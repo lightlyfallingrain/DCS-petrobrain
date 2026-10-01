@@ -81,5 +81,59 @@ aircraft's problem. Post-2022 Ukraine OSINT geolocation, offered as the way to c
   centre — the fixed S-75/S-125 sites it is most defensible for are *also* the ones squarely in
   scope, which argues it is about right, but this has not been checked against an actual Cold War
   mission's unit placement.
-- When a landmark earns a mention in a callout, and how its name is chosen when several are nearby.
-  That is disclosure policy and belongs in the plan's own taxonomy work, not here.
+- ~~When a landmark earns a mention in a callout, and how its name is chosen when several are
+  nearby.~~ **Answered below (2026-10-01, fourth round).**
+
+## 5. When a landmark earns a mention (user, 2026-10-01)
+
+> *"when it is promenent and close enough to be a reference. Villages are great. Large cities are
+> not because they themselves span kilometers. Road where there are only few is good, road where
+> there are many is noise. River, valley, mountain, ridge, lake, sea - all good, though if there's
+> many nearby it can be confusing which one, but using a combination might work well -> 'in valley,
+> south of village'."*
+
+Two independent tests, both of which a landmark candidate must pass:
+
+- **Extent** — the feature's own size must be small relative to the precision the reference is
+  meant to convey. A village localizes; a city spanning kilometres does not, because "near
+  Damascus" is a worse answer than the range/bearing already given.
+- **Local uniqueness** — one road among few nearby is a reference; one road among many is noise.
+  Same for rivers, valleys, mountains, ridges, lakes, seas: all good kinds, all useless in a
+  cluttered area where several of the same kind sit close together.
+
+**The extent test is the same principle `belief.groups`' cohesion rule already uses** — grouping
+compares spacing to unit size, landmark selection compares usefulness to feature size, and neither
+works as an absolute-metre threshold. One idea, two applications; worth building once rather than
+inventing a second ad-hoc rule.
+
+**Combination resolves ambiguity, and should be designed in from the start, not bolted on as a
+fallback**: *"in valley, south of village"* chains two individually-weak references into one
+unambiguous one, and reads like how a crew member actually talks rather than a single engineered
+"perfect" landmark.
+
+### What this means against the actual world-model data (checked, not assumed)
+
+- `query.describe.SettlementInfo.subtype` is already `"city"`/`"town"`/`"village"`/`"built_up"`
+  (`world-model/src/query/describe.py`), and `NamedPlaceInfo.subtype` already carries a `place=*`
+  value (`city`/`town`/`village`/...) or `None` for a DCS-native `towns.lua` entry. **The extent
+  test is answerable today** — village/town vs. city is already a stored distinction, not a gap
+  that needs a guessed area threshold. This resolves the open question the dispatch raised about
+  whether anything distinguishes a village from a city: something does, already.
+- **The local-uniqueness test has no existing query support.** `describe_position` returns the
+  *nearest* feature of each kind (`RoadInfo`, `WaterInfo`, `NamedPlaceInfo`, ...), singular — there
+  is no "how many of this kind within radius R" query. Building the uniqueness test needs a new
+  world-model query (count or list candidates of a kind within a radius), not just a disclosure
+  policy on top of what exists. This is a real, if small, addition to `world-model/src/query/`, not
+  only a body-layer decision.
+- Kind coverage against what's named: village/town/city → `settlement`/`named_place` (26,182 /
+  23,044 rows respectively); road → `road`; river/lake/sea → `water`/`coastline`; valley/ridge →
+  the terrain-landform work (`feature/terrain-landform-features`), whose adjacency/bearing/callout
+  stages (3-5) are **not yet built**. Mountain has no obviously corresponding kind yet in the
+  reviewed schema — flagged, not resolved here.
+
+### Dependency this creates, and what not to block on
+
+Valley and ridge as landmark kinds depend on `feature/terrain-landform-features` Stages 3-5, unbuilt
+as of this note. **Landmark anchoring should not be designed to block on them** — village/road/water
+coverage is available today and is most of the value (villages are explicitly called out as the best
+case). Valley/ridge/mountain join later as the terrain work lands, additively.
