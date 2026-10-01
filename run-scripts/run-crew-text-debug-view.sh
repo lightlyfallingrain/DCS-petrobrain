@@ -12,5 +12,7 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-ur
     --eyesight-view \
     --eyesight-view-radius-m 5000 \
     --belief-truth-log ~/dcs-belief-truth.jsonl \
+    --detection-trace ~/dcs-detection-trace.jsonl \
+    --brain-client http --brain-url http://127.0.0.1:7796 \
     $@
 popd
