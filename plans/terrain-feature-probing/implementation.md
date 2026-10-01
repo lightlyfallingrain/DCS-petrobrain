@@ -238,3 +238,117 @@ that is accepted, non-crashing degenerate behaviour, documented in the function'
 Recommend: either retune this one test's fixture/parameters when M8 chunk-ingest work is actually
 picked up (not before), or explicitly accept the mechanism gap now via the same Escalation-Rules
 process the three named files went through — this report does not make that call unilaterally.
+
+---
+
+## 2026-10-01 — Second implementation round: geometry fix, knob re-sweep, `test_probe_chunk_pipeline.py` fixed
+
+Dispatched to address the first round's own flagged gap and the real defect it had correctly
+diagnosed but left unfixed. Base: `feature/terrain-landform-features` tip `84a7cc6`. Worked in a
+worktree whose own branch (`worktree-agent-a436865d899eb3e79`) was reset onto that exact tip with
+`git checkout -B` (per the dispatching prompt's instruction; `git reset --hard` is denied by this
+harness).
+
+### Item 1 — replaced the polyline geometry step
+
+`terrain.features._build_component` no longer sorts a component's cells by projection onto their
+own major axis (the "projection-sort" the first round correctly identified as the actual source of
+zigzag, and explicitly declined to touch, since the plan's point 6 called for reusing it
+unchanged). New `_axis_sliced_line`: bins cells into 1-cell-wide slices along the major axis and
+emits one point per occupied bin — the bin's own elevation-extreme *sampled* cell (highest for a
+`ridge`, the real crest; lowest for a `valley`, the real floor). This is monotone in the axis
+coordinate by construction, so it cannot zigzag regardless of how wide the input component is.
+Every emitted point is a real sampled grid cell (never a centroid or any other fabricated
+position), per this module's "honest polyline through actual sampled grid points" standard
+(`plans/m6-terrain-semantics/plan.md`), restated in `_axis_sliced_line`'s own docstring for a
+mechanism that samples one real cell per axis-slice rather than one per input cell.
+
+`TerrainComponent.cells` still carries the *full* input cell set (unordered), not the binned
+subset used for `points` — load-bearing, because the fragmentation metric ("% under 15 cells")
+and several existing tests (`len(ridge.cells) == 14`, `len(valley_a.cells) == ...`) measure the
+component's total size, which is a basin/boundary-size property independent of how many points the
+line ends up with. Conflating the two would have silently changed what the fragmentation metric
+means mid-sweep.
+
+### Item 2 — re-swept the knobs that rested on the broken geometry step
+
+Full tables in `research/2026-10-01-terrain-feature-probing-watershed-sweep.md`'s new "Second
+implementation round" section (old numbers kept, marked superseded rather than deleted). Summary:
+
+- **`DEFAULT_VALLEY_CORE_FRACTION`: 0.1 -> 0.3.** The first round pinned 0.1 specifically to
+  protect sinuosity from widening under the broken geometry step — a trade against a defect that
+  no longer exists. Re-swept 0.1-0.5: sinuosity is now ~1.1-1.4 at *every* value (the mechanism fix,
+  not this knob), so the choice is decided on fragmentation alone, and 0.3 is the clear local best
+  (22% of valleys under 15 cells, vs. 83% at the old 0.1 and a 70% baseline). Re-verified, not
+  assumed, that the Bekaa still fails the width gate at 0.3 (core width 9.0-15.2 km against the
+  2,500 m ceiling, wider margin than the first round's single 8,611 m measurement) and that the
+  one surviving valley is the same small mountain-top basin as before, confirmed by basin id.
+- **Processing/storage spacing: stays 500 m, re-confirmed a third time for a new reason.** Finer
+  spacing (250 m, 100 m) does *not* help once the zigzag is fixed — sinuosity is already good at
+  500 m. What finer spacing actually does is reduce real recall (10 ridges at 500 m -> 6 at 250 m
+  -> 0 at 100 m, confirmed via raw `min_cell_count=1` candidate counts, not just the gated output)
+  while appearing to improve fragmentation only because the area-equivalent `min_cell_count` floor
+  at finer spacings (24, 150) already exceeds the 15-cell comparison threshold — a measurement
+  artefact, not a quality gain. Also noted: 250 m's window (6 cells) is the only even-sized one of
+  the three tested, which `scipy.ndimage`'s filters centre asymmetrically relative to the odd 3-
+  and 15-cell windows, a further reason not to read its numbers as a clean comparison point. A
+  second, separate methodological finding recorded for future reference: the quadratic
+  (area-based) `min_cell_count` scaling inherited from the first round's valley-core reasoning may
+  not be the right model for a ridge (a ~1-2-cell-wide line, whose cell count should scale roughly
+  linearly with resolution) — not re-derived here, since it doesn't change the spacing decision
+  either way, but flagged so it isn't silently re-inherited.
+- **Relief threshold, width ceiling, min cell count, smoothing window: unchanged**, re-verified
+  (not re-tuned) against the new geometry and new core_fraction.
+
+**Stage 1 acceptance now passes on all four items**, including (a) (fragmentation/sinuosity),
+which was the one item the first round could not close: ridge 30%/1.22 sinuosity (vs. baseline
+75%/2.17), valley 22%/1.19 (vs. baseline 70%/2.21) — both kinds now beat baseline on both metrics.
+(b)/(c)/(d) were already passing and are reconfirmed under the new defaults.
+
+### Item 3 — fixed `test_probe_chunk_pipeline.py::test_add_probe_chunk_ingests_grids_and_terrain_features`
+
+Established, by hand-running `add_probe_chunk` against the old 3x3 `_VALLEY_CHUNK_POINTS` fixture
+before touching the test, that a fixture this small is genuinely incompatible with the production
+watershed defaults (a 3-cell smoothing window on a 3x3 grid flattens it to one basin with no
+divide) — not assumed, the degenerate-collapse claim from the first round's own report was
+reproduced directly. Rather than accept that as permanent (the task authorized fixing this file),
+built a new, larger fixture (`_RIDGE_CHUNK_COLS`, a 19-column strictly-monotonic double-V profile,
+replicated across 19 rows) sized to actually host a real divide within M8's chunk-plus-1-cell-
+border geometry, and verified end-to-end through the real `add_probe_chunk` pipeline (not simulated)
+before writing the test.
+
+Two things had to be worked out, both now documented in the test file's own comments: (1)
+`store.chunks.chunk_bounds` is half-open, so the fixture's chunk size (2000 m) had to be wider than
+its own coordinate span (0-1800 m) or its own rightmost points would land in the next chunk and
+trip the "outside chunk" guard; (2) the chunk-plus-1-cell-border window's border is genuinely
+unprobed (`None`), and `smooth_grid`'s gap-aware averaging produces a handful of small (<=25-cell)
+spurious regional minima right at that real/`None` interface alongside the two genuine ~90+-cell
+basins — a mechanism-level instance of the gap `probe_store/reader.py`'s own docstring already
+names ("no equivalent chunk-isolation guarantee"), not a bug in this fixture and not this plan's to
+fix. A `min_cell_count` of 20 (comfortably above the artefact sizes, verified stable across 15-26)
+filters them without touching the real divide, giving a deterministic `ridge_feature_count=1`,
+`valley_feature_count=2` — asserting the mechanism's real shape for a genuine divide, not an
+arbitrary number.
+
+### Checks (world-model/)
+- ruff format --check: pass (104 files)
+- ruff check: pass
+- mypy --strict (`src`): pass, 62 source files
+- pytest -q: **485 passed, 3 skipped** — the one failure from the first round's handoff is fixed;
+  no regressions. (A transient run during the knob sweep showed 2 unrelated failures in
+  `test_junctions.py` — caused by this round's own region-scoped sweep builds overwriting
+  `data/world-model/latakia-20km.sqlite`, a gitignored fixture file a different test suite depends
+  on existing with real roadnet data. Removed the sweep's build artifacts before the final run;
+  not a code defect, recorded here so a future sweep doesn't repeat it.)
+
+### Notable discoveries
+- **The geometry-extraction step, not any gate, was the entire remaining acceptance gap.** Fixing
+  it with no other change already improved valley sinuosity from 3.57 to 1.17 at the *old* 0.1
+  core_fraction, before any re-sweep — the re-sweep then found a better fragmentation/sinuosity
+  point (0.3) that the old geometry step could never have reached without a sinuosity penalty.
+- **A fragmentation metric compared across different `min_cell_count` floors can read as "fixed"
+  when it is really just filtering harder.** The 0% figures at 250 m/100 m are a direct instance of
+  this and would have been a false "finer spacing wins" conclusion if taken at face value.
+- **`git checkout -B <branch> <sha>`, not `git reset --hard`, remains the correct way to reset a
+  worktree's own branch pointer onto a specific commit** under this harness's permission settings —
+  confirmed again, same finding the first round recorded.
