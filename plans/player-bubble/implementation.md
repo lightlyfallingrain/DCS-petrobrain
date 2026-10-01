@@ -31,12 +31,21 @@ duplicate `coordinates.wgs84_to_dcs`'s own job for no real saving).
   channel only.
 
 **Existing range filter found, and the redundancy it creates**: `association.associate()` already
-applies `RANGE_CAP_M = 5000.0` (forward-hemisphere only) inside its own per-leaf loop. Since
-5000 < 10000, the bubble is a behavioural no-op for the hybrid channel today — every candidate the
-bubble would drop, `associate()`'s own tighter cap would have dropped anyway. This is documented in
-both constants' docstrings as expected, not a sign one should be removed: they answer different
-questions (omnidirectional computation scope vs. forward-hemisphere detection plausibility) and
-will diverge the moment either number changes independently. For the naked-eye channel there is no
+applies `RANGE_CAP_M = 5000.0` inside its own per-leaf loop. Since 5000 < 10000, the bubble is a
+behavioural no-op for the hybrid channel today — every candidate the bubble would drop,
+`associate()`'s own tighter cap would have dropped anyway. This is documented in both constants'
+docstrings as expected, not a sign one should be removed: they answer different questions
+(computation scope against detection plausibility) and will diverge the moment either number
+changes independently.
+
+**Correction, Reviewer 2026-10-02**: this section first described `RANGE_CAP_M` as
+"forward-hemisphere only". It is not — the range check itself is unconditional and
+omnidirectional; the forward-hemisphere window is a *separate* bearing gate in the same function.
+The conclusion survives and in fact holds more strongly than the original reasoning: because the
+range check applies in every direction and is strictly tighter, the bubble is a no-op for the
+hybrid channel in all aspects, not merely ahead of the aircraft. Recorded rather than quietly
+reworded, because a plausible-sounding justification that happens to reach the right answer is
+exactly what this project has been caught by twice this week. For the naked-eye channel there is no
 pre-existing range filter upstream of `check_visibility`'s own angular-size/`NAKED_EYE_RANGE_CAP_M`
 gate, so the bubble is the first computation-scope cut there.
 
