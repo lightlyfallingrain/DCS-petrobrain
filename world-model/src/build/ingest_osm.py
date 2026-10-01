@@ -142,7 +142,14 @@ SIMPLIFY_TOLERANCE_M = 30.0
 # `load_cached_stats` instead, because the fix also *removed* a stats field
 # -- an accident of that one change, not the invalidation working.) Bumped
 # retroactively so the key reflects the code that produced the rows.
-CLASSIFIER_VERSION = 4
+#
+# 4 -> 5: `WM-B1` -- `_select_name` now prefers `name:en`/`int_name` over a
+# non-Latin-1 `name` tag, and every classified node/line/area with a name
+# gains a `tags["name_source"]` entry. Both change this module's output for
+# every named feature, so a `CLASSIFIER_VERSION = 4` cache would otherwise
+# keep serving the old verbatim-`name` rows (and the missing `name_source`
+# tag) forever, silently undoing this fix on any cache-hit rebuild.
+CLASSIFIER_VERSION = 5
 
 #: `place=*` values a *node* classifies as a named settlement point. Other
 #: `place` values (`hamlet`, `isolated_dwelling`, `suburb`, `neighbourhood`,
@@ -325,6 +332,65 @@ def _classify_area(tags: dict[str, str]) -> tuple[str, str, str | None] | None:
     return None  # rule 5: anything else
 
 
+#: OSM tag keys checked, in priority order, for a feature's stored name
+#: (`WM-B1`). Named places in this theatre's merged extract often arrive in
+#: non-Latin script -- Arabic in Syria proper, but also Greek/Hebrew/Turkish
+#: for features elsewhere in the clipped region -- and **DCS's cockpit
+#: overlay cannot render non-Latin-1 text** (`body-layer`'s `belief.
+#: enrichment.displayable_name` is the render-time guard for exactly this,
+#: and names the ingest-side fix this constant is). `name:en` is OSM's own
+#: convention for an English name; `int_name` ("international name") is the
+#: next-best romanisation where `name:en` is absent; `name` is the
+#: original-script value, present whenever anything is. See `_select_name`
+#: for why this is a renderability *check* on each candidate, not just a
+#: tag-priority list.
+_NAME_TAG_PREFERENCE: tuple[str, ...] = ("name:en", "int_name", "name")
+
+
+def _is_latin1_renderable(name: str) -> bool:
+    """Whether `name` can reach DCS's cockpit overlay unmangled.
+
+    Mirrors `body-layer`'s `belief.enrichment.displayable_name` check
+    (`name.encode("latin-1")`) exactly, deliberately **not imported** from
+    there: `body-layer` importing `world-model`'s `query`/`coordinates`
+    packages in-process is the one sanctioned cross-subproject coupling
+    (root `CLAUDE.md`'s "Module independence"), and the reverse direction
+    would be a second, unjustified one. Keep this logic and that function's
+    in sync by hand if either ever changes -- there are only the two
+    copies, and both docstrings say so."""
+    try:
+        name.encode("latin-1")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _select_name(tags: dict[str, str]) -> tuple[str | None, str | None]:
+    """Returns `(name, name_source)`: the first `_NAME_TAG_PREFERENCE`
+    candidate that both exists and is Latin-1 renderable, and which tag key
+    it came from -- stored as the feature's `name_source` reserved tag
+    (`store/models.py`'s reserved-`tags`-key convention) so a consumer (or a
+    later reader) can tell a romanisation from the original-script value.
+
+    `name:en`/`int_name` are free-text and not guaranteed Latin-1
+    themselves (a diacritic-heavy transliteration can still fail
+    `encode("latin-1")`), so this checks renderability on each candidate in
+    turn rather than just preferring a tag. When **no** candidate renders,
+    falls back to the raw `name` tag unrenderable or not (`name_source =
+    "name"`) -- this does not regress the pre-`WM-B1` behaviour for a
+    feature with no romanisation available; `body-layer`'s `displayable_name`
+    still degrades it to a generic label at render time. Returns `(None,
+    None)` when no `name` tag exists at all."""
+    for key in _NAME_TAG_PREFERENCE:
+        value = tags.get(key)
+        if value and _is_latin1_renderable(value):
+            return value, key
+    raw_name = tags.get("name")
+    if raw_name:
+        return raw_name, "name"
+    return None, None
+
+
 def _polyline_half_length_point(points: list[Point]) -> Point:
     """The point at half the polyline's total arc length -- D2's "half-length
     vertex" for collapsing a `waterway=dam` line into a single `named_place`
@@ -367,7 +433,8 @@ def _ingest_node(
         return None
     kind, subtype = classification
 
-    if "name" not in node.tags:
+    name, name_source = _select_name(node.tags)
+    if name is None:
         if subtype == "dam":
             stats.unnamed_dams_dropped += 1
         elif subtype == "peak":
@@ -383,9 +450,9 @@ def _ingest_node(
         kind=kind,
         geom_type="Point",
         geometry=[(x, z)],
-        name=node.tags["name"],
+        name=name,
         subtype=subtype,
-        tags={},
+        tags={"name_source": name_source} if name_source is not None else {},
         source_id=source_id,
         source_ref=f"node/{node.id}",
         provenance=dict(_PROVENANCE),
@@ -410,7 +477,8 @@ def _ingest_line(
         return None
 
     if way.tags.get("waterway") == "dam":
-        if "name" not in way.tags:
+        dam_name, dam_name_source = _select_name(way.tags)
+        if dam_name is None:
             stats.unnamed_dams_dropped += 1
             return None
         dam_point = _polyline_half_length_point(points)
@@ -424,9 +492,11 @@ def _ingest_line(
             kind="named_place",
             geom_type="Point",
             geometry=[dam_point],
-            name=way.tags["name"],
+            name=dam_name,
             subtype="dam",
-            tags={},
+            tags={"name_source": dam_name_source}
+            if dam_name_source is not None
+            else {},
             source_id=source_id,
             source_ref=f"way/{way.id}",
             provenance=dict(_PROVENANCE),
@@ -458,13 +528,14 @@ def _ingest_line(
     else:
         stats.coastline_features += 1
 
+    line_name, line_name_source = _select_name(way.tags)
     return StoredFeature(
         kind=kind,
         geom_type="LineString",
         geometry=simplified,
-        name=way.tags.get("name"),
+        name=line_name,
         subtype=subtype,
-        tags={},
+        tags={"name_source": line_name_source} if line_name_source is not None else {},
         source_id=source_id,
         source_ref=f"way/{way.id}",
         provenance=dict(_PROVENANCE),
@@ -493,6 +564,7 @@ def _ingest_ring(
     subtype: str,
     landcover_class: str | None,
     name: str | None,
+    name_source: str | None,
     source_ref: str,
     theatre: str,
     centre_x: float,
@@ -574,6 +646,8 @@ def _ingest_ring(
         tags["inner_rings"] = simplified_holes
     if landcover_class is not None:
         tags["landcover_class"] = landcover_class
+    if name_source is not None:
+        tags["name_source"] = name_source
 
     return StoredFeature(
         kind=kind,
@@ -613,7 +687,7 @@ def _ingest_area(
         return []
     kind, subtype, landcover_class = classification
 
-    name = area.tags.get("name")
+    name, name_source = _select_name(area.tags)
     source_prefix = "way" if area.from_way else "relation"
     features: list[StoredFeature] = []
     for ring in area.rings:
@@ -623,6 +697,7 @@ def _ingest_area(
             subtype,
             landcover_class,
             name,
+            name_source,
             f"{source_prefix}/{area.id}",
             theatre,
             centre_x,
