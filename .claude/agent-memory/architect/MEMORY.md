@@ -59,3 +59,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — gate lives in tick's spontaneous-only block (Decision 3); Fix C's audio-adapter seam didn't exist; coverage sized out separately.
 - [DCS-driven LOS design](project_dcs_driven_los_design.md) — no-omniscience splits where a live LOS feed can land; the cited bug already had a shipped fix; unit_name is the join-key precedent.
 - [DCS-driven LOS revision](project_dcs_driven_los_revision.md) — LOS reciprocity lets belief carry a value instead of computing one; "bake into unit data" ≠ merge endpoints, check movement-detection's Decision 2 first.
+- [Group cohesion redesign](project_group_cohesion_redesign.md) — op_class is the no-omniscience kind-coherence vocabulary; flat metres vs unit-widths currency; size-relative spacing already existed, check before assuming it's missing.
