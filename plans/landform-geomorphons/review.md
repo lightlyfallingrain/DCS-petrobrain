@@ -142,3 +142,89 @@ reproduced the acceptance numbers and render (byte-identical) against real data,
 verified junction-walk determinism across process boundaries, and independently verified the
 resumability mechanism by hand-constructing an interrupted-cache scenario — none of these were taken
 on the implementer's word alone.
+
+---
+
+## Round 2 — fix verification
+
+Re-reviewed `feature/landform-geomorphons` tip `5c9f683` (confirmed via `git rev-parse HEAD` before
+anything else; worktree checked out directly on the branch since it wasn't checked out elsewhere).
+Scope: the single commit `4ed1853..5c9f683`, the three required fixes plus the two optional
+stale-comment fixes from round 1. Nothing else re-opened.
+
+**All four verification commands pass, from a freshly built `.venv`** (none existed in this
+worktree): `ruff format --check src tests` (116 files already formatted), `ruff check src tests`
+(all checks passed), `mypy --strict src` (no issues, 71 source files), `pytest tests -q` — **509
+passed, 3 skipped**, confirming the claimed net +1. The +1 is exactly what was claimed: one
+mis-tested function (`test_ingest_terrain_resumes_a_partially_completed_cache`) became two correct
+ones — `test_ingest_terrain_different_tile_set_forces_full_invalidation` (the renamed test, keeping
+the old test's real coverage — tile-set-change forces full invalidation, then a repeat run is a
+full cache hit) and a new `test_ingest_terrain_resumes_a_partially_completed_cache` (the actual
+resumability path). Both read the file and both assert something real, not a copy-paste pair.
+
+**Fix 1 — `docs/M8_PROBE_STORE.md`.** The "What lives where" bullet no longer claims the probe
+store holds ridge/valley; it now says plainly why the terrain half left (geomorphons needs a whole
+SRTM tile + multi-km margin, a 5 km chunk can't supply that), that `"ridge"`/`"valley"` coverage
+stays `UNQUERIED` forever, and points to `ROADMAP.md`'s `WM-B6` for where terrain lives now.
+Checked the ~23 ms Performance-section figure isn't a hedge: walked the figure back via `git log
+--follow`, it was first recorded in `8e5ac81` ("M8: incremental probe store..."), and at that
+commit `build/pipeline.py`'s `add_probe_chunk` called `ingest_terrain_chunk` against the
+watershed-era `terrain.curvature` module — i.e. the figure really did cost chunk-scoped
+ridge/valley classification into its ~23 ms, and marking it a pre-`landform-geomorphons` baseline
+is factually correct, not a dodge.
+
+**Fix 2 — `ROADMAP.md`'s `WM-B6` region-bbox gap.** Now stated as its own bolded "Known, unfixed
+gap" paragraph inside WM-B6's "Implementation status" subsection, directly after the parallel
+M8-chunk-gap paragraph and before "Not yet checked by this implementation pass" — exactly where a
+person reading that subsection to understand what's built would hit it, not buried mid-entry. It
+names the concrete consequence (every ridge/valley line a covering SRTM tile produces, not clipped
+to the region's own bbox — "oversized... until this is fixed") and the project's own standard
+small-region dev loop (`latakia-20km`) as the build that will hit it next.
+
+**Fix 3 — the resumability test, verified empirically rather than taken on the implementer's
+report.** Patched `src/build/ingest_terrain.py` line 295 from `already_complete =
+completed_tile_ids(conn)` to `already_complete = set()` (the exact skip-path break the implementer
+named) and re-ran `tests/test_ingest_terrain.py`:
+
+- The new `test_ingest_terrain_resumes_a_partially_completed_cache` failed exactly as claimed —
+  `assert stats.tiles_cache_hit == 1` → `assert 0 == 1`.
+- `test_ingest_terrain_different_tile_set_forces_full_invalidation` (the renamed test) still
+  passed under the same break — confirming the two tests exercise genuinely different paths, not
+  one path under two names.
+
+Restored the file (`diff` against a pre-edit copy: byte-identical; `git status --porcelain` clean
+on it) and reran the full suite — 509/3 again.
+
+Also judged the sentinel-feature assertion's strength, since "loaded from cache" and "recomputed
+and happened to match" need to be distinguishable. `tests/test_ingest_terrain.py:91-92`
+(`test_ingest_terrain_param_change_invalidates_the_whole_cache`'s sibling, same flat fixture)
+already asserts a flat tile produces `ridge_feature_count == 0, valley_feature_count == 0` — flat
+terrain has no geomorphons ridge/valley classes. So tile A reprocessed from the flat fixture would
+come back with **zero** features, never the sentinel's `[(0.0, 0.0), (1.0, 1.0)]` line. The
+assertion genuinely distinguishes "loaded from cache" from "recomputed and happened to match" —
+there's no way the real pipeline produces that exact geometry from that fixture.
+
+**Optional fixes.** Both confirmed accurate: `find src -iname "*curvature*"` returns nothing
+(`terrain/curvature.py` is gone), and `grep -rn scipy src/` shows `terrain/skeleton.py` as the
+only remaining `scipy` import (`close_and_thin`'s `scipy.ndimage.binary_closing`/`ndimage` calls) —
+matching both corrected comments (`pyproject.toml`'s mypy override, `roadnet/junctions.py`'s
+threshold-precedent comment) exactly.
+
+### Verdict
+
+APPROVED. All three required fixes verified correct and complete — not just present, but checked
+against the specific failure mode each was meant to close (a performance figure that could have
+been quietly re-scoped rather than honestly re-measured; a gap that could have been noted
+somewhere a reader wouldn't reach; a test whose fix could itself have been vacuous). None were.
+
+No further required fixes. This branch is ready for the remaining pre-merge gates (security,
+performance, DoD) and, per standing user authority, merge once those pass.
+
+### Round 2 Review Confidence
+
+Full read of the one-commit diff. All four verification commands re-run from a freshly built
+`.venv`. The resumability fix was verified empirically (broke the skip path, watched the right
+test fail and the other stay green, restored byte-identical) rather than taken on the
+implementer's report. The performance-figure re-marking was checked against `git log --follow`
+and the historical commit's own code, not just read as plausible. The sentinel-assertion strength
+was checked against an adjacent test's own zero-features assertion on the same fixture shape.
