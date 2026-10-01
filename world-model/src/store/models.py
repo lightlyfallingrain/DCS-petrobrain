@@ -71,6 +71,15 @@ class StoredFeature:
     Any future non-OSM producer of holed polygons must reuse `inner_rings`
     with this exact shape, not invent a second convention.
 
+    **Reserved on any row with a non-`None` `name`** (`WM-B1`):
+    - `name_source`: `str`, one of `"name:en"`, `"int_name"`, `"name"` --
+      which OSM tag `name` was taken from (`build.ingest_osm._select_name`'s
+      Latin-1-renderability preference order). Lets a consumer, or a later
+      reader, tell a romanisation (`"name:en"`/`"int_name"`) from the
+      original-script value stored verbatim because no romanisation existed
+      or none of the candidates rendered (`"name"`). Absent on an unnamed
+      feature, same absent-not-null convention as the other derived tags.
+
     **Reserved on `ridge`/`valley` rows** (terrain-feature-probing,
     `terrain.features`'s marker-controlled-watershed mechanism, Stage 1/3):
     - `adjacent_feature_ids`: `list[int]` -- the neighbouring valley/ridge

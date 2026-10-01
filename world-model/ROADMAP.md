@@ -368,7 +368,7 @@ sortie actually exercises it, and say which one.
 Items here are `WM-B<n>`. A new one takes the next unused number; numbers are never reused or
 renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
-- [ ] **WM-B1 — Prefer a Latin-script place name at OSM ingest.** Named places currently store OSM's `name`
+- [x] **WM-B1 — Prefer a Latin-script place name at OSM ingest.** Named places currently store OSM's `name`
   tag verbatim, so Syrian features arrive in Arabic script — and **DCS cannot render non-Latin-1
   text**, so they reach the cockpit overlay as blanks (observed live, 2026-09-18). Body-layer now
   guards at render time (`belief.enrichment.displayable_name` drops an unrenderable name so the
@@ -377,6 +377,36 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   good romanisation. Fix at ingest: prefer `name:en`, then `int_name`, then `name`, and record which
   was used. Needs a rebuild to take effect, so it should ride along with the next full-theatre run
   rather than triggering one.
+
+  **Implemented, `fix/latin-place-names`** (2026-10-02). `build.ingest_osm._select_name` picks the
+  first of `name:en`/`int_name`/`name` that both exists and actually encodes as Latin-1 (a
+  romanisation can itself still fail that check), applied uniformly across every classified kind
+  that carries a name — `named_place` (point and dam-line), `water`/`coastline` lines, and
+  `settlement`/`landcover` areas via `_ingest_ring`, not just the one kind the item names. Which tag
+  won is recorded as a new reserved `tags["name_source"]` entry (`store/models.py`'s existing
+  convention; no schema change, `tags` is already a generic JSON blob) — `"name:en"`, `"int_name"`,
+  or `"name"` (the last also covers the no-romanisation-available fallback, so a feature that would
+  previously have stored an untranslatable name unmarked still does, just now distinguishable from an
+  actual romanisation). `CLASSIFIER_VERSION` bumped 4 → 5 to force `osm-classified-cache` invalidation
+  (verified: `cache_meta_matches` compares it against the cached meta, so a stale `CLASSIFIER_VERSION
+  = 4` cache is correctly rejected rather than silently served). Renderability is checked with the
+  same `name.encode("latin-1")` test as body-layer's `belief.enrichment.displayable_name`, but **not
+  imported from it** — `body-layer` → `world-model` is the one sanctioned in-process cross-subproject
+  import (root `CLAUDE.md`'s "Module independence"), and the reverse direction would be a new,
+  unjustified coupling; both copies' docstrings say to keep them in sync by hand.
+
+  **Measured against the real `syria-full` build** (`data/world-model/syria-full.sqlite` +
+  `data/raw/osm/syria-theatre.osm.pbf`, read-only copies, never the live files): of 49,226
+  `named_place`/`settlement` rows, 19,553 (40%) currently store a non-Latin-1 name — not only Arabic;
+  this theatre's merged extract also carries Greek/Hebrew/Turkish names outside Syria proper. Of
+  those, **13,073 (67%) have a usable `name:en` or `int_name` in the source `.osm.pbf`** (12,926 via
+  `name:en`, a further 864 via `int_name` where `name:en` was absent or itself unrenderable) — this
+  fix's real yield on the next rebuild. The remaining 6,480 (33%) have neither tag, or neither
+  renders, and keep falling back to the raw non-Latin-1 name, same as before — body-layer's
+  render-time guard still degrades those to a generic label. Worth saying plainly: a third of the
+  affected features gain nothing from this change; it is a real improvement, not a complete fix.
+
+  Full detail: `plans/latin-place-names/implementation.md`.
 
 - [>] **WM-B2 — Power lines from DCS data — deferred 2026-09-13 (user: not important now).** Wanted as a
   low-level wire hazard and navigation landmark, but only with exact in-DCS positions (OSM's ~1 km
