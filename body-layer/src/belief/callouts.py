@@ -103,6 +103,7 @@ from belief.speech import (
     _format_range_km,
     _group_member_facts,
     _unit_type_display,
+    group_membership_state,
     render_contact_report,
     render_group_disclosure,
     route_event,
@@ -646,7 +647,19 @@ class CalloutScheduler:
                 # on the next `GroupStore.reconcile`, nothing to do here.
                 continue
             speech = render_group_disclosure(store, belief_group, now_sim, enrichment)
-            if speech is None or speech.text == belief_group.last_spoken_signature:
+            if speech is None:
+                continue
+            # Compared by *content*, not the full rendered line -- a pure
+            # range/clock drift must not count as "something changed"
+            # (`plans/group-undermerging/debug.md`'s second finding: the
+            # user flying away from an already-fully-reported group heard
+            # its entire composition re-spoken every ~500 m of opening
+            # range). `OutgoingSpeech.content_signature` is `None` only
+            # for templates that never needed this distinction;
+            # `render_group_disclosure` always sets it.
+            content_signature = speech.content_signature
+            assert content_signature is not None
+            if content_signature == belief_group.last_spoken_signature:
                 # Nothing changed since this group last spoke -- silent,
                 # not a candidate this tick at all (Stage 4 design,
                 # section 4, step 2).
@@ -666,13 +679,39 @@ class CalloutScheduler:
                 # being spoken" invariant every other candidate gets
                 # (Stage 4 design, section 4, step 4).
                 speech = render_group_disclosure(store, candidate, now_sim, enrichment)
-                if speech is None or speech.text == candidate.last_spoken_signature:
+                if speech is None:
+                    continue
+                content_signature = speech.content_signature
+                assert content_signature is not None
+                if content_signature == candidate.last_spoken_signature:
                     # Rare/defensive: belief moved between scoring and
                     # speaking within this one `tick()` call. Fall through
                     # to the next candidate exactly as a vanished event
                     # candidate does.
                     continue
-                store.mark_group_spoken(candidate.id, speech.text, now_sim)
+                membership_state = group_membership_state(
+                    store, candidate, now_sim, enrichment
+                )
+                # `membership_state` re-gathers the same member facts
+                # `render_group_disclosure` just rendered against -- see
+                # that function's own docstring for why this is the
+                # existing double-gather pattern, not new duplication.
+                # `None` here would mean the group dissolved between the
+                # two calls; `speech` being non-`None` above makes that
+                # impossible within one `tick()`, so the assert documents
+                # the invariant rather than guessing past it.
+                assert membership_state is not None
+                member_contact_ids, leading_contact_id, differentiated = (
+                    membership_state
+                )
+                store.mark_group_spoken(
+                    candidate.id,
+                    content_signature,
+                    now_sim,
+                    member_contact_ids=member_contact_ids,
+                    leading_contact_id=leading_contact_id,
+                    differentiated=differentiated,
+                )
                 for member_event in store.unacknowledged_events:
                     if (
                         member_event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED)

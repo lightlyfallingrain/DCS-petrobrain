@@ -212,7 +212,7 @@ from belief.events import (
     CONTACT_REACQUIRED,
     Event,
 )
-from belief.groups import Group
+from belief.groups import AIR_DEFENSE_OP_CLASSES, Group
 from belief.threat import envelope_for
 from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
@@ -226,7 +226,23 @@ class OutgoingSpeech:
     """§5's `outgoing_speech` record, trimmed to what this milestone's
     body-written templates actually populate -- `author` is always
     `"body_template"` here (the brain-written class is §2.1's class 3, not
-    built by this milestone)."""
+    built by this milestone).
+
+    `content_signature` (`plans/group-undermerging/debug.md`, the
+    2026-10-01 sortie's second finding) is the substance of `text` with
+    any purely positional clause (clock/range) stripped out -- `None` for
+    every template that does not need the distinction (every caller then
+    falls back to comparing `text` itself, unchanged behaviour). Only
+    `render_group_disclosure` sets it: a group's own re-disclosure trigger
+    must fire on a *content* change (a new member, a firmed-up
+    classification, a changed threat lead), never on range/clock alone --
+    the user's own words, flying away from an already-fully-reported
+    group while it re-spoke its entire composition every ~500 m of
+    opening range: *"that's still constant reports that add no value...
+    repeating the whole group composition every time adds noise."*
+    Comparing `text` itself (as the pre-fix code did) makes that
+    impossible, since clock/range is baked into `text` and changes on
+    almost every tick a group is being closed on or opened from."""
 
     text: str
     template: Template
@@ -234,6 +250,7 @@ class OutgoingSpeech:
     urgency: Urgency = "normal"
     author: Literal["body_template"] = "body_template"
     in_reply_to: str | None = None
+    content_signature: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1022,6 +1039,62 @@ def _classification_key(facts: dict[str, object]) -> tuple[object, object]:
     return (classification.get("value"), classification.get("level"))
 
 
+#: `plans/group-cohesion-redesign/review.md`'s Finding 1 fix (2026-10-01,
+#: superseding a same-day fix that corrected `"a armor"` to `"an armor"`
+#: instead of removing the article). `"Armor"` is a mass noun -- it takes
+#: no indefinite article in any form, so `"an armor"` is not English
+#: either, and patching the vowel mismatch while keeping the article was
+#: fixing the wrong half of the bug.
+#:
+#: The real fix is to drop the article for every class/type word a
+#: count==1 composition phrase can hold, mass noun or not, and this
+#: matches this module's own existing convention rather than inventing a
+#: new one: every other singular rendering in this file -- `_contact_
+#: report_text`'s own single-contact line, `_identification_lead`'s
+#: `"armor 11 o'clock..."` -- already speaks a bare class/type noun with
+#: no leading article. So does every one of the user's own worked
+#: examples (`plans/group-cohesion-redesign/explore-notes-delta-
+#: taxonomy.md`): `"AAA in the group"`, `"Shilka and zsu"`, `"SRSAM,
+#: Shilka, armor 2 o'clock 2.5 km"` -- count nouns (`"Shilka"`, `"zsu"`)
+#: appear exactly as bare as mass nouns (`"AAA"`, `"armor"`) in a
+#: composition list; the one article in that file, `"there's a zsu"`, sits
+#: in a different sentence frame (an existential singular announcement),
+#: not a composition clause, so it is not evidence for treating count
+#: nouns differently here. There is accordingly no count-noun/mass-noun
+#: split to maintain in this function at all -- removing `_with_
+#: indefinite_article` rather than growing it.
+
+
+#: `_classification_level`'s undifferentiated levels, named here too so
+#: `_group_composition_clause` can test for them without importing a
+#: function whose own name reads oddly applied to a bare `(value, level)`
+#: key rather than a facts dict.
+_UNDIFFERENTIATED_LEVELS: Final = ("presence", "unknown")
+
+
+def _undifferentiated_phrase(count: int) -> str:
+    """How `_group_composition_clause` names member(s) with no class/type
+    yet, aggregated into one phrase rather than one `"a ground"` per member
+    (the Finding 2 fix, `plans/group-cohesion-redesign/review.md`) -- the user's
+    own worked examples are the specification: *"SAM and something"* for a
+    single undifferentiated member alongside a known one, *"a couple of
+    contacts"* / *"two contacts"* for more than one. A lone member is
+    `"something"`, not `"a contact"` -- `_unit_type_display`'s own
+    `"contact"` fallback reads as a tracked, nameable thing, while
+    `"something"` reads as genuinely unclassified, matching the example's
+    own word. More than one reuses `_plural_unit_type_display`'s presence-
+    level fallback, `"contacts"`, counted the same way a real class would
+    be. Where the examples do not cover a count (three or more
+    undifferentiated members alongside a differentiated one), this follows
+    the many-contacts fallback already used elsewhere in this function
+    rather than inventing new wording."""
+    if count == 1:
+        return "something"
+    if count in _SPOKEN_NUMBERS:
+        return f"{_SPOKEN_NUMBERS[count]} contacts"
+    return "many contacts"
+
+
 def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     """The per-class member breakdown for `render_group_disclosure`'s
     composition line (`plans/group-reporting/plan.md` Stage 3's worked
@@ -1037,16 +1110,32 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     as it already does in a single contact's own count clause -- a known,
     accepted quirk of that vocabulary, not new to this function.
 
-    Callers must not call this with an empty sequence, and must not call
-    it with only undifferentiated (`presence`/`unknown` level) members --
-    see `render_group_disclosure`'s own "Group" bare-word branch for that
-    case, which this function has no sensible rendering for (`_unit_type_
-    display(None, "presence")` returns `"ground"`, which does not compose
-    into a listed clause the way a real class/type word does)."""
+    **Undifferentiated (`presence`/`unknown` level) members are aggregated
+    into one trailing phrase, never counted as their own noun phrase per
+    member.** This was a real defect (`plans/group-cohesion-redesign/review.md`
+    Finding 2): calling `_unit_type_display(None, "presence")` per member
+    and composing it like a real class produced `"a ground and a truck"`
+    for a 2-member group with one undifferentiated member -- `"ground"` is
+    `_unit_type_display`'s internal fallback word, not something a crew
+    member says about an unclassified contact. See `_undifferentiated_
+    phrase` for the aggregated wording, matched against the user's own
+    examples (*"SAM and something"*).
+
+    Callers must still not call this with an empty sequence, or with
+    *only* undifferentiated members -- see `render_group_disclosure`'s own
+    "Group"/"a couple of contacts" bare-word branches for that case, which
+    this function deliberately leaves to the caller rather than rendering
+    itself (a composition clause with nothing differentiated to lead with
+    is a different sentence shape, not this one with an empty prefix)."""
     order: list[tuple[object, object]] = []
     counts: dict[tuple[object, object], int] = {}
+    undifferentiated_count = 0
     for facts in member_facts:
         key = _classification_key(facts)
+        _, level = key
+        if level in _UNDIFFERENTIATED_LEVELS:
+            undifferentiated_count += 1
+            continue
         if key not in counts:
             order.append(key)
             counts[key] = 0
@@ -1057,7 +1146,7 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
         value, level = key
         count = counts[key]
         if count == 1:
-            phrases.append(f"a {_unit_type_display(value, level)}")
+            phrases.append(_unit_type_display(value, level))
         elif count in _SPOKEN_NUMBERS:
             phrases.append(
                 f"{_SPOKEN_NUMBERS[count]} {_plural_unit_type_display(value, level)}"
@@ -1065,6 +1154,13 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
         else:
             phrases.append(f"many {_plural_unit_type_display(value, level)}")
 
+    if undifferentiated_count:
+        phrases.append(_undifferentiated_phrase(undifferentiated_count))
+
+    assert phrases, (
+        "_group_composition_clause called with only undifferentiated "
+        "members -- see this function's own docstring"
+    )
     if len(phrases) == 1:
         return phrases[0]
     return ", ".join(phrases[:-1]) + f" and {phrases[-1]}"
@@ -1100,6 +1196,262 @@ def _group_member_facts(
     return member_facts
 
 
+def _member_contacts_for(
+    store: ContactStore, member_facts: Sequence[dict[str, object]]
+) -> list[Contact]:
+    """`member_facts`' own `Contact` objects, in the same order -- the real
+    `Contact.classification` `envelope_for`/the delta taxonomy need, which
+    `describe_contact`'s facts dict deliberately does not carry (`belief.
+    callouts` has no license to hold a `Contact` at all; this module, which
+    already imports `Contact`, does)."""
+    contacts_by_id = {contact.id: contact for contact in store.contacts}
+    member_contacts: list[Contact] = []
+    for facts in member_facts:
+        contact_id = facts["id"]
+        assert isinstance(contact_id, str)
+        member_contacts.append(contacts_by_id[contact_id])
+    return member_contacts
+
+
+def _leading_index(member_contacts: Sequence[Contact]) -> int | None:
+    """Index into `member_contacts` of the member with the widest
+    resolvable engagement envelope (`belief.threat.envelope_for`), or
+    `None` if no member resolves one. Shared by `render_group_disclosure`'s
+    composition logic and `group_membership_state`'s leader-change
+    bookkeeping, so the two never silently diverge on what "the leader"
+    means."""
+    leading_index: int | None = None
+    leading_range_max_m = -1.0
+    for index, contact in enumerate(member_contacts):
+        envelope = envelope_for(contact.classification)
+        if envelope is not None and envelope.range_max_m > leading_range_max_m:
+            leading_range_max_m = envelope.range_max_m
+            leading_index = index
+    return leading_index
+
+
+def _classification_level(facts: dict[str, object]) -> object:
+    """`facts["classification"]["level"]`, typed through an explicit
+    `isinstance` assertion rather than a bare `.get` on an `object`-typed
+    dict value -- shared by every "is this member still undifferentiated"
+    check in this module's group-disclosure taxonomy."""
+    classification = facts["classification"]
+    assert isinstance(classification, dict)
+    return classification.get("level")
+
+
+def _is_differentiated(member_facts: Sequence[dict[str, object]]) -> bool:
+    """Whether any member has crossed from undifferentiated
+    (`presence`/`unknown` classification level) to a real class/type --
+    the first-differentiation signal both the full-disclosure branch and
+    `group_membership_state` read."""
+    return any(
+        _classification_level(facts) not in ("presence", "unknown")
+        for facts in member_facts
+    )
+
+
+def _is_air_defence(facts: dict[str, object]) -> bool:
+    """Whether `facts`' believed classification resolves to one of
+    `belief.groups.AIR_DEFENSE_OP_CLASSES` -- the delta taxonomy's
+    "more air defence is always news" test (`plans/
+    group-cohesion-redesign/plan.md` §4 Correction 2). Reads `perception.
+    object_model.profile_for` on the classification's raw value, the same
+    no-omniscience lookup `_identification_lead`/`belief.groups.
+    _representative_size_m` already use for a believed classification --
+    never a DCS `object_type`."""
+    classification = facts["classification"]
+    assert isinstance(classification, dict)
+    value = classification.get("value")
+    if not isinstance(value, str) or not value:
+        return False
+    from perception import object_model
+
+    return object_model.profile_for(value).op_class in AIR_DEFENSE_OP_CLASSES
+
+
+def _nearest_clock_position(member_facts: Sequence[dict[str, object]]) -> int | None:
+    """The clock position of the group's nearest member (by `relative_now.
+    range_m`) -- the same "report the near edge of a cluster" convention
+    `render_group_disclosure`'s own clock/range clause and `render_group_
+    report` already use, factored out so the membership-delta branch can
+    build its own "in {clock} o'clock group" clause without duplicating
+    the nearest-member scan."""
+    nearest_clock: int | None = None
+    nearest_range_m = math.inf
+    for facts in member_facts:
+        relative_now = facts.get("relative_now")
+        if not isinstance(relative_now, dict):
+            continue
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        if range_m < nearest_range_m:
+            nearest_range_m = range_m
+            clock = relative_now["clock_position"]
+            assert isinstance(clock, int)
+            nearest_clock = clock
+    return nearest_clock
+
+
+def group_membership_state(
+    store: ContactStore,
+    group: Group,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> tuple[frozenset[str], str | None, bool] | None:
+    """`(member_contact_ids, leading_contact_id, differentiated)` -- the
+    three delta-taxonomy signals `render_group_disclosure` itself computes
+    to decide *what* to say, gathered again here for a caller
+    (`belief.callouts.CalloutScheduler.tick`) that needs the exact same
+    values to pass to `GroupStore.mark_spoken`/`ContactStore.
+    mark_group_spoken` *after* a successful disclosure, so the next call to
+    `render_group_disclosure` reads back what was actually last spoken.
+
+    Mirrors the existing double-`_group_member_facts`-call pattern already
+    between this module and `belief.callouts` (that module gathers its own
+    copy for `group_priority`) rather than growing `OutgoingSpeech` a new
+    field to smuggle this out of `render_group_disclosure` -- the two calls
+    are cheap `describe_contact` lookups, not a new I/O cost class.
+
+    Returns `None` under the same `_group_member_facts` "fewer than two
+    members still resolve" guard `render_group_disclosure` itself enforces."""
+    member_facts = _group_member_facts(store, group, now_sim, enrichment)
+    if member_facts is None:
+        return None
+    member_contacts = _member_contacts_for(store, member_facts)
+    leading_index = _leading_index(member_contacts)
+    leading_contact_id = (
+        member_contacts[leading_index].id if leading_index is not None else None
+    )
+    member_ids = frozenset(contact.id for contact in member_contacts)
+    differentiated = _is_differentiated(member_facts)
+    return member_ids, leading_contact_id, differentiated
+
+
+def _render_full_group_composition(
+    member_facts: list[dict[str, object]],
+    leading_index: int | None,
+    differentiated: bool,
+) -> tuple[str, str]:
+    """The full-roster disclosure composition -- `(text, content_signature)`
+    before either has its trailing `"."`/clock-range/watched clause
+    stripped by the caller's own needs. Unchanged in substance from the
+    original Stage 3 design (`plans/group-reporting/plan.md`); factored out
+    so it has exactly one implementation shared by `render_group_
+    disclosure`'s own never-spoken/first-differentiation branches (the push
+    path, gated by the delta taxonomy) and `render_group_full_disclosure`
+    below (the "report" pull path, which always wants the full roster and
+    must never see a delta or a silent `None` -- see that function's own
+    docstring for why the two paths cannot share one taxonomy-gated
+    function)."""
+    if leading_index is not None:
+        leading_classification = member_facts[leading_index]["classification"]
+        assert isinstance(leading_classification, dict)
+        leading_word = _unit_type_display(
+            leading_classification.get("value"),
+            leading_classification.get("level"),
+        )
+        rest = member_facts[:leading_index] + member_facts[leading_index + 1 :]
+        if rest:
+            text = f"Danger, {leading_word}. Also {_group_composition_clause(rest)}"
+        else:
+            text = f"Danger, {leading_word}."
+    else:
+        is_pair = len(member_facts) == 2
+        homogeneous = len({_classification_key(facts) for facts in member_facts}) == 1
+        if differentiated and is_pair and homogeneous:
+            value, level = _classification_key(member_facts[0])
+            text = f"Pair of {_plural_unit_type_display(value, level)}"
+        elif differentiated:
+            composition = _group_composition_clause(member_facts)
+            text = composition[0].upper() + composition[1:]
+        elif is_pair:
+            value, level = _classification_key(member_facts[0])
+            text = f"A couple of {_plural_unit_type_display(value, level)}"
+        else:
+            text = "Group"
+
+    # `content_signature` (module docstring's `OutgoingSpeech` entry,
+    # `plans/group-undermerging/debug.md`): the composition decided above
+    # is the whole substance of a group disclosure -- clock/range is
+    # positional, not content, and must not be part of what decides
+    # whether this is "the same thing already said." Captured here,
+    # before the clock/range clause below is appended to `text`, and
+    # given the same trailing "watched"/"." treatment so the two strings
+    # differ only by the clock/range clause itself.
+    content_signature = text
+
+    nearest_relative_now: dict[str, object] | None = None
+    nearest_range_m = math.inf
+    for facts in member_facts:
+        relative_now = facts.get("relative_now")
+        if not isinstance(relative_now, dict):
+            continue
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        if range_m < nearest_range_m:
+            nearest_range_m = range_m
+            nearest_relative_now = relative_now
+    if nearest_relative_now is not None:
+        clock = nearest_relative_now["clock_position"]
+        text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
+
+    watched = any(
+        facts.get("attention") in ("watch", "priority") for facts in member_facts
+    )
+    if watched:
+        text += ", watched"
+        content_signature += ", watched"
+
+    text += "."
+    content_signature += "."
+    return text, content_signature
+
+
+def render_group_full_disclosure(
+    store: ContactStore,
+    group: Group,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> OutgoingSpeech | None:
+    """The always-full-roster group disclosure for a pull-based query --
+    `belief.crew_console.CrewConsole._handle_report`'s "report" command,
+    per the delta taxonomy's own worked example (`plans/
+    group-cohesion-redesign/plan.md` §4, explore-notes-delta-taxonomy.md):
+    *`Pilot: "report"` -> "SRSAM, Shilka, armor 2 o'clock 2.5 km. ..."`* --
+    the report roll-up always names the group's current full composition,
+    never a delta, regardless of what the group last said on the push path.
+
+    **Deliberately does not call `render_group_disclosure`.** That
+    function's taxonomy decides full/delta/silent by comparing against
+    `Group.last_spoken_*` -- exactly right for `CalloutScheduler`'s push
+    path, which must not re-announce a group's whole roster on every tick,
+    but exactly wrong for a report, which the pre-existing call site's own
+    comment already documented as "pull-based, so it always speaks fresh --
+    no gate here." Before the delta taxonomy existed the two needs
+    coincided (`render_group_disclosure` only ever produced the full
+    composition), so one function served both call sites; the taxonomy
+    split that coincidence, and this function is the pull path's own,
+    taxonomy-free half of what `render_group_disclosure` used to always do.
+
+    Returns `None` under the same `_group_member_facts` "fewer than two
+    members still resolve" guard every other group-reading function in this
+    module uses -- the only reason this can return nothing, since there is
+    no taxonomy gate here to also return `None`."""
+    member_facts = _group_member_facts(store, group, now_sim, enrichment)
+    if member_facts is None:
+        return None
+    member_contacts = _member_contacts_for(store, member_facts)
+    leading_index = _leading_index(member_contacts)
+    differentiated = _is_differentiated(member_facts)
+    text, content_signature = _render_full_group_composition(
+        member_facts, leading_index, differentiated
+    )
+    return OutgoingSpeech(
+        text=text, template="contact_report", content_signature=content_signature
+    )
+
+
 def render_group_disclosure(
     store: ContactStore,
     group: Group,
@@ -1125,9 +1477,56 @@ def render_group_disclosure(
     group identically.
 
     Returns `None` if fewer than two members still resolve to a live
-    `Contact` (`_group_member_facts` returns `None`) -- there is nothing
-    coherent left to report as a group.
+    `Contact` (`_group_member_facts` returns `None`), or if the delta
+    taxonomy below decides this tick is silent at the group level.
 
+    **The delta taxonomy** (`plans/group-cohesion-redesign/plan.md` §4,
+    rebuilt against worked utterances rather than rules inferred from
+    them) decides whether this call is a full disclosure, a short delta
+    clause, or silent, by comparing the group's *current* state against
+    what it last said (`Group.last_spoken_signature`/`.last_spoken_
+    member_contact_ids`/`.last_spoken_leading_contact_id`/`.last_spoken_
+    differentiated`), in this priority order -- first match decides, since
+    only one utterance is ever returned per call:
+
+    1. **Never spoken** (`last_spoken_signature is None`): full disclosure.
+    2. **The leading member changed** (a new leader, or leader gained --
+       `None` to some contact id): a short `"Now leading: {type}."` delta,
+       never a full restatement (Correction 1) -- reusing `_identification_
+       lead`'s sibling vocabulary, `_unit_type_display`. **Leader *lost*
+       (some contact id to `None`) is deliberately NOT this branch** -- no
+       worked example covers "the group just de-escalated," and losing the
+       one threat-capable member is, in every case this taxonomy's
+       departure rule already covers, a member *departing* the group
+       (silent at group level, told via that member's own lifecycle event
+       if it matters) rather than a new fact needing its own delta clause.
+       A judgment call, not a worked-example-backed rule -- flagged here
+       rather than silently assumed.
+    3. **First differentiation** (`not last_spoken_differentiated and`
+       differentiated now): full disclosure, once.
+    4. **A newly arrived, differentiated member is worth announcing** --
+       either its class was not already known among the group's
+       *continuing* members (a genuinely new class joining), or it belongs
+       to `belief.groups.AIR_DEFENSE_OP_CLASSES` (another instance of an
+       already-known air-defence class still counts as news, Correction 2,
+       *"more air defense does make a difference"*): a delta clause
+       composing just the newly-worth-announcing arrivals via `_group_
+       composition_clause`, suffixed `", in {clock} o'clock group"` -- the
+       "group" disambiguation word the user's own examples use exactly
+       here (*"so it's not a single shilka that is detected"*). An
+       undifferentiated arrival (still `presence`/`unknown`) is never
+       itself delta-worthy; it simply joins the roster silently until it
+       differentiates (at which point it is a *continuing* member, not a
+       new arrival, so §3's crossing above is what would speak it, if
+       anything does).
+    5. **Otherwise, silent** -- covers "one more truck/armor makes no
+       difference," "members only departed, no new arrivals, same leader,"
+       and a non-leading member's own type refinement (already told via
+       its own `CONTACT_CLASSIFICATION_CHANGED` event, per module
+       docstring's "Which lifecycle kinds get a template").
+
+    **The full-disclosure composition itself is unchanged from the
+    original Stage 3 design** -- only the branch conditions above are new.
     **Threat leads the line** (`belief.threat.envelope_for`, called on each
     member's own `Contact.classification` -- the no-omniscience boundary is
     upstream of this call, in `envelope_for` itself): the member with the
@@ -1158,8 +1557,9 @@ def render_group_disclosure(
       (`"Three T-72s"`), unchanged by this stage.
     - **Differentiated but mixed** (a real classification exists, but not
       every member shares it): `_group_composition_clause` as before --
-      `"A tank and a truck"` already names each member exactly once, with
-      no quantity word to pick between at all.
+      `"Armor and truck"` already names each member exactly once, with
+      no quantity word to pick between at all and no indefinite article
+      on either (`plans/group-cohesion-redesign/review.md` Finding 1).
 
     A sentence never reaches for both "pair" and "a couple of" together,
     because the classification specificity that selects one rules out the
@@ -1170,77 +1570,79 @@ def render_group_disclosure(
     text`'s single-contact convention, restated here since a group has no
     such helper of its own), and a trailing `", watched"` is appended when
     any member is under `watch`/`priority` attention -- the group-level
-    analogue of a single contact's own trailing motion clause."""
+    analogue of a single contact's own trailing motion clause. **Neither
+    clause/trailing-word is attached to a delta branch** (§4's own worked
+    examples -- `"Now leading: SRSAM."`, `"Shilka, in 2 o'clock group"` --
+    carry no separate range figure and no watched marker): the leader-delta
+    carries no positional clause at all, and the membership-delta's own
+    `", in {clock} o'clock group"` suffix already is its positional
+    clause."""
     member_facts = _group_member_facts(store, group, now_sim, enrichment)
     if member_facts is None:
         return None
-    contacts_by_id = {contact.id: contact for contact in store.contacts}
-    member_contacts: list[Contact] = []
-    for facts in member_facts:
-        contact_id = facts["id"]
-        assert isinstance(contact_id, str)
-        contact = contacts_by_id[contact_id]
-        member_contacts.append(contact)
+    member_contacts = _member_contacts_for(store, member_facts)
+    leading_index = _leading_index(member_contacts)
+    leading_contact_id = (
+        member_contacts[leading_index].id if leading_index is not None else None
+    )
+    differentiated = _is_differentiated(member_facts)
 
-    leading_index: int | None = None
-    leading_range_max_m = -1.0
-    for index, contact in enumerate(member_contacts):
-        envelope = envelope_for(contact.classification)
-        if envelope is not None and envelope.range_max_m > leading_range_max_m:
-            leading_range_max_m = envelope.range_max_m
-            leading_index = index
+    never_spoken = group.last_spoken_signature is None
+    leader_changed = (
+        leading_contact_id is not None
+        and leading_contact_id != group.last_spoken_leading_contact_id
+    )
+    first_differentiation = not group.last_spoken_differentiated and differentiated
 
-    if leading_index is not None:
+    delta_members: list[dict[str, object]] = []
+    if not (never_spoken or leader_changed or first_differentiation):
+        current_member_ids = frozenset(contact.id for contact in member_contacts)
+        new_arrival_ids = current_member_ids - group.last_spoken_member_contact_ids
+        known_classes = {
+            _classification_key(facts)
+            for facts in member_facts
+            if facts["id"] in group.last_spoken_member_contact_ids
+            and _classification_level(facts) not in ("presence", "unknown")
+        }
+        for facts in member_facts:
+            if facts["id"] not in new_arrival_ids:
+                continue
+            if _classification_level(facts) in ("presence", "unknown"):
+                continue
+            key = _classification_key(facts)
+            is_new_class = key not in known_classes
+            is_air_defence_repeat = not is_new_class and _is_air_defence(facts)
+            if is_new_class or is_air_defence_repeat:
+                delta_members.append(facts)
+
+    if never_spoken or first_differentiation:
+        text, content_signature = _render_full_group_composition(
+            member_facts, leading_index, differentiated
+        )
+    elif leader_changed:
+        assert leading_index is not None
         leading_classification = member_facts[leading_index]["classification"]
         assert isinstance(leading_classification, dict)
         leading_word = _unit_type_display(
             leading_classification.get("value"), leading_classification.get("level")
         )
-        rest = member_facts[:leading_index] + member_facts[leading_index + 1 :]
-        if rest:
-            text = f"Danger, {leading_word}. Also {_group_composition_clause(rest)}"
+        text = f"Now leading: {leading_word}."
+        content_signature = text
+    elif delta_members:
+        composition = _group_composition_clause(delta_members)
+        composed = composition[0].upper() + composition[1:]
+        clock = _nearest_clock_position(member_facts)
+        if clock is not None:
+            text = f"{composed}, in {clock} o'clock group."
         else:
-            text = f"Danger, {leading_word}."
+            text = f"{composed}, in the group."
+        content_signature = text
     else:
-        is_pair = len(member_facts) == 2
-        differentiated = any(
-            isinstance(facts["classification"], dict)
-            and facts["classification"].get("level") not in ("presence", "unknown")
-            for facts in member_facts
-        )
-        homogeneous = len({_classification_key(facts) for facts in member_facts}) == 1
-        if differentiated and is_pair and homogeneous:
-            value, level = _classification_key(member_facts[0])
-            text = f"Pair of {_plural_unit_type_display(value, level)}"
-        elif differentiated:
-            composition = _group_composition_clause(member_facts)
-            text = composition[0].upper() + composition[1:]
-        elif is_pair:
-            value, level = _classification_key(member_facts[0])
-            text = f"A couple of {_plural_unit_type_display(value, level)}"
-        else:
-            text = "Group"
+        return None
 
-    nearest_relative_now: dict[str, object] | None = None
-    nearest_range_m = math.inf
-    for facts in member_facts:
-        relative_now = facts.get("relative_now")
-        if not isinstance(relative_now, dict):
-            continue
-        range_m = relative_now["range_m"]
-        assert isinstance(range_m, float)
-        if range_m < nearest_range_m:
-            nearest_range_m = range_m
-            nearest_relative_now = relative_now
-    if nearest_relative_now is not None:
-        clock = nearest_relative_now["clock_position"]
-        text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
-
-    if any(facts.get("attention") in ("watch", "priority") for facts in member_facts):
-        text += ", watched"
-
-    text += "."
-    return OutgoingSpeech(text=text, template="contact_report")
+    return OutgoingSpeech(
+        text=text, template="contact_report", content_signature=content_signature
+    )
 
 
 def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:

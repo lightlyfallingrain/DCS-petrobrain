@@ -17,7 +17,8 @@ import pytest
 
 from belief import enrichment as enrichment_module
 from belief import speech as speech_module
-from belief.contacts import ContactStore
+from belief.classification import SpecificityLevel, new_classification_belief
+from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -26,6 +27,7 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     Event,
 )
+from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import (
     UrgentCall,
     _cardinality_phrase,
@@ -36,11 +38,13 @@ from belief.speech import (
     _respell_for_tts,
     _round_enrichment_fragment,
     _unit_type_display,
+    group_membership_state,
     render_clear,
     render_confirm_request,
     render_contact_report,
     render_disambiguation,
     render_group_disclosure,
+    render_group_full_disclosure,
     render_lost_contact,
     render_no_view,
     render_readback,
@@ -1268,9 +1272,13 @@ def _cohering_group_store(
     return store, store.groups[0]
 
 
-def test_group_composition_clause_singular_uses_indefinite_article() -> None:
+def test_group_composition_clause_singular_is_bare_noun() -> None:
+    """No indefinite article on a count==1 member (`plans/
+    group-cohesion-redesign/review.md` Finding 1) -- matches every other
+    singular rendering in this module and the user's own worked examples
+    ("AAA in the group", "Shilka and zsu")."""
     facts = [{"classification": {"value": "OP_TRUCK", "level": "class"}}]
-    assert _group_composition_clause(facts) == "a truck"
+    assert _group_composition_clause(facts) == "truck"
 
 
 def test_group_composition_clause_counts_members_exactly() -> None:
@@ -1279,7 +1287,7 @@ def test_group_composition_clause_counts_members_exactly() -> None:
         {"classification": {"value": "OP_ARMORED", "level": "class"}},
         {"classification": {"value": "OP_TRUCK", "level": "class"}},
     ]
-    assert _group_composition_clause(facts) == "two armor and a truck"
+    assert _group_composition_clause(facts) == "two armor and truck"
 
 
 def test_render_group_disclosure_undifferentiated_group_says_bare_group() -> None:
@@ -1309,7 +1317,7 @@ def test_render_group_disclosure_differentiated_group_gives_composition() -> Non
     speech = render_group_disclosure(store, group, now_sim=0.0)
 
     assert speech is not None
-    assert speech.text == "Two armor and a truck."
+    assert speech.text == "Two armor and truck."
 
 
 def test_render_group_disclosure_threat_capable_member_leads_the_line() -> None:
@@ -1343,6 +1351,52 @@ def test_render_group_disclosure_appends_clock_range_from_nearest_member(
     assert speech is not None
     assert speech.text.startswith("Group, ")
     assert speech.text.endswith("o'clock, very close.")
+
+
+def test_render_group_disclosure_content_signature_excludes_clock_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/group-undermerging/debug.md`'s second finding: `text` carries
+    the clock/range clause, but `content_signature` must not -- that is
+    the whole fix, since `CalloutScheduler` compares the signature, not
+    `text`, to decide whether a group has anything new to say.
+
+    Moves *ownship* between the two calls, not the contacts -- `relative_
+    geometry` (the live, never-cached half of enrichment) reads current
+    ownship, while this test's faked `project_terrain_aware` always
+    returns its `observer` argument unchanged regardless of contact
+    position, so moving a contact's own fused position would not be
+    reflected in the rendered range at all under this fake."""
+    _enrichment_context(monkeypatch)  # installs the describe_position/
+    # project_terrain_aware fakes; its own fixed-ownship instance is not
+    # reused below.
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+
+    near = render_group_disclosure(
+        store,
+        group,
+        now_sim=0.0,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship()
+        ),
+    )
+    assert near is not None
+    assert near.text.startswith("Group, ")
+
+    far = render_group_disclosure(
+        store,
+        group,
+        now_sim=1.0,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=50_000.0)
+        ),
+    )
+
+    assert far is not None
+    assert far.text != near.text
+    assert far.content_signature == near.content_signature == "Group."
 
 
 def test_render_group_disclosure_appends_watched_when_any_member_is_watched() -> None:
@@ -1398,15 +1452,20 @@ def test_render_group_disclosure_homogeneous_pair_says_pair_of() -> None:
 def test_render_group_disclosure_mixed_pair_uses_the_composition_clause() -> None:
     """A two-member group with real, *different* classifications never
     reaches for "pair" or "a couple of" at all -- `_group_composition_
-    clause` already names each member exactly once (`"a tank and a
-    truck"`), which is unambiguous without a quantity word, matching the
-    "differentiated but mixed" rung of the same ladder."""
+    clause` already names each member exactly once (`"Armor and truck"`),
+    which is unambiguous without a quantity word, matching the
+    "differentiated but mixed" rung of the same ladder. No indefinite
+    article on either noun (`plans/group-cohesion-redesign/review.md`
+    Finding 1) -- "armor" is a mass noun and takes none in any form, and
+    this module's own singular vocabulary never uses one for a count noun
+    either (`_contact_report_text`'s single-contact line, the user's own
+    "AAA in the group"/"Shilka and zsu" examples)."""
     store, group = _cohering_group_store([("OP_ARMORED", 2), ("OP_TRUCK", 2)])
 
     speech = render_group_disclosure(store, group, now_sim=0.0)
 
     assert speech is not None
-    assert speech.text == "A armor and a truck."
+    assert speech.text == "Armor and truck."
 
 
 def test_render_group_disclosure_returns_none_when_membership_has_collapsed() -> None:
@@ -1424,3 +1483,321 @@ def test_render_group_disclosure_returns_none_when_membership_has_collapsed() ->
     )
 
     assert render_group_disclosure(store, stale_group, now_sim=0.0) is None
+
+
+# --- render_group_disclosure's delta taxonomy (plans/group-cohesion-redesign/
+# plan.md §4) ------------------------------------------------------------
+
+
+def _mark_spoken_as_rendered(
+    store: ContactStore, group: object, now_sim: float
+) -> None:
+    """Simulates what `belief.callouts.CalloutScheduler.tick` does after a
+    successful speech: render once, compute `group_membership_state` from
+    the identical inputs, and persist both via `mark_group_spoken` -- the
+    exact sequence these taxonomy tests need between two `render_group_
+    disclosure` calls to exercise anything past the "never spoken" branch."""
+    from belief.groups import Group as _Group
+
+    assert isinstance(group, _Group)
+    speech = render_group_disclosure(store, group, now_sim)
+    assert speech is not None
+    assert speech.content_signature is not None
+    state = group_membership_state(store, group, now_sim)
+    assert state is not None
+    member_contact_ids, leading_contact_id, differentiated = state
+    store.mark_group_spoken(
+        group.id,
+        speech.content_signature,
+        now_sim,
+        member_contact_ids=member_contact_ids,
+        leading_contact_id=leading_contact_id,
+        differentiated=differentiated,
+    )
+
+
+def _add_observation_and_tick(
+    store: ContactStore,
+    *,
+    obs_id: str,
+    bearing_deg: float,
+    classification_raw: str,
+    classification_level: int,
+    now_sim: float,
+) -> None:
+    """Ingests one more `_group_member_observation` (same fixed-range, tight
+    bearing-spread geometry `_cohering_group_store` already uses) and ticks
+    -- the incremental-arrival half of these taxonomy tests, which `_cohering_
+    group_store` itself does not support (it only ever ingests once)."""
+    store.ingest(
+        [
+            _group_member_observation(
+                obs_id=obs_id,
+                bearing_deg=bearing_deg,
+                classification_raw=classification_raw,
+                classification_level=classification_level,
+            )
+        ],
+        now_sim=now_sim,
+    )
+    store.tick(now_sim=now_sim)
+
+
+def test_render_group_disclosure_leader_change_speaks_a_delta_not_full_restatement() -> (
+    None
+):
+    """Correction 1 (`plans/group-cohesion-redesign/plan.md` §4): once a
+    group has already spoken, a *new* leading threat is announced as its
+    own short clause, never by re-speaking the whole roster."""
+    store, group = _cohering_group_store([("OP_TRUCK", 2), ("OP_TRUCK", 2)])
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    _add_observation_and_tick(
+        store,
+        obs_id="OBS_LEADER",
+        bearing_deg=2.0,
+        classification_raw="ZSU-23-4 Shilka",
+        classification_level=3,
+        now_sim=1.0,
+    )
+    group = store.groups[0]
+
+    speech = render_group_disclosure(store, group, now_sim=1.0)
+
+    assert speech is not None
+    assert speech.text == "Now leading: ZSU-23-4 Shilka."
+
+
+def test_render_group_disclosure_first_differentiation_is_full_once() -> None:
+    """A group that has already spoken while undifferentiated, and now has
+    its first real classification, still gets a full disclosure (unchanged
+    from the first draft) -- not a delta, because there was nothing to
+    diff against yet.
+
+    Asserts the actual rendered string, not just the absence of other
+    branches' markers -- the previous version of this test
+    (`"in" not in speech.text or ...`, `not speech.text.startswith(...)`)
+    could not fail on nonsense output, and did not: it passed unchanged
+    while this exact scenario (one differentiated, one still-`presence`
+    member) rendered `"A ground and a truck."` (`plans/
+    group-cohesion-redesign/review.md` Finding 2) until `_group_composition_
+    clause` was fixed to aggregate undifferentiated members instead of
+    treating `_unit_type_display`'s `"ground"` fallback as a real noun
+    phrase."""
+    store, group = _cohering_group_store([("Ural truck", 1), ("Ural truck", 1)])
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+    assert group.last_spoken_differentiated is False
+
+    # One member differentiates -- still a 2-member group (whether the
+    # differentiating observation refines an existing contact or founds a
+    # new one at this bearing is an `association_over_time` detail this
+    # test does not depend on; what matters is that *some* member is now
+    # past `presence` while the group's own `last_spoken_differentiated`
+    # is still `False`).
+    _add_observation_and_tick(
+        store,
+        obs_id="OBS_REFINE",
+        bearing_deg=0.0,
+        classification_raw="OP_TRUCK",
+        classification_level=2,
+        now_sim=1.0,
+    )
+    group = store.groups[0]
+    assert len(group.member_contact_ids) == 2
+    assert group.last_spoken_differentiated is False  # not updated until re-marked
+
+    speech = render_group_disclosure(store, group, now_sim=1.0)
+
+    assert speech is not None
+    # Full composition, not a delta clause -- the one differentiated
+    # member leads, the still-undifferentiated member is "something"
+    # (matching the user's own "SAM and something" example), not a
+    # counted noun phrase of its own. No indefinite article on "truck"
+    # either (`plans/group-cohesion-redesign/review.md` Finding 1).
+    assert speech.text == "Truck and something."
+
+
+def _direct_contact(
+    contact_id: str, x: float, z: float, *, class_raw: str, level: SpecificityLevel
+) -> Contact:
+    """`Contact` fixtures built directly, mirroring `test_groups.py`'s own
+    `_contact` pattern -- used by the two membership-delta taxonomy tests
+    below because their geometry (two members far enough apart that `belief.
+    association_over_time`'s spatial gate would fold a same-classification
+    new arrival into the *existing* contact rather than founding a new one,
+    confirmed empirically while writing these tests) cannot be expressed as
+    a second `_group_member_observation`-style `Observation` at any bearing
+    offset that both founds a distinct `Contact` and still coheres into the
+    group under `belief.groups`'s own cohesion test."""
+    return Contact(
+        id=contact_id,
+        position=PositionEstimate(
+            x=x,
+            z=z,
+            covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+            as_of_sim=0.0,
+            fused_at_sim=0.0,
+            fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+        ),
+        last_alt_m=0.0,
+        last_class_raw=class_raw,
+        classification=new_classification_belief(
+            value=class_raw, level=level, established_sim=0.0
+        ),
+    )
+
+
+def _store_with_direct_contacts(contacts: list[Contact]) -> ContactStore:
+    store = ContactStore()
+    for contact in contacts:
+        store._contacts[contact.id] = contact  # type: ignore[attr-defined]
+    store._groups.reconcile(contacts, now_sim=0.0)  # type: ignore[attr-defined]
+    return store
+
+
+def test_render_group_disclosure_new_class_arrival_is_a_delta() -> None:
+    """A newly arrived, differentiated member whose class was not already
+    known among the group's continuing members is always news (`plans/
+    group-cohesion-redesign/plan.md` §4) -- composed via `_group_
+    composition_clause` over just the new arrival(s), suffixed with the
+    "in {clock} o'clock group" disambiguation (falling back to "in the
+    group" when no `EnrichmentContext`/`relative_now` exists to give a
+    clock position, as in this test)."""
+    store = _store_with_direct_contacts(
+        [
+            _direct_contact(
+                "CONTACT_1",
+                0.0,
+                0.0,
+                class_raw="OP_TRUCK",
+                level=SpecificityLevel.CLASS,
+            ),
+            _direct_contact(
+                "CONTACT_2",
+                10.0,
+                0.0,
+                class_raw="OP_TRUCK",
+                level=SpecificityLevel.CLASS,
+            ),
+        ]
+    )
+    group = store.groups[0]
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    new_armor = _direct_contact(
+        "CONTACT_3", 20.0, 0.0, class_raw="OP_ARMORED", level=SpecificityLevel.CLASS
+    )
+    store._contacts[new_armor.id] = new_armor  # type: ignore[attr-defined]
+    store._groups.reconcile(list(store._contacts.values()), now_sim=1.0)  # type: ignore[attr-defined]
+    group = store.groups[0]
+
+    speech = render_group_disclosure(store, group, now_sim=1.0)
+
+    assert speech is not None
+    assert speech.text == "Armor, in the group."
+
+
+def test_render_group_disclosure_air_defence_repeat_arrival_is_a_delta() -> None:
+    """ "More air defence is always news" (Correction 2) -- a second instance
+    of an *already-known* air-defence class still speaks a delta, unlike an
+    ordinary repeat."""
+    store = _store_with_direct_contacts(
+        [
+            _direct_contact(
+                "CONTACT_1",
+                0.0,
+                0.0,
+                class_raw="ZSU-23-4 Shilka",
+                level=SpecificityLevel.TYPE,
+            ),
+            _direct_contact(
+                "CONTACT_2",
+                10.0,
+                0.0,
+                class_raw="OP_TRUCK",
+                level=SpecificityLevel.CLASS,
+            ),
+        ]
+    )
+    group = store.groups[0]
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    new_shilka = _direct_contact(
+        "CONTACT_3", 20.0, 0.0, class_raw="ZSU-23-4 Shilka", level=SpecificityLevel.TYPE
+    )
+    store._contacts[new_shilka.id] = new_shilka  # type: ignore[attr-defined]
+    store._groups.reconcile(list(store._contacts.values()), now_sim=1.0)  # type: ignore[attr-defined]
+    group = store.groups[0]
+
+    speech = render_group_disclosure(store, group, now_sim=1.0)
+
+    assert speech is not None
+    # Bare type noun, no article -- matches the user's own "Shilka and
+    # zsu" worked example (`plans/group-cohesion-redesign/explore-notes-
+    # delta-taxonomy.md`).
+    assert speech.text == "ZSU-23-4 Shilka, in the group."
+
+
+def test_render_group_disclosure_non_air_defence_repeat_arrival_is_silent() -> None:
+    """ "One more truck/armor makes no difference" -- a new arrival whose
+    class is already known and is *not* air-defence stays silent at the
+    group level."""
+    store, group = _cohering_group_store([("OP_TRUCK", 2), ("OP_TRUCK", 2)])
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    _add_observation_and_tick(
+        store,
+        obs_id="OBS_MORETRUCK",
+        bearing_deg=2.0,
+        classification_raw="OP_TRUCK",
+        classification_level=2,
+        now_sim=1.0,
+    )
+    group = store.groups[0]
+
+    assert render_group_disclosure(store, group, now_sim=1.0) is None
+
+
+def test_render_group_disclosure_departure_only_is_silent() -> None:
+    """Members only departing, no new arrivals, same leader -- silent at
+    the group level (the departed member's own lifecycle event, if any,
+    carries the news instead)."""
+    import dataclasses
+
+    store, group = _cohering_group_store(
+        [("OP_TRUCK", 2), ("OP_TRUCK", 2), ("OP_TRUCK", 2)]
+    )
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    # Move one member far away so the next reconcile drops it from the
+    # cluster -- a departure, with no new arrivals and no leader (there
+    # never was one in this all-truck group).
+    departing_id = next(iter(group.member_contact_ids))
+    for contact in store.contacts:
+        if contact.id == departing_id:
+            contact.position = dataclasses.replace(
+                contact.position, x=contact.position.x + 50_000.0
+            )
+    store.tick(now_sim=1.0)
+    group = store.groups[0]
+    assert departing_id not in group.member_contact_ids
+
+    assert render_group_disclosure(store, group, now_sim=1.0) is None
+
+
+def test_render_group_full_disclosure_ignores_the_delta_taxonomy() -> None:
+    """`belief.crew_console.CrewConsole._handle_report`'s pull path always
+    wants the full roster, per the worked "report" roll-up example (`plans/
+    group-cohesion-redesign/plan.md` §4) -- unlike `render_group_
+    disclosure`, a second call after the group has already spoken (with no
+    membership change at all) still returns the same full composition, not
+    `None`."""
+    store, group = _cohering_group_store([("OP_ARMORED", 2), ("OP_TRUCK", 2)])
+    first = render_group_full_disclosure(store, group, now_sim=0.0)
+    assert first is not None
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    second = render_group_full_disclosure(store, group, now_sim=1.0)
+
+    assert second is not None
+    assert second.text == first.text

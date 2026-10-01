@@ -16,3 +16,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [LOS terrain tolerance accepted omniscience trade](project_los_terrain_tolerance_accepted_omniscience_trade.md) — 12.0 m LOS tolerance is a reviewed, user-approved relaxation; lapse condition is a pop-up-and-shoot airframe (Ka-50/Apache), not a re-flag target as-is.
 - [world-model first native deps: numpy/scipy](project_world_model_first_native_deps_numpy_scipy.md) — terrain-watershed's numpy<2.5/scipy deps checked clean 2026-10-01; <2.5 ceiling is a mypy-stub pin, not security.
 - [store.writer fail-closed geometry guard](project_store_writer_fail_closed_geometry_guard.md) — insert_features' new sub-2-point LineString/Polygon check aborts the whole transaction; confirmed fail-closed 2026-10-01.
+
+- [Group cohesion redesign: reassign not accumulate](project_group_cohesion_reassign_not_accumulate.md) — new Group.last_spoken_* fields checked clean (reassigned, not unioned); installation_component fails closed.
