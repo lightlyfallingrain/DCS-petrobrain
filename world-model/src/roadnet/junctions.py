@@ -85,9 +85,11 @@ from store.models import Point, StoredFeature
 
 # First-guess value (Stage 1), tuned against real `latakia-20km` output in
 # Stage 2 -- see this module's own docstring update once Stage 2 lands, same
-# discipline `terrain/curvature.py`'s threshold constant follows. Chosen
-# conservatively below the recon's observed clean gap at 1.4 m between
-# genuinely-coincident vertices and the nearest unrelated vertex.
+# discipline a tuned threshold constant elsewhere in this codebase follows
+# (`terrain/curvature.py`'s, before it was deleted on
+# `feature/landform-geomorphons`). Chosen conservatively below the recon's
+# observed clean gap at 1.4 m between genuinely-coincident vertices and the
+# nearest unrelated vertex.
 DEFAULT_JUNCTION_TOLERANCE_M = 0.5
 
 # First-guess threshold (Stage 1): a plain two-road endpoint meeting (degree

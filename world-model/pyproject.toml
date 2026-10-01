@@ -44,9 +44,10 @@ mypy_path = "src:tests"
 # project's `python_version = "3.11"` target (a parse error, not a type
 # error, so it cannot be narrowed to one module) -- confirmed against
 # scipy-stubs 1.18.1.1 during terrain-feature-probing Stage 1. `terrain.
-# curvature` is the only caller (`scipy.ndimage.uniform_filter`/
-# `minimum_filter`, both thin, narrow calls), so untyped-import is an
-# accepted, scoped gap rather than a reason to loosen `strict` project-wide.
+# skeleton`'s `close_and_thin` (`scipy.ndimage.binary_closing`) is now the
+# only caller -- the original caller, `terrain.curvature`, was deleted on
+# `feature/landform-geomorphons` -- so untyped-import is an accepted,
+# scoped gap rather than a reason to loosen `strict` project-wide.
 module = "scipy.*"
 ignore_missing_imports = true
 
