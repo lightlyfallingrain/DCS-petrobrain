@@ -177,8 +177,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Full original acceptance plan, kept for the record:
   `plans/f10-command-vocabulary/dod-check.md`.
 
-- [ ] **Group cohesion redesign (`fix/group-undermerging` @ `6d6ea3f`) — DoD's mechanical gate
-  passed 2026-10-01; genuinely unflown, not merged as of this entry.** Reviewer (round 2),
+- [ ] **Group cohesion redesign — merged to `main` 2026-10-01 (`ff7934e`), still unflown.**
+  DoD's mechanical gate passed at `6d6ea3f`; the merge followed on the user's instruction, with
+  live acceptance tracked as debt rather than blocking it. Reviewer (round 2),
   Security, and Performance (MONITOR, `BL-B23` filed — see Backlog) all approved; 1367 passed/4
   xfailed, `ruff`/`mypy --strict` clean at the tip. Card: `docs/acceptance/
   2026-10-01-group-cohesion-sortie.md` (and its artifact). What the flight has to settle and
@@ -1364,7 +1365,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   reading in advance of it.
 
 - [~] **Group cohesion redesign: size-relative/kind-coherence cohesion, infantry `EAGER` release,
-  and the delta taxonomy. `fix/group-undermerging` @ `6d6ea3f`. Reviewer (round 2), Security
+  and the delta taxonomy. Merged to `main` 2026-10-01 as `ff7934e` (branch was
+  `fix/group-undermerging` @ `6d6ea3f`); flight outstanding. Reviewer (round 2), Security
   (deep analysis), and Performance (APPROVED — MONITOR, `BL-B23` filed) all passed; DoD's
   mechanical gate (format/lint/type/test) passed 2026-10-01 at this tip (1367 passed/4 xfailed,
   `ruff format`/`ruff check`/`mypy --strict` clean). Not merged as of this entry — pending the
