@@ -786,8 +786,17 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   well after BL-4.
 
 
-- [ ] **BL-B23 — `ContactStore` is never pruned, so clustering cost grows with every contact ever
-  seen.** Found by the Performance Reviewer during the group-cohesion pass (2026-10-01), and
+- [x] **BL-B23 — `ContactStore` is never pruned, so clustering cost grows with every contact ever
+  seen.** Fixed `fix/contact-store-pruning` (2026-10-02, `plans/contact-store-pruning/
+  implementation.md`): `ContactStore.tick`'s eighth block now filters its `reconcile` input to
+  `belief.decay.certainty_of(contact, now_sim) != "lost"` — the existing lifecycle ladder, no new
+  field — rather than passing the full historical `_contacts` set. `_contacts` itself is untouched
+  (a `lost` contact stays full memory, still answerable by `describe_contact`); only clustering's
+  input is filtered. Re-measured at the same scale sweep: `GroupStore.reconcile` alone still costs
+  0.15-403 ms across 22-1200 *total* contacts (confirms the old number), but `ContactStore.tick()`
+  end to end, given 20 live contacts plus up to 1200 total (the rest long-lost), now costs
+  0.15-1.4 ms flat — clustering cost tracks the live picture, not sortie length. Found by the
+  Performance Reviewer during the group-cohesion pass (2026-10-01), and
   **pre-existing** — `fix/group-undermerging` only added a few per-pair dict lookups on top of a
   growth path group-reporting Stage 2 already created. `ContactStore._contacts` has no delete path
   anywhere in the class, and `tick()` passes `list(self._contacts.values())` to
@@ -812,3 +821,26 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   which `ContactStore` accumulates**. Whoever measures this backlog item should not assume the
   bubble changed the baseline; it will only start doing so once `NAKED_EYE_RANGE_CAP_M` and
   `PLAYER_BUBBLE_RADIUS_M` diverge (9K113 sight).
+
+- [ ] **BL-B24 — Two close contacts can become ambiguous reacquisition candidates for each other
+  after a long gap.** Found 2026-10-02 while fixing `BL-B23`, **pre-existing and not introduced by
+  it**; the Reviewer recommended filing it for discoverability rather than leaving it only in a
+  plan's "Notable Discoveries" and two test docstrings.
+
+  `association_over_time`'s gate inflates with elapsed time since a contact was last seen — correct
+  in itself, since a unit unobserved for two minutes could genuinely have moved. But two contacts
+  roughly 17 m apart, both reacquired in the same poll after a 120 s+ gap, each fall inside the
+  other's inflated gate. The plain spatial gate then has two candidates for one observation, and
+  `ingest`'s anti-guessing rule treats "2+ candidates" as ambiguous — the same shape as
+  `plans/contact-duplication-ambiguity-runaway/`, with elapsed-time inflation as the trigger rather
+  than range-scaled sigma.
+
+  Real traffic routes around it: naked-eye and hybrid observations both carry
+  `continues_observation_id`, which resolves the pairing without consulting the spatial gate, and
+  `BL-B23`'s own tests use that path for the same reason. So this is reachable mainly where an
+  observation arrives *without* a continuation id. Worth establishing when that actually happens
+  before sizing a fix — if it never does in production, the honest outcome is a test and a comment,
+  not a change to the gate.
+
+  Note the existing lost-and-reacquired test only ever exercised a single contact, which is why
+  this had no coverage until a two-contact fixture was written.
