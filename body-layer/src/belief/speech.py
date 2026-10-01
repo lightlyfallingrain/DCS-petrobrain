@@ -1039,6 +1039,65 @@ def _classification_key(facts: dict[str, object]) -> tuple[object, object]:
     return (classification.get("value"), classification.get("level"))
 
 
+#: Vowel-initial entries in the sayable class vocabulary (`_OP_CLASS_
+#: DISPLAY`'s values, after `_respell_for_tts`) that need `"an"` rather than
+#: `"a"`. Checked against the whole vocabulary a count==1 composition phrase
+#: can hold: `_OP_CLASS_DISPLAY`'s nine class words (`"armor"`, `"truck"`,
+#: `"infantry"`, `"short range SAM"`, `"medium range SAM"`, `"long range
+#: SAM"`, `"AAA"` -> respelled `"triple A"`, `"ship"`, `"group"`), plus
+#: `_unit_type_display`'s `type`-level pass-through of a raw DCS reporting
+#: name or designation string (`"T-72"`, `"ZSU-23-4 Shilka"`, `"Mi-8"` ->
+#: respelled `"M I 8"`, ...). Only `"armor"` and `"infantry"` are
+#: vowel-initial; everything else here, including the respelled forms,
+#: starts with a consonant sound.
+#:
+#: An explicit set rather than a first-letter-is-a-vowel rule, deliberately:
+#: a blanket rule is a claim about English phonetics in general, and this
+#: vocabulary already has at least one word (`"unit"`, `_identification_
+#: lead`'s fallback) where the vowel *letter* does not match the consonant
+#: *sound* ("a unit", not "an unit"). An enumerable set over a known, small,
+#: tested vocabulary is honest about what it actually checks; a phonetic
+#: rule would silently mis-handle the next word like `"unit"` that gets
+#: added to this table.
+_VOWEL_INITIAL_CLASS_WORDS: Final = frozenset({"armor", "infantry"})
+
+
+def _with_indefinite_article(word: str) -> str:
+    """`"a {word}"` / `"an {word}"`, for a count==1 composition phrase --
+    see `_VOWEL_INITIAL_CLASS_WORDS` for which words take `"an"` and why."""
+    return f"an {word}" if word.lower() in _VOWEL_INITIAL_CLASS_WORDS else f"a {word}"
+
+
+#: `_classification_level`'s undifferentiated levels, named here too so
+#: `_group_composition_clause` can test for them without importing a
+#: function whose own name reads oddly applied to a bare `(value, level)`
+#: key rather than a facts dict.
+_UNDIFFERENTIATED_LEVELS: Final = ("presence", "unknown")
+
+
+def _undifferentiated_phrase(count: int) -> str:
+    """How `_group_composition_clause` names member(s) with no class/type
+    yet, aggregated into one phrase rather than one `"a ground"` per member
+    (the Finding 2 fix, `plans/group-undermerging/review.md`) -- the user's
+    own worked examples are the specification: *"SAM and something"* for a
+    single undifferentiated member alongside a known one, *"a couple of
+    contacts"* / *"two contacts"* for more than one. A lone member is
+    `"something"`, not `"a contact"` -- `_unit_type_display`'s own
+    `"contact"` fallback reads as a tracked, nameable thing, while
+    `"something"` reads as genuinely unclassified, matching the example's
+    own word. More than one reuses `_plural_unit_type_display`'s presence-
+    level fallback, `"contacts"`, counted the same way a real class would
+    be. Where the examples do not cover a count (three or more
+    undifferentiated members alongside a differentiated one), this follows
+    the many-contacts fallback already used elsewhere in this function
+    rather than inventing new wording."""
+    if count == 1:
+        return "something"
+    if count in _SPOKEN_NUMBERS:
+        return f"{_SPOKEN_NUMBERS[count]} contacts"
+    return "many contacts"
+
+
 def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     """The per-class member breakdown for `render_group_disclosure`'s
     composition line (`plans/group-reporting/plan.md` Stage 3's worked
@@ -1054,16 +1113,32 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     as it already does in a single contact's own count clause -- a known,
     accepted quirk of that vocabulary, not new to this function.
 
-    Callers must not call this with an empty sequence, and must not call
-    it with only undifferentiated (`presence`/`unknown` level) members --
-    see `render_group_disclosure`'s own "Group" bare-word branch for that
-    case, which this function has no sensible rendering for (`_unit_type_
-    display(None, "presence")` returns `"ground"`, which does not compose
-    into a listed clause the way a real class/type word does)."""
+    **Undifferentiated (`presence`/`unknown` level) members are aggregated
+    into one trailing phrase, never counted as their own noun phrase per
+    member.** This was a real defect (`plans/group-undermerging/review.md`
+    Finding 2): calling `_unit_type_display(None, "presence")` per member
+    and composing it like a real class produced `"a ground and a truck"`
+    for a 2-member group with one undifferentiated member -- `"ground"` is
+    `_unit_type_display`'s internal fallback word, not something a crew
+    member says about an unclassified contact. See `_undifferentiated_
+    phrase` for the aggregated wording, matched against the user's own
+    examples (*"SAM and something"*).
+
+    Callers must still not call this with an empty sequence, or with
+    *only* undifferentiated members -- see `render_group_disclosure`'s own
+    "Group"/"a couple of contacts" bare-word branches for that case, which
+    this function deliberately leaves to the caller rather than rendering
+    itself (a composition clause with nothing differentiated to lead with
+    is a different sentence shape, not this one with an empty prefix)."""
     order: list[tuple[object, object]] = []
     counts: dict[tuple[object, object], int] = {}
+    undifferentiated_count = 0
     for facts in member_facts:
         key = _classification_key(facts)
+        _, level = key
+        if level in _UNDIFFERENTIATED_LEVELS:
+            undifferentiated_count += 1
+            continue
         if key not in counts:
             order.append(key)
             counts[key] = 0
@@ -1074,7 +1149,7 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
         value, level = key
         count = counts[key]
         if count == 1:
-            phrases.append(f"a {_unit_type_display(value, level)}")
+            phrases.append(_with_indefinite_article(_unit_type_display(value, level)))
         elif count in _SPOKEN_NUMBERS:
             phrases.append(
                 f"{_SPOKEN_NUMBERS[count]} {_plural_unit_type_display(value, level)}"
@@ -1082,6 +1157,13 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
         else:
             phrases.append(f"many {_plural_unit_type_display(value, level)}")
 
+    if undifferentiated_count:
+        phrases.append(_undifferentiated_phrase(undifferentiated_count))
+
+    assert phrases, (
+        "_group_composition_clause called with only undifferentiated "
+        "members -- see this function's own docstring"
+    )
     if len(phrases) == 1:
         return phrases[0]
     return ", ".join(phrases[:-1]) + f" and {phrases[-1]}"

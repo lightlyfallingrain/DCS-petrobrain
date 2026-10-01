@@ -1456,7 +1456,7 @@ def test_render_group_disclosure_mixed_pair_uses_the_composition_clause() -> Non
     speech = render_group_disclosure(store, group, now_sim=0.0)
 
     assert speech is not None
-    assert speech.text == "A armor and a truck."
+    assert speech.text == "An armor and a truck."
 
 
 def test_render_group_disclosure_returns_none_when_membership_has_collapsed() -> None:
@@ -1563,7 +1563,18 @@ def test_render_group_disclosure_first_differentiation_is_full_once() -> None:
     """A group that has already spoken while undifferentiated, and now has
     its first real classification, still gets a full disclosure (unchanged
     from the first draft) -- not a delta, because there was nothing to
-    diff against yet."""
+    diff against yet.
+
+    Asserts the actual rendered string, not just the absence of other
+    branches' markers -- the previous version of this test
+    (`"in" not in speech.text or ...`, `not speech.text.startswith(...)`)
+    could not fail on nonsense output, and did not: it passed unchanged
+    while this exact scenario (one differentiated, one still-`presence`
+    member) rendered `"A ground and a truck."` (`plans/
+    group-undermerging/review.md` Finding 2) until `_group_composition_
+    clause` was fixed to aggregate undifferentiated members instead of
+    treating `_unit_type_display`'s `"ground"` fallback as a real noun
+    phrase."""
     store, group = _cohering_group_store([("Ural truck", 1), ("Ural truck", 1)])
     _mark_spoken_as_rendered(store, group, now_sim=0.0)
     assert group.last_spoken_differentiated is False
@@ -1589,11 +1600,11 @@ def test_render_group_disclosure_first_differentiation_is_full_once() -> None:
     speech = render_group_disclosure(store, group, now_sim=1.0)
 
     assert speech is not None
-    # Full composition, not a delta clause -- "Pair of trucks." (or the
-    # mixed-composition form), never "Now leading" or an "in ... group"
-    # suffix.
-    assert "in" not in speech.text or "o'clock group" not in speech.text
-    assert not speech.text.startswith("Now leading")
+    # Full composition, not a delta clause -- the one differentiated
+    # member leads, the still-undifferentiated member is "something"
+    # (matching the user's own "SAM and something" example), not a
+    # counted noun phrase of its own.
+    assert speech.text == "A truck and something."
 
 
 def _direct_contact(
@@ -1673,7 +1684,7 @@ def test_render_group_disclosure_new_class_arrival_is_a_delta() -> None:
     speech = render_group_disclosure(store, group, now_sim=1.0)
 
     assert speech is not None
-    assert speech.text == "A armor, in the group."
+    assert speech.text == "An armor, in the group."
 
 
 def test_render_group_disclosure_air_defence_repeat_arrival_is_a_delta() -> None:
