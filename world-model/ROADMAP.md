@@ -45,6 +45,12 @@ sortie actually exercises it, and say which one.
   known, so they do not sample ordinary terrain and over-promised by ~20 points on the one metric
   the motivating cases did not exercise.
 
+  **Parked 2026-10-01 — see `WM-B6`.** The user judged the detector's real output wrong on the
+  ground (aligned hillshade renders, three spacings): *"The real problem is that the ridge/valley
+  detection itself does not seem to produce correct results."* The merge stands and the code is
+  sound as written, but **the `ridge`/`valley` rows in `syria-full.sqlite` should not be treated as
+  a layer to build on** until `WM-B6` is reopened. Stages 3-5 are parked with it.
+
   Card: `docs/acceptance/2026-10-01-terrain-landform-build.md` /
   https://claude.ai/artifact/AKXxX4R4R5a3tcztsR2qJC. DoD: `plans/terrain-feature-probing/
   dod-check.md`. Stages 3-5 (adjacency, bearing, callout) remain unbuilt — nothing in the cockpit
@@ -413,6 +419,52 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Consumers to check before changing the stored geometry: `geometry.signed_side_of_polyline`
   (proven on coastline), `geometry.bearing_deg`, and whatever Stage 3's adjacency ends up reading.
   Densifying into the same `LineString` shape keeps all three working unchanged.
+
+  **Superseded by `WM-B6` and parked with it, 2026-10-01.** Implemented on
+  `feature/landform-curve-smoothing` (unmerged, Chaikin, measured max deviation 182 m against the
+  250 m cap) — but smoothing a line that is in the wrong place does not help, and the user's verdict
+  below retires this as a standalone item. Keep the branch; revisit only once detection quality is
+  fixed.
+
+- [>] **WM-B6 — Ridge/valley detection does not produce correct results. Parked 2026-10-01, needs
+  much more effort at some other time.** User direction, after looking at aligned SRTM-hillshade
+  renders of real output at three grid spacings:
+
+  > *"500 m grid is too coarse, not useful. 250 m grid, if smoothed, would be precise enough, but
+  > the data is bad. The real problem is that the ridge/valley detection itself does not seem to
+  > produce correct results. Smoothing or finer grid does not solve that."*
+
+  **This parks the whole landform line of work** — `WM-B4` (smoothing), `WM-B5` (valley boundary
+  extraction) and `plans/terrain-feature-probing/`'s unbuilt Stages 3-5 (adjacency, bearing, the
+  callout). Nothing should be built on `feature(kind='ridge'/'valley')` until this is reopened, and
+  the merged detector's output in `syria-full.sqlite` should be treated as unreliable rather than as
+  a layer later work can assume.
+
+  **What is already known, so a future attempt does not re-derive it** (full detail:
+  `research/2026-10-01-terrain-detection-resolution-spike.md`, branch
+  `spike/terrain-detection-resolution`):
+
+  - **The `min_cell_count` floor scaled by area while gating a 1-D line feature**, demanding ~150
+    cells at 100 m where 500 m demands 6. That suppressed fine-spacing recall to ~1 surviving ridge
+    where a linearly-scaled floor finds 23-37, and **it is why three separate sweeps concluded
+    "finer spacing does not help"** — they were measuring their own floor. This is a real, fixed-in-
+    principle bug and must not be rediscovered as a new finding.
+  - **"Too coarse" is point density, not the floor**: the extraction emits one point per grid cell,
+    so 500 m spacing puts 500 m between points. 250 m with the corrected floor is the affordable
+    improvement (~6 GB, ~110 s extrapolated full-theatre); **100 m is infeasible as written**
+    (~38 GB, from nested Python lists and a per-cell dict in `grow_basins` — a data-structure cost,
+    not an algorithmic one, so a re-architecture could change this).
+  - **Valleys stay sparse in steep terrain at every spacing and floor tested** — unexplained by the
+    floor, and the spike's own guess is that one basin core swallows several real draws. This is a
+    basin-definition question and is the most likely root of the user's "the data is bad", since
+    *"next valley"* is a headline callout.
+  - The watershed mechanism itself was never shown to be wrong, only never fairly tested; the
+    user's judgement is about the **output**, which is what matters. A future attempt should treat
+    "is a marker-controlled watershed the right mechanism at all" as open rather than settled.
+
+  **Reopening condition**: a consumer that actually needs landform references — the Stage 5 callout
+  (*"at the foot of the hill"*, *"next valley"*) or navigation phrasing once Petrovich flies. Until
+  then this is unbuilt capability, not a defect in anything shipping.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
