@@ -96,7 +96,7 @@ from belief.speech import (
     render_confirm_request,
     render_contact_report,
     render_disambiguation,
-    render_group_disclosure,
+    render_group_full_disclosure,
     render_group_report,
     render_lost_contact,
     render_no_contact,
@@ -1488,11 +1488,15 @@ class CrewConsole:
         # `plans/group-reporting/plan.md` Stage 4 design, section 6: a
         # contact already in this report's scope may belong to a real,
         # persisted `belief.groups.Group` -- resolve those first and speak
-        # each distinct group once via `render_group_disclosure`, so a
-        # pushed callout and a pulled "report" describe the same group
-        # identically. Everything left over (no group at all) still goes
-        # through `group_facts`/`render_group_report`'s report-space
-        # bucketing exactly as before.
+        # each distinct group once via `render_group_full_disclosure`, so a
+        # pushed callout and a pulled "report" describe the same group's
+        # full composition (`plans/group-cohesion-redesign/plan.md` §4's
+        # "report" roll-up example always names the full roster, never a
+        # delta -- `render_group_disclosure`'s own taxonomy gate is
+        # deliberately not used here, see that function's docstring).
+        # Everything left over (no group at all) still goes through
+        # `group_facts`/`render_group_report`'s report-space bucketing
+        # exactly as before.
         grouped_by_id: dict[str, list[dict[str, object]]] = {}
         ungrouped_facts_list: list[dict[str, object]] = []
         for facts in facts_list:
@@ -1511,9 +1515,9 @@ class CrewConsole:
             belief_group = self.store.group_for_contact(leading_id)
             assert belief_group is not None
             # A report is pull-based, so it always speaks fresh -- no
-            # `last_spoken_signature` gate here, that exists only to
-            # throttle the push (`CalloutScheduler`) path.
-            speech = render_group_disclosure(
+            # `last_spoken_signature`/delta-taxonomy gate here, that exists
+            # only to throttle the push (`CalloutScheduler`) path.
+            speech = render_group_full_disclosure(
                 self.store, belief_group, now_sim, self.enrichment
             )
             if speech is None:

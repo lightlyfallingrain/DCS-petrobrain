@@ -152,6 +152,7 @@ import math
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Final
 
 from perception import object_model
@@ -186,6 +187,70 @@ GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS: Final[float] = 20.0
 #: different purpose -- see `_representative_size_m`).
 GROUP_REPORTING_UNKNOWN_SIZE_M: Final[float] = 7.0
 
+
+#: Per-class cohesion backstop policy (`plans/group-cohesion-redesign/
+#: plan.md` §2) -- `STRICT` is today's unit-widths backstop (the default for
+#: every class not named in `_OP_CLASS_COHESION_BACKSTOP`); `EAGER` drops the
+#: absolute backstop entirely, leaving only the relative/density test. Not a
+#: bool: a third policy (e.g. a looser-but-still-bounded backstop) is a
+#: plausible future addition, and an enum names the two existing values
+#: rather than leaving `eager: bool` to be read as "the only other option."
+class CohesionBackstop(Enum):
+    STRICT = "strict"
+    EAGER = "eager"
+
+
+#: `OP_INFANTRY` only, no backstop at all -- user direction 2026-10-01,
+#: *"Ok to merge infantry too eagerly. Infantry is the least detectable and
+#: also least important of unit types."* (`plans/group-undermerging/
+#: explore-notes.md`). Not extended to any other class. `EAGER` fires for a
+#: pair when **either** member resolves to `OP_INFANTRY` -- the error this
+#: policy accepts (over-merging infantry) is asymmetric and cheap; nothing
+#: else gets the same latitude.
+_OP_CLASS_COHESION_BACKSTOP: Final[dict[str, CohesionBackstop]] = {
+    "OP_INFANTRY": CohesionBackstop.EAGER,
+}
+_DEFAULT_COHESION_BACKSTOP: Final[CohesionBackstop] = CohesionBackstop.STRICT
+
+#: Air-defence `op_class` families, shared by two independent questions that
+#: must not be merged into one flag (`plans/group-cohesion-redesign/
+#: plan.md` §1/§4's Correction 2):
+#:
+#: - `belief.groups._cluster_contacts`'s installation-cap selection (below)
+#:   asks a narrower question -- both members' `profile.installation_
+#:   component is True` -- and does NOT use this set at all.
+#: - `belief.speech.render_group_disclosure`'s delta taxonomy asks a
+#:   broader one: is a *newly arrived* member's class air-defence at all,
+#:   regardless of whether it is a fixed installation component or a
+#:   single-vehicle SHORAD system, because "more air defence is always
+#:   news" applies to both (an Osa joining a group that already has a
+#:   Shilka is news for exactly this reason).
+#:
+#: Membership: the air-defence `op_class` buckets `perception.object_model`
+#: actually declares -- `OP_SRSAM`/`OP_MRSAM`/`OP_LRSAM` (SAM systems),
+#: `OP_SPAAG`/`OP_ZU23` (gun-based AAA). A hand-authored guess, same posture
+#: as every other vocabulary table in this codebase -- not re-derived from
+#: flown evidence.
+AIR_DEFENSE_OP_CLASSES: Final[frozenset[str]] = frozenset(
+    {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
+)
+
+#: Flat cap, metres, on inter-member spacing for a pair where **both**
+#: members are fixed air-defence-installation components (`profile.
+#: installation_component is True`) -- `plans/group-cohesion-redesign/
+#: plan.md` §1, replacing the first draft's `op_class`-keyed design (which
+#: conflated the genuine S-125 fixed site with four single-vehicle systems).
+#: 500 m, grounded in `body-layer/research/2026-10-01-sam-site-geometry.md`
+#: (real S-75/S-125 launcher spacing is ~60-230 m; this cap carries margin
+#: above the best-documented fixed-site figures without reaching far enough
+#: to also cover a dispersed mobile-TELAR battery, which is deliberately
+#: not this rule's job -- see that research note's §"Possible Approaches").
+#: Composed as `min(relative_threshold, GROUP_REPORTING_INSTALLATION_
+#: COHESION_CAP_M)`, same as the unit-widths backstop -- the relative test
+#: still governs everything, this is not an unconditional "any two
+#: installation parts anywhere merge" rule.
+GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
+
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
 
 
@@ -206,7 +271,16 @@ class Group:
     an unchanged group), reset to `None` only for a group founded fresh
     (a brand-new cluster, or a split's minority child) -- a fresh group has
     said nothing yet, regardless of what its members individually said
-    before they were grouped."""
+    before they were grouped.
+
+    `last_spoken_member_contact_ids`/`last_spoken_leading_contact_id`/
+    `last_spoken_differentiated` are the delta-taxonomy's own disclosure
+    snapshot (`plans/group-cohesion-redesign/plan.md` §4) -- what
+    `render_group_disclosure` last saw when it actually spoke, read back on
+    the next call to decide full/delta/silent. Same carry-over/reset rule as
+    `last_spoken_signature` above: untouched across a reconciliation that
+    keeps this group's id, reset to the empty/`None`/`False` defaults only
+    for a freshly founded group."""
 
     id: str
     member_contact_ids: frozenset[str]
@@ -214,6 +288,9 @@ class Group:
     last_reconciled_sim: float
     last_spoken_signature: str | None = None
     last_spoken_sim: float | None = None
+    last_spoken_member_contact_ids: frozenset[str] = frozenset()
+    last_spoken_leading_contact_id: str | None = None
+    last_spoken_differentiated: bool = False
 
 
 def _pairwise_distance(
@@ -224,15 +301,23 @@ def _pairwise_distance(
     return math.hypot(xi - xj, zi - zj)
 
 
-def _representative_size_m(contact: Contact) -> float:
-    """The physical size (metres) used to scale `contact`'s share of a
-    pair's cohesion backstop -- `contact.last_class_raw` (the believed
-    classification string; no omniscience, never a DCS `object_type`) run
-    through `object_model.profile_for`, the same lookup `belief.threat`/
-    `belief.speech` already use for a believed classification.
+def _profile_for_contact(contact: Contact) -> object_model.ObjectTypeProfile:
+    """`contact.last_class_raw` (the believed classification string; no
+    omniscience, never a DCS `object_type`) run through `object_model.
+    profile_for` -- shared by `_representative_size_m` (size) and
+    `_cluster_contacts`'s per-pair backstop selection (`installation_
+    component`, cohesion policy), so the two never read a believed
+    classification through two different paths."""
+    return object_model.profile_for(contact.last_class_raw)
+
+
+def _representative_size_m(profile: object_model.ObjectTypeProfile) -> float:
+    """The physical size (metres) used to scale a contact's share of a
+    pair's cohesion backstop, given its already-resolved `profile`
+    (`_profile_for_contact`).
 
     Falls back to `GROUP_REPORTING_UNKNOWN_SIZE_M` whenever that lookup
-    cannot resolve a real type -- detected via `object_model.
+    could not resolve a real type -- detected via `object_model.
     DEFAULT_OP_CLASS`, the same "no real match" signal `belief.
     classification._op_class_of` and `belief.speech._identification_lead`
     already key off, rather than duplicating a `SpecificityLevel` check
@@ -243,10 +328,48 @@ def _representative_size_m(contact: Contact) -> float:
     keyword-matchable type name -- `profile_for` cannot resolve either, and
     both deserve the same honest default rather than a silently wrong
     size."""
-    profile = object_model.profile_for(contact.last_class_raw)
     if profile.op_class == object_model.DEFAULT_OP_CLASS:
         return GROUP_REPORTING_UNKNOWN_SIZE_M
     return profile.size_m
+
+
+def _pair_backstop_m(
+    profile_i: object_model.ObjectTypeProfile,
+    profile_j: object_model.ObjectTypeProfile,
+    size_i: float,
+    size_j: float,
+) -> float:
+    """The absolute cohesion backstop (metres) for one pair, given both
+    members' resolved profiles/sizes -- `plans/group-cohesion-redesign/
+    plan.md` §3's composition order, in priority:
+
+    1. **Both** members are fixed-installation components
+       (`installation_component is True` on both): the flat
+       `GROUP_REPORTING_INSTALLATION_COHESION_CAP_M`. A **mixed** pair (one
+       installation component, one not) falls through to the ordinary
+       rule below -- an installation cap is only meaningful when both
+       members are plausibly parts of the same site.
+    2. **Either** member's `op_class` has an `EAGER` cohesion policy
+       (`_OP_CLASS_COHESION_BACKSTOP`, today only `OP_INFANTRY`): no
+       backstop at all (`math.inf`) -- the relative/density test alone
+       decides.
+    3. Otherwise, the ordinary unit-widths backstop
+       (`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * mean(size_i, size_j)`).
+
+    No profile is authored as both `installation_component=True` and
+    `EAGER`, so (1) and (2) never compete for the same pair in practice
+    (module docstring)."""
+    if profile_i.installation_component and profile_j.installation_component:
+        return GROUP_REPORTING_INSTALLATION_COHESION_CAP_M
+    backstop_i = _OP_CLASS_COHESION_BACKSTOP.get(
+        profile_i.op_class, _DEFAULT_COHESION_BACKSTOP
+    )
+    backstop_j = _OP_CLASS_COHESION_BACKSTOP.get(
+        profile_j.op_class, _DEFAULT_COHESION_BACKSTOP
+    )
+    if CohesionBackstop.EAGER in (backstop_i, backstop_j):
+        return math.inf
+    return GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * (0.5 * (size_i + size_j))
 
 
 def _cluster_contacts(
@@ -280,18 +403,26 @@ def _cluster_contacts(
     armor..."` at the correct composition) -- the few seconds of
     individually-reported members beforehand are this system's equivalent
     of a human copilot needing a moment to resolve a new contact, not a
-    defect. The uncertainty-budgeted version, meanwhile, regressed
-    `test_2c_transcript_fixture_renders_four_lines_not_seven`: two
-    infantry 260 m apart at 500 m range (deliberately pinned to stay
-    ungrouped, per that test's own docstring) merged anyway, because one
-    look's ~300 m covariance swallowed a gap nearly 10x the infantry
-    backstop. Budgeting a single look's full uncertainty is too blunt an
-    instrument for this test; a real fix would need something better than
-    a flat subtraction (e.g. a proper Mahalanobis-style test, or
-    hysteresis that only favours an *already-formed* group's continuity
-    rather than loosening first-contact formation) -- out of scope for
-    this debug pass, which found no live symptom this mechanism actually
-    needed to fix.
+    defect. The uncertainty-budgeted version, meanwhile, regressed what was
+    then a pinned two-infantry-stays-ungrouped test (`OP_INFANTRY` was
+    `STRICT` at the time, like every other class): one look's ~300 m
+    covariance swallowed a gap nearly 10x the infantry backstop. Budgeting a
+    single look's full uncertainty is too blunt an instrument for a strict
+    class; a real fix would need something better than a flat subtraction
+    (e.g. a proper Mahalanobis-style test, or hysteresis that only favours
+    an *already-formed* group's continuity rather than loosening
+    first-contact formation) -- out of scope for this debug pass, which
+    found no live symptom this mechanism actually needed to fix. **This
+    finding does not generalise to `OP_INFANTRY` post-dating this
+    investigation** -- `plans/group-cohesion-redesign/plan.md` later made
+    exactly that class `EAGER` (no backstop at all) by deliberate user
+    direction, not by retuning this uncertainty question; the two are
+    unrelated fixes to the same test's old pinned behaviour.
+
+    **Per-pair backstop is `_pair_backstop_m`** (`plans/
+    group-cohesion-redesign/plan.md` §3): installation cap, then per-class
+    cohesion policy (`EAGER`/`STRICT`), then the ordinary unit-widths
+    backstop -- see that function's own docstring for the priority order.
 
     O(n^2) in the number of currently tracked contacts (same cost shape
     `perception.clustering`/`perception.group_salience` already pay) --
@@ -301,7 +432,8 @@ def _cluster_contacts(
         return []
     ids = [c.id for c in contacts]
     positions = [(c.position.x, c.position.z) for c in contacts]
-    sizes = [_representative_size_m(c) for c in contacts]
+    profiles = [_profile_for_contact(c) for c in contacts]
+    sizes = [_representative_size_m(profile) for profile in profiles]
     n = len(ids)
 
     nn_gaps: list[float] = []
@@ -333,8 +465,8 @@ def _cluster_contacts(
 
     for i in range(n):
         for j in range(i + 1, n):
-            pair_backstop = GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * (
-                0.5 * (sizes[i] + sizes[j])
+            pair_backstop = _pair_backstop_m(
+                profiles[i], profiles[j], sizes[i], sizes[j]
             )
             pair_threshold = min(relative_threshold, pair_backstop)
             if _pairwise_distance(positions, i, j) <= pair_threshold:
@@ -375,7 +507,16 @@ class GroupStore:
                 return group
         return None
 
-    def mark_spoken(self, group_id: str, signature: str, now_sim: float) -> bool:
+    def mark_spoken(
+        self,
+        group_id: str,
+        signature: str,
+        now_sim: float,
+        *,
+        member_contact_ids: frozenset[str] = frozenset(),
+        leading_contact_id: str | None = None,
+        differentiated: bool = False,
+    ) -> bool:
         """Record that `group_id`'s disclosure line was just spoken as
         `signature` -- the write half of Stage 3's progressive-disclosure
         trigger (`belief.speech.render_group_disclosure`'s caller compares
@@ -383,12 +524,26 @@ class GroupStore:
         calls this to update it only when it actually spoke). Returns
         whether `group_id` still exists -- a group can vanish between a
         caller reading it and calling this, if a `reconcile` ran in
-        between."""
+        between.
+
+        `member_contact_ids`/`leading_contact_id`/`differentiated`
+        (`plans/group-cohesion-redesign/plan.md` §4) are the delta
+        taxonomy's own disclosure snapshot -- what `render_group_
+        disclosure` saw when it decided to speak this time, read back by
+        its own taxonomy decision on the *next* call via `Group.last_
+        spoken_member_contact_ids`/`.last_spoken_leading_contact_id`/
+        `.last_spoken_differentiated`. Keyword-only with permissive
+        defaults (an empty set / `None` / `False`) so a caller that only
+        cares about the pre-existing content-signature gate -- or a test
+        exercising that gate alone -- is unaffected."""
         group = self._groups.get(group_id)
         if group is None:
             return False
         group.last_spoken_signature = signature
         group.last_spoken_sim = now_sim
+        group.last_spoken_member_contact_ids = member_contact_ids
+        group.last_spoken_leading_contact_id = leading_contact_id
+        group.last_spoken_differentiated = differentiated
         return True
 
     def _new_group_id(self) -> str:
@@ -439,6 +594,9 @@ class GroupStore:
                     last_reconciled_sim=now_sim,
                     last_spoken_signature=old.last_spoken_signature,
                     last_spoken_sim=old.last_spoken_sim,
+                    last_spoken_member_contact_ids=old.last_spoken_member_contact_ids,
+                    last_spoken_leading_contact_id=old.last_spoken_leading_contact_id,
+                    last_spoken_differentiated=old.last_spoken_differentiated,
                 )
             else:
                 new_id = self._new_group_id()

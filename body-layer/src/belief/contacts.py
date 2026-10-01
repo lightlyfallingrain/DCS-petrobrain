@@ -731,10 +731,26 @@ class ContactStore:
         delegates to `belief.groups.GroupStore.group_for_contact`."""
         return self._groups.group_for_contact(contact_id)
 
-    def mark_group_spoken(self, group_id: str, signature: str, now_sim: float) -> bool:
+    def mark_group_spoken(
+        self,
+        group_id: str,
+        signature: str,
+        now_sim: float,
+        *,
+        member_contact_ids: frozenset[str] = frozenset(),
+        leading_contact_id: str | None = None,
+        differentiated: bool = False,
+    ) -> bool:
         """Delegates to `belief.groups.GroupStore.mark_spoken` -- see that
         method's docstring."""
-        return self._groups.mark_spoken(group_id, signature, now_sim)
+        return self._groups.mark_spoken(
+            group_id,
+            signature,
+            now_sim,
+            member_contact_ids=member_contact_ids,
+            leading_contact_id=leading_contact_id,
+            differentiated=differentiated,
+        )
 
     @property
     def unacknowledged_events(self) -> list[Event]:

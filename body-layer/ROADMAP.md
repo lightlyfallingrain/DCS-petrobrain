@@ -1346,6 +1346,57 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   from what that flight actually shows about cohesion misses/false-merges, not from more code
   reading in advance of it.
 
+- [x] **Group cohesion redesign: size-relative/kind-coherence cohesion, infantry `EAGER` release,
+  and the delta taxonomy. Implemented, checks green, pending Reviewer/DoD.** `plans/
+  group-cohesion-redesign/plan.md`, built on `plans/group-undermerging/debug.md`'s 2026-10-01
+  sortie debug (the re-trigger fix already merged) and three Explore rounds the same day. **Stage
+  1** — `belief.groups.CohesionBackstop` (`STRICT`/`EAGER`), `_OP_CLASS_COHESION_BACKSTOP` makes
+  `OP_INFANTRY` `EAGER` (no backstop at all for a pair where either member is infantry) — user
+  direction: *"Ok to merge infantry too eagerly."* **Stage 2** — `perception.object_model.
+  ObjectTypeProfile.installation_component: bool`, `True` only for `"s-125"`/`"kub "` (a real
+  finding mid-revision: `op_class="OP_SRSAM"` alone would have conflated the genuine fixed S-125
+  site with four single-vehicle systems — Osa/Strela-10/Strela-1/Tor — that must stay excluded);
+  `GROUP_REPORTING_INSTALLATION_COHESION_CAP_M = 500.0` (down from a discredited 1000 m guess,
+  grounded in `body-layer/research/2026-10-01-sam-site-geometry.md`'s real S-75/S-125 doctrine).
+  **Stage 3** — the delta taxonomy: `Group` gains `last_spoken_member_contact_ids`/`.
+  last_spoken_leading_contact_id`/`.last_spoken_differentiated`; `belief.speech.render_group_
+  disclosure` now decides full/delta/silent per tick (leader change -> a short "Now leading: X."
+  delta, never a full restatement; first differentiation -> full, once; a new or repeat-air-
+  defence arrival -> a delta naming just the new member(s); a repeat non-air-defence arrival or a
+  departure with no new arrivals -> silent). **A real design gap found and fixed while wiring
+  this in**: `belief.crew_console.CrewConsole._handle_report`'s pull-based "report" command used
+  to call `render_group_disclosure` directly and relied on it always returning the full
+  composition (its own comment: "a report is pull-based, so it always speaks fresh"); the new
+  taxonomy breaks that assumption (a post-taxonomy call can return a delta or `None`), so a new
+  `render_group_full_disclosure` (taxonomy-free, always full) was added for the pull path, and
+  `_handle_report` now calls that instead — confirmed against the delta taxonomy's own worked
+  "report" roll-up example, which always names the full current roster.
+
+  **Verified against real sortie data, not only hand-built fixtures**: the real S-300 battery's
+  ground-truth emplacement geometry (`/Users/sg/dcs-belief-truth.jsonl`, 2026-10-01 trace,
+  `true_x`/`true_z` for object ids 16785152/16784640/16784896/16785408) forms a 3-member cluster
+  under the settled `installation_component` assignment (S-300/`OP_LRSAM` is explicitly NOT
+  flagged — only `"s-125"`/`"kub "` are), with the fourth component ("64H6E sr") isolated —
+  `tests/test_groups.py::test_real_s300_site_ground_truth_geometry_forms_a_three_member_cluster`.
+  **This does not match the plan's own Stage 2 acceptance wording** ("confirmed to form one
+  four-member group") — that wording is stale, inherited from before this revision's own §1
+  finding narrowed the installation flag off `OP_LRSAM`; flagged in the implementation report
+  rather than silently worked around.
+
+  **`tests/test_callouts.py::test_2c_transcript_fixture_renders_four_lines_not_seven` rewritten**
+  (AGENTS.md escalation, user-confirmed) — and the actual result is wider than "the infantry pair
+  now merges": single-link chaining through an infantry member (no backstop at all) bridges the
+  BTR-70 and truck into the *same* five-member group even though their own direct pairwise gap
+  does not clear the ordinary backstop, a real and now-pinned consequence of the `EAGER` release
+  (`tests/test_groups.py::test_infantry_eager_policy_bridges_a_non_infantry_pair_that_would_not_
+  merge_alone`).
+
+  1366 passed/4 xfailed (up from the branch's 1351/4 baseline), `ruff format`/`ruff check`/`mypy
+  --strict` clean. **Milestone completion question**: unblocks `BL-B11` (threat-based report
+  prioritisation) once cohesion correctly reflects installation structure, per the plan's own
+  "Second-Order Effect" section — otherwise does not change what is next, pending Reviewer/DoD and
+  the first sortie to exercise the installation cap/delta taxonomy for real.
+
 ## Backlog (body-layer)
 
 **Moved to `body-layer/BACKLOG.md` on 2026-09-27** — items keep their `BL-B<n>` ids. This file
