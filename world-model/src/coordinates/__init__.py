@@ -9,6 +9,8 @@ theatre-agnostic.
 
 from functools import cache
 
+import numpy as np
+import numpy.typing as npt
 from pyproj import CRS, Transformer
 
 from .projections import THEATRE_PROJECTIONS
@@ -61,3 +63,24 @@ def wgs84_to_dcs(theatre: str, lat: float, lon: float) -> tuple[float, float]:
     """
     x, z = _wgs84_to_dcs_transformer(theatre).transform(lat, lon)
     return x, z
+
+
+def dcs_to_wgs84_array(
+    theatre: str, x: npt.NDArray[np.float64], z: npt.NDArray[np.float64]
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Vectorised counterpart to `dcs_to_wgs84` -- `x`/`z` are numpy arrays
+    of equal shape (DCS-native theatre-local), returns `(lat, lon)` arrays
+    of that same shape.
+
+    Exists so a whole lattice's worth of points converts in one call
+    rather than a per-point Python loop (`landform-geomorphons` plan,
+    design decision 1: `pyproj.Transformer.transform` accepts array input
+    natively -- confirmed, not assumed). This is the one place coordinate
+    math is allowed to operate on arrays rather than scalars; it still
+    goes through the same cached per-theatre `Transformer` as the scalar
+    form, so behavior (and the registered-theatre check) is identical.
+
+    Raises ValueError if `theatre` has no registered projection.
+    """
+    lat, lon = _dcs_to_wgs84_transformer(theatre).transform(x, z)
+    return np.asarray(lat, dtype=np.float64), np.asarray(lon, dtype=np.float64)
