@@ -544,6 +544,61 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     over numpy, same complexity class as the priority-flood basin grower already shipped — keeping
     the project's own axis-sliced line extraction.
 
+  ### DECIDED 2026-10-01 — geomorphons, classified then vectorised. User's call, from the renders.
+
+  > *"The second image looks like the data I want. The lines there could use smoothing, probably
+  > with the earlier smoothing algorithm we tried. But it does get the ridges and valleys correctly
+  > and that is what matters. Choose Geomorphons approach."*
+
+  **This overturns the spike's own D8 recommendation, and the reason is worth keeping.** The spike
+  preferred in-house D8 drainage; the user then pointed at a single long ridge spanning one test
+  window and showed what each approach did with it. Inverted-DEM drainage finds a crest only where
+  the *inverted* catchment accumulates, so **every saddle breaks the line** — at a high threshold
+  almost nothing was detected on that ridge, at a low one it became disconnected pieces plus a
+  thicket of branch noise. Geomorphons labels a crest cell because the cell *looks like* a crest,
+  independent of what is upstream, so a long ridge survives as a long ridge. Measured on that
+  window: longest traced ridge **8.3 km** and valley **6.5 km**, against D8's fragments.
+
+  **The pipeline, as validated by eye:**
+
+  1. **Geomorphons classification** over the native-resolution DEM (~90 m SRTM, sampled on a DCS x/z
+     lattice). Pure numpy, ~40 lines, no dependency: per cell, eight directions, line-of-sight
+     zenith/nadir angles within a lookup radius, a flatness threshold, then the paper's ternary
+     pattern → one of ten landform classes. Spike parameters that produced the accepted render:
+     **lookup 15 cells (~1.35 km), flatness 1°**. WhiteboxTools is *not* needed — it was the
+     survey's route to geomorphons, and an in-house implementation removes the binary dependency,
+     the licence question and the Windows-support question in one go.
+  2. **Masks**: ridge family = `ridge` + `peak`; valley family = `valley` + `pit`. (`spur`/`hollow`
+     were left out of the accepted render — revisit, they may be what "at the foot of" wants.)
+  3. **Binary closing before thinning.** Without it, a crest the classifier drops for a single cell
+     breaks the line.
+  4. **Zhang-Suen thinning** to a one-pixel skeleton.
+  5. **Trace walking *through* junctions, not cutting at them** — at a fork continue in the
+     incoming direction, stop only on a genuinely sharp turn. **This step is what makes or breaks
+     the result**: naive cut-at-every-junction tracing gave 516 ridge fragments with a 2.2 km
+     longest; the same skeleton with gap-closing and junction-walking gave 312 lines and the 8.3 km
+     crest. It is also a heuristic — right for a spur leaving a ridge, wrong where two comparable
+     crests genuinely meet — and needs checking on more terrain than one window.
+  6. **Smoothing: reuse `WM-B4`'s Chaikin pass** (user's own instruction above). It is implemented
+     and measured on `feature/landform-curve-smoothing` — deviation bounded by construction, 182 m
+     max against a 250 m cap — so it is a port, not new work.
+  7. Store as `LineString` features carrying their elevation range, as today.
+
+  **Known costs and gaps, honestly:**
+
+  - **The thinning is the scaling problem, not the classification.** Geomorphons is vectorised
+    numpy (8 directions × lookup radius array ops) and tiles naturally; Zhang-Suen as written in
+    the spike is a pure-Python double loop — 0.1 s for a 178×178 window, which extrapolates to
+    hours over a theatre at 90 m. Vectorise it, or take a thinning from a permissively-licensed
+    library, before this is anything but a spike.
+  - **Density is still a product question.** 135 ridges and 121 valleys over 0.8 km in a 16×16 km
+    window: fine as geometry, far too many to *speak*. The consolidation question does not go away,
+    it changes from "reconnect the pieces" to "which of these is worth mentioning".
+  - Spike implementation kept at `world-model/tools/spike_geomorphons.py` on
+    `spike/terrain-detection-resolution` — scratch code, not a pipeline module.
+
+  **Still parked.** This is the design to build when `WM-B6` reopens, not an instruction to start.
+
   **The consumer half, user 2026-10-01**: *"Could we replace contact enrichment of near that hill
   to work from the ridge/valley data? Then we'd not need elevation grid for that and the ridge
   valley data would be superior in quality anyhow."*
