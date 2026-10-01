@@ -25,11 +25,21 @@ and exists for this.
 - **Base store** (`store/`): roads, settlements, airfields, beacons, navaids, whatever
   whole-theatre elevation/`surface_type` grid a build supplied (SRTM or a stored DCS probe run)
   — everything M1–M7 built. Untouched by M8.
-- **Probe store** (`probe_store/`): fine elevation, `surface_type`, and ridge/valley features
-  accumulated chunk by chunk via `build.pipeline.add_probe_chunk`, plus a tri-state coverage
-  record (`unqueried` / `queried_with_data` / `queried_void`) per `(kind, chunk_ix, chunk_iz)`.
-  Chunks are 5,000 m squares anchored at the DCS x/z origin (`store.chunks`), independent of any
-  region's own boundary — the same probe store outlives a region being redefined.
+- **Probe store** (`probe_store/`): fine elevation and `surface_type` accumulated chunk by chunk
+  via `build.pipeline.add_probe_chunk`, plus a tri-state coverage record (`unqueried` /
+  `queried_with_data` / `queried_void`) per `(kind, chunk_ix, chunk_iz)`. Chunks are 5,000 m
+  squares anchored at the DCS x/z origin (`store.chunks`), independent of any region's own
+  boundary — the same probe store outlives a region being redefined.
+  **Ridge/valley terrain features left this list on `feature/landform-geomorphons`
+  (2026-10-01/02)**: geomorphons classification needs a whole SRTM tile plus a multi-kilometre
+  margin as its processing window (native ~90 m resolution, ~1.8 km margin at default
+  settings) — a 5 km probe chunk cannot supply that context, so there is no chunk-scoped
+  equivalent of the old watershed-era `ingest_terrain_chunk`. `add_probe_chunk`'s grid/
+  `surface_type` chunk ingestion is unaffected; its `"ridge"`/`"valley"` coverage now stays
+  `UNQUERIED` forever, and `ProbeChunkReport.terrain_stats`/`terrain_skipped` are kept for shape
+  compatibility but always come back `None`/`True`. Ridge/valley features are instead produced
+  theatre- or region-wide, per SRTM tile, by `build.ingest_terrain.ingest_terrain` and stored on
+  the **base** store, not the probe store — see `world-model/ROADMAP.md`'s `WM-B6` entry.
 
 ## Reading both at once
 
@@ -89,7 +99,11 @@ split introduces.
 `describe_position` calls with the probe store attached, against a small locally generated
 store (never a real `syria-full` build — see the plan's Implementation Plan step 5 and
 `M7_RUN_INSTRUCTIONS.md`'s precedent for why a real full-theatre run stays a user-run job). A
-representative local run: ~23 ms for one `add_probe_chunk` call (probe ingest + grid upsert +
-chunk-scoped ridge/valley classification), ~0.4 ms mean for a probe-attached
+representative local run (pre-`landform-geomorphons`, when `add_probe_chunk` still did
+chunk-scoped ridge/valley classification): ~23 ms for one `add_probe_chunk` call (probe ingest +
+grid upsert + chunk-scoped ridge/valley classification), ~0.4 ms mean for a probe-attached
 `describe_position` call — both far inside the ~72 s a Mi-24 at 250 km/h takes to cross one
-5 km chunk.
+5 km chunk. Since `feature/landform-geomorphons` removed chunk-scoped terrain extraction (see
+"What lives where" above), `add_probe_chunk`'s cost is now just the grid/`surface_type`
+ingest + upsert; the figure above is kept as a pre-change baseline rather than re-measured, since
+nothing in this doc currently depends on an exact updated number.

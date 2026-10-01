@@ -751,6 +751,19 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   chunk-scoped case a degenerate, non-crashing one, so this is a narrowing of real behaviour, not a
   regression.
 
+  **Known, unfixed gap: a region-scoped build does not clip terrain output to the region's own
+  bbox.** `ingest_terrain`'s processing unit is one SRTM tile, independent of which region a
+  caller is building (plan design decision 2) — `region` identifies the cache (name + bbox) but
+  is never used to clip the extracted ridge/valley lines. A region-scoped build (e.g.
+  `latakia-20km`, this project's standard small-region dev/test loop) therefore stores *every*
+  ridge/valley line a covering SRTM tile produces across its whole ~1°×1° (~100×90 km at Syria's
+  latitude) extent, not just the region's own (typically ~20-40 km) bbox. This does not affect the
+  full-theatre build above — every tile is in-theatre there, so there is nothing to clip — but it
+  will produce a geographically oversized `ridge`/`valley` set on the next region-scoped rebuild.
+  Left unaddressed per the plan's own silence on region-bbox clipping (`implementation.md` has the
+  fuller account); treat any `latakia-20km` (or other region-scoped) terrain rebuild as storing
+  out-of-region geometry until this is fixed.
+
   **Not yet checked by this implementation pass**: Stage D's own two-adjacent-tile seam test (no
   tile boundary was exercised against real SRTM data beyond the single-tile reproduction above) and
   Stage E's kill-mid-build resume test against a real interrupted process (the cache's resumability
