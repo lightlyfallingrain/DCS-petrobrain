@@ -560,12 +560,14 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   - `belief/enrichment.py` already consumes `describe_position`'s `nearby_ridges`/`nearby_valleys`
     and those features already carry `elevation_range_m` from their own `tags_json`. The rework is
     in which fields the fact is built from, not in new plumbing.
-  - **The exception: offline consumers have no DCS to ask.** Mission Interpreter runs pre-mission
-    with no sim running, and `describe_position`'s `elevation` is part of world-model's public
-    query/HTTP surface. Dropping the grid entirely would leave those callers with no elevation at
-    all. So the honest scope is *"in-flight enrichment stops needing the grid"*, not *"the grid can
-    be deleted"* — decide what offline callers get before removing anything, and check
-    `query/describe.py`'s other readers rather than assuming enrichment is the only one.
+  - **The supposed offline exception is weaker than first stated — checked 2026-10-01 at the user's
+    question "what does the MI need elevation for?".** Nothing in `mission-interpreter/src` reads
+    `elevation` by name. `world_enrich/enrich.py` stores the whole `GET /describe_position` JSON
+    blob as `WorldRef.position`, and `synth/prompts.py` reads only the nested place-name field out
+    of it. So elevation currently reaches Mission Interpreter as unread payload, not as a
+    dependency. Removing it would change what an LLM sees in context, which is a judgement call
+    about mission understanding, **not a broken consumer**. Still worth re-grepping
+    `query/describe.py`'s readers before deleting anything — but no code blocks this.
   - Net effect if both halves land: the grid stops being load-bearing for anything the pilot hears
     (DCS answers LOS, DCS answers elevation, features answer landform), which is what makes
     detecting at native SRTM resolution and storing only lines a coherent design rather than a
