@@ -267,6 +267,32 @@ def _cluster_contacts(
     `min_members` short-circuits with no distance computation at all,
     since no cluster meeting the floor is possible either way.
 
+    **Investigated and deliberately not budgeted by position uncertainty**
+    (`plans/group-undermerging/debug.md`, 2026-10-01 sortie debug): a
+    freshly founded contact's covariance is wide (a single naked-eye look
+    is ~300 m of RMS uncertainty even at 500 m range,
+    `Contact.position.radius_m()`), and a first attempt at this fix
+    subtracted each pair's combined uncertainty from their raw gap before
+    comparing it to `pair_threshold`. Replaying the real 2026-10-01 sortie
+    trace showed the *unmodified* mechanism already forms the correct
+    multi-member group once enough looks accumulate (confirmed against
+    the real spoken output, `"Danger, short range SAM. Also three
+    armor..."` at the correct composition) -- the few seconds of
+    individually-reported members beforehand are this system's equivalent
+    of a human copilot needing a moment to resolve a new contact, not a
+    defect. The uncertainty-budgeted version, meanwhile, regressed
+    `test_2c_transcript_fixture_renders_four_lines_not_seven`: two
+    infantry 260 m apart at 500 m range (deliberately pinned to stay
+    ungrouped, per that test's own docstring) merged anyway, because one
+    look's ~300 m covariance swallowed a gap nearly 10x the infantry
+    backstop. Budgeting a single look's full uncertainty is too blunt an
+    instrument for this test; a real fix would need something better than
+    a flat subtraction (e.g. a proper Mahalanobis-style test, or
+    hysteresis that only favours an *already-formed* group's continuity
+    rather than loosening first-contact formation) -- out of scope for
+    this debug pass, which found no live symptom this mechanism actually
+    needed to fix.
+
     O(n^2) in the number of currently tracked contacts (same cost shape
     `perception.clustering`/`perception.group_salience` already pay) --
     fine at today's contact counts, the plan's own noted risk if a sortie

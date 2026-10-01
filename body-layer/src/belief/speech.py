@@ -226,7 +226,23 @@ class OutgoingSpeech:
     """§5's `outgoing_speech` record, trimmed to what this milestone's
     body-written templates actually populate -- `author` is always
     `"body_template"` here (the brain-written class is §2.1's class 3, not
-    built by this milestone)."""
+    built by this milestone).
+
+    `content_signature` (`plans/group-undermerging/debug.md`, the
+    2026-10-01 sortie's second finding) is the substance of `text` with
+    any purely positional clause (clock/range) stripped out -- `None` for
+    every template that does not need the distinction (every caller then
+    falls back to comparing `text` itself, unchanged behaviour). Only
+    `render_group_disclosure` sets it: a group's own re-disclosure trigger
+    must fire on a *content* change (a new member, a firmed-up
+    classification, a changed threat lead), never on range/clock alone --
+    the user's own words, flying away from an already-fully-reported
+    group while it re-spoke its entire composition every ~500 m of
+    opening range: *"that's still constant reports that add no value...
+    repeating the whole group composition every time adds noise."*
+    Comparing `text` itself (as the pre-fix code did) makes that
+    impossible, since clock/range is baked into `text` and changes on
+    almost every tick a group is being closed on or opened from."""
 
     text: str
     template: Template
@@ -234,6 +250,7 @@ class OutgoingSpeech:
     urgency: Urgency = "normal"
     author: Literal["body_template"] = "body_template"
     in_reply_to: str | None = None
+    content_signature: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1221,6 +1238,16 @@ def render_group_disclosure(
         else:
             text = "Group"
 
+    # `content_signature` (module docstring's `OutgoingSpeech` entry,
+    # `plans/group-undermerging/debug.md`): the composition decided above
+    # is the whole substance of a group disclosure -- clock/range is
+    # positional, not content, and must not be part of what decides
+    # whether this is "the same thing already said." Captured here,
+    # before the clock/range clause below is appended to `text`, and
+    # given the same trailing "watched"/"." treatment so the two strings
+    # differ only by the clock/range clause itself.
+    content_signature = text
+
     nearest_relative_now: dict[str, object] | None = None
     nearest_range_m = math.inf
     for facts in member_facts:
@@ -1236,11 +1263,18 @@ def render_group_disclosure(
         clock = nearest_relative_now["clock_position"]
         text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
 
-    if any(facts.get("attention") in ("watch", "priority") for facts in member_facts):
+    watched = any(
+        facts.get("attention") in ("watch", "priority") for facts in member_facts
+    )
+    if watched:
         text += ", watched"
+        content_signature += ", watched"
 
     text += "."
-    return OutgoingSpeech(text=text, template="contact_report")
+    content_signature += "."
+    return OutgoingSpeech(
+        text=text, template="contact_report", content_signature=content_signature
+    )
 
 
 def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
