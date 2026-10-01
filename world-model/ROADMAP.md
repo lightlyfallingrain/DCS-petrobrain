@@ -408,6 +408,41 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   Full detail: `plans/latin-place-names/implementation.md`.
 
+  **DoD (2026-10-02): Reviewer and Security both APPROVED, no required fixes; mechanical checks
+  (`ruff format`/`check`, `mypy --strict`, `pytest`) independently reproduced — 511 passed, 3
+  skipped, 20 new tests, zero regressions against `main`'s 491/3 baseline. No separate acceptance
+  card: this change produces zero observable effect until a full-theatre rebuild runs (the user's
+  to trigger), expected to ride along with `WM-B6`'s rebuild rather than its own. So this `[x]` means
+  code merged and gated, not verified against real output yet — that verification is the following
+  check, to run against `syria-full.sqlite` once that rebuild completes:**
+
+  ```sql
+  SELECT
+    SUM(CASE WHEN json_extract(tags_json, '$.name_source') = 'name:en' THEN 1 ELSE 0 END) AS via_name_en,
+    SUM(CASE WHEN json_extract(tags_json, '$.name_source') = 'int_name' THEN 1 ELSE 0 END) AS via_int_name,
+    SUM(CASE WHEN json_extract(tags_json, '$.name_source') IS NOT NULL THEN 1 ELSE 0 END) AS any_name_source,
+    COUNT(*) AS total
+  FROM feature
+  WHERE kind IN ('named_place', 'settlement');
+  ```
+
+  (table/column names confirmed against `world-model/src/store/schema.py`'s real `CREATE TABLE
+  feature (... tags_json TEXT ...)` — not guessed from the ORM-style naming `StoredFeature`/`tags`
+  might suggest.) `name_source = 'name'` covers both an already-Latin-1 name that never needed
+  romanising *and* the 6,480 still-unrenderable fallback rows, so SQL alone can't isolate the
+  "gained nothing" count — follow with a Python pass over rows where `name_source = 'name'`,
+  checking `name.encode("latin-1")` the same way `_is_latin1_renderable` does, and count the
+  failures. Predicted: `via_name_en` near 12,926, `via_int_name` near 864 (summing to the
+  13,073-row yield), and roughly 6,480 of the `name_source = 'name'` rows failing that Python-side
+  encode check. A result far off any of these means the fix did not take effect as expected on the
+  real extract and needs a debugger pass before this item can be called verified, not just merged.
+
+  **Milestone Completion question**: this does not change what the next milestone should be or
+  invalidate a downstream assumption — it is a localized data-quality improvement inside the
+  existing OSM ingest pipeline; `WM-B6` (geomorphons), already in flight, is unaffected in either
+  direction, and no other roadmap item depended on `name`/`name_source` having a particular shape
+  before this landed.
+
 - [>] **WM-B2 — Power lines from DCS data — deferred 2026-09-13 (user: not important now).** Wanted as a
   low-level wire hazard and navigation landmark, but only with exact in-DCS positions (OSM's ~1 km
   offset rules it out as a source). Recon done: `research/2026-09-13-dcs-power-lines-recon.md`.
