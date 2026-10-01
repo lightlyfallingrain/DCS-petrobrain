@@ -14,12 +14,14 @@ from here on stays stdlib, per the plan's point 3:
    loop, same tolerance for a full-theatre (~2.5M-cell) pure-Python pass
    this codebase already demonstrated for the old curvature classifier.
 2. **`qualifying_ridges`** -- basin-pair boundaries, gated on their own
-   divide prominence (the boundary's lowest cell -- the saddle/pass a
-   route between the two basins must cross -- minus the lower of the two
-   basins' own floors) independent of whether either basin qualifies as a
-   `valley` below (point 4): this is what keeps an isolated ridge between
-   two basins that are both too flat or too wide to be `valley`s still
-   emitted as `ridge` (Palmyra's desert ridge chains).
+   divide prominence (the saddle elevation -- `min`, over every point of
+   contact between the two basins, of `max` of the two sides' elevations
+   at that point: the actual pass height a route between the two basins
+   must cross -- minus the lower of the two basins' own floors) independent
+   of whether either basin qualifies as a `valley` below (point 4): this is
+   what keeps an isolated ridge between two basins that are both too flat
+   or too wide to be `valley`s still emitted as `ridge` (Palmyra's desert
+   ridge chains).
 3. **`qualifying_valleys`** -- basins gated on floor-to-rim relief *and* a
    width ceiling along their own low-elevation core's minor principal axis
    (point 5) -- the concrete, checkable form of the user's Bekaa exclusion
@@ -368,6 +370,69 @@ def _basin_boundaries(
     return boundaries
 
 
+def _saddle_elevations(
+    grid: ElevationGrid, labels: dict[tuple[int, int], int]
+) -> dict[tuple[int, int], float]:
+    """Saddle elevation for every pair of basins that share a border, keyed
+    `(lower_id, higher_id)`: `min`, over every point of contact between the
+    two basins, of `max` of the two sides' elevations at that point -- the
+    actual topological pass height a route between the two basins must
+    cross.
+
+    This is *not* the same as the naive `min` over the boundary's combined,
+    mixed cell set (`_basin_boundaries`'s own return value): that naive
+    form collapses to whichever basin's own floor-adjacent boundary cell
+    happens to be lowest, which can sit well below the real crossing height
+    whenever the two basins' boundary cells are not elevation-paired --
+    exactly the defect a 2026-10-01 review caught (`implementation.md`
+    already claimed this formula was shipped; it was not, until this fix).
+    A point of contact is one adjacent cell pair straddling the border, so
+    the saddle is the lowest of those pairs' own higher side -- the
+    narrowest place the route is still forced up to the higher of the two
+    local elevations."""
+    saddles: dict[tuple[int, int], float] = {}
+    for (row, col), basin_id in labels.items():
+        elevation = grid.samples[row][col]
+        if elevation is None:
+            continue
+        for n_row, n_col in (
+            (row - 1, col),
+            (row + 1, col),
+            (row, col - 1),
+            (row, col + 1),
+        ):
+            neighbour_id = labels.get((n_row, n_col))
+            if neighbour_id is None or neighbour_id == basin_id:
+                continue
+            neighbour_elevation = grid.samples[n_row][n_col]
+            if neighbour_elevation is None:
+                continue
+            key = (min(basin_id, neighbour_id), max(basin_id, neighbour_id))
+            contact_elevation = max(elevation, neighbour_elevation)
+            if key not in saddles or contact_elevation < saddles[key]:
+                saddles[key] = contact_elevation
+    return saddles
+
+
+def _round_half_away_from_zero(value: float) -> int:
+    """Deterministic tie-break for `_axis_sliced_line`'s bin index, in place
+    of builtin `round()`'s round-half-to-even. A component whose cells are
+    symmetric about their own mean (a plain NxN square being the simplest
+    case, and the review's own reproduction) projects a pair of cells onto
+    the axis at exactly `+-0.5`; round-half-to-even sends *both* of those
+    to bin `0` (`round(-0.5) == round(0.5) == 0` in Python), collapsing a
+    genuinely 2-cell-wide spread into one bin and, if that is the whole
+    component, a 1-point "LineString" -- contradicting this module's own
+    "monotone by construction, cannot zigzag" claim and `store/models.py`'s
+    documented LineString convention (two or more points). Rounding half
+    away from zero instead sends `-0.5` to `-1` and `+0.5` to `+1`, so a
+    symmetric pair always lands in two distinct bins. Still monotone
+    nondecreasing in `value` (so ascending-bin-index iteration stays
+    ascending-axis-coordinate), so this changes no other geometry
+    guarantee `_axis_sliced_line` already makes."""
+    return math.floor(value + 0.5) if value >= 0 else -math.floor(-value + 0.5)
+
+
 def _axis_sliced_line(
     grid: ElevationGrid, cells: list[GridCell], kind: str
 ) -> list[tuple[float, float]]:
@@ -378,7 +443,10 @@ def _axis_sliced_line(
     that sit at the same position along the axis, collapsing whatever
     spread they have across the minor axis into a single representative
     per bin -- the structural fix for zigzag, independent of any
-    downstream tuning.
+    downstream tuning. Bin indices are assigned by `_round_half_away_from_
+    zero`, not builtin `round()` -- see that function's docstring for why
+    (a tie-breaking defect that could collapse a symmetric multi-cell
+    component to a single bin).
 
     The representative is the bin's own elevation-extreme sampled cell --
     highest for a `ridge` (the actual crest), lowest for a `valley` (the
@@ -401,7 +469,7 @@ def _axis_sliced_line(
         elevation = grid.samples[cell.row][cell.col]
         if elevation is None:
             continue
-        bin_index = round(
+        bin_index = _round_half_away_from_zero(
             (cell.row - mean_row) * axis_row + (cell.col - mean_col) * axis_col
         )
         current = bin_elevations.get(bin_index)
@@ -440,6 +508,17 @@ def _build_component(
         )
 
     points = _axis_sliced_line(grid, cells, kind)
+    if len(cells) >= 2 and len(points) < 2:
+        # Should be unreachable after `_round_half_away_from_zero`'s fix
+        # (see its docstring) -- a hard failure here, rather than silently
+        # storing a 1-point "LineString", is the belt-and-suspenders half
+        # of that fix: `store.writer.insert_features` is the other half,
+        # catching the same invariant for any producer, not just this one.
+        raise ValueError(
+            f"{kind} component at cells {[(c.row, c.col) for c in cells]} "
+            f"({len(cells)} cells) collapsed to {len(points)} point(s) -- "
+            "a multi-cell component must produce at least two points"
+        )
 
     if len(points) >= 2 and points[0] != points[-1]:
         dx = points[-1][0] - points[0][0]
@@ -467,24 +546,22 @@ def qualifying_ridges(
     min_cell_count: int = DEFAULT_MIN_CELL_COUNT,
 ) -> list[TerrainComponent]:
     """Ridge lines: a basin-pair's shared boundary qualifies as `ridge`
-    only if its saddle (the lowest boundary cell -- the pass a route
-    between the two basins must cross) rises `relief_threshold_m` above the
+    only if its saddle elevation -- `min`, over every point of contact
+    between the two basins, of `max` of the two sides' elevations at that
+    point (`_saddle_elevations`): the actual pass height a route between
+    the two basins must cross -- rises `relief_threshold_m` above the
     *lower* of the two basins' own floors (point 4). Evaluated independent
     of whether either basin itself qualifies as a `valley`
     (`qualifying_valleys`) -- this is what keeps an isolated ridge between
     two basins that are both too flat or too wide to be `valley`s still
     emitted as `ridge` (Palmyra's desert ridge chains: "located correctly,
     shaped badly" under the old detector)."""
+    saddle_elevations = _saddle_elevations(grid, labels)
     components: list[TerrainComponent] = []
     for (basin_a, basin_b), boundary_cells in _basin_boundaries(labels).items():
-        elevations = [
-            elevation
-            for row, col in boundary_cells
-            if (elevation := grid.samples[row][col]) is not None
-        ]
-        if not elevations:
+        saddle_elevation = saddle_elevations.get((basin_a, basin_b))
+        if saddle_elevation is None:
             continue
-        saddle_elevation = min(elevations)
         lower_floor = min(
             basins_by_id[basin_a].min_elevation, basins_by_id[basin_b].min_elevation
         )

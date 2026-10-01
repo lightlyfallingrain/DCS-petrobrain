@@ -170,6 +170,34 @@ def test_insert_features_raises_on_empty_geometry(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_insert_features_raises_on_one_point_linestring(tmp_path: Path) -> None:
+    # `store.models.StoredFeature`'s own docstring documents "two or more
+    # pairs" as the LineString/Polygon convention; this is the generic
+    # backstop for that invariant (a terrain-watershed review, 2026-10-01,
+    # found one producer could emit exactly this before its own bug was
+    # fixed -- this check protects every producer, not just that one).
+    db_path = tmp_path / "test.sqlite"
+    conn = open_for_build(db_path)
+    try:
+        bad_feature = StoredFeature(
+            kind="ridge",
+            geom_type="LineString",
+            geometry=[(100.0, 200.0)],
+            name=None,
+            subtype=None,
+            tags={},
+            source_id=None,
+            source_ref=None,
+            provenance={},
+            confidence={},
+            position_uncertainty_m=None,
+        )
+        with pytest.raises(ValueError, match="two or more"):
+            insert_features(conn, [bad_feature])
+    finally:
+        conn.close()
+
+
 def test_check_schema_version_raises_on_mismatch(tmp_path: Path) -> None:
     db_path = tmp_path / "test.sqlite"
     conn = open_for_build(db_path)
