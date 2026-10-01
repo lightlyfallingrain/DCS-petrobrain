@@ -1,0 +1,503 @@
+<title>Geomorphons Rebuild</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+
+<style>
+:root {
+  --ground: #0D1012;
+  --panel: #151A1D;
+  --panel-2: #1C2326;
+  --rule: #2A3438;
+  --ink: #E9EEF0;
+  --ink-2: #94A3AA;
+  --ink-3: #6B7A81;
+  --amber: #E3A130;
+  --amber-dim: #3A2C11;
+  --teal: #43A596;
+  --teal-dim: #10302C;
+  --red: #C85A48;
+  --red-dim: #341813;
+}
+
+* { box-sizing: border-box; }
+html, body { background: var(--ground); }
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding-block: 40px 96px;
+  padding-left: 20px;
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+h1 {
+  font-family: "Barlow Condensed", ui-sans-serif, sans-serif;
+  font-weight: 700;
+  font-size: clamp(38px, 7.5vw, 58px);
+  line-height: .98;
+  letter-spacing: .004em;
+  margin: 10px 0 0;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.standfirst { margin: 12px 0 0; color: var(--ink-2); font-size: 17.5px; max-width: 64ch; }
+
+.notice {
+  border-left: 3px solid var(--red);
+  background: var(--red-dim);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notice.quiet { border-left-color: var(--ink-3); background: var(--panel); }
+.notice.good { border-left-color: var(--teal); background: var(--teal-dim); }
+.notice b {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 19px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.notice p { margin: 0; color: var(--ink-2); font-size: 15.5px; max-width: 64ch; }
+
+section { display: flex; flex-direction: column; gap: 14px; }
+
+h2 {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--rule);
+}
+
+p { margin: 0; max-width: 64ch; }
+.dim { color: var(--ink-2); }
+
+pre {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  color: var(--ink);
+  margin: 0;
+  max-width: 100%;
+}
+
+code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13.5px;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.verified {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+.unverified {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.block {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink-3);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.block.prize {
+  border-left-color: var(--amber);
+  background: linear-gradient(180deg, var(--amber-dim) 0%, var(--panel) 46%);
+}
+
+.block-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.block.prize .tag { color: var(--amber); }
+.block h3 {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.line { display: flex; flex-direction: column; gap: 3px; }
+.line .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.line p { color: var(--ink-2); font-size: 15.5px; }
+.line.expect .lbl { color: var(--teal); }
+
+.record {
+  border-left: 2px solid var(--teal);
+  background: var(--teal-dim);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.record .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+.record ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.record li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+.record label { color: var(--ink); font-size: 15.5px; cursor: pointer; }
+
+input[type=checkbox] {
+  appearance: none;
+  width: 17px; height: 17px;
+  margin: 4px 0 0;
+  border: 1.5px solid var(--teal);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  flex: none;
+}
+input[type=checkbox]:checked { background: var(--teal); }
+input[type=checkbox]:checked::after {
+  content: "";
+  display: block;
+  width: 5px; height: 9px;
+  margin: 1px 0 0 4.5px;
+  border: solid var(--ground);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type=checkbox]:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.bring { display: flex; flex-direction: column; gap: 12px; }
+.bring ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 9px; }
+.bring li { color: var(--ink); }
+.bring li span { color: var(--ink-2); }
+.closing {
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+  color: var(--amber);
+  font-size: 16.5px;
+  max-width: 64ch;
+}
+
+footer {
+  color: var(--ink-3);
+  font-size: 13.5px;
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+  max-width: 68ch;
+}
+footer code { font-size: 12.5px; }
+
+@media (max-width: 480px) {
+  h1 { font-size: 36px; }
+  .wrap { gap: 28px; }
+}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">
+      <span>Desk / Windows box · world-model</span>
+      <span>2026-10-02</span>
+      <span>no flight needed</span>
+    </div>
+    <h1>Geomorphons Rebuild</h1>
+    <p class="standfirst">One full-theatre build verifies two features at once: the
+      geomorphons ridge/valley detector (<code>WM-B6</code>) and the Latin-script place-name
+      preference (<code>WM-B1</code>). Neither takes effect until this runs.</p>
+  </header>
+
+  <div class="notice quiet">
+    <b>Checkout</b>
+    <p><code>git checkout main && git pull</code>, then confirm with
+      <code>git log --oneline -5</code> that you see both
+      <code>Merge feature/landform-geomorphons</code> and
+      <code>Merge fix/latin-place-names</code>. If only the latter shows, the geomorphons branch
+      hasn't merged yet — wait for it.</p>
+  </div>
+
+  <div class="notice">
+    <b>Only you can run this</b>
+    <p>Real SRTM tiles, <code>Syria.routes</code>, <code>towns.lua</code>/<code>beacons.lua</code>,
+      and the merged <code>syria-theatre.osm.pbf</code> are all gitignored — no agent has built or
+      can build <code>syria-full.sqlite</code>. Per project rule, the real full-theatre build is
+      yours alone to run.</p>
+  </div>
+
+  <section>
+    <h2>What changed, in one line</h2>
+    <p class="dim"><strong style="color:var(--ink)">WM-B6:</strong> the parked watershed detector
+      is replaced by geomorphons classification at native ~90 m SRTM resolution, traced through
+      junctions and smoothed, cached per tile. <strong style="color:var(--ink)">WM-B1:</strong>
+      OSM place names now prefer a Latin-script <code>name:en</code>/<code>int_name</code> over
+      raw (often Arabic) <code>name</code>. <strong style="color:var(--ink)">Nothing in the
+      cockpit changes</strong> — the landform callout (Stages 3-5) isn't built yet.</p>
+  </section>
+
+  <section>
+    <h2>Setup</h2>
+    <p class="dim">From <code>world-model/</code>, venv active. Read straight from
+      <code>tools/build_world_model.py</code> as it stands on the merged branch — no new flag for
+      either feature:</p>
+    <pre>cd world-model
+.venv/bin/python tools/build_world_model.py syria-full \
+    --towns data/raw/dcs/syria/map/towns.lua \
+    --beacons data/raw/dcs/syria/map/beacons.lua \
+    --routes data/raw/dcs/syria/roads/Syria.routes \
+    --srtm-dir data/raw/dem/syria-full/ \
+    --osm-pbf data/raw/osm/syria-theatre.osm.pbf</pre>
+    <p class="dim">Overwrites <code>data/world-model/syria-full.sqlite</code>. <code>--srtm-dir</code>
+      drives the terrain stage (cache path auto-derived, no flag); <code>--osm-pbf</code> drives OSM
+      ingest, where the name preference applies.</p>
+    <p class="unverified">Terrain-stage timing is extrapolated from 27 real tiles, not a measured
+      131-tile run — no agent can run the real build</p>
+    <p class="dim">Terrain stage: roughly <strong style="color:var(--ink)">14 minutes</strong> of
+      CPU time (down from an early ~25 min estimate after a memory/smoothing fix), one progress
+      line per tile across all 131. Peak RSS for that stage: <strong style="color:var(--ink)">under
+      ~1.8 GB</strong>, measured directly (not extrapolated) and confirmed flat across tiles rather
+      than growing with theatre size.</p>
+    <p class="dim"><strong style="color:var(--ink)">Resumability:</strong> if you interrupt the
+      build, re-running the same command skips SRTM tiles already processed — the terrain cache is
+      a separate file that survives the base store's delete-and-rebuild. Verified by a direct unit
+      test and a cold/warm timing measurement (16.65s → 0.75s on one tile), not by an actual kill of
+      a live run.</p>
+  </section>
+
+  <section>
+    <h2>Blocks</h2>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block A</span>
+        <h3>Ridge/valley counts — a different kind of number now</h3>
+      </div>
+      <pre>.venv/bin/python -c "
+import sqlite3
+conn = sqlite3.connect('data/world-model/syria-full.sqlite')
+for row in conn.execute(\"select kind, count(*) from feature where kind in ('ridge','valley') group by kind\"):
+    print(row)
+"</pre>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>The old watershed detector's theatre-wide counts were <strong style="color:var(--ink)">8,189
+          ridges / 2,314 valleys</strong> — one feature per basin boundary. Geomorphons counts
+          individual traced lines instead, so a much bigger number is the <em>intended</em> result,
+          not a regression: a 27-tile sample during performance testing extrapolates to roughly
+          <strong style="color:var(--ink)">1.3 million</strong> combined features theatre-wide.
+          Near-zero, or wildly off that extrapolation, is the actual red flag.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="a1" id="a1"><label for="a1">Ridge count / valley count</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block B</span>
+        <h3>WM-B1 — did the Latin-name preference take effect?</h3>
+      </div>
+      <pre>.venv/bin/python -c "
+import sqlite3
+conn = sqlite3.connect('data/world-model/syria-full.sqlite')
+row = conn.execute('''
+  select
+    sum(case when json_extract(tags_json, '\$.name_source') = 'name:en' then 1 else 0 end) as via_name_en,
+    sum(case when json_extract(tags_json, '\$.name_source') = 'int_name' then 1 else 0 end) as via_int_name,
+    sum(case when json_extract(tags_json, '\$.name_source') is not null then 1 else 0 end) as any_name_source,
+    count(*) as total
+  from feature
+  where kind in ('named_place', 'settlement')
+''').fetchone()
+print(row)
+"</pre>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p><code>via_name_en</code> near 12,926, <code>via_int_name</code> near 864 (13,073 total
+          yield), out of 49,226 named/settlement rows — from <code>WM-B1</code>'s own measurement
+          against the real merged extract.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="b1" id="b1"><label for="b1">The four counts from the query</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block C</span>
+        <h3>Coastal hills — reproduced exactly on this DoD pass</h3>
+      </div>
+      <pre>.venv/bin/python tools/inspect_terrain.py \
+    --srtm-dir data/raw/dem/syria-full/ --center -5000,15000 --radius-km 8 \
+    --out /tmp/coastal-hills.png</pre>
+      <p class="verified">Run against the real theatre tiles during this DoD pass — not a
+        prediction</p>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p><code>ridge: 299 lines, longest 7.18 km</code> and
+          <code>valley: 289 lines, longest 7.70 km</code> — matches the committed
+          <code>world-model/data/renders/coastal-hills-geomorphons.png</code>: continuous
+          multi-kilometre crests through junctions, not fragments.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="c1" id="c1"><label for="c1">Your own numbers match 299/289, 7.18/7.70 km?</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block prize">
+      <div class="block-head">
+        <span class="tag">Block D — the prize</span>
+        <h3>Baalbek: the Bekaa must still not read as a valley</h3>
+      </div>
+      <pre>.venv/bin/python tools/inspect_terrain.py \
+    --srtm-dir data/raw/dem/syria-full/ --center -114453.8,25280.8 --radius-km 20 \
+    --out /tmp/baalbek.png</pre>
+      <p class="verified">Run against the real theatre tiles during this DoD pass</p>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>This is the specific defect that got the old detector parked: a kilometres-wide flat
+          basin reading as "a valley" is meaningless at Mi-24 flight profile. This DoD pass's own
+          run shows the flat Bekaa floor clean of lines, with ridge/valley detections sitting on
+          the bordering slopes instead. <strong style="color:var(--ink)">Your own look at the
+          render is still the real test</strong> — this has always been judged by eye, not by a
+          count.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="d1" id="d1"><label for="d1">Does the Bekaa floor read clean to you?</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block E</span>
+        <h3>Palmyra: isolated ridge chains must still appear</h3>
+      </div>
+      <pre>.venv/bin/python tools/inspect_terrain.py \
+    --srtm-dir data/raw/dem/syria-full/ --center -54775.0,217141.7 --radius-km 20 \
+    --out /tmp/palmyra.png</pre>
+      <p class="verified">Run against the real theatre tiles during this DoD pass</p>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>Long, isolated ridge chains standing clear across otherwise flat desert — this DoD
+          pass's own run of this exact command shows that pattern. Zero or only fragmented ridges
+          here would mean the classifier is too conservative for flat-desert terrain.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="e1" id="e1"><label for="e1">Are the isolated chains there, and do they look right?</label></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <div class="notice good">
+    <b>What is NOT fixed</b>
+    <p><strong style="color:var(--ink)">Region-scoped builds (e.g. <code>latakia-20km</code>) don't
+      clip terrain output to the region's bbox</strong> — a region rebuild stores every ridge/
+      valley line any covering SRTM tile produces, not just the region's own extent. Doesn't affect
+      this full-theatre build. <strong style="color:var(--ink)">Nothing in the cockpit changes</strong> —
+      Stages 3-5 (adjacency, bearing, the callout) aren't built. A tile-seam case and a literal
+      kill-mid-build resume were never exercised against real data, only unit-tested.</p>
+  </div>
+
+  <section class="bring">
+    <h2>Bring back</h2>
+    <ol>
+      <li><strong>Block A — counts</strong> <span>— order of hundreds-of-thousands to low millions, not near zero?</span></li>
+      <li><strong>Block B — WM-B1 name sources</strong> <span>— close to 12,926 / 864 / 13,073-of-49,226?</span></li>
+      <li><strong>Block C — coastal hills</strong> <span>— your run match 299/289, 7.18/7.70 km?</span></li>
+      <li><strong>Block D — Baalbek, the prize</strong> <span>— does the Bekaa floor read clean?</span></li>
+      <li><strong>Block E — Palmyra</strong> <span>— isolated chains present and looking right?</span></li>
+    </ol>
+    <p class="closing">Anything that surprised you is worth more than anything on this list.</p>
+  </section>
+
+  <footer>
+    Source: <code>docs/acceptance/2026-10-02-geomorphons-latin-names-rebuild.md</code>. This card
+    is a view — results go into <code>world-model/ROADMAP.md</code> and the research notes, not
+    back into the card.
+  </footer>
+
+</div>
+
+<script>
+const KEY = 'geomorphons-latin-names-rebuild-2026-10-02';
+const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b => {
+  if (saved[b.dataset.k]) b.checked = true;
+  b.addEventListener('change', () => {
+    const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+    s[b.dataset.k] = b.checked;
+    localStorage.setItem(KEY, JSON.stringify(s));
+  });
+});
+</script>

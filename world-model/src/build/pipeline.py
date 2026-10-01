@@ -79,11 +79,7 @@ from build.ingest_probe import (
 )
 from build.ingest_roadnet import RoadnetIngestStats, ingest_roadnet
 from build.ingest_srtm import SrtmIngestStats, ingest_srtm_grid
-from build.ingest_terrain import (
-    TerrainIngestStats,
-    ingest_terrain,
-    ingest_terrain_chunk,
-)
+from build.ingest_terrain import TerrainIngestStats, ingest_terrain
 from build.ingest_towns import ingest_towns
 from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
@@ -103,19 +99,17 @@ from osm_cache.writer import (
 )
 from probe_store.models import ChunkStatus
 from probe_store.paths import probe_store_path
-from probe_store.reader import load_chunk_elevation_window
 from probe_store.schema import PROBE_SPACING_M
 from probe_store.writer import insert_source as insert_probe_source
 from probe_store.writer import (
     open_probe_store,
-    replace_chunk_features,
     upsert_chunk_coverage,
     upsert_grid_samples,
 )
 from roadnet.junctions import DEFAULT_JUNCTION_MIN_DEGREE, DEFAULT_JUNCTION_TOLERANCE_M
 from store.chunks import CHUNK_SIZE_M
-from store.models import Region, Source
-from store.reader import load_full_grid, load_only_region
+from store.models import Region, Source, StoredFeature
+from store.reader import load_only_region
 from store.schema import SCHEMA_VERSION as BASE_SCHEMA_VERSION
 from store.schema import check_schema_version
 from store.writer import (
@@ -125,15 +119,7 @@ from store.writer import (
     insert_source,
     open_for_build,
 )
-from terrain.curvature import (
-    DEFAULT_SEED_FOOTPRINT_CELLS,
-    DEFAULT_SMOOTHING_WINDOW_CELLS,
-)
-from terrain.features import (
-    DEFAULT_MIN_CELL_COUNT,
-    DEFAULT_RELIEF_THRESHOLD_M,
-    DEFAULT_WIDTH_CEILING_M,
-)
+from terrain_cache.paths import terrain_cache_store_path
 
 _PROBE_GRID_SPACING_M = 500.0
 # Default storage spacing for the M7 Stage 2 SRTM-primary full-theatre
@@ -638,22 +624,29 @@ def build_region(
         # features to the grid it actually classified, not a guess.
         elevation_source_id: int | None = None
 
+        # Captured once, ahead of the SRTM grid-insert block below, so the
+        # terrain-semantics stage (further down) can gate on it directly
+        # (plan design decision 1's "do not depend on the stored grid")
+        # rather than re-deriving it from `elevation_source_id`.
+        existing_srtm_tile_paths: list[Path] = (
+            [p for p in srtm_tile_paths if p.exists()] if srtm_tile_paths else []
+        )
+
         if srtm_tile_paths:
-            existing_tile_paths = [p for p in srtm_tile_paths if p.exists()]
-            if existing_tile_paths:
+            if existing_srtm_tile_paths:
                 srtm_source_id = insert_source(
                     conn,
                     Source(
                         name="SRTM .hgt tiles",
                         fetched_at=built_at,
-                        raw_path=",".join(str(p) for p in existing_tile_paths),
+                        raw_path=",".join(str(p) for p in existing_srtm_tile_paths),
                         attribution="SRTM (processed via viewfinderpanoramas.org "
                         "no-login mirror)",
                         notes="Primary full-theatre elevation source (M7 Stage 2); "
                         "see build.ingest_srtm module docstring.",
                     ),
                 )
-                tiles = [SrtmTile.from_file(p) for p in existing_tile_paths]
+                tiles = [SrtmTile.from_file(p) for p in existing_srtm_tile_paths]
                 srtm_origin_x, srtm_origin_z, _, srtm_n_rows, srtm_n_cols = (
                     probe_grid_for_region(region, spacing_m=srtm_grid_spacing_m)
                 )
@@ -716,25 +709,49 @@ def build_region(
         else:
             report.probe_skipped = True
 
-        # Un-gated (plans/terrain-feature-probing/plan.md Stage 1): this
-        # used to run only inside the probe branch above, so it never once
-        # ran against an SRTM-sourced grid -- the grid every real
-        # `syria-full`-scale build actually supplies. It now runs whenever
-        # *any* "elevation" grid was actually inserted above, SRTM or
-        # probe, attributed to whichever `Source` row produced that grid.
-        if elevation_source_id is not None:
-            with _stage("terrain semantics (ridge/valley)", 8):
-                terrain_grid = load_full_grid(conn, "elevation")
-                if terrain_grid is not None:
-                    terrain_features, terrain_stats = ingest_terrain(
-                        terrain_grid, elevation_source_id
-                    )
-                    insert_features(conn, terrain_features)
-                    for f in terrain_features:
+        # `landform-geomorphons` plan, design decision 1: gated on
+        # `existing_srtm_tile_paths` directly, independent of whether an
+        # "elevation" grid was ever inserted into the store -- this stage
+        # resamples straight from the SRTM tile files itself (via
+        # `build.ingest_terrain`'s own per-tile pipeline), it does not
+        # read the stored grid at all.
+        if existing_srtm_tile_paths:
+            with _stage(
+                f"terrain semantics (ridge/valley), {len(existing_srtm_tile_paths)} "
+                "tile(s)",
+                8,
+            ):
+
+                def _flush_terrain_tile(tile_features: list[StoredFeature]) -> None:
+                    # One `insert_features` call (one SQLite transaction)
+                    # per tile, not one call over the whole theatre's
+                    # features -- `ingest_terrain`'s own docstring and
+                    # `plans/landform-geomorphons/performance.md`'s
+                    # blocking memory finding. Mirrors the OSM
+                    # streaming-ingest `_flush_nodes`/`_flush_ways`/
+                    # `_flush_areas` callbacks above: safe because
+                    # `open_for_build` always deletes-and-recreates
+                    # `out_path` from scratch, so a crash partway through
+                    # this stage never leaves stale partial terrain data
+                    # mistaken for a complete build -- the next build
+                    # overwrites `out_path` entirely rather than resuming
+                    # it. (The terrain *cache* at `terrain_cache_store_
+                    # path` is the one place resumption is meaningful, and
+                    # it already tracks per-tile completion independently
+                    # of this store.)
+                    insert_features(conn, tile_features)
+                    for f in tile_features:
                         report.feature_counts[f.kind] += 1
-                    report.terrain_stats = terrain_stats
-                else:
-                    report.terrain_skipped = True
+
+                terrain_stats = ingest_terrain(
+                    existing_srtm_tile_paths,
+                    region.theatre,
+                    region,
+                    terrain_cache_store_path(out_path),
+                    elevation_source_id,
+                    _flush_terrain_tile,
+                )
+                report.terrain_stats = terrain_stats
         else:
             report.terrain_skipped = True
 
@@ -767,11 +784,6 @@ def add_probe_chunk(
     chunk_iz: int,
     chunk_size_m: float = CHUNK_SIZE_M,
     probe_spacing_m: float = PROBE_SPACING_M,
-    smoothing_window_cells: int = DEFAULT_SMOOTHING_WINDOW_CELLS,
-    seed_footprint_cells: int = DEFAULT_SEED_FOOTPRINT_CELLS,
-    relief_threshold_m: float = DEFAULT_RELIEF_THRESHOLD_M,
-    width_ceiling_m: float = DEFAULT_WIDTH_CEILING_M,
-    min_cell_count: int = DEFAULT_MIN_CELL_COUNT,
 ) -> ProbeChunkReport:
     """Ingest one chunk-scoped probe output file into `base_db_path`'s
     probe-tier sibling store (`probe_store.paths.probe_store_path`).
@@ -793,12 +805,20 @@ def add_probe_chunk(
        a real, meaningful outcome (see `probe_store.models.ChunkStatus`),
        not an error.
     3. Otherwise, upsert both grids' cells and mark both `QUERIED_WITH_DATA`.
-    4. Load a local elevation window (chunk + 1-cell border,
-       `probe_store.reader.load_chunk_elevation_window`) and run M6's
-       ridge/valley classifier over it unchanged
-       (`build.ingest_terrain.ingest_terrain_chunk`), replacing this
-       chunk's `"ridge"`/`"valley"` features (and their own coverage)
-       independently per kind.
+
+    **No chunk-scoped ridge/valley extraction any more.** The retired
+    watershed mechanism's `ingest_terrain_chunk` ran M6's classifier over a
+    chunk + 1-cell-border window; `landform-geomorphons` replaced it with a
+    geomorphons mechanism whose own processing unit is a whole SRTM tile
+    (with a multi-kilometre margin, see `build.ingest_terrain`'s module
+    docstring), not a 5 km probe chunk, and that plan did not design a
+    chunk-scoped variant (discovered while implementing this plan -- see
+    `plans/landform-geomorphons/implementation.md`). `terrain_stats`/
+    `terrain_skipped` are kept on `ProbeChunkReport` for shape
+    compatibility but always come back `None`/`True` now; the old
+    mechanism's own docstring already called the chunk-scoped case "an
+    accepted, non-crashing degenerate case... not a regression to chase
+    here", since a chunk this small routinely produced no features anyway.
     """
     base_conn = open_region_db(base_db_path)
     try:
@@ -878,55 +898,14 @@ def add_probe_chunk(
             ChunkStatus.QUERIED_WITH_DATA,
         )
 
-        window = load_chunk_elevation_window(
-            probe_conn, chunk_ix, chunk_iz, chunk_size_m, probe_spacing_m
-        )
-        terrain_stats: TerrainIngestStats | None = None
-        terrain_skipped = True
-        if window is not None:
-            features, terrain_stats = ingest_terrain_chunk(
-                window,
-                probe_source_id,
-                smoothing_window_cells,
-                seed_footprint_cells,
-                relief_threshold_m,
-                width_ceiling_m,
-                min_cell_count,
-            )
-            terrain_skipped = False
-            ridge_features = [f for f in features if f.kind == "ridge"]
-            valley_features = [f for f in features if f.kind == "valley"]
-            replace_chunk_features(
-                probe_conn, "ridge", chunk_ix, chunk_iz, ridge_features
-            )
-            replace_chunk_features(
-                probe_conn, "valley", chunk_ix, chunk_iz, valley_features
-            )
-            upsert_chunk_coverage(
-                probe_conn,
-                "ridge",
-                chunk_ix,
-                chunk_iz,
-                ChunkStatus.QUERIED_WITH_DATA
-                if ridge_features
-                else ChunkStatus.QUERIED_VOID,
-            )
-            upsert_chunk_coverage(
-                probe_conn,
-                "valley",
-                chunk_ix,
-                chunk_iz,
-                ChunkStatus.QUERIED_WITH_DATA
-                if valley_features
-                else ChunkStatus.QUERIED_VOID,
-            )
-
+        # No chunk-scoped ridge/valley extraction any more -- see this
+        # function's own docstring.
         return ProbeChunkReport(
             chunk_ix=chunk_ix,
             chunk_iz=chunk_iz,
             probe_stats=probe_stats,
-            terrain_stats=terrain_stats,
-            terrain_skipped=terrain_skipped,
+            terrain_stats=None,
+            terrain_skipped=True,
         )
     finally:
         probe_conn.close()
