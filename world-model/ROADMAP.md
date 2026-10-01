@@ -24,6 +24,19 @@ sortie actually exercises it, and say which one.
   show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
   reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
 
+- [ ] **`feature/landform-geomorphons` (`WM-B6`) + `fix/latin-place-names` (`WM-B1`) — DoD-passed
+  2026-10-02, no real 131-tile `syria-full` build run by any agent.** Every timing/memory/count
+  figure in `plans/landform-geomorphons/`'s plan/performance/implementation/review docs is either a
+  direct measurement on a sampled subset of real SRTM tiles (6, 22, or 27 of the real 131,
+  depending on which pass took it) or a linear extrapolation from one — never the real run. Clears
+  when the user runs the combined build in `docs/acceptance/2026-10-02-geomorphons-latin-names-
+  rebuild.md` (card: https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW) and reports back: ridge/
+  valley counts at real theatre scale (extrapolated ≈1.3M, a different kind of number than the old
+  detector's 8,189/2,314 — not directly comparable), the `WM-B1` name-source counts, and — the real
+  test, by eye, same as every prior landform decision on this project — whether the Bekaa still
+  reads clean and Palmyra's isolated chains still show. One rebuild clears both items; say which
+  rebuild (date/host) cleared it when it does.
+
 - [x] **`feature/terrain-landform-features` — marker-controlled watershed replaces the M6
   curvature ridge/valley detector (Stages 1-2). Merged 2026-10-01 (`0bef4b9`), and the user's own
   full-theatre build confirms it.** Acceptance ran against the real `syria-full` store, not a test
@@ -707,9 +720,15 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     elevation over featureless ground, a very coarse mesh is cheap and accurate precisely there.
     Do not let it hold up dropping the grid.
 
-  **Implementation status — detection + caching + pipeline wiring built, `[~]` in progress
-  (`feature/landform-geomorphons`, `plans/landform-geomorphons/plan.md`/`implementation.md`).**
-  Everything this plan scoped (Stages A-F) is in place: vectorised geomorphons classification
+  **Implementation status — DoD-passed 2026-10-02, live acceptance outstanding (see "Live
+  acceptance debt" above), merge pending (`feature/landform-geomorphons`,
+  `plans/landform-geomorphons/plan.md`/`implementation.md`/`dod-check.md`).** A Performance
+  Reviewer pass found and a follow-up fix (`b4d38cf`) closed one blocking finding — unbounded
+  whole-theatre memory accumulation (~29 GB extrapolated) — fixed to a per-tile-bounded ~1.75 GB
+  plateau, independently re-verified by Reviewer round 3 on different real tiles. The same fix cut
+  the O(N²) Chaikin-smoothing deviation check to O(N), bringing the extrapolated full-theatre
+  terrain-stage CPU cost from ~25 minutes down to ~14 minutes. Everything this plan scoped
+  (Stages A-F) is in place: vectorised geomorphons classification
   (`terrain/geomorphons.py`), vectorised Zhang-Suen thinning + the ported junction-walking tracer
   (`terrain/skeleton.py`), vectorised DCS-lattice resampling (`terrain/resample.py`), per-SRTM-tile
   margin/clip tiling with the resumable cache built in from the first pass (`terrain_cache/`,
@@ -770,13 +789,19 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   was verified via direct unit tests in `tests/test_ingest_terrain.py`/`test_terrain_cache.py`, not
   a literal process-kill). **Stage G (the full-theatre build) is the user's own run, per the
   project's standing execution boundary** — not run here. Run command (mirrors the existing
-  `RUN.md`/`tools/build_world_model.py` pattern, `--srtm-dir` already wired to the new stage):
+  `RUN.md`/`tools/build_world_model.py` pattern, `--srtm-dir` already wired to the new stage; add
+  `--osm-pbf` to also pick up `WM-B1`'s Latin-name preference on the same rebuild, which is the
+  combined invocation the DoD acceptance card uses):
 
   ```sh
   world-model/.venv/bin/python world-model/tools/build_world_model.py syria-full \
       --towns <path/to/towns.lua> --beacons <path/to/beacons.lua> \
-      --routes <path/to/Syria.routes> --srtm-dir <path/to/hgt_tiles/>
+      --routes <path/to/Syria.routes> --srtm-dir <path/to/hgt_tiles/> \
+      --osm-pbf <path/to/syria-theatre.osm.pbf>
   ```
+
+  Full card with expected figures per block: `docs/acceptance/2026-10-02-geomorphons-latin-names-
+  rebuild.md` / https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
