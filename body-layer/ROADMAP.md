@@ -175,6 +175,21 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Full original acceptance plan, kept for the record:
   `plans/f10-command-vocabulary/dod-check.md`.
 
+- [ ] **Group cohesion redesign (`fix/group-undermerging` @ `6d6ea3f`) — DoD's mechanical gate
+  passed 2026-10-01; genuinely unflown, not merged as of this entry.** Reviewer (round 2),
+  Security, and Performance (MONITOR, `BL-B23` filed — see Backlog) all approved; 1367 passed/4
+  xfailed, `ruff`/`mypy --strict` clean at the tip. Card: `docs/acceptance/
+  2026-10-01-group-cohesion-sortie.md` (and its artifact). What the flight has to settle and
+  static review cannot: whether the 500 m installation cap and the `AIR_DEFENSE_OP_CLASSES`
+  membership guess (both one-source-of-evidence per the plan's own "Risks & Unknowns") hold up
+  against real unit placement; whether the delta taxonomy's six branches land correctly by ear
+  (new class speaks, repeat non-air-defence member silent, repeat air-defence member always
+  speaks, leader change speaks a short delta not a restatement, pure departure silent); and
+  whether the two user-approved but still-surprising behaviours (infantry `EAGER` bridging a
+  non-infantry pair into one group; S-300 not flagged `installation_component` so its own
+  components do not single-merge) read as intended in the cockpit rather than as noise or a
+  miss. Clear this entry only once a real sortie exercises it, and say which one.
+
 ## Status
 
 - [x] **BL-0 — Harness and replay.** Body process skeleton, aircraft-layer HTTP client, world-model
@@ -1346,8 +1361,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   from what that flight actually shows about cohesion misses/false-merges, not from more code
   reading in advance of it.
 
-- [x] **Group cohesion redesign: size-relative/kind-coherence cohesion, infantry `EAGER` release,
-  and the delta taxonomy. Implemented, checks green, pending Reviewer/DoD.** `plans/
+- [~] **Group cohesion redesign: size-relative/kind-coherence cohesion, infantry `EAGER` release,
+  and the delta taxonomy. `fix/group-undermerging` @ `6d6ea3f`. Reviewer (round 2), Security
+  (deep analysis), and Performance (APPROVED — MONITOR, `BL-B23` filed) all passed; DoD's
+  mechanical gate (format/lint/type/test) passed 2026-10-01 at this tip (1367 passed/4 xfailed,
+  `ruff format`/`ruff check`/`mypy --strict` clean). Not merged as of this entry — pending the
+  user's acceptance call, per the live-acceptance-debt entry below (which the project's own
+  "never block a merge on live acceptance the user cannot currently perform" posture means the
+  user may choose to merge ahead of the flight rather than wait, tracking the flight as debt).**
+  `plans/
   group-cohesion-redesign/plan.md`, built on `plans/group-undermerging/debug.md`'s 2026-10-01
   sortie debug (the re-trigger fix already merged) and three Explore rounds the same day. **Stage
   1** — `belief.groups.CohesionBackstop` (`STRICT`/`EAGER`), `_OP_CLASS_COHESION_BACKSTOP` makes
@@ -1392,10 +1414,20 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   merge_alone`).
 
   1366 passed/4 xfailed (up from the branch's 1351/4 baseline), `ruff format`/`ruff check`/`mypy
-  --strict` clean. **Milestone completion question**: unblocks `BL-B11` (threat-based report
-  prioritisation) once cohesion correctly reflects installation structure, per the plan's own
-  "Second-Order Effect" section — otherwise does not change what is next, pending Reviewer/DoD and
-  the first sortie to exercise the installation cap/delta taxonomy for real.
+  --strict` clean; two further rounds (indefinite-article removal, undifferentiated-member
+  aggregation) brought this to 1367/4 at the merged tip. **Milestone completion question**:
+  unblocks `BL-B11` (threat-based report prioritisation) once cohesion correctly reflects
+  installation structure, per the plan's own "Second-Order Effect" section — otherwise does not
+  change what is next, pending the first sortie to exercise the installation cap/delta taxonomy
+  for real (tracked below).
+
+  **Acceptance boundary, stated up front rather than left implicit**: every check above is a
+  fixture/unit-test pass. It cannot observe whether the *right* contacts merge in a real,
+  continuously-moving scene, whether the 500 m installation cap or the `AIR_DEFENSE_OP_CLASSES`
+  membership guess holds up against a real Cold War-era mission's unit placement, or whether the
+  delta taxonomy's rendered lines land correctly *by ear*, in the cockpit, under task load — the
+  F10 vocabulary precedent (`Scan` driving the wrong sight; `Cancel Task` speaking a raw id) is
+  the standing reminder that a fixture pass and a flight pass are different claims.
 
 ## Backlog (body-layer)
 
