@@ -69,6 +69,54 @@ an error of mine.**
   where a 1000 m grid cell is expected to be poor). So the forest sites are real places at real
   elevations, and Finding 2 rests on valid geometry.
 
+**5. UNIT-REFERENCED RE-TEST (2026-10-01). The weakness below is closed, and the answer is
+unchanged: no scripting call sees trees.**
+
+- **evidence: reproduced-locally, against two vehicles the pilot placed inside visible canopy** —
+  `dcs.log` 07:29:59 → 07:30:01, prefix `PetrobrainTreeUnits`.
+- The user placed a **BTR-70 and a BTR-60, 201 m apart, both inside the same forest near ownship**
+  (`Ground-55-1` at 207827, 35952 and `Ground-54-1` at 207762, 35762). That removes the
+  OSM-is-not-DCS circularity: the geometry comes from real objects in cover he can see.
+
+  | sightline | terrain | `getIP` | `isVisible` | SEGMENT |
+  |---|---|---|---|---|
+  | BTR-70 → BTR-60, 201 m, in forest | **blocked by +1.0 m** | hit @67 m, **aboveGround −0.0 m** | false | 0 |
+  | open control, same vector translated | clear (−1.4 m) | none | true | 0 |
+  | ownship → BTR-70, 535 m, +30 m → +2 m | clear (−2.4 m) | **none** | **true** | 0 |
+  | ownship → BTR-60, 604 m | clear (−2.2 m) | **none** | **true** | 0 |
+
+- **The two ownship rays are the strongest evidence, and they are the realistic case.** A Mi-24P at
+  30 m looking at a vehicle sitting in forest 535 m away: terrain clear by 2.4 m, `isVisible`
+  **true**, and `getIP` hit **nothing at all** along a ray that passes straight through the canopy
+  band. If trees were geometry these calls could reach, that ray would stop.
+- **The BTR-to-BTR line is blocked, but by terrain, not trees** — the ground rises 1.0 m above the
+  line (the vehicles sit at 162.8 m and 150.4 m, a 12.4 m drop over 201 m), and `getIP`'s intercept
+  is at **−0.0 m above local ground**, i.e. the surface. So `isVisible = false` there is fully
+  explained without invoking a tree. **It is therefore not a clean tree test**, and should not be
+  read as one.
+- **The prediction written into the probe header before the flight held**: all four facts behave
+  identically in forest and in the open.
+
+**6. `SEGMENT` does not catch terrain — settled, this time with a 950 m margin.**
+
+- **evidence: reproduced-locally** — the corrected ridge, same flight.
+- `len=6000 m | terrainBlocked=true | maxTerrainAboveLine=**+952.7 m** | getIP=hit@13 m aboveGround
+  −0.0 m | isVisible=false | **SEGMENT=0**`.
+- DCS's own `getHeight` put the crest 952.7 m above the sightline, against the 926 m our grid
+  predicted — the site selection was right and the earlier 4 m version was purely my row/col error.
+- **A SEGMENT scenery search returns nothing for a line buried under a kilometre of rock.** The
+  two-call design (`clear = building_clear and terrain_clear`) in `plans/dcs-driven-los/plan.md` is
+  correct and its Stage 3 does not collapse.
+
+**7. The AI-detection half did not run — same coalition, exactly as the probe warned.**
+
+- Both vehicles are `side1` (RED), so they are not each other's targets:
+  `A_sees_B=detected:false visualTargets:0`, `B_sees_A` identical.
+- **`Controller.isTargetDetected` remains the last untested candidate** and the only shipped path
+  known to do tree-occluded LOS. **Resolves with:** one unit moved to the opposing coalition and
+  the same probe re-flown — ideally also with flatter ground between them, so a positive cannot be
+  confused with the 1.0 m terrain intrusion above.
+
 ### The weakness in Finding 2, stated plainly
 
 The forest rays were aimed using **OSM** polygons, and OSM forest is not proof of **DCS** trees. If
@@ -83,15 +131,13 @@ says only "nothing was found where OSM claims forest".
 
 ### Unresolved
 
-- **Does DCS have trees where OSM says forest?** Resolves with the dense fan above, flown somewhere
-  the pilot can see trees.
-- **Does SEGMENT catch terrain?** Finding 3's direction is right but the margin was 4 m. Resolves
-  with the corrected ridge, already deployed.
-- **`Controller.isTargetDetected` — the AI path that `Detection.lua` configures with
-  `trees_LOS_test_T4`.** Not probed: characterising it needs a purpose-built mission with an AI
-  unit and a target deliberately placed behind a treeline, which is mission-authoring work rather
-  than another hook. **It remains the only known code path that demonstrably does tree-occluded
-  LOS**, and if the answer above stays negative it is the last candidate.
+- ~~**Does DCS have trees where OSM says forest?**~~ **Superseded by Finding 5** — the test no
+  longer depends on OSM at all; it references vehicles the pilot placed in canopy he can see.
+- ~~**Does SEGMENT catch terrain?**~~ **Answered, Finding 6:** no, with a 952.7 m margin.
+- **`Controller.isTargetDetected`** — the probe now runs it, but the two vehicles are on the same
+  coalition so it has nothing to report (Finding 7). **It remains the only known code path that
+  demonstrably does tree-occluded LOS, and is now the last candidate standing.** Resolves with one
+  unit flipped to the opposing side.
 - **Cost:** all figures in this note are **raw per-call milliseconds with no baseline subtracted**,
   and are not per-item costs. The calls bundle setup, ~12 `getHeight` samples per ray and three
   different APIs.
