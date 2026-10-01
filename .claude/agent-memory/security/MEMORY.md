@@ -18,3 +18,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [store.writer fail-closed geometry guard](project_store_writer_fail_closed_geometry_guard.md) — insert_features' new sub-2-point LineString/Polygon check aborts the whole transaction; confirmed fail-closed 2026-10-01.
 
 - [Group cohesion redesign: reassign not accumulate](project_group_cohesion_reassign_not_accumulate.md) — new Group.last_spoken_* fields checked clean (reassigned, not unioned); installation_component fails closed.
+- [Player bubble trace is local debug artifact](project_player_bubble_trace_is_local_debug_artifact.md) — PLAYER_BUBBLE trace row records a filtered-out unit but stays local-disk/read-only-join, no belief/network path; checked 2026-10-02.

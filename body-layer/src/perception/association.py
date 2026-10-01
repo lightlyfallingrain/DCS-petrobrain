@@ -18,12 +18,16 @@ refers to, and how confidently. Picking the wrong nearby object among
 several similar ones is an association error, not an omniscience leak.
 
 That describes `associate()`, which remains the module's subject. It is no
-longer true of the module as a whole: `filter_ownship()` below *is* an
-unconditional pre-filter, called by both `HybridPerceptionSource` and
-`NakedEyePerceptionSource` before any channel-specific logic. It lives here
-rather than in `geometry.py` -- the more obvious home for something every
-tier shares -- because `WorldObjectCandidate` is defined in this module.
-Placement is deliberate, not expedient.
+longer true of the module as a whole: `filter_ownship()` and
+`filter_player_bubble()` below *are* unconditional pre-filters, called by
+both `HybridPerceptionSource` and `NakedEyePerceptionSource` before any
+channel-specific logic (`filter_player_bubble()` is the computation-scope
+limit from `todo/todo.md`'s "Player bubble" item -- see that function's own
+docstring and `PLAYER_BUBBLE_RADIUS_M`'s docstring for why it lives here and
+not in `visibility.py`). They live here rather than in `geometry.py` -- the
+more obvious home for something every tier shares -- because
+`WorldObjectCandidate` is defined in this module. Placement is deliberate,
+not expedient.
 
 Algorithm (plan's "Association design" section, unchanged here):
 1. Candidate pool = every `WorldObjectCandidate` passed in, no coalition/IFF
@@ -65,6 +69,51 @@ from perception.source import OwnshipState
 #: helicopter -- not derived from any DCS sensor-range figure (none exists
 #: for Petrovich, see the plan's Risks section), a plausibility bound only.
 RANGE_CAP_M: Final[float] = 5000.0
+
+#: The player bubble (`todo/todo.md`, "Player bubble: 10 km, settled
+#: 2026-09-28", user direction): ground/air unit detection *computation* is
+#: bounded to this radius around ownship. Nothing beyond it is considered at
+#: all -- not gated late, not scored and discarded -- because it is applied
+#: here, at `filter_player_bubble()` below, which both concrete
+#: `PerceptionSource` tiers call immediately after `filter_ownship()` and
+#: before anything else (gaze, group salience, `check_visibility`'s gate
+#: chain, clustering, or -- for the hybrid channel -- `associate()`'s own
+#: per-leaf loop): the earliest point in either poll where a candidate
+#: becomes work rather than just a row in a list.
+#:
+#: **This is a computation-scope limit, not a perception limit, and the two
+#: must never collapse into one constant even though they carry the same
+#: number today.** `visibility.NAKED_EYE_RANGE_CAP_M` (10000.0) is a sanity
+#: bound on what the naked eye is allowed to *claim* to have seen -- itself
+#: an admitted guess, scaled by whichever optic is active. This constant
+#: answers a different question: what is even worth computing in the first
+#: place, regardless of which optic or channel might eventually look at it.
+#: They will diverge the moment the 9K113 sight lands (per the todo item):
+#: its cone reaches 20 km while the naked eye's own cap stays at 10 km, and
+#: when that exception exists it will be evaluated *within* the bubble
+#: filter below (narrowed to the sight's own FOV), not by raising this
+#: radius -- raising it would reinstate the whole-sphere cost the bubble
+#: exists to remove, at four times the area. Do not import this from
+#: `visibility.py`, alias it to `NAKED_EYE_RANGE_CAP_M`, or vice versa --
+#: `tests/test_association.py`'s `test_player_bubble_radius_is_not_...`
+#: pair asserts neither module's source references the other's constant
+#: name, specifically to catch that collapse.
+#:
+#: **Not measured, and deliberately not.** Nothing here establishes DCS's
+#: own culling radius for `LoGetWorldObjects` -- large units may well be
+#: reported well past this. This is a decision about what is *worth
+#: computing*, taken on the pilot's own judgement about what he cares
+#: about ("we don't usually care about things that far"), not a discovered
+#: limit. Revisit if a sortie shows something important missed near the
+#: boundary; it is a number to revisit, not a law.
+#:
+#: **Ground and air units only -- never apply this to world-model
+#: geography** (landmarks, settlements, roads, beacons, airports). Those
+#: are reached by proximity to a contact (`belief.enrichment`), not by
+#: scanning a candidate pool, and this constant has no seam into that path
+#: at all -- it only ever filters `WorldObjectCandidate` lists built from
+#: `LoGetWorldObjects`.
+PLAYER_BUBBLE_RADIUS_M: Final[float] = 10000.0
 
 #: Half-width of the forward-hemisphere bearing window from ownship's true
 #: heading, degrees. Not a claim about where the ASP-17 sight is pointed
@@ -214,6 +263,28 @@ def filter_ownship(
     list before running their own filtering, since both build that list from
     the same unfiltered `LoGetWorldObjects` snapshot."""
     return [candidate for candidate in candidates if candidate.is_ownship is not True]
+
+
+def filter_player_bubble(
+    candidates: Sequence[WorldObjectCandidate],
+    ownship: OwnshipState,
+) -> list[WorldObjectCandidate]:
+    """Drop any candidate further than `PLAYER_BUBBLE_RADIUS_M` from
+    ownship -- see that constant's own docstring for why this exists and
+    why it must stay independent of `visibility.NAKED_EYE_RANGE_CAP_M`.
+    Both `HybridPerceptionSource` and `NakedEyePerceptionSource` call this
+    immediately after `filter_ownship()`, before any gaze/salience/
+    visibility/clustering/association work runs on the survivors -- a
+    candidate beyond the bubble is never considered at all, not gated
+    late. Equal-to-radius is kept (`<=`), matching `associate()`'s own
+    `> RANGE_CAP_M` rejection convention elsewhere in this module."""
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    survivors: list[WorldObjectCandidate] = []
+    for candidate in candidates:
+        target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
+        if range_m(observer, target) <= PLAYER_BUBBLE_RADIUS_M:
+            survivors.append(candidate)
+    return survivors
 
 
 def associate(

@@ -24,7 +24,18 @@ Each `poll()`:
    itself, identified by the aircraft-layer's `is_ownship` flag (see that
    function's docstring; the flag replaced an earlier 50 m proximity
    heuristic found necessary via a live sortie,
-   `plans/pb1.5-naked-eye-detection/debug.md`).
+   `plans/pb1.5-naked-eye-detection/debug.md`). Then drops anything beyond
+   `association.PLAYER_BUBBLE_RADIUS_M` via `association.
+   filter_player_bubble()` (`todo/todo.md`'s "Player bubble" item) -- a
+   candidate outside the bubble never reaches `associate()`'s own per-leaf
+   loop at all. `associate()`'s own `RANGE_CAP_M` (5000 m, tighter than the
+   10 km bubble today) still runs inside that loop and is unaffected --
+   the bubble is a strictly earlier, coarser cut, not a replacement for
+   it; the two happen to make the bubble a no-op for this channel right
+   now, which is expected, not a sign one of them is redundant to remove
+   (`RANGE_CAP_M` is a plausibility bound on top of forward-hemisphere
+   bearing, the bubble is omnidirectional computation scope -- they would
+   diverge the moment either number changes independently).
 3. Calls `association.associate()` once per distinct populated leaf text, in
    order, to resolve which candidate (if any) each refers to. A candidate
    claimed by one leaf is removed from the pool before the next leaf is
@@ -74,7 +85,12 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from aircraft_client import AircraftLayerClient
-from perception.association import WorldObjectCandidate, associate, filter_ownship
+from perception.association import (
+    WorldObjectCandidate,
+    associate,
+    filter_ownship,
+    filter_player_bubble,
+)
 from perception.estimation import perturbed_bearing_range
 from perception.source import (
     OBSERVATION_ID_PREFIX_HYBRID,
@@ -190,11 +206,14 @@ class HybridPerceptionSource:
                 self._record_drop(classification, "no world-objects snapshot available")
             return []
 
-        candidates = filter_ownship(
-            [
-                WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
-                for obj in world_objects.get("objects", [])
-            ]
+        candidates = filter_player_bubble(
+            filter_ownship(
+                [
+                    WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
+                    for obj in world_objects.get("objects", [])
+                ]
+            ),
+            ownship_state,
         )
 
         observations: list[Observation] = []

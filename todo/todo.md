@@ -14,37 +14,12 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ### Player bubble: 10 km, settled 2026-09-28
 
-- [ ] **Unit detection computations are bounded to a 10 km radius around ownship.** User decision,
-  2026-09-28: *"Let's settle on 10 km for the player bubble radius. While some very large units may
-  be visible beyond that, we don't usually care about things that far."* Nothing outside it is
-  computed at all — not gated late, not scored and discarded, simply never considered.
-
-  **Scope, stated precisely because the obvious misreading is expensive:**
-
-  - It applies to **ground and air units only**. It does **not** apply to world features —
-    landmarks, settlements, roads, beacons, airports. Those are world-model geography, they do not
-    move, and enrichment already reaches for them by proximity to a contact rather than by
-    scanning; bounding them would break `describe_position` for no gain.
-  - **Memory outlives the bubble.** Once the memory layer exists (BL-8), a unit that was seen and
-    then fell outside the radius stays *remembered* — what stops is *detection computation*, not
-    belief. A contact does not cease to exist because it is 11 km away; Petrovich simply is not
-    actively looking that far.
-  - The one exception, already recorded on its own item: **the 9K113 sight, out to 20 km and only
-    within its own field of view** — see "Model the 9K113 sight as an optic" below. Not yet
-    implemented, so not yet a live exception.
-
-  **Why this is worth having as an explicit decision rather than an implementation detail**: it is
-  the first *computation-scope* limit in the perception path, as opposed to a perception limit.
-  `NAKED_EYE_RANGE_CAP_M` (10000 m) happens to carry the same number today and is a different
-  thing — a sanity bound on what the eye is allowed to claim, itself an admitted guess. Whatever
-  expresses the bubble must not be folded into that constant, because the 9K113 exception will
-  separate them: the sight's cone reaches 20 km while the naked eye's cap stays where it is.
-
-  **Not measured, and deliberately not.** Nothing here establishes what DCS's own culling radius
-  is — `LoGetWorldObjects` may well report large units further out. This is a decision about what
-  is *worth computing*, taken on the pilot's judgement about what he cares about, not a discovered
-  limit. If a sortie ever shows something important being missed at 9-10 km, this is a number to
-  revisit, not a law.
+- [x] **Unit detection computations are bounded to a 10 km radius around ownship. DONE, merged
+  2026-10-02.** DoD PASSED (no live acceptance owed — a waiver, not deferred debt: this feature
+  has no in-cockpit observable until the 9K113 sight's 20 km cone makes `PLAYER_BUBBLE_RADIUS_M`
+  diverge from `NAKED_EYE_RANGE_CAP_M`). Full writeup and status now lives in
+  `body-layer/ROADMAP.md`'s own entry, per this file's own rule against duplicating milestone
+  narrative. `plans/player-bubble/` has the plan/review/security/performance/DoD trail.
 
 ### Sortie 2026-09-28 — user-flown, two findings
 
