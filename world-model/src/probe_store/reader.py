@@ -163,20 +163,19 @@ def load_chunk_elevation_window(
     the chunk's own interior exactly the classifiable region).
 
     `terrain-feature-probing`'s marker-controlled-watershed mechanism
-    (`build.ingest_terrain.ingest_terrain_chunk`) replaced that per-cell
-    rule and has no equivalent single-ring edge-exclusion guarantee -- a
-    basin or divide can legitimately extend to this window's very edge.
-    The 1-cell border is kept regardless (still real context a landform-
-    scale smoothing window can use, and changing this M8-only geometry is
-    out of this plan's scope -- see `plans/terrain-feature-probing/plan.md`,
-    "Not touched"), but it no longer *guarantees* chunk-isolation the way it
-    did under the old mechanism.
+    (`build.ingest_terrain.ingest_terrain_chunk`, since removed) replaced
+    that per-cell rule and had no equivalent single-ring edge-exclusion
+    guarantee. `landform-geomorphons` removed chunk-scoped ridge/valley
+    extraction from `build.pipeline.add_probe_chunk` entirely -- its own
+    processing unit is a whole SRTM tile with a multi-kilometre margin, not
+    a chunk-sized window -- so this function no longer has a terrain
+    consumer at all; it is kept as a general-purpose local elevation-
+    window accessor (still exercised directly by `tests/test_probe_store.py`)
+    in case a future chunk-scoped consumer needs one.
 
     Border cells that fall in a chunk nobody has probed yet come back as
-    `None` samples, same as any other unsampled cell -- the watershed
-    pipeline's smoothing/seeding steps treat a `None` neighbour the same
-    way the old classifier did (never fabricate from missing data), so a
-    chunk's edge simply has less context until its neighbour is probed too.
+    `None` samples, same as any other unsampled cell -- never fabricated
+    from missing data.
     """
     meta = _load_grid_meta(conn, "elevation", schema)
     if meta is None:

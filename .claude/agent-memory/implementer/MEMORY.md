@@ -120,3 +120,6 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Group-reporting unit-width backstop](project_group_reporting_unit_width_backstop.md) — borrow currency not constant; mechanism/calibration split isn't always zero-diff; profile_for/OP_* quirk.
 - [Terrain feature probing watershed](project_terrain_feature_probing_watershed.md) — saddle=min-of-max-per-contact not naive-min; sinuosity needs geometry-step fix not retuning; numpy<2.5 mypy pin.
 - [Terrain feature probing Stage 1-2](project_terrain_feature_probing_stage1_2.md) — checkerboard ceiling is spacing-invariant; plan's fine/coarse split didn't survive real-data sweep.
+- [Landform-geomorphons perf fix](project_landform_geomorphons_perf_fix.md) — streaming terrain inserts via callback; O(N) Chaikin via per-point support windows.
+- [macOS ru_maxrss unit is bytes](reference_macos_ru_maxrss_unit_bytes.md) — bytes on macOS, KB on Linux; divide by 1024*1024 for MB on Mac.
+- [Landform geomorphons implementation](project_landform_geomorphons.md) — plan cited wrong spike's min_cells; junction-walk is order-dependent; M8 chunk pipeline had no equivalent.

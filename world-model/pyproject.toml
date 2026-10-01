@@ -13,14 +13,15 @@ dependencies = [
     # pyosmium` 404s; `pip install osmium` is correct). Ships cp314 wheels
     # for macOS arm64/x86_64, manylinux and Windows as of 4.3.1.
     "osmium>=4.3",
-    # terrain-feature-probing Stage 1 (Option C, marker-controlled
-    # watershed): used *only* for terrain.curvature's landform-scale
-    # smoothing (scipy.ndimage.uniform_filter) and basin-seed extremum
-    # detection (scipy.ndimage.minimum_filter) -- vectorized O(n) over a
-    # ~2.5M-cell theatre grid. Basin growth (terrain.features.grow_basins,
-    # a hand-written heapq priority flood) and axis/boundary extraction
-    # (_connected_components/_principal_axis) stay stdlib; this is not
-    # blanket permission to reach for numpy elsewhere in world-model.
+    # landform-geomorphons: vectorized geomorphons classification
+    # (terrain.geomorphons), DCS-lattice SRTM resampling
+    # (terrain.resample), and mask/closing/Zhang-Suen-thinning
+    # (terrain.skeleton's scipy.ndimage.binary_closing) -- replaces the
+    # retired marker-controlled-watershed mechanism's terrain.curvature
+    # (deleted), which previously held this comment. The junction-walking
+    # tracer and basin-free geometry wrapping in terrain.features/
+    # terrain.skeleton stay stdlib; this is not blanket permission to
+    # reach for numpy elsewhere in world-model.
     # Pinned below 2.5: numpy 2.5's bundled stubs adopted PEP 695 `type`
     # statements unconditionally, which mypy's parser rejects outright
     # under this project's `python_version = "3.11"` target -- confirmed
@@ -43,9 +44,10 @@ mypy_path = "src:tests"
 # project's `python_version = "3.11"` target (a parse error, not a type
 # error, so it cannot be narrowed to one module) -- confirmed against
 # scipy-stubs 1.18.1.1 during terrain-feature-probing Stage 1. `terrain.
-# curvature` is the only caller (`scipy.ndimage.uniform_filter`/
-# `minimum_filter`, both thin, narrow calls), so untyped-import is an
-# accepted, scoped gap rather than a reason to loosen `strict` project-wide.
+# skeleton`'s `close_and_thin` (`scipy.ndimage.binary_closing`) is now the
+# only caller -- the original caller, `terrain.curvature`, was deleted on
+# `feature/landform-geomorphons` -- so untyped-import is an accepted,
+# scoped gap rather than a reason to loosen `strict` project-wide.
 module = "scipy.*"
 ignore_missing_imports = true
 
