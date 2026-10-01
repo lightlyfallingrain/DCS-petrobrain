@@ -310,6 +310,14 @@ within one. It also **unblocks** a future domain-aware extension (aircraft forma
   deferred, matching `plans/group-contact-model/plan.md`'s "no `CONTACT_SPLIT` event kind, inferred"
   precedent. Recommend deferring — Stage 4's ladder already surfaces a membership change as a
   changed rendered line; a dedicated event is a wording nicety, not core noise reduction.
+
+  **Amended 2026-10-01 (`plans/group-cohesion-redesign/plan.md`'s Decision 8, at that plan's merge):**
+  this still has no dedicated event kind, but "a changed rendered line" is no longer always a full
+  re-disclosure — the delta taxonomy (that plan's §4) now sometimes speaks a short delta clause
+  (a new leader, a new/repeat-air-defence member) and sometimes stays silent (a non-air-defence
+  repeat join, a departure with no new arrivals). A split/merge is still never its own `Event`; it
+  is inferred exactly as before, just through a richer set of possible rendered outcomes than "full
+  line or nothing."
 - **Whether to fly Stages 1–4 before deciding on Stage 5 (common fate)**, exactly as the sibling plan
   did for its own Stage 5. Recommend yes — no convoy/checkpoint evidence exists yet, and it may not be
   needed.

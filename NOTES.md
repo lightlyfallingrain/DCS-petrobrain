@@ -589,3 +589,19 @@ two functions that must agree (2026-09-19).
   plausible-sounding justification that happens to produce the right answer is not evidence the
   reasoning was sound — it is worth measuring even when nobody doubts the conclusion
   (`plans/terrain-feature-probing/performance.md`, 2026-10-01).
+- **In speech-rendering code, a test that asserts shape instead of the sentence is not a safety
+  net — three wording defects in a row survived a fully green suite this way.** Group cohesion's
+  review found `"a armor"`, `"a infantry"`, and `"A ground and a truck."` all shipped as the
+  *expected* output of their own tests, because the assertions checked the absence of other
+  branches' markers (`"in" not in speech.text`, `not speech.text.startswith("Now leading")`)
+  rather than the actual rendered string. If a line is ever spoken to the pilot, its test must
+  pin the literal sentence, not a property the sentence happens to have (`plans/
+  group-cohesion-redesign/review.md`, both rounds; `plans/group-undermerging/implementation.md`).
+- **The user's own worked utterances, not the rules inferred from them, are the specification —
+  and checking the rendered output against the utterances directly is what catches defects that
+  internal consistency never will.** The group-cohesion plan's first draft inferred a taxonomy
+  from the debug pass's framing before utterances existed; once the user gave worked examples
+  (`"AAA in the group"`, `"Shilka and zsu"`, `"SRSAM, Shilka, armor 2 o'clock 2.5 km"`), re-deriving
+  the design against them directly (not the inferred rules) reversed one branch (leader change:
+  full → delta) and found the indefinite-article defect, since every worked example renders class
+  nouns bare (`plans/group-cohesion-redesign/plan.md` §4, `explore-notes-delta-taxonomy.md`).

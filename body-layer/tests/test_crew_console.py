@@ -36,7 +36,11 @@ from belief.crew_console import (
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
-from belief.speech import render_group_disclosure
+from belief.speech import (
+    group_membership_state,
+    render_group_disclosure,
+    render_group_full_disclosure,
+)
 from belief.tasks import TaskStore
 from belief.voice_commands import (
     ACT_FLOOR,
@@ -2568,7 +2572,7 @@ def test_report_clock_3_finds_the_matching_contact(
     # regardless of distance (`belief.groups`'s own module docstring).
     # They do not cohere, so this test is naturally about clock-scoping
     # alone -- group formation itself is covered by `tests/test_groups.py`
-    # and `test_report_speaks_a_persisted_group_through_render_group_
+    # and `test_report_speaks_a_persisted_group_through_render_group_full_
     # disclosure`, below.
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
@@ -2785,17 +2789,29 @@ def test_report_all_groups_and_truncates_multiple_contacts(
     ]
 
 
-def test_report_speaks_a_persisted_group_through_render_group_disclosure(
+def test_report_speaks_a_persisted_group_through_render_group_full_disclosure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`plans/group-reporting/plan.md` Stage 4 design, section 6:
     `_handle_report` resolves each in-scope contact's `belief.groups.Group`
-    and speaks it once via `render_group_disclosure` -- the same renderer
-    `CalloutScheduler.tick` uses for the push path -- rather than the older
-    `group_facts`/`render_group_report` report-space bucketing, once a real
-    group exists. Three same-type contacts a few metres apart cohere into
-    one `Group` on `store.tick`; the report names all three as one line,
-    not three separate `"BMP-2, ..."` reports."""
+    and speaks it once via `render_group_full_disclosure` -- the same
+    always-full-roster renderer the "report" pull path needs, rather than
+    the older `group_facts`/`render_group_report` report-space bucketing,
+    once a real group exists. Three same-type contacts a few metres apart
+    cohere into one `Group` on `store.tick`; the report names all three as
+    one line, not three separate `"BMP-2, ..."` reports.
+
+    Named and checked against `render_group_full_disclosure`, not `render_
+    group_disclosure` -- that was this test's own staleness (`plans/
+    group-cohesion-redesign/review.md`, Optional Refinement): production code
+    was changed to call `render_group_full_disclosure` for this path, but
+    this test still named and called `render_group_disclosure` directly,
+    and passed only because the group here has never been spoken, where
+    the two functions' output coincides. It gave no regression coverage
+    for the actual case the split exists for -- see `test_report_speaks_
+    an_already_spoken_group_in_full`, below, which marks the group spoken
+    first so the two renderers would disagree if `_handle_report` ever
+    silently reverted to the taxonomy-gated one."""
     store = ContactStore()
     store.ingest(
         [
@@ -2816,11 +2832,73 @@ def test_report_speaks_a_persisted_group_through_render_group_disclosure(
 
     lines = console.handle_command("report_all", now_sim=0.0)
 
-    expected = render_group_disclosure(
+    expected = render_group_full_disclosure(
         store, store.groups[0], now_sim=0.0, enrichment=console.enrichment
     )
     assert expected is not None
     assert lines == [expected.text]
+    assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
+
+
+def test_report_speaks_an_already_spoken_group_in_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case `test_report_speaks_a_persisted_group_through_render_
+    group_full_disclosure` could not cover: a group that has *already*
+    spoken (so `render_group_disclosure`'s delta taxonomy would return a
+    delta clause, or `None`, depending on what changed since) must still
+    get the full roster from "report" -- the pull path's whole reason for
+    not sharing a function with the push path (`render_group_full_
+    disclosure`'s own docstring). Marks the group spoken via the same
+    `render_group_disclosure` + `mark_group_spoken` sequence `belief.
+    callouts.CalloutScheduler.tick` uses, then confirms a second,
+    unchanged-membership `render_group_disclosure` call would go silent
+    (proving the taxonomy really would gate this) while `"report"` still
+    names the whole group."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at(
+                obs_id=f"OBS_{i}",
+                t_sim=0.0,
+                ownship_x=float(i) * 5.0,
+                ownship_z=1000.0,
+                classification_raw="BMP-2",
+            )
+            for i in range(3)
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+    enrichment = _enrichment_context(monkeypatch)
+    group = store.groups[0]
+
+    first = render_group_disclosure(store, group, now_sim=0.0, enrichment=enrichment)
+    assert first is not None
+    assert first.content_signature is not None
+    state = group_membership_state(store, group, now_sim=0.0, enrichment=enrichment)
+    assert state is not None
+    member_contact_ids, leading_contact_id, differentiated = state
+    store.mark_group_spoken(
+        group.id,
+        first.content_signature,
+        now_sim=0.0,
+        member_contact_ids=member_contact_ids,
+        leading_contact_id=leading_contact_id,
+        differentiated=differentiated,
+    )
+
+    # Confirms the gate is really armed: an unchanged group, spoken once
+    # already, goes silent at group level on the push path.
+    assert (
+        render_group_disclosure(store, group, now_sim=1.0, enrichment=enrichment)
+        is None
+    )
+
+    console = CrewConsole(store=store, enrichment=enrichment)
+    lines = console.handle_command("report_all", now_sim=1.0)
+
     assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
 
 

@@ -785,3 +785,22 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   the first place, upstream of everything BL-2 built — a future perception-layer milestone, likely
   well after BL-4.
 
+
+- [ ] **BL-B23 — `ContactStore` is never pruned, so clustering cost grows with every contact ever
+  seen.** Found by the Performance Reviewer during the group-cohesion pass (2026-10-01), and
+  **pre-existing** — `fix/group-undermerging` only added a few per-pair dict lookups on top of a
+  growth path group-reporting Stage 2 already created. `ContactStore._contacts` has no delete path
+  anywhere in the class, and `tick()` passes `list(self._contacts.values())` to
+  `GroupStore.reconcile`, i.e. every contact ever folded rather than the live set. So
+  `_cluster_contacts`'s O(n²) pairing scales with total-ever-seen, not with how many contacts are
+  actually out there.
+
+  Measured, same pass: 22 contacts 0.17 ms, 50 0.72 ms, 100 2.96 ms, 300 24.75 ms, 500 70 ms, 800
+  180 ms, 1200 406 ms — clean quadratic from 100 up. Trivial today (the 2026-10-01 sortie had 22
+  objects admitted), and the point is that it is **the sortie length that drives it, not the
+  threat picture**: a 90-minute mission accumulating long-LOST records reaches the 70-180 ms band
+  on a 5 Hz loop, where it starts costing the pilot latency.
+
+  Fix shape: filter `reconcile`'s input by lifecycle or age before clustering, rather than pruning
+  the store itself — a LOST contact is still memory Petrovich should have, so dropping the record
+  is the wrong move; excluding it from *clustering* is the right one.

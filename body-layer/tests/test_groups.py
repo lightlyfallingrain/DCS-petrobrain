@@ -11,16 +11,26 @@ from __future__ import annotations
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.groups import (
+    AIR_DEFENSE_OP_CLASSES,
     GROUP_PROXIMITY_GAP_RATIO,
     GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS,
+    GROUP_REPORTING_INSTALLATION_COHESION_CAP_M,
     GROUP_REPORTING_MIN_MEMBERS,
     GROUP_REPORTING_UNKNOWN_SIZE_M,
+    CohesionBackstop,
     GroupStore,
 )
 from belief.position_belief import Covariance2D, PositionEstimate
 
 
-def _contact(contact_id: str, x: float, z: float) -> Contact:
+def _contact(
+    contact_id: str, x: float, z: float, *, class_raw: str = "OP_TRUCK"
+) -> Contact:
+    """`class_raw` defaults to `OP_TRUCK` (unchanged for every pre-existing
+    caller) -- the `EAGER`/installation-cohesion tests below pass a real
+    `object_model` keyword string (`"infantry"`, `"osa"`, `"s-125"`, ...) to
+    exercise a specific per-class backstop policy or `installation_
+    component` flag via `object_model.profile_for`."""
     return Contact(
         id=contact_id,
         position=PositionEstimate(
@@ -32,9 +42,9 @@ def _contact(contact_id: str, x: float, z: float) -> Contact:
             fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
         ),
         last_alt_m=0.0,
-        last_class_raw="OP_TRUCK",
+        last_class_raw=class_raw,
         classification=new_classification_belief(
-            value="OP_TRUCK", level=SpecificityLevel.CLASS, established_sim=0.0
+            value=class_raw, level=SpecificityLevel.CLASS, established_sim=0.0
         ),
     )
 
@@ -354,3 +364,190 @@ def test_constants_are_the_stated_assumptions() -> None:
     assert GROUP_REPORTING_MIN_MEMBERS == 2
     assert GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS == 20.0
     assert GROUP_REPORTING_UNKNOWN_SIZE_M == 7.0
+    assert GROUP_REPORTING_INSTALLATION_COHESION_CAP_M == 500.0
+    assert AIR_DEFENSE_OP_CLASSES == frozenset(
+        {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
+    )
+
+
+# --- Stage 1: per-class cohesion policy (the infantry release) --------------
+# `plans/group-cohesion-redesign/plan.md` -- user direction 2026-10-01: "Ok
+# to merge infantry too eagerly. Infantry is the least detectable and also
+# least important of unit types."
+
+
+def test_infantry_pair_merges_eagerly_past_the_ordinary_backstop() -> None:
+    """Two infantry 260 m apart, in a sparse (n=2) scene -- well past the
+    ordinary 36 m unit-widths backstop (`20.0 * 1.8`), the exact geometry
+    the pre-cohesion-redesign pinned test forbade. `CohesionBackstop.EAGER`
+    for `OP_INFANTRY` drops that backstop entirely, leaving only the
+    (tautological at n=2, so unconditionally satisfied) relative test."""
+    store = GroupStore()
+    contacts = [
+        _contact("C1", 0.0, 0.0, class_raw="infantry"),
+        _contact("C2", 260.0, 0.0, class_raw="infantry"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"C1", "C2"})
+
+
+def test_non_infantry_pair_at_the_identical_geometry_still_does_not_merge() -> None:
+    """The regression guard the plan's own Stage 1 acceptance calls for: a
+    non-infantry pair at the *identical* 260 m/n=2 geometry still splits --
+    `CohesionBackstop.STRICT`'s ordinary unit-widths backstop is unaffected
+    by the infantry release. `OP_TRUCK` (6 m) backstop is `20.0 * 6.0 =
+    120.0` m, well under the 260 m gap."""
+    store = GroupStore()
+    contacts = [
+        _contact("C1", 0.0, 0.0, class_raw="truck"),
+        _contact("C2", 260.0, 0.0, class_raw="truck"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_infantry_eager_policy_bridges_a_non_infantry_pair_that_would_not_merge_alone() -> (
+    None
+):
+    """A real, documented consequence of single-link chaining plus the
+    infantry release, found while verifying this implementation against
+    `tests/test_callouts.py::test_2c_transcript_fixture_renders_four_
+    lines_not_seven`'s rewritten fixture: an infantry contact sitting
+    between two *non*-infantry contacts that would not themselves clear
+    the ordinary backstop can still bridge them into one group, because
+    each infantry-involving edge has no backstop at all. This is not a
+    bug -- `_cluster_contacts`'s own docstring already documents single-
+    link chaining letting a convoy cohere end-to-end even when its full
+    span would not -- but it is worth pinning directly at the smallest
+    scale that shows it, since it is easy to assume `EAGER` only ever
+    affects infantry-infantry pairs."""
+    store = GroupStore()
+    # truck<->truck gap is 230 m, past the 120 m OP_TRUCK backstop --
+    # confirmed they would NOT merge directly (see the previous test's own
+    # math, scaled up slightly so the bridging infantry sits exactly
+    # between them).
+    contacts = [
+        _contact("TRUCK_1", 0.0, 0.0, class_raw="truck"),
+        _contact("INFANTRY", 115.0, 0.0, class_raw="infantry"),
+        _contact("TRUCK_2", 230.0, 0.0, class_raw="truck"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"TRUCK_1", "INFANTRY", "TRUCK_2"})
+
+
+# --- Stage 2: kind-coherence for air-defence installations ------------------
+# `plans/group-cohesion-redesign/plan.md` §1 -- `installation_component`,
+# not `op_class`, is the membership key, precisely so an Osa (single-
+# vehicle) and an S-125 launcher (fixed multi-component site) are never
+# merged as "one installation."
+
+
+def test_osa_and_s125_launcher_400m_apart_do_not_merge_as_an_installation() -> None:
+    """The regression test for the bug this plan's §1 found: under the
+    first draft's `op_class`-keyed design (`OP_SRSAM` covering both), this
+    pair would have incorrectly merged as "one installation." Under the
+    corrected `installation_component` key, Osa (`False`) and S-125
+    (`True`) is a *mixed* pair, which falls through to the ordinary
+    size-relative backstop (`20.0 * mean(9.0, 9.0) = 180.0` m for this
+    pair, both profiles sized 9.0 m) -- well under the 400 m gap."""
+    store = GroupStore()
+    contacts = [
+        _contact("OSA", 0.0, 0.0, class_raw="osa"),
+        _contact("S125", 400.0, 0.0, class_raw="s-125"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_two_s125_launchers_400m_apart_merge_as_one_installation() -> None:
+    """The positive case: two genuine installation components (both
+    `installation_component=True`) at the same 400 m spacing the previous
+    test shows a *mixed* pair failing to clear -- the flat 500 m
+    installation cap (not the 180 m ordinary backstop that pair would
+    otherwise get) is what lets this one merge."""
+    store = GroupStore()
+    contacts = [
+        _contact("S125_A", 0.0, 0.0, class_raw="s-125"),
+        _contact("S125_B", 400.0, 0.0, class_raw="s-125"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"S125_A", "S125_B"})
+
+
+def test_two_s125_launchers_past_the_500m_cap_do_not_merge() -> None:
+    """The installation cap is a cap, not an unconditional "any two
+    installation parts merge" rule -- 600 m exceeds `GROUP_REPORTING_
+    INSTALLATION_COHESION_CAP_M` (500.0)."""
+    store = GroupStore()
+    contacts = [
+        _contact("S125_A", 0.0, 0.0, class_raw="s-125"),
+        _contact("S125_B", 600.0, 0.0, class_raw="s-125"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_real_s300_site_ground_truth_geometry_forms_a_three_member_cluster() -> None:
+    """A real emplacement, not a hand-built geometry -- the four S-300
+    components' true (x, z) positions (metres, local projection) extracted
+    directly from `/Users/sg/dcs-belief-truth.jsonl`'s `true_x`/`true_z`
+    fields for the 2026-10-01 trace's S-300 battery (object ids 16785152
+    "S-300PS 40B6M tr", 16784640 "S-300PS 64H6E sr", 16784896 "S-300PS 54K6
+    cp", 16785408 "S-300PS 40B6MD sr_19J6"), offset here by a constant so
+    the fixture does not depend on the trace's own absolute DCS-world
+    coordinate origin. Pairwise spacing is 262-830 m -- close to, and
+    consistent with, `debug.md`'s own 236-838 m figure for this same
+    battery and the user's own verdict that this placement is unrealistic
+    test geometry, not real doctrine (`body-layer/research/2026-10-01-sam-
+    site-geometry.md`).
+
+    **This does NOT reproduce `plans/group-cohesion-redesign/plan.md`'s own
+    Stage 2 acceptance wording** ("confirmed to form one four-member
+    group") -- that wording is stale, carried over from before this
+    revision's own §1 finding narrowed `installation_component` to
+    `"s-125"`/`"kub "` only. S-300/`OP_LRSAM` is explicitly NOT in that set
+    (§1's settled list), so no pair here ever gets the 500 m installation
+    cap; only the ordinary per-pair unit-widths backstop applies, and only
+    two of the four real components (`"s-300ps 40b6m tr"`/`"s-300ps 64h6e
+    sr"`) have their own keyword entry at all -- the other two (`"54K6
+    cp"`, `"40B6MD sr_19J6"`) fall back to the generic 7 m size. Flagged to
+    the user rather than silently worked around: see the implementation
+    report."""
+    store = GroupStore()
+    # Real true_x/true_z, each with a constant -380000/387000 offset
+    # subtracted (see docstring) -- tr/sr/cp/sr_19j6.
+    contacts = [
+        _contact("TR", -435.0, -230.0, class_raw="s-300ps 40b6m tr"),
+        _contact("SR", -101.0, 198.0, class_raw="s-300ps 64h6e sr"),
+        _contact("CP", -236.0, -60.0, class_raw="s-300ps 54k6 cp"),
+        _contact("SR_19J6", -616.0, -453.0, class_raw="s-300ps 40b6md sr_19j6"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"TR", "CP", "SR_19J6"})
+    assert store.group_for_contact("SR") is None
+
+
+def test_cohesion_backstop_enum_members() -> None:
+    assert {policy.value for policy in CohesionBackstop} == {"strict", "eager"}
