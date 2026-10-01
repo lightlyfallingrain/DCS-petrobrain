@@ -18,3 +18,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [store.writer fail-closed geometry guard](project_store_writer_fail_closed_geometry_guard.md) — insert_features' new sub-2-point LineString/Polygon check aborts the whole transaction; confirmed fail-closed 2026-10-01.
 
 - [Group cohesion redesign: reassign not accumulate](project_group_cohesion_reassign_not_accumulate.md) — new Group.last_spoken_* fields checked clean (reassigned, not unioned); installation_component fails closed.
+- [terrain_cache resumable fail-closed, APPROVED](project_terrain_cache_resumable_fail_closed_approved.md) -- WM-B6 per-tile SQLite cache verified crash-safe without tmp-rename; theatre not in invalidation key mirrors pre-existing osm_cache gap, not new.
