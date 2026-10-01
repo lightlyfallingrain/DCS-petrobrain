@@ -8,6 +8,7 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-ur
     --crew-text \
     --f10-commands \
     --audio-adapter-url http://127.0.0.1:7795 \
+    --brain-client http --brain-url http://127.0.0.1:7796 \
     --speech-log ~/dcs-speech.jsonl \
     $@
 popd
