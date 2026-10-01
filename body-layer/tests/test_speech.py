@@ -1272,9 +1272,13 @@ def _cohering_group_store(
     return store, store.groups[0]
 
 
-def test_group_composition_clause_singular_uses_indefinite_article() -> None:
+def test_group_composition_clause_singular_is_bare_noun() -> None:
+    """No indefinite article on a count==1 member (`plans/
+    group-undermerging/review.md` Finding 1) -- matches every other
+    singular rendering in this module and the user's own worked examples
+    ("AAA in the group", "Shilka and zsu")."""
     facts = [{"classification": {"value": "OP_TRUCK", "level": "class"}}]
-    assert _group_composition_clause(facts) == "a truck"
+    assert _group_composition_clause(facts) == "truck"
 
 
 def test_group_composition_clause_counts_members_exactly() -> None:
@@ -1283,7 +1287,7 @@ def test_group_composition_clause_counts_members_exactly() -> None:
         {"classification": {"value": "OP_ARMORED", "level": "class"}},
         {"classification": {"value": "OP_TRUCK", "level": "class"}},
     ]
-    assert _group_composition_clause(facts) == "two armor and a truck"
+    assert _group_composition_clause(facts) == "two armor and truck"
 
 
 def test_render_group_disclosure_undifferentiated_group_says_bare_group() -> None:
@@ -1313,7 +1317,7 @@ def test_render_group_disclosure_differentiated_group_gives_composition() -> Non
     speech = render_group_disclosure(store, group, now_sim=0.0)
 
     assert speech is not None
-    assert speech.text == "Two armor and a truck."
+    assert speech.text == "Two armor and truck."
 
 
 def test_render_group_disclosure_threat_capable_member_leads_the_line() -> None:
@@ -1448,15 +1452,20 @@ def test_render_group_disclosure_homogeneous_pair_says_pair_of() -> None:
 def test_render_group_disclosure_mixed_pair_uses_the_composition_clause() -> None:
     """A two-member group with real, *different* classifications never
     reaches for "pair" or "a couple of" at all -- `_group_composition_
-    clause` already names each member exactly once (`"a tank and a
-    truck"`), which is unambiguous without a quantity word, matching the
-    "differentiated but mixed" rung of the same ladder."""
+    clause` already names each member exactly once (`"Armor and truck"`),
+    which is unambiguous without a quantity word, matching the
+    "differentiated but mixed" rung of the same ladder. No indefinite
+    article on either noun (`plans/group-undermerging/review.md`
+    Finding 1) -- "armor" is a mass noun and takes none in any form, and
+    this module's own singular vocabulary never uses one for a count noun
+    either (`_contact_report_text`'s single-contact line, the user's own
+    "AAA in the group"/"Shilka and zsu" examples)."""
     store, group = _cohering_group_store([("OP_ARMORED", 2), ("OP_TRUCK", 2)])
 
     speech = render_group_disclosure(store, group, now_sim=0.0)
 
     assert speech is not None
-    assert speech.text == "An armor and a truck."
+    assert speech.text == "Armor and truck."
 
 
 def test_render_group_disclosure_returns_none_when_membership_has_collapsed() -> None:
@@ -1603,8 +1612,9 @@ def test_render_group_disclosure_first_differentiation_is_full_once() -> None:
     # Full composition, not a delta clause -- the one differentiated
     # member leads, the still-undifferentiated member is "something"
     # (matching the user's own "SAM and something" example), not a
-    # counted noun phrase of its own.
-    assert speech.text == "A truck and something."
+    # counted noun phrase of its own. No indefinite article on "truck"
+    # either (`plans/group-undermerging/review.md` Finding 1).
+    assert speech.text == "Truck and something."
 
 
 def _direct_contact(
@@ -1684,7 +1694,7 @@ def test_render_group_disclosure_new_class_arrival_is_a_delta() -> None:
     speech = render_group_disclosure(store, group, now_sim=1.0)
 
     assert speech is not None
-    assert speech.text == "An armor, in the group."
+    assert speech.text == "Armor, in the group."
 
 
 def test_render_group_disclosure_air_defence_repeat_arrival_is_a_delta() -> None:
@@ -1722,7 +1732,10 @@ def test_render_group_disclosure_air_defence_repeat_arrival_is_a_delta() -> None
     speech = render_group_disclosure(store, group, now_sim=1.0)
 
     assert speech is not None
-    assert speech.text == "A ZSU-23-4 Shilka, in the group."
+    # Bare type noun, no article -- matches the user's own "Shilka and
+    # zsu" worked example (`plans/group-cohesion-redesign/explore-notes-
+    # delta-taxonomy.md`).
+    assert speech.text == "ZSU-23-4 Shilka, in the group."
 
 
 def test_render_group_disclosure_non_air_defence_repeat_arrival_is_silent() -> None:

@@ -762,7 +762,7 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     assert spoken == [
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
-        "Three infantry, a BTR-70 and a truck, 1 o'clock, very close.",
+        "Three infantry, BTR-70 and truck, 1 o'clock, very close.",
         "unit 12 o'clock, very close is truck.",
     ]
 
