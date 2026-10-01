@@ -29,3 +29,11 @@ spatial index (grid/k-d tree) for the nearest-neighbour pass, turning both loops
 See also [[project_watch_reporting_scale_notes]] for the git-archive isolated-snapshot benchmarking
 technique this reused (build a minimal fixture via the dataclass constructors directly, skip full
 `ContactStore.ingest`).
+
+**2026-10-01 re-confirmation on `fix/group-undermerging`** (the cohesion-redesign's own
+per-pair backstop, `_pair_backstop_m`): same quadratic shape, slightly updated numbers (22->0.17ms,
+100->3ms, 300->25ms, 500->70ms, 800->180ms, 1200->406ms) -- the redesign's extra per-pair dict
+lookups (installation cap, EAGER/STRICT policy) don't change the complexity class. The more
+important finding from that pass isn't the per-tick contact count at all -- it's that
+`ContactStore` never prunes `_contacts`, so this O(n^2) cost grows with every contact ever seen
+across a sortie, not the live count. See [[contact_store_never_pruned]].

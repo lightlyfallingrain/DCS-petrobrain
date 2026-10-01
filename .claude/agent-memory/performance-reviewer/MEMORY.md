@@ -18,3 +18,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Optic-policy dict-copy cost](project_optic_policy_dict_copy_cost.md) — measured 0.08/0.45/1.46 ms/call at 55/300/1000 contacts for decide()'s unpruned-map copies; non-issue at this project's scale.
 - [Contact ingest/association unmeasured](project_contact_ingest_association_unmeasured.md) — ingest+tick microbenchmark didn't finish in minutes at 55x500; ingest itself untouched by sortie-2026-09-26-fixes but worth a dedicated future pass.
 - [Group-reporting cohesion scale](project_group_reporting_cohesion_scale.md) — measured O(n^2) _cluster_contacts: 0.6ms@52, 8.4ms@200, 54ms@500, 879ms@2000; needs 300-400+ contacts to matter.
+- [ContactStore never pruned](project_contact_store_never_pruned.md) — _contacts has no delete path; group reconcile runs over every contact ever seen, so O(n^2) cost grows with sortie length not live count.
