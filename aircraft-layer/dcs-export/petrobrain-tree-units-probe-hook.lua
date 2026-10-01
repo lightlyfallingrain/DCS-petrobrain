@@ -206,13 +206,32 @@ end
 --: The AI detection path, asked in both directions. This is the only shipped
 --: route known to test trees; see the header for what it folds in and why it
 --: is characterised rather than consumed.
+--: The AI detection path, asked in both directions, WITH A POSITIVE CONTROL.
+--:
+--: The control is the point. A bare "detected:false" between two vehicles is
+--: unreadable on its own: it could mean trees block the AI's line of sight,
+--: or that the AI has not looked yet, or that the call does not work the way
+--: this probe assumes. So each controller is also asked about **the player's
+--: own aircraft** -- and the pilot reports the blue BTR *fired on him*
+--: (2026-10-01), so that unit demonstrably detects him. A `true` there proves
+--: the mechanism is live and the question well-formed; a `false` would mean
+--: the probe is measuring nothing and the vehicle-to-vehicle result should be
+--: discarded rather than believed.
+--:
+--: `getDetectedTargets` is read alongside as a second view: it says how many
+--: things that controller is currently holding visually, which distinguishes
+--: "sees nothing at all" from "sees other things but not this one".
 local function detectionCode(nameA, nameB)
     return string.format(
         [[
 local a = Unit.getByName(%q)
 local b = Unit.getByName(%q)
 if a == nil or b == nil then return "ERR|unit lookup failed" end
+local okP, player = pcall(world.getPlayer)
+if not okP then player = nil end
+
 local function ask(fromUnit, target, label)
+    if target == nil then return label .. "=noTarget" end
     local okG, grp = pcall(function() return fromUnit:getGroup() end)
     if not okG or grp == nil then return label .. "=noGroup" end
     local okC, ctrl = pcall(function() return grp:getController() end)
@@ -220,16 +239,34 @@ local function ask(fromUnit, target, label)
     local okD, det, vis, lastT, typ, dist = pcall(function()
         return ctrl:isTargetDetected(target, Controller.Detection.VISUAL)
     end)
-    local n = -1
+    if not okD then return label .. "=ERR(" .. tostring(det) .. ")" end
+    return string.format("%%s=detected:%%s visible:%%s dist:%%s",
+        label, tostring(det), tostring(vis), tostring(dist))
+end
+
+local function held(fromUnit, label)
+    local okG, grp = pcall(function() return fromUnit:getGroup() end)
+    if not okG or grp == nil then return label .. "=noGroup" end
+    local okC, ctrl = pcall(function() return grp:getController() end)
+    if not okC or ctrl == nil then return label .. "=noController" end
     local okL, lst = pcall(function()
         return ctrl:getDetectedTargets(Controller.Detection.VISUAL)
     end)
-    if okL and type(lst) == "table" then n = #lst end
-    if not okD then return label .. "=ERR(" .. tostring(det) .. ") visualTargets=" .. n end
-    return string.format("%%s=detected:%%s visible:%%s dist:%%s visualTargets:%%d",
-        label, tostring(det), tostring(vis), tostring(dist), n)
+    if not okL or type(lst) ~= "table" then return label .. "=ERR" end
+    local names = {}
+    for _, t in ipairs(lst) do
+        if #names < 4 and t.object ~= nil then
+            local okN, n = pcall(function() return t.object:getTypeName() end)
+            names[#names + 1] = okN and tostring(n) or "?"
+        end
+    end
+    return string.format("%%s=%%d[%%s]", label, #lst, table.concat(names, ","))
 end
+
 return "OK|" .. ask(a, b, "A_sees_B") .. " | " .. ask(b, a, "B_sees_A")
+    .. " || CONTROL " .. ask(a, player, "A_sees_PLAYER")
+    .. " | " .. ask(b, player, "B_sees_PLAYER")
+    .. " || HELD " .. held(a, "A_visual") .. " | " .. held(b, "B_visual")
 ]],
         nameA,
         nameB
@@ -389,6 +426,52 @@ return string.format("OK|%.1f|%.1f", p.x, p.z)
             logi("=== probe end (units not usable) ===")
             return
         end
+
+        --: Pick the two NEAREST the aircraft, not the first two found.
+        --:
+        --: The 2026-10-01 07:42 flight is why. Scan order is
+        --: NEUTRAL -> RED -> BLUE, so taking units[1] and units[2] paired the
+        --: pilot's red BTR with an unrelated mission BTR **694 km away** on
+        --: the far side of the map, fired a 693,937 m sightline, spent 274 ms
+        --: and tripped the abort -- with the correct blue partner sitting
+        --: last in the list, 119 m away. The pilot said "near ownship"; the
+        --: probe should have used that rather than scan order.
+        if ownX ~= nil then
+            for i = 1, #units do
+                units[i].d = math.sqrt((units[i].x - ownX) ^ 2 + (units[i].z - ownZ) ^ 2)
+            end
+            table.sort(units, function(p, q)
+                return p.d < q.d
+            end)
+            local listed = {}
+            for i = 1, math.min(#units, 6) do
+                listed[#listed + 1] = string.format(
+                    "%s(%s,side%d)@%.1fkm", units[i].name, units[i].tn, units[i].side,
+                    units[i].d / 1000)
+            end
+            logi("BTRs by distance from ownship: " .. table.concat(listed, " "))
+        else
+            logi("ownship position unknown -- falling back to scan order, which may pair wrongly")
+        end
+
+        --: A pair kilometres apart is a selection failure, not a long
+        --: sightline. Skip the geometry rather than firing a ray across the
+        --: theatre; the AI half can still run.
+        local sep = math.sqrt(
+            (units[1].x - units[2].x) ^ 2 + (units[1].z - units[2].z) ^ 2
+        )
+        if sep > 2000 then
+            logi(
+                string.format(
+                    "SELECTION FAILED: nearest two BTRs are %.0f m apart, which is not a pair"
+                        .. " placed in one forest -- sightline steps skipped",
+                    sep
+                )
+            )
+            phase = "done"
+            logi("=== probe end (no usable pair) ===")
+            return
+        end
         local sideNote = (units[1].side == units[2].side)
             and (" SAME COALITION (side"
                 .. units[1].side
@@ -406,7 +489,7 @@ return string.format("OK|%.1f|%.1f", p.x, p.z)
                 units[2].tn,
                 units[2].x,
                 units[2].z,
-                sideNote
+                sideNote .. string.format(" -- %.0f m apart", sep)
             )
         )
         plan = buildPlan(units)
