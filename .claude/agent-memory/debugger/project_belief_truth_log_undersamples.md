@@ -33,3 +33,15 @@ reading a snapshot's footer.
 See `plans/sortie-2026-09-26-fixes/diagnosis.md` for the full reconciliation and the two defects
 this session diagnosed (crossing callouts firing for unseeable contacts; binoculars permanently
 locked out for a contact after one command-interrupted look).
+
+**Update, 2026-10-01 (`plans/group-undermerging/debug.md`):** the file also interleaves a second
+record `kind`, `"speech"` -- one row per actually-spoken `CrewConsole` line (`text`, `gaze_label`,
+`gaze_center_deg`, `optic_name`, `urgent`), not just the per-admission belief/truth rows above; a
+row has no `kind` key at all in the admission case, so filter on `d.get("kind") == "speech"` to
+separate the two shapes rather than assuming every line matches the admission schema. Also: this
+file (and its sibling `dcs-detection-trace.jsonl`) is opened in append mode across every logger
+launch within one test session, so one calendar day's file can hold many separate runs
+concatenated end to end -- `t_sim` resets to near-zero are the marker; split on those before
+computing anything that assumes one continuous flight (contact ids are reused per run, and
+cross-run filtering without this produces nonsensical same-timestamp, different-object_type
+results for one `contact_id`).

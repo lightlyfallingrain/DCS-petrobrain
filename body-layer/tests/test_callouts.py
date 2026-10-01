@@ -1469,6 +1469,51 @@ def test_progressive_disclosure_silent_until_composition_changes() -> None:
     assert any(line for line in spoken)
 
 
+def test_opening_range_alone_does_not_re_speak_the_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-10-01 sortie defect, `plans/group-undermerging/debug.md`'s
+    second finding -- the user's own words, flying away from an
+    already-fully-reported group: *"while it probably is caused by
+    distance changing, that's still constant reports that add no value...
+    repeating the whole group composition every time adds noise."* Six
+    real spoken lines from that sortie were byte-identical except for the
+    range clause, re-triggered roughly every 500 m of opening range.
+
+    Reproduced here by moving *ownship* (not the contacts) between calls
+    -- the fixture's faked `project_terrain_aware` always returns its
+    `observer` argument unchanged, so a contact's own fused position does
+    not move the rendered range under this fake (confirmed directly: see
+    `plans/group-undermerging/debug.md`); `relative_geometry`'s live
+    ownship term is the one lever that does. Composition does not change
+    at all. A pre-fix scheduler re-speaks the identical composition with
+    a new range clause every time ownship opens enough to cross a range
+    bucket; the fix must stay silent."""
+    near_enrichment = _enrichment_context(monkeypatch)  # also installs the fakes
+    store = ContactStore()
+    _cohering_group(store)
+    scheduler = CalloutScheduler()
+    first = scheduler.tick(store, now_sim=0.0, enrichment=near_enrichment)
+    assert first != []
+    assert first[0].startswith("Group,")
+
+    store.tick(now_sim=5.0)
+    far_enrichment = EnrichmentContext(
+        conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=-2000.0)
+    )
+
+    # Opening range alone must not resurrect the group as a live
+    # candidate -- drained across several ticks (well past any single
+    # speaking budget) to rule out a timing fluke, not just one lucky
+    # sample.
+    spoken = (
+        scheduler.tick(store, now_sim=5.0, enrichment=far_enrichment)
+        + scheduler.tick(store, now_sim=11.0, enrichment=far_enrichment)
+        + scheduler.tick(store, now_sim=17.0, enrichment=far_enrichment)
+    )
+    assert spoken == []
+
+
 def test_two_groups_changed_in_the_same_tick_one_speaks_the_other_stays_live() -> None:
     """§4's sixth bullet: two groups changed in the same tick -- exactly
     one speaks; the other is still a live candidate next tick (not lost,

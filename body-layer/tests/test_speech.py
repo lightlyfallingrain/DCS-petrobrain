@@ -1345,6 +1345,52 @@ def test_render_group_disclosure_appends_clock_range_from_nearest_member(
     assert speech.text.endswith("o'clock, very close.")
 
 
+def test_render_group_disclosure_content_signature_excludes_clock_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/group-undermerging/debug.md`'s second finding: `text` carries
+    the clock/range clause, but `content_signature` must not -- that is
+    the whole fix, since `CalloutScheduler` compares the signature, not
+    `text`, to decide whether a group has anything new to say.
+
+    Moves *ownship* between the two calls, not the contacts -- `relative_
+    geometry` (the live, never-cached half of enrichment) reads current
+    ownship, while this test's faked `project_terrain_aware` always
+    returns its `observer` argument unchanged regardless of contact
+    position, so moving a contact's own fused position would not be
+    reflected in the rendered range at all under this fake."""
+    _enrichment_context(monkeypatch)  # installs the describe_position/
+    # project_terrain_aware fakes; its own fixed-ownship instance is not
+    # reused below.
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+
+    near = render_group_disclosure(
+        store,
+        group,
+        now_sim=0.0,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship()
+        ),
+    )
+    assert near is not None
+    assert near.text.startswith("Group, ")
+
+    far = render_group_disclosure(
+        store,
+        group,
+        now_sim=1.0,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=50_000.0)
+        ),
+    )
+
+    assert far is not None
+    assert far.text != near.text
+    assert far.content_signature == near.content_signature == "Group."
+
+
 def test_render_group_disclosure_appends_watched_when_any_member_is_watched() -> None:
     store, group = _cohering_group_store(
         [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
