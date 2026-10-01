@@ -19,3 +19,5 @@ Write directly to this directory — it already exists, no need to create it or 
 
 - [Group cohesion redesign: reassign not accumulate](project_group_cohesion_reassign_not_accumulate.md) — new Group.last_spoken_* fields checked clean (reassigned, not unioned); installation_component fails closed.
 - [Player bubble trace is local debug artifact](project_player_bubble_trace_is_local_debug_artifact.md) — PLAYER_BUBBLE trace row records a filtered-out unit but stays local-disk/read-only-join, no belief/network path; checked 2026-10-02.
+- [BL-B23 contact-store-pruning security approved](project_bl_b23_contact_store_pruning_security_approved.md) — lost-contact clustering filter verified clean: memory unaffected, no false-departed claim; APPROVED 2026-10-02.
+- [BL-B23 memory-vs-clustering-filter pattern](project_bl_b23_memory_vs_clustering_filter_pattern.md) — reusable check for future "filter input to O(n^2) consumer" perf fixes: trace unfiltered store stays readable, confirm consumer stays silent on shrink.
