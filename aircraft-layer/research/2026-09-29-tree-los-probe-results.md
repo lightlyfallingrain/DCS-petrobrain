@@ -22,11 +22,20 @@
 scenery. So `clear = building_clear and terrain_clear` in `plans/dcs-driven-los/plan.md` is
 correct, and its Stage 3 does not collapse.
 
-**What that means for the design:** terrain and buildings come from DCS (measured, cheap, exact);
-**trees must come from OSM `landcover`**, which world-model already holds — 44,811 polygons. That
-was the plan's pre-decided fallback and it now rests on measurement rather than on absence of
-evidence. Findings 8–9 carry the reasoning for why the engine's own tree-aware path cannot be
-borrowed, including a design tension worth knowing before anyone tries.
+**3. But DCS's own tree placement data is on disk, and it is not OSM.** `Mods/terrains/<Theatre>/
+surfaceDetails/` carries a vegetation table in the **same columnar grammar already cracked for
+`.surface5`** — 276,924 records for Syria with position, orientation, seed and species index. You
+cannot *call* DCS's tree-LOS, but you may be able to reconstruct its input and run the test
+locally. **Finding 10** has the layout, the one unknown that could sink it, and the effort. Filed
+as `X-B32`; investigation continues.
+
+**What that means for the design:** terrain and buildings come from DCS (measured, cheap, exact).
+Trees come from **either** OSM `landcover` — 44,811 polygons world-model already holds, a
+statistical model, honest for forest but unable to say "this sightline is blocked and the one ten
+metres left is not" — **or**, if Finding 10 resolves, DCS's own discrete vegetation placement,
+which is exactly the treeline-along-a-road case the user raised. Findings 8–9 carry why the
+engine's own tree-aware path cannot be borrowed, including a design tension worth knowing before
+anyone tries.
 
 **What was NOT tested, deliberately:** whether ground-unit `isTargetDetected` is tree-aware (the
 forum "ground units see through trees" claim). The probe for it is written and the geometry is
@@ -198,6 +207,56 @@ measurement rather than on absence of evidence.
 *were* machine-readable, consuming it would run against the standing direction to stop taking DCS's
 detection output and model perception ourselves. So this route is not merely unavailable — it is
 also against the grain of the design.
+
+**10. DCS ships its vegetation placement as data, in a container this project has already
+decoded. This is the live lead.**
+
+- **evidence: reproduced-locally (parsed on this box, 2026-10-01)** — **source:**
+  `Mods/terrains/Syria/surfaceDetails/`.
+- The directory was missed in every earlier pass because the search terms were about *LOS*, not
+  about vegetation as a data layer. It holds:
+  - **`Trees.StructTable.sht`** — **plain Lua text**, declaring 13 species (`ItalianCypress`,
+    `Juniperus`, `Orange`, `Palm1`, `PineItalian1/2`, `Platan`, `Salsola`, `Snakeweed`,
+    `Anabasis_setifera`, `Mandal2`, …) with `life = 20`, `classname = "lStandartStructure"`,
+    `positioning = "ONLYHEIGTH"`, `rotation = "VERTICAL"`.
+  - 11 `.ref` files — the per-species models.
+  - **`Syria.sd5`**, 8,863,144 bytes, header **`landscape4::SurfaceDetails5File`** — the **same
+    self-describing columnar grammar** as `Syria.surface5`, which
+    `world-model/tools/probe_surface5_elevation.py` already walks.
+
+- **The field table parses cleanly and self-consistently:**
+
+  | column | type | elem size | count (bytes) | records |
+  |---|---|---|---|---|
+  | `P` | 2 | 12 | 3,323,088 | 276,924 |
+  | `AXISX` | 1 | 8 | 2,215,392 | 276,924 |
+  | `SEED` | 0 | 4 | 1,107,696 | 276,924 |
+  | `reference` | 4 | 4 | 1,107,696 | 276,924 |
+  | `splatlayer` | 4 | 4 | 1,107,696 | 276,924 |
+
+  All five agree exactly at **276,924 records**, offsets are contiguous
+  (`0 → 0x32b4d0 → 0x5482b0 → 0x6569a0 → 0x765090`), and 276,924 × 32 bytes + a 1,576-byte header
+  reproduces the file size. The decode is not in doubt.
+
+- **THE UNKNOWN THAT COULD SINK IT: `P` is normalised, not world coordinates.** Sampled values are
+  all in **[0, 1] with y = 0** — tile-local fractions. **The tile mapping is not in this file**, and
+  without it there are 276,924 offsets with no idea where they sit. That is the thing to find.
+- **A second caution, pointing the same way:** 276,924 records over Syria's ~545,000 km² is
+  **0.5 per km²** — far too sparse to be individual trees. Together with a `SEED` column, these are
+  almost certainly **vegetation patch seeds** that the engine expands procedurally. So even with the
+  mapping, the likely yield is patch centres and extents, not trunks.
+- **That may still clear the bar.** The user's requirement is explicitly *"We don't need to know
+  individual tree placement... but need to know if they block LOS."* Patch centres with extents are
+  a **discrete** occluder, which is the thing OSM polygons cannot be.
+- **Effort.** The container grammar is already decoded and this file is **3,400× smaller** than
+  `.surface5`, whose node index fell in an afternoon. The remaining work is: find the tile mapping
+  (the real risk — hours, or a dead end); resolve `reference` → crown radius/height per species
+  (from the `.ref` models, or measured once in-game, or approximated per species); index spatially
+  (world-model already has R*Tree); then LOS is our own cylinder intersection along the sightline,
+  computed locally and offline — **no bridge, no per-call cost, available to the Mission Interpreter
+  as well as in flight**.
+- `reference` shows only **5 distinct values** in a sample against 13 declared species, so either
+  Syria uses a subset or the index means something else. Unresolved, and cheap to settle.
 
 ### The weakness in Finding 2, stated plainly
 
