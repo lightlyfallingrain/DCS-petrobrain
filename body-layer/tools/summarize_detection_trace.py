@@ -74,7 +74,14 @@ def summarize(records: list[dict[str, Any]]) -> dict[int, _ObjectSummary]:
             _ObjectSummary(object_id=object_id, object_type=str(record["object_type"])),
         )
         outcome = record["outcome"]
-        if outcome != "cockpit_mask":
+        # "player_bubble" rows are recorded before check_visibility (and so
+        # before the cockpit mask gate) ever ran for that candidate -- see
+        # `detection_trace.GateOutcome.PLAYER_BUBBLE`'s own docstring.
+        # Treating that as "cleared the mask" would put a candidate the
+        # player bubble dropped on this tool's "plausibly on screen but
+        # never admitted" list, which it was never actually a candidate
+        # for.
+        if outcome not in ("cockpit_mask", "player_bubble"):
             summary.cleared_cockpit_mask = True
         if outcome == "admitted":
             summary.ever_admitted = True
