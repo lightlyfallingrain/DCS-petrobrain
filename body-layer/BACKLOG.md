@@ -804,3 +804,11 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Fix shape: filter `reconcile`'s input by lifecycle or age before clustering, rather than pruning
   the store itself — a LOST contact is still memory Petrovich should have, so dropping the record
   is the wrong move; excluding it from *clustering* is the right one.
+
+  **Player-bubble interaction (`plans/player-bubble/performance.md`, 2026-10-02, MONITOR):** the
+  10 km player bubble filters the *candidate* pool, not admitted contacts, and nothing beyond
+  `NAKED_EYE_RANGE_CAP_M` (10 km, same value as the bubble today) could ever have reached
+  `ContactStore` before the bubble existed either — so the bubble **does not reduce the rate at
+  which `ContactStore` accumulates**. Whoever measures this backlog item should not assume the
+  bubble changed the baseline; it will only start doing so once `NAKED_EYE_RANGE_CAP_M` and
+  `PLAYER_BUBBLE_RADIUS_M` diverge (9K113 sight).

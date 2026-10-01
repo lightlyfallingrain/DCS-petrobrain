@@ -605,3 +605,25 @@ two functions that must agree (2026-09-19).
   the design against them directly (not the inferred rules) reversed one branch (leader change:
   full → delta) and found the indefinite-article defect, since every worked example renders class
   nouns bare (`plans/group-cohesion-redesign/plan.md` §4, `explore-notes-delta-taxonomy.md`).
+- **A filter that duplicates an existing, cheaper gate can measure near-zero end-to-end saving and
+  still be the right thing to ship — the measurement and the decision answer different questions.**
+  The 10 km player bubble excludes 76.6% of raw candidates in a real sortie trace, but both
+  perception channels already had their own range gate at or below that radius
+  (`NAKED_EYE_RANGE_CAP_M` = 10 000 m, `associate()`'s `RANGE_CAP_M` = 5 000 m, stricter), so the
+  expensive work those candidates would have reached (terrain-LOS, ~540 us/candidate) was already
+  unreachable before this feature existed. Measured end-to-end saving: 0.955 ms/tick, ~1.4%. The
+  implementation's own docstrings were already honest that this is a *computation-scope* decision
+  ("not measured, deliberately"), not a discovered perf win — Performance Review's job here was to
+  put a number on that so nobody later cites "76.6% excluded" as the feature's payoff. The real
+  payoff is structural and future: keeping the two constants independent (rather than folding the
+  bubble into `NAKED_EYE_RANGE_CAP_M`) is what lets the bubble start mattering once the 9K113
+  sight's 20 km cone makes them diverge (`plans/player-bubble/performance.md`, 2026-10-02).
+- **When two constants legitimately share a value today but must stay independent, test the
+  import/namespace relationship, not the numeric equality.** `PLAYER_BUBBLE_RADIUS_M` and
+  `NAKED_EYE_RANGE_CAP_M` are both `10000.0` right now, by coincidence, and are required to diverge
+  later (9K113 sight). A value-equality assertion either direction would be meaningless noise; the
+  actual guard needed is `dir()`-namespace checks that neither module imports the other's constant
+  by name (`test_player_bubble_radius_is_not_imported_from_visibility` and its pair) — this catches
+  a direct aliasing import but not a value-derivation form (`CONST = other_module.OTHER_CONST`),
+  a residual gap the Reviewer flagged as acceptable to leave open until the 9K113 work actually
+  touches either constant (`plans/player-bubble/implementation.md`, `review.md`).
