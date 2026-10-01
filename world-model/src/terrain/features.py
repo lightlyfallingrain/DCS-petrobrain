@@ -127,6 +127,52 @@ def _chaikin_smooth(points: list[Point], iterations: int) -> list[Point]:
     return current
 
 
+def _chaikin_smooth_with_support(
+    points: list[Point], iterations: int
+) -> tuple[list[Point], list[tuple[int, int]]]:
+    """Same construction as `_chaikin_smooth` (kept separate rather than
+    merged so `_chaikin_smooth`'s own existing tests stay exercising the
+    plain function), but also tracks, for every output point, the
+    inclusive `(lo, hi)` range of *original* `points` indices whose convex
+    combination produced it.
+
+    This is what lets `_smooth_for_storage`'s deviation check compare each
+    smoothed point against only its own local slice of the original
+    polyline instead of scanning the whole thing -- the O(line_length^2)
+    cost `plans/landform-geomorphons/performance.md` measured at 92% of
+    per-tile time (`distance_point_polyline` called against every original
+    segment, for every one of the ~16x as many smoothed points, for every
+    line). A Chaikin point is always a convex combination of a small,
+    iteration-bounded window of consecutive original points -- each pass
+    replaces an edge `(c_i, c_{i+1})` with two points that are each convex
+    combinations of `c_i` and `c_{i+1}` alone, so a point's support can
+    only grow by merging its two parents' ranges, never jump outside them.
+    At `DEFAULT_CHAIKIN_ITERATIONS=4` that window stays a handful of
+    points wide regardless of how long the original line is, turning the
+    per-point check from O(line_length) into O(1) and the whole deviation
+    check from O(line_length^2) into O(line_length)."""
+    current = points
+    support = [(i, i) for i in range(len(points))]
+    for _ in range(iterations):
+        if len(current) < 3:
+            break
+        new_points: list[Point] = [current[0]]
+        new_support: list[tuple[int, int]] = [support[0]]
+        for i in range(len(current) - 1):
+            (x0, z0), (x1, z1) = current[i], current[i + 1]
+            lo = min(support[i][0], support[i + 1][0])
+            hi = max(support[i][1], support[i + 1][1])
+            new_points.append((0.75 * x0 + 0.25 * x1, 0.75 * z0 + 0.25 * z1))
+            new_support.append((lo, hi))
+            new_points.append((0.25 * x0 + 0.75 * x1, 0.25 * z0 + 0.75 * z1))
+            new_support.append((lo, hi))
+        new_points.append(current[-1])
+        new_support.append(support[-1])
+        current = new_points
+        support = new_support
+    return current, support
+
+
 def _smooth_for_storage(
     points: list[Point],
     position_uncertainty_m: float,
@@ -139,13 +185,25 @@ def _smooth_for_storage(
     half a grid cell (`_MAX_SMOOTHING_DEVIATION_FRACTION *
     position_uncertainty_m`) -- a belt-and-suspenders fallback, not an
     assumption that Chaikin's structural bound always holds for every
-    input shape."""
+    input shape.
+
+    The deviation check compares each smoothed point only against the
+    local slice of `points` it was actually constructed from
+    (`_chaikin_smooth_with_support`'s per-point support window), not the
+    whole original polyline -- see that function's docstring. Checking a
+    (correct, construction-exact) subset of segments can only ever report
+    a deviation greater than or equal to the true whole-polyline minimum
+    distance, never less, so this can only make the fallback trigger in
+    cases the full scan would also have triggered (or, in principle, a
+    pathological case the full scan would not have) -- it never accepts a
+    smoothing the full scan would have rejected."""
     if len(points) < 3:
         return points
-    smoothed = _chaikin_smooth(points, iterations)
-    max_deviation_m = max(distance_point_polyline(p, points) for p in smoothed)
-    if max_deviation_m > _MAX_SMOOTHING_DEVIATION_FRACTION * position_uncertainty_m:
-        return points
+    smoothed, support = _chaikin_smooth_with_support(points, iterations)
+    cap_m = _MAX_SMOOTHING_DEVIATION_FRACTION * position_uncertainty_m
+    for point, (lo, hi) in zip(smoothed, support, strict=True):
+        if distance_point_polyline(point, points[lo : hi + 1]) > cap_m:
+            return points
     return smoothed
 
 

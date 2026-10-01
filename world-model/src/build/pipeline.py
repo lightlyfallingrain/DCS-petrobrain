@@ -108,7 +108,7 @@ from probe_store.writer import (
 )
 from roadnet.junctions import DEFAULT_JUNCTION_MIN_DEGREE, DEFAULT_JUNCTION_TOLERANCE_M
 from store.chunks import CHUNK_SIZE_M
-from store.models import Region, Source
+from store.models import Region, Source, StoredFeature
 from store.reader import load_only_region
 from store.schema import SCHEMA_VERSION as BASE_SCHEMA_VERSION
 from store.schema import check_schema_version
@@ -721,16 +721,36 @@ def build_region(
                 "tile(s)",
                 8,
             ):
-                terrain_features, terrain_stats = ingest_terrain(
+
+                def _flush_terrain_tile(tile_features: list[StoredFeature]) -> None:
+                    # One `insert_features` call (one SQLite transaction)
+                    # per tile, not one call over the whole theatre's
+                    # features -- `ingest_terrain`'s own docstring and
+                    # `plans/landform-geomorphons/performance.md`'s
+                    # blocking memory finding. Mirrors the OSM
+                    # streaming-ingest `_flush_nodes`/`_flush_ways`/
+                    # `_flush_areas` callbacks above: safe because
+                    # `open_for_build` always deletes-and-recreates
+                    # `out_path` from scratch, so a crash partway through
+                    # this stage never leaves stale partial terrain data
+                    # mistaken for a complete build -- the next build
+                    # overwrites `out_path` entirely rather than resuming
+                    # it. (The terrain *cache* at `terrain_cache_store_
+                    # path` is the one place resumption is meaningful, and
+                    # it already tracks per-tile completion independently
+                    # of this store.)
+                    insert_features(conn, tile_features)
+                    for f in tile_features:
+                        report.feature_counts[f.kind] += 1
+
+                terrain_stats = ingest_terrain(
                     existing_srtm_tile_paths,
                     region.theatre,
                     region,
                     terrain_cache_store_path(out_path),
                     elevation_source_id,
+                    _flush_terrain_tile,
                 )
-                insert_features(conn, terrain_features)
-                for f in terrain_features:
-                    report.feature_counts[f.kind] += 1
                 report.terrain_stats = terrain_stats
         else:
             report.terrain_skipped = True
