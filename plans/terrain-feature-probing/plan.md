@@ -175,10 +175,20 @@ is correcting shipped, currently-wrong output, not speculative scope.
 ### What survives from Stages 1–2 and what is superseded
 
 - **Survives unmodified**: the pipeline un-gating (`ingest_terrain` now runs against whichever
-  `elevation` grid is present, not only a DCS probe grid) and the **500 m storage/processing
-  spacing decision** — the 2026-09-29 sweep's finding that finer spacing reproduces the same
-  checkerboard at higher density, not a cleaner signal, still holds; Option C's smoothing step
-  operates on this same 500 m grid rather than needing a different spacing.
+  `elevation` grid is present, not only a DCS probe grid).
+- **Reopened — processing spacing is a swept knob again, not an inherited decision** (user,
+  2026-10-01: *"grid size, I agree, investigate what gives good results and use that"*). This
+  revision originally carried 500 m forward on the 2026-09-29 sweep's finding that finer spacing
+  reproduced the same checkerboard at higher density. **That finding is about the Laplacian**, and
+  transferring it to a different mechanism is exactly the kind of inherited-premise error this
+  project keeps paying for. The specific worry: a sharp 500 m-wide V-notch — the "sharp and/or
+  high" form the Explore conversation says is the meaningful kind — is *one cell* at 500 m, so
+  watershed seeding may resolve it where per-cell curvature could not. Sweep processing spacing
+  (500 m / 250 m / 100 m, SRTM is 30–90 m native and already on disk) alongside the smoothing
+  window in Stage 1, and record what was chosen and why. **Storage spacing remains a separate
+  decision from processing spacing** — a fine transient processing grid can emit only the
+  `LineString` features while the stored grid stays coarse; `grid_sample` sizing is 12.2 MB at
+  1000 m, ~210 MB at 250 m, ~1.3 GB at 100 m of a 589 MB store.
 - **Superseded, not reverted**: `curvature.py`'s per-cell discrete-Laplacian classification and its
   `DEFAULT_CURVATURE_THRESHOLD_M = 20.0` tuning. These were real, checked work (the 500 m/threshold
   cross-validation against M6's DCS-probe-derived components was a genuine finding), but the
@@ -228,7 +238,8 @@ is correcting shipped, currently-wrong output, not speculative scope.
    region if one can be built region-scoped (the Baalbek SRTM tiles used for the 2026-10-01
    inspection's full-theatre render) — the Bekaa case needs its own region-scoped check since it is
    the concrete, falsifiable form of the width gate. Sweep smoothing-window radius and the relief/
-   width thresholds, rendering each with the updated `inspect_terrain.py`, exactly as Stages 1–2
+   width thresholds AND the processing spacing (500 m / 250 m / 100 m), rendering each with the
+   updated `inspect_terrain.py`, exactly as Stages 1–2
    originally did for the curvature threshold. **Acceptance, checkable without a sortie**: (a)
    fragmentation and sinuosity numbers recomputed over the new output are materially better than
    the 2026-10-01 baseline (75 %/70 % under-15-cells, sinuosity 2.17/2.21); (b) no ridge is paired
@@ -298,7 +309,19 @@ plan's starting position: `signed_side_of_polyline` and the ordered `LineString`
 apply unchanged to Option C's output, and that plan now additionally inherits a real basin-
 adjacency graph instead of having to build one from scratch when ray-ordering work begins.
 
-### Decisions Requiring User Input
+### Decisions Requiring User Input — all settled 2026-10-01
+
+Both items below were put to the user and answered the same day; they are kept here with their
+answers rather than deleted, so the fork and its resolution stay on the record.
+
+- **SETTLED, confirmed:** Option C (marker-controlled watershed) is the mechanism. User: *"1
+  confirmed."*
+- **SETTLED, approved:** the three test modules are rewritten rather than extended. User: *"2
+  yes."*
+- **SETTLED, reopened in this plan's favour:** processing spacing is swept in Stage 1 rather than
+  inherited from the curvature-era decision — see "What survives from Stages 1–2" above.
+
+The original statements of the two decisions follow.
 
 - **Confirm Option C (marker-controlled watershed) over Option A (smoothed multi-scale curvature)
   and Option B (full D8 hydrology) as the replacement mechanism.** This architect's recommendation
