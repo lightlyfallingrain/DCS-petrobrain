@@ -466,6 +466,44 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   (*"at the foot of the hill"*, *"next valley"*) or navigation phrasing once Petrovich flies. Until
   then this is unbuilt capability, not a defect in anything shipping.
 
+  **The approach to try when it reopens — user's own, 2026-10-01, and it reframes the problem:**
+
+  > *"You did create those shadow mapped terrain elevation images. That* **is** *the data. It*
+  > **shows** *the ridges and valleys. If that was directly from the SRTM data that is on the disk,
+  > we can use that as the source. ... can we just use the SRTM source, parse ridge/valley data from
+  > it, as precise as it allows, and save the finished (smoothed) lines to world model. That'd
+  > remove a whole lot of elevation data that we don't particularly need and replace it with terrain
+  > features data that we actually do need. The ridge/valley lines would obviously have to carry
+  > elevation data with them."*
+
+  The hillshade renders that produced this judgement were built straight from the raw `.hgt` tiles
+  at ~90 m, sampled in DCS x/z — not from the stored 500 m grid. **So the detector has been run at
+  one fifth of the resolution the source already offers, for no reason except that the pipeline
+  happened to detect off the stored grid.** Detect at native SRTM resolution, store only the
+  resulting lines with their elevation profile. The plan always allowed processing spacing and
+  storage spacing to differ; nothing ever acted on it.
+
+  Two corrections to the storage half of the argument, neither fatal to it:
+
+  - **The elevation grid cannot be removed outright.** `query.line_of_sight.line_of_sight_clear`
+    samples it directly, point by point along the sightline — deleting it breaks LOS, which is a
+    shipped consumer. What the proposal removes is the need to ingest a *finer* grid, which is real:
+    nobody has to store a 250 m or 100 m mesh to get fine features.
+  - **The storage saving is smaller than it looks.** Measured on the real `syria-full.sqlite`
+    (608 MB): `grid_sample` is **49 MB**, while `feature` is **576 MB**. The elevation grid is ~8 %
+    of the store; OSM features are the bulk. So this is worth doing for **quality**, not for disk.
+
+  What this does not answer, and must not be assumed away: the user's judgement was that the
+  *output* is wrong, and a human eye reading a hillshade is doing the detection that the code has
+  to do by itself. Native resolution supplies the signal; it does not supply the algorithm. The
+  sparse-valleys-in-steep-terrain finding above is still unexplained and is the most likely root.
+
+  Memory is the practical constraint and has a known shape: the spike measured ~38 GB extrapolated
+  at 100 m theatre-wide, from nested Python lists and a per-cell dict in `grow_basins`. **Tile-wise
+  processing with overlapping margins** — SRTM's own 1° tiles are the natural unit — bounds that by
+  construction and is the obvious way in, since the output is per-feature lines rather than a
+  global grid.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
