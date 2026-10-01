@@ -563,45 +563,41 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     counted from *its own* arrival -- polled here every second, the way
     `logger.py`'s poll loop actually calls `drain_events`.
 
-    **Superseded by the unit-width cohesion backstop** (`belief.groups`'s
-    `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS`, replacing the old flat-metre
-    backstop that only guarded n=2 -- the n>=3 risk `plans/group-reporting/
-    review.md` flagged this exact test as pinning). Before that fix, this
-    fixture's own geometry -- every detection within a few
-    hundred metres of every other, nothing else tracked in the whole scene
-    -- was exactly the unbounded "sparse desert" case: the relative-gap
-    rule alone merged all five objects (three infantry, the BTR-70, the
-    truck) into one composite `Group`, regardless of unit type, and this
-    test used to pin that as "the real, current behaviour" without
-    endorsing it. It no longer happens: the backstop bounds each pair's
-    cohesion by their own believed size (infantry, 1.8 m, backstop
-    `20.0 * 1.8 = 36` m; the BTR-70/truck are 7 m/6 m and far larger
-    relative to the infantry's own scale), so only genuinely close,
-    same-scale pairs still cohere.
-
-    **Confirmed by print-instrumenting this test's own `spoken`/`store.
-    contacts`/`store.groups` while updating it, not guessed.** Only two
-    same-position coincidences (`OBS_1`/`OBS_3` at clock 12, and `OBS_5`/
-    `OBS_6` at clock 2 -- both literally the same point, 0 m apart) form
-    persisted pairs (`GROUP_1`, `GROUP_2`); the third infantry detection
-    (`OBS_2`, ~260 m from `OBS_1`/`OBS_3`, past the 36 m infantry backstop)
-    stays its own ungrouped `Contact` and speaks its own individual report
-    line; the BTR-70 and truck stay ungrouped entirely. Four lines still
-    come out, but through a different mix than before: one individual
-    infantry report, the BTR-70's own identification, the truck's own
-    identification, and `GROUP_2`'s pair disclosure. `GROUP_1`'s own
-    disclosure (`"Pair of infantry, 1 o'clock, very close."`) never wins a
-    speaking slot in this fixture's polled window -- confirmed by tracing
-    `scheduler.tick`'s per-poll output directly, it consistently loses the
-    same-tick priority contest to a fresher-arriving candidate (the
-    infantry singleton at t=0, the BTR-70 identification at t=4, the truck
-    identification at t=9) and no tick after t=9 offers it an otherwise-
-    empty slot before the fixture's window ends at t=18 -- a pre-existing
-    scheduler contention property this fix does not touch, not a new
-    regression; `belief.groups`'s own "groups need no expiry" design means
-    it remains a live, eligible candidate indefinitely, just never speaks
-    within this fixture's own 18 s. This test pins the real, current
-    behaviour."""
+    **Rewritten for `plans/group-cohesion-redesign/plan.md`'s infantry
+    `EAGER` release (user-confirmed, 2026-10-01: "the infantry pair now
+    merges") -- confirmed by running this fixture, not guessed, and the
+    actual result is wider than a literal "the infantry pair merges"
+    reading.** `OP_INFANTRY` dropping its backstop entirely (`belief.groups.
+    CohesionBackstop.EAGER`) does not only merge infantry with infantry:
+    single-link chaining means an infantry-involving edge with *no*
+    backstop at all can bridge two *non*-infantry members that would not
+    themselves clear the ordinary backstop (`belief.groups`'s own
+    `_cluster_contacts` docstring already documents this "convoy coheres
+    end-to-end" property; `tests/test_groups.py::test_infantry_eager_
+    policy_bridges_a_non_infantry_pair_that_would_not_merge_alone` pins it
+    directly at the smallest scale). In this fixture's own geometry (every
+    detection within a few hundred metres of every other, only ~7 contacts
+    in the whole scene), that bridging pulls the first three infantry
+    (`OBS_1`/`OBS_2`/`OBS_3`), the BTR-70, and the truck into *one* five-
+    member group once the truck differentiates at t=8 -- not a bounded
+    infantry-only pair/triple. The two infantry arriving later (`OBS_5`/
+    `OBS_6`, t=12) then join that same existing group *silently*: a repeat
+    of an already-known non-air-defence class (infantry) is exactly the
+    delta taxonomy's "one more makes no difference" branch (`plans/
+    group-cohesion-redesign/plan.md` §4) -- their own `CONTACT_DETECTED`
+    events are also suppressed once grouped (`belief/callouts.py`'s own
+    docstring: only `CONTACT_DETECTED`/`CONTACT_REACQUIRED` are filtered
+    for a grouped contact), so nothing is ever spoken for them. Four lines
+    still come out, through a genuinely different mix than either the
+    pre-cohesion-redesign backstop-bounded behaviour or a naive "just the
+    infantry pair merges" guess: one individual infantry report (the
+    scheduler's same pre-existing same-tick priority-contention property
+    the old docstring already described -- which member wins is not this
+    test's claim), the BTR-70's own identification, the five-member
+    group's one full disclosure (first-ever, so full per the delta
+    taxonomy), and the truck's own identification. Confirmed by actually
+    running this fixture against the implementation, not predicted from
+    the mechanism alone. This test pins the real, current behaviour."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
@@ -766,8 +762,8 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     assert spoken == [
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
+        "Three infantry, a BTR-70 and a truck, 1 o'clock, very close.",
         "unit 12 o'clock, very close is truck.",
-        "Pair of infantry, 2 o'clock, very close.",
     ]
 
 

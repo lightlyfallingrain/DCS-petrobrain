@@ -106,7 +106,19 @@ class ObjectTypeProfile:
     rather than a per-type value on all ~150 rows: fabricating a
     distinctiveness for every row is exactly the failure mode that
     produced the S-300's 5.0 m generic size in the first place.
-    """
+
+    `installation_component`: `True` when this profile's real system is one
+    component (radar, launcher) of a fixed, multi-component air-defence
+    site -- `plans/group-cohesion-redesign/plan.md` §1. **Deliberately not
+    keyed off `op_class`**: `op_class="OP_SRSAM"` conflates the genuine
+    fixed S-125 (SA-3) site with four single-vehicle systems (Osa/SA-8,
+    Strela-10/SA-13, Strela-1/SA-9, Tor/SA-15) that are each their own
+    radar+launcher and must stay excluded from the installation cohesion
+    rule entirely (`belief.groups`'s own per-pair backstop selection) --
+    an `op_class`-keyed set would merge an Osa and an S-125 launcher sitting
+    a few hundred metres apart as "one installation," which is exactly what
+    the settled single-vehicle exclusion forbids. `False` (the default) for
+    every row not named otherwise, so no existing entry needs an edit."""
 
     size_m: float
     op_class: str
@@ -114,6 +126,7 @@ class ObjectTypeProfile:
     width_m: float | None = None
     height_m: float | None = None
     distinctiveness: float | None = None
+    installation_component: bool = False
 
 
 def apparent_extent_m(profile: ObjectTypeProfile, aspect_deg: float | None) -> float:
@@ -222,8 +235,21 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     # ("5p73 s-125 ln", "Kub 2P25 ln", "Tor 9A331", ...), which very rarely
     # contain the NATO "SA-N" designation as a literal substring. Verified
     # against 595 real DCS unit type names (research doc below).
-    ("s-125", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-3
-    ("kub ", ObjectTypeProfile(size_m=9.0, op_class="OP_MRSAM")),  # SA-6
+    # `installation_component=True`: both are genuine fixed, multi-component
+    # sites (central radar + separate launcher revetments) -- see
+    # `ObjectTypeProfile.installation_component`'s own docstring and
+    # `body-layer/research/2026-10-01-sam-site-geometry.md`. The four
+    # single-vehicle systems below (Osa/strela-10/strela-1/tor/chap_torm2)
+    # deliberately keep the field's `False` default -- each is its own
+    # radar+launcher, never a multi-component installation.
+    (
+        "s-125",
+        ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM", installation_component=True),
+    ),  # SA-3
+    (
+        "kub ",
+        ObjectTypeProfile(size_m=9.0, op_class="OP_MRSAM", installation_component=True),
+    ),  # SA-6
     ("osa", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-8
     # "strela-10" before "strela-1": "Strela-10M3" also contains "strela-1"
     # as a prefix, so the more specific SA-13 keyword must win first-match.

@@ -103,6 +103,7 @@ from belief.speech import (
     _format_range_km,
     _group_member_facts,
     _unit_type_display,
+    group_membership_state,
     render_contact_report,
     render_group_disclosure,
     route_event,
@@ -688,7 +689,29 @@ class CalloutScheduler:
                     # to the next candidate exactly as a vanished event
                     # candidate does.
                     continue
-                store.mark_group_spoken(candidate.id, content_signature, now_sim)
+                membership_state = group_membership_state(
+                    store, candidate, now_sim, enrichment
+                )
+                # `membership_state` re-gathers the same member facts
+                # `render_group_disclosure` just rendered against -- see
+                # that function's own docstring for why this is the
+                # existing double-gather pattern, not new duplication.
+                # `None` here would mean the group dissolved between the
+                # two calls; `speech` being non-`None` above makes that
+                # impossible within one `tick()`, so the assert documents
+                # the invariant rather than guessing past it.
+                assert membership_state is not None
+                member_contact_ids, leading_contact_id, differentiated = (
+                    membership_state
+                )
+                store.mark_group_spoken(
+                    candidate.id,
+                    content_signature,
+                    now_sim,
+                    member_contact_ids=member_contact_ids,
+                    leading_contact_id=leading_contact_id,
+                    differentiated=differentiated,
+                )
                 for member_event in store.unacknowledged_events:
                     if (
                         member_event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED)
