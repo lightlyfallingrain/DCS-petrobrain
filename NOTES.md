@@ -627,3 +627,20 @@ two functions that must agree (2026-09-19).
   a direct aliasing import but not a value-derivation form (`CONST = other_module.OTHER_CONST`),
   a residual gap the Reviewer flagged as acceptable to leave open until the 9K113 work actually
   touches either constant (`plans/player-bubble/implementation.md`, `review.md`).
+- **When a growth-path fix is found, the obvious wrong move is pruning the store — the right move
+  is excluding the stale records from the one expensive consumer.** `ContactStore` accumulated every
+  contact ever seen for the whole sortie, and the O(n²) cost was in `GroupStore.reconcile`'s
+  clustering, not in holding the records. Deleting `lost` contacts from `_contacts` would have fixed
+  the timing at the cost of memory Petrovich should still have (`describe_contact` must still answer
+  for a contact that went quiet ten minutes ago); filtering `reconcile`'s *input* to not-`lost`
+  fixed the same cost with no memory loss, reusing the existing `belief.decay` lifecycle ladder
+  rather than adding a new field (`BL-B23`, `plans/contact-store-pruning/implementation.md`).
+- **"The fix works" and "the cost is now bounded" are different claims, and a benchmark that
+  confirms the first can be silently read as confirming the second.** `BL-B23`'s fix made clustering
+  cost flat across a 55x range in *total contacts ever seen* (403 ms -> 1.4 ms at n=1200) — a real
+  fix for the defect it targeted. But clustering's cost is still exactly as quadratic as before
+  along the *live-contact-count* axis, by design (the filter changes which contacts are counted, not
+  the O(n²) algorithm over however many pass the filter): 20 live -> 0.15 ms, 300 -> 25 ms, 500 ->
+  70 ms, all simultaneously fresh. Performance Review caught this by sweeping a second axis the
+  implementer's own benchmark never varied, not by finding an error in what was measured
+  (`plans/contact-store-pruning/performance.md`).

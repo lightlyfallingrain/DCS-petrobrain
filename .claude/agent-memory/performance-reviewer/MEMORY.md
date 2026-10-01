@@ -21,3 +21,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Terrain watershed scaling](project_terrain_watershed_scaling.md) — full-theatre grow_basins+extract ~65-80s (vs 5.8s old curvature), 2GB RSS, mildly superlinear not linear; synthetic-terrain calibration trap noted.
 - [ContactStore never pruned](project_contact_store_never_pruned.md) — _contacts has no delete path; group reconcile runs over every contact ever seen, so O(n^2) cost grows with sortie length not live count.
 - [Player-bubble capped by existing gates](project_player_bubble_capped_by_existing_gates.md) — measured ~1.4% saving not ~77%; NAKED_EYE_RANGE_CAP_M/RANGE_CAP_M already rejected out-of-bubble candidates cheaply before LOS.
+- [Contact-store pruning live-count axis](project_contact_store_pruning_live_count_axis.md) — BL-B23 fixed total-ever-seen growth only; simultaneous-live-count clustering is still O(n^2), unchanged, MONITOR per the earlier cohesion finding.
