@@ -513,29 +513,29 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 29 Sep 2026</span>
+      <span>Derived from ROADMAP.md · 01 Oct 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems, one hundred and eighty-seven tracked items &mdash; and this
-      cycle was driven almost entirely by <strong>one pilot flying and saying what he heard</strong>.
-      A sortie produced five contact reports a minute for twenty-five minutes, the same sentence up
-      to seven times. The first diagnosis was wrong: the log showed clustering working correctly, so
-      the noise was not fragmentation but <strong>sheer contact count</strong> &mdash; fifty-two
-      individually-resolvable vehicles each earning their own callout, nearly all rendering the same
-      three words. Petrovich now speaks <strong>one line per group</strong>, escalating with range
-      and threat, and stays silent when nothing has changed. The same flight found insurgent AAA he
-      attacked and Petrovich never saw: the elevation grid's own measured error was burying real
-      units beneath modelled terrain, blocking line of sight permanently from every angle. Both are
-      merged and neither has been heard in the air.</p>
+    <p class="lede">Six subsystems, two hundred tracked items &mdash; and today the project
+      <strong>built something, proved it against the whole theatre, and then parked it on the
+      pilot's own eye</strong>. The new ridge/valley detector merged with both falsifiable checks
+      holding and sinuosity down from 2.2 to 1.2; then hillshade renders of the real output were put
+      side by side with the terrain they describe, and the verdict was that the detection itself is
+      wrong &mdash; <em>&ldquo;smoothing or finer grid does not solve that.&rdquo;</em> The whole
+      landform line is now parked behind one decision that replaces the mechanism: geomorphons,
+      classified then vectorised, chosen from rendered comparisons over a spike's own
+      recommendation. Elsewhere the group cohesion redesign cleared every gate there is and waits
+      on a flight, and the tree question closed with a clean negative: <strong>no DCS call sees
+      trees</strong>, so OSM landcover is the shipping answer rather than the fallback.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>115</b><span>Done</span></div>
-    <div class="count is-active"><b>9</b><span>In progress</span></div>
-    <div class="count is-open"><b>51</b><span>Open</span></div>
-    <div class="count is-hold"><b>12</b><span>Deferred</span></div>
-    <div class="count is-block"><b>2</b><span>Await you</span></div>
+    <div class="count is-done"><b>117</b><span>Done</span></div>
+    <div class="count is-active"><b>12</b><span>In progress</span></div>
+    <div class="count is-open"><b>56</b><span>Open</span></div>
+    <div class="count is-hold"><b>15</b><span>Deferred</span></div>
+    <div class="count is-block"><b>3</b><span>Await you</span></div>
   </div>
 
   <section>
@@ -547,12 +547,14 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>World Model</h3>
         <span class="path">world-model/</span>
         <div class="bar"><i style="width:97%"></i></div>
-        <span class="chip done">M0–M10 complete</span>
-        <p class="next">All query surfaces serving the Mission Interpreter over HTTP. A real sortie
-          found the elevation grid's own measured error (11.52&nbsp;m stddev, SRTM at 1000&nbsp;m)
-          burying units beneath modelled terrain; a tolerance sized to that figure shipped
-          2026-09-29. <b>Next:</b> real DCS elevation &mdash; whether by reading terrain files or
-          probing in flight is unresolved, and one measurement decides it.</p>
+        <span class="chip active">M0–M10 complete &mdash; the landform line parked today</span>
+        <p class="next">All query surfaces serving the Mission Interpreter over HTTP. The new
+          watershed ridge/valley detector merged today and the full-theatre build confirmed every
+          prediction it made &mdash; then the pilot looked at the output over a hillshade and judged
+          the detection itself wrong, which parks <b>the entire landform line</b> (smoothing, valley
+          boundaries, the three unbuilt callout stages). <b>Next:</b> nothing in this subproject is
+          actionable &mdash; the replacement mechanism is decided but deliberately not started, and
+          multi-theatre is the only other open milestone.</p>
         <span class="more">Details</span>
       </article>
 
@@ -561,11 +563,12 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <span class="path">aircraft-layer/</span>
         <div class="bar"><i style="width:95%"></i></div>
         <span class="chip done">Core complete, both new channels accepted</span>
-        <p class="next">Live DCS I/O stable since Sept 7. Both channels added this cycle &mdash;
-          per-unit velocity out of the mission sandbox, and the intercom trigger for push-to-talk
-          &mdash; flew and were accepted on 2026-09-23. <b>Next:</b> a damage and firing
-          channel &mdash; the probes that would have guessed at it flew 2026-09-25 and answered
-          instead.</p>
+        <p class="next">Live DCS I/O stable since Sept 7. The mission-scripting bridge is now
+          measured rather than feared: 568 units at a mean of 1.99&nbsp;ms, p99 8&nbsp;ms, about
+          2.6&nbsp;&micro;s an item &mdash; which is what makes batched work on the DCS side
+          affordable at all. <b>Next:</b> a damage and firing channel, and the bigger idea this
+          measurement unlocked &mdash; <b>DCS answering line of sight itself</b>, batched
+          collector-side, instead of our own grid approximating it.</p>
         <span class="more">Details</span>
       </article>
 
@@ -584,14 +587,14 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
         <div class="bar"><i style="width:93%"></i></div>
-        <span class="chip active">Grouping merged &mdash; and nothing since 09-24 has been heard in the air</span>
-        <p class="next">Petrovich now reports <b>one line per perceptual group</b> instead of one per
-          vehicle, escalating with range and threat and silent when nothing changed &mdash; the
-          answer to a sortie that produced five near-identical reports a minute. The confirm band
-          became answerable the same day (<code>cancel</code> &rarr; &ldquo;confirm&rdquo; had been
-          replying &ldquo;no such command&rdquo;). <b>Next:</b> fly it &mdash; four merged features
-          now ride one flight, and the group-boundary constant is a guess awaiting its first
-          evidence.</p>
+        <span class="chip active">Cohesion redesign through every gate &mdash; unmerged, unflown</span>
+        <p class="next">Grouping shipped last week; today's work is the correction to it. Cohesion is
+          now <b>size-relative and kind-aware</b> rather than one distance: infantry merge eagerly by
+          the pilot's own instruction, a real SAM site's components merge inside 500&nbsp;m, and a
+          re-arrival speaks a short delta instead of restating the roster. Reviewer, Security,
+          Performance and DoD all passed on <code>fix/group-undermerging</code>. <b>Next:</b> your
+          call &mdash; fly it from the branch, or merge it and fly it from <code>main</code> with
+          everything else outstanding.</p>
         <span class="more">Details</span>
       </article>
 
@@ -604,9 +607,10 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
           <code>qwen3:4b-instruct-2507-q4_K_M</code> behind it, with a body-side validator standing
           between the model and anything Petrovich acts on. <b>Next:</b> the pilot's own first
           real-model run &mdash; then structured candidates, so <code>follow that tank</code> can
-          resolve at all. A direction was settled 2026-09-29: the brain should <b>answer questions
+          resolve at all. A direction was settled 2026-09-28 from a flight where free speech came
+          back <em>&ldquo;unable, no such command&rdquo;</em>: the brain should <b>answer questions
           about what Petrovich believes</b> rather than the command vocabulary growing to meet free
-          speech.</p>
+          speech. The tool surface that needs is already frozen and built.</p>
         <span class="more">Details</span>
       </article>
 
@@ -628,10 +632,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 
   <section>
     <h2>Dependency map</h2>
-    <p class="section-note">What gates what. The node everything converged on last cycle &mdash; a
-      brain layer with no plan file &mdash; is now a running process, so the four branches that were
-      finished-except-for-it are no longer stopped. It is the only place on this map where a first
-      slice landing changed the shape rather than the colour of a node.</p>
+    <p class="section-note">What gates what, done work included. Two chains ended today rather than
+      advancing: the landform line reached a working detector and was parked on the pilot's judgement
+      of its output, and the tree investigation reached a definite <em>no</em> &mdash; which is an
+      answer, so its node is green. A chain that stops is still progress if what stopped it is
+      knowledge.</p>
 
     <div class="diagram-wrap">
       <button class="expand" id="gv-open" data-graph="#graph-deps" type="button">Expand graph</button>
@@ -653,34 +658,38 @@ flowchart LR
   BL5a["BL-5a&lt;br/&gt;text crew interaction"]:::done
   BL7I["BL-7 reaches nothing&lt;br/&gt;in a sortie"]:::hold
 
-  GC["Group contacts&lt;br/&gt;stages 0–4a"]:::done
-  GC4B["Stage 4b&lt;br/&gt;counts, spoken"]:::open
-  GC5["Stage 5&lt;br/&gt;composition"]:::hold
+  GC["Group contacts&lt;br/&gt;stages 0–4a, angular"]:::done
 
-  S1["Slice 1&lt;br/&gt;voice out, stages 1–5"]:::done
-  S6["Stage 6&lt;br/&gt;answered, not flown"]:::done
+  S1["Slice 1&lt;br/&gt;voice out, accepted"]:::done
   ST15["Speech in 1–5&lt;br/&gt;gate → capture → real PTT"]:::done
-  CKPT["Cockpit audio state&lt;br/&gt;intercom + volume"]:::hold
   CONES["Cones 1 · 2A–2C&lt;br/&gt;optics, gaze, scan loop"]:::done
   CALL["Callouts + groups&lt;br/&gt;+ movement"]:::done
-  SORT5["Five-fix sortie&lt;br/&gt;PASSED 2026-09-23"]:::done
-  NEW3["Binoculars + voice commands&lt;br/&gt;+ precise position"]:::done
   EVS["Eyes-and-voice sortie&lt;br/&gt;FLOWN 2026-09-25&lt;br/&gt;8 defects, not a pass"]:::done
-  FIX8["8 fixes + position-belief gate&lt;br/&gt;merged"]:::done
-  FRAG["Outpost fragments&lt;br/&gt;into 18 contacts"]:::open
   NOISE["2026-09-28 sortie&lt;br/&gt;5 reports/min, 25 min"]:::done
   GREP["Group reporting&lt;br/&gt;one line per group"]:::done
   CONF["Confirm band&lt;br/&gt;answerable at last"]:::done
-  LOS["LOS tolerance&lt;br/&gt;grid error buried a unit"]:::done
-  CBS["One flight, four features&lt;br/&gt;unflown"]:::block
+  COH["Cohesion redesign&lt;br/&gt;every gate passed, unmerged"]:::block
+  CBS["Four cards on main&lt;br/&gt;still unflown"]:::block
 
   PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
   DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
 
+  LOS["LOS tolerance&lt;br/&gt;grid error buried a unit"]:::done
+  BRIDGE["Bridge cost measured&lt;br/&gt;568 units, 1.99 ms"]:::done
+  TREE["Tree LOS probe&lt;br/&gt;no DCS call sees trees"]:::done
+  OSMV["OSM landcover&lt;br/&gt;the shipping answer"]:::open
+  DLOS["DCS answers LOS&lt;br/&gt;batched, plan only"]:::open
+  SURF[".surface5 payload wall&lt;br/&gt;hit twice, deferred"]:::hold
+
+  M6["M6 curvature detector&lt;br/&gt;checkerboard noise"]:::done
+  WSHED["Watershed detector&lt;br/&gt;merged, theatre-confirmed"]:::done
+  WMB6["WM-B6 output judged wrong&lt;br/&gt;geomorphons decided"]:::hold
+  PARK["Smoothing · valley bounds&lt;br/&gt;callout stages 3–5"]:::hold
+
   BL8["BL-8&lt;br/&gt;memory interfaces"]:::open
   BR1["BR-1 Stage 1&lt;br/&gt;async wire, stub decider"]:::done
   BR2["BR-1 Stage 2&lt;br/&gt;the real model, unflown"]:::done
-  BRAIN["Brain layer&lt;br/&gt;Stage 3 + structured candidates"]:::active
+  BRAIN["Brain layer&lt;br/&gt;answers from belief + candidates"]:::active
 
   WM --> BL27
   AL --> BL27
@@ -688,23 +697,26 @@ flowchart LR
   BL27 --> BL7I -.->|"deferred to the brain"| BR1
   BL27 --> BL5a
   BL27 --> GC
-  GC --> GC4B --> GC5
   BL5a --> S1
-  S1 --> S6
-  S1 --> CKPT
   S1 --> ST15 --> BR1
-  BL27 --> CONES --> CALL --> SORT5
-  SORT5 --> NEW3 --> EVS --> FIX8 --> NOISE
-  NOISE --> GREP --> CBS
+  BL27 --> CONES --> CALL --> EVS
+  EVS --> NOISE --> GREP --> COH
+  GC --> GREP
   NOISE --> CONF --> CBS
-  NOISE --> LOS --> CBS
-  EVS --> FRAG
+  GREP --> CBS
+  LOS --> CBS
+  COH -.->|"merge, or fly the branch"| CBS
   AL --> PROBE --> DMG
+  AL --> BRIDGE --> TREE
+  TREE --> OSMV
+  TREE -.->|"placement exists, unaddressable"| SURF
+  BRIDGE --> DLOS
+  LOS -.->|"a mitigation, not the fix"| DLOS
   BR1 --> BR2 --> BRAIN
   CBS -.->|"tunes"| BRAIN
   BL27 -.->|"needs real flights"| BL8 -.-> BRAIN
-  EVS -.->|"judge after flying"| GC5
-  GC4B -.->|"judge after flying"| GC5
+  WM --> M6 --> WSHED --> WMB6 --> PARK
+  DLOS -.->|"removes the grid's last gate"| WMB6
 </pre>
       </div>
     </div>
@@ -721,9 +733,10 @@ flowchart LR
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
     <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing that is
-      done. The brain chain shortened as its first stages landed. The new group is terrain: until
-      this cycle, real DCS elevation was an idea with a blocker attached; it is now a design with a
-      single unread number standing in front of it.</p>
+      done. The groups were redrawn rather than inherited this time, because one of them stopped
+      being a group: &ldquo;terrain&rdquo; used to be a single chain waiting on a single unread
+      number. That number was read, and what it answered split the chain in two halves that no
+      longer touch.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -737,77 +750,75 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
+  SORTIE["Five cards unflown&lt;br/&gt;four on main, one on a branch"]:::block
+
+  subgraph REPORT ["Crew behaviour &mdash; everything here is downstream of the flight"]
+    direction LR
+    COH["Cohesion redesign&lt;br/&gt;merge it, or fly the branch"]:::block
+    GBOUND["Cohesion constants are guesses&lt;br/&gt;500 m cap · 20 unit widths"]:::open
+    GC5["Group stage 5&lt;br/&gt;common fate"]:::hold
+    POL["Callout policy follow-ons&lt;br/&gt;repetition · sector fairness"]:::open
+    DMG["Damage + fire reporting&lt;br/&gt;probes answered it"]:::open
+  end
+
   subgraph PERC ["Perception"]
     direction LR
-    SORTIE["One flight, four features&lt;br/&gt;unflown, 2026-09-29"]:::block
-    FRAG["X-B6 outpost fragments&lt;br/&gt;diagnosed, not the noise cause"]:::open
+    BUBBLE["10 km player bubble&lt;br/&gt;decided, unbuilt"]:::open
     CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
-    COND["Conditions&lt;br/&gt;one multiplier cannot work"]:::open
-    MET["Met visibility&lt;br/&gt;a ceiling, not a penalty"]:::open
-    PROBE2["Probe: isVisible,&lt;br/&gt;trees, weather"]:::block
-    K9["9K113 optic + LOWRES&lt;br/&gt;recalibration"]:::hold
+    COND["Conditions&lt;br/&gt;f(condition, optical path) + a ceiling"]:::open
+    FRAG["X-B6 outpost fragments&lt;br/&gt;diagnosed, not the noise cause"]:::open
+    PERF["BL-B23 clustering cost&lt;br/&gt;grows with sortie length"]:::open
   end
 
-  subgraph TERRAIN ["Real DCS elevation &mdash; the LOS tolerance is only a mitigation"]
+  subgraph LOSG ["Line of sight, the DCS way"]
     direction LR
-    BRIDGE["bridge_call_ms&lt;br/&gt;never read, decides everything"]:::block
-    SURF[".surface5 decode&lt;br/&gt;timeboxed disproof"]:::open
-    TSAMP["Fog-of-war sampling&lt;br/&gt;fine near, coarse far"]:::open
+    ELEV["Elevation-cost probe&lt;br/&gt;deployed, needs a flight"]:::block
+    DLOS["Batched LOS + occluders&lt;br/&gt;buildings DCS, trees OSM"]:::open
+    SURF["X-B32 per-tree placement&lt;br/&gt;behind the payload wall"]:::hold
   end
 
-  subgraph SPEECH ["Speech"]
+  subgraph LANDF ["Landform &mdash; parked whole, and touches nothing else"]
     direction LR
-    LAT["Press-to-readback&lt;br/&gt;~3s, next real problem"]:::open
-    VOICE["Voice character&lt;br/&gt;accent + prosody"]:::hold
-    SPU8["Cockpit audio state&lt;br/&gt;intercom + SPU-8"]:::hold
-  end
-
-  subgraph REPORT ["Reporting"]
-    direction LR
-    GBOUND["Group boundary constant&lt;br/&gt;a guess, needs one flight"]:::open
-    GC5["Group stage 5&lt;br/&gt;common fate"]:::hold
-    REP["Repetition reopened&lt;br/&gt;2026-09-23"]:::open
-    DMG["Damage + fire reporting&lt;br/&gt;probes answered it"]:::open
-    BEH["Behaviour channel&lt;br/&gt;tracking / engaging"]:::open
-    TERR["Terrain control&lt;br/&gt;world-model"]:::hold
-    IFF["Coalition / IFF&lt;br/&gt;inferred, never truth"]:::hold
-    THR["Threat banding"]:::hold
+    WMB6["WM-B6 detection is wrong&lt;br/&gt;geomorphons, then vectorise"]:::hold
+    PARK["Smoothing built · valley bounds&lt;br/&gt;callout stages 3–5"]:::hold
+    GRID["Retire the elevation grid&lt;br/&gt;interpolate from structure lines"]:::hold
   end
 
   subgraph BRAINCHAIN ["The brain layer"]
     direction LR
     D10["Structured candidates&lt;br/&gt;follow still cannot pick"]:::open
-    BR3["Stage 3&lt;br/&gt;the A/B answer leg"]:::open
-    QA["Answer questions from belief&lt;br/&gt;decided 2026-09-29"]:::open
+    BR3["Stage 3 &mdash; answer questions&lt;br/&gt;from belief, never truth"]:::open
     IDLE["Idle consumers&lt;br/&gt;mission phase, MI-5 questions"]:::hold
   end
 
-  BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
+  subgraph SPEECH ["Speech"]
+    direction LR
+    LAT["Press-to-readback&lt;br/&gt;~3s, next real problem"]:::open
+    AUD["Voice character&lt;br/&gt;+ cockpit audio state"]:::hold
+  end
 
-  SORTIE --> GBOUND --> GC5
+  BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
+  THEATRE["Multi-theatre&lt;br/&gt;Kola has no SRTM above 60°N"]:::open
+
+  SORTIE --> COH --> GBOUND --> GC5
+  SORTIE --> POL
   SORTIE -.->|"judge after flying"| FRAG
   SORTIE --> CAP
   SORTIE -.->|"judge after flying"| COND
-  COND --> MET
-  PROBE2 --> K9
-  PROBE2 -.->|"gates the sight half only"| COND
-  PROBE2 --> MET
-  SORTIE --> BEH --> THR
-  DMG --> BEH
-  TERR --> IFF --> THR
-  SORTIE --> VOICE
   SORTIE --> LAT
-  SORTIE --> SPU8
-  SORTIE --> REP
   SORTIE -.->|"needs many flights"| BL8
-  BRIDGE --> TSAMP
-  SURF -.->|"if it decodes, it wins"| TSAMP
-  BRIDGE -.->|"same session"| SURF
-  TSAMP -.->|"replaces the 12 m tolerance"| K9
-  D10 --> BR3 --> QA
-  BR3 -.-> IDLE
-  THR -.->|"needs judgement"| BR3
   SORTIE -.->|"tunes the prompts"| D10
+  COH --> PERF
+  BUBBLE -.->|"bounds what clustering ever sees"| PERF
+  DMG --> POL
+  ELEV --> DLOS
+  DLOS -.->|"only route left"| SURF
+  DLOS -.->|"removes the grid's last live reader"| GRID
+  WMB6 --> PARK
+  WMB6 --> GRID
+  D10 --> BR3
+  BR3 -.-> IDLE
+  BR3 -.->|"a question needs a contact resolver"| D10
 </pre>
       </div>
     </div>
@@ -820,58 +831,80 @@ flowchart LR
     </div>
 
     <p class="section-note"><strong>What the drawing shows that the lists do not.</strong>
-      <strong>One flight is upstream of more of this board than any single piece of code.</strong>
-      That is the third consecutive cycle where an unflown sortie is the widest gate &mdash; and the
-      previous two both paid for themselves, returning eight defects and then four. What changed is
-      the ratio: the flight now carries four merged features rather than one, so a single session in
-      the cockpit either clears a quarter of the open work or reshapes it.</p>
-    <p class="section-note"><strong>The terrain group is gated behind a number nobody has looked
-      at.</strong> <code>bridge_call_ms</code> has been measured and written to <code>dcs.log</code>
-      by production code since 2026-09-13; no one has ever read it. Two quite different builds
-      &mdash; probe in flight, or decode a 30&nbsp;GB mesh container &mdash; are waiting on that one
-      value, and the 12&nbsp;m line-of-sight tolerance now shipping is explicitly a mitigation for
-      whichever one wins. A design blocked on an unread log line is a cheaper problem than it looks.</p>
-    <p class="section-note"><strong>The reporting chain grew a short new head and kept its long
-      tail.</strong> Group boundary calibration and common-fate cohesion are both one flight from
-      being decidable. Behind them, threat banding still needs believed coalition, which needs
-      terrain control, which does not exist in world-model at all &mdash; unchanged for three
-      cycles, and still the longest unbuilt chain on the board.</p>
+      <strong>There is now a group with no edge to the flight at all</strong> &mdash; and that has
+      not happened before on this board. Every other chain here is either waiting on the cockpit or
+      one step behind something that is. The landform group is parked on a judgement already made:
+      the pilot looked at real output and said the detection is wrong, so no sortie can advance it
+      and no measurement is outstanding. It is the first chain this project has stopped by
+      <em>looking</em> rather than by flying or measuring, and drawing it is what makes the
+      difference visible &mdash; the roadmap lists it among open items as though it were waiting its
+      turn.</p>
+    <p class="section-note"><strong>The terrain group dissolved when its one blocker was
+      read.</strong> Last cycle this was a single chain gated on <code>bridge_call_ms</code>, a
+      number production code had been writing to <code>dcs.log</code> for a fortnight that nobody had
+      opened. It was read: 568 units at a mean of 1.99&nbsp;ms. That made probing obviously
+      affordable, which moved line of sight to DCS &mdash; and the moment it moved, the two halves of
+      &ldquo;terrain&rdquo; stopped sharing anything. Line of sight no longer needs the elevation
+      grid; landform detection wants to stop reading it too. <strong>They now touch only through a
+      data structure both of them are trying to retire.</strong></p>
+    <p class="section-note"><strong>One more thing the shape says.</strong> The crew-behaviour chain
+      is the only place where a single node carries a decision rather than work: whether the cohesion
+      redesign is merged before its flight or flown from its branch. Everything downstream of it is
+      calibration &mdash; constants the pilot already said to pick and refine &mdash; so that one
+      choice sets whether the next sortie tests one feature or five.</p>
   </section>
 
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Still two, and both got larger rather than being cleared. One flight now carries four
-        merged features instead of one; the Windows-box session now has a measurement that decides
-        an entire design, not just a probe. Neither can be answered from the Mac.</p>
+      <p>Three, and the first one is a decision rather than a flight &mdash; it changes what the
+        other two are worth doing in. Nothing here can be answered from the Mac except the first
+        half of the first item.</p>
       <ul class="blockers">
+        <li class="bl" role="button" tabindex="0" data-detail="cohesion">
+          <span class="chip block">Decision + sortie</span>
+          <div>
+            <b>Merge the cohesion redesign, or fly it from its branch</b>
+            <p><code>fix/group-undermerging</code> is through Reviewer (twice), Security,
+              Performance and DoD's mechanical gate, and is <strong>not merged</strong>. The
+              precedent is already set both ways: three earlier features were merged before their
+              flight at your direction, on the grounds that <em>&ldquo;so many things at this stage
+              are intertwined that it's better to test to current HEAD&rdquo;</em>. Merging folds it
+              into the four cards already waiting; not merging means a separate flight on a branch
+              that will drift. What the flight settles either way: whether the 500&nbsp;m
+              installation cap and the air-defence class list hold against real unit placement, and
+              whether six delta branches land by ear. Card:
+              <code>docs/acceptance/2026-10-01-group-cohesion-sortie.md</code>.</p>
+          </div>
+        </li>
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>One flight, four unflown features</b>
-            <p>Group reporting, the confirm band, the line-of-sight tolerance and the 2026-09-26
-              fixes all merged to <code>main</code> and none has been heard in the air. The single
-              most valuable answer is whether the new group boundary
-              (<code>20</code> unit widths, about 140&nbsp;m between neighbouring vehicles) draws
-              groups where the pilot perceives them &mdash; it is a stated assumption he asked to
-              refine from flight evidence, not a measurement. Fly with
+            <b>Four cards on <code>main</code>, none heard in the air</b>
+            <p>Group reporting and the 12&nbsp;m line-of-sight tolerance (2026-09-29), the confirm
+              band (2026-09-28), the 2026-09-26 crew-behaviour fixes, and the brain's first real
+              model &mdash; all merged, none flown. The most valuable single answer is whether the
+              group boundary (<code>20</code> unit widths, about 140&nbsp;m between neighbouring
+              vehicles) draws groups where you perceive them; it is a number you were asked for and
+              declined to guess at, which is exactly why it needs ears rather than review. Fly with
               <code>--detection-trace</code>: the belief log structurally cannot record a
-              <em>rejected</em> candidate, which is why the AAA defect needed an offline
-              reproduction to find at all. Card:
-              <code>docs/acceptance/2026-09-29-group-reporting-sortie.md</code>.</p>
+              <em>rejected</em> candidate, which is why the missed-AAA defect needed an offline
+              reproduction to find at all.</p>
           </div>
         </li>
-        <li class="bl" role="button" tabindex="0" data-detail="probe2">
+        <li class="bl" role="button" tabindex="0" data-detail="elevprobe">
           <span class="chip block">Windows box</span>
           <div>
-            <b>Read <code>bridge_call_ms</code> &mdash; it decides the terrain design</b>
-            <p>The mission-scripting bridge already measures its own cost and writes it to
-              <code>dcs.log</code>. Nobody has ever read it, and the only flown sortie had twelve
-              units. A terrain-probe batch is two orders of magnitude more per-call work, so this
-              number decides whether accumulating real DCS elevation in flight is affordable at
-              all. Same session: demonstrate <code>land.getHeight</code> through that bridge (high
-              confidence, never actually done) and timebox the <code>.surface5</code> decode.
-              Handoff: <code>docs/handoff/2026-09-29-windows-dcs-session.md</code>.</p>
+            <b>Fly the elevation-cost probe &mdash; alone, with nothing else running</b>
+            <p>The hook is already deployed on the Windows box and writes straight to
+              <code>dcs.log</code>; no collector, no body layer, no audio. Two things it settles
+              that no log elsewhere can: whether <code>land.getHeight</code> works through the
+              mission bridge at all (high confidence, never once demonstrated), and
+              <strong>whether the call stutters the frame</strong> &mdash; which only you can
+              judge, because milliseconds in a log cannot record a hitch. Fly it separately from any
+              crew-behaviour sortie: a deliberate frame hitch is precisely what would contaminate a
+              judgement about whether callouts feel right. Card:
+              <code>docs/acceptance/2026-09-29-elevation-cost-probe.md</code>.</p>
           </div>
         </li>
       </ul>
@@ -884,6 +917,62 @@ flowchart LR
       earlier pass got wrong — stays in the roadmap files, which remain the source of truth.</p>
 
     <div class="work">
+
+      <div class="row s-hold" role="button" tabindex="0" data-detail="wmb6">
+        <span class="who">world-model</span>
+        <div class="what">
+          <b>Ridge and valley detection is wrong, and the replacement is already chosen</b>
+          <p>The watershed detector merged today having passed every check set for it &mdash; then the
+            real output over a hillshade settled it: <em>&ldquo;500&nbsp;m grid is too coarse&hellip;
+            250&nbsp;m, if smoothed, would be precise enough, but the data is bad.&rdquo;</em> The
+            replacement is geomorphons &mdash; classify each cell by what it <em>looks like</em>,
+            thin, then trace through junctions &mdash; chosen from side-by-side renders over a
+            spike's own recommendation, because inverted-drainage breaks a long crest at every saddle
+            and geomorphons does not. Parked deliberately: no consumer needs landform references yet.</p>
+        </div>
+        <span class="chip hold">Parked, decided</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
+        <span class="who">aircraft-layer</span>
+        <div class="what">
+          <b>Let DCS answer line of sight, batched, next to the game</b>
+          <p>The bridge turned out cheap &mdash; 568 units, 1.99&nbsp;ms mean &mdash; so one batched
+            sweep can compute line of sight for every unit in the bubble instead of body-layer asking
+            per candidate over the LAN. Terrain <em>and</em> buildings, true position to true
+            position, which is new capability rather than a fix: nothing occludes behind a building
+            today. Not omniscience &mdash; line of sight is a physical fact, and belief about
+            <em>position</em> stays as fuzzy as it is now.</p>
+        </div>
+        <span class="chip open">Planned</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="blb23">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Clustering cost grows with how long you fly, not with what is out there</b>
+          <p>Found by the performance pass on the cohesion redesign and pre-existing to it:
+            <code>ContactStore</code> has no delete path anywhere, and every tick hands the whole
+            store to clustering &mdash; every contact ever seen, not the live set. Measured clean
+            quadratic: 2.96&nbsp;ms at 100 contacts, 70&nbsp;ms at 500, 406&nbsp;ms at 1200. Trivial
+            today at 22 objects; a 90-minute sortie accumulating lost records is where it starts
+            costing latency.</p>
+        </div>
+        <span class="chip open">New today</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="bubble">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>The 10&nbsp;km player bubble &mdash; decided, not yet built</b>
+          <p>Nothing beyond 10&nbsp;km is computed at all: not gated late, not scored and discarded,
+            simply never considered. Ground and air units only &mdash; world features stay
+            unbounded, because they do not move and enrichment reaches for them by proximity to a
+            contact. Memory outlives the bubble: once BL-8 exists, a unit seen and then left behind
+            stays remembered. What stops is detection computation, not belief.</p>
+        </div>
+        <span class="chip open">Priority</span>
+      </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="cond">
         <span class="who">body-layer</span>
@@ -902,26 +991,15 @@ flowchart LR
       <div class="row s-open" role="button" tabindex="0" data-detail="gbound">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>The group boundary is a guess, by agreement</b>
-          <p>Cohesion is relative &mdash; a gap judged against the local median nearest-neighbour gap,
-            so a group is tighter in a crowded scene than in empty desert &mdash; bounded by twenty
-            <em>unit widths</em> rather than a flat distance, so it scales with what the units are.
-            Twenty is the pilot's own &ldquo;pick something, we'll refine it later&rdquo;. One flight
-            tells us whether convoys fragment or strangers merge.</p>
+          <b>Three cohesion constants, all of them agreed guesses</b>
+          <p>Twenty <em>unit widths</em> bounds an ordinary group, so the boundary scales with what the
+            units are rather than being a flat distance. A real SAM installation gets its own
+            500&nbsp;m cap, grounded in S-75/S-125 emplacement doctrine. Infantry merge with no
+            backstop at all &mdash; <em>&ldquo;ok to merge infantry too eagerly&rdquo;</em> &mdash;
+            which also bridges two non-infantry vehicles into one group through an infantry member
+            between them. Every one of those wants ears, not another review round.</p>
         </div>
         <span class="chip open">Needs a flight</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="terrain">
-        <span class="who">world-model</span>
-        <div class="what">
-          <b>Real DCS elevation &mdash; probe it, or decode it</b>
-          <p>The 12&nbsp;m line-of-sight tolerance stops units being buried by grid error, but it is
-            a mitigation: it also reveals anything hiding behind a ridge by less than that. The fix is
-            real elevation, accumulated fog-of-war style as the pilot flies. Whether that comes from
-            in-flight probing or from decoding DCS's own mesh container turns on one unread number.</p>
-        </div>
-        <span class="chip open">Gated on a measurement</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="d10">
@@ -965,14 +1043,16 @@ flowchart LR
       <div class="row s-open" role="button" tabindex="0" data-detail="gc4b">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Detection under real conditions</b>
-          <p>Two models now, not one, and the split is what each channel actually is: the naked eye and
-            binoculars get a <b>statistical</b> per-landcover transmission probability, because a sweeping
-            gaze through woods genuinely is probabilistic and we hold polygons, not trunks; the 9K113
-            sight asks <b>DCS</b> for the real line of sight, one narrow ray to one target. Cost and
-            fidelity point the same way. Flicker is the failure mode to design against.</p>
+          <b>Seeing through woods &mdash; OSM landcover is the answer for every channel</b>
+          <p>The plan split the channels: a statistical per-landcover transmission probability for the
+            eye and binoculars, and the 9K113 asking DCS for the real ray. <b>That second half is now
+            gone.</b> Probed on the Windows box and closed today: <code>isVisible</code>,
+            <code>getIP</code>, <code>searchObjects</code> at any volume and <code>getSurfaceType</code>
+            are all terrain and scenery only, tested against vehicles parked inside canopy. The engine
+            has the capability; it is compiled, and Petrovich's own verdict there is an audio file. So
+            the statistical model covers everything, which it was already built to do.</p>
         </div>
-        <span class="chip open">Unblocked</span>
+        <span class="chip open">Unblocked, and simplified</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="capture">
@@ -1096,8 +1176,8 @@ flowchart LR
     <h2>Architecture</h2>
     <p class="section-note">The other two graphs are about time — how we got here, what is next. This
       one is about shape, and stays useful once every milestone above is done. Two machines, two seam
-      kinds, and &mdash; for the first time &mdash; no absent component: the brain is drawn as a real
-      process, because it is one.</p>
+      kinds, and one component drawn as absent again: a line-of-sight answer computed inside DCS,
+      which exists as a plan and nothing else.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-arch" type="button">Expand graph</button>
@@ -1114,10 +1194,11 @@ flowchart TB
   subgraph WIN ["Windows — the DCS box"]
     direction TB
     DCS["DCS World&lt;br/&gt;Mi-24P / Petrovich cockpit"]:::done
-    AL["Aircraft Layer&lt;br/&gt;Export.lua + collector"]:::done
+    AL["Aircraft Layer&lt;br/&gt;Export.lua + collector&lt;br/&gt;pinned: needs the install"]:::done
+    LOSQ["Batched line of sight&lt;br/&gt;terrain + buildings&lt;br/&gt;PLANNED, not built"]:::hold
   end
 
-  subgraph MAC ["Mac — everything else"]
+  subgraph MAC ["Mac — for now, by decision, not by need"]
     direction TB
     WM["World Model&lt;br/&gt;offline-built theatre store"]:::done
     BL["Body Layer&lt;br/&gt;Petrovich's belief state"]:::done
@@ -1140,6 +1221,8 @@ flowchart TB
   BRAIN -->|"HTTP/JSON, drained in&lt;br/&gt;the poll loop"| BL
   BRAIN -->|"Stage 2, wired 2026-09-25"| OLL
   MI -.->|"same model, kept warm"| OLL
+  DCS -.->|"one bridge call per sweep"| LOSQ
+  LOSQ -.->|"would join the unit feed"| AL
 </pre>
       </div>
     </div>
@@ -1147,25 +1230,33 @@ flowchart TB
     <div class="legend">
       <span class="chip done">Built</span>
       <span class="chip active">Built, one slice deep</span>
-      <span class="chip open">Planned, not built</span>
+      <span class="chip hold">Planned, not built</span>
     </div>
 
     <p class="section-note">The double-line edges are DCS itself &mdash; read <em>and</em> written,
       never a one-way feed. The single plain edge between Body Layer and World Model is the one
       in-process import this project allows anywhere; every other subproject boundary, including
       the two crossing back to Windows, is HTTP. Mission Interpreter runs offline and hands off one
-      artifact before a sortie starts &mdash; it has no seat in the runtime loop. <strong>The brain is
-      no longer drawn as absent.</strong> Note which way its two edges point: body-layer hands an
-      escalation over and does not wait, and the reply is drained in the ordinary poll loop. That is
-      not an implementation detail &mdash; it is the constraint the whole layer was designed around,
-      because the game world keeps moving whether or not Petrovich has finished thinking.</p>
+      artifact before a sortie starts &mdash; it has no seat in the runtime loop. Note which way the
+      brain's two edges point: body-layer hands an escalation over and does not wait, and the reply is
+      drained in the ordinary poll loop. That is not an implementation detail &mdash; it is the
+      constraint the whole layer was designed around, because the game world keeps moving whether or
+      not Petrovich has finished thinking. <strong>Only the aircraft layer is pinned to Windows</strong>
+      &mdash; it needs the DCS install. Body layer and world model sit on the Mac by decision, not by
+      need, and they move together or not at all: that in-process import is the one this project
+      allows, so a service split between them has been rejected rather than merely postponed. The
+      dashed box inside Windows is the planned line-of-sight answer &mdash; drawn absent on purpose,
+      because today the world model still approximates it from a 1000&nbsp;m elevation grid.</p>
   </section>
 
   <footer>
     Generated from <code>ROADMAP.md</code> across six subprojects plus <code>todo/todo.md</code>,
     <code>todo/backlog.md</code> and each subproject's own <code>BACKLOG.md</code>. This page is a
     view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
-    files is a bug in this page, not in them.
+    files is a bug in this page, not in them. One exception worth naming: the cohesion redesign's
+    roadmap and backlog entries live on <code>fix/group-undermerging</code> rather than on
+    <code>main</code>, because the branch is not merged — so three of the counts above include items
+    no file on <code>main</code> currently carries.
   </footer>
 
 </div>
@@ -1203,16 +1294,99 @@ flowchart TB
 
 <script>
 const DETAIL = {
+  wmb6: {
+    kicker: "world-model/", title: "The landform line, parked whole", chip: ["hold", "Parked 2026-10-01, mechanism decided"],
+    facts: [["Merged today", "marker-controlled watershed (0bef4b9)"], ["Then parked", "WM-B6, by the pilot's own look"], ["Chosen replacement", "geomorphons, classified then vectorised"]],
+    sections: [
+      { h: "It passed every check it was given, and that was not enough", p: "Acceptance ran against the real <code>syria-full</code> store rather than a test region, and both falsifiable predictions held: <strong>zero valleys within 8 km of Baalbek</strong> (the Bekaa floor correctly excluded by the width gate, three ridges flanking it) and <strong>Palmyra's isolated chains intact</strong> (14 ridges within 20 km). Counts collapsed from 11,749 ridges / 11,477 valleys to 8,189 / 2,314, and sinuosity landed at 1.202 / 1.172 against the old 2.17 / 2.21. Then the output was rendered over an aligned hillshade at three spacings and judged by eye." },
+      { h: "The verdict, in the pilot's own words", p: "<em>\"500 m grid is too coarse, not useful. 250 m grid, if smoothed, would be precise enough, but the data is bad. The real problem is that the ridge/valley detection itself does not seem to produce correct results. Smoothing or finer grid does not solve that.\"</em> The merge stands and the code is sound as written &mdash; but the <code>ridge</code>/<code>valley</code> rows in the store are now explicitly <strong>not a layer to build on</strong>, and three further items are parked with them: smoothing (built and measured on an unmerged branch), valley boundary extraction, and the three unbuilt callout stages." },
+      { h: "What the detector was never given a fair chance at", p: "Two findings a future attempt must not rediscover. The <code>min_cell_count</code> floor <strong>scaled by area while gating a one-dimensional line feature</strong>, demanding ~150 cells at 100 m where 500 m demands 6 &mdash; which is why three separate sweeps each concluded \"finer spacing does not help\". They were measuring their own floor. And the hillshade renders that produced the verdict came <em>straight from the raw <code>.hgt</code> tiles at ~90 m</em>, not from the stored 500 m grid: the detector has been running at one fifth of the resolution the source already offers, for no reason except that the pipeline happened to detect off the stored grid." },
+      { h: "The decision, and why it overturns the spike's own recommendation", p: "The spike preferred in-house D8 drainage. The pilot then pointed at one long ridge spanning a test window and asked what each approach did with it. Inverted-DEM drainage finds a crest only where the inverted catchment accumulates, so <strong>every saddle breaks the line</strong> &mdash; high threshold detected almost nothing, low threshold gave disconnected pieces plus branch noise. Geomorphons labels a crest because the cell <em>looks like</em> a crest, independent of what is upstream, so a long ridge survives as one. Measured on that window: longest traced ridge 8.3 km, valley 6.5 km. <em>\"It does get the ridges and valleys correctly and that is what matters.\"</em>" },
+      { h: "The pipeline as validated by eye, and its honest costs", p: "Geomorphons over the native-resolution DEM (pure numpy, ~40 lines, no dependency &mdash; WhiteboxTools turned out unnecessary, removing a binary dependency, a licence question and a Windows-support question at once), ridge/valley family masks, <strong>binary closing before thinning</strong> (without it one dropped cell breaks a crest), Zhang-Suen thinning, then tracing that <strong>walks through junctions instead of cutting at them</strong> &mdash; that step is what makes or breaks it: naive cut-at-every-junction gave 516 fragments with a 2.2 km longest, junction-walking gave 312 lines and the 8.3 km crest. Costs named rather than discovered later: the thinning is the scaling problem, not the classification (a pure-Python double loop that extrapolates to hours over a theatre), and density is still a product question &mdash; 135 ridges and 121 valleys in one 16 km window is fine as geometry and far too many to <em>speak</em>." },
+      { h: "And it must be cached, on the pattern that already exists", p: "<em>\"Data must be cached to a file, similar to OSM processing. It's too expensive to run at every world model rebuild.\"</em> That is the established third-store pattern, not a new mechanism: a sibling cache file per region, validity as a conjunction (DEM hash and size, an extractor version constant covering every parameter, a schema version, the region bbox), any mismatch meaning a full rebuild rather than partial reuse, populated at a <code>.tmp</code> path and moved into place only on success. The cache holds the <em>lines</em>, which are small &mdash; 4.6 MB of ridge and valley geometry against 49 MB of elevation grid." },
+      { h: "Reopening condition", p: "A consumer that actually needs landform references &mdash; the \"at the foot of the hill\" / \"next valley\" callout, or navigation phrasing once Petrovich flies. Until then this is <strong>unbuilt capability, not a defect in anything shipping</strong>. The algorithm itself is explicitly in scope when it reopens: <em>\"can and should be refined if it does not produce correct results. Or swapped/rewritten completely.\"</em>" }
+    ],
+    items: [["done","Watershed detector merged, theatre-confirmed"],["done","Prior-art survey; licences checked"],["done","Geomorphons spike, rendered and chosen"],["hold","WM-B4 smoothing (built, unmerged)"],["hold","WM-B5 valley boundaries"],["hold","Callout stages 3-5"],["hold","Retire the elevation grid"]],
+    src: "world-model/ROADMAP.md (WM-B6), research/2026-10-01-terrain-feature-detection-prior-art.md, research/2026-10-01-terrain-detection-resolution-spike.md"
+  },
+
+  dcslos: {
+    kicker: "aircraft-layer/", title: "DCS answers line of sight, batched", chip: ["open", "Planned, measured, not built"],
+    facts: [["Bridge cost", "568 units, mean 1.99 ms, p99 8 ms"], ["Per sweep", "50 units 0.9 ms · 200 units 2.2 ms · 500 units 4.9 ms"], ["Status", "plan only"]],
+    sections: [
+      { h: "The inversion that removes the LAN problem", p: "Today body-layer asks world-model for line of sight per candidate, per poll, at 5 Hz, in-process on the Mac. The proposal is the other way round: aircraft-layer computes it for every relevant unit in <strong>one batched bridge call</strong> and publishes the result the way it already publishes telemetry, world objects and indication text. Body-layer polls one response. Existing pattern, no new seam &mdash; and at 1 Hz it is 0.2&ndash;0.5% duty on a cadence the mission bridge already runs." },
+      { h: "Why this is more than an optimisation", p: "It removes the elevation grid from the line-of-sight path entirely. Line of sight computed against DCS's own terrain and own buildings has no SRTM error to correct and no probe accumulation to wait for, so it <strong>dissolves the missed-AAA defect class at its source</strong> rather than mitigating it with a 12 m tolerance. And buildings do not occlude anything today in either path &mdash; that half is new capability, additive, and cannot regress what works." },
+      { h: "Not a loosening of the invariant", p: "Line of sight is a physical fact about the world, not knowledge. Belief about <em>position</em> stays exactly as fuzzy as it is now; what changes is whether the terrain and buildings between two real points are modelled correctly. The detectability model &mdash; angular size, optic, conditions, salience &mdash; sits on top of that answered fact, unchanged." },
+      { h: "Three constraints any design must keep", p: "Tests must run with no DCS and no collector, which is a hard requirement &mdash; so world-model's own primitive stays as the offline and test path and this becomes the <em>live</em> path, not a replacement. The Mission Interpreter still needs the elevation grid for offline enrichment across the whole map, where coarse is adequate. And aircraft-layer has so far reported facts rather than computing gates; HelperAI's own detection text is the precedent that this is not a new kind of thing, but the boundary shift should be argued rather than assumed." }
+    ],
+    items: [["done","Bridge cost measured at scale"],["done","Building sightline cost measured (8.7 us)"],["open","Terrain source swap"],["open","Building occlusion (the cheaper, higher-value half)"],["hold","Trees - no DCS route exists"]],
+    src: "plans/dcs-driven-los/plan.md, todo/backlog.md (X-B29, X-B30, X-B31)"
+  },
+
+  blb23: {
+    kicker: "body-layer/", title: "Clustering cost grows with sortie length", chip: ["open", "BL-B23, filed today"],
+    facts: [["Found by", "the cohesion redesign's performance pass"], ["Pre-existing", "group reporting created the growth path"], ["Today's sortie", "22 objects admitted"]],
+    sections: [
+      { h: "The mechanism", p: "<code>ContactStore._contacts</code> has <strong>no delete path anywhere in the class</strong>, and every tick passes the whole dictionary's values to group reconciliation &mdash; every contact ever folded, not the live set. So the O(n&sup2;) pairing scales with total-ever-seen rather than with how many contacts are actually out there." },
+      { h: "Measured, not extrapolated", p: "22 contacts 0.17 ms · 50 0.72 ms · 100 2.96 ms · 300 24.75 ms · 500 70 ms · 800 180 ms · 1200 406 ms &mdash; clean quadratic from 100 up. Trivial today. The point is that <strong>it is the sortie length that drives it, not the threat picture</strong>: a 90-minute mission accumulating long-lost records reaches the 70&ndash;180 ms band on a 5 Hz loop, which is where it starts costing the pilot latency." },
+      { h: "The fix shape, and why it is not pruning", p: "Filter clustering's <em>input</em> by lifecycle or age, rather than pruning the store. A lost contact is still memory Petrovich should have &mdash; dropping the record is the wrong move; excluding it from clustering is the right one." }
+    ],
+    items: [["done","Measured across seven contact counts"],["open","Filter reconcile's input by lifecycle or age"]],
+    src: "body-layer/BACKLOG.md (BL-B23), plans/group-cohesion-redesign/performance.md"
+  },
+
+  bubble: {
+    kicker: "body-layer/", title: "The 10 km player bubble", chip: ["open", "Decided 2026-09-28, unbuilt"],
+    facts: [["Radius", "10 km around ownship"], ["Decided", "user, 2026-09-28"], ["Applies to", "ground and air units only"]],
+    sections: [
+      { h: "The decision", p: "<em>\"Let's settle on 10 km for the player bubble radius. While some very large units may be visible beyond that, we don't usually care about things that far.\"</em> Nothing outside it is computed at all &mdash; not gated late, not scored and discarded, simply never considered." },
+      { h: "The scope boundary that matters, stated because the misreading is expensive", p: "It applies to <strong>units</strong>, not to world features. Landmarks, settlements, roads, beacons and airports stay unbounded: they do not move, and enrichment already reaches for them by proximity to a contact rather than by scanning. Bounding them would break <code>describe_position</code> for no gain." },
+      { h: "Memory outlives the bubble", p: "Once BL-8 exists, a unit that was seen and then fell outside the radius stays <em>remembered</em>. What stops is detection computation, not belief &mdash; a contact does not cease to exist because it is 11 km away; Petrovich simply is not working on it." },
+      { h: "It also bounds the cost problem above", p: "BL-B23's quadratic is driven by how many contacts the store has ever held. A hard admission radius is upstream of that, which makes the two items worth sequencing together rather than separately." }
+    ],
+    items: [["done","Radius decided"],["open","Apply at admission, not at scoring"]],
+    src: "todo/todo.md (User priority tasks)"
+  },
+
+  cohesion: {
+    kicker: "Waiting on you", title: "Merge the cohesion redesign, or fly its branch", chip: ["block", "Decision + sortie"],
+    facts: [["Branch", "fix/group-undermerging @ 6d6ea3f"], ["Gates passed", "Reviewer x2, Security, Performance, DoD"], ["Tests", "1367 passed / 4 xfailed, lint and types clean"]],
+    sections: [
+      { h: "What it changes about how he groups things", p: "Cohesion stops being one distance. A gap is judged against the local median <em>and</em> bounded in unit widths, so it scales with what the units are; a genuine fixed installation gets its own 500 m cap; and infantry get no backstop at all, by your instruction &mdash; <em>\"ok to merge infantry too eagerly.\"</em> Then the disclosure ladder gained a delta taxonomy: a leader change speaks a short \"now leading\" line rather than restating the roster, a new or repeat air-defence arrival names just the new member, and a repeat non-air-defence arrival or a pure departure says nothing at all." },
+      { h: "The decision in front of you, with precedent both ways", p: "This is not merged. Three earlier features were merged <em>before</em> their flight at your own direction &mdash; <em>\"so many things at this stage are intertwined that it's better to test to current HEAD\"</em> &mdash; because a correction the flight produces then lands on <code>main</code> rather than on a branch that has drifted. Merging folds this into the four cards already waiting. Not merging means its own separate flight, and a branch that ages against everything else landing." },
+      { h: "Two findings that came out of building it, both worth keeping", p: "<strong>A real S-300 battery's own ground-truth geometry was used as a test</strong>, from a sortie trace rather than a hand-built fixture &mdash; and under the settled rules it forms a three-member cluster with the fourth component isolated, which <em>contradicts the plan's own acceptance wording</em> (\"one four-member group\"). That wording was stale, inherited from before the installation flag was narrowed, and it was flagged rather than quietly worked around. And <code>op_class</code> alone would have conflated the genuine fixed S-125 site with four single-vehicle systems that must stay excluded, so the flag became a per-type property." },
+      { h: "What static review explicitly cannot settle", p: "Whether the 500 m installation cap and the air-defence class membership hold against real unit placement &mdash; both are single-source-of-evidence by the plan's own admission. Whether the six delta branches land correctly <em>by ear</em>. And whether two behaviours you approved but which remain surprising read as intended in the cockpit: infantry bridging a non-infantry pair into one group, and the S-300 deliberately not flagged as an installation so its own components do not single-merge." },
+      { h: "The precedent that justifies all of this caution", p: "The F10 vocabulary passed every fixture test and then flew: Scan was driving the wrong sight entirely, and Cancel Task spoke a raw task id aloud. A fixture pass and a flight pass are different claims." }
+    ],
+    items: [["done","Three Explore rounds + SAM-site recon"],["done","Reviewer round 2, Security, Performance"],["done","DoD mechanical gate at the tip"],["open","Your merge call"],["open","The acceptance flight"]],
+    src: "plans/group-cohesion-redesign/plan.md, docs/acceptance/2026-10-01-group-cohesion-sortie.md"
+  },
+
+  elevprobe: {
+    kicker: "Waiting on you", title: "Fly the elevation-cost probe", chip: ["block", "Windows box"],
+    facts: [["Setup", "DCS alone — no collector, no body layer"], ["Already deployed", "hook on the Windows box, writes to dcs.log"], ["Known already", "the bridge costs ~2.6 us an item"]],
+    sections: [
+      { h: "Two things the existing measurement cannot tell us", p: "The bridge cost is settled for one call: 0.5 ms fixed plus ~2.6 &micro;s an item, p99 8 ms at 568 units, read out of a sortie that was already in <code>dcs.log</code>. What that figure cannot answer: whether <code>land.getHeight</code> works through the mission bridge <em>at all</em> &mdash; high confidence, never once demonstrated, since every prior elevation probe ran offline through mission-editor triggers &mdash; and what it costs when it does." },
+      { h: "Half of it is yours and cannot be delegated", p: "<strong>Does the call block DCS's own frame?</strong> A log can record milliseconds; it cannot record whether the aircraft stuttered. The 20 ms outliers in the existing data are the hint that a bridge payload might stall the renderer rather than merely taking time." },
+      { h: "Fly it separately, deliberately", p: "Not on a crew-behaviour sortie. The probe may hitch the frame by design, which is exactly what would contaminate a judgement about whether Petrovich's callouts feel right &mdash; and the reverse holds too." },
+      { h: "What it decides", p: "Whether real DCS elevation gets accumulated in flight at all. The alternative route is real but unfinished: <code>Syria.surface5</code> does encode elevation, confirmed 129/129 against ground truth with a working index walker, but only a per-tile min/max envelope has been decoded &mdash; per-node heights sit behind the same payload-addressing wall that has now stopped two separate attempts. If this probe comes back cheap, that fortnight-long decode never needs attempting." }
+    ],
+    items: [["done","Bridge cost at scale, from an existing log"],["done","surface5 elevation confirmed (envelope only)"],["open","Does land.getHeight work through the bridge?"],["open","Does it hitch the frame?"]],
+    src: "docs/acceptance/2026-09-29-elevation-cost-probe.md, todo/backlog.md (X-B26)"
+  },
+
   wm: {
-    kicker: "world-model/", title: "World Model", chip: ["done", "M0-M10 complete"],
-    facts: [["Scope", "Persistent geographic knowledge of a DCS theatre"], ["Authority", "DCS geometry always wins; OSM augments, never overrides"], ["Last full build", "syria-full, 2026-09-15/16, ~60 min end to end"]],
+    kicker: "world-model/", title: "World Model", chip: ["active", "M0-M10 complete, landform parked"],
+    facts: [["Scope", "Persistent geographic knowledge of a DCS theatre"], ["Authority", "DCS geometry always wins; OSM augments, never overrides"], ["Last full build", "syria-full, with the new landform detector, 2026-10-01"]],
     sections: [
       { h: "What it does", p: "Roads, settlements, terrain, elevation, coastline, landcover and road junctions, built offline and served to the Mission Interpreter over HTTP. Line-of-sight was generalised out of body-layer into here, so masking is a point-A-to-point-B primitive rather than something the perception code owns." },
-      { h: "Why it's effectively finished", p: "Every query surface the layers above it need is live. The last full-theatre rebuild validated both the junction-streaming fix and the OSM ingest split in one run — OSM now contributes landcover, coastline, water and named places, and never roads. DCS <code>.routes</code> stays authoritative for those." },
-      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the real one, and it is add-entries-and-verify rather than a rewrite — projections and regions are per-theatre registries, not code forks. Per theatre you need verified projection parameters, a region bbox, and a hand-derived raster chart registration. Kola is the exception that needs thought: SRTM has no coverage above 60 degrees north, so its elevation source has to change." },
+      { h: "Why it's effectively finished", p: "Every query surface the layers above it need is live. The last full-theatre rebuild validated both the junction-streaming fix and the OSM ingest split in one run — OSM now contributes landcover, coastline, water and named places, and never roads. DCS <code>.routes</code> stays authoritative for those. OSM landcover also just became the <em>shipping</em> answer for seeing through woods rather than a fallback: no DCS call sees trees." },
+      { h: "Today: the landform line was built, confirmed, and parked", p: "The marker-controlled watershed detector replaced M6's curvature classifier and the real <code>syria-full</code> build held every prediction &mdash; then the output was judged wrong by eye over a hillshade. <strong>Treat the stored <code>ridge</code>/<code>valley</code> rows as unreliable</strong> rather than as a layer later work can assume. Geomorphons is the chosen replacement, with a line cache on the OSM cache's own pattern; deliberately not started." },
+      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and it is add-entries-and-verify rather than a rewrite — projections and regions are per-theatre registries, not code forks. Per theatre you need verified projection parameters, a region bbox, and a hand-derived raster chart registration. Kola is the exception that needs thought: SRTM has no coverage above 60 degrees north, so its elevation source has to change." },
+      { h: "The elevation grid's future is now in question, and that is new", p: "Line of sight is moving to DCS, which was the grid's strongest claimed consumer; contact enrichment can use a unit's own DCS-reported altitude, which is exact; and the Mission Interpreter turns out to receive elevation as unread payload rather than reading it. Measured, so the size argument is not guessed at: the grid is 49 MB of a 608 MB store &mdash; about 8% &mdash; while OSM features are the bulk. <strong>The reason to do that work is quality, not disk.</strong>" },
       { h: "Unmeasured", p: "Full-theatre OSM parse time and peak memory were never measured — the validating build hit a warm cache and skipped the parse. Stage 5 of that pipeline also has pathological single-chunk stalls. Both are backlog, neither is a correctness gate." }
     ],
-    items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive"],["done","HTTP API server"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["hold","Power lines from DCS data"]],
+    items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive + 12 m tolerance"],["done","HTTP API server"],["done","Watershed landform detector (merged, then parked)"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["open","Latin-script place names at OSM ingest"],["hold","WM-B6 - landform detection, geomorphons decided"],["hold","Power lines from DCS data"]],
     src: "world-model/ROADMAP.md"
   },
   al: {
@@ -1225,7 +1399,8 @@ const DETAIL = {
       { h: "Audio playback", p: "<code>POST /audio/play</code> landed with the TTS slice: base64 WAV in, played through <code>winsound</code> by a single worker thread. Routine lines queue FIFO; an urgent line clears the queue and interrupts whatever is already speaking." },
       { h: "Open: split the export throttle", p: "<code>EXPORT_INTERVAL_S = 0.2</code> is one shared 5 Hz throttle gating all three feeds together. Ground units do not need 5 Hz; self-data may want to stay fast. The fix is two interval constants. Not urgent, because there is no measured cost to react to yet — see below." },
       { h: "Open: measure the real FPS cost", p: "No quantified per-call cost for <code>LoGetWorldObjects</code> exists at realistic unit counts of 50-200 — only forum folklore. The test is to fly with world-objects export on and off at 5, 2 and 1 Hz and diff frame times. Worth checking at the same time whether being fired at is served by this poll at all; nothing currently reads it for threat detection, and urgent callouts may need their own signal." },
-      { h: "A found gap in our own documentation", p: "The clickabledata.lua dump that documents Mi-24P controls missed 13 of 749 elements — precisely the ones with more than one action, including both push-to-talk triggers. Listed by hand in a warning box at the top of the reference for now; the generator is the real fix." }
+      { h: "A found gap in our own documentation", p: "The clickabledata.lua dump that documents Mi-24P controls missed 13 of 749 elements — precisely the ones with more than one action, including both push-to-talk triggers. Listed by hand in a warning box at the top of the reference for now; the generator is the real fix." },
+      { h: "The bridge stopped being a worry and became a foundation", p: "<code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13, and its cost is now measured rather than feared: <strong>568 units at a mean of 1.99 ms, p99 8 ms, about 2.6 &micro;s an item</strong>. That single figure is what makes batched work on the DCS side affordable &mdash; and it is why line of sight is now proposed to move here, one sweep per second over every unit in the bubble, instead of body-layer asking per candidate across the LAN." }
     ],
     items: [["done","Core telemetry pipeline"],["done","/world_objects/latest"],["done","/petrovich_indication/latest"],["done","Text overlay write channel"],["done","F10 command inbound channel"],["done","POST /audio/play"],["done","/unit_velocity/latest - ACCEPTED 2026-09-23"],["done","Push-to-talk channel - ACCEPTED 2026-09-23"],["open","Split the export throttle"],["open","Measure LoGetWorldObjects FPS cost"],["open","Regenerate command-surface reference with a raw-table parser"]],
     src: "aircraft-layer/ROADMAP.md"
@@ -1244,8 +1419,8 @@ const DETAIL = {
     src: "mission-interpreter/ROADMAP.md, docs/acceptance/2026-09-24-mission-interpreter-sortie.md"
   },
   bl: {
-    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Eyes-and-voice flown -- eight defects, not a pass"],
-    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["Tests", "1275 passing, 4 xfailed"]],
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Cohesion redesign through every gate, unmerged"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["Tests", "1367 passing, 4 xfailed (branch tip)"]],
     sections: [
       { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state -- never LLM chat history." },
       { h: "The invariant everything serves", p: "Contact identity is <strong>perceptual</strong>, never a DCS object id or any truth field. That is deliberate: Petrovich can confuse two identical trucks, which is exactly the fallibility this project exists to model." },
@@ -1255,9 +1430,11 @@ const DETAIL = {
       { h: "The eyes-and-voice sortie flew -- and returned eight defects, 2026-09-25", p: "Not a pass, and that is the point: every fixture and console test had already passed. What the air found: a commanded scan was enrolling everything it saw into unprompted reporting, so the pilot heard movement and range calls about contacts he had never asked about (<em>\"for watched units it's signal, for non-watched noise\"</em>); \"cancel everything\" cancelled only the newest task of each kind, leaving an earlier <code>scan south</code> to take over the gaze once the newer scan stopped; a kilometre crossing was worded identically to a fresh sighting, so it sounded like a new contact -- the user's own fix was <em>\"getting closer\"</em> / <em>\"moving away\"</em>, better than the proposed wording because it carries direction; and an outpost fragmented into eighteen contacts. All fixed and merged except the last, which is diagnosed." },
       { h: "Position belief needed a gate nobody had built", p: "The day-after sortie on precise position belief produced <em>\"couple contacts, 4 o'clock, 87.5 kilometres\"</em> against a 10 km detection cap. The user's one-line diagnosis named the reachable path -- <em>\"position uncertainty needs a gate, cannot be further than detection range\"</em> -- and it was the correct one; this orchestrator's own hypothesis, ill-conditioned covariance fusion, was reproducible in isolation but unreachable, because the association gate already blocks it. Worth recording as the pattern: a defect that reproduces is not thereby the defect that happened." },
       { h: "Two instruments built for the calibration problem itself", p: "A top-down ASCII eyesight view (5 km radius, watched contacts in orange) and an optional belief-versus-ground-truth log, which deliberately breaks the no-omniscience boundary because its entire purpose is catching the moments belief and truth diverge. Both earned their place immediately: the log found the eighteen-contact outpost, the view caught the scan/watch conflation. The log also carries what Petrovich <em>says</em>, with his gaze at that instant -- which turns \"he called 10 o'clock while scanning right\" from a two-file correlation into one line." },
-      { h: "What's next", p: "One consolidated sortie (<code>docs/acceptance/2026-09-25-crew-behaviour-sortie.md</code>) covering everything merged 2026-09-24/25, then contact fragmentation -- diagnosed, four candidate directions, none chosen." }
+      { h: "The noise problem, and the diagnosis that was wrong first", p: "A 2026-09-28 sortie produced roughly five reports a minute for half an hour, the same sentence up to seven times. It was attributed in conversation to the known fragmentation defect &mdash; then the belief-truth log was actually opened and <strong>3 of 52 contacts were ever plural, against 62 real objects</strong>, which is near 1:1 and the exact opposite of that defect's signature. Clustering was right: there were simply that many individually-resolvable vehicles. The lever was callout <em>policy</em>, not association, which is what group reporting then addressed." },
+      { h: "Today: cohesion redesigned, and the branch is still a branch", p: "Group reporting's one-line-per-group ladder shipped with a flat cohesion bound; the redesign makes it <strong>size-relative and kind-aware</strong> &mdash; infantry merge eagerly by your instruction, a real SAM installation's components merge inside 500 m (grounded in S-75/S-125 doctrine, replacing a discredited 1000 m guess), and a re-arrival speaks a short delta rather than restating the roster. Reviewer twice, Security, Performance and DoD's mechanical gate all passed. A design gap surfaced while wiring it: the pull-based \"report\" command assumed disclosure always returned a full composition, which the delta taxonomy breaks &mdash; so a taxonomy-free full-disclosure renderer was added for that path." },
+      { h: "What's next", p: "Your merge call on <code>fix/group-undermerging</code>, then the flight that carries it alongside four cards already on <code>main</code>. Behind that: the 10 km player bubble (decided, unbuilt), sector fairness (staged out as needing its own <code>/explore</code>), and the clustering-cost item the performance pass just filed." }
     ],
-    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Group detectability - resolution vs salience"],["done","Watch as a standing mode"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Five-fix sortie - PASSED 2026-09-23"],["done","Binocular optic - unflown"],["done","Voice command completeness - unflown"],["done","Precise position belief - unflown"],["open","Repetition - reopened 2026-09-23"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - composition"]],
+    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["active","Cohesion redesign - gates passed, unmerged"],["open","10 km player bubble"],["open","BL-B20 sector fairness"],["open","BL-B23 clustering cost"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
     src: "body-layer/ROADMAP.md"
   },
   srs: {
@@ -1309,43 +1486,18 @@ const DETAIL = {
     src: "docs/concept/detection-in-non-perfect-conditions.md, body-layer/research/2026-09-26-condition-factors-first-analysis.md"
   },
 
-  probe2: {
-    kicker: "Waiting on you", title: "Will DCS do line-of-sight for us?", chip: ["block", "Windows box"],
-    facts: [["Gates", "the 9K113 half of the vegetation model"], ["Does not gate", "the statistical model"], ["Transport", "already in production since 2026-09-13"]],
-    sections: [
-      { h: "The question, precisely", p: "<code>Scripts/AI/Detection.lua</code> sets <code>trees_LOS_test_T4 = true</code> and every installed theatre is Terrain-4, so <strong>ED's AI detection</strong> samples tree geometry for line of sight. That is not the same claim as <strong>the scripting API</strong> doing it. Our own line of sight samples the bare terrain mesh, so we are strictly more permissive through forest than the engine - Petrovich sees through woods DCS would block." },
-      { h: "Why it gates only half the work", p: "The vegetation decision splits the channels: naked eye and binoculars get a statistical transmission probability (a sweeping gaze through woods genuinely is probabilistic, and we hold landcover polygons, not trunks), while the 9K113 sight - one narrow ray to one target, pointed deliberately - asks DCS for the real answer. If <code>isVisible</code> turns out to be terrain-only, the sight half has nothing to call and the statistical model has to cover everything." },
-      { h: "Two weather questions ride the same bridge", p: "Whether meteorological visibility can be read at all - it is a ceiling on detection for every instrument, and <code>Export.lua</code> has no weather getter, so this bridge is the only candidate. And whether <em>where</em> it rains can be read: rain is not uniform, so an ownship-local figure says nothing about whether the target sits under a squall. ED's own fog is a time series, so whatever reads it must sample rather than read once." },
-      { h: "What is not in question", p: "The transport. <code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13 at 1 Hz. This probe is about what the function answers and what it costs, not about reaching it. Still open from when the earlier bridge probe closed: whether a result can return synchronously - which was never the blocker for velocity, a push, and is the blocker for line of sight, a question." }
-    ],
-    items: [["open","Does isVisible test trees, or terrain only?"],["open","Is getIP more useful - it names the blocker"],["open","Per-call cost at realistic candidate counts"],["open","Can a result return synchronously?"]],
-    src: "todo/todo.md, body-layer/ROADMAP.md (conditions, factor 1)"
-  },
-
   gbound: {
-    kicker: "body-layer/", title: "The group boundary is a guess, by agreement", chip: ["open", "Needs a flight"],
-    facts: [["Constant", "GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS = 20.0"], ["For a 7 m vehicle", "~140 m between neighbours"], ["Evidence behind it", "none yet"]],
+    kicker: "body-layer/", title: "Three cohesion constants, all agreed guesses", chip: ["open", "Needs a flight"],
+    facts: [["Ordinary group", "20 unit widths (~140 m for a 7 m vehicle)"], ["Installation", "500 m cap, from emplacement doctrine"], ["Infantry", "no backstop at all, by direction"]],
     sections: [
-      { h: "Why unit widths and not metres", p: "The pilot's own observation closed this: a constant already existed in <code>perception/group_salience.py</code> measuring gaps in multiples of the members' own size. The currency transferred; the number did not - that one is angular and answers whether dots merge into one mass at range, which is a different question from whether resolved contacts belong together. So the reporting side got its own constant, deliberately named apart from it." },
-      { h: "How 20 was picked", p: "The pilot was asked for a number and declined honestly: <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Twenty sits above typical DCS road-convoy spacing (50-100 m, i.e. 7-14 unit widths for a vehicle) and about seven times above the only real group the project has measured - the twelve-unit, ~200 m calibration line, which is ~2.6 unit widths. Single-link chaining means a long convoy still coheres provided each neighbour gap is inside the bound." },
-      { h: "What it replaced, and why that matters", p: "A flat 300 m backstop that applied only when fewer than three contacts were tracked. That version fixed a real defect - with exactly two contacts the relative median is tautologically their own separation, so any two cohered at any distance - but left a subtler one standing at three or more: a sparse merge could lead a line with a named threat while taking clock and range from a <em>different</em> member, putting a Shilka somewhere it was not. The unit-width bound applies at every density and closes both." },
-      { h: "What the flight decides", p: "Two failure directions, both audible. Too tight and a convoy fragments into pieces that should be one thing; too loose and separate clusters merge into a group the pilot does not perceive. Either way the number moves, which is what it was shipped to do." }
+      { h: "Why unit widths and not metres", p: "Your own observation closed this: a constant already existed in <code>perception/group_salience.py</code> measuring gaps in multiples of the members' own size. The currency transferred; the number did not &mdash; that one is angular and answers whether dots merge into one mass at range, which is a different question from whether resolved contacts belong together. So the reporting side got its own constant, deliberately named apart from it." },
+      { h: "How 20 was picked", p: "You were asked for a number and declined honestly: <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Twenty sits above typical DCS road-convoy spacing (50-100 m, i.e. 7-14 unit widths for a vehicle) and about seven times above the only real group the project has measured &mdash; the twelve-unit, ~200 m calibration line, at ~2.6 unit widths. Single-link chaining means a long convoy still coheres provided each neighbour gap is inside the bound." },
+      { h: "The 500 m installation cap replaced a worse number, and the flag had to be narrowed", p: "The first guess was 1000 m and was discredited; 500 m comes from real S-75/S-125 emplacement doctrine, researched rather than estimated. The subtler finding came mid-revision: <strong><code>op_class</code> alone would have conflated the genuine fixed S-125 site with four single-vehicle systems</strong> &mdash; Osa, Strela-10, Strela-1, Tor &mdash; that must stay excluded. So \"is an installation component\" became a per-type property, and only two types carry it. The S-300 deliberately does not, which means its own components do not single-merge; verified against a real battery's ground-truth geometry from a sortie trace, where they form a three-member cluster with the fourth isolated." },
+      { h: "Infantry merge eagerly, and the consequence is wider than it sounds", p: "<em>\"Ok to merge infantry too eagerly.\"</em> With no backstop at all for a pair where either member is infantry, single-link chaining through an infantry member <strong>bridges two non-infantry vehicles into the same group</strong> even though their own direct gap would not clear the ordinary bound. That is a real consequence, now pinned by its own test rather than left to be discovered in the air &mdash; but whether it reads as correct or as noise in the cockpit is a listening question." },
+      { h: "What the flight decides", p: "Two audible failure directions for every one of the three: too tight and a convoy or a site fragments into pieces that should be one thing; too loose and separate clusters merge into a group you do not perceive. Either way a number moves, which is what they were shipped to do." }
     ],
-    items: [["done","Unit-width bound, all densities"],["done","n=2 tautology closed"],["done","n>=3 wrong-position risk closed"],["open","First flight evidence for 20.0"]],
-    src: "plans/group-reporting/plan.md, implementation.md"
-  },
-
-  terrain: {
-    kicker: "world-model/", title: "Real DCS elevation - probe it, or decode it", chip: ["open", "Gated on a measurement"],
-    facts: [["Today's grid", "SRTM, 1000 m spacing"], ["Its measured error", "11.52 m stddev vs DCS"], ["Mitigation shipped", "12 m LOS tolerance"]],
-    sections: [
-      { h: "Why a tolerance is not the fix", p: "A real sortie flew past insurgent AAA, attacked it, and Petrovich never saw it. The grid's own error had placed the unit <em>below</em> modelled terrain at its own position, so line of sight was blocked from every angle, permanently - reproduced offline at exactly the recorded stddev, not a contrived case. The 12 m tolerance stops that, and necessarily also reveals anything masked by a ridge clearing the sightline by less than 12 m. Accepted knowingly, on the grounds that a Mi-24P attacks in a run rather than from a masked pop-up hover - an airframe assumption recorded as a lapse condition, because a Ka-50 or Apache would need it revisited." },
-      { h: "The design the pilot chose", p: "Fog-of-war accumulation: sample tiles around the aircraft, coarse to the bubble limit, medium to ~6 km, fine to ~3 km, and fine along the 9K113's field to 20 km. Persisted in a <em>separate</em> SQLite file so a model rebuild cannot destroy it - sampled terrain is earned over many sorties and cannot be regenerated. Never resample what is already held at equal or finer resolution; M8's tri-state chunk coverage already implements that half." },
-      { h: "One number decides which build", p: "Reading DCS's own terrain files would have no frame-rate risk and no throughput ceiling, but no terrain module ships a heightmap: the only candidate is a 30 GB+ LOD-quadtree mesh container whose payload has never been decoded, with no public documentation anywhere. Two ED forum threads were read on 2026-09-29 and contain no prior art - the one person publicly asking this exact question concluded he would query heights in-game instead. So live probing is now the working assumption, and its affordability rests entirely on <code>bridge_call_ms</code>, which production code has been writing to <code>dcs.log</code> since 2026-09-13 and nobody has read." },
-      { h: "A blocker that was stale for three weeks", p: "The concept doc said incremental probing was blocked because no live path existed out of a running mission. That path shipped five days after the sentence was written, and two flown features ride it. The claim was corrected on 2026-09-29 - kept visible next to its correction rather than deleted, because a confidently wrong sentence is the failure mode this project keeps meeting." }
-    ],
-    items: [["done","12 m LOS tolerance merged"],["done","Forum prior-art search closed"],["open","Read bridge_call_ms at 50-200 units"],["open","Demonstrate land.getHeight via the bridge"],["open",".surface5 decode, timeboxed"]],
-    src: "plans/live-terrain-sampling/design-input.md, plans/missed-aaa-detection/debug.md"
+    items: [["done","Unit-width bound, all densities"],["done","n=2 tautology and n>=3 wrong-position risk closed"],["done","500 m installation cap, doctrine-grounded"],["done","Infantry EAGER, bridging pinned by test"],["open","First flight evidence for all three"]],
+    src: "plans/group-reporting/plan.md, plans/group-cohesion-redesign/plan.md, body-layer/research/2026-10-01-sam-site-geometry.md"
   },
 
   d10: {
@@ -1385,29 +1537,32 @@ const DETAIL = {
   },
 
   crewsortie: {
-    kicker: "Waiting on you", title: "Fly the crew-behaviour sortie", chip: ["block", "Sortie"],
-    facts: [["Branch", "main -- all of it is merged"], ["Card", "docs/acceptance/2026-09-25-crew-behaviour-sortie.md"], ["Processes", "Three on the Mac now"]],
+    kicker: "Waiting on you", title: "Four cards on main, none flown", chip: ["block", "Sortie"],
+    facts: [["Branch", "main -- all four are merged"], ["Oldest card", "2026-09-25, crew behaviour"], ["Newest", "2026-09-29, group reporting + LOS tolerance"]],
     sections: [
-      { h: "Why one card and not nine", p: "Nine things merged over two days and none has been heard in the air. But most of them came out of the previous sortie, so the question is not \"do these features exist\" -- it is \"are the fixes right\", and that is one continuous listening exercise rather than nine checks. The user's call: <em>\"fold into single.\"</em>" },
-      { h: "The block worth most", p: "Whether a commanded scan has stopped being noisy. It was the pilot's own complaint -- a scan was enrolling everything it found into unprompted reporting, and the fix narrowed the area's attention level. What to listen for: detection reports, then <em>quiet</em>." },
-      { h: "Two things it explicitly cannot judge", p: "There is no intelligence behind the brain yet, so only responsiveness and stand-by timing are assessable. And <code>follow &lt;descriptor&gt;</code> still cannot pick the right contact, for the structural reason above -- he will correctly ask rather than pick, and that is not a defect to report." },
-      { h: "One setup defect found while writing the card", p: "<code>run-brain.sh</code> was broken on the Mac: it used <code>$PETROBRAIN_PATH</code>, which holds the WSL path <code>/mnt/d/...</code>. Fixed to a relative path, matching the other run scripts." }
+      { h: "What is waiting, and why it is cards rather than features", p: "Group reporting and the 12 m line-of-sight tolerance (2026-09-29), the confirm band (2026-09-28), the 2026-09-26 crew-behaviour fixes, and the brain's first real model. All merged, none heard in the air. Several of these were deliberately merged ahead of their flight at your direction, so a correction the flight produces lands on <code>main</code> rather than on a branch that has drifted &mdash; which is the right call and is also why the backlog of unflown cards keeps growing rather than clearing." },
+      { h: "The single answer worth most", p: "Whether the group boundary draws groups where you perceive them. It is 20 unit widths &mdash; about 140 m between neighbouring vehicles &mdash; and it is your own <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Two audible failure directions: too tight and a convoy fragments into pieces that should be one thing; too loose and separate clusters merge into a group you do not perceive." },
+      { h: "Fly with the detection trace on", p: "The belief-truth log records what Petrovich believes; it <strong>structurally cannot record a candidate he rejected</strong>. That is precisely why the missed-AAA defect needed an offline reproduction to find at all &mdash; the evidence of the miss was the absence of a row. The trace records every visibility call, including the rejections." },
+      { h: "Two things no flight here can judge", p: "<code>follow &lt;descriptor&gt;</code> still cannot pick the right contact &mdash; the validator's rule is right and currently unsatisfiable, so he will correctly ask rather than pick, and that is not a defect to report. And the 12 m tolerance's second effect is a thing to watch for rather than test: it will also reveal units genuinely masked by a ridge clearing the sightline by less than that. Accepted knowingly; only a real flight shows it happening." },
+      { h: "The one card deliberately not in this set", p: "The elevation-cost probe. It may hitch the frame by design, which would contaminate any judgement about whether callouts feel right." }
     ],
-    items: [["open","Block 1 - scan noise (worth most)"],["open","Block 2 - watch reporting and direction words"],["open","Block 3 - cancel everything"],["open","Block 4 - the brain answers at all"],["open","Block 5 - the dense scene"]],
-    src: "docs/acceptance/2026-09-25-crew-behaviour-sortie.md"
+    items: [["open","Group reporting - one line per group"],["open","12 m LOS tolerance - the missed AAA"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
+    src: "docs/acceptance/2026-09-29-group-reporting-sortie.md, 2026-09-29-los-tolerance-sortie.md, 2026-09-28-confirm-band-sortie.md, 2026-09-26-sortie-fixes-sortie.md"
   },
 
   gc4b: {
-    kicker: "body-layer/", title: "Detection under real conditions", chip: ["block", "Needs the Windows box"],
-    facts: [["Raised", "2026-09-19"], ["Gates", "Detection cones"], ["Next artifact", "Scripts/AI/Detection.lua"]],
+    kicker: "body-layer/", title: "Seeing through woods, and under real conditions", chip: ["open", "Unblocked, and simplified"],
+    facts: [["Raised", "2026-09-19"], ["Tree question", "CLOSED 2026-10-01 \u2014 a clean negative"], ["Shipping answer", "OSM landcover polygons, already local"]],
     sections: [
       { h: "The framing matters more than the list", p: "Every detection test so far was flown in near-perfect visual conditions. That makes the calibration an <strong>upper bound on what is possible</strong>, not a model of what usually happens \u2014 so conditions do not replace it, they multiply down from it. Optics multiply apparent size up, conditions multiply detectability down, and the three calibrated angular thresholds stay fixed in the middle." },
+      { h: "The tree question closed, and the answer removes half the design", p: "The plan split the channels: a statistical per-landcover probability for the eye and binoculars, and the 9K113 sight asking DCS for a real ray to one target. <strong>No DCS call gives tree-aware line of sight.</strong> Probed on the Windows box against vehicles parked inside canopy: <code>isVisible</code>, <code>getIP</code>, <code>searchObjects</code> at every volume and <code>getSurfaceType</code> are all terrain and scenery only. ED's own AI does sample tree geometry \u2014 <code>trees_LOS_test_T4 = true</code> \u2014 but that path is compiled, and DCS Petrovich's own verdict there is an audio file. So the statistical model covers every channel, which it was already built to do, and the fallback became the answer." },
+      { h: "The placements do exist, and are behind a wall hit twice", p: "<code>Syria.surface5</code> holds per-node tree sections \u2014 8,789 in the first 150 MB, each with ~325-346 twelve-byte positions, indexed into a readable 2,665-entry asset table naming six species. Extrapolated, millions of individual trees. But the field table's offsets are not file offsets, and every candidate base gives degenerate clouds: <strong>the identical blocker the elevation decode hit from a different payload.</strong> Two attempts, two payloads, one wall \u2014 which is the transferable finding, and why a third afternoon on it would be wasted. Three files look like tree data and none is: <code>.sd5</code> parses perfectly and is grass and rock clutter, the <code>.ref</code> siblings are meshes of a single tree." },
       { h: "Vegetation is nearly free", p: "World-model already resolves landcover \u2014 forest, orchard, scrubland, open fields \u2014 and it already reaches the body layer through enrichment. Nothing new has to be extracted from DCS; it simply is not wired to the visibility gate yet. Light level is next; weather needed research before it could be planned; camouflage is deliberately last, because it interacts with all three." },
       { h: "The research already overturned an assumption", p: "Movement was the standing guess for our biggest gap against ED \u2014 a moving vehicle being far more detectable than a static one, with no term for it in our model. <strong>Neither ED nor we model movement, or dwell.</strong> So it is not catch-up; if it gets built it is a design choice to argue on crew realism rather than parity. That is exactly the kind of thing reading our own code could never have told us." },
       { h: "And corroborated a decision", p: "ED never exposes a raw numeric range on any crew-facing channel \u2014 only a coarse range bucket, or nothing. Handing our belief layer a ground-truth distance departs from the sim's own conventions as much as from a crew member's senses. Weather also turned out live-readable after all, reversing an assumption recorded a day earlier." },
       { h: "What is still unknown", p: "Three grep passes found zero consumers of <code>min_contrast_f</code>, <code>min_fog_transparency</code> or <code>extra_eyesight_ratio</code> anywhere in the Mi-24P tree, so the engine-wide <code>Scripts/AI/Detection.lua</code> is where they are most likely used. It is confirmed present in the file listing and has never been read \u2014 the single highest-value thing to open on the Windows box." }
     ],
-    src: "body-layer/ROADMAP.md, aircraft-layer/research/2026-09-19-ed-native-detection-identification-gap-analysis.md"
+    src: "body-layer/ROADMAP.md, todo/backlog.md (X-B4 closed, X-B31, X-B32), aircraft-layer/research/2026-09-29-tree-los-probe-results.md"
   },
   gc5: {
     kicker: "body-layer/", title: "Stage 5 - composition", chip: ["hold", "Re-judge after flying"],
