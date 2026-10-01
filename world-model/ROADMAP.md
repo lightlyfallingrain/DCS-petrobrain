@@ -544,6 +544,33 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     over numpy, same complexity class as the priority-flood basin grower already shipped — keeping
     the project's own axis-sliced line extraction.
 
+  **The consumer half, user 2026-10-01**: *"Could we replace contact enrichment of near that hill
+  to work from the ridge/valley data? Then we'd not need elevation grid for that and the ridge
+  valley data would be superior in quality anyhow."*
+
+  Checked, and it holds — with one exception that has to be named rather than discovered later.
+
+  - **A ground unit's elevation already comes from DCS, exactly, per poll.**
+    `aircraft_layer.schema.world_objects.WorldObjectSample` carries `altitude_m` on every object,
+    and for a ground unit that *is* the ground elevation at its own position — DCS-authoritative,
+    not SRTM-interpolated, and better than anything the grid can give (M7 measured the grid at
+    −7.19 m mean / 11.52 m stddev against DCS). So the foot/slope/crest judgement is
+    *contact's own reported altitude* against *the landform's stored `elevation_range_m`*. Neither
+    term needs `sample_grid`.
+  - `belief/enrichment.py` already consumes `describe_position`'s `nearby_ridges`/`nearby_valleys`
+    and those features already carry `elevation_range_m` from their own `tags_json`. The rework is
+    in which fields the fact is built from, not in new plumbing.
+  - **The exception: offline consumers have no DCS to ask.** Mission Interpreter runs pre-mission
+    with no sim running, and `describe_position`'s `elevation` is part of world-model's public
+    query/HTTP surface. Dropping the grid entirely would leave those callers with no elevation at
+    all. So the honest scope is *"in-flight enrichment stops needing the grid"*, not *"the grid can
+    be deleted"* — decide what offline callers get before removing anything, and check
+    `query/describe.py`'s other readers rather than assuming enrichment is the only one.
+  - Net effect if both halves land: the grid stops being load-bearing for anything the pilot hears
+    (DCS answers LOS, DCS answers elevation, features answer landform), which is what makes
+    detecting at native SRTM resolution and storing only lines a coherent design rather than a
+    half-measure.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
