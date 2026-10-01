@@ -44,7 +44,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
 ### Added 2026-09-25 (user)
 
-- [ ] **X-B4 — Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
+- [x] **X-B4 — Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
+  **CLOSED 2026-10-01** (merge `306ae05`) — answered in full, including the tree half. Details below.
   User direction, 2026-09-25, arising from the vegetation-model decision recorded in
   `body-layer/ROADMAP.md` ("Detection under real world conditions", factor 1). **Gates the 9K113
   half of that decision and nothing else** — the statistical model for naked eye and binoculars
@@ -192,6 +193,15 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   **Do not start before `X-B26`'s SRTM-resolution question is settled** — both change
   `line_of_sight_clear`, and doing them in either order separately means touching it twice.
+
+  **The "trees from OSM" row is settled rather than assumed, as of 2026-10-01** (merge `306ae05`).
+  It was the fallback pending an answer; it is now the measured answer. **No DCS call gives
+  tree-aware line of sight** — `isVisible`, `getIP`, `searchObjects` at any volume and
+  `getSurfaceType` are all terrain/scenery only, tested against vehicles the pilot placed inside
+  canopy. The engine has the capability but it is compiled and Petrovich's own verdict is an audio
+  file. DCS's per-tree placement does exist on disk, and is deferred behind the `.surface5`
+  payload-addressing wall (`X-B32`). Full reasoning:
+  `aircraft-layer/research/2026-09-29-tree-los-probe-results.md`.
 
 - [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
@@ -912,3 +922,48 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   development."* So the buildings half of the occluder work proceeds Mac-side now, paying the LAN
   round trip, rather than waiting on X-B27's eventual topology. X-B29 above may make the point moot
   by batching the call anyway.
+
+- [>] **X-B32 — DCS's per-tree placement is in `Syria.surface5`, behind the payload-addressing wall.
+  DEFERRED 2026-10-01, same day it was opened.** Investigated on the Windows box in answer to the
+  user's question *"what would it take to access the compiled tree aware LOS and call it between
+  point A and B?"*. Full detail:
+  `aircraft-layer/research/2026-09-29-tree-los-probe-results.md` Finding 10.
+
+  **The question's own answer: you cannot call it.** No scripting binding exists; reaching the
+  compiled test needs native injection into the DCS process — against the EULA, broken by every
+  update, not a route. The rest is about rebuilding its input.
+
+  **What was found.** Trees live in `Syria.surface5` as per-node `Trees` sections — **8,789 in the
+  first 150 MB** — each with a `Pbase` array of ~325–346 twelve-byte positions and an `assetIndex`
+  into a **readable 2,665-entry asset-name table at 140.3 MB**. Syria instances six species:
+  `italiancypress`, `juniperus`, `mandal2`, `palm`, `pineitalian2`, `platan`. Extrapolated, that is
+  **millions of individual tree positions** — better than the patch-centres outcome hoped for, and
+  comfortably past the user's bar of "need to know if they block LOS".
+
+  **Why it is deferred anyway.** The field table's `offset` is not a file offset: `Trees.Pbase`
+  states 585 KB and the bytes there are another node's field declarations. Offsets grow with node
+  index at no constant ratio — the recursive LOD quadtree. Candidate data bases, including the
+  exact end of the descriptor region (0x85d2616), give degenerate clouds. **This is the same wall
+  the elevation decode hit** (`world-model/research/2026-09-29-surface5-elevation-confirmed.md`
+  Finding 5). Two attempts, two payloads, one blocker.
+
+  **Correction worth keeping, because the wrong turn is re-walkable.**
+  `surfaceDetails/Syria.sd5` parses perfectly — 276,924 records — and is **ground clutter, not
+  trees**: its splat layers are grass, two desert shrubs and three rock types. The sibling `.ref`
+  files are **SpeedTree meshes of a single tree**, not placements. Three files that look like tree
+  data; none is.
+
+  **Effort, revised.** The earlier "3,400× smaller, an afternoon" estimate was based on the wrong
+  file and is withdrawn. The work is the **full 30 GB `.surface5` payload decode** — M7's 1–2 weeks
+  with a real chance of stalling, now having stalled twice at the same point.
+
+  **Reopen only if** someone takes on payload addressing deliberately — and then cost it as a
+  **terrain-elevation** project that happens to yield trees, not the reverse. The reason is
+  survival rather than sequencing: **trees have a working fallback and elevation does not.** OSM
+  landcover ships today; the missed-AAA class has nothing behind it. A fortnight-long decode
+  justified by the half that already has an alternative is the one that gets dropped at the
+  midpoint, leaving the decode half-done — worse than either finishing it or never starting.
+
+  **The transferable finding is the wall, not either negative:** two attempts from two unrelated
+  payloads reached the identical blocker. That is what stops a third person spending an afternoon
+  rediscovering it. OSM landcover remains the shipping answer for trees; nothing is blocked.
