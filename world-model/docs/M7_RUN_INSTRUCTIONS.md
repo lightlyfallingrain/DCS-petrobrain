@@ -120,11 +120,14 @@ handles either, deriving resolution from file size) and put them all in one dire
 
 **Row-count sizing is a real decision you should make before running this for real** (see
 `build.ingest_srtm`'s module docstring and `build.pipeline`'s `DEFAULT_SRTM_GRID_SPACING_M`):
-at the default 1000m storage spacing, `syria-full`'s ~827x771 km bbox is roughly 828 x 772 ≈
-639,000 grid cells; at 500m (matching the older probe-grid convention) it's ~2.5 million. SQLite
-handles millions of rows fine per M5's own findings, but this is the first full-theatre-scale
-grid this pipeline has ever built for real — consider timing a smaller test run first, or pass
-`--srtm-grid-spacing-m` explicitly if you want a different tradeoff than the default.
+the default storage spacing is now **500m** (raised from the original 1000m -- see
+`plans/terrain-feature-probing/plan.md` Stage 1/2 and
+`world-model/research/2026-09-29-terrain-feature-probing-spacing.md` for why; 1000m starved the
+terrain-semantics ridge/valley stage of usable relief), giving `syria-full`'s ~827x771 km bbox
+roughly 1,650 x 1,540 ≈ 2.5 million grid cells. SQLite handles millions of rows fine per M5's own
+findings, and this is a modest ~49 MB of `grid_sample` (4x the old 1000m default's 12.2 MB) —
+still cheap next to the store's other layers. Pass `--srtm-grid-spacing-m 1000` explicitly if you
+want the old, coarser tradeoff instead (e.g. for a quick timing test before a real run).
 
 ### 2b. Run the build with `--srtm-dir`
 

@@ -35,11 +35,14 @@ parse needed to change).
 `elevation` grid (`build.ingest_srtm`, `provenance="srtm"`), run before the
 pre-existing live-probe grid stage (`probe_output_path`,
 `provenance="dcs_probe"`) so that a build supplying both still lets the
-probe grid win as "most recent" for M6's ridge/valley classifier -- which
-this pipeline does **not** run over an SRTM-sourced grid (M6 is locked out
-of M7 entirely; see the plan's "Deferred / Out of Scope"). In practice a
-real `syria-full` build supplies only `srtm_tile_paths`, since M7 repurposes
-the live probe to a small spot-check validation set
+probe grid win as "most recent" for M6's ridge/valley classifier. **The
+terrain-semantics stage now runs over whichever grid wins** -- SRTM alone,
+or probe-over-SRTM when both are supplied -- per
+`plans/terrain-feature-probing/plan.md` Stage 1; it used to run only
+inside the probe branch, so an SRTM-only build (every real `syria-full`-
+scale build) never reached it at all. In practice a real `syria-full`
+build supplies only `srtm_tile_paths`, since M7 repurposes the live probe
+to a small spot-check validation set
 (`build.validate.compare_probe_to_srtm`) rather than a stored full grid, so
 this ordering concern does not arise for M7's own builds -- it exists only
 so the two paths compose safely if ever used together.
@@ -122,21 +125,47 @@ from store.writer import (
     insert_source,
     open_for_build,
 )
-from terrain.curvature import DEFAULT_CURVATURE_THRESHOLD_M
-from terrain.features import DEFAULT_MIN_CELL_COUNT
+from terrain.curvature import (
+    DEFAULT_SEED_FOOTPRINT_CELLS,
+    DEFAULT_SMOOTHING_WINDOW_CELLS,
+)
+from terrain.features import (
+    DEFAULT_MIN_CELL_COUNT,
+    DEFAULT_RELIEF_THRESHOLD_M,
+    DEFAULT_WIDTH_CEILING_M,
+)
 
 _PROBE_GRID_SPACING_M = 500.0
 # Default storage spacing for the M7 Stage 2 SRTM-primary full-theatre
-# elevation grid -- deliberately coarser than `_PROBE_GRID_SPACING_M`
-# (SRTM's own native ~30-90m sampling density is unaffected; this only
-# controls how many of those samples get stored as grid cells). At 500m,
-# `syria-full`'s ~827x771 km padded bbox would be ~1,650 x 1,540 = ~2.5M
-# grid cells; SQLite handles millions of rows fine per M5, but this is the
-# first full-theatre-scale grid this pipeline has built, so the CLI exposes
-# this as an override rather than hardcoding either number -- see
-# `build.ingest_srtm`'s module docstring and
+# elevation grid. Raised from the original 1000m to match
+# `_PROBE_GRID_SPACING_M` (2026-09-29, plans/terrain-feature-probing/
+# plan.md Stage 1/2): the user rejected 1000m for the terrain-semantics
+# (ridge/valley) stage this grid now also feeds -- "an entire mountain can
+# fit inside it" -- and a real sweep over `latakia-20km` SRTM data
+# (`world-model/research/2026-09-29-terrain-feature-probing-spacing.md`)
+# confirmed it empirically: at 1000m the curvature classifier both loses
+# real secondary relief and never reproduces more than a handful of
+# components at any workable threshold. 500m reproduces M6's own
+# already-validated probe-grid tuning (the old per-cell discrete-Laplacian
+# classifier's threshold, since removed -- see `terrain.curvature`'s
+# current module docstring) almost exactly on real SRTM data, and the
+# same sweep found no landmark-quality benefit from going finer (250m/100m
+# still checkerboard at every threshold tested -- a resolution ceiling, not
+# a threshold-tuning gap, matching M6's own finding). The marker-
+# controlled-watershed mechanism that replaced that classifier (2026-10-01,
+# `research/2026-10-01-terrain-feature-probing-watershed-sweep.md`)
+# independently re-confirmed 500m for a mechanism-specific reason (finer
+# spacing raises the absolute cell count the shared geometry-extraction
+# step threads into a line, worsening its zigzag), rather than inheriting
+# this note's finding blind. At 500m,
+# `syria-full`'s ~827x771 km padded bbox is ~1,650 x 1,540 = ~2.5M grid
+# cells; SQLite handles millions of rows fine per M5, and the stored
+# `grid_sample` cost scales to roughly 49 MB (linear in cell count from the
+# 1000m baseline's 12.2 MB) -- a modest, affordable increase, not a
+# storage-cost concern. The CLI still exposes this as an override rather
+# than hardcoding it -- see `build.ingest_srtm`'s module docstring and
 # `world-model/docs/M7_RUN_INSTRUCTIONS.md`'s Stage 2 section.
-DEFAULT_SRTM_GRID_SPACING_M = 1000.0
+DEFAULT_SRTM_GRID_SPACING_M = 500.0
 _TOTAL_STAGES = 8
 
 # How many `StoredFeature` rows `osm_pbf_path`'s cache-hit fast path reads
@@ -598,6 +627,17 @@ def build_region(
         else:
             report.junction_skipped = True
 
+        # `elevation_source_id` tracks whichever `Source` row actually
+        # produced the "elevation" grid the terrain-semantics stage below
+        # will read back -- SRTM is inserted first, so a probe grid
+        # inserted afterwards overwrites it as `store.reader`'s "most
+        # recently inserted" `elevation` row, per this function's own
+        # docstring on the two paths composing safely together. Tracked
+        # here (rather than re-derived from `report.srtm_skipped`/
+        # `probe_skipped`) so the terrain stage below attributes its
+        # features to the grid it actually classified, not a guess.
+        elevation_source_id: int | None = None
+
         if srtm_tile_paths:
             existing_tile_paths = [p for p in srtm_tile_paths if p.exists()]
             if existing_tile_paths:
@@ -630,6 +670,7 @@ def build_region(
                     )
                     insert_grid(conn, srtm_grid)
                     report.srtm_stats = srtm_stats
+                    elevation_source_id = srtm_source_id
             else:
                 report.srtm_skipped = True
         else:
@@ -671,12 +712,22 @@ def build_region(
                 insert_grid(conn, elevation_grid)
                 insert_grid(conn, surface_grid)
                 report.probe_stats = probe_stats
+                elevation_source_id = probe_source_id
+        else:
+            report.probe_skipped = True
 
+        # Un-gated (plans/terrain-feature-probing/plan.md Stage 1): this
+        # used to run only inside the probe branch above, so it never once
+        # ran against an SRTM-sourced grid -- the grid every real
+        # `syria-full`-scale build actually supplies. It now runs whenever
+        # *any* "elevation" grid was actually inserted above, SRTM or
+        # probe, attributed to whichever `Source` row produced that grid.
+        if elevation_source_id is not None:
             with _stage("terrain semantics (ridge/valley)", 8):
                 terrain_grid = load_full_grid(conn, "elevation")
                 if terrain_grid is not None:
                     terrain_features, terrain_stats = ingest_terrain(
-                        terrain_grid, probe_source_id
+                        terrain_grid, elevation_source_id
                     )
                     insert_features(conn, terrain_features)
                     for f in terrain_features:
@@ -685,7 +736,6 @@ def build_region(
                 else:
                     report.terrain_skipped = True
         else:
-            report.probe_skipped = True
             report.terrain_skipped = True
 
         return report
@@ -717,7 +767,10 @@ def add_probe_chunk(
     chunk_iz: int,
     chunk_size_m: float = CHUNK_SIZE_M,
     probe_spacing_m: float = PROBE_SPACING_M,
-    curvature_threshold_m: float = DEFAULT_CURVATURE_THRESHOLD_M,
+    smoothing_window_cells: int = DEFAULT_SMOOTHING_WINDOW_CELLS,
+    seed_footprint_cells: int = DEFAULT_SEED_FOOTPRINT_CELLS,
+    relief_threshold_m: float = DEFAULT_RELIEF_THRESHOLD_M,
+    width_ceiling_m: float = DEFAULT_WIDTH_CEILING_M,
     min_cell_count: int = DEFAULT_MIN_CELL_COUNT,
 ) -> ProbeChunkReport:
     """Ingest one chunk-scoped probe output file into `base_db_path`'s
@@ -832,7 +885,13 @@ def add_probe_chunk(
         terrain_skipped = True
         if window is not None:
             features, terrain_stats = ingest_terrain_chunk(
-                window, probe_source_id, curvature_threshold_m, min_cell_count
+                window,
+                probe_source_id,
+                smoothing_window_cells,
+                seed_footprint_cells,
+                relief_threshold_m,
+                width_ceiling_m,
+                min_cell_count,
             )
             terrain_skipped = False
             ridge_features = [f for f in features if f.kind == "ridge"]

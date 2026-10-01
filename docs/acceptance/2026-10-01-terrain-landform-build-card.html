@@ -1,0 +1,521 @@
+<title>Terrain Landform Build</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+
+<style>
+/* Same instrument-panel palette as the other acceptance cards (dark ground,
+   amber prize accent, teal record rail) — this one is read at a desk, not
+   in the cockpit, but keeping the family resemblance. */
+:root {
+  --ground: #0D1012;
+  --panel: #151A1D;
+  --panel-2: #1C2326;
+  --rule: #2A3438;
+  --ink: #E9EEF0;
+  --ink-2: #94A3AA;
+  --ink-3: #6B7A81;
+  --amber: #E3A130;
+  --amber-dim: #3A2C11;
+  --teal: #43A596;
+  --teal-dim: #10302C;
+  --red: #C85A48;
+  --red-dim: #341813;
+}
+
+* { box-sizing: border-box; }
+
+html, body { background: var(--ground); }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding-block: 40px 96px;
+  padding-left: 20px;
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+h1 {
+  font-family: "Barlow Condensed", ui-sans-serif, sans-serif;
+  font-weight: 700;
+  font-size: clamp(38px, 7.5vw, 58px);
+  line-height: .98;
+  letter-spacing: .004em;
+  margin: 10px 0 0;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.standfirst {
+  margin: 12px 0 0;
+  color: var(--ink-2);
+  font-size: 17.5px;
+  max-width: 64ch;
+}
+
+.notice {
+  border-left: 3px solid var(--red);
+  background: var(--red-dim);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notice.quiet { border-left-color: var(--ink-3); background: var(--panel); }
+.notice.good { border-left-color: var(--teal); background: var(--teal-dim); }
+.notice b {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 19px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.notice p { margin: 0; color: var(--ink-2); font-size: 15.5px; max-width: 64ch; }
+
+section { display: flex; flex-direction: column; gap: 14px; }
+
+h2 {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--rule);
+}
+
+p { margin: 0; max-width: 64ch; }
+.dim { color: var(--ink-2); }
+
+pre {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  color: var(--ink);
+  margin: 0;
+  max-width: 100%;
+}
+
+code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13.5px;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.unverified {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.block {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink-3);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.block.prize {
+  border-left-color: var(--amber);
+  background: linear-gradient(180deg, var(--amber-dim) 0%, var(--panel) 46%);
+}
+
+.block-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.block.prize .tag { color: var(--amber); }
+.block h3 {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.line { display: flex; flex-direction: column; gap: 3px; }
+.line .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.line p { color: var(--ink-2); font-size: 15.5px; }
+.line.expect .lbl { color: var(--teal); }
+
+table {
+  border-collapse: collapse;
+  font-size: 14.5px;
+  width: 100%;
+  max-width: 420px;
+}
+th, td {
+  border: 1px solid var(--rule);
+  padding: 6px 12px;
+  text-align: left;
+}
+th { color: var(--ink-3); font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+td { color: var(--ink-2); }
+
+.record {
+  border-left: 2px solid var(--teal);
+  background: var(--teal-dim);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.record .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+.record ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.record li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+.record label { color: var(--ink); font-size: 15.5px; cursor: pointer; }
+
+input[type=checkbox] {
+  appearance: none;
+  width: 17px; height: 17px;
+  margin: 4px 0 0;
+  border: 1.5px solid var(--teal);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  flex: none;
+}
+input[type=checkbox]:checked { background: var(--teal); }
+input[type=checkbox]:checked::after {
+  content: "";
+  display: block;
+  width: 5px; height: 9px;
+  margin: 1px 0 0 4.5px;
+  border: solid var(--ground);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type=checkbox]:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.bring { display: flex; flex-direction: column; gap: 12px; }
+.bring ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 9px; }
+.bring li { color: var(--ink); }
+.bring li span { color: var(--ink-2); }
+.closing {
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+  color: var(--amber);
+  font-size: 16.5px;
+  max-width: 64ch;
+}
+
+footer {
+  color: var(--ink-3);
+  font-size: 13.5px;
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+  max-width: 68ch;
+}
+footer code { font-size: 12.5px; }
+
+@media (max-width: 480px) {
+  h1 { font-size: 36px; }
+  .wrap { gap: 28px; }
+}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">
+      <span>Desk / Windows box · world-model</span>
+      <span>2026-10-01</span>
+      <span>no flight needed</span>
+    </div>
+    <h1>Terrain Landform Build</h1>
+    <p class="standfirst">A full-theatre rebuild, not a sortie. The ridge/valley detector was
+      replaced end to end — this card checks the real output against what three small test
+      regions already predicted, before Stage 3-5 ever reach the cockpit.</p>
+  </header>
+
+  <div class="notice quiet">
+    <b>Checkout</b>
+    <p><code>git checkout feature/terrain-landform-features && git pull</code> — this becomes
+      <code>main</code> once merged; confirm with <code>git log --oneline -3</code> that you're on
+      the fix, not an older <code>main</code>.</p>
+  </div>
+
+  <div class="notice">
+    <b>Only you can run this</b>
+    <p>The real SRTM tiles, <code>Syria.routes</code>, <code>towns.lua</code>/<code>beacons.lua</code>
+      are gitignored — no agent has built or can build <code>syria-full.sqlite</code>. Per project
+      rule, the real full-theatre build is yours alone to run.</p>
+  </div>
+
+  <section>
+    <h2>What changed, in one line</h2>
+    <p class="dim">Old per-cell curvature noise — <strong style="color:var(--ink)">11,749 ridges /
+      11,477 valleys</strong> on the 2026-09-30 build — is replaced by a marker-controlled
+      watershed gated on relief and width. <strong style="color:var(--ink)">Nothing in the cockpit
+      changes from this build</strong>: Stage 3 (adjacency), Stage 4 (bearing) and Stage 5 (the
+      callout itself) aren't built. This only changes what lands in
+      <code>feature(kind='ridge'/'valley')</code>.</p>
+  </section>
+
+  <section>
+    <h2>Setup</h2>
+    <p class="dim">From <code>world-model/</code>, venv active:</p>
+    <pre>cd world-model
+.venv/bin/python tools/build_world_model.py syria-full \
+    --towns data/raw/dcs/syria/map/towns.lua \
+    --beacons data/raw/dcs/syria/map/beacons.lua \
+    --routes data/raw/dcs/syria/roads/Syria.routes \
+    --srtm-dir data/raw/dem/syria-full/</pre>
+    <p class="dim">The exact Stage 2 command from <code>world-model/docs/M7_RUN_INSTRUCTIONS.md</code>
+      — no new flag. The terrain stage runs unconditionally whenever any elevation grid exists
+      (confirmed by reading <code>build/pipeline.py</code>). Overwrites
+      <code>data/world-model/syria-full.sqlite</code>.</p>
+    <p class="unverified">Estimate, not measured — synthetic grid at real theatre shape (2.56M
+      cells), not a real syria-full run</p>
+    <p class="dim">Terrain stage: roughly <strong style="color:var(--ink)">65-80 s</strong> (was
+      5.8 s) — a rounding error against the <code>.routes</code> walk (~430 s). Peak RSS for that
+      stage: roughly <strong style="color:var(--ink)">2 GB</strong>.</p>
+  </section>
+
+  <section>
+    <h2>Blocks</h2>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block A</span>
+        <h3>Counts, against the noise this replaces</h3>
+      </div>
+      <pre>.venv/bin/python -c "
+import sqlite3
+conn = sqlite3.connect('data/world-model/syria-full.sqlite')
+for row in conn.execute(\"select kind, count(*) from feature where kind in ('ridge','valley') group by kind\"):
+    print(row)
+"</pre>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>Both counts far below the old 11,749 / 11,477 — hundreds-to-low-thousands, not tens of
+          thousands. Anywhere near the old count means something regressed.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="a1" id="a1"><label for="a1">Ridge count / valley count</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block B</span>
+        <h3>Fragmentation and sinuosity</h3>
+      </div>
+      <pre>.venv/bin/python -c "
+import json, math, sqlite3, statistics
+conn = sqlite3.connect('data/world-model/syria-full.sqlite')
+for kind in ('ridge', 'valley'):
+    rows = conn.execute('select geom_json, tags_json from feature where kind = ?', (kind,)).fetchall()
+    n = len(rows)
+    under_15 = 0
+    sins = []
+    for geom_json, tags_json in rows:
+        coords = json.loads(geom_json)
+        tags = json.loads(tags_json)
+        if tags.get('cell_count', 999) < 15:
+            under_15 += 1
+        path = sum(math.hypot(coords[i+1][0]-coords[i][0], coords[i+1][1]-coords[i][1]) for i in range(len(coords)-1))
+        end = math.hypot(coords[-1][0]-coords[0][0], coords[-1][1]-coords[0][1])
+        if end > 0:
+            sins.append(path / end)
+    pct = 100.0 * under_15 / n if n else float('nan')
+    med = statistics.median(sins) if sins else float('nan')
+    print(f'{kind}: n={n}  pct_under_15_cells={pct:.1f}  median_sinuosity={med:.3f}')
+"</pre>
+      <div class="line expect">
+        <span class="lbl">Expect (predicted, pooled across 3 test regions)</span>
+      </div>
+      <table>
+        <tr><th>kind</th><th>% under 15 cells</th><th>median sinuosity</th></tr>
+        <tr><td>ridge</td><td>~30%</td><td>~1.22</td></tr>
+        <tr><td>valley</td><td>~22%</td><td>~1.19</td></tr>
+      </table>
+      <p class="dim">Against the old detector's 75% / 70% under-15-cells and 2.17 / 2.21 median
+        sinuosity — materially less fragmented and far less zigzag, even if the exact full-theatre
+        numbers don't match the three-region figures precisely.</p>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="b1" id="b1"><label for="b1">Ridge and valley %-under-15 / median sinuosity</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block prize">
+      <div class="block-head">
+        <span class="tag">Block C · the prize</span>
+        <h3>Baalbek — the Bekaa must produce no valley</h3>
+      </div>
+      <p class="unverified">Unverified against real syria-full — names/coordinates confirmed from
+        this session's research notes, the lookup itself not yet run on real data</p>
+      <pre>.venv/bin/python tools/inspect_terrain.py data/world-model/syria-full.sqlite \
+    --near Baalbek --radius-km 20 --out /tmp/baalbek.png</pre>
+      <div class="line">
+        <span class="lbl">Why this is the one that matters</span>
+        <p>The Bekaa is a kilometres-wide flat basin — at Mi-24 flight profile, calling the whole
+          floor "a valley" the way you'd call a narrow draw is meaningless (your own words from the
+          Explore conversation that redesigned this detector). Three region-scoped rebuilds already
+          confirmed the Baalbek-window dominant basin (1,020 cells, ~1,274 m relief, ~13.7 km core
+          width against the 2,500 m ceiling) fails the width gate and produces zero valleys for the
+          Bekaa body — this build is the first time that's checked against the real whole-theatre
+          grid.</p>
+      </div>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>Zero <code>valley</code> components over the Bekaa floor itself. A small separate
+          mountain-top basin near Baalbek is expected and fine.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="c1" id="c1"><label for="c1">Zero valleys over the Bekaa floor — yes or no?</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block D</span>
+        <h3>Palmyra — isolated ridges must still appear</h3>
+      </div>
+      <p class="unverified">Unverified against real syria-full, same basis as Baalbek above</p>
+      <pre>.venv/bin/python tools/inspect_terrain.py data/world-model/syria-full.sqlite \
+    --near Palmyra --radius-km 20 --out /tmp/palmyra.png</pre>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>A handful of ridge components (3 in the 20 km test region) — isolated desert ridge
+          chains standing clear of the gate. Zero here would mean the gates are too strict for
+          flat-desert-with-isolated-relief terrain, not just for the Bekaa.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="d1" id="d1"><label for="d1">Ridge count near Palmyra</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block E</span>
+        <h3>Latakia — known-good region, for comparison</h3>
+      </div>
+      <div class="line">
+        <span class="lbl">Note</span>
+        <p>Latakia isn't confirmed as a <code>named_place</code> row in <code>syria-full</code> —
+          use its registered region centre with <code>--center</code> instead of <code>--near</code>
+          so this can't fail on a name-lookup miss.</p>
+      </div>
+      <pre>.venv/bin/python tools/inspect_terrain.py data/world-model/syria-full.sqlite \
+    --center 44934.892,5685.076 --radius-km 20 --out /tmp/latakia.png</pre>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>No specific number — look at the render and judge whether the lines read as real hills
+          and valleys to your eye, the way the old checkerboard-noise classifier never did.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="e1" id="e1"><label for="e1">Does the Latakia render look like real terrain?</label></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <div class="notice good">
+    <b>What is NOT yet true</b>
+    <p><strong style="color:var(--ink)">No callout changes as a result of this build.</strong> This
+      is Stages 1-2 only — the detector and its tuning. Stage 3 (adjacency), Stage 4 (bearing) and
+      Stage 5 (the actual "at the foot of the hill" callout) aren't implemented. Don't fly expecting
+      Petrovich to say anything different — this build only changes what a <code>.sqlite</code>
+      inspection tool shows you.</p>
+  </div>
+
+  <section class="bring">
+    <h2>Bring back</h2>
+    <ol>
+      <li><strong>Counts (Block A)</strong> <span>— hundreds/low-thousands, or still near 11k+11k?</span></li>
+      <li><strong>Fragmentation/sinuosity (Block B)</strong> <span>— materially better than 75%/70% and 2.17/2.21?</span></li>
+      <li><strong>Baalbek — the prize (Block C)</strong> <span>— zero valleys over the Bekaa floor, yes or no?</span></li>
+      <li><strong>Palmyra (Block D)</strong> <span>— ridges still present, how many?</span></li>
+      <li><strong>Latakia (Block E)</strong> <span>— does it look like real terrain to you?</span></li>
+    </ol>
+    <p class="closing">Anything that surprised you is worth more than anything on this list.</p>
+  </section>
+
+  <footer>
+    Source: <code>docs/acceptance/2026-10-01-terrain-landform-build.md</code>. This card is a
+    view — results go into <code>world-model/ROADMAP.md</code> and the research notes, not back
+    into the card.
+  </footer>
+
+</div>
+
+<script>
+const KEY = 'terrain-landform-build-2026-10-01';
+const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b => {
+  if (saved[b.dataset.k]) b.checked = true;
+  b.addEventListener('change', () => {
+    const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+    s[b.dataset.k] = b.checked;
+    localStorage.setItem(KEY, JSON.stringify(s));
+  });
+});
+</script>
