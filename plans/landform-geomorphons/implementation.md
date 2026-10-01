@@ -205,3 +205,89 @@ here, per the project's execution-boundary rule.
   tiles and checks the seam behaviour by eye, nor kills a real `ingest_terrain` process mid-tile-loop
   and confirms resumption. Flagging per the plan's own "Risks & unknowns" section, which named both
   as real-but-unverified.
+
+### Performance fix: bounded terrain-ingest memory, O(N) Chaikin check (`b4d38cf`)
+
+Applied `performance.md`'s findings ahead of the user's planned full-theatre build.
+
+**Item 1 (blocking): per-tile streaming inserts.** `ingest_terrain` no longer returns/accumulates a
+whole-theatre `list[StoredFeature]` — it takes an `on_tile_features` callback, invoked once per tile
+(cache hit or freshly processed, already retagged with `source_id`) with just that tile's features.
+`build/pipeline.py`'s new `_flush_terrain_tile` callback calls `insert_features` immediately per
+tile, mirroring the existing OSM streaming-ingest `_flush_nodes`/`_flush_ways`/`_flush_areas`
+pattern. The whole-build cache-hit fast path (previously one `load_all_features` call — the same
+unbounded shape, just on a warm rebuild) now folds into the same per-tile loop, so a warm rebuild is
+bounded per tile too; `load_all_features` itself is untouched (still used by `test_terrain_cache.py`)
+but `ingest_terrain` no longer calls it. The final `[replace(...) for f in cache_features]`
+second-list copy performance.md flagged as a transient doubling is gone entirely — retagging now
+happens per tile, inside the loop, so there is never a second full-size list.
+
+**Transactional behaviour decision**: one `insert_features` call (one SQLite transaction) per tile,
+not one atomic transaction for the whole stage. Chosen to follow the same rule the cache already
+applies to itself rather than invent a second one, per the task's own framing — `open_for_build`
+always deletes-and-recreates the base region store from scratch, so a crash mid-stage leaves a
+partial base store, but the *next* build overwrites it entirely rather than resuming from it; nothing
+ever reads a half-written base store as "the build". Resumability lives entirely in the terrain
+*cache* (`terrain_cache/`), which already tracks per-tile completion independently via
+`write_tile_features`/`mark_build_complete` — unaffected by this change, since it was already
+per-tile. This is the same tradeoff `build.pipeline`'s OSM/road/junction streaming stages made
+earlier (see their own comments), not a new pattern.
+
+**Measured before/after** (real Syria SRTM tiles, `data/raw/dem/syria-full`, read-only from the main
+checkout — no full-theatre build run):
+
+- 27 real tiles sampled across the full theatre grid, streamed through the new `on_tile_features`
+  callback (nothing retained across tiles, as the real pipeline now does): peak RSS **plateaus at
+  1752.8 MB** after the third tile (the one with the largest single-tile feature count, 31,024) and
+  stays flat through to 293,331 cumulative features — it does not grow further as more tiles are
+  processed. `performance.md`'s own old-code numbers at a comparable cumulative-feature count
+  (218,162 features -> 5.33 GB, linear in cumulative count) predict roughly 6-7 GB at this run's
+  scale; the new code holds flat at 1.75 GB. Peak memory is now bounded by the largest single tile's
+  own feature set, not by cumulative theatre feature count — confirming the fix.
+- A new test, `test_ingest_terrain_streams_one_call_per_tile_not_one_theatre_wide_call`, asserts the
+  streaming contract directly (one `on_tile_features` call per tile, both for a fresh build and a
+  warm whole-build cache hit) rather than relying only on the memory measurement.
+
+**Item 2: O(N) Chaikin deviation check.** `_chaikin_smooth_with_support` tracks, for every output
+point, the inclusive `(lo, hi)` range of *original* point indices whose convex combination produced
+it — a Chaikin point's support can only grow by merging its two parents' ranges each pass, so at
+`DEFAULT_CHAIKIN_ITERATIONS=4` the window stays a handful of points wide regardless of line length.
+`_smooth_for_storage` now checks each smoothed point against `distance_point_polyline(point,
+points[lo:hi+1])` — its own local window — instead of the whole original polyline, turning the
+deviation check from O(line_length^2) into O(line_length). `_chaikin_smooth` itself (and its existing
+tests) is untouched; the new function is a separate implementation `_smooth_for_storage` calls
+instead.
+
+Checking a window ⊆ the full polyline can only ever report a distance ≥ the true whole-polyline
+minimum (fewer candidate segments to minimize over), never less — so this can only make the
+half-cell fallback trigger in cases the full scan would also have triggered, never accept a smoothing
+the full scan would have rejected. Empirically verified rather than just argued: re-ran both the
+old (full-scan) and new (windowed) deviation check over every real traced line from the acceptance
+window (588 lines) and separately over every real traced line from the heaviest profiled tile,
+N35E036 (11,104 lines at this script's trace settings) — **zero mismatches** in either case; the
+windowed check never changed a single line's accept/fallback decision or its smoothed geometry on
+real data.
+
+**Measured timing**: N35E036 (performance.md's own reference tile, 12,059 lines, previously 43.8s
+total tile time with `distance_point_polyline`/`_smooth_for_storage` at 92%) now completes in
+**6.87s** end to end (non-profiled). `cProfile` on the same tile shows `distance_point_segment` calls
+dropped from 30.8M to ~3.1M and `_smooth_for_storage`'s own cumulative time from 40.2s to ~8s (profiler
+overhead included). Re-running the same 27-tile theatre-wide sample used for the memory measurement
+(which already includes this fix) gives **6.46s/tile average**, extrapolating to **~14.1 minutes for
+a full 131-tile Syria build** — down from `performance.md`'s pre-fix ~25-minute estimate.
+
+**Acceptance window unchanged.** `tools/inspect_terrain.py --srtm-dir <real syria-full>
+--center -5000,15000 --radius-km 8` (same command `review.md` used) still reports **299 ridge / 289
+valley lines, longest 7.18 km / 7.70 km**, and the rendered PNG is still byte-identical (same MD5) to
+the committed `data/renders/coastal-hills-geomorphons.png`. Note this tool calls `terrain.geomorphons`/
+`terrain.skeleton`/`terrain.features.component_from_trace` directly and never exercises
+`_smooth_for_storage` or `ingest_terrain` — it was unaffected by construction, which is exactly why
+the separate direct smoothed-geometry comparison above (588 + 11,104 real lines, zero mismatches) is
+the actual evidence item 2 preserves geometry, not just this render.
+
+### Checks (re-run after the performance fix)
+
+- `ruff format --check src tests`: 116 files already formatted
+- `ruff check src tests`: all checks passed
+- `mypy --strict src` (run from inside `world-model/`): no issues, 71 source files
+- `pytest tests -q`: **510 passed, 3 skipped** (509 baseline + 1 new streaming-contract test)
