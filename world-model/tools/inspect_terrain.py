@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Diagnostic: visualize M6's curvature classification and extracted
-ridge/valley lines over a built region's elevation grid.
+"""Diagnostic: visualize Stage 1's marker-controlled-watershed basins and
+gated ridge/valley lines over a built region's elevation grid.
 
 Not part of the pipeline. Loads the full elevation grid from a built
-`.sqlite` (via `store.reader.load_full_grid`), runs
-`terrain.curvature.classify_curvature` and `terrain.features.
-extract_components` over it, and renders a per-cell classification map
-(ridge/valley/neither/unsampled) with the extracted lines overdrawn, plus a
-component-by-component text report (cell count, orientation, elevation
-range). This exists specifically so curvature/min-cell-count thresholds get
-tuned by looking at real output over `latakia-20km`, not guessed blind --
-see `plans/m6-terrain-semantics/plan.md` Stage 2.
+`.sqlite` (via `store.reader.load_full_grid`), runs `terrain.curvature.
+smooth_grid`/`find_basin_seeds` and `terrain.features.grow_basins`/
+`extract_components` over it, and renders a per-cell basin map (each basin
+a distinct colour, ridge/valley lines overdrawn) plus a component-by-
+component text report (cell count, orientation, elevation range, and the
+relief/width gate values that decided pass/fail). This exists specifically
+so the smoothing window, relief threshold, and width ceiling get tuned by
+looking at real output over `latakia-20km` and a Bekaa-equivalent region,
+not guessed blind -- see `plans/terrain-feature-probing/plan.md` Stage 1/2.
 
 North is drawn up (DCS's `+x`), east is drawn right (DCS's `+z`), matching
 `geometry.bearing_deg`'s convention -- one grid cell renders as a
@@ -27,10 +28,12 @@ Run from `world-model/`:
 
     .venv/bin/python tools/inspect_terrain.py <db_path> \\
         [--near NAME | --center X,Z] [--radius-km R] \\
-        [--grid-kind elevation] [--threshold M] [--min-cells N] [--out out.png]
+        [--grid-kind elevation] [--smoothing-window N] [--seed-footprint N] \\
+        [--relief-threshold M] [--width-ceiling M] [--min-cells N] [--out out.png]
 """
 
 import argparse
+import colorsys
 import json
 import sqlite3
 import sys
@@ -45,20 +48,35 @@ from build.pipeline import open_region_db
 from store.models import ElevationGrid
 from store.reader import load_full_grid
 from terrain.curvature import (
-    DEFAULT_CURVATURE_THRESHOLD_M,
-    CurvatureClass,
-    classify_curvature,
+    DEFAULT_SEED_FOOTPRINT_CELLS,
+    DEFAULT_SMOOTHING_WINDOW_CELLS,
+    find_basin_seeds,
+    smooth_grid,
 )
-from terrain.features import DEFAULT_MIN_CELL_COUNT, extract_components
+from terrain.features import (
+    DEFAULT_MIN_CELL_COUNT,
+    DEFAULT_RELIEF_THRESHOLD_M,
+    DEFAULT_WIDTH_CEILING_M,
+    extract_components,
+    grow_basins,
+)
 
 _CELL_PX = 12
-_RIDGE_COLOR = (220, 60, 40)
-_VALLEY_COLOR = (50, 110, 230)
 _NEITHER_COLOR = (70, 70, 70)
 _UNSAMPLED_COLOR = (15, 15, 15)
 _RIDGE_LINE_COLOR = (255, 255, 255)
 _VALLEY_LINE_COLOR = (255, 255, 0)
 _LINE_WIDTH_PX = 2
+
+
+def _basin_color(basin_id: int) -> tuple[int, int, int]:
+    """A visually distinct, deterministic colour per basin id -- evenly
+    spaced hues via the golden-angle increment, so adjacent basin ids
+    (likely spatially adjacent, since `grow_basins` assigns ids in seed
+    order) don't land on visually similar hues."""
+    hue = (basin_id * 0.6180339887) % 1.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.55, 0.55)
+    return (round(r * 255), round(g * 255), round(b * 255))
 
 
 def _grid_point_to_pixel(
@@ -128,7 +146,10 @@ def _window(
 def cmd_render(
     db_path: Path,
     grid_kind: str,
-    threshold_m: float,
+    smoothing_window_cells: int,
+    seed_footprint_cells: int,
+    relief_threshold_m: float,
+    width_ceiling_m: float,
     min_cell_count: int,
     out_path: Path | None,
     near: str | None = None,
@@ -152,10 +173,16 @@ def cmd_render(
         window = _window(grid, center, radius_km * 1000.0)
     first_row, last_row, first_col, last_col = window
 
-    curvature_cells = classify_curvature(grid, threshold_m=threshold_m)
-    cells_by_rc = {(c.row, c.col): c for c in curvature_cells}
+    smoothed = smooth_grid(grid, window_cells=smoothing_window_cells)
+    seeds = find_basin_seeds(smoothed, footprint_cells=seed_footprint_cells)
+    labels, basins = grow_basins(smoothed, seeds)
     components = extract_components(
-        grid, curvature_cells, min_cell_count=min_cell_count
+        smoothed,
+        basins,
+        labels,
+        relief_threshold_m=relief_threshold_m,
+        width_ceiling_m=width_ceiling_m,
+        min_cell_count=min_cell_count,
     )
 
     width = (last_col - first_col + 1) * _CELL_PX
@@ -166,17 +193,11 @@ def cmd_render(
     for row in range(first_row, last_row + 1):
         image_row = last_row - row
         for col in range(first_col, last_col + 1):
-            color: tuple[int, int, int]
-            if grid.samples[row][col] is None:
+            if smoothed.samples[row][col] is None:
                 color = _UNSAMPLED_COLOR
             else:
-                cell = cells_by_rc.get((row, col))
-                if cell is None or cell.classification == CurvatureClass.NEITHER:
-                    color = _NEITHER_COLOR
-                elif cell.classification == CurvatureClass.RIDGE:
-                    color = _RIDGE_COLOR
-                else:
-                    color = _VALLEY_COLOR
+                basin_id = labels.get((row, col))
+                color = _NEITHER_COLOR if basin_id is None else _basin_color(basin_id)
             x0 = (col - first_col) * _CELL_PX
             y0 = image_row * _CELL_PX
             draw.rectangle((x0, y0, x0 + _CELL_PX - 1, y0 + _CELL_PX - 1), fill=color)
@@ -194,9 +215,9 @@ def cmd_render(
             _grid_point_to_pixel(
                 pt[0],
                 pt[1],
-                grid.origin_x,
-                grid.origin_z,
-                grid.spacing_m,
+                smoothed.origin_x,
+                smoothed.origin_z,
+                smoothed.spacing_m,
                 last_row,
                 first_col,
             )
@@ -212,14 +233,14 @@ def cmd_render(
         out_path = db_path.parent / f"{db_path.stem}_terrain.png"
     img.save(out_path)
 
-    ridge_cell_count = sum(
-        1 for c in curvature_cells if c.classification == CurvatureClass.RIDGE
-    )
-    valley_cell_count = sum(
-        1 for c in curvature_cells if c.classification == CurvatureClass.VALLEY
-    )
     ridge_components = [c for c in in_window if c.kind == "ridge"]
     valley_components = [c for c in in_window if c.kind == "valley"]
+    basins_in_window = {
+        basin_id
+        for row in range(first_row, last_row + 1)
+        for col in range(first_col, last_col + 1)
+        if (basin_id := labels.get((row, col))) is not None
+    }
 
     print(f"wrote {out_path}")
     print(f"grid: {grid.n_rows}x{grid.n_cols} at {grid.spacing_m} m spacing")
@@ -229,10 +250,17 @@ def cmd_render(
         f"{(last_col - first_col + 1) * grid.spacing_m / 1000.0:.0f} km); "
         f"components listed below are those with a cell inside it"
     )
-    print(f"curvature threshold: {threshold_m} m, min cell count: {min_cell_count}")
-    print(f"ridge cells: {ridge_cell_count}, valley cells: {valley_cell_count}")
     print(
-        f"ridge components (>= min cell count): {len(ridge_components)}, "
+        f"smoothing window: {smoothing_window_cells} cells, "
+        f"seed footprint: {seed_footprint_cells} cells"
+    )
+    print(
+        f"relief threshold: {relief_threshold_m} m, "
+        f"width ceiling: {width_ceiling_m} m, min cell count: {min_cell_count}"
+    )
+    print(f"basins (whole grid): {len(basins)}; basins touching this window: {len(basins_in_window)}")
+    print(
+        f"ridge components (>= min cell count, gate-passed): {len(ridge_components)}, "
         f"valley components: {len(valley_components)}"
     )
     for label, kind_components in (
@@ -241,10 +269,21 @@ def cmd_render(
     ):
         for i, component in enumerate(kind_components):
             elev_min, elev_max = component.elevation_range_m
+            # NB: this is the extracted cells' own elevation span, not the
+            # basin-floor-to-saddle "relief" the gate actually compared
+            # against relief_threshold_m -- a ridge's boundary cells can
+            # span far less than that (the saddle is one point along it).
+            elev_span_m = elev_max - elev_min
+            width_note = (
+                f" width={component.width_m:.0f} m"
+                if component.width_m is not None
+                else ""
+            )
             print(
-                f"  {label} {i}: cells={len(component.cells)} "
+                f"  {label} {i}: cells={len(component.cells)} basin_ids={component.basin_ids} "
                 f"orientation={component.orientation_deg:.1f} deg "
-                f"elevation_range=[{elev_min:.1f}, {elev_max:.1f}] m"
+                f"elevation_range=[{elev_min:.1f}, {elev_max:.1f}] m "
+                f"elev_span={elev_span_m:.1f} m{width_note}"
             )
 
 
@@ -253,7 +292,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("db_path", type=Path)
     parser.add_argument("--grid-kind", default="elevation")
     parser.add_argument(
-        "--threshold", type=float, default=DEFAULT_CURVATURE_THRESHOLD_M
+        "--smoothing-window", type=int, default=DEFAULT_SMOOTHING_WINDOW_CELLS
+    )
+    parser.add_argument(
+        "--seed-footprint", type=int, default=DEFAULT_SEED_FOOTPRINT_CELLS
+    )
+    parser.add_argument(
+        "--relief-threshold", type=float, default=DEFAULT_RELIEF_THRESHOLD_M
+    )
+    parser.add_argument(
+        "--width-ceiling", type=float, default=DEFAULT_WIDTH_CEILING_M
     )
     parser.add_argument("--min-cells", type=int, default=DEFAULT_MIN_CELL_COUNT)
     parser.add_argument("--out", type=Path, default=None)
@@ -290,7 +338,10 @@ def main() -> None:
     cmd_render(
         args.db_path,
         args.grid_kind,
-        args.threshold,
+        args.smoothing_window,
+        args.seed_footprint,
+        args.relief_threshold,
+        args.width_ceiling,
         args.min_cells,
         args.out,
         near=args.near,

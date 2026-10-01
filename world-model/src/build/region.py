@@ -117,6 +117,31 @@ REGIONS: dict[str, RegionDefinition] = {
         centre_z=29815.4,
         half_extent_m=10000.0,
     ),
+    "baalbek-20km": RegionDefinition.square(
+        theatre="Syria",
+        name="baalbek-20km",
+        # terrain-feature-probing Stage 1's Bekaa-equivalent test region:
+        # the width gate's falsifiable test is that this basin produces no
+        # `valley` row (see plans/terrain-feature-probing/plan.md). Centred
+        # on the `named_place` "Baalbek" row already in `syria-full.sqlite`
+        # (centroid of its stored vertices), same half-extent convention as
+        # `latakia-20km`.
+        centre_x=-114453.77304029558,
+        centre_z=25280.763382998703,
+        half_extent_m=10000.0,
+    ),
+    "palmyra-20km": RegionDefinition.square(
+        theatre="Syria",
+        name="palmyra-20km",
+        # terrain-feature-probing Stage 1's regression check for the one
+        # thing the old per-cell detector got right: flat desert with
+        # isolated ridge chains, "located correctly, shaped badly" per
+        # `research/2026-10-01-terrain-features-full-build-inspection.md`.
+        # Centred on the `named_place` "Palmyra" row in `syria-full.sqlite`.
+        centre_x=-54775.02454323182,
+        centre_z=217141.70638191345,
+        half_extent_m=10000.0,
+    ),
     "syria-full": RegionDefinition(
         theatre="Syria",
         name="syria-full",

@@ -155,22 +155,28 @@ def load_chunk_elevation_window(
     chunk_iz)` plus a **1-cell border on every side**, from the `"elevation"`
     grid -- or `None` if no `"elevation"` grid exists in this store at all.
 
-    The border exists so `terrain.curvature.classify_curvature`'s
-    full-4-neighbour-window rule gives every one of the chunk's own cells a
-    verdict: that rule already excludes a grid's outermost ring (no full
-    window), so with exactly a 1-cell border the *only* cells that can ever
-    end up classified are the chunk's own interior -- border cells never
-    get a verdict because their own outward neighbour (2 rings out) is
-    never in this window. This is what lets `build.ingest_terrain.
-    ingest_terrain_chunk` reuse the whole-region classifier unchanged and
-    still guarantee no feature ever bleeds from one chunk's classification
-    into another's stored rows.
+    The border originally existed so the old per-cell discrete-Laplacian
+    `terrain.curvature.classify_curvature`'s full-4-neighbour-window rule
+    gave every one of the chunk's own cells a verdict without a feature
+    ever bleeding from one chunk's classification into another's stored
+    rows (that rule excluded a grid's outermost ring; a 1-cell border made
+    the chunk's own interior exactly the classifiable region).
+
+    `terrain-feature-probing`'s marker-controlled-watershed mechanism
+    (`build.ingest_terrain.ingest_terrain_chunk`) replaced that per-cell
+    rule and has no equivalent single-ring edge-exclusion guarantee -- a
+    basin or divide can legitimately extend to this window's very edge.
+    The 1-cell border is kept regardless (still real context a landform-
+    scale smoothing window can use, and changing this M8-only geometry is
+    out of this plan's scope -- see `plans/terrain-feature-probing/plan.md`,
+    "Not touched"), but it no longer *guarantees* chunk-isolation the way it
+    did under the old mechanism.
 
     Border cells that fall in a chunk nobody has probed yet come back as
-    `None` samples, same as any other unsampled cell -- `classify_curvature`
-    already treats a `None` neighbour as "skip this cell", so a chunk's
-    edge simply gets fewer classified cells until its neighbour is probed
-    too, never a fabricated value.
+    `None` samples, same as any other unsampled cell -- the watershed
+    pipeline's smoothing/seeding steps treat a `None` neighbour the same
+    way the old classifier did (never fabricate from missing data), so a
+    chunk's edge simply has less context until its neighbour is probed too.
     """
     meta = _load_grid_meta(conn, "elevation", schema)
     if meta is None:

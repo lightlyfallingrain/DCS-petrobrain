@@ -1,118 +1,142 @@
-"""Synthetic control-point tests for `terrain.curvature.classify_curvature`.
+"""Tests for `terrain.curvature`'s two Stage 1 (Option C) inputs:
+`smooth_grid` (landform-scale, gap-aware box smoothing) and
+`find_basin_seeds` (regional-minimum detection over the smoothed grid).
 
-Hand-built 7x7 grids each encode one known feature -- a straight, row-3
-ridge and a straight, row-3 valley -- via
-`height(row, col) = 100 + 5*row (+/-) 10*abs(row - 3) + 2*col`. The `5*row`
-and `2*col` terms are both linear in one axis; the discrete Laplacian of any
-linear function is exactly zero, so they contribute nothing to curvature
-while still giving the fixture non-constant elevation along the feature (see
-`test_terrain_features.py`, which asserts `elevation_range_m` against this
-same fixture). This isolates "does the classifier recover the known
-feature's shape" from "does elevation vary along it" -- the algorithm's
-"known control point" analogue to M1's coordinate control points, per the
-plan's Stage 1 item.
+Rewritten (not extended) for the marker-controlled-watershed mechanism --
+user-approved, per `plans/terrain-feature-probing/plan.md`'s "Decisions
+Requiring User Input": the per-cell discrete-Laplacian `classify_curvature`/
+`CellCurvature`/`CurvatureClass` this file used to test no longer exist.
 
-`_TEST_THRESHOLD_M` is deliberately independent of
-`curvature.DEFAULT_CURVATURE_THRESHOLD_M` (Stage 2's real-data-tuned
-production default) -- this fixture's curvature magnitude (20.0, see
-`_grid`'s `10.0 * abs(...)` coefficient) is a fixed algorithm control point,
-not something that should silently start failing if the production default
-is re-tuned again later.
+Expected values below are computed by hand against `scipy.ndimage.
+uniform_filter`'s/`minimum_filter`'s documented behaviour (`mode="constant"`,
+`cval` as given) rather than re-deriving scipy's own correctness -- these
+tests check this module's gap-handling and seed logic, not scipy itself.
 """
 
+import pytest
+
 from store.models import ElevationGrid
-from terrain.curvature import CurvatureClass, classify_curvature
+from terrain.curvature import find_basin_seeds, smooth_grid
 
 _SPACING_M = 100.0
-_N = 7
-_RIDGE_ROW = 3
-_TEST_THRESHOLD_M = 3.0
 
 
-def _grid(sign: float) -> ElevationGrid:
-    samples: list[list[float | None]] = [
-        [
-            100.0 + 5.0 * row + sign * 10.0 * abs(row - _RIDGE_ROW) + 2.0 * col
-            for col in range(_N)
-        ]
-        for row in range(_N)
-    ]
+def _grid(samples: list[list[float | None]]) -> ElevationGrid:
+    n_rows = len(samples)
+    n_cols = len(samples[0])
     return ElevationGrid(
         origin_x=0.0,
         origin_z=0.0,
         spacing_m=_SPACING_M,
-        n_rows=_N,
-        n_cols=_N,
+        n_rows=n_rows,
+        n_cols=n_cols,
         source_id=None,
-        provenance="dcs_probe",
+        provenance="srtm",
         stats={},
         samples=samples,
     )
 
 
-def _ridge_grid() -> ElevationGrid:
-    return _grid(sign=-1.0)
+# 5x5 grid, sequential values 1..25 except the centre, which is a probe
+# gap -- chosen so every 3x3 window used below has an easily hand-summed
+# value.
+_SEQUENTIAL_GRID = [
+    [1.0, 2.0, 3.0, 4.0, 5.0],
+    [6.0, 7.0, 8.0, 9.0, 10.0],
+    [11.0, 12.0, None, 14.0, 15.0],
+    [16.0, 17.0, 18.0, 19.0, 20.0],
+    [21.0, 22.0, 23.0, 24.0, 25.0],
+]
 
 
-def _valley_grid() -> ElevationGrid:
-    return _grid(sign=1.0)
+def test_smooth_grid_preserves_shape_origin_and_spacing() -> None:
+    grid = _grid(_SEQUENTIAL_GRID)
+
+    smoothed = smooth_grid(grid, window_cells=3)
+
+    assert smoothed.n_rows == grid.n_rows
+    assert smoothed.n_cols == grid.n_cols
+    assert smoothed.origin_x == grid.origin_x
+    assert smoothed.origin_z == grid.origin_z
+    assert smoothed.spacing_m == grid.spacing_m
 
 
-def test_classify_curvature_recovers_row_ridge() -> None:
-    grid = _ridge_grid()
+def test_smooth_grid_gap_aware_excludes_unsampled_cell_from_the_average() -> None:
+    grid = _grid(_SEQUENTIAL_GRID)
 
-    cells = classify_curvature(grid, threshold_m=_TEST_THRESHOLD_M)
-    ridge_cells = {
-        (c.row, c.col) for c in cells if c.classification == CurvatureClass.RIDGE
-    }
+    smoothed = smooth_grid(grid, window_cells=3, min_valid_fraction=0.5)
 
-    assert ridge_cells == {(_RIDGE_ROW, col) for col in range(1, _N - 1)}
-
-
-def test_classify_curvature_recovers_row_valley() -> None:
-    grid = _valley_grid()
-
-    cells = classify_curvature(grid, threshold_m=_TEST_THRESHOLD_M)
-    valley_cells = {
-        (c.row, c.col) for c in cells if c.classification == CurvatureClass.VALLEY
-    }
-
-    assert valley_cells == {(_RIDGE_ROW, col) for col in range(1, _N - 1)}
+    # The 3x3 window around (2, 2) is {7,8,9,12,None,14,17,18,19} -- 8 real
+    # samples summing to 104. A gap-aware mean is 104/8 = 13.0; a naive
+    # mean that treated the gap as 0.0 would give 104/9 ~= 11.56 instead --
+    # this assertion is only satisfied by the gap-aware computation.
+    assert smoothed.samples[2][2] == pytest.approx(13.0)
 
 
-def test_classify_curvature_off_feature_cells_are_neither() -> None:
-    grid = _ridge_grid()
+def test_smooth_grid_marks_cell_none_below_min_valid_fraction() -> None:
+    grid = _grid(_SEQUENTIAL_GRID)
 
-    cells = classify_curvature(grid, threshold_m=_TEST_THRESHOLD_M)
-    off_ridge = [c for c in cells if c.row != _RIDGE_ROW]
+    # The 3x3 window around the (0, 0) corner only overlaps 4 real grid
+    # cells (rows 0-1, cols 0-1); the other 5 window cells fall outside the
+    # grid entirely. 4/9 ~= 0.44 is below the default 0.5 threshold.
+    smoothed = smooth_grid(grid, window_cells=3, min_valid_fraction=0.5)
 
-    assert all(c.classification == CurvatureClass.NEITHER for c in off_ridge)
+    assert smoothed.samples[0][0] is None
 
 
-def test_classify_curvature_skips_cells_with_unsampled_neighbours() -> None:
-    grid = _ridge_grid()
-    samples = [list(row) for row in grid.samples]
-    samples[_RIDGE_ROW][2] = None
-    grid_with_gap = ElevationGrid(
-        origin_x=grid.origin_x,
-        origin_z=grid.origin_z,
-        spacing_m=grid.spacing_m,
-        n_rows=grid.n_rows,
-        n_cols=grid.n_cols,
-        source_id=None,
-        provenance="dcs_probe",
-        stats={},
-        samples=samples,
-    )
+def test_smooth_grid_keeps_corner_when_fraction_threshold_is_lowered() -> None:
+    grid = _grid(_SEQUENTIAL_GRID)
 
-    cells = classify_curvature(grid_with_gap, threshold_m=_TEST_THRESHOLD_M)
-    classified_rc = {(c.row, c.col) for c in cells}
+    # Same corner as above, but a caller willing to accept fewer sampled
+    # cells per window gets a value instead of None -- 4/9 clears 0.4.
+    smoothed = smooth_grid(grid, window_cells=3, min_valid_fraction=0.4)
 
-    # Every interior cell whose 4-neighbor window touches the gap at
-    # (_RIDGE_ROW, 2) must be skipped entirely, not classified from a
-    # fabricated value -- including the gap cell itself.
-    assert (_RIDGE_ROW, 2) not in classified_rc
-    assert (_RIDGE_ROW, 1) not in classified_rc  # east neighbour is the gap
-    assert (_RIDGE_ROW, 3) not in classified_rc  # west neighbour is the gap
-    assert (_RIDGE_ROW - 1, 2) not in classified_rc  # south neighbour is the gap
-    assert (_RIDGE_ROW + 1, 2) not in classified_rc  # north neighbour is the gap
+    # Window cells actually present: 1, 2, 6, 7 -> mean 4.0.
+    assert smoothed.samples[0][0] == pytest.approx(4.0)
+
+
+def test_smooth_grid_never_fabricates_from_a_fully_unsampled_window() -> None:
+    grid = _grid([[None, None, None], [None, None, None], [None, None, None]])
+
+    smoothed = smooth_grid(grid, window_cells=3, min_valid_fraction=0.01)
+
+    assert all(value is None for row in smoothed.samples for value in row)
+
+
+def test_find_basin_seeds_recovers_a_single_bowl_minimum() -> None:
+    samples: list[list[float | None]] = [
+        [float((row - 2) ** 2 + (col - 2) ** 2) for col in range(5)] for row in range(5)
+    ]
+    grid = _grid(samples)
+
+    seeds = find_basin_seeds(grid, footprint_cells=5)
+
+    assert seeds == [(2, 2)]
+
+
+def test_find_basin_seeds_never_returns_an_unsampled_cell() -> None:
+    samples: list[list[float | None]] = [
+        [float((row - 2) ** 2 + (col - 2) ** 2) for col in range(5)] for row in range(5)
+    ]
+    samples[2][2] = None  # the true minimum is now a gap
+    grid = _grid(samples)
+
+    seeds = find_basin_seeds(grid, footprint_cells=5)
+
+    # The gap is never a seed (never treated as a fabricated low value);
+    # the four cells at distance 1 (value 1.0) become the new regional
+    # minima instead.
+    assert (2, 2) not in seeds
+    assert set(seeds) == {(1, 2), (3, 2), (2, 1), (2, 3)}
+
+
+def test_find_basin_seeds_plateau_returns_every_candidate_cell() -> None:
+    # A flat-bottomed dip: find_basin_seeds does no merging of its own --
+    # that is terrain.features._seed_groups's job (tested in
+    # test_terrain_features.py) -- so every plateau cell that is its own
+    # neighbourhood's minimum comes back.
+    grid = _grid([[5.0, 0.0, 0.0, 0.0, 5.0]])
+
+    seeds = find_basin_seeds(grid, footprint_cells=3)
+
+    assert set(seeds) == {(0, 1), (0, 2), (0, 3)}

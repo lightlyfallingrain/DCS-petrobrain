@@ -125,8 +125,15 @@ from store.writer import (
     insert_source,
     open_for_build,
 )
-from terrain.curvature import DEFAULT_CURVATURE_THRESHOLD_M
-from terrain.features import DEFAULT_MIN_CELL_COUNT
+from terrain.curvature import (
+    DEFAULT_SEED_FOOTPRINT_CELLS,
+    DEFAULT_SMOOTHING_WINDOW_CELLS,
+)
+from terrain.features import (
+    DEFAULT_MIN_CELL_COUNT,
+    DEFAULT_RELIEF_THRESHOLD_M,
+    DEFAULT_WIDTH_CEILING_M,
+)
 
 _PROBE_GRID_SPACING_M = 500.0
 # Default storage spacing for the M7 Stage 2 SRTM-primary full-theatre
@@ -139,11 +146,18 @@ _PROBE_GRID_SPACING_M = 500.0
 # confirmed it empirically: at 1000m the curvature classifier both loses
 # real secondary relief and never reproduces more than a handful of
 # components at any workable threshold. 500m reproduces M6's own
-# already-validated probe-grid tuning (`terrain.curvature.
-# DEFAULT_CURVATURE_THRESHOLD_M`) almost exactly on real SRTM data, and the
+# already-validated probe-grid tuning (the old per-cell discrete-Laplacian
+# classifier's threshold, since removed -- see `terrain.curvature`'s
+# current module docstring) almost exactly on real SRTM data, and the
 # same sweep found no landmark-quality benefit from going finer (250m/100m
 # still checkerboard at every threshold tested -- a resolution ceiling, not
-# a threshold-tuning gap, matching M6's own finding). At 500m,
+# a threshold-tuning gap, matching M6's own finding). The marker-
+# controlled-watershed mechanism that replaced that classifier (2026-10-01,
+# `research/2026-10-01-terrain-feature-probing-watershed-sweep.md`)
+# independently re-confirmed 500m for a mechanism-specific reason (finer
+# spacing raises the absolute cell count the shared geometry-extraction
+# step threads into a line, worsening its zigzag), rather than inheriting
+# this note's finding blind. At 500m,
 # `syria-full`'s ~827x771 km padded bbox is ~1,650 x 1,540 = ~2.5M grid
 # cells; SQLite handles millions of rows fine per M5, and the stored
 # `grid_sample` cost scales to roughly 49 MB (linear in cell count from the
@@ -753,7 +767,10 @@ def add_probe_chunk(
     chunk_iz: int,
     chunk_size_m: float = CHUNK_SIZE_M,
     probe_spacing_m: float = PROBE_SPACING_M,
-    curvature_threshold_m: float = DEFAULT_CURVATURE_THRESHOLD_M,
+    smoothing_window_cells: int = DEFAULT_SMOOTHING_WINDOW_CELLS,
+    seed_footprint_cells: int = DEFAULT_SEED_FOOTPRINT_CELLS,
+    relief_threshold_m: float = DEFAULT_RELIEF_THRESHOLD_M,
+    width_ceiling_m: float = DEFAULT_WIDTH_CEILING_M,
     min_cell_count: int = DEFAULT_MIN_CELL_COUNT,
 ) -> ProbeChunkReport:
     """Ingest one chunk-scoped probe output file into `base_db_path`'s
@@ -868,7 +885,13 @@ def add_probe_chunk(
         terrain_skipped = True
         if window is not None:
             features, terrain_stats = ingest_terrain_chunk(
-                window, probe_source_id, curvature_threshold_m, min_cell_count
+                window,
+                probe_source_id,
+                smoothing_window_cells,
+                seed_footprint_cells,
+                relief_threshold_m,
+                width_ceiling_m,
+                min_cell_count,
             )
             terrain_skipped = False
             ridge_features = [f for f in features if f.kind == "ridge"]
