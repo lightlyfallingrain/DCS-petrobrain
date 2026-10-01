@@ -644,3 +644,17 @@ two functions that must agree (2026-09-19).
   70 ms, all simultaneously fresh. Performance Review caught this by sweeping a second axis the
   implementer's own benchmark never varied, not by finding an error in what was measured
   (`plans/contact-store-pruning/performance.md`).
+- **A one-directional module-independence rule forces duplication of small shared checks, and the
+  failure mode of that duplication drifting out of sync presents as "the upstream fix didn't work"
+  rather than as a visible divergence.** `WM-B1` added a Latin-1-renderability check at OSM ingest
+  (`world-model/src/build/ingest_osm.py::_is_latin1_renderable`) that mirrors `body-layer`'s
+  existing render-time guard (`belief/enrichment.py::displayable_name`) byte-for-byte. Importing one
+  from the other was not an option — `body-layer` may import `world-model` in-process (the one
+  sanctioned coupling), never the reverse — so the only choices were duplication with a
+  keep-in-sync-by-hand docstring note on both sides, or no ingest-side fix at all. If the two checks
+  ever diverge, the symptom will not look like a sync bug: a name that the ingest-side check now
+  accepts but the render-time guard still rejects (or vice versa) will read as "the ingest fix
+  didn't take effect," sending debugging toward the wrong side. Lesson: wherever a module-boundary
+  rule forces a logic duplicate rather than a shared import, name the duplicate's drift failure mode
+  explicitly (not just "keep in sync") so a future debugger recognizes it instead of re-diagnosing
+  the fix itself (`WM-B1`, `plans/latin-place-names/implementation.md`, `security-review.md`).

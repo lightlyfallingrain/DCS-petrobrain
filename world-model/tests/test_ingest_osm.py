@@ -32,8 +32,10 @@ from build.ingest_osm import (
     _ingest_line,
     _ingest_node,
     _ingest_ring,
+    _is_latin1_renderable,
     _polyline_half_length_point,
     _ring_vertices_contained,
+    _select_name,
     ingest_osm,
 )
 from coordinates import dcs_to_wgs84, wgs84_to_dcs
@@ -422,6 +424,173 @@ class TestIngestNode:
         assert feature is None
         assert stats.unnamed_dams_dropped == 1
 
+    def test_prefers_name_en_over_non_latin1_name(self) -> None:
+        # WM-B1: a Latin-1-renderable `name:en` wins over a non-Latin-1
+        # `name`, and the feature records which tag it came from.
+        lat, lon = _in_region_point()
+        node = OsmNode(
+            id=8,
+            tags={"place": "town", "name": "اللاذقية", "name:en": "Lattakia"},
+            lat=lat,
+            lon=lon,
+        )
+        stats = _stats()
+
+        feature = _ingest_node(
+            node,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            7,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.name == "Lattakia"
+        assert feature.tags["name_source"] == "name:en"
+
+    def test_falls_back_to_int_name_when_name_en_absent(self) -> None:
+        lat, lon = _in_region_point()
+        node = OsmNode(
+            id=9,
+            tags={
+                "place": "town",
+                "name": "اللاذقية",
+                "int_name": "Latakia",
+            },
+            lat=lat,
+            lon=lon,
+        )
+        stats = _stats()
+
+        feature = _ingest_node(
+            node,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            7,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.name == "Latakia"
+        assert feature.tags["name_source"] == "int_name"
+
+    def test_falls_back_to_raw_name_when_no_romanisation_renders(self) -> None:
+        # No `name:en`/`int_name` at all -- keeps the non-Latin-1 `name`
+        # verbatim (status quo), tagged `name_source="name"` so a consumer
+        # knows it is the original-script value, not a romanisation.
+        lat, lon = _in_region_point()
+        arabic_name = "اللاذقية"
+        node = OsmNode(
+            id=10, tags={"place": "town", "name": arabic_name}, lat=lat, lon=lon
+        )
+        stats = _stats()
+
+        feature = _ingest_node(
+            node,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            7,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.name == arabic_name
+        assert feature.tags["name_source"] == "name"
+
+    def test_latin1_name_has_no_name_source_confusion_with_name(self) -> None:
+        # The common case -- a plain Latin-1 `name` with no `name:en`/
+        # `int_name` candidates -- records `name_source="name"` too, not a
+        # distinct "no preference needed" marker; there is only one
+        # vocabulary for the tag.
+        lat, lon = _in_region_point()
+        node = OsmNode(
+            id=11, tags={"place": "town", "name": "Testville"}, lat=lat, lon=lon
+        )
+        stats = _stats()
+
+        feature = _ingest_node(
+            node,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            7,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.tags["name_source"] == "name"
+
+
+# --- _select_name / _is_latin1_renderable -------------------------------
+
+
+class TestIsLatin1Renderable:
+    def test_ascii_renders(self) -> None:
+        assert _is_latin1_renderable("Lattakia") is True
+
+    def test_latin1_extended_renders(self) -> None:
+        # e.g. a French/German-accented name -- within Latin-1.
+        assert _is_latin1_renderable("Café") is True
+
+    def test_arabic_does_not_render(self) -> None:
+        assert _is_latin1_renderable("اللاذقية") is False
+
+    def test_diacritic_heavy_transliteration_does_not_render(self) -> None:
+        # A real risk the brief calls out: a romanisation can still contain
+        # characters outside Latin-1 (e.g. Vietnamese-style combining marks
+        # or Arabic transliteration diacritics such as macrons).
+        assert _is_latin1_renderable("Abū Kāmil") is False
+
+
+class TestSelectName:
+    def test_no_name_tags_returns_none(self) -> None:
+        assert _select_name({"place": "town"}) == (None, None)
+
+    def test_plain_name_only(self) -> None:
+        assert _select_name({"name": "Testville"}) == ("Testville", "name")
+
+    def test_name_en_preferred_over_name(self) -> None:
+        tags = {"name": "اللاذقية", "name:en": "Lattakia"}
+        assert _select_name(tags) == ("Lattakia", "name:en")
+
+    def test_int_name_preferred_over_name_when_name_en_absent(self) -> None:
+        tags = {"name": "اللاذقية", "int_name": "Latakia"}
+        assert _select_name(tags) == ("Latakia", "int_name")
+
+    def test_name_en_preferred_over_int_name(self) -> None:
+        tags = {
+            "name": "اللاذقية",
+            "name:en": "Lattakia",
+            "int_name": "Latakia",
+        }
+        assert _select_name(tags) == ("Lattakia", "name:en")
+
+    def test_non_latin1_name_en_is_skipped_for_renderable_int_name(self) -> None:
+        # `name:en` exists but does not itself render -- falls through to
+        # `int_name`, not accepted just because the key matched.
+        tags = {
+            "name": "اللاذقية",
+            "name:en": "Абу Камиль",
+            "int_name": "Abu Kamil",
+        }
+        assert _select_name(tags) == ("Abu Kamil", "int_name")
+
+    def test_no_candidate_renders_falls_back_to_raw_name(self) -> None:
+        arabic_name = "اللاذقية"
+        tags = {"name": arabic_name, "name:en": "اللاذقية 2"}
+        assert _select_name(tags) == (arabic_name, "name")
+
 
 # --- _ingest_line ------------------------------------------------------
 
@@ -475,6 +644,58 @@ class TestIngestLine:
         assert feature.kind == "coastline"
         assert feature.subtype is None
         assert stats.coastline_features == 1
+
+    def test_named_river_prefers_name_en(self) -> None:
+        lat1, lon1 = _in_region_point()
+        lat2, lon2 = _CENTRE_LAT - 0.001, _CENTRE_LON - 0.001
+        way = OsmWay(
+            id=13,
+            tags={
+                "waterway": "river",
+                "name": "نهر العاصي",
+                "name:en": "Orontes",
+            },
+            points=[(lat1, lon1), (lat2, lon2)],
+        )
+        stats = _stats()
+
+        feature = _ingest_line(
+            way,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            8,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.name == "Orontes"
+        assert feature.tags["name_source"] == "name:en"
+
+    def test_unnamed_line_has_no_name_source_tag(self) -> None:
+        lat1, lon1 = _in_region_point()
+        lat2, lon2 = _CENTRE_LAT - 0.001, _CENTRE_LON - 0.001
+        way = OsmWay(
+            id=14, tags={"waterway": "river"}, points=[(lat1, lon1), (lat2, lon2)]
+        )
+        stats = _stats()
+
+        feature = _ingest_line(
+            way,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            8,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.name is None
+        assert "name_source" not in feature.tags
 
     def test_unclassified_line_is_counted_skip(self) -> None:
         lat1, lon1 = _in_region_point()
@@ -567,8 +788,38 @@ class TestIngestLine:
         assert feature.geom_type == "Point"
         assert feature.subtype == "dam"
         assert feature.name == "Test Dam"
+        assert feature.tags["name_source"] == "name"
         assert len(feature.geometry) == 1
         assert stats.named_places == 1
+
+    def test_named_dam_line_prefers_name_en(self) -> None:
+        lat1, lon1 = _in_region_point()
+        lat2, lon2 = _CENTRE_LAT, _CENTRE_LON
+        way = OsmWay(
+            id=17,
+            tags={
+                "waterway": "dam",
+                "name": "سد الاختبار",
+                "name:en": "Test Dam EN",
+            },
+            points=[(lat1, lon1), (lat2, lon2)],
+        )
+        stats = _stats()
+
+        feature = _ingest_line(
+            way,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            8,
+            stats,
+        )
+
+        assert feature is not None
+        assert feature.name == "Test Dam EN"
+        assert feature.tags["name_source"] == "name:en"
 
     def test_unnamed_dam_line_is_dropped_and_counted(self) -> None:
         lat1, lon1 = _in_region_point()
@@ -685,6 +936,7 @@ class TestIngestRing:
             subtype,
             landcover_class,
             "Test Name",
+            "name",
             "way/999",
             _THEATRE,
             _CENTRE_X,
@@ -1026,6 +1278,7 @@ class TestHoleOuterContainmentInvariant:
             "forest",
             "forest",
             "Test Name",
+            "name",
             "way/999",
             _THEATRE,
             _CENTRE_X,
@@ -1082,6 +1335,7 @@ class TestHoleOuterContainmentInvariant:
             "forest",
             "forest",
             "Test Name",
+            "name",
             "way/999",
             _THEATRE,
             _CENTRE_X,
@@ -1298,6 +1552,57 @@ class TestIngestArea:
         assert len(features) == 1
         assert features[0].kind == "water"
         assert stats.water_features == 1
+
+    def test_named_settlement_area_prefers_name_en(self) -> None:
+        # WM-B1: the preference applies to area/ring features too, not just
+        # point `named_place`s.
+        ring, _ = _square_ring(half_width_m=500.0)
+        area = OsmArea(
+            id=900,
+            from_way=True,
+            tags={
+                "place": "town",
+                "name": "اللاذقية",
+                "name:en": "Lattakia",
+            },
+            rings=[ring],
+        )
+        stats = _stats()
+
+        features = _ingest_area(
+            area,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            9,
+            stats,
+        )
+
+        assert len(features) == 1
+        assert features[0].name == "Lattakia"
+        assert features[0].tags["name_source"] == "name:en"
+
+    def test_unnamed_area_has_no_name_source_tag(self) -> None:
+        ring, _ = _square_ring(half_width_m=500.0)
+        area = OsmArea(id=901, from_way=True, tags={"landuse": "forest"}, rings=[ring])
+        stats = _stats()
+
+        features = _ingest_area(
+            area,
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            9,
+            stats,
+        )
+
+        assert len(features) == 1
+        assert features[0].name is None
+        assert "name_source" not in features[0].tags
 
 
 # --- ingest_osm end-to-end aggregation --------------------------------------
