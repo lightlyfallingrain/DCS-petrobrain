@@ -271,6 +271,17 @@ is correcting shipped, currently-wrong output, not speculative scope.
 
 ### Risks & Unknowns
 
+- **The ridge gate is strictly more permissive than it was before the 2026-10-01 saddle fix, and a
+  Stage 3 implementer needs to know it.** The divide elevation is now the true pass height (minimum
+  over contact pairs of the maximum of the two sides), where the first implementation took a naive
+  minimum over the mixed boundary-cell set. The correct saddle is always **greater than or equal
+  to** the naive one, so the prominence gate can now admit a ridge it previously rejected. None of
+  `latakia-20km`, `baalbek-20km` or `palmyra-20km` sits near that boundary — confirmed by rebuilding
+  all three with and without the fix and getting identical output, not assumed — but a future
+  theatre can. **Stage 3's adjacency is defined across qualifying ridges**, so the set of ridges
+  that qualify is Stage 3's own input: a change in that set changes which valleys are "adjacent
+  across one divide". Recorded here rather than only in `implementation.md`, which is a session log
+  a later implementer has no reason to read.
 - **The smoothing-window and relief/width thresholds are four interacting knobs, not two** (the
   original plan had one). More tuning surface means more passes before Stage 1's acceptance check
   is satisfied — expected, not a sign the approach is wrong, but worth naming plainly since it is a
