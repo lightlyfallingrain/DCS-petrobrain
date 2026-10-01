@@ -101,3 +101,111 @@ pyproject.toml` (reproduction scripts via Write, run with `.venv/bin/python`, th
 tree left clean), not inferred from reading alone. `.claude/scripts/gq.sh` was not usable in this
 worktree (`graphify-out/` is gitignored and absent here); not needed for this review since the
 controlling documents were all explicitly named in the task and read directly.
+
+---
+
+## Round 2: re-review of the fix rounds
+
+Re-reviewed `fix/group-undermerging` @ `0317431` (range `3d7d51c..0317431`, three commits:
+`8c9708a` round-1 fix, `adb7d19` round-2 fix correcting round 1, `0317431` citation cleanup)
+against this file's two Required Fixes above and
+`plans/group-cohesion-redesign/explore-notes-delta-taxonomy.md`'s worked utterances as the
+grammar specification.
+
+**Worktree note**: the assigned worktree had landed on `main`'s tip
+(`67da508`, own branch `worktree-agent-aee7d0266358765f8`), not `fix/group-undermerging`. Verified
+with `git rev-parse HEAD` per the rule-4 procedure before doing anything else, then built an
+isolated snapshot with `git archive fix/group-undermerging | tar -x` into the scratchpad and ran
+every check from inside that tree's own `body-layer/` with a fresh venv — never from the worktree's
+actual checkout.
+
+**Finding 1 (indefinite article), re-reviewed.** Round 1 (`8c9708a`) replaced the bare `"a"` with
+an `_with_indefinite_article` helper plus a `{"armor", "infantry"}` vowel-initial exception set —
+grammatically correct for count nouns but still wrong for `"armor"`, a mass noun that takes no
+article in either form. I sent this back. Round 2 (`adb7d19`) removed the mechanism entirely rather
+than extending it: `_with_indefinite_article`/`_VOWEL_INITIAL_CLASS_WORDS` are gone from
+`speech.py` (grepped — no trace), and `_group_composition_clause`'s `count == 1` branch now appends
+`_unit_type_display(value, level)` bare. Checked the implementer's claim that this brings the
+function in line with the module's existing convention rather than creating a new inconsistency:
+`_contact_report_text` and `_identification_lead` were already bare-noun (grepped both; neither
+ever prepended an article) before this fix, so the claim holds — the module is now consistent in
+the direction it already had, not inconsistent in a new one. Cross-checked every worked utterance
+in `explore-notes-delta-taxonomy.md`: `"AAA in the group"`, `"Shilka and zsu"`, `"SRSAM, Shilka,
+armor 2 o'clock 2.5 km"` — count nouns and mass nouns alike are bare in a composition clause; the
+file's one article, `"there's a zsu"`, sits in a different sentence frame (existential singular
+announcement, not composition) and is correctly not treated as counter-evidence by the fix's own
+code comment. Grepped `tests/test_speech.py`, `test_callouts.py`, `test_crew_console.py` for any
+remaining `"[Aa]n? <class/type noun>"` pattern in an actual assertion (not a docstring) — none
+found; the five assertions the round-2 commit message names, plus the `test_callouts.py` fixture
+line, account for all of them.
+
+**The one kept article, `"A couple of contacts."`**, judged separately rather than taken on
+faith: `"couple of"` is a fixed cardinality-hedge idiom (`_cardinality_phrase`'s own vocabulary,
+alongside `"a handful of"`, `"several"`) that always takes "a", structurally unlike `_with_
+indefinite_article`'s per-noun a/an choice on a bare count==1 class word — it is quantifying a
+plural noun phrase, not choosing an article for a singular one. The user's own example
+(`"a couple of contacts"`) uses exactly this form. Real distinction, not a missed case papered
+over: `_cardinality_phrase` and `_group_composition_clause`'s count==1 branch are different
+functions serving different grammatical slots, and nothing in the diff touches `_cardinality_
+phrase`'s article.
+
+**Finding 2 (undifferentiated-member aggregation), re-reviewed.** Unchanged by round 2 — this was
+only round 1's fix, and it stands. `_undifferentiated_phrase` (new) returns `"something"` for
+count 1 and a spoken-number/`"many"` count of `"contacts"` otherwise, matching the user's own `"SAM
+and something"` example exactly; `_group_composition_clause` buckets `presence`/`unknown`-level
+members out of the per-class loop and appends this as one trailing phrase instead of rendering
+`_unit_type_display`'s `"ground"` fallback as its own noun phrase. Ran the originally-reproduced
+scenario and its siblings directly (not just read): `test_render_group_disclosure_first_
+differentiation_is_full_once` now asserts `"Truck and something."` (was `"A ground and a
+truck."`), and `test_crew_console.py`'s new `test_report_speaks_an_already_spoken_group_in_full`
+exercises the two-undifferentiated-member count path end to end via `"report"` after the group has
+already spoken once, giving `"Three BMP-2, 3 o'clock, 1 kilometre."` for a fully-undifferentiated
+group's full roster. Both ran green in isolation, not just inside the full suite.
+
+Verified the implementer's "same latent bug on an untested second code path" claim rather than
+accepting it: grepped every call site of `_group_composition_clause` (three — the air-defence
+"Danger, X. Also Y" leading-member/rest line at `speech.py:1356`, the main composition line at
+`:1366`, and the delta clause at `:1632`) and confirmed the fix lives inside the shared function
+itself, so all three call sites get it for free rather than only the one path the original defect
+was reproduced on. This is exactly the standing "grep for the new mechanism's own call site, not
+the file list" check — all three call sites route through one function, so there is no sibling
+path left uncovered.
+
+**Test quality.** Re-swept `test_speech.py`, `test_callouts.py`, `test_crew_console.py` myself for
+any remaining can't-fail assertion over a rendered group-composition string (negative-shape checks
+like round 1's own `"in" not in speech.text or ...` that this feature has now hit three times) —
+found none; every composition-clause/group-disclosure assertion in scope now pins the literal
+string. The round-2 commit's claim of "five test assertions ... fixed all of them, not just the two
+reported" is correct by direct count (four in `test_speech.py`, one in `test_callouts.py`,
+confirmed above).
+
+**Citation fix (`0317431`).** Diffed it directly: five `plans/group-undermerging/review.md` →
+`plans/group-cohesion-redesign/review.md` string replacements in `speech.py` comments and
+`test_speech.py`/`test_crew_console.py` docstrings, plus a rewrite of the implementer's "file does
+not exist" note in `plans/group-undermerging/implementation.md` into a short "corrected" note.
+Confirmed `plans/group-cohesion-redesign/review.md` exists at the destination path and its Finding
+1/Finding 2 text matches every citing comment's description. No other hunks touched; nothing
+mangled.
+
+**Checks reproduced**, from a venv built fresh in the snapshot's `body-layer/` (no `.venv` shipped
+in the worktree): `ruff format --check src tests` → 113 files already formatted; `ruff check src
+tests` → all checks passed; `mypy src` (run with cwd inside `body-layer/`, per the CWD-only config
+discovery note) → no issues, 53 source files; `pytest tests -q` → **1367 passed, 4 xfailed**,
+matching the expected count exactly.
+
+### Verdict (Round 2)
+
+APPROVED
+
+Both required fixes are resolved correctly and completely — Finding 1 by removing the article
+mechanism rather than patching it (the right fix, since the defect was conceptual, not a missing
+exception), Finding 2 unchanged and still correct. The one surviving article (`"a couple of"`) is a
+different grammatical construct, not a missed case. No new findings; this round is a clean pass.
+
+### Review Confidence (Round 2)
+
+Full read of all three commits' diffs. Every claimed before/after string checked by running the
+actual test (not reading the assertion alone) for the end-to-end fixture, both arrival deltas, the
+first-differentiation branch, and the two crew-console group-report tests. The call-site grep for
+Finding 2's "second code path" claim and the test-suite sweep for remaining can't-fail assertions
+were both performed directly rather than accepted from the implementer's report.
