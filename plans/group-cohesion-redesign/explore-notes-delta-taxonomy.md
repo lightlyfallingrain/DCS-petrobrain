@@ -100,3 +100,45 @@ for a named place in a callout.
   pilot also turned and his own frame moved with it.
 - The "report" roll-up's ordering (leading threat first, then movement) is inferred from one
   example.
+## Addendum — destruction and damage have perceptual grounds (user, 2026-10-01)
+
+Answers the open question this file raised about departure-by-destruction: what gives Petrovich
+grounds to say a unit was destroyed rather than merely lost from view.
+
+> *"'grounds to believe it was destroyed' -> can see it + unit health 0. could also say 'burning'
+> or 'smoking' which is important. Determinable from unit health, somehow. Smoking is damaged not
+> destroyed. Burning will become destroyed, no need to state destruction beyond burning."*
+
+So three states, all from the same source, all gated on actually seeing the unit:
+
+| state | grounds | spoken |
+|---|---|---|
+| damaged | visible, health below full | *"smoking"* |
+| dying | visible, health 0 | *"burning"* — and that is the last word on it |
+| gone, unseen | not visible | silence |
+
+**"No need to state destruction beyond burning" is the economical part**: burning already implies
+the outcome, so there is no second callout when the unit finally dies. It also sidesteps the case
+where the kill completes after the pilot has looked away.
+
+### This is already reachable, and the existing research matches the user's model almost exactly
+
+`aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md` established:
+
+- `Unit.getLife()` / `getLife0()` are real Mission Scripting API, reachable through the
+  mission-scripting bridge **already shipping in production** — the same per-unit loop
+  `petrobrain-mission-telemetry-hook.lua` already runs for unit velocity. No new mechanism.
+- **"Ground/ship units that are actively burning-but-not-yet-detonated read `0` until
+  detonation."** That is the user's "burning" state, exactly, and it is distinguishable from
+  "gone" because the unit object still exists.
+- There is **no queryable "is visibly smoking" boolean** — but DCS's own smoke rendering is itself
+  health-driven, so a life-fraction threshold reproduces what the pilot sees without needing one.
+  The note labels the agreement between DCS's internal smoke threshold and any threshold chosen
+  here as *inferred*, not proven — worth one live look rather than assumption.
+
+### The invariant this must respect
+
+Health is ground truth, and reading it directly would make Petrovich omniscient about every unit in
+the theatre. **The user's own formulation already contains the guard — "can see it + unit health
+0"** — so the life value must pass the same observability gate every other perceived property
+passes. A unit that is burning behind a ridge produces no callout.
