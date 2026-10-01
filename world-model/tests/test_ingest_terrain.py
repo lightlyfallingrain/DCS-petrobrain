@@ -73,12 +73,14 @@ def test_ingest_terrain_flat_tile_produces_no_features(tmp_path: Path) -> None:
     tile_path = tmp_path / "N36E037.hgt"
     _write_flat_tile(tile_path, size=4)
 
-    features, stats = ingest_terrain(
+    features: list[StoredFeature] = []
+    stats = ingest_terrain(
         [tile_path],
         "Syria",
         _REGION,
         tmp_path / "cache.sqlite",
         source_id=5,
+        on_tile_features=features.extend,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
@@ -95,12 +97,14 @@ def test_ingest_terrain_flat_tile_produces_no_features(tmp_path: Path) -> None:
 def test_ingest_terrain_missing_tile_path_is_skipped_not_an_error(
     tmp_path: Path,
 ) -> None:
-    features, stats = ingest_terrain(
+    features: list[StoredFeature] = []
+    stats = ingest_terrain(
         [tmp_path / "does-not-exist.hgt"],
         "Syria",
         _REGION,
         tmp_path / "cache.sqlite",
         source_id=None,
+        on_tile_features=features.extend,
     )
 
     assert features == []
@@ -114,12 +118,14 @@ def test_ingest_terrain_sloped_tile_produces_a_ridge_tagged_with_source_id(
     tile_path = tmp_path / "N36E037.hgt"
     _write_tile(tile_path, size=30, slope_per_col=150.0)
 
-    features, stats = ingest_terrain(
+    features: list[StoredFeature] = []
+    stats = ingest_terrain(
         [tile_path],
         "Syria",
         _REGION,
         tmp_path / "cache.sqlite",
         source_id=9,
+        on_tile_features=features.extend,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
@@ -139,22 +145,26 @@ def test_ingest_terrain_second_run_is_a_full_cache_hit(tmp_path: Path) -> None:
     _write_tile(tile_path, size=30, slope_per_col=150.0)
     cache_path = tmp_path / "cache.sqlite"
 
-    features_1, stats_1 = ingest_terrain(
+    features_1: list[StoredFeature] = []
+    stats_1 = ingest_terrain(
         [tile_path],
         "Syria",
         _REGION,
         cache_path,
         source_id=1,
+        on_tile_features=features_1.extend,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
     )
-    features_2, stats_2 = ingest_terrain(
+    features_2: list[StoredFeature] = []
+    stats_2 = ingest_terrain(
         [tile_path],
         "Syria",
         _REGION,
         cache_path,
         source_id=2,
+        on_tile_features=features_2.extend,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
@@ -181,16 +191,18 @@ def test_ingest_terrain_param_change_invalidates_the_whole_cache(
         _REGION,
         cache_path,
         source_id=1,
+        on_tile_features=lambda _: None,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
     )
-    _, stats = ingest_terrain(
+    stats = ingest_terrain(
         [tile_path],
         "Syria",
         _REGION,
         cache_path,
         source_id=1,
+        on_tile_features=lambda _: None,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=6,  # changed
@@ -221,17 +233,19 @@ def test_ingest_terrain_different_tile_set_forces_full_invalidation(
         _REGION,
         cache_path,
         source_id=1,
+        on_tile_features=lambda _: None,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
     )
 
-    _, stats = ingest_terrain(
+    stats = ingest_terrain(
         [tile_a, tile_b],
         "Syria",
         _REGION,
         cache_path,
         source_id=2,
+        on_tile_features=lambda _: None,
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
@@ -240,6 +254,61 @@ def test_ingest_terrain_different_tile_set_forces_full_invalidation(
     assert stats.tiles_total == 2
     assert stats.tiles_processed == 2
     assert stats.tiles_cache_hit == 0
+
+
+def test_ingest_terrain_streams_one_call_per_tile_not_one_theatre_wide_call(
+    tmp_path: Path,
+) -> None:
+    """The memory-accumulation fix's whole point
+    (`plans/landform-geomorphons/performance.md`'s blocking finding): the
+    caller gets fed one tile's features at a time, never the whole
+    theatre's features in a single call -- otherwise a caller streaming
+    straight to `insert_features` per call would still materialise one
+    theatre-wide list internally, defeating the fix."""
+    tile_a = tmp_path / "N36E037.hgt"
+    tile_b = tmp_path / "N36E038.hgt"
+    _write_tile(tile_a, size=30, slope_per_col=150.0)
+    _write_tile(tile_b, size=30, slope_per_col=150.0)
+    cache_path = tmp_path / "cache.sqlite"
+
+    calls: list[list[StoredFeature]] = []
+    stats = ingest_terrain(
+        [tile_a, tile_b],
+        "Syria",
+        _REGION,
+        cache_path,
+        source_id=1,
+        on_tile_features=calls.append,
+        spacing_m=3000.0,
+        margin_cells=2,
+        lookup_cells=4,
+    )
+
+    assert len(calls) == 2
+    assert stats.tiles_processed == 2
+    assert sum(len(c) for c in calls) == (
+        stats.ridge_feature_count + stats.valley_feature_count
+    )
+
+    # A warm, whole-build cache hit streams per tile too, not via a single
+    # `load_all_features`-style call -- the fast path this fix folded into
+    # the same per-tile loop (see `ingest_terrain`'s own comment).
+    warm_calls: list[list[StoredFeature]] = []
+    warm_stats = ingest_terrain(
+        [tile_a, tile_b],
+        "Syria",
+        _REGION,
+        cache_path,
+        source_id=2,
+        on_tile_features=warm_calls.append,
+        spacing_m=3000.0,
+        margin_cells=2,
+        lookup_cells=4,
+    )
+
+    assert len(warm_calls) == 2
+    assert warm_stats.tiles_cache_hit == 2
+    assert warm_stats.tiles_processed == 0
 
 
 def test_ingest_terrain_resumes_a_partially_completed_cache(tmp_path: Path) -> None:
@@ -305,12 +374,14 @@ def test_ingest_terrain_resumes_a_partially_completed_cache(tmp_path: Path) -> N
     write_tile_features(conn, tile_a.stem, [sentinel])
     conn.close()
 
-    features, stats = ingest_terrain(
+    features: list[StoredFeature] = []
+    stats = ingest_terrain(
         [tile_a, tile_b],
         "Syria",
         _REGION,
         cache_path,
         source_id=7,
+        on_tile_features=features.extend,
         spacing_m=spacing_m,
         margin_cells=margin_cells,
         lookup_cells=lookup_cells,

@@ -23,6 +23,7 @@ not a positional one.
 import logging
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -60,7 +61,6 @@ from terrain_cache.models import TerrainCacheMeta, cache_meta_matches
 from terrain_cache.reader import (
     completed_tile_ids,
     is_build_complete,
-    load_all_features,
     load_cache_meta,
     load_tile_features,
 )
@@ -218,6 +218,7 @@ def ingest_terrain(
     region: RegionDefinition,
     cache_path: Path,
     source_id: int | None,
+    on_tile_features: Callable[[list[StoredFeature]], None],
     spacing_m: float = DEFAULT_SPACING_M,
     margin_cells: int = DEFAULT_MARGIN_CELLS,
     lookup_cells: int = DEFAULT_LOOKUP_CELLS,
@@ -226,7 +227,7 @@ def ingest_terrain(
     max_turn_cos: float = DEFAULT_MAX_TURN_COS,
     min_line_length_cells: int = DEFAULT_MIN_LINE_LENGTH_CELLS,
     chaikin_iterations: int = DEFAULT_CHAIKIN_ITERATIONS,
-) -> tuple[list[StoredFeature], TerrainIngestStats]:
+) -> TerrainIngestStats:
     """Extract ridge/valley `StoredFeature`s from `srtm_tile_paths`
     (existing paths only -- a missing path is silently skipped, same
     "absence reported as absence" convention every other ingest module
@@ -242,8 +243,24 @@ def ingest_terrain(
     designed here.
 
     `source_id` is this build's own elevation `Source` row -- cache rows
-    carry no `source_id` (a cache outlives any one build), so every
-    returned feature is retagged with it here, cache hit or not.
+    carry no `source_id` (a cache outlives any one build), so every tile's
+    features are retagged with it here, cache hit or not, before being
+    handed to `on_tile_features`.
+
+    This function **does not accumulate or return the whole theatre's
+    features** -- `on_tile_features` is called once per tile (cache hit or
+    freshly processed) with that one tile's retagged `StoredFeature`s, and
+    the caller is expected to insert/flush them immediately (mirroring
+    `build.pipeline`'s OSM streaming-ingest `_flush_nodes`/`_flush_ways`/
+    `_flush_areas` callback pattern). A theatre's worth of features held in
+    one Python list measured ~22 KB/feature and reached an estimated
+    29 GB+ peak RSS extrapolated to a full Syria build
+    (`plans/landform-geomorphons/performance.md`'s blocking finding) --
+    the per-tile cache this module already writes to proves per-tile
+    granularity is a safe, resumable unit, so this streams inserts at that
+    same granularity instead of behind one theatre-wide list. Peak memory
+    is now bounded by the largest single tile's own feature set, not by
+    cumulative theatre feature count.
     """
     started_at = time.monotonic()
     existing_paths = [p for p in srtm_tile_paths if p.exists()]
@@ -278,70 +295,74 @@ def ingest_terrain(
         conn = reset_terrain_cache(cache_path)
         write_meta(conn, expected_meta)
 
+    # A whole-build cache hit is handled by the same per-tile loop as a
+    # fresh/resumed build (not a separate `load_all_features` fast path --
+    # that call materialised every cached feature across the entire
+    # theatre into one list, the same unbounded-accumulation shape this
+    # fix removes from the fresh-build path, just hit on a warm rebuild
+    # instead). Treating every tile as "already complete" here reuses the
+    # one cache-hit branch below, so a warm rebuild is bounded by one
+    # tile's features at a time too.
+    whole_build_cache_hit = n_tiles > 0 and is_build_complete(conn)
+    already_complete = (
+        set(tile_ids) if whole_build_cache_hit else completed_tile_ids(conn)
+    )
+
     cache_hit_tiles = 0
     processed_tiles = 0
-    cache_features: list[StoredFeature] = []
+    ridge_feature_count = 0
+    valley_feature_count = 0
 
-    if n_tiles > 0 and is_build_complete(conn):
-        cache_features = load_all_features(conn)
-        cache_hit_tiles = n_tiles
-        logger.info(
-            "ingest_terrain: %d/%d tiles (100.0%%, cache hit, %.1fs elapsed)",
-            n_tiles,
-            n_tiles,
-            time.monotonic() - started_at,
-        )
-    else:
-        already_complete = completed_tile_ids(conn)
-        for index, (tile_id, tile) in enumerate(zip(tile_ids, tiles, strict=True)):
-            if tile_id in already_complete:
-                tile_features = load_tile_features(conn, tile_id)
-                cache_hit_tiles += 1
-                status = "cache hit"
-            else:
-                tile_features = _process_tile(
-                    tile,
-                    tiles,
-                    theatre,
-                    spacing_m,
-                    margin_cells,
-                    lookup_cells,
-                    flat_deg,
-                    close_iterations,
-                    max_turn_cos,
-                    min_line_length_cells,
-                    chaikin_iterations,
-                )
-                write_tile_features(conn, tile_id, tile_features)
-                processed_tiles += 1
-                status = "processed"
-            cache_features.extend(tile_features)
+    for index, (tile_id, tile) in enumerate(zip(tile_ids, tiles, strict=True)):
+        if tile_id in already_complete:
+            tile_features = load_tile_features(conn, tile_id)
+            cache_hit_tiles += 1
+            status = "cache hit"
+        else:
+            tile_features = _process_tile(
+                tile,
+                tiles,
+                theatre,
+                spacing_m,
+                margin_cells,
+                lookup_cells,
+                flat_deg,
+                close_iterations,
+                max_turn_cos,
+                min_line_length_cells,
+                chaikin_iterations,
+            )
+            write_tile_features(conn, tile_id, tile_features)
+            processed_tiles += 1
+            status = "processed"
 
-            if index % _PROGRESS_LOG_INTERVAL_TILES == 0:
-                ridge_so_far = sum(1 for f in cache_features if f.kind == "ridge")
-                valley_so_far = sum(1 for f in cache_features if f.kind == "valley")
-                logger.info(
-                    "ingest_terrain: tile %d/%d (%s, %.1f%%, %s, ridge=%d valley=%d, "
-                    "%.1fs elapsed)",
-                    index + 1,
-                    n_tiles,
-                    tile_id,
-                    100.0 * (index + 1) / n_tiles if n_tiles else 100.0,
-                    status,
-                    ridge_so_far,
-                    valley_so_far,
-                    time.monotonic() - started_at,
-                )
-        if n_tiles > 0:
-            mark_build_complete(conn)
+        retagged = [replace(f, source_id=source_id) for f in tile_features]
+        ridge_feature_count += sum(1 for f in retagged if f.kind == "ridge")
+        valley_feature_count += sum(1 for f in retagged if f.kind == "valley")
+        on_tile_features(retagged)
+
+        if index % _PROGRESS_LOG_INTERVAL_TILES == 0:
+            logger.info(
+                "ingest_terrain: tile %d/%d (%s, %.1f%%, %s, ridge=%d valley=%d, "
+                "%.1fs elapsed)",
+                index + 1,
+                n_tiles,
+                tile_id,
+                100.0 * (index + 1) / n_tiles if n_tiles else 100.0,
+                status,
+                ridge_feature_count,
+                valley_feature_count,
+                time.monotonic() - started_at,
+            )
+
+    if n_tiles > 0 and not whole_build_cache_hit:
+        mark_build_complete(conn)
     conn.close()
 
-    features = [replace(f, source_id=source_id) for f in cache_features]
-    stats = TerrainIngestStats(
+    return TerrainIngestStats(
         tiles_total=n_tiles,
         tiles_cache_hit=cache_hit_tiles,
         tiles_processed=processed_tiles,
-        ridge_feature_count=sum(1 for f in features if f.kind == "ridge"),
-        valley_feature_count=sum(1 for f in features if f.kind == "valley"),
+        ridge_feature_count=ridge_feature_count,
+        valley_feature_count=valley_feature_count,
     )
-    return features, stats
