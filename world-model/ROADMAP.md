@@ -426,7 +426,19 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   below retires this as a standalone item. Keep the branch; revisit only once detection quality is
   fixed.
 
-- [>] **WM-B6 — Ridge/valley detection does not produce correct results. Parked 2026-10-01, needs
+- [~] **WM-B6 — Ridge/valley detection rebuilt on geomorphons. Unparked 2026-10-01, same day it
+  was parked**, because the prior-art spike produced a design the user accepted from the renders
+  and because `WM-B1` (Latin-script place names) already forces a full-theatre rebuild — so the
+  expensive pass can ride along rather than triggering a second one. User: *"since WM-B1 needs
+  world model rebuild, go ahead and start on WM-B6 also. Build the cache from the beginning so
+  that we don't have to recreate the data every world model rebuild."* **The cache is not a
+  follow-up stage: it is part of the first build**, per that instruction and the cache section
+  below.
+
+  The original parking text follows, because the judgement that caused it still stands over the
+  old mechanism and is the reason the new one exists.
+
+  **Originally: ridge/valley detection does not produce correct results. Parked 2026-10-01, needs
   much more effort at some other time.** User direction, after looking at aligned SRTM-hillshade
   renders of real output at three grid spacings:
 
@@ -624,7 +636,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `grid_sample`), while the expensive thing being avoided is the native-resolution pass that
   produced them.
 
-  **Still parked.** This is the design to build when `WM-B6` reopens, not an instruction to start.
+  **No longer parked — this is the design being built** (user, 2026-10-01). Build order follows
+  from his own instruction: the cache is in from the first pass, not retrofitted.
 
   **The consumer half, user 2026-10-01**: *"Could we replace contact enrichment of near that hill
   to work from the ridge/valley data? Then we'd not need elevation grid for that and the ridge
