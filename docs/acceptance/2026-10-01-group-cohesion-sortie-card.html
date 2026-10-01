@@ -1,0 +1,436 @@
+<!doctype html>
+<title>Group Cohesion Sortie</title>
+<style>
+  :root {
+    --ground: #f4f2ee;
+    --panel: #ffffff;
+    --panel-2: #ebe8e2;
+    --ink: #1b1d1f;
+    --ink-dim: #55585c;
+    --line: #d8d4cc;
+    --amber: #b5680a;
+    --amber-ink: #6f3f04;
+    --record: #1f6f74;
+    --record-bg: #e4f0f1;
+    --danger: #a3271f;
+    --danger-bg: #f6e6e3;
+    --mono-bg: #26241f;
+    --mono-ink: #f0ead8;
+    --mono-border: #3a3730;
+    color-scheme: light dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a;
+      --panel: #1c1f24;
+      --panel-2: #23262c;
+      --ink: #ece8de;
+      --ink-dim: #a3a099;
+      --line: #34373d;
+      --amber: #e2a13d;
+      --amber-ink: #f3c874;
+      --record: #6fd3d9;
+      --record-bg: #17302f;
+      --danger: #e2695f;
+      --danger-bg: #33201e;
+      --mono-bg: #0f1113;
+      --mono-ink: #e9e4d6;
+      --mono-border: #33363c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a;
+    --panel: #1c1f24;
+    --panel-2: #23262c;
+    --ink: #ece8de;
+    --ink-dim: #a3a099;
+    --line: #34373d;
+    --amber: #e2a13d;
+    --amber-ink: #f3c874;
+    --record: #6fd3d9;
+    --record-bg: #17302f;
+    --danger: #e2695f;
+    --danger-bg: #33201e;
+    --mono-bg: #0f1113;
+    --mono-ink: #e9e4d6;
+    --mono-border: #33363c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    padding-inline: 16px;
+  }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  h1, h2, h3, .display {
+    font-family: "Barlow Condensed", "Segoe UI Condensed", system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-wrap: balance;
+  }
+  code, pre, .mono {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 64px; }
+
+  .topbar {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    font-weight: 700;
+  }
+  .branch-name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 1.05rem;
+    color: var(--amber-ink);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 8px;
+    display: inline-block;
+  }
+  .branch-note { color: var(--ink-dim); font-size: 0.92rem; }
+
+  pre.cmd {
+    background: var(--mono-bg);
+    color: var(--mono-ink);
+    border: 1px solid var(--mono-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    margin: 8px 0 0;
+    white-space: pre;
+  }
+
+  h1.title { font-size: clamp(1.9rem, 5vw, 2.6rem); margin: 0 0 4px; font-weight: 800; }
+  .subtitle { color: var(--ink-dim); font-size: 1rem; margin: 0 0 22px; max-width: 62ch; }
+
+  section.block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px 20px;
+    margin-bottom: 18px;
+  }
+  section.rider-block { background: var(--panel-2); }
+
+  h2 { font-size: 1.15rem; margin: 0 0 10px; color: var(--ink); font-weight: 700; }
+  h2 .num { color: var(--amber); margin-right: 6px; }
+  p { margin: 0 0 10px; }
+  .lede { color: var(--ink-dim); font-size: 0.95rem; }
+
+  .prize {
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 0 1px var(--amber) inset;
+  }
+  .prize .badge {
+    display: inline-block;
+    background: var(--amber);
+    color: #1b1305;
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 800;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    margin-bottom: 10px;
+  }
+
+  .row { margin: 12px 0; }
+  .row-label {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 4px;
+  }
+  .row.expect .row-label { color: var(--amber); }
+  .row.record .row-label { color: var(--record); }
+
+  .line {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 7px;
+    font-size: 0.92em;
+  }
+  .line.danger { color: var(--danger); background: var(--danger-bg); border-color: var(--danger); }
+  .line.good { color: var(--record); background: var(--record-bg); border-color: var(--record); }
+
+  .checks { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--record-bg);
+    border: 1px solid var(--record);
+    border-radius: 8px;
+    padding: 9px 11px;
+  }
+  .check input[type="checkbox"] {
+    margin-top: 3px;
+    width: 17px;
+    height: 17px;
+    accent-color: var(--record);
+    flex: 0 0 auto;
+  }
+  .check label { font-size: 0.95rem; cursor: pointer; }
+
+  .not-built {
+    border-left: 4px solid var(--danger);
+    background: var(--danger-bg);
+  }
+  .not-built h2 { color: var(--danger); }
+
+  .surprising { border-left: 4px solid var(--amber); }
+
+  .riders h2 { font-size: 1rem; }
+  .rider-item { padding: 8px 0; border-top: 1px solid var(--line); }
+  .rider-item:first-of-type { border-top: none; padding-top: 0; }
+  .rider-item .rname { font-weight: 700; }
+  .rider-item .rdetail { color: var(--ink-dim); font-size: 0.92rem; }
+
+  .pass { border-left: 4px solid var(--amber); }
+
+  .bringback {
+    background: var(--panel-2);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-top: 6px;
+  }
+  .bringback ol { margin: 8px 0 0; padding-left: 1.3em; }
+  .bringback li { margin-bottom: 6px; }
+  .invite {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  :root:not([data-theme="light"]) .invite,
+  :root[data-theme="dark"] .invite { color: var(--danger); }
+
+  footer { color: var(--ink-dim); font-size: 0.82rem; margin-top: 30px; text-align: center; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="eyebrow">Checkout before you fly</div>
+    <div><span class="branch-name">fix/group-undermerging</span> <span class="branch-note">— not merged yet; DoD/Reviewer/Security/Performance have all passed, your acceptance call is what's left</span></div>
+    <pre class="cmd">git checkout fix/group-undermerging &amp;&amp; git pull</pre>
+  </div>
+
+  <h1 class="title">Group Cohesion Sortie</h1>
+  <p class="subtitle">Yesterday's sortie repeated one eleven-unit group callout six times, ~11
+    seconds apart, only the range changing. That's fixed. This branch also redesigns <em>when</em>
+    contacts cohere into one group, and <em>what</em> gets re-spoken when a group changes.</p>
+
+  <section class="block">
+    <h2>What should sound different</h2>
+    <ul style="margin:0 0 0 1.1em; padding:0;">
+      <li>The six-identical-lines defect is gone — range drift alone no longer re-triggers a full
+        re-announcement.</li>
+      <li>Group composition says what <em>changed</em>, not the whole roster again.</li>
+      <li>Articles are gone from class nouns: <span class="line good">"Armor and truck"</span>, not
+        <span class="line danger">"An armor and a truck"</span>. Hearing the old form is a
+        regression worth flagging by name.</li>
+    </ul>
+  </section>
+
+  <section class="block">
+    <h2>Setup</h2>
+    <p class="lede">From <code class="line">run-scripts/</code> on the Mac, Windows collector
+      already running:</p>
+    <pre class="cmd">cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text-debug-view.sh --brain-client http --brain-url http://127.0.0.1:7796 \
+    --detection-trace ~/dcs-detection-trace.jsonl</pre>
+    <p class="lede" style="margin-top:10px;">Checked against this branch's actual committed
+      script, not copied from an older card: it already forwards
+      <code class="line">--speech-audio --speech-input --crew-text --f10-commands
+      --audio-adapter-url http://127.0.0.1:7795 --speech-log ~/dcs-speech.jsonl --eyesight-view
+      --eyesight-view-radius-m 5000 --belief-truth-log ~/dcs-belief-truth.jsonl</code> on its own —
+      you don't add those. It does <strong>not</strong> default
+      <code class="line">--brain-client</code>/<code class="line">--brain-url</code>/
+      <code class="line">--detection-trace</code> itself; those three above are passed on the
+      command line. If your own working copy of the script already has local edits defaulting
+      some of these, don't pass that one twice. The trace plus the belief-truth log is what made
+      yesterday's diagnosis possible — without it, tonight's report is anecdote.</p>
+  </section>
+
+  <section class="block prize">
+    <span class="badge">Listen for all five</span>
+    <h2><span class="num">1</span>A new class joining is spoken</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Watch an already-reported group until a genuinely new class joins it (e.g. a truck joins
+        an armor-only group).</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>A short delta naming just the new class — <span class="line">"Truck, in the group."</span>
+        — not the roster re-spoken.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c1" data-k="c1"><label for="c1">New-class arrival spoke, and only the new part.</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">2</span>Another instance of a reported class is silent</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Watch a group with one truck already reported until a second truck joins it.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p><span class="line">— silence —</span> "One more truck makes no difference," your own
+        worked rule.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c2" data-k="c2"><label for="c2">Second same-class, non-air-defence arrival triggered nothing.</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">3</span>Another air-defence unit is always spoken</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Watch a group with one air-defence member until a second one — even a different type —
+        joins.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>A delta is spoken, unlike case 2 — "more air defence is always news," even though it's
+        just another instance of a class already reported.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c3" data-k="c3"><label for="c3">Second air-defence arrival spoke, where case 2's truck did not.</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">4</span>A leading-threat change speaks a short delta</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Watch a group where the leading (most dangerous) member changes — a more dangerous unit
+        joins, or the leader is lost.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p><span class="line">"Now leading: Shilka."</span> — a short clause, not the whole
+        composition re-spoken.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c4" data-k="c4"><label for="c4">Leader change produced a short delta, not a full restatement.</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">5</span>A departure alone is silent</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Watch a group lose a member with no new arrivals and no leader change.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p><span class="line">— silence —</span> at the group level. (A kill should still be heard
+        from that unit's own callout, just not repeated here.)</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c5" data-k="c5"><label for="c5">Pure departure stayed silent at the group level.</label></div>
+    </div>
+  </section>
+
+  <section class="block not-built">
+    <h2>Not in this build — don't fly listening for these</h2>
+    <p><strong>Damage/destruction narration</strong> ("smoking", "burning") and
+      <strong>landmark anchoring</strong> ("south of the village") are both real, wanted
+      features, scoped to their own later plans. You asked for both today in conversation; neither
+      is here. Their absence tonight is not a defect.</p>
+  </section>
+
+  <section class="block surprising">
+    <h2>Approved, but may still sound surprising</h2>
+    <div class="rider-item">
+      <div class="rname">Infantry merge eagerly, and can bridge other units into one group</div>
+      <div class="rdetail">A BTR and a truck can land in the same group as three infantry — infantry has no distance backstop at all ("ok to merge infantry too eagerly," your own direction). If a group looks like it pulled in units that don't belong, check whether infantry is the bridge before calling it a miss.</div>
+    </div>
+    <div class="rider-item">
+      <div class="rname">The S-300 is not one installation, so its parts don't all merge</div>
+      <div class="rdetail">Only S-125 and Kub sites get the flat 500 m installation cap. An S-300 battery's launcher and radar vehicles cohere — or don't — under the ordinary size-relative rule instead, which may split a real S-300 site into more than one group.</div>
+    </div>
+  </section>
+
+  <section class="block pass">
+    <h2>Pass criteria</h2>
+    <p>Cases 1-5 each sound as specified, no article defect is heard on a class noun, and the two
+      approved-but-surprising behaviours read as expected once you know what to listen for.</p>
+  </section>
+
+  <div class="bringback">
+    <h2 style="margin-bottom:6px;">Bring back</h2>
+    <ol>
+      <li>Did each of the five branches (new class, repeat non-air-defence, repeat air-defence,
+        leader change, pure departure) sound the way this card says it should?</li>
+      <li>Any group that felt wrong — merged too eagerly, split too eagerly, said too much or too
+        little?</li>
+      <li>How did the infantry-bridging and S-300-not-merging behaviours actually read?</li>
+      <li>The 500 m installation cap and the air-defence-class list are one-source-of-evidence
+        guesses — any read on whether either looks wrong against what you saw?</li>
+    </ol>
+    <div class="invite">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>docs/acceptance/2026-10-01-group-cohesion-sortie.md is the source of truth — this card is generated from it.</footer>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'group-cohesion-sortie-2026-10-01';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+})();
+</script>
