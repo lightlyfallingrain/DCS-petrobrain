@@ -24,7 +24,7 @@ from belief.events import (
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
-from belief.tools import set_attention
+from belief.tools import describe_contact, set_attention
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.geometry import bearing_deg as geometry_bearing_deg
 from perception.geometry import range_m as geometry_range_m
@@ -1800,3 +1800,228 @@ def test_tick_is_idempotent_for_group_membership() -> None:
 
     assert len(store.groups) == 1
     assert store.groups[0].id == group_id
+
+
+# --- BL-B23: lost contacts excluded from group clustering ------------------
+#
+# `body-layer/BACKLOG.md`'s BL-B23 -- `ContactStore.tick`'s eighth block now
+# filters `GroupStore.reconcile`'s input to not-`lost` contacts (`belief.
+# decay.certainty_of`), rather than the full historical `_contacts` set, so
+# `_cluster_contacts`'s O(n^2) pairing scales with the live threat picture
+# rather than with total-ever-seen. See `tick`'s own docstring for why this
+# is a clustering-input exclusion, never a deletion from `_contacts` itself.
+
+
+def test_lost_contact_is_excluded_from_group_clustering() -> None:
+    """Two contacts tightly spaced enough to cohere (per
+    `test_two_tightly_spaced_contacts_form_a_group`-style geometry) do not
+    form a group once one of them has gone `lost` -- `tick`'s eighth block
+    must not hand a `lost` contact to `GroupStore.reconcile` even though it
+    is still sitting in `_contacts`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.contacts) == 2
+
+    # Confirm they *would* cohere while both are fresh.
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+
+    # Advance past LOST_THRESHOLD_S with no further observations -- both
+    # contacts are now `lost`.
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=lost_at)
+
+    assert store.groups == []
+    # Still remembered -- not pruned from the store itself.
+    assert len(store.contacts) == 2
+
+
+def test_one_member_going_lost_shrinks_the_group_but_keeps_its_id() -> None:
+    """A three-member group loses one member to `lost`; the remaining pair
+    still clears `GROUP_REPORTING_MIN_MEMBERS` (2), so the group survives
+    under its original id with the smaller membership -- `GroupStore.
+    reconcile`'s majority-overlap rule, exercised here through a real
+    `lost` exclusion rather than a spatial split.
+
+    The two re-observations go through object-permanence continuity
+    (`continues_observation_id`), not the plain spatial gate -- see
+    `test_lost_contact_rejoins_clustering_cleanly_on_reacquisition` for why
+    the gate's own elapsed-motion inflation makes contacts this close
+    together ambiguous reacquisition candidates for each other after a gap
+    this long, which is unrelated to what this test checks."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+    group_id = store.groups[0].id
+    lost_contact_id = store.contacts[0].id
+    surviving_ids = {c.id for c in store.contacts} - {lost_contact_id}
+
+    # Re-observe the other two (via continuity) to keep them fresh while
+    # the first one goes quiet long enough to cross LOST_THRESHOLD_S.
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_4",
+                t_sim=lost_at,
+                bearing_deg=1.0,
+                range_m=1000.0,
+                continues_observation_id="OBS_2",
+            ),
+            _observation(
+                obs_id="OBS_5",
+                t_sim=lost_at,
+                bearing_deg=2.0,
+                range_m=1000.0,
+                continues_observation_id="OBS_3",
+            ),
+        ],
+        now_sim=lost_at,
+    )
+    store.tick(now_sim=lost_at)
+
+    assert len(store.groups) == 1
+    assert store.groups[0].id == group_id
+    assert store.groups[0].member_contact_ids == surviving_ids
+    assert store.group_for_contact(lost_contact_id) is None
+
+
+def test_lost_contact_rejoins_clustering_cleanly_on_reacquisition() -> None:
+    """A contact excluded from clustering while `lost` rejoins the moment
+    it is reobserved -- `certainty_of` is a pure function of elapsed time
+    since `last_seen_sim`, so there is no sticky "once excluded, always
+    excluded" state to clear. `ingest` runs before `tick` in the same poll
+    (`logger.Runner.run_once`'s ordering), so a reacquiring poll already
+    reads `elapsed_s == 0` by the time `tick`'s eighth block filters.
+
+    Reacquisition here goes through object-permanence continuity
+    (`continues_observation_id`), not the plain spatial gate -- after a
+    gap this long the gate's own elapsed-motion inflation
+    (`association_over_time.GATE_GROWTH_RATE_MPS`) grows wide enough that
+    two contacts only ~17 m apart become ambiguous candidates for each
+    other's reacquisition, which is `association_over_time`'s own
+    pre-existing behaviour and not what this test is checking."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=lost_at)
+    assert store.groups == []
+
+    # Both reacquired in the same poll, via continuity -- they must cohere
+    # again exactly as they did the first time.
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_3",
+                t_sim=lost_at + 1.0,
+                bearing_deg=0.0,
+                range_m=1000.0,
+                continues_observation_id="OBS_1",
+            ),
+            _observation(
+                obs_id="OBS_4",
+                t_sim=lost_at + 1.0,
+                bearing_deg=1.0,
+                range_m=1000.0,
+                continues_observation_id="OBS_2",
+            ),
+        ],
+        now_sim=lost_at + 1.0,
+    )
+    store.tick(now_sim=lost_at + 1.0)
+
+    assert len(store.groups) == 1
+    assert len(store.contacts) == 2  # continuity held -- no new contacts founded
+
+
+def test_lost_contact_still_answerable_by_describe_contact() -> None:
+    """A contact excluded from clustering because it is `lost` must still
+    be full memory -- `describe_contact` (the brain-facing "report" query)
+    keeps answering for it, since BL-B23's fix is a clustering-input
+    exclusion, never a deletion from `ContactStore._contacts`."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=lost_at)
+
+    result = describe_contact(store, contact_id, lost_at)
+
+    assert result is not None
+    assert result["facts"]["id"] == contact_id
+    assert result["facts"]["certainty"] == "lost"
+
+
+def test_clustering_cost_scales_with_live_not_total_ever_seen() -> None:
+    """The regression BL-B23 exists to fix, measured directly rather than
+    only asserted: a store holding many long-`lost` contacts plus a small
+    live cluster reconciles that cluster correctly, and the `lost`
+    contacts are never passed to `GroupStore.reconcile` at all -- confirmed
+    via `store.groups` reflecting only the live pair, not by timing (timing
+    belongs in the performance log, not a unit test)."""
+    store = ContactStore()
+    # A large number of contacts, all now long `lost` (bearings spread out
+    # so none of them would cohere with each other even if they were live).
+    stale_observations = [
+        _observation(
+            obs_id=f"OBS_STALE_{i}",
+            t_sim=0.0,
+            bearing_deg=float(i % 360),
+            range_m=5000.0,
+        )
+        for i in range(300)
+    ]
+    store.ingest(stale_observations, now_sim=0.0)
+    assert len(store.contacts) == 300
+
+    lost_at = LOST_THRESHOLD_S + 1.0
+    # A fresh, tightly-spaced pair introduced at the same poll that pushes
+    # everything else past LOST_THRESHOLD_S.
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_LIVE_1", t_sim=lost_at, bearing_deg=90.0, range_m=1000.0
+            ),
+            _observation(
+                obs_id="OBS_LIVE_2", t_sim=lost_at, bearing_deg=91.0, range_m=1000.0
+            ),
+        ],
+        now_sim=lost_at,
+    )
+    store.tick(now_sim=lost_at)
+
+    assert len(store.contacts) == 302  # nothing pruned
+    assert len(store.groups) == 1
+    # The two most-recently-founded contacts are the live pair (ids are
+    # assigned in ingest order) -- every stale contact was excluded from
+    # clustering, not merely too far apart to cohere.
+    assert store.groups[0].member_contact_ids == {
+        store.contacts[-2].id,
+        store.contacts[-1].id,
+    }
