@@ -20,3 +20,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Group-reporting cohesion scale](project_group_reporting_cohesion_scale.md) — measured O(n^2) _cluster_contacts: 0.6ms@52, 8.4ms@200, 54ms@500, 879ms@2000; needs 300-400+ contacts to matter.
 - [Terrain watershed scaling](project_terrain_watershed_scaling.md) — full-theatre grow_basins+extract ~65-80s (vs 5.8s old curvature), 2GB RSS, mildly superlinear not linear; synthetic-terrain calibration trap noted.
 - [ContactStore never pruned](project_contact_store_never_pruned.md) — _contacts has no delete path; group reconcile runs over every contact ever seen, so O(n^2) cost grows with sortie length not live count.
+- [Geomorphons smoothing and memory scale](project_geomorphons_smoothing_and_memory_scale.md) — flagged thinning risk was fine; real cost is O(N^2) Chaikin deviation check + unbounded theatre-wide feature-list memory (~29GB extrapolated).
