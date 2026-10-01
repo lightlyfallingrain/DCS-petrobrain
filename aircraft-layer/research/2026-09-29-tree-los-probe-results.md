@@ -1,8 +1,39 @@
 # Do any scripting calls see trees? And does SEGMENT catch terrain?
 
-**Date:** 2026-09-29, flown on the Windows box (~25 s, Syria).
-**Probe:** `aircraft-layer/dcs-export/petrobrain-tree-los-probe-hook.lua`.
-**Raw:** `dcs.log`, prefix `PetrobrainTreeLos`, 20:09:21 → 20:09:23.
+**Date:** 2026-09-29 → 2026-10-01, Windows box, Syria. Three flights plus an install read.
+**Probes:** `petrobrain-tree-los-probe-hook.lua`, `petrobrain-tree-units-probe-hook.lua`.
+**Raw:** `dcs.log`, prefixes `PetrobrainTreeLos` / `PetrobrainTreeUnits`.
+
+## Answers, up front
+
+**1. No scripting call gives tree-aware line of sight. OSM landcover is the only source.**
+
+| route | tree-aware? | reachable? |
+|---|---|---|
+| `land.isVisible` | no — 40 rays through 40 buildings, 0 blocked | yes |
+| `land.getIP` | no — nothing above ground in 336 km² of forest, nor at vehicles placed in canopy | yes |
+| `world.searchObjects`, any volume | no — trees are not scenery objects, 11 flights | yes |
+| `land.getSurfaceType` | no — `LAND/SHALLOW_WATER/WATER/ROAD/RUNWAY` | yes |
+| `visual_detection` / `trees_LOS_test_T4` | **yes** | compiled; no scripting handle |
+| Petrovich's `target_obstructed` | **yes** | **audio only** — absent from the indication text |
+| `Controller.isTargetDetected` | unknown for ground units | yes, but cannot address a cockpit device |
+
+**2. `SEGMENT` does not catch terrain** — a line buried under **952.7 m** of rock returns zero
+scenery. So `clear = building_clear and terrain_clear` in `plans/dcs-driven-los/plan.md` is
+correct, and its Stage 3 does not collapse.
+
+**What that means for the design:** terrain and buildings come from DCS (measured, cheap, exact);
+**trees must come from OSM `landcover`**, which world-model already holds — 44,811 polygons. That
+was the plan's pre-decided fallback and it now rests on measurement rather than on absence of
+evidence. Findings 8–9 carry the reasoning for why the engine's own tree-aware path cannot be
+borrowed, including a design tension worth knowing before anyone tries.
+
+**What was NOT tested, deliberately:** whether ground-unit `isTargetDetected` is tree-aware (the
+forum "ground units see through trees" claim). The probe for it is written and the geometry is
+sound, but the user called it off as not worth a flight — a neighbouring AI unit's opinion is not
+available as a general LOS oracle, so the answer would not change the design either way.
+
+---
 
 ### Question
 
