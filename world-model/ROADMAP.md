@@ -516,6 +516,34 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   construction and is the obvious way in, since the output is per-feature lines rather than a
   global grid.
 
+  **Prior art surveyed before a third in-house attempt** (user direction, 2026-10-01: *"No need to
+  build our own if there's something we can use, library or example."*). Full survey with sources:
+  `research/2026-10-01-terrain-feature-detection-prior-art.md`.
+
+  - **Primary candidate: geomorphons via WhiteboxTools.** Geomorphons classifies each cell into one
+    of ten landform types (ridge, valley, spur, hollow, slope…) from a line-of-sight ternary
+    pattern and is multi-scale by construction. WhiteboxTools ships `Geomorphons`, `FindRidges`,
+    `ExtractValleys` **and `RasterStreamsToVector`** — and that last one matters most: it is the
+    only surveyed tool that goes raster → clean `PolyLine`, which is precisely the step this
+    project's own code botched twice (zigzag, then fragmentation). Cost: a binary-subprocess
+    dependency and a `.hgt`→ESRI-ASCII bridge (modest, no GDAL). `curvature.py` and the basin core
+    would be replaced; `StoredFeature`/provenance shaping survives.
+  - **Licence constraint, and it rules out most of the obvious names**: GRASS, RichDEM, pysheds and
+    pytopotoolbox are **GPL-3.0 / GPLv2+**, which conflicts with this project's intent to be public
+    open source under a permissive licence. pysheds additionally pulls GDAL back in via rasterio,
+    which M4 deliberately avoided. **Do not let a future architect reach for these without seeing
+    this.** WhiteboxTools' MIT licence was corroborated from secondary sources but **not** read from
+    its own LICENSE file (one fetch 404'd) — verify before committing to it. Landlab's MIT is
+    unverified for the same reason.
+  - **Drainage, not watershed basins, is the structurally better fit for the valley half.** A
+    watershed basin is one blob per local minimum, which is exactly the observed "one basin
+    swallows several draws" failure; a traced flow-accumulation channel keeps each tributary
+    distinct until confluence. This independently matches the user's own *water flow, not rooms and
+    doorways* analogue in `plans/terrain-feature-probing/explore-notes.md`.
+  - **Fallback if a new dependency is unwanted**: D8 flow accumulation in-house — tens of lines
+    over numpy, same complexity class as the priority-flood basin grower already shipped — keeping
+    the project's own axis-sliced line extraction.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
