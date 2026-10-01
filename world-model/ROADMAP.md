@@ -573,6 +573,34 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     detecting at native SRTM resolution and storing only lines a coherent design rather than a
     half-measure.
 
+  **And the last step the user proposed, 2026-10-01**: *"If something does need elevation, it could
+  be approximated from the ridge/valley lines. Not perfect, but neither is the sparse grid. And
+  we'd get rid of the grid data altogether. This of course requires high quality ridge/valley
+  lines."*
+
+  This is an established cartographic idea, not an improvisation — ridge and valley lines are
+  terrain's *structure lines*, and interpolating a surface between them (TIN or natural-neighbour
+  over structure lines) is a standard reconstruction. Worth noting that it sets the quality bar
+  itself: an approximation is only as good as the lines, which is exactly why `WM-B6` is parked.
+
+  Three things to weigh when it is tried, two of them favourable:
+
+  - **Size, measured on the real store**: ridge+valley geometry is **4.6 MB** (3.5 MB ridge, 1.1 MB
+    valley) against `grid_sample`'s **49 MB**. Even at native resolution with many more features,
+    structure lines are a fraction of a mesh — and they carry meaning the mesh does not.
+  - **Accuracy is a trade, not a loss.** The grid is bilinear interpolation between 500 m samples
+    and measured at −7.19 m mean / 11.52 m stddev against DCS. Interpolating between a crest and a
+    floor is worse for an absolute height on an open slope, and *better* for the relational
+    question anything here actually asks — is this unit above or below that ridge, at its foot or on
+    its crest.
+  - **The real limit is flat ground.** Structure lines exist only where there is structure: a
+    desert plain or a wide valley floor produces no ridges and no valleys, so interpolation has no
+    anchors there and the method degenerates exactly where it looks easiest. Whatever covers that
+    case — a very coarse elevation mesh, coastline-as-sea-level, scattered anchor points — has to be
+    decided as part of the design rather than discovered when a Palmyra callout returns nothing.
+    Flat ground is also where a coarse mesh is cheapest and most accurate, so a hybrid is the
+    likely answer.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
