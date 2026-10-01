@@ -597,6 +597,33 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   - Spike implementation kept at `world-model/tools/spike_geomorphons.py` on
     `spike/terrain-detection-resolution` — scratch code, not a pipeline module.
 
+  **Cache the extracted lines to a file, exactly as the OSM pass already does** (user direction,
+  2026-10-01): *"data must be cached to a file, similar to OSM processing. It's too expensive to
+  run at every world model rebuild. If cache exists, then just bring that into the sqlite."*
+
+  This is the established third-store pattern, not a new mechanism — `world-model/CLAUDE.md`
+  documents `data/world-model/<region>-osm-cache.sqlite` alongside the base store and M8's probe
+  store, built for the same reason (a ~25-30 minute classify pass that hurts a rebuild loop).
+  Mirror it:
+
+  - A sibling cache file per region, `src/osm_cache/`'s layout as the template (schema / models /
+    writer / reader / paths / hashing).
+  - **Validity is a conjunction, and any mismatch means a full rebuild, never a partial reuse** —
+    same rule the OSM cache already enforces: the DEM source's hash and size, the extractor's own
+    version constant (the geomorphons parameters, mask membership, closing/thinning/tracing and
+    smoothing all belong in it, since changing any of them changes the output), a cache schema
+    version, and the region's bbox.
+  - Populate at a `.tmp` path and `os.replace` into place only after the whole pass succeeds, so
+    existence at the canonical path is the only validity signal and no flag column is needed.
+  - On a hit, insert through the existing `store.writer.insert_features` per batch rather than a
+    hand-rolled `ATTACH` + bulk copy — again the OSM cache's own choice, with the bulk path
+    documented as the fallback if it proves slow at real scale.
+
+  Note this fits the storage argument above rather than cutting against it: the cache holds the
+  **lines**, which are small (4.6 MB of ridge+valley geometry on the current store against 49 MB of
+  `grid_sample`), while the expensive thing being avoided is the native-resolution pass that
+  produced them.
+
   **Still parked.** This is the design to build when `WM-B6` reopens, not an instruction to start.
 
   **The consumer half, user 2026-10-01**: *"Could we replace contact enrichment of near that hill
