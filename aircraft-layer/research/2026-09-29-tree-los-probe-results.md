@@ -117,6 +117,57 @@ unchanged: no scripting call sees trees.**
   the same probe re-flown — ideally also with flatter ground between them, so a positive cannot be
   confused with the 1.0 m terrain intrusion above.
 
+**8. Where the engine's tree-aware LOS actually lives — read from the install, 2026-10-01. It is
+not reachable, and that is the answer.**
+
+- **evidence: reproduced-locally (reading the shipped Mi-24P module and `Detection.lua`) +
+  documented-absence (no matching strings in `Mi24.dll`)**.
+- **Context the user supplied, which reframes the AI test:** forum consensus is that DCS **ground
+  units see through trees**, a long-standing complaint — while the Mi-24P's own AI Petrovich *does*
+  appear tree-aware when using the 9K113, *possibly only* with the 9K113.
+- **The module confirms the Petrovich half is real.** `Cockpit/Scripts/HelperAI/HelperAI_sound.lua`
+  carries the event names **`target_obstructed`** and **`sight_blocked`**, each with four and three
+  recorded voice lines. So an obstruction judgement is a named, shipped state — not an impression.
+- **But it is audio-only.** Those tokens appear *only* in the sound table. `HelperAI_page_common.lua`
+  and `HelperAI_reporting_names.lua` — the files behind the indication text that
+  `list_indication(HELPERAI_DEVICE_ID)` returns, which aircraft-layer **already reads** — contain
+  no obstruction, visibility or tree term at all. **So Petrovich's own tree-aware verdict does not
+  surface in any machine-readable channel this project has.** It is a sound file.
+- **The decision itself is compiled.** `Mi24.dll` yields 12,725 extractable strings and **not one**
+  matching `obstruct|tree|forest|isVisible|getIP|LineOfSight|visibility|occlu|foliage|canopy`, nor
+  any `petrovich`/`target_` token — the sound events are selected by index from the Lua table, so
+  there is no string surface and no Lua surface to the logic.
+- **`Controller.isTargetDetected` cannot reach the 9K113 path either**, and this is structural
+  rather than a measurement gap: Petrovich is a **cockpit device** in the player's own aircraft, not
+  a Controller-driven AI unit. The `Controller` API addresses AI *groups*; it has no handle on
+  another unit's internal sight operator. So the one tree-aware behaviour the user has observed sits
+  behind an interface that does not exist.
+- `detection_by_optic_sensor` (the table that would govern a 9K113-class sensor) carries **no LOS
+  flags of its own** — only scan time, recognition ratio and fog/IR behaviour — so it inherits
+  `visual_detection`'s, which do include `trees_LOS_test_T4 = true`. That is consistent with the
+  engine having the capability while exposing no way to ask it a question.
+
+**9. So the complete answer to "is there any DCS call for tree-aware LOS" is no.**
+
+| route | tree-aware? | reachable? |
+|---|---|---|
+| `land.isVisible` | no — measured, 40 rays through 40 buildings | yes |
+| `land.getIP` | no — measured, nothing above ground in forest or at vehicles in canopy | yes |
+| `world.searchObjects` (any volume) | no — trees are not scenery objects, 11 flights | yes |
+| `land.getSurfaceType` | no — `LAND/SHALLOW_WATER/WATER/ROAD/RUNWAY`, no vegetation | yes |
+| `visual_detection` / `trees_LOS_test_T4` | **yes** | compiled; no scripting handle |
+| Petrovich's `target_obstructed` | **yes** | **audio only**; absent from the indication text |
+| `Controller.isTargetDetected` | unknown for ground units (forums say they see through trees) | yes, but cannot address a cockpit device |
+
+**OSM `landcover` is therefore the only source for trees**, which is what
+`plans/dcs-driven-los/plan.md` already pre-decided as the fallback. That decision now rests on
+measurement rather than on absence of evidence.
+
+**One tension worth naming rather than discovering later:** even if Petrovich's obstruction verdict
+*were* machine-readable, consuming it would run against the standing direction to stop taking DCS's
+detection output and model perception ourselves. So this route is not merely unavailable — it is
+also against the grain of the design.
+
 ### The weakness in Finding 2, stated plainly
 
 The forest rays were aimed using **OSM** polygons, and OSM forest is not proof of **DCS** trees. If
