@@ -59,3 +59,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — gate lives in tick's spontaneous-only block (Decision 3); Fix C's audio-adapter seam didn't exist; coverage sized out separately.
 - [DCS-driven LOS design](project_dcs_driven_los_design.md) — no-omniscience splits where a live LOS feed can land; the cited bug already had a shipped fix; unit_name is the join-key precedent.
 - [DCS-driven LOS revision](project_dcs_driven_los_revision.md) — LOS reciprocity lets belief carry a value instead of computing one; "bake into unit data" ≠ merge endpoints, check movement-detection's Decision 2 first.
+- [Terrain feature probing watershed revision](project_terrain_feature_probing_watershed_revision.md) — curvature detector replaced by seeded watershed (basins=valleys, divides=ridges); why A/B rejected; adjacency now free; numpy/scipy scoped narrowly.
