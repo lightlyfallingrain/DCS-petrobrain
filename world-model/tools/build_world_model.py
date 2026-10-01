@@ -26,8 +26,9 @@ region's *primary* `elevation` grid (`provenance="srtm"`, see
 `build.ingest_srtm`) -- distinct from `--srtm-tile` above. Every `*.hgt`/
 `*.HGT` file directly inside the directory is loaded (not recursive).
 `--srtm-grid-spacing-m` controls the storage grid's cell spacing (default
-1000m); see `build.pipeline`'s `DEFAULT_SRTM_GRID_SPACING_M` for the row-count
-sizing tradeoff this default is a judgment call about.
+500m, raised from 1000m -- see `plans/terrain-feature-probing/plan.md`
+Stage 1/2); see `build.pipeline`'s `DEFAULT_SRTM_GRID_SPACING_M` for the
+row-count sizing tradeoff this default is a judgment call about.
 
 `syria-full` (M7 Stage 1) has no registered defaults and no OSM cache at
 all -- OSM is out of scope for M7 (see
