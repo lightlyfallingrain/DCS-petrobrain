@@ -20,7 +20,18 @@ Each `poll()`:
    includes the player's own aircraft, identified by the aircraft-layer's
    `is_ownship` flag (see that function's docstring; the flag replaced an
    earlier proximity heuristic found necessary via a live sortie,
-   `plans/pb1.5-naked-eye-detection/debug.md`).
+   `plans/pb1.5-naked-eye-detection/debug.md`). Then runs the survivors
+   through `association.filter_player_bubble()` (`todo/todo.md`'s "Player
+   bubble" item, `association.PLAYER_BUBBLE_RADIUS_M` -- 10 km) before
+   anything else sees them: group salience (1a), the gaze/visibility loop
+   (2), and clustering (3) all only ever operate on what's left inside the
+   bubble. A candidate the bubble drops gets one trace row (`GateOutcome.
+   PLAYER_BUBBLE`) when `trace_sink` is set, rather than the per-gate row
+   `check_visibility` would otherwise have produced -- it is never handed
+   to `check_visibility` at all. This filters the ground/air unit pool
+   only; world-model geography (landmarks, roads, settlements) is reached
+   by proximity to a contact (`belief.enrichment`), not through this pool,
+   and is unaffected.
 1a. **Group salience is resolved once per poll, over the whole candidate
     pool, before the per-candidate gate loop** (`plans/
     group-detectability/plan.md` Stage 2) -- `perception.group_salience.
@@ -212,9 +223,18 @@ from typing import Any, Final, Literal
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from perception import object_model
-from perception.association import WorldObjectCandidate, filter_ownship
+from perception.association import (
+    PLAYER_BUBBLE_RADIUS_M,
+    WorldObjectCandidate,
+    filter_ownship,
+    filter_player_bubble,
+)
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
-from perception.detection_trace import DetectionTraceCollector
+from perception.detection_trace import (
+    DetectionTrace,
+    DetectionTraceCollector,
+    GateOutcome,
+)
 from perception.estimation import naked_eye_sigma_m, perturbed_bearing_range
 from perception.gaze import (
     FREE_SCAN_PLAN,
@@ -427,7 +447,7 @@ class NakedEyePerceptionSource:
         velocity_by_object_id, motion_skew_s = _resolve_velocity_by_object_id(
             raw_objects, world_objects.get("dcs_model_time_s"), unit_velocity
         )
-        candidates = filter_ownship(
+        all_candidates = filter_ownship(
             [
                 WorldObjectCandidate.from_dict(
                     obj,
@@ -438,14 +458,44 @@ class NakedEyePerceptionSource:
             ]
         )
 
+        observer = GeoPosition(
+            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
+        )
+        # The player bubble (`todo/todo.md`'s "Player bubble" item,
+        # `association.PLAYER_BUBBLE_RADIUS_M`) -- the earliest point a
+        # candidate becomes work: dropped here, before group salience, the
+        # gaze/visibility loop, and clustering ever see it. A dropped
+        # candidate gets exactly one trace row (PLAYER_BUBBLE) when tracing
+        # is on, instead of the per-gate row `check_visibility` would have
+        # produced -- it was never handed to `check_visibility` at all.
+        candidates = filter_player_bubble(all_candidates, ownship_state)
+        if self.trace_sink is not None:
+            in_bubble_ids = frozenset(c.object_id for c in candidates)
+            for candidate in all_candidates:
+                if candidate.object_id in in_bubble_ids:
+                    continue
+                target = GeoPosition(
+                    x=candidate.x, z=candidate.z, alt_m=candidate.alt_m
+                )
+                self.trace_sink.record(
+                    DetectionTrace(
+                        object_id=candidate.object_id,
+                        object_type=candidate.object_type,
+                        t_sim=now_sim,
+                        true_bearing_deg=bearing_deg(observer, target),
+                        true_range_m=range_m(observer, target),
+                        range_threshold_m=PLAYER_BUBBLE_RADIUS_M,
+                        threshold_bound="player_bubble",
+                        outcome=GateOutcome.PLAYER_BUBBLE,
+                        optic=self.optic.name,
+                    )
+                )
+
         # 2C: the effective Gaze is a pure function of this poll's own
         # sim time and self.scan_plan (`perception.gaze.gaze_at`) -- never
         # stored, recomputed every poll.
         gaze = gaze_at(now_sim, self.scan_plan)
 
-        observer = GeoPosition(
-            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
-        )
         # `plans/group-detectability/plan.md` Stage 2: group membership is
         # computed once per poll, over the whole un-gazed, un-LOS-filtered
         # candidate pool -- before check_visibility runs, not after (module

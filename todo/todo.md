@@ -14,10 +14,19 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ### Player bubble: 10 km, settled 2026-09-28
 
-- [ ] **Unit detection computations are bounded to a 10 km radius around ownship.** User decision,
-  2026-09-28: *"Let's settle on 10 km for the player bubble radius. While some very large units may
-  be visible beyond that, we don't usually care about things that far."* Nothing outside it is
-  computed at all — not gated late, not scored and discarded, simply never considered.
+- [x] **Unit detection computations are bounded to a 10 km radius around ownship. DONE,
+  `feature/player-bubble`, awaiting merge.** User decision, 2026-09-28: *"Let's settle on 10 km for
+  the player bubble radius. While some very large units may be visible beyond that, we don't usually
+  care about things that far."* Nothing outside it is computed at all — not gated late, not scored
+  and discarded, simply never considered.
+
+  Implemented as `perception.association.filter_player_bubble()` (`PLAYER_BUBBLE_RADIUS_M`, 10 km),
+  called by both `NakedEyePerceptionSource.poll()` and `HybridPerceptionSource.poll()` immediately
+  after `filter_ownship()` — the earliest point either tier's own candidate pool becomes work. Kept
+  fully independent of `NAKED_EYE_RANGE_CAP_M` per the constraint below (two tests assert neither
+  module imports the other's constant by name). A dropped naked-eye candidate gets a `PLAYER_BUBBLE`
+  detection-trace row instead of reaching `check_visibility`'s own gate chain. See
+  `plans/player-bubble/implementation.md` for the full writeup.
 
   **Scope, stated precisely because the obvious misreading is expensive:**
 

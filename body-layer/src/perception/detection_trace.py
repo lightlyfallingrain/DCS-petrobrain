@@ -64,6 +64,16 @@ class GateOutcome(str, Enum):
     RANGE_OR_SIZE = "range_or_size"
     TERRAIN_LOS = "terrain_los"
     ADMITTED = "admitted"
+    #: Dropped by the player bubble (`perception.association.
+    #: filter_player_bubble`, `todo/todo.md`'s "Player bubble" item) before
+    #: `check_visibility` was ever called -- unlike every outcome above,
+    #: this one is recorded by `NakedEyePerceptionSource.poll` directly,
+    #: not inside `check_visibility`'s own gate chain, because the whole
+    #: point of the bubble is that a candidate past it is never handed to
+    #: that chain at all. Always the *first* and *only* row for an
+    #: object_id this poll when it fires, since nothing downstream ever
+    #: sees that candidate.
+    PLAYER_BUBBLE = "player_bubble"
 
 
 @dataclass
@@ -85,7 +95,11 @@ class DetectionTrace:
     so this field recovers the distinct *reasons* ("outside the range
     cap" vs "angular size too small for this tier" vs "admitted only
     because a salient group relaxed the threshold") without inventing a
-    code-level distinction `visibility.py` doesn't have.
+    code-level distinction `visibility.py` doesn't have. A fourth value,
+    `"player_bubble"`, is set only on a `GateOutcome.PLAYER_BUBBLE` row --
+    recorded before `check_visibility` ever ran, so `range_threshold_m` on
+    that row is `association.PLAYER_BUBBLE_RADIUS_M`, not anything derived
+    from the object's own size curve.
 
     `achieved_tier`/`cluster_member_object_ids`/`observation_id` are
     `None` until the candidate is admitted (the first) or, further, until

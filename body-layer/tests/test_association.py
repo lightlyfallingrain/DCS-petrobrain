@@ -15,15 +15,17 @@ from __future__ import annotations
 
 import pytest
 
-from perception import association
+from perception import association, visibility
 from perception.association import (
     AMBIGUOUS_ASSOCIATION_CONFIDENCE,
     AMBIGUOUS_ASSOCIATION_METHOD,
     CONFIDENT_ASSOCIATION_CONFIDENCE,
     CONFIDENT_ASSOCIATION_METHOD,
+    PLAYER_BUBBLE_RADIUS_M,
     WorldObjectCandidate,
     associate,
     filter_ownship,
+    filter_player_bubble,
 )
 from perception.source import OwnshipState
 
@@ -246,6 +248,62 @@ def test_filter_ownship_keeps_a_candidate_even_when_co_located_with_ownship() ->
     close_but_real = _candidate(2, "Ural-4320", x=3.0, z=-2.0, is_ownship=False)
 
     assert filter_ownship([close_but_real]) == [close_but_real]
+
+
+# --- Player bubble (`todo/todo.md`, "Player bubble: 10 km, settled
+# 2026-09-28") -- `filter_player_bubble` is the computation-scope limit both
+# concrete `PerceptionSource` tiers call immediately after `filter_ownship`.
+
+
+def test_filter_player_bubble_keeps_a_candidate_just_inside_the_radius() -> None:
+    just_inside = _candidate(1, "Ural-4320", x=PLAYER_BUBBLE_RADIUS_M - 1.0, z=0.0)
+
+    assert filter_player_bubble([just_inside], _ownship()) == [just_inside]
+
+
+def test_filter_player_bubble_drops_a_candidate_just_outside_the_radius() -> None:
+    just_outside = _candidate(1, "Ural-4320", x=PLAYER_BUBBLE_RADIUS_M + 1.0, z=0.0)
+
+    assert filter_player_bubble([just_outside], _ownship()) == []
+
+
+def test_filter_player_bubble_keeps_a_candidate_exactly_at_the_radius() -> None:
+    # Equal-to-radius is kept (<=), matching associate()'s own ">
+    # RANGE_CAP_M" rejection convention -- see filter_player_bubble's
+    # docstring.
+    exactly_at = _candidate(1, "Ural-4320", x=PLAYER_BUBBLE_RADIUS_M, z=0.0)
+
+    assert filter_player_bubble([exactly_at], _ownship()) == [exactly_at]
+
+
+def test_filter_player_bubble_is_omnidirectional_unlike_associate() -> None:
+    # Unlike associate()'s forward-hemisphere + RANGE_CAP_M plausibility
+    # filter, the bubble has no heading dependency at all -- a candidate
+    # directly behind ownship but within 10 km survives.
+    behind_ownship = _candidate(1, "Ural-4320", x=-5000.0, z=0.0)
+
+    assert filter_player_bubble([behind_ownship], _ownship()) == [behind_ownship]
+
+
+def test_player_bubble_radius_is_not_imported_from_visibility() -> None:
+    # `visibility.NAKED_EYE_RANGE_CAP_M` and `association.
+    # PLAYER_BUBBLE_RADIUS_M` carry the same number today by coincidence,
+    # not because one is derived from the other -- the player bubble is a
+    # computation-scope limit, the naked-eye cap is a perception sanity
+    # bound, and they will diverge once the 9K113 sight lands. A value
+    # comparison can't catch an alias (both floats legitimately equal
+    # 10000.0 right now); the real guard is structural -- neither module
+    # may import or reference the other's constant by name.
+    # A name check against the module's own namespace, not a substring
+    # search over its source -- the docstrings above *name* the other
+    # module's constant in prose deliberately, which must not trip this.
+    # An actual `from perception.visibility import NAKED_EYE_RANGE_CAP_M`
+    # (bare or aliased) would bind the name into `dir(association)`.
+    assert "NAKED_EYE_RANGE_CAP_M" not in dir(association)
+
+
+def test_naked_eye_range_cap_is_not_imported_from_association() -> None:
+    assert "PLAYER_BUBBLE_RADIUS_M" not in dir(visibility)
 
 
 # --- PB-2 Stage 0a: `_type_match_score` against real DCS type/reporting-name
