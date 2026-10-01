@@ -260,10 +260,22 @@ def displayable_name(name: str | None) -> str | None:
     Not transliteration, deliberately. Romanising Arabic properly needs a
     library this project's stdlib-only rule does not admit, and a crude
     character-map transliteration produces names no map agrees with, which
-    is worse than no name at all. The real fix belongs upstream in the
-    world model, which should prefer OSM's `name:en`/`int_name` at ingest
-    where one exists -- recorded in `world-model/ROADMAP.md`. This is the
-    render-time guard that makes the current data usable meanwhile."""
+    is worse than no name at all.
+
+    **The upstream half shipped as `WM-B1` (2026-10-02):**
+    `world-model`'s `build.ingest_osm._select_name` now prefers OSM's
+    `name:en`, then `int_name`, then `name`, accepting a candidate only if
+    it actually encodes to Latin-1 -- the same test this function applies,
+    deliberately duplicated rather than imported, because `body-layer` may
+    import `world-model` but not the reverse (root `CLAUDE.md`, "Module
+    independence"). **Keep the two in sync by hand**; if they diverge, a
+    name accepted at ingest is still dropped here, which looks like the
+    fix not working.
+
+    This guard stays, and still earns its place: measured on the real
+    store, 40% of named places held an unrenderable name and only 67% of
+    those had a usable romanisation available, so roughly a third still
+    arrive here needing the generic label."""
     if name is None:
         return None
     try:
