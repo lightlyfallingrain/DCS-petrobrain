@@ -15,16 +15,19 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import pathlib
 import sqlite3
 import sys
 import threading
 import time
+import urllib.error
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import logger as logger_module
 from aircraft_client import AircraftLayerError
 from belief.attention import AttentionArea
 from belief.audio_client import AudioAdapterError
@@ -1820,3 +1823,97 @@ def test_all_three_trace_consumers_see_one_polls_records(
         "eyesight view printed nothing -- it rendered after the collector "
         "was cleared, which is the reorder this test exists to catch"
     )
+
+
+def test_connection_reporter_says_disconnected_once_then_connected_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One line when the collector goes away, one when it returns, and
+    nothing for the retries in between.
+
+    The poll loop retries every `poll_interval_s`, so before this an
+    unreachable aircraft layer printed a fresh traceback every second for
+    as long as it stayed down. The pilot needs the state change, not the
+    same fact once a second (user direction, 2026-10-02).
+
+    Asserts the actual emitted messages rather than call counts -- these
+    are lines a person reads on a terminal while flying, so the test pins
+    what they say.
+    """
+    reporter = logger_module._ConnectionReporter()
+    dead = AircraftLayerError("request to http://host/x failed: refused")
+
+    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        reporter.report_failure(dead)
+        reporter.report_failure(dead)
+        reporter.report_failure(dead)
+        reporter.report_success()
+        reporter.report_success()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [
+        "aircraft layer disconnected (request to http://host/x failed: refused)",
+        "aircraft layer connected",
+    ], messages
+
+
+def test_connection_reporter_announces_the_first_connection(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A first successful poll says "connected" rather than staying silent.
+
+    The state starts unknown rather than connected precisely so this
+    happens -- "it is working" is worth one line at startup, and without
+    it the pilot cannot tell a healthy run from one that has not reached
+    the collector yet.
+    """
+    reporter = logger_module._ConnectionReporter()
+
+    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        reporter.report_success()
+
+    assert [r.getMessage() for r in caplog.records] == ["aircraft layer connected"]
+
+
+def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Each real transition gets its own line -- the suppression is of
+    repeats, not of subsequent events."""
+    reporter = logger_module._ConnectionReporter()
+    dead = AircraftLayerError("request to http://host/x failed: refused")
+
+    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        reporter.report_failure(dead)
+        reporter.report_success()
+        reporter.report_failure(dead)
+        reporter.report_failure(dead)
+        reporter.report_success()
+
+    assert [r.getMessage() for r in caplog.records] == [
+        "aircraft layer disconnected (request to http://host/x failed: refused)",
+        "aircraft layer connected",
+        "aircraft layer disconnected (request to http://host/x failed: refused)",
+        "aircraft layer connected",
+    ]
+
+
+def test_only_a_dead_socket_counts_as_connection_loss() -> None:
+    """A defect in our own poll cycle still gets its traceback.
+
+    `AircraftLayerError` is raised both for an unreachable collector and
+    for a reply that is not valid JSON, so the cause chain is what
+    separates them. Collapsing a real defect into a quiet "disconnected"
+    line is the failure this distinction exists to prevent -- it would
+    hide exactly the bug a flight is meant to surface.
+    """
+    refused = AircraftLayerError("unreachable")
+    refused.__cause__ = urllib.error.URLError("connection refused")
+    timed_out = AircraftLayerError("unreachable")
+    timed_out.__cause__ = TimeoutError("timed out")
+    bad_json = AircraftLayerError("invalid JSON from http://host/x: line 1")
+
+    assert logger_module._is_connection_loss(refused) is True
+    assert logger_module._is_connection_loss(timed_out) is True
+    assert logger_module._is_connection_loss(bad_json) is False
+    assert logger_module._is_connection_loss(ValueError("something else")) is False

@@ -11,6 +11,15 @@ dependencies = [
     # world-model's own pyproject, since body-layer has its own venv
     # (mirrors aircraft-layer's independent-subproject pattern).
     "pyproj>=3.6",
+    # Same transitive-but-explicit rule, added 2026-10-02: world-model's
+    # `coordinates` package gained `dcs_to_wgs84_array` (numpy) with the
+    # geomorphons landform work (`WM-B6`), and body-layer's
+    # `perception.association` imports `coordinates`. Without this a fresh
+    # body-layer venv imports world-model and dies on `import numpy` --
+    # caught here rather than in flight. The upper pin mirrors
+    # world-model's own: numpy 2.5's bundled stubs use PEP 695 syntax that
+    # mypy rejects under `python_version = "3.11"`.
+    "numpy>=1.26,<2.5",
 ]
 
 [tool.mypy]
