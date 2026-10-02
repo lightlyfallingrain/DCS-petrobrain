@@ -188,6 +188,7 @@ import sqlite3
 import sys
 import threading
 import time
+import urllib.error
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -966,6 +967,57 @@ ATTITUDE_HISTORY_LEN = 3
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
 
+def _is_connection_loss(exc: BaseException) -> bool:
+    """Whether `exc` is the aircraft layer being unreachable, as opposed to
+    a defect in our own poll cycle.
+
+    `AircraftLayerError` covers both -- `aircraft_client` raises it for a
+    dead socket *and* for a reply that is not valid JSON -- so the cause
+    chain is what separates them. A `URLError`/`OSError` underneath means
+    the collector is not answering (DCS not running, the Windows box
+    asleep, the cable out); anything else is ours and still deserves a
+    traceback.
+    """
+    if not isinstance(exc, AircraftLayerError):
+        return False
+    return isinstance(exc.__cause__, (urllib.error.URLError, OSError))
+
+
+class _ConnectionReporter:
+    """One line when the aircraft layer goes away, one when it comes back,
+    and nothing in between.
+
+    The poll loop retries every `poll_interval_s`, so an unreachable
+    collector used to print a fresh traceback every second for as long as
+    it stayed down -- thousands of identical stack traces burying anything
+    real. The pilot needs to know the state changed, not to be told the
+    same fact once a second (user direction, 2026-10-02).
+
+    State is tri-valued on purpose: `None` means nothing has been reported
+    yet, so the first successful poll announces "connected" rather than
+    staying silent on the grounds that nothing broke.
+    """
+
+    def __init__(self, label: str = "aircraft layer") -> None:
+        self._label = label
+        self._connected: bool | None = None
+
+    def report_failure(self, exc: BaseException) -> None:
+        """Log `disconnected` on the transition only; later failures are
+        silent until a success resets the state."""
+        if self._connected is False:
+            return
+        self._connected = False
+        logger.warning("%s disconnected (%s)", self._label, exc)
+
+    def report_success(self) -> None:
+        """Log `connected` on the transition, including the first one."""
+        if self._connected is True:
+            return
+        self._connected = True
+        logger.info("%s connected", self._label)
+
+
 def _run_console_poll_loop(
     runner: ConsolePerceptionRunner,
     aircraft_client: AircraftLayerClient,
@@ -1039,6 +1091,7 @@ def _run_console_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
+        connection = _ConnectionReporter()
         while not stop_event.is_set():
             # Same log-and-continue guard as `_run_crew_text_poll_loop`'s,
             # and for the same reason -- see that function for the full
@@ -1078,8 +1131,12 @@ def _run_console_poll_loop(
                         runner.last_t_sim,
                         last_gaze_label,
                     )
-            except Exception:
-                logger.exception("console poll cycle failed; continuing")
+                connection.report_success()
+            except Exception as exc:
+                if _is_connection_loss(exc):
+                    connection.report_failure(exc)
+                else:
+                    logger.exception("console poll cycle failed; continuing")
             stop_event.wait(poll_interval_s)
     finally:
         if trace_writer is not None:
@@ -1319,6 +1376,7 @@ def _run_crew_text_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
+        connection = _ConnectionReporter()
         while not stop_event.is_set():
             # One log-and-continue guard around the whole poll body, not
             # just the HTTP calls inside `_poll_f10_commands`/
@@ -1418,12 +1476,18 @@ def _run_crew_text_poll_loop(
                             runner.last_t_sim,
                             last_gaze_label,
                         )
-            except Exception:
+                connection.report_success()
+            except Exception as exc:
                 # Deliberately bare-ish: anything at all, because the
                 # alternative is a dead crew member the pilot cannot see.
                 # `logger.exception` keeps the traceback, so a real defect
-                # is still diagnosable after the flight rather than hidden.
-                logger.exception("crew-text poll cycle failed; continuing")
+                # is still diagnosable after the flight rather than hidden
+                # -- but a dead collector is not a defect, and repeating
+                # its traceback every poll buries the ones that are.
+                if _is_connection_loss(exc):
+                    connection.report_failure(exc)
+                else:
+                    logger.exception("crew-text poll cycle failed; continuing")
             stop_event.wait(poll_interval_s)
     finally:
         if trace_writer is not None:
