@@ -45,6 +45,24 @@ def test_load_mission_understanding_parses_the_fixture() -> None:
     assert data.phases[0].epistemic_status == "FACT"
     assert data.phases[0].basis == ("mi3:phase_boundary",)
     assert data.route[2].epistemic_status == "OBSERVATION"
+    assert data.theatre is not None
+    assert data.theatre.value == "Syria"
+    assert data.theatre.epistemic_status == "FACT"
+    assert data.theatre.basis == ("miz:theatre",)
+
+
+def test_load_mission_understanding_raises_on_missing_theatre_key(
+    tmp_path: Path,
+) -> None:
+    """`theatre` (Stage 5, multi-theatre-afghanistan plan) is required --
+    every real compact artifact carries it -- same fail-loud posture as
+    `phases`/`route`."""
+    raw = json.loads(_FIXTURE_PATH.read_text())
+    del raw["theatre"]
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text(json.dumps(raw))
+    with pytest.raises(ValueError, match="theatre"):
+        load_mission_understanding(bad_path)
 
 
 def test_load_mission_understanding_sorts_phases_by_waypoint_index(
