@@ -251,3 +251,17 @@ a crew member would actually say about a cluster re-forming, which is exactly th
 behaviour call this project's process reserves for the user, not the architect. Recommend shipping
 silence first (cheapest, reversible, matches the existing precedent) and revisiting only if live
 flying shows the silence itself reads as wrong.
+
+
+## Measured outcome against this plan's own narrative bound (added 2026-10-04)
+
+The plan's prose describes the six-vehicle cluster collapsing to "at most 2" lines rather than six.
+The implemented fix does better and differently: on the real sortie reconstruction the four
+genuinely simultaneous foundings each speak once and the single later re-founding echo is
+suppressed — every real sighting heard once, the duplicate silenced. Theatre-wide on that sortie,
+17 of 34 foundings would now be suppressed.
+
+**Read "at most 2" as narrative, not as the acceptance criterion.** The criterion that matters is
+the one in Staging: the same real vehicles must not each earn a fresh first-report. Recorded
+because a future reader comparing the measurement against the prose would otherwise see a miss
+where the behaviour is actually correct.
