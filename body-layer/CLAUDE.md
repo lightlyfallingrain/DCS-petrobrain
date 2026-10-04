@@ -79,11 +79,18 @@ Run a single test: `pytest body-layer/tests/test_file.py::test_name -q`.
 same non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector (see its `WORKFLOW.md`).
 **Must use `body-layer/.venv`'s interpreter, not the system/plain `python`** — the world-model
 seam pulls in `pyproj`, which is only installed in this subproject's own venv (see
-`## Tech stack` above on why that dependency exists). **Also requires `--world-model-db`**
-(PB-1.5): `NakedEyePerceptionSource`'s terrain line-of-sight gate needs a built world-model
-region `.sqlite` to run at all, per `docs/concept/PETROBRAIN_RUNTIME.md`'s naked-eye section
-and the world-model seam note above — there is no default and no way to run the logger without
-one. From `cd body-layer`:
+`## Tech stack` above on why that dependency exists). **Also requires a resolved theatre and
+world-model store** (PB-1.5, widened by the multi-theatre-afghanistan plan's Stage 5):
+`NakedEyePerceptionSource`'s terrain line-of-sight gate needs a built world-model region
+`.sqlite` to run at all, per `docs/concept/PETROBRAIN_RUNTIME.md`'s naked-eye section and the
+world-model seam note above — there is no default and no way to run the logger without one.
+Two ways to give it one: `--theatre`/`--world-model-db` together (explicit, needed for small
+test regions like `latakia-20km`/`gemerek-20km`, or for running with no mission-understanding
+artifact at all), or `--mission-understanding PATH --world-model-dir DIR` (derives
+`--theatre` from the loaded artifact's own `theatre` field and resolves the store as
+`DIR/<theatre.lower()>-full.sqlite`). Giving neither combination, or a `--world-model-db`
+built for a different theatre than the resolved one, is a startup error (`parser.error`), not a
+silent default or a wrong-projection run. From `cd body-layer`:
 
 ```sh
 PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName> --world-model-db <path-to-region.sqlite>
