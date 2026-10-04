@@ -104,8 +104,10 @@ later *entries*, not a second design pass.
    - `THEATRE_PROJECTIONS["Afghanistan"]`, `confidence="provisional"`, `source` citing the
      2026-10-04 investigator note and stating explicitly what would upgrade it (Stage 4 below).
    - `REGIONS["afghanistan-full"]`: derive the padded DCS x/z centre + rectangular half-extents
-     from the beacon point-cloud bbox the investigator already extracted (x span 1,023.9 km, z
-     span 1,249.1 km), padded the same way Syria's was (+30 km/side), mirroring
+     from the **union of `towns.lua` (projected to x/z with the new params) and `beacons.lua`**
+     point clouds — not beacons alone (main-loop amendment 2026-10-05: Afghanistan has only 49
+     beacons, all airfield-tied, and the investigator found towns.lua the safer lower-bound source;
+     beacons alone gave x span 1,023.9 km, z span 1,249.1 km), padded the same way Syria's was (+30 km/side), mirroring
      `research/2026-09-05-m7-syria-theatre-extent.md`'s method — a small reproducible script,
      not a hand-typed number, the same discipline `derive_m9_osm_clip_bbox.py` already uses for
      Syria's OSM clip bbox.
@@ -127,7 +129,7 @@ later *entries*, not a second design pass.
    the investigator already validated), then job (b)
    (`tools/build_world_model.py afghanistan-full --towns ... --beacons ... --routes ...
    --srtm-dir ... --osm-pbf ...`). Check per `RUN.md` §3.5: non-zero `road`/`junction`/
-   `settlement`/`named_place`/`water`/`landcover`/`coastline` counts, then spot-check a known
+   `settlement`/`named_place`/`water`/`landcover`/`coastline` counts (Afghanistan is landlocked: `coastline` = 0 is expected there — main-loop amendment 2026-10-05), then spot-check a known
    place (e.g. Kabul) via `describe_position`. Add the resulting RUN.md section once the real
    command has actually been run and the counts checked, not written speculatively.
 
