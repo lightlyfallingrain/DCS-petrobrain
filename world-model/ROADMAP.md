@@ -24,18 +24,33 @@ sortie actually exercises it, and say which one.
   show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
   reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
 
-- [ ] **`feature/landform-geomorphons` (`WM-B6`) + `fix/latin-place-names` (`WM-B1`) — DoD-passed
-  2026-10-02, no real 131-tile `syria-full` build run by any agent.** Every timing/memory/count
-  figure in `plans/landform-geomorphons/`'s plan/performance/implementation/review docs is either a
-  direct measurement on a sampled subset of real SRTM tiles (6, 22, or 27 of the real 131,
-  depending on which pass took it) or a linear extrapolation from one — never the real run. Clears
-  when the user runs the combined build in `docs/acceptance/2026-10-02-geomorphons-latin-names-
-  rebuild.md` (card: https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW) and reports back: ridge/
-  valley counts at real theatre scale (extrapolated ≈1.3M, a different kind of number than the old
-  detector's 8,189/2,314 — not directly comparable), the `WM-B1` name-source counts, and — the real
-  test, by eye, same as every prior landform decision on this project — whether the Bekaa still
-  reads clean and Palmyra's isolated chains still show. One rebuild clears both items; say which
-  rebuild (date/host) cleared it when it does.
+- [x] **`fix/latin-place-names` (`WM-B1`) — cleared by the user's 2026-10-02 `syria-full` build.**
+  Name-source counts landed exactly as predicted: `via_name_en`≈12,926, `via_int_name`≈864,
+  13,073-of-49,226. No outstanding item.
+
+- [x] **`feature/landform-geomorphons` (`WM-B6`) raw extraction at theatre scale — cleared by the
+  same 2026-10-02 build.** `ridge=700,142, valley=740,255` matched the pipeline's own measured
+  figures exactly, confirming geomorphons extraction/tracing/caching/store-write all work
+  correctly at full 131-tile scale. Not re-opened by the item below — that run is what *found* the
+  two defects it fixes, not evidence against the extraction mechanism itself.
+
+- [ ] **`fix/landform-relief-gate` — DoD-passed 2026-10-04, no real 131-tile `syria-full` rebuild
+  run by any agent.** The 2026-10-02 build above, checked against the user's own acceptance
+  criteria, found the ridge/valley layer had no relief gate (89-92% of stored lines under 50 m of
+  relief; the Bekaa floor at Baalbek read as a valley) and stored geometry ~16x denser than a 90 m
+  DEM supports (`feature` was 7.98 of 8.1 GB). Both fixed — see
+  `plans/landform-relief-gate/implementation.md`. The theatre-wide feature count after the gate
+  (234,799) is a direct SQL measurement against the existing store, not an extrapolation; the
+  resulting store size (~2.4-2.5 GB, down from 8.1 GB) *is* extrapolated from a measured
+  36.5-36.7x geometry-byte reduction, not from a full rebuild. Clears when the user re-runs
+  `syria-full` (the terrain cache fully invalidates — `EXTRACTOR_VERSION` 1→2 plus two new knobs
+  in the key, so this is a full ~14-minute cold reprocess, not the warm path) per
+  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` (card:
+  https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP) and reports back: zero relief-gate
+  violations, ridge/valley counts near the 230-240k range, store size near 2.4-2.5 GB, and —
+  the real test, by eye, same as every prior landform decision on this project — whether the
+  Bekaa still reads clean and Palmyra's isolated chains still show. Say which rebuild (date/host)
+  cleared it when it does.
 
 - [x] **`feature/terrain-landform-features` — marker-controlled watershed replaces the M6
   curvature ridge/valley detector (Stages 1-2). Merged 2026-10-01 (`0bef4b9`), and the user's own
@@ -904,6 +919,29 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   boundary rule. The terrain cache is fully invalidated by this change (new `min_relief_m`/
   `decimation_tolerance_fraction` knobs plus an `EXTRACTOR_VERSION` bump), so the user's next
   `syria-full` rebuild reprocesses every tile rather than serving stale, ungated geometry.
+
+  **DoD-passed 2026-10-04 (`fix/landform-relief-gate`), Reviewer and Security both APPROVED with
+  no required fixes, live acceptance outstanding — see "Live acceptance debt" above and
+  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` / card
+  https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP.** No Performance Reviewer pass — this change
+  strictly reduces work in a stage whose cost was already measured (drops lines before storage,
+  decimates what remains), and Security's deep analysis agreed with that framing while checking
+  the degenerate decimation cases directly (2000-collinear-point and adversarial-zigzag inputs);
+  see `plans/landform-relief-gate/security-review.md`.
+
+  **Milestone-completion check**: this closes the last known defect in `feature(kind='ridge'/
+  'valley')` that blocked treating it as a layer to build on — Stages 3-5 (adjacency, bearing, the
+  callout) can now assume gated, DEM-scale-appropriate geometry once they're picked up, rather
+  than inheriting the two defects this fix removed. It does **not** change what the next milestone
+  should be (Stages 3-5 are still unbuilt and still gated behind a real consumer need, per the
+  reopening condition above) — but it does narrow what "trustworthy" means for anyone reading an
+  older terrain render: see the `inspect_terrain.py` rewrite note below and the corresponding
+  `NOTES.md` entry — every render judged by eye before this branch (including the ones that
+  produced the 2026-10-01 "choose geomorphons" decision and the 2026-10-02 acceptance renders) was
+  of raw/Chaikin-only geometry, not what the store actually holds. That does not reopen the
+  geomorphons-vs-alternatives choice itself (made on a different, zoomed-in test window where the
+  gate/decimation gap is proportionally small), but any density or clutter impression taken from
+  those earlier renders should not be trusted for what ships.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
