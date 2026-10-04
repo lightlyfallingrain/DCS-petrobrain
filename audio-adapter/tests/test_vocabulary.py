@@ -185,6 +185,17 @@ def test_stop_and_nevermind_are_distinct_tokens() -> None:
     assert index[normalize_for_match("nevermind")] == "cancel_nevermind"
 
 
+def test_silence_is_distinct_from_stop_talking() -> None:
+    """`silence` ("say nothing from here on") and `stop_talking` ("stop
+    talking right now") answer different questions and must stay
+    separable -- a pilot who wants both says both."""
+    assert "silence" in VOICE_ONLY_TOKENS
+    index = normalized_phrase_index()
+    assert index[normalize_for_match("stop")] == "stop_talking"
+    for phrase in PHRASES["silence"]:
+        assert index[normalize_for_match(phrase)] == "silence"
+
+
 def test_bearing_digits_are_always_three() -> None:
     assert bearing_digits(320) == "three two zero"
     assert bearing_digits(5) == "zero zero five"

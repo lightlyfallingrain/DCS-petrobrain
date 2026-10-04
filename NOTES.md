@@ -688,3 +688,14 @@ two functions that must agree (2026-09-19).
   whose correctness is fundamentally a matter of "does this look right to a pilot" should budget
   for a rendered comparison early, before investing in tuning metrics that a correct-looking render
   might make moot (`world-model/ROADMAP.md`'s `WM-B6` entry, decision dated 2026-10-01).
+- **A new one-word voice phrase needs a collision check against ordinary speech, not just against
+  the existing vocabulary table.** `audio-adapter`'s `command_matcher.VERB_ANCHOR_WORDS` derives an
+  anchor word from each phrase's first word, with a deliberately loose fuzzy floor (`VERB_FLOOR =
+  0.5`) because false anchors are cheap and false rejections are not. A candidate bare `"quiet"`
+  phrase for the `silence` command was clean against every existing command phrase but sat a 0.889
+  `difflib.SequenceMatcher` ratio from the ordinary word `"quite"` — enough to anchor
+  `"quite a nice day for flying today"` as a command and break a pinned regression test. Found only
+  by actually running the matcher with the candidate wired in and testing it against plausible
+  near-neighbour English words, not by eyeballing the word or checking it against other commands.
+  Multi-word phrasings (`"be quiet"`) are safe by construction, since only a phrase's first word
+  becomes an anchor (`plans/silence-command/implementation.md`).

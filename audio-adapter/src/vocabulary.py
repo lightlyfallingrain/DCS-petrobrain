@@ -125,6 +125,13 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         "report_all",
         "stop_talking",
         "say_again",
+        # Absolute silence until the next dispatched command (`plans/
+        # silence-command/implementation.md`, user direction 2026-10-04) --
+        # body-layer's `handle_command` already dispatches this token; it
+        # has no F10 button. No `follow`/`watch_nearest`-style synonym
+        # pairing: this is its own command, not an alternate verb for an
+        # existing one.
+        "silence",
         "scan_bearing_deg",
         "report_bearing_deg",
         # `follow [<descriptor>] [<clock> o'clock] [<n> km]` -- a best-match
@@ -328,6 +335,49 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # bench measures. Asking beats both guessing and silence -- a crew
     # member who did not catch something says so.
     "say_again": ("say again", "repeat", "repeat that"),
+    # Mutes Petrovich absolutely -- including urgent threat callouts --
+    # until any dispatched command clears it (body-layer's own call,
+    # `plans/silence-command/implementation.md`). A misfire here is worse
+    # than most: it does not just fail to act, it makes the crew go quiet
+    # near something the player never asked to stop hearing about, which
+    # is why body-layer gates this token behind the elevated
+    # `ACT_FLOOR_CANCEL` confidence floor (`voice_commands.CANCEL_TOKENS`)
+    # rather than the ordinary act floor.
+    #
+    # **Three phrasings, not one -- and a fourth, bare "quiet", was
+    # weighed and rejected, not merely not thought of.** "silence" is the
+    # user's own word and must be present. "quiet"/"be quiet"/"shut up"
+    # were candidates, measured against this file's own matcher
+    # (`command_matcher.match_transcript`) with all four wired in:
+    # "be quiet" and "shut up" cost nothing (no false command on
+    # adversarial sentences that merely contain one of their words --
+    # "be careful", "shut the door" come back `token=None`, and the
+    # existing phrase table -- `cancel`/`stop`/`watch nearest`/`scan
+    # left`/`follow nearest` -- is unaffected). Bare **"quiet" was
+    # dropped**: as a one-word phrase it becomes its own verb-anchor word
+    # (`VERB_ANCHOR_WORDS` is derived from each phrase's first word), and
+    # "quiet" sits a 0.889 `SequenceMatcher` ratio from the ordinary
+    # English word "quite" -- comfortably above `VERB_FLOOR` (0.5). That
+    # turned `match_transcript("quite a nice day for flying today")` from
+    # a clean anchor rejection into a false `verb_anchored=True`, which
+    # broke `test_verb_anchor_rejects_non_command_speech`'s pinned
+    # expectation (`test_command_matcher.py`) -- a real, measured
+    # collision, not merely a theoretical one, and exactly the risk this
+    # token's own addition was told to weigh phrase by phrase. "be quiet"
+    # keeps the second word "quiet" without that risk, since only a
+    # phrase's *first* word becomes an anchor. `"stop"` alone stays
+    # `stop_talking`'s -- that token means "stop talking right now", this
+    # one means "say nothing from here on"; a pilot who wants both says
+    # both.
+    #
+    # **Unbenched, like every token added here**: no recordings of this
+    # speaker saying any of these three phrasings exist in this corpus,
+    # so recognition accuracy on his voice is unmeasured -- the same cost
+    # that kept `cancel_scan`/`cancel_watch` off voice until 2026-09-23
+    # (see those tokens' own comment above). This one is worth weighing
+    # more carefully than most: it is a command reached for when busy and
+    # not wanting to repeat it.
+    "silence": ("silence", "be quiet", "shut up"),
     # The bare verb -- descriptor/clock/range are parsed slots
     # (`command_matcher.py`'s follow-slot fallback path), never enumerated
     # here. "follow nearest"/"follow nearest air defence" are NOT this
