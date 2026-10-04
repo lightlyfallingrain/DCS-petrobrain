@@ -10,6 +10,19 @@ both approved; it is not yet on `main`):
 git checkout fix/contact-report-flood && git pull
 ```
 
+**Added 2026-10-05: a second, related fix rides this same sortie — `fix/redundant-group-disclosure`
+(DoD PASSED, not yet merged).** It silences a *group's first disclosure* when every member of that
+group was already individually reported (directly, or via the merge-echo this card's own fix
+silences), and speaks only the genuinely new part otherwise. Both fixes change what you hear about
+the same contact/group stream, so one flight settles both rather than needing a second sortie.
+**If you are flying after both branches have merged, check out `main` instead** — the two fixes
+land as separate merges but this card's setup and test items cover both regardless of which branch
+or combination you're actually on:
+
+```sh
+git checkout main && git pull
+```
+
 ## Why this card exists
 
 Mid-flight, 2026-10-04, your own words: *"when there are units around, I hear a near constant
@@ -132,6 +145,22 @@ untouched by this fix.
 **Record.**
 - [ ] Did a genuine reacquisition after a real gap still get announced?
 
+### 5a — A group's opening line doesn't repeat what you already heard
+
+**Do.** Watch a group form from contacts you've already individually heard about — e.g. you heard
+"infantry, 1 o'clock" and "armor, 1 o'clock, is BTR-70" separately, and a truck then joins them into
+one group.
+
+**Expect.** The group's first line should name only the genuinely new part (e.g. "BTR-70 and truck,
+in 1 o'clock group" when the truck is what's new) — not a full re-read of the whole roster
+including things you already heard individually. If every member of a newly-formed group was
+already individually reported, the group's opening line should be silent entirely.
+
+**Record.**
+- [ ] Did a group's first disclosure ever repeat something you were sure you'd already heard
+  individually?
+- [ ] Did a group ever go silent on formation when you'd expect to hear at least the new part?
+
 ### 5 — Listen for a missed split
 
 **Do.** Watch for any moment where a group you thought was one thing turns out, on later
@@ -168,5 +197,7 @@ suppression count from this flight can be checked against the 17/34 estimate.
    reach for "silence" less than usual?
 4. The detection-trace and belief-truth logs from this flight, so the real suppression count can be
    measured against the 17/34 estimate above.
+5. Did a group's opening line ever repeat something already heard individually, or go silent when
+   you expected at least a partial line (item 5a)?
 
 Anything that surprises you is worth more than anything on this list.

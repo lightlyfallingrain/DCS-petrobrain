@@ -739,3 +739,20 @@ two functions that must agree (2026-09-19).
   near-neighbour English words, not by eyeballing the word or checking it against other commands.
   Multi-word phrasings (`"be quiet"`) are safe by construction, since only a phrase's first word
   becomes an anchor (`plans/silence-command/implementation.md`).
+- **`belief.groups`' cohesion gate is measurably tighter than `belief.association_over_time`'s
+  contact-founding gate — two observations the founding gate keeps as distinct `Contact`s do not
+  automatically cohere into a `Group`.** Found while writing a test meant to reuse an existing
+  merge-echo fixture's geometry (500 m apart, bearing 0, ranges 1000/1500 m): `GroupStore.reconcile`
+  never clustered them on its own, so the test had to construct the `Group` directly rather than
+  relying on natural clustering. Worth knowing before assuming any two contacts close enough to be
+  founding-gate-ambiguous will also test group-level behaviour for free
+  (`plans/redundant-group-disclosure/implementation.md`).
+- **When a suppression mechanism composes with a second, independent suppression mechanism, verify
+  the composition is per-member, not per-group (or per-whatever-the-container-is) — a per-group
+  check can silently let one suppressed member's "already handled" status silence a sibling that
+  was never itself reported.** `_already_reported_member_ids` computes the "already reported" set
+  per individual member and the worth-announcing filter is then applied per member, so a group of
+  {suppressed, never-reported} members still speaks the never-reported one; full silence only
+  occurs when every member independently qualifies. Confirmed by a dedicated composition test, not
+  inferred from the two mechanisms each being individually correct
+  (`plans/redundant-group-disclosure/security-review.md`).
