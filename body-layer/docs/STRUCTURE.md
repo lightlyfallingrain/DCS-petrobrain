@@ -776,7 +776,43 @@ The entries are in the order they were written, which is roughly perception → 
   short `"Copy."` acknowledgement (`speech.render_stop_acknowledged`, now removed) pushed urgent
   through `_print` — that acknowledgement was itself the defect the follow-up fixes: it had to go
   out over the same channel it was interrupting, so asking Petrovich to stop talking made him talk
-  once more.
+  once more. `silence` (`plans/silence-command/plan.md`, user direction 2026-10-04) is this
+  method's sibling with the opposite relationship to speech: "make Petrovich not talk until my
+  next command," chosen **absolute** (nothing is spoken at all while silenced, including an
+  injected urgent call) after the user was shown the risk explicitly and accepted it. Handled by
+  `_handle_silence`, dispatched from `handle_command`'s own top -- checked *before* the general
+  `self.silenced = False` reset every other token now runs there, since `_handle_silence` needs to
+  see whether silence was already in effect (a repeated `silence` is a no-op, not a toggle — a
+  toggle would make a repeated press ambiguous once the pilot has lost track of state). It speaks
+  one fixed word (`speech.render_silence_ack`, `"Quiet."`) *before* setting `self.silenced`, so its
+  own acknowledgement is not self-suppressing — the inverse of `stop_talking`'s removed `"Copy."`
+  paradox above, not a repeat of it, since the mute is not yet in effect when this line goes out.
+  `self.silenced` gates exactly one thing, in exactly one place: `_print`'s push to `speech_client`
+  (both the routine and, deliberately, the `bypass_gate=True` urgent branch). `output` and
+  `overlay_client` are untouched — the use case is audio ("during radio traffic," "near a friendly
+  airbase"), so crew-text/overlay keep working — and so is `speech_log_sink`/the scheduler's own
+  `note_reply`/`note_urgent` bookkeeping, which keeps running exactly as if each chosen line had
+  been spoken. That last point is what makes this **suppressed, not deferred**: `drain_events`
+  keeps calling `self.scheduler.tick` every poll regardless of `silenced`, so belief events are
+  still chosen, rendered, and consumed by the scheduler's existing "lost, not deferred" posture for
+  anything it does not get to — nothing backs up to be dumped the instant silence ends. Ending
+  silence is "any subsequent command," read narrowly on purpose: a token reaching `handle_command`
+  (F10, a voice `"act"`, or a committed confirm-band `"affirm"`) ends it, and so does a free-text
+  utterance `belief.utterance.parse_utterance` actually resolves to an intent (`_handle_utterance`'s
+  own `"handled"` branch) — but an utterance that resolves to nothing (`"escalated"`, stray radio
+  chatter the use case exists for) does not, and neither does a voice `"confirm"`/`"say_again"`
+  disposition that has not yet committed to a token. `silence` was also added to
+  `voice_commands.CANCEL_TOKENS` (`ACT_FLOOR_CANCEL`'s higher confidence floor) — a misfire here is
+  arguably worse than a misfired `cancel_task`, since it is Petrovich going quiet near something
+  the player never asked to stop hearing about. **Not wired into `brain_reply.
+  OFFERED_CONFIRM_VOCABULARY`** (the brain-layer classify prompt's own offered-token mirror) —
+  that is a cross-subproject change (`brain-layer/src/prompts.py` plus its own mirrored test) out
+  of this change's scope; the asymmetry fails safe per that constant's own docstring (a brain
+  `CONFIRM silence` degrades to `ASK`, never misdispatches). Likewise, no DCS-side F10 radio-menu
+  button exists for it yet (`aircraft-layer`'s Hook script owns that enumeration) — `silence` is
+  reachable today via `!voice silence <ratio> <confidence> 1 0` in the typed harness, and will be
+  reachable for real once either side's vocabulary is extended, with no further body-layer change
+  needed (`handle_command` already dispatches the token generically).
 - `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
   split) — the act/confirm/say-again band decision (`classify_response`, given `audio_adapter.
   command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import
