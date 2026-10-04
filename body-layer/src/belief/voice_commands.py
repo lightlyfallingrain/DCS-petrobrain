@@ -101,8 +101,21 @@ ACT_FLOOR_CANCEL: float = 0.80
 #: have inherited the ordinary floor silently -- a mis-heard "stop watch"
 #: is exactly as destructive as a mis-heard "cancel task", and the reason
 #: the higher floor exists does not care which mode is being ended.
+#:
+#: **`silence` joined this set 2026-10-04** (`plans/silence-command/
+#: plan.md`), broadening the set's reach: it does not destroy a
+#: `belief.tasks.PendingIntent` the way the other three do, but a misfire
+#: is arguably worse -- it is Petrovich going quiet, under this project's
+#: chosen "absolute silence, including urgent callouts" semantics
+#: (`belief.crew_console.CrewConsole._handle_silence`), near something the
+#: player never asked to stop hearing about. The name is now slightly
+#: narrower than the set it labels (not every member here "cancels" in the
+#: literal sense), but renaming it for one new member would touch every
+#: existing reference to save nothing -- the module docstring is where the
+#: real definition ("the higher floor for an asymmetric-cost misfire")
+#: lives, and that's where it's read.
 CANCEL_TOKENS: frozenset[str] = frozenset(
-    {"cancel_task", "cancel_scan", "cancel_watch"}
+    {"cancel_task", "cancel_scan", "cancel_watch", "silence"}
 )
 
 #: Below this, nothing fires and Petrovich asks the player to say it

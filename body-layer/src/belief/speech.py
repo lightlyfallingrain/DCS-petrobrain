@@ -348,6 +348,25 @@ def render_say_again() -> OutgoingSpeech:
 # speak; this is the deliberate, stated exception, not an omission.
 
 
+def render_silence_ack() -> OutgoingSpeech:
+    """`silence`'s one spoken acknowledgement (`plans/silence-command/
+    plan.md`, user direction 2026-10-04: *"one short spoken
+    acknowledgement, then quiet"* -- on a speech-only setup it is the
+    pilot's only confirmation the command landed). Fixed, one word,
+    deliberately echoing the pilot's own request rather than a generic
+    "Copy" -- `crew_console.CrewConsole._handle_silence` speaks this line
+    *before* setting `self.silenced`, not after, so nothing is suppressed
+    yet when it goes out.
+
+    **Not `render_stop_acknowledged`'s ghost reborn.** That one was
+    removed (see the comment above) because it had to go out over the
+    very channel it was interrupting -- asking Petrovich to stop talking
+    made him talk once more, a live paradox. `silence` has no such
+    paradox: the mute is not yet in effect at the moment this is spoken,
+    so there is nothing for this line to contradict."""
+    return OutgoingSpeech(text="Quiet.", template="readback")
+
+
 def render_confirm_request(description: str) -> OutgoingSpeech:
     """`plans/inbound-speech/plan.md` Stage 2's confirm-band interrogative
     readback (Decision 4 Layer 3): `render_confirm_request("scan left")`
