@@ -24,18 +24,33 @@ sortie actually exercises it, and say which one.
   show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
   reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
 
-- [ ] **`feature/landform-geomorphons` (`WM-B6`) + `fix/latin-place-names` (`WM-B1`) — DoD-passed
-  2026-10-02, no real 131-tile `syria-full` build run by any agent.** Every timing/memory/count
-  figure in `plans/landform-geomorphons/`'s plan/performance/implementation/review docs is either a
-  direct measurement on a sampled subset of real SRTM tiles (6, 22, or 27 of the real 131,
-  depending on which pass took it) or a linear extrapolation from one — never the real run. Clears
-  when the user runs the combined build in `docs/acceptance/2026-10-02-geomorphons-latin-names-
-  rebuild.md` (card: https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW) and reports back: ridge/
-  valley counts at real theatre scale (extrapolated ≈1.3M, a different kind of number than the old
-  detector's 8,189/2,314 — not directly comparable), the `WM-B1` name-source counts, and — the real
-  test, by eye, same as every prior landform decision on this project — whether the Bekaa still
-  reads clean and Palmyra's isolated chains still show. One rebuild clears both items; say which
-  rebuild (date/host) cleared it when it does.
+- [x] **`fix/latin-place-names` (`WM-B1`) — cleared by the user's 2026-10-02 `syria-full` build.**
+  Name-source counts landed exactly as predicted: `via_name_en`≈12,926, `via_int_name`≈864,
+  13,073-of-49,226. No outstanding item.
+
+- [x] **`feature/landform-geomorphons` (`WM-B6`) raw extraction at theatre scale — cleared by the
+  same 2026-10-02 build.** `ridge=700,142, valley=740,255` matched the pipeline's own measured
+  figures exactly, confirming geomorphons extraction/tracing/caching/store-write all work
+  correctly at full 131-tile scale. Not re-opened by the item below — that run is what *found* the
+  two defects it fixes, not evidence against the extraction mechanism itself.
+
+- [ ] **`fix/landform-relief-gate` — DoD-passed 2026-10-04, no real 131-tile `syria-full` rebuild
+  run by any agent.** The 2026-10-02 build above, checked against the user's own acceptance
+  criteria, found the ridge/valley layer had no relief gate (89-92% of stored lines under 50 m of
+  relief; the Bekaa floor at Baalbek read as a valley) and stored geometry ~16x denser than a 90 m
+  DEM supports (`feature` was 7.98 of 8.1 GB). Both fixed — see
+  `plans/landform-relief-gate/implementation.md`. The theatre-wide feature count after the gate
+  (234,799) is a direct SQL measurement against the existing store, not an extrapolation; the
+  resulting store size (~2.4-2.5 GB, down from 8.1 GB) *is* extrapolated from a measured
+  36.5-36.7x geometry-byte reduction, not from a full rebuild. Clears when the user re-runs
+  `syria-full` (the terrain cache fully invalidates — `EXTRACTOR_VERSION` 1→2 plus two new knobs
+  in the key, so this is a full ~14-minute cold reprocess, not the warm path) per
+  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` (card:
+  https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP) and reports back: zero relief-gate
+  violations, ridge/valley counts near the 230-240k range, store size near 2.4-2.5 GB, and —
+  the real test, by eye, same as every prior landform decision on this project — whether the
+  Bekaa still reads clean and Palmyra's isolated chains still show. Say which rebuild (date/host)
+  cleared it when it does.
 
 - [x] **`feature/terrain-landform-features` — marker-controlled watershed replaces the M6
   curvature ridge/valley detector (Stages 1-2). Merged 2026-10-01 (`0bef4b9`), and the user's own
@@ -867,6 +882,66 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   Full card with expected figures per block: `docs/acceptance/2026-10-02-geomorphons-latin-names-
   rebuild.md` / https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW.
+
+  **Two real defects found and fixed against the user's own build (`fix/landform-relief-gate`,
+  `plans/landform-relief-gate/implementation.md`), both checked directly against the real
+  `syria-full.sqlite` (8.1 GB, read-only, not modified)**:
+
+  - **No relief gate.** 89%/92% of ridges/valleys stored under 50 m of relief (measured: `>=50 m`
+    keeps 234,799 of 1,440,397, exact match on a direct SQL query), and the Bekaa floor read as a
+    valley — the exact case the user's own criteria (`plans/terrain-feature-probing/
+    explore-notes.md`, "maskable-behind: sharp and/or high", ~50-150 m) rule out.
+    `terrain.features.filter_by_relief` (default `min_relief_m=50.0`, the floor of that band) now
+    drops any line below threshold before it reaches the cache or store.
+  - **~16x-denser-than-DEM-justifies stored geometry** (one point per 5.6 m on a 90 m DEM; `feature`
+    was 7.98 GB of the 8.1 GB store). `terrain.features._decimate_for_storage` (Douglas-Peucker,
+    reusing the existing `geometry.simplify_polyline`) now decimates the smoothed line back toward
+    DEM resolution, with its own deviation check against the real sampled points (never exceeding
+    the pre-existing half-cell cap) — measured **36.7x point-count reduction** on a real
+    region-scoped rebuild, worst real deviation **32.3 m** against a 45 m cap.
+
+  A real correctness bug was found and fixed *during* verification of the second fix (not a named
+  defect, but worth recording): an early version of the decimation deviation check compared each
+  original point against only the one decimated segment a windowing shortcut assigned it to, which
+  **overstated** real deviation by up to 5x on real traced lines near a genuine turn (it measured
+  70-155 m where the true distance to the decimated line was 15-30 m) — so it was *safe*, never
+  admitting a decimation it should have rejected, and useless, rejecting almost every one it should
+  have accepted. Caught because the real built output's density barely dropped when it should have
+  dropped ~37x, not because the check itself ever failed. Fixed to check against the whole decimated
+  polyline; see the implementation doc for the full account.
+
+  Both falsifiable checks hold on real renders (`data/renders/{coastal-hills,baalbek,palmyra}-
+  relief-gate.png`): **the Bekaa floor is clean of ridge/valley lines**, and **Palmyra's isolated
+  ridge chains survive** (a continuous ~6+ km chain visible through flat desert). Theatre-wide
+  feature count after the gate is a direct measurement (234,799), not an extrapolation; expected
+  new store size is extrapolated from the measured decimation ratio to **~2.4-2.5 GB** (down from
+  8.1 GB) — not measured, since no full-theatre build was run here, per the project's execution-
+  boundary rule. The terrain cache is fully invalidated by this change (new `min_relief_m`/
+  `decimation_tolerance_fraction` knobs plus an `EXTRACTOR_VERSION` bump), so the user's next
+  `syria-full` rebuild reprocesses every tile rather than serving stale, ungated geometry.
+
+  **DoD-passed 2026-10-04 (`fix/landform-relief-gate`), Reviewer and Security both APPROVED with
+  no required fixes, live acceptance outstanding — see "Live acceptance debt" above and
+  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` / card
+  https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP.** No Performance Reviewer pass — this change
+  strictly reduces work in a stage whose cost was already measured (drops lines before storage,
+  decimates what remains), and Security's deep analysis agreed with that framing while checking
+  the degenerate decimation cases directly (2000-collinear-point and adversarial-zigzag inputs);
+  see `plans/landform-relief-gate/security-review.md`.
+
+  **Milestone-completion check**: this closes the last known defect in `feature(kind='ridge'/
+  'valley')` that blocked treating it as a layer to build on — Stages 3-5 (adjacency, bearing, the
+  callout) can now assume gated, DEM-scale-appropriate geometry once they're picked up, rather
+  than inheriting the two defects this fix removed. It does **not** change what the next milestone
+  should be (Stages 3-5 are still unbuilt and still gated behind a real consumer need, per the
+  reopening condition above) — but it does narrow what "trustworthy" means for anyone reading an
+  older terrain render: see the `inspect_terrain.py` rewrite note below and the corresponding
+  `NOTES.md` entry — every render judged by eye before this branch (including the ones that
+  produced the 2026-10-01 "choose geomorphons" decision and the 2026-10-02 acceptance renders) was
+  of raw/Chaikin-only geometry, not what the store actually holds. That does not reopen the
+  geomorphons-vs-alternatives choice itself (made on a different, zoomed-in test window where the
+  gate/decimation gap is proportionally small), but any density or clutter impression taken from
+  those earlier renders should not be trusted for what ships.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are

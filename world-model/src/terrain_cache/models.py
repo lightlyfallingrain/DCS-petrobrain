@@ -37,6 +37,8 @@ _INVALIDATION_KEY_FIELDS = (
     "max_turn_cos",
     "min_line_length_cells",
     "chaikin_iterations",
+    "min_relief_m",
+    "decimation_tolerance_fraction",
 )
 
 
@@ -49,7 +51,9 @@ class TerrainCacheMeta:
     whose value changing would change the output (geomorphons
     `lookup_cells`/`flat_deg`, the lattice `spacing_m`/`margin_cells`,
     mask closing, thinning's junction-walk `max_turn_cos`/
-    `min_line_length_cells`, Chaikin `chaikin_iterations`)."""
+    `min_line_length_cells`, Chaikin `chaikin_iterations`, the relief gate
+    `min_relief_m` and decimation's `decimation_tolerance_fraction` --
+    `fix/landform-relief-gate`)."""
 
     dem_identity: str
     extractor_version: int
@@ -67,6 +71,8 @@ class TerrainCacheMeta:
     max_turn_cos: float
     min_line_length_cells: int
     chaikin_iterations: int
+    min_relief_m: float
+    decimation_tolerance_fraction: float
     built_at: str
 
 

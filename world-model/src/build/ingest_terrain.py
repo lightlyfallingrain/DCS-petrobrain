@@ -36,8 +36,11 @@ from elevation.dem import SrtmTile
 from store.models import StoredFeature
 from terrain.features import (
     DEFAULT_CHAIKIN_ITERATIONS,
+    DEFAULT_DECIMATION_TOLERANCE_FRACTION,
+    DEFAULT_MIN_RELIEF_M,
     TerrainComponent,
     component_from_trace,
+    filter_by_relief,
     to_stored_features,
 )
 from terrain.geomorphons import (
@@ -79,7 +82,18 @@ logger = logging.getLogger(__name__)
 # which `TerrainCacheMeta` already tracks individually) would change a
 # cache's output for the same inputs/knobs -- mirrors `osm_cache`'s
 # `classifier_version` convention.
-EXTRACTOR_VERSION = 1
+#
+# 2 (`fix/landform-relief-gate`): added the relief gate
+# (`terrain.features.filter_by_relief`) and decimation
+# (`terrain.features._decimate_for_storage`) to the per-tile pipeline --
+# both are knobs (`min_relief_m`/`decimation_tolerance_fraction`, tracked
+# individually below) but a cache written by version 1 predates both
+# fields entirely, so `terrain_cache.reader.load_cache_meta` already
+# returns `None` for it (a missing META_FIELDS key, not a mismatch) and
+# forces a full rebuild on its own -- this bump is belt-and-suspenders
+# for that same invalidation, stated explicitly per this constant's own
+# convention rather than relying only on the missing-key path.
+EXTRACTOR_VERSION = 2
 
 # Matches SRTM3's nominal resolution (plan design decision 1).
 DEFAULT_SPACING_M = 90.0
@@ -163,6 +177,8 @@ def _process_tile(
     max_turn_cos: float,
     min_line_length_cells: int,
     chaikin_iterations: int,
+    min_relief_m: float,
+    decimation_tolerance_fraction: float,
 ) -> list[StoredFeature]:
     """The whole per-tile pipeline (module docstring), returning
     cache-ready `StoredFeature`s (`source_id=None` -- the caller retags
@@ -207,8 +223,13 @@ def _process_tile(
                     )
                 )
 
+    components = filter_by_relief(components, min_relief_m=min_relief_m)
+
     return to_stored_features(
-        components, source_id=None, position_uncertainty_m=spacing_m
+        components,
+        source_id=None,
+        position_uncertainty_m=spacing_m,
+        decimation_tolerance_fraction=decimation_tolerance_fraction,
     )
 
 
@@ -227,6 +248,8 @@ def ingest_terrain(
     max_turn_cos: float = DEFAULT_MAX_TURN_COS,
     min_line_length_cells: int = DEFAULT_MIN_LINE_LENGTH_CELLS,
     chaikin_iterations: int = DEFAULT_CHAIKIN_ITERATIONS,
+    min_relief_m: float = DEFAULT_MIN_RELIEF_M,
+    decimation_tolerance_fraction: float = DEFAULT_DECIMATION_TOLERANCE_FRACTION,
 ) -> TerrainIngestStats:
     """Extract ridge/valley `StoredFeature`s from `srtm_tile_paths`
     (existing paths only -- a missing path is silently skipped, same
@@ -285,6 +308,8 @@ def ingest_terrain(
         max_turn_cos=max_turn_cos,
         min_line_length_cells=min_line_length_cells,
         chaikin_iterations=chaikin_iterations,
+        min_relief_m=min_relief_m,
+        decimation_tolerance_fraction=decimation_tolerance_fraction,
         built_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     )
 
@@ -331,6 +356,8 @@ def ingest_terrain(
                 max_turn_cos,
                 min_line_length_cells,
                 chaikin_iterations,
+                min_relief_m,
+                decimation_tolerance_fraction,
             )
             write_tile_features(conn, tile_id, tile_features)
             processed_tiles += 1

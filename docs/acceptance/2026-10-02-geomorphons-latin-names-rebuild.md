@@ -1,5 +1,14 @@
 # Full-theatre rebuild — geomorphons landforms + Latin-script names
 
+**STATUS UPDATE, 2026-10-04.** This build ran (that's how `WM-B1`'s Block A/B were confirmed and
+how the `fix/landform-relief-gate` defects below were found). `WM-B1` is fully cleared by it —
+nothing left to re-check. The terrain half is **superseded**: that run exposed two real defects
+(no relief gate, geometry ~16x denser than the DEM supports), now fixed on
+`fix/landform-relief-gate`, which requires a *new* `syria-full` rebuild (the terrain cache fully
+invalidates). Use `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` /
+https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP for that re-run — it only asks about what
+changed, not a repeat of Blocks A/B/C below.
+
 **Artifact card (read this at the desk running the build):**
 https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW
 
