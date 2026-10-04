@@ -1104,3 +1104,129 @@ def test_continuity_survives_a_cluster_whose_membership_grows_between_polls() ->
 
     assert len(second) == 1
     assert second[0].continues_observation_id == first[0].id
+
+
+def test_merging_previously_separate_contacts_abandons_the_minority_identities() -> (
+    None
+):
+    # Reproduces the mechanism behind a real sortie's "near constant stream
+    # of contact reports... many of those reports were about the same
+    # units" complaint (`plans/contact-report-flood/debug.md`), traced from
+    # a live `--detection-trace`/`--belief-truth-log` capture: a tight
+    # scatter of T-55s at ~4.4 km repeatedly re-clustered as the o'clock
+    # scan cone swept across it, and at t_sim=751.247 a 4-member supercluster
+    # formed from 3 *already separately tracked* clusters (2+1+1 members)
+    # inherited only the 2-member one's identity -- the other two (1 member
+    # each) got no vote at all in the result and simply stopped being
+    # updated, left to decay in `ContactStore` while their real objects kept
+    # being seen under the surviving id.
+    #
+    # Three already-independent clusters are established over two polls
+    # (objects 1+2 paired at lon 0.0/3.0 -- gap 3, confirmed merging; object
+    # 3 alone at lon 12.0 -- gap 9 from object 2, confirmed separate; object
+    # 4 alone at lon 24.0 -- gap 12 from object 3, confirmed separate; see
+    # this module's own empirical sweep in `plans/contact-report-flood/
+    # debug.md` for where the merge/no-merge boundary actually sits for this
+    # object type/range, 7-8 m of lon at 600 m). A third poll then adds two
+    # new objects (5, 6) at the midpoints (lon 7.5, 18.0) that single-link
+    # chain the whole scatter into one six-member cluster -- exactly what a
+    # scan sweep admitting one more real vehicle into view does, with no
+    # need for anything to have physically moved.
+    #
+    # `_build_observations`' majority-overlap rule (module docstring point
+    # 6) is working exactly as designed here -- objects 1+2's identity has
+    # 2 votes against 1 each for objects 3 and 4, a clean majority, no tie
+    # to break. **That is the point**: this is not an edge case that a
+    # better tie-break would fix. Discarding 2 of 3 live, already-identified
+    # contacts the instant their members get folded into one supercluster
+    # is the documented behaviour (`_build_observations`'s own docstring:
+    # "a minority split... founds fresh instead" -- merging is the same
+    # code path as splitting, and the plan this rule came from
+    # (`plans/group-contact-model/plan.md`'s Splitting section) only ever
+    # analysed splitting a single parent, not several independent parents
+    # colliding). The two abandoned contacts receive no further
+    # observations and no signal that their object is still present; they
+    # simply decay toward `lost` while the surviving contact (and,
+    # eventually, a freshly-founded one for any object a later re-split
+    # does not reunite with it) keeps the conversation going as if this
+    # were new ground.
+    #
+    # **Not fixed here.** Changing which identity should survive a merge
+    # (or whether the belief layer should be told about the discarded ones
+    # at all) is the same class of decision `plans/
+    # contact-duplication-ambiguity-runaway/debug.md` and `plans/
+    # contact-fragmentation-at-range/debug.md` already escalated to the
+    # Architect rather than patching `ContactStore`'s/`naked_eye_source`'s
+    # continuity policy directly -- see `plans/contact-report-flood/
+    # debug.md`.
+    rng = 600.0
+    client = FakeAircraftClient({"objects": []})
+    trace = DetectionTraceCollector()
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+        trace_sink=trace,
+    )
+
+    separate = {
+        "objects": [
+            _world_object(1, "BTR-80", lat_deg=rng, lon_deg=0.0),
+            _world_object(2, "BTR-80", lat_deg=rng, lon_deg=3.0),
+            _world_object(3, "BTR-80", lat_deg=rng, lon_deg=12.0),
+            _world_object(4, "BTR-80", lat_deg=rng, lon_deg=24.0),
+        ]
+    }
+    merged = {
+        "objects": [
+            *separate["objects"],
+            _world_object(5, "BTR-80", lat_deg=rng, lon_deg=7.5),
+            _world_object(6, "BTR-80", lat_deg=rng, lon_deg=18.0),
+        ]
+    }
+
+    def _members_by_observation_id() -> dict[str, frozenset[int]]:
+        by_id: dict[str, set[int]] = {}
+        for entry in trace.records:
+            if entry.observation_id is not None:
+                by_id.setdefault(entry.observation_id, set()).add(entry.object_id)
+        return {obs_id: frozenset(members) for obs_id, members in by_id.items()}
+
+    client._world_objects = separate
+    trace.records.clear()
+    first = source.poll(0.0, _ownship())
+    assert len(first) == 3
+
+    # Re-poll once at the same geometry so each of the three identities has
+    # a `_object_id_to_last_observation_id` entry that is one poll old, not
+    # brand new -- matching the real trace, where every one of the three
+    # pre-merge contacts had already survived at least one prior poll.
+    trace.records.clear()
+    second = source.poll(0.1, _ownship())
+    assert len(second) == 3
+    members_of = _members_by_observation_id()
+    majority_id = next(
+        obs.id for obs in second if members_of[obs.id] == frozenset({1, 2})
+    )
+    minority_ids = {obs.id for obs in second if members_of[obs.id] != frozenset({1, 2})}
+    assert len(minority_ids) == 2
+
+    client._world_objects = merged
+    trace.records.clear()
+    third = source.poll(0.2, _ownship())
+
+    assert len(third) == 1
+    merged_observation = third[0]
+    # The majority identity (objects 1+2, 2 votes against 1 each) survives
+    # the merge...
+    assert merged_observation.continues_observation_id == majority_id
+    # ...and the two minority identities (objects 3 and 4, 1 vote each) are
+    # simply absent from the result -- nothing links back to them, and
+    # nothing tells `ContactStore` their objects moved into the surviving
+    # contact rather than vanishing. A real `ContactStore` leaves both of
+    # those contacts to decay toward `lost` while the pilot keeps hearing
+    # about this same patch of ground under the surviving id (and, if a
+    # later poll re-splits the scatter, possibly a freshly founded one for
+    # whichever object does not reunite with it).
+    assert merged_observation.continues_observation_id not in minority_ids
