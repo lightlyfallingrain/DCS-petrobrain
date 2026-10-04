@@ -171,7 +171,7 @@ from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
 from belief.association_over_time import contacts_plausibly_same
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -548,6 +548,30 @@ def group_facts(
     return groups
 
 
+def _is_merge_echo_of_earlier_contact(
+    contact: Contact, store: ContactStore, now_sim: float
+) -> bool:
+    """Whether `contact` is a merge echo of some strictly-earlier-founded,
+    not-`lost`, plausibly-same contact already in `store` -- the one
+    condition shared, character for character, by `_render_event`'s own
+    `CONTACT_DETECTED` suppression branch and
+    `CalloutScheduler._already_reported_member_ids`'s branch 2 (`plans/
+    redundant-group-disclosure/plan.md`, review item 1). Factored out here
+    so the two call sites can never drift apart silently: `_render_event`
+    asks this of its own candidate event's contact; `_already_reported_
+    member_ids` asks it of a member reached by iterating a group's
+    membership with no event in hand -- both questions are "does an
+    earlier, live, plausibly-same contact already account for this one,"
+    answered the same way regardless of which caller is asking."""
+    return any(
+        other.id != contact.id
+        and other.first_seen_sim < contact.first_seen_sim
+        and certainty_of(other, now_sim) != "lost"
+        and contacts_plausibly_same(contact, other, now_sim)
+        for other in store.contacts
+    )
+
+
 @dataclass
 class CalloutScheduler:
     """Owns speech-time occupancy for one `CrewConsole` -- see module
@@ -629,17 +653,13 @@ class CalloutScheduler:
            spoken** -- `contact_id in self._last_spoken_signature`, the
            same dict `_render_event`'s singleton gate already reads.
         2. **It was itself merge-echo-suppressed** (module docstring's
-           "Merge-echo `CONTACT_DETECTED` suppression") -- restating the
-           identical `contacts_plausibly_same`/`first_seen_sim`/
-           `certainty_of` condition `_render_event`'s `CONTACT_DETECTED`
-           branch already evaluates to decide whether to suppress that
-           announcement in the first place. Not factored into one shared
-           helper with that branch because the two differ in exactly one
-           respect: that branch asks about *this* contact's own candidate
-           event; this one asks about a member reached by iterating a
-           group's membership, with no event in hand at all. Per that
-           branch's own condition, this does not additionally require the
-           earlier, plausibly-same contact to itself appear in
+           "Merge-echo `CONTACT_DETECTED` suppression") -- via the shared
+           `_is_merge_echo_of_earlier_contact`, the same predicate
+           `_render_event`'s `CONTACT_DETECTED` branch evaluates to decide
+           whether to suppress that announcement in the first place, so
+           the two can never drift apart silently. Per that predicate's
+           own condition, this does not additionally require the earlier,
+           plausibly-same contact to itself appear in
            `_last_spoken_signature` -- a contact that is not `lost` and
            strictly earlier-founded is, by the same reasoning the
            suppression itself relies on, the contact whose continuity the
@@ -652,13 +672,7 @@ class CalloutScheduler:
             if contact_id in self._last_spoken_signature:
                 reported.add(contact_id)
                 continue
-            if any(
-                other.id != contact_id
-                and other.first_seen_sim < contact.first_seen_sim
-                and certainty_of(other, now_sim) != "lost"
-                and contacts_plausibly_same(contact, other, now_sim)
-                for other in store.contacts
-            ):
+            if _is_merge_echo_of_earlier_contact(contact, store, now_sim):
                 reported.add(contact_id)
         return frozenset(reported)
 
@@ -712,27 +726,24 @@ class CalloutScheduler:
             # CONTACT_DETECTED suppression" section for the full rationale,
             # including why this also silences some genuine splits.
             this_contact = store.contact(event.contact_id)
-            if this_contact is not None and any(
-                other.id != this_contact.id
-                # Strictly earlier founding only -- a contact founded in
-                # the very same poll is a simultaneous, independent
-                # sighting, never a merge echo of an abandoned identity
-                # (the mechanism this check exists for always has the
-                # abandoned identity surviving from an *earlier* poll).
-                # Discovered against the real sortie-1004 snapshot
-                # (`plans/contact-report-flood/implementation.md`): without
-                # this, several genuinely distinct, genuinely simultaneous
-                # foundings that are mutually close (a common real scene --
-                # several vehicles entering view in the same scan poll)
-                # see each other as live peers and mutually suppress,
-                # producing *zero* spoken lines for the whole cluster --
-                # worse than the flood this fix exists to reduce, and a
-                # direct violation of this plan's own "at most 2, not 6"
-                # acceptance bound on its own named six-vehicle example.
-                and other.first_seen_sim < this_contact.first_seen_sim
-                and certainty_of(other, now_sim) != "lost"
-                and contacts_plausibly_same(this_contact, other, now_sim)
-                for other in store.contacts
+            # Strictly earlier founding only (see
+            # `_is_merge_echo_of_earlier_contact`'s docstring) -- a contact
+            # founded in the very same poll is a simultaneous, independent
+            # sighting, never a merge echo of an abandoned identity (the
+            # mechanism this check exists for always has the abandoned
+            # identity surviving from an *earlier* poll). Discovered
+            # against the real sortie-1004 snapshot (`plans/
+            # contact-report-flood/implementation.md`): without this,
+            # several genuinely distinct, genuinely simultaneous foundings
+            # that are mutually close (a common real scene -- several
+            # vehicles entering view in the same scan poll) see each other
+            # as live peers and mutually suppress, producing *zero* spoken
+            # lines for the whole cluster -- worse than the flood this fix
+            # exists to reduce, and a direct violation of this plan's own
+            # "at most 2, not 6" acceptance bound on its own named
+            # six-vehicle example.
+            if this_contact is not None and _is_merge_echo_of_earlier_contact(
+                this_contact, store, now_sim
             ):
                 return None
         speech = route_event(store, event, now_sim, enrichment)
