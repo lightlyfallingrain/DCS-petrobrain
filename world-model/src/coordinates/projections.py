@@ -53,4 +53,27 @@ THEATRE_PROJECTIONS: dict[str, TmercParams] = {
         ),
         confidence="confirmed",
     ),
+    "Afghanistan": TmercParams(
+        central_meridian=63,
+        false_easting=-300149.9912,
+        false_northing=-3759656.9499,
+        scale_factor=0.9996,
+        lat_0=0,
+        source=(
+            "Beacon-fit (49 beacons.lua position/positionGeo pairs, least-squares, "
+            "RMS 0.03m) -- no pydcs source exists for Afghanistan (pydcs predates "
+            "ED's Afghanistan release). The fit method was validated to 0.03m "
+            "against Syria's already-live-confirmed parameters and to <0.01m "
+            "against Caucasus's already-published pydcs parameters before being "
+            "trusted here; see world-model/research/2026-10-04-multi-theatre-"
+            "afghanistan-caucasus-recon.md Q1. NOT yet confirmed against a live "
+            "coord.LOtoLL run (the M1 circularity caveat applies -- beacons.lua's "
+            "own positionGeo is DCS's internal geodesy, not an independent "
+            "source). Upgrades to confirmed via Stage 4's live probe: mirrors "
+            "M1->M1-verification (tools/dcs-mission-probe/coord_probe.lua on a "
+            "Windows DCS session with Afghanistan loaded), residual <=~0.1m at "
+            "every sampled point."
+        ),
+        confidence="provisional",
+    ),
 }

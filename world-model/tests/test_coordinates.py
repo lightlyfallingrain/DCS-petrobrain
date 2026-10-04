@@ -41,3 +41,28 @@ def test_control_point_within_expected_residual(point: ControlPoint) -> None:
     lat, lon = dcs_to_wgs84(point.theatre, point.dcs_x, point.dcs_z)
     residual_m = haversine_distance_m(lat, lon, point.real_lat, point.real_lon)
     assert residual_m <= point.expected_max_residual_m
+
+
+def test_afghanistan_provisional_fit_self_consistency() -> None:
+    """**Not** a live-DCS or real-world accuracy check -- this is
+    self-consistency with the provisional beacon-fit only, per the M1
+    circularity caveat (`beacons.lua`'s own `positionGeo` is computed by
+    DCS's internal projection at terrain-build time, not an independent
+    real-world source -- see `tests/control_points.py`'s module
+    docstring and `world-model/research/2026-09-03-m1-coordinate-
+    transform-verification.md` Finding 2). Unlike `CONTROL_POINTS` above
+    (always an independently-published real-world ARP), Afghanistan has
+    no second source at all yet -- see `world-model/research/2026-10-04-
+    multi-theatre-afghanistan-caucasus-recon.md` Q1 -- so this test only
+    confirms `dcs_to_wgs84` reproduces the beacon-fit's own input to the
+    ~0.03m RMS floor that fit already measured, not that the fit is
+    geodetically correct. `THEATRE_PROJECTIONS["Afghanistan"]` stays
+    `confidence="provisional"` until Stage 4's live `coord.LOtoLL` probe
+    (plan's Stage 4) confirms it independently.
+
+    Point: `beacons.lua` `airfield17_0` ('Kabul', BEACON_TYPE_VOR_DME),
+    `position = {81018.583527, 1780.280833, 277427.106402}`,
+    `positionGeo = {latitude = 34.545599, longitude = 69.290360}`."""
+    lat, lon = dcs_to_wgs84("Afghanistan", 81018.583527, 277427.106402)
+    residual_m = haversine_distance_m(lat, lon, 34.545599, 69.290360)
+    assert residual_m <= 0.2
