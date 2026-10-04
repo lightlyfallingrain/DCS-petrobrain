@@ -463,6 +463,61 @@ class TestNarrowCancels:
         assert match_transcript("scan left").token == "scan_left"
 
 
+class TestSilence:
+    """`silence` by voice (`plans/silence-command/implementation.md`, user
+    direction 2026-10-04) -- mutes Petrovich absolutely, including urgent
+    callouts, until any dispatched command clears it. **Unbenched, like
+    `cancel_scan`/`cancel_watch` before it**: these three phrasings have no
+    recordings in this corpus, so the tests below prove only that they are
+    unambiguous against the rest of the vocabulary and do not falsely fire
+    on ordinary sentences that merely contain one of their words -- not
+    that whisper actually hears them on this speaker's voice.
+
+    A fourth candidate, bare "quiet", was measured and rejected
+    (`vocabulary.py`'s own comment on `PHRASES["silence"]`) -- as a
+    one-word phrase it would have become a verb-anchor word 0.889 close to
+    the ordinary English word "quite", which broke
+    `test_verb_anchor_rejects_non_command_speech` below. "quiet" survives
+    only inside "be quiet", where it is not the first word and so never
+    becomes an anchor.
+    """
+
+    def test_all_three_phrasings_resolve(self) -> None:
+        for phrase in ("silence", "be quiet", "shut up"):
+            result = match_transcript(phrase)
+            assert result.token == "silence", phrase
+            assert result.match_ratio == 1.0, phrase
+            assert result.ambiguous is False, phrase
+
+    def test_does_not_steal_stop_talking(self) -> None:
+        """`"stop"` alone must keep meaning "stop talking right now", not
+        fall through to "say nothing from here on"."""
+        assert match_transcript("stop").token == "stop_talking"
+
+    def test_does_not_steal_the_cancel_family(self) -> None:
+        for phrase in ("cancel", "cancel task", "cancel scan", "cancel watch"):
+            assert match_transcript(phrase).token != "silence", phrase
+
+    def test_adversarial_sentences_do_not_falsely_fire(self) -> None:
+        """Ordinary sentences containing "quiet"/"shut"/"silence"/"be" as
+        an incidental word must not execute the command -- `token=None`
+        (say-again at most) is the correct outcome, never a false
+        `silence`."""
+        for phrase in (
+            "be careful",
+            "shut the door",
+            "silence is golden",
+            "quiet down there",
+            "report quietly",
+            "stay quiet",
+        ):
+            assert match_transcript(phrase).token != "silence", phrase
+
+    def test_silence_is_separable_from_everything_else(self) -> None:
+        for phrase in ("silence", "be quiet", "shut up"):
+            assert match_transcript(phrase).ambiguous is False, phrase
+
+
 # --- follow: watch's synonym (plans/watch-reporting/plan.md Decision 2a) ---
 
 

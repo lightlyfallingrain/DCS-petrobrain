@@ -170,3 +170,83 @@ requested.
   clear that budget first (used `t_sim`/`now_sim` offsets of 10s in the final tests, well past any
   plausible accumulated budget, rather than computing the exact figure and coupling the test to
   it).
+
+---
+
+## audio-adapter half (this file's second entry)
+
+Wires the spoken phrase for `silence` into `audio-adapter`, so the token the body-layer half
+already dispatches is actually reachable by voice, not only through the typed `!voice` harness.
+No body-layer change -- `handle_command` dispatches the token generically.
+
+### Design points settled
+
+- **Token placement**: `silence` added to `vocabulary.VOICE_ONLY_TOKENS`, alongside
+  `stop_talking`/`say_again` -- no F10 button today, same category as those two.
+- **Phrase set: `("silence", "be quiet", "shut up")` -- three, not the four candidates the task
+  raised.** Bare `"quiet"` was weighed and measured, then dropped. As a one-word phrase it would
+  have become its own verb-anchor word (`command_matcher.VERB_ANCHOR_WORDS` is derived from each
+  phrase's first word), and `"quiet"` sits a 0.889 `difflib.SequenceMatcher` ratio from the
+  ordinary English word `"quite"` -- comfortably above `VERB_FLOOR` (0.5). That turned
+  `match_transcript("quite a nice day for flying today")` from a clean anchor rejection into a
+  false `verb_anchored=True`, breaking the existing pinned
+  `test_verb_anchor_rejects_non_command_speech` regression test. This was found by actually
+  running the matcher with the candidate wired in, not by eyeballing the word -- the task's own
+  warning that "each phrase is a chance to misfire" held literally here. `"quiet"` survives inside
+  `"be quiet"` without the risk, since only a phrase's *first* word becomes an anchor word.
+- **Collision measurement method**: before choosing, every candidate was run through the real
+  `command_matcher.match_transcript` (with the candidate phrases temporarily wired into
+  `vocabulary.PHRASES`/`VOICE_ONLY_TOKENS` via a throwaway script, not guessed) against: the exact
+  phrasings themselves (all resolve, `match_ratio=1.0`, unambiguous); the existing cancel/
+  stop_talking/watch/scan families (`"cancel"`, `"cancel task"`, `"cancel scan"`, `"cancel
+  watch"`, `"stop"`, `"watch nearest"`, `"scan left"`, `"follow nearest"` -- all unaffected, none
+  resolve to `silence`); and adversarial sentences that merely contain one of the candidate words
+  (`"be careful"`, `"shut the door"`, `"silence is golden"`, `"quiet down there"`, `"report
+  quietly"`, `"stay quiet"` -- all come back `token=None`, verb-anchored at most, never a false
+  `silence`). The one real finding from that sweep is the `"quiet"`/`"quite"` collision above --
+  everything else came back clean on the first pass.
+- **`VERB_ANCHOR_WORDS` and `normalized_phrase_index()` needed no separate wiring** -- both are
+  derived from `vocabulary.PHRASES` at import time (`command_matcher.py`'s own design, predating
+  this change), so adding the token to `PHRASES` was the only vocabulary-side step. No change to
+  `command_matcher.py` itself.
+- **Marked unbenched** in `vocabulary.py`'s own comment, following that file's established
+  convention for every token added since the corpus was last recorded (`cancel_scan`/
+  `cancel_watch`'s comment is the precedent cited). Flagged as worth weighing more carefully than
+  most, since this is a command reached for when busy and not wanting to repeat it.
+
+### Files Changed
+
+- `audio-adapter/src/vocabulary.py` -- added `"silence"` to `VOICE_ONLY_TOKENS` and
+  `PHRASES["silence"] = ("silence", "be quiet", "shut up")`, with a comment recording the
+  `"quiet"`/`"quite"` collision finding and why it was dropped.
+- `audio-adapter/tests/test_command_matcher.py` -- new `TestSilence` class (five tests: all three
+  phrasings resolve unambiguously at `match_ratio=1.0`; `"stop"` still resolves to `stop_talking`,
+  not stolen; the cancel family is untouched; adversarial sentences containing a candidate word do
+  not falsely resolve to `silence`; the three phrasings are separable from everything else).
+- `audio-adapter/tests/test_vocabulary.py` -- `test_silence_is_distinct_from_stop_talking`,
+  matching the existing `test_stop_and_nevermind_are_distinct_tokens` pattern.
+- `plans/silence-command/implementation.md` -- this entry.
+
+### Checks (audio-adapter/)
+
+- No `.venv` existed in this worktree; built one from `pyproject.toml` (stdlib-only, no
+  dependencies declared) with `ruff`/`mypy`/`pytest` installed into it.
+- Baseline (before this change, branch tip `493ba6a`): `pytest tests -q` -> 213 passed, 1 skipped.
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (`--strict`): pass, 15 source files
+- `pytest tests -q`: pass, 219 passed, 1 skipped -- the +6 is exactly the new tests (5 methods in
+  `TestSilence` plus 1 in `test_vocabulary.py`); nothing regressed, and the `"quiet"`/`"quite"`
+  regression found above was fixed before this count, not papered over.
+
+### Notable Discoveries
+
+- **A single-word phrase addition is not safe by default, even against ordinary English rather
+  than another vocabulary token.** `command_matcher.VERB_ANCHOR_WORDS`'s fuzzy floor (`VERB_FLOOR
+  = 0.5`) is deliberately loose (false anchors are cheap; false rejections are not, per that
+  module's own docstring), which means a short, common-looking candidate word can anchor against
+  an unrelated English word nobody meant to route anywhere. The fix pattern worth remembering:
+  check `difflib.SequenceMatcher(None, candidate, nearby_word).ratio()` against plausible
+  near-neighbours before committing a bare one-word phrase, not just against the existing
+  vocabulary table -- the existing table was clean on the first pass, and the real risk was
+  outside it.
