@@ -94,6 +94,31 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
 
 - **Never undo a live-patch-and-revert sanity check with `git checkout -- <tracked file>` if that file carries unstaged work.** Proving a new tripwire test actually fails on a reverted implementation (patch a constant/behavior, run the test, confirm red, then undo) is good practice — but `git checkout --` on a file with unstaged edits silently discards everything back to `HEAD`, not just the temporary patch. Happened live during binocular-optic Stage 3b: all of `optic_policy.py`'s Stage 3b edits were lost this way and had to be reconstructed from memory of the diff — the file looked "restored" (green tests) but was actually reverted past the pre-patch state. Use a scratch copy instead (`cp file /tmp/backup`, patch, test, `cp /tmp/backup file`) for this class of check, unconditionally (binocular-optic Stage 3b implementation, 2026-09-23).
 
+- **A verification/inspection tool that doesn't exercise the real code path proves nothing about
+  it, even when its output looks plausible for weeks.** `world-model/tools/inspect_terrain.py`
+  rendered `comp.points` — the raw traced skeleton before smoothing or decimation — while the
+  pipeline actually stored Chaikin-smoothed, later decimated `feature.geometry`. Every landform
+  judgement call this project made by eye (including the 2026-10-01 "choose geomorphons" decision
+  and the 2026-10-02 acceptance renders) was looking at something other than what the store held.
+  Caught only when the relief-gate/decimation fix needed a render that matched the real output
+  (`fix/landform-relief-gate`, 2026-10-04). Lesson: an inspection tool that reimplements "roughly
+  what the pipeline does" instead of calling the pipeline's own functions is a liability that
+  compounds the longer it goes unnoticed, because each use builds more confidence in the wrong
+  picture.
+
+- **A safety/deviation check can fail *toward* safety and still be a real defect.** An early
+  version of `terrain.features._decimate_for_storage`'s deviation guard measured each original
+  point against only the one decimated segment a windowing shortcut assigned it to, rather than
+  the whole decimated polyline — this *overstated* true deviation by up to 5x on real traced
+  lines near a genuine turn, so it never let through a decimation it should have rejected, it just
+  rejected almost every decimation outright, neutering the fix while looking conservative. The
+  check's own tests all passed throughout, because "never exceeds the cap" was never false — it
+  was caught only by noticing an unrelated number (the real built output's point-density
+  reduction) stayed far below the expected ~37x. Lesson: a safety check passing tells you it is
+  safe, not that the thing it's supposed to enable is actually happening — verify the feature's
+  own effect size independently, not just that its guard never trips (`fix/landform-relief-gate`,
+  2026-10-04).
+
 ## Type Checking & Python Conventions
 
 - **`float ** float` returns `Any` under `mypy --strict` — use `math.pow()` instead.** The `**` exponentiation operator's overloads admit a `complex` result in general, so mypy cannot narrow the return type to `float` even when both operands are `float` and the result is mathematically `float`. Solution: `math.pow(0.5, x)` has an unambiguous `float -> float` signature in typeshed and passes strict checking without surprises. Lesson: any future exponentiation in this codebase should use `math.pow()` proactively rather than triggering a `no-any-return` error later (BL-3 implementation note).

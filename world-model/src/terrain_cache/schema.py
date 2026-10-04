@@ -49,6 +49,8 @@ META_FIELDS = (
     "max_turn_cos",
     "min_line_length_cells",
     "chaikin_iterations",
+    "min_relief_m",
+    "decimation_tolerance_fraction",
     "built_at",
 )
 

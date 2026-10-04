@@ -26,7 +26,14 @@ Run from `world-model/`:
     .venv/bin/python tools/inspect_terrain.py \\
         --srtm-dir <path/to/hgt_tiles/> --center X,Z --radius-km R \\
         [--spacing-m 90] [--lookup-cells 15] [--flat-deg 1.0] \\
-        [--min-cells 4] [--out out.png]
+        [--min-cells 4] [--min-relief-m 50.0] \\
+        [--decimation-tolerance-fraction 0.25] [--out out.png]
+
+Renders the same relief-gated, smoothed-and-decimated geometry
+`build.ingest_terrain` stores (`--min-relief-m`/
+`--decimation-tolerance-fraction` match that module's own defaults), and
+prints per-kind line counts, how many lines the relief gate dropped, and
+the raw-vs-stored point-count reduction.
 """
 
 import argparse
@@ -42,7 +49,14 @@ from PIL import Image, ImageDraw
 
 from coordinates import dcs_to_wgs84, dcs_to_wgs84_array
 from elevation.dem import SrtmTile
-from terrain.features import TerrainComponent, component_from_trace
+from terrain.features import (
+    DEFAULT_DECIMATION_TOLERANCE_FRACTION,
+    DEFAULT_MIN_RELIEF_M,
+    TerrainComponent,
+    component_from_trace,
+    filter_by_relief,
+    to_stored_features,
+)
 from terrain.geomorphons import RIDGE_KINDS, VALLEY_KINDS, geomorphons
 from terrain.resample import lattice_coords, sample_tiles_bilinear
 from terrain.skeleton import close_and_thin, family_mask, trace
@@ -97,13 +111,21 @@ def main() -> None:
     parser.add_argument("--lookup-cells", type=int, default=15)
     parser.add_argument("--flat-deg", type=float, default=1.0)
     parser.add_argument("--min-cells", type=int, default=4)
+    parser.add_argument("--min-relief-m", type=float, default=DEFAULT_MIN_RELIEF_M)
+    parser.add_argument(
+        "--decimation-tolerance-fraction",
+        type=float,
+        default=DEFAULT_DECIMATION_TOLERANCE_FRACTION,
+    )
     parser.add_argument("--out", type=Path, default=Path("terrain_inspect.png"))
     args = parser.parse_args()
 
     centre_x, centre_z = (float(v) for v in args.center.split(","))
     radius_m = args.radius_km * 1000.0
 
-    names = _needed_tile_names(args.theatre, centre_x, centre_z, radius_m, margin_deg=0.15)
+    names = _needed_tile_names(
+        args.theatre, centre_x, centre_z, radius_m, margin_deg=0.15
+    )
     tiles = [
         SrtmTile.from_file(args.srtm_dir / name)
         for name in sorted(names)
@@ -123,25 +145,70 @@ def main() -> None:
         dem, args.spacing_m, lookup_cells=args.lookup_cells, flat_deg=args.flat_deg
     )
 
-    components: dict[str, list[TerrainComponent]] = {"ridge": [], "valley": []}
+    raw_components: list[TerrainComponent] = []
     for kind, kinds in (("ridge", RIDGE_KINDS), ("valley", VALLEY_KINDS)):
         mask = family_mask(classes, kinds)
         skeleton = close_and_thin(mask)
         for cells in trace(skeleton, min_cells=args.min_cells):
-            components[kind].append(
-                component_from_trace(kind, cells, dem, origin_x, origin_z, args.spacing_m)
+            raw_components.append(
+                component_from_trace(
+                    kind, cells, dem, origin_x, origin_z, args.spacing_m
+                )
             )
 
-    for kind, comps in components.items():
+    # Apply the same relief gate (`fix/landform-relief-gate` defect 1) and
+    # Chaikin-smoothing-plus-decimation (defect 2) `build.ingest_terrain`
+    # actually stores, rather than drawing the raw traced skeleton -- so
+    # this render shows what a real build puts in `syria-full.sqlite`, not
+    # an earlier, denser intermediate stage.
+    gated_components = filter_by_relief(raw_components, min_relief_m=args.min_relief_m)
+    stored_features = to_stored_features(
+        gated_components,
+        source_id=None,
+        position_uncertainty_m=args.spacing_m,
+        decimation_tolerance_fraction=args.decimation_tolerance_fraction,
+    )
+
+    raw_cell_count = sum(len(c.points) for c in gated_components)
+    # What `_smooth_for_storage` would store with decimation disabled --
+    # the actual "before" figure for defect 2's fix (four Chaikin passes
+    # multiply point count by exactly 16, per `terrain.features`'s own
+    # construction: each pass doubles the point count). Comparing against
+    # `raw_cell_count` instead (the pre-Chaikin trace) understates the
+    # reduction decimation achieves, since Chaikin's own 16x inflation is
+    # what defect 2 was actually about.
+    pre_decimation_point_count = sum(
+        len(c.points) * 16 if len(c.points) >= 3 else len(c.points)
+        for c in gated_components
+    )
+    stored_point_count = sum(len(f.geometry) for f in stored_features)
+    for kind in ("ridge", "valley"):
+        kind_features = [f for f in stored_features if f.kind == kind]
         lengths = [
             sum(
                 math.hypot(b[0] - a[0], b[1] - a[1])
-                for a, b in zip(comp.points, comp.points[1:], strict=False)
+                for a, b in zip(f.geometry, f.geometry[1:], strict=False)
             )
-            for comp in comps
+            for f in kind_features
         ]
         longest_km = max(lengths) / 1000.0 if lengths else 0.0
-        print(f"{kind}: {len(comps)} lines, longest {longest_km:.2f} km")
+        dropped = sum(1 for c in raw_components if c.kind == kind) - sum(
+            1 for c in gated_components if c.kind == kind
+        )
+        print(
+            f"{kind}: {len(kind_features)} lines, longest {longest_km:.2f} km "
+            f"({dropped} dropped by the relief gate)"
+        )
+    ratio = (
+        pre_decimation_point_count / stored_point_count
+        if stored_point_count
+        else float("nan")
+    )
+    print(
+        f"stored geometry points: {raw_cell_count} (raw traced cells) -> "
+        f"{pre_decimation_point_count} (Chaikin-smoothed, pre-decimation) -> "
+        f"{stored_point_count} (stored), {ratio:.1f}x reduction from decimation"
+    )
 
     shaded = _hillshade(dem, args.spacing_m)
     gray = (shaded * 255).astype(np.uint8)
@@ -149,8 +216,10 @@ def main() -> None:
     # the top, matching `geometry.bearing_deg`'s convention.
     img_array = np.flipud(gray)
     size_px = round(n_cells * _PX_PER_CELL)
-    image = Image.fromarray(img_array).resize((size_px, size_px), Image.NEAREST).convert(
-        "RGB"
+    image = (
+        Image.fromarray(img_array)
+        .resize((size_px, size_px), Image.NEAREST)
+        .convert("RGB")
     )
     draw = ImageDraw.Draw(image)
 
@@ -162,10 +231,9 @@ def main() -> None:
         return px, py
 
     colors = {"ridge": (220, 40, 40), "valley": (50, 110, 220)}
-    for kind, comps in components.items():
-        for comp in comps:
-            pixels = [to_px(p) for p in comp.points]
-            draw.line(pixels, fill=colors[kind], width=2)
+    for feature in stored_features:
+        pixels = [to_px(p) for p in feature.geometry]
+        draw.line(pixels, fill=colors[feature.kind], width=2)
 
     image.save(args.out)
     print(f"wrote {args.out}")

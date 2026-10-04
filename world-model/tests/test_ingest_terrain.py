@@ -20,7 +20,11 @@ import numpy as np
 from build.ingest_terrain import EXTRACTOR_VERSION, ingest_terrain
 from build.region import RegionDefinition
 from store.models import StoredFeature
-from terrain.features import DEFAULT_CHAIKIN_ITERATIONS
+from terrain.features import (
+    DEFAULT_CHAIKIN_ITERATIONS,
+    DEFAULT_DECIMATION_TOLERANCE_FRACTION,
+    DEFAULT_MIN_RELIEF_M,
+)
 from terrain.geomorphons import DEFAULT_FLAT_DEG
 from terrain.skeleton import (
     DEFAULT_CLOSE_ITERATIONS,
@@ -129,6 +133,7 @@ def test_ingest_terrain_sloped_tile_produces_a_ridge_tagged_with_source_id(
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
     )
 
     assert stats.ridge_feature_count >= 1
@@ -138,6 +143,36 @@ def test_ingest_terrain_sloped_tile_produces_a_ridge_tagged_with_source_id(
     assert all(f.geom_type == "LineString" for f in ridges)
     assert all(len(f.geometry) >= 2 for f in ridges)
     assert all(f.provenance == {"geometry": "dcs_derived"} for f in ridges)
+
+
+def test_ingest_terrain_default_relief_gate_drops_a_flat_along_crest_ridge(
+    tmp_path: Path,
+) -> None:
+    """`fix/landform-relief-gate` defect 1: this fixture's traced ridge
+    sits exactly along the slope's crest, which this fixture builds dead
+    flat along its own length (elevation only varies across columns, not
+    along the ridge) -- so at the default `min_relief_m` (50.0) it is
+    correctly gated out, same as the real Bekaa-floor case this gate
+    exists for. Without `min_relief_m=0.0` (as the test above passes
+    explicitly), the default must reject it."""
+    tile_path = tmp_path / "N36E037.hgt"
+    _write_tile(tile_path, size=30, slope_per_col=150.0)
+
+    features: list[StoredFeature] = []
+    stats = ingest_terrain(
+        [tile_path],
+        "Syria",
+        _REGION,
+        tmp_path / "cache.sqlite",
+        source_id=9,
+        on_tile_features=features.extend,
+        spacing_m=3000.0,
+        margin_cells=2,
+        lookup_cells=4,
+    )
+
+    assert stats.ridge_feature_count == 0
+    assert features == []
 
 
 def test_ingest_terrain_second_run_is_a_full_cache_hit(tmp_path: Path) -> None:
@@ -156,6 +191,7 @@ def test_ingest_terrain_second_run_is_a_full_cache_hit(tmp_path: Path) -> None:
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
     )
     features_2: list[StoredFeature] = []
     stats_2 = ingest_terrain(
@@ -168,6 +204,7 @@ def test_ingest_terrain_second_run_is_a_full_cache_hit(tmp_path: Path) -> None:
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
     )
 
     assert stats_1.tiles_processed == 1
@@ -195,6 +232,7 @@ def test_ingest_terrain_param_change_invalidates_the_whole_cache(
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
     )
     stats = ingest_terrain(
         [tile_path],
@@ -206,6 +244,47 @@ def test_ingest_terrain_param_change_invalidates_the_whole_cache(
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=6,  # changed
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
+    )
+
+    assert stats.tiles_processed == 1
+    assert stats.tiles_cache_hit == 0
+
+
+def test_ingest_terrain_relief_gate_change_invalidates_the_whole_cache(
+    tmp_path: Path,
+) -> None:
+    """`fix/landform-relief-gate`: `min_relief_m` is a knob tracked in
+    `TerrainCacheMeta` like any other -- changing it must invalidate a
+    cache built under a different value, not silently keep serving rows
+    gated at the old threshold."""
+    tile_path = tmp_path / "N36E037.hgt"
+    _write_tile(tile_path, size=30, slope_per_col=150.0)
+    cache_path = tmp_path / "cache.sqlite"
+
+    ingest_terrain(
+        [tile_path],
+        "Syria",
+        _REGION,
+        cache_path,
+        source_id=1,
+        on_tile_features=lambda _: None,
+        spacing_m=3000.0,
+        margin_cells=2,
+        lookup_cells=4,
+        min_relief_m=0.0,
+    )
+    stats = ingest_terrain(
+        [tile_path],
+        "Syria",
+        _REGION,
+        cache_path,
+        source_id=1,
+        on_tile_features=lambda _: None,
+        spacing_m=3000.0,
+        margin_cells=2,
+        lookup_cells=4,
+        min_relief_m=50.0,  # changed
     )
 
     assert stats.tiles_processed == 1
@@ -282,6 +361,7 @@ def test_ingest_terrain_streams_one_call_per_tile_not_one_theatre_wide_call(
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
     )
 
     assert len(calls) == 2
@@ -304,6 +384,7 @@ def test_ingest_terrain_streams_one_call_per_tile_not_one_theatre_wide_call(
         spacing_m=3000.0,
         margin_cells=2,
         lookup_cells=4,
+        min_relief_m=0.0,  # relief gate is orthogonal to what this test checks
     )
 
     assert len(warm_calls) == 2
@@ -351,6 +432,8 @@ def test_ingest_terrain_resumes_a_partially_completed_cache(tmp_path: Path) -> N
         max_turn_cos=DEFAULT_MAX_TURN_COS,
         min_line_length_cells=DEFAULT_MIN_LINE_LENGTH_CELLS,
         chaikin_iterations=DEFAULT_CHAIKIN_ITERATIONS,
+        min_relief_m=DEFAULT_MIN_RELIEF_M,
+        decimation_tolerance_fraction=DEFAULT_DECIMATION_TOLERANCE_FRACTION,
         built_at="2026-01-01T00:00:00Z",
     )
     conn = open_terrain_cache(cache_path)
