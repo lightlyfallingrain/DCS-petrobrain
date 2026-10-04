@@ -65,7 +65,18 @@ exists yet, so this is a clearly-labelled test harness, not a production
 intent or a detector). Constructs a `belief.speech.UrgentCall` and routes it
 through the same `route_event` gate the proactive path uses, demonstrating
 ordering/pre-emption without pretending a real missile-launch/tracer
-detector exists."""
+detector exists.
+
+**`silence`.** (`plans/silence-command/plan.md`, user direction
+2026-10-04.) "Make Petrovich not talk until my next command" -- **absolute**:
+nothing is spoken while silenced, not even an urgent threat callout, a
+deliberate choice made after showing the user the consequence in those
+terms. One fixed word acknowledges the command (`speech.render_silence_ack`),
+then nothing else until a real command -- F10/voice token, or a free-text
+utterance the grammar actually resolves -- ends it; stray speech recognised
+as nothing does not. See `_handle_silence`'s own docstring for the full
+account, including why `self.silenced` gates `_print`'s `speech_client` push
+alone, never `output`/`overlay_client`."""
 
 from __future__ import annotations
 
@@ -105,6 +116,7 @@ from belief.speech import (
     render_report,
     render_say_again,
     render_scan_readback,
+    render_silence_ack,
     render_stand_by,
     render_unable,
     render_watch_nearest_readback,
@@ -513,15 +525,20 @@ def _describe_token_for_confirm(
 
 #: The canonical "what has real dispatch behaviour in `handle_command`" set
 #: (`plans/voice-command-completeness/plan.md` Stage 1) -- every token this
-#: method actually branches on, `stop_talking` included (a documented,
-#: deliberate no-readback no-op, not a gap). Excludes `wake_petrovich`/
-#: `cancel_nevermind`/`say_again` (handled above `handle_command` entirely,
-#: per the module docstring -- this method never even sees those three
-#: tokens) and `scan_bearing_deg`/`report_bearing_deg` are included even
-#: though a missing `slots["bearing_degrees"]` degrades them to a "say
-#: again" line rather than raising, matching every other graceful-
-#: degradation branch in this class. `test_crew_console.py` asserts every
-#: member of this set returns a non-empty result from `handle_command`.
+#: method actually branches on, `stop_talking`/`silence` included (each a
+#: documented, deliberate no-readback-via-return-value no-op, not a gap --
+#: both speak by calling `_print` themselves, inside their own handler,
+#: rather than through `handle_command`'s shared tail call; see
+#: `_handle_stop_talking`'s and `_handle_silence`'s own docstrings).
+#: Excludes `wake_petrovich`/`cancel_nevermind`/`say_again` (handled above
+#: `handle_command` entirely, per the module docstring -- this method
+#: never even sees those three tokens) and `scan_bearing_deg`/
+#: `report_bearing_deg` are included even though a missing
+#: `slots["bearing_degrees"]` degrades them to a "say again" line rather
+#: than raising, matching every other graceful-degradation branch in this
+#: class. `test_crew_console.py` asserts every member of this set either
+#: returns a non-empty result from `handle_command`, or is one of the two
+#: documented no-return exceptions.
 DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
     set(_RELATIVE_SCAN_TOKENS)
     | set(_BEARING_SCAN_TOKENS)
@@ -539,8 +556,16 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "cancel_scan",
         "cancel_watch",
         "stop_talking",
+        "silence",
     }
 )
+
+#: `handle_command`'s "this token's call returns `[]`, by design, never a
+#: silent dispatch gap" set -- `test_dispatched_command_tokens_all_return_
+#: something`'s own exemption list, pulled out as a named constant so the
+#: test and `handle_command`'s early-return branches read the same
+#: definition rather than two independently-maintained lists of two.
+NO_RETURN_VALUE_COMMAND_TOKENS: frozenset[str] = frozenset({"stop_talking", "silence"})
 
 
 def _active_tasks_by_kind(tasks: list[PendingIntent]) -> list[PendingIntent]:
@@ -758,6 +783,24 @@ class CrewConsole:
     #: spoken for -- so it fires **once** per question, not once per poll
     #: while the question remains outstanding.
     _stand_by_spoken_for: set[str] = field(default_factory=set, repr=False)
+    #: Set by `_handle_silence` while `silence` is in effect; cleared the
+    #: moment any *other* command reaches `handle_command` or `_act`
+    #: (`plans/silence-command/plan.md`, user direction 2026-10-04:
+    #: "any subsequent command will end silence"). While `True`, `_print`
+    #: never pushes to `speech_client` -- **absolute silence, including an
+    #: injected urgent call** (`bypass_gate=True`), per the user's explicit
+    #: choice: he was shown the risk in those terms (silenced near a
+    #: friendly airbase, a Shilka opens up and says nothing) and chose
+    #: absolute over "urgent still gets through" anyway. `output`
+    #: (printed/crew-text) and `overlay_client` are deliberately **not**
+    #: gated on this flag -- the use case is audio ("during radio
+    #: traffic"), so the text/overlay surfaces keep working; only spoken
+    #: audio goes quiet. `self.scheduler` keeps ticking normally while
+    #: this is `True` (`drain_events` is unconditional) so belief events
+    #: are still chosen, rendered and consumed at the scheduler's own
+    #: pace -- **suppressed, not deferred**: nothing is held back to be
+    #: dumped the moment silence ends, it is simply never voiced.
+    silenced: bool = field(default=False, repr=False)
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()
@@ -974,6 +1017,20 @@ class CrewConsole:
         # own docstring for why a stale value from an earlier `follow`
         # must not leak into this command's evaluation.
         self.last_command_target_contact_id = None
+        if token == "silence":
+            # Checked *before* the general `self.silenced = False` reset
+            # below, and dispatched before it -- `_handle_silence` is the
+            # one place that needs to see whether silence was already in
+            # effect (its own no-op-when-already-silent rule).
+            self._handle_silence(now_sim)
+            return []
+        # Any other recognised command ends silence (`plans/
+        # silence-command/plan.md`, "any subsequent command will end
+        # silence") -- including a token this method has no dispatch
+        # behaviour for (the `else` branch below): the player still
+        # issued *something* command-shaped, which is the distinction
+        # that matters here, not whether this class happens to act on it.
+        self.silenced = False
         bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
         if not isinstance(bearing_degrees, int):
             bearing_degrees = None
@@ -1725,6 +1782,45 @@ class CrewConsole:
                 exc_info=True,
             )
 
+    def _handle_silence(self, now_sim: float) -> None:
+        """`silence` -- "make Petrovich not talk until my next command"
+        (user direction, 2026-10-04, `plans/silence-command/plan.md`).
+
+        **Already silenced -> a pure no-op**, not a toggle. A second
+        `silence` while one is already in effect must not un-silence --
+        the pilot has no reliable way to know he is silenced already
+        (there is nothing to look at), so a toggle would make a repeated
+        press ambiguous: did that just turn silence off? A no-op is the
+        only reading that is always safe to repeat.
+
+        **Speaks the one-word acknowledgement first, then sets
+        `self.silenced`** -- in that order, deliberately. If the flag were
+        set first, this method's own call to `_print` would suppress its
+        own acknowledgement, which would make `silence` the one command
+        whose confirmation the pilot never hears, on a speech-only setup
+        where that confirmation is the only signal he gets that the
+        command landed at all.
+
+        Unlike every other token `handle_command` dispatches, this method
+        returns nothing and its caller never reaches the shared
+        `self._print(lines, now_sim)` tail call -- the acknowledgement
+        has already gone out, from here, before `self.silenced` flips.
+        `stop_talking` is this class's only other token with that
+        shape, for an unrelated reason (see its own docstring); the two
+        are tracked together as `NO_RETURN_VALUE_COMMAND_TOKENS`.
+
+        **Does not touch `speech_client.stop()`.** `silence` and
+        `stop_talking` answer different questions -- "stop talking right
+        now" vs. "say nothing from here on" -- and the plan's own
+        decisions treat them as independent: silencing does not imply an
+        in-flight utterance needs interrupting (nothing may be playing),
+        and ending silence does not resume anything it never stopped. A
+        pilot who wants both says both."""
+        if self.silenced:
+            return
+        self._print([render_silence_ack().text], now_sim)
+        self.silenced = True
+
     def handle_transcript(
         self,
         transcript: str,
@@ -2025,6 +2121,15 @@ class CrewConsole:
         )
         if parse.disposition == "handled":
             self._note_player_command()
+            # A recognised free-text command ends silence too (`plans/
+            # silence-command/plan.md`) -- the grammar resolved an actual
+            # intent here, which is a real command, not the stray speech
+            # an *unrecognised* utterance (the `escalated` branch below)
+            # represents. `handle_command`'s own "silence" branch is the
+            # only place this reset is skipped, and this path can never
+            # reach it: `parse_utterance`'s grammar has no `silence`
+            # intent, so this branch is never how silence itself begins.
+            self.silenced = False
             return self._act(parse, now_sim)
         # `plans/brain-layer/plan.md` -- tracked so `_handle_brain_reply`
         # knows what to act on if/when a reply lands (D4's table), and so
@@ -2121,7 +2226,25 @@ class CrewConsole:
         playing. An urgent call is always exactly one line
         (`_handle_inject_urgent`'s only caller of this path), but this
         loops over `lines` rather than assuming that, so it degrades
-        correctly if that ever changes."""
+        correctly if that ever changes.
+
+        **`self.silenced` gates `speech_client` only** (`plans/
+        silence-command/plan.md`, user direction 2026-10-04) -- `output`
+        and `overlay_client` are untouched by it, since the use case is
+        audio specifically ("during radio traffic", "near a friendly
+        airbase"); the crew-text/overlay surfaces keep working. The gate
+        applies regardless of `bypass_gate`: an injected urgent call is
+        suppressed exactly like a routine line while silenced -- this
+        project's own chosen reading of "absolute silence," not an
+        oversight (see `CrewConsole.silenced`'s own field docstring for
+        the tradeoff the user was shown before choosing it).
+        `speech_log_sink` and the scheduler bookkeeping
+        (`note_urgent`/`note_reply`) below are **not** gated either: they
+        record what Petrovich *decided* to say, independent of whether it
+        was actually voiced, which is exactly the "suppressed, not
+        deferred" behaviour `silenced`'s own docstring describes -- the
+        scheduler keeps pacing choices as if each chosen line had been
+        spoken, so nothing backs up to be dumped once silence ends."""
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
@@ -2146,7 +2269,7 @@ class CrewConsole:
                         "overlay push failed for crew-text line (continuing)",
                         exc_info=True,
                     )
-            if self.speech_client is not None:
+            if self.speech_client is not None and not self.silenced:
                 try:
                     self.speech_client.push_speech(line, urgent=bypass_gate)
                 except AudioAdapterError:

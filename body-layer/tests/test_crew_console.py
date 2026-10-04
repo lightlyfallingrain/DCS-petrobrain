@@ -29,6 +29,7 @@ from belief.contacts import ContactStore
 from belief.crew_console import (
     _AIR_DEFENCE_OP_CLASSES,
     DISPATCHED_COMMAND_TOKENS,
+    NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
     _describe_token_for_confirm,
     _nearest_sector,
@@ -1138,6 +1139,182 @@ def test_stop_talking_interrupt_failure_does_not_raise() -> None:
     lines = console.handle_command("stop_talking", now_sim=0.0)
 
     assert lines == []
+
+
+# -- silence (`plans/silence-command/plan.md`, user direction 2026-10-04: -----
+# "make Petrovich not talk until my next command", absolute silence incl. -----
+# urgent callouts, one spoken acknowledgement, any subsequent command ends ----
+# it) -----------------------------------------------------------------------
+
+
+def test_silence_speaks_one_word_acknowledgement_then_goes_quiet() -> None:
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+
+    lines = console.handle_command("silence", now_sim=0.0)
+
+    # Nothing comes back through handle_command's own return value (same
+    # no-return shape as stop_talking) -- the ack already went out via
+    # `_print`, inside `_handle_silence`, before this returns.
+    assert lines == []
+    assert speech_client.pushed == [("Quiet.", False)]
+    assert console.silenced is True
+
+
+def test_silence_pushes_nothing_to_the_overlay_differently_than_speech() -> None:
+    """The acknowledgement is spoken *and* shown -- `silence` gates only
+    the audio sink, never the overlay, even for its own ack."""
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(store=ContactStore(), overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    console.handle_command("silence", now_sim=0.0)
+
+    assert overlay_client.pushed == ["Quiet."]
+
+
+def test_silence_does_not_call_speech_client_stop() -> None:
+    """`silence` and `stop_talking` answer different questions -- silence
+    must not reach for the interrupt-only call `stop_talking` owns."""
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+
+    console.handle_command("silence", now_sim=0.0)
+
+    assert speech_client.stop_calls == 0
+
+
+def test_silence_suppresses_a_drained_callout_that_would_otherwise_be_spoken() -> None:
+    store = ContactStore()
+    speech_client = FakeSpeechClient()
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(
+        store=store,
+        speech_client=speech_client,  # type: ignore[arg-type]
+        overlay_client=overlay_client,  # type: ignore[arg-type]
+    )
+    console.handle_command("silence", now_sim=0.0)
+    speech_client.pushed.clear()
+    overlay_client.pushed.clear()
+
+    # Well clear of the ack's own `CalloutScheduler.busy_until_sim` budget
+    # (`note_reply` still runs unconditionally -- see `_print`'s docstring
+    # on why that bookkeeping is deliberately not gated on `silenced`).
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=10.0, classification_raw="BMP-2")],
+        now_sim=10.0,
+    )
+    store.tick(now_sim=10.0)
+    spoken = console.drain_events(now_sim=10.0)
+
+    # The event is still chosen and rendered by the scheduler -- it is not
+    # held back to be dumped later (suppressed, not deferred) -- it is
+    # simply never voiced.
+    assert len(spoken) == 1
+    assert speech_client.pushed == []
+    # The text/overlay surfaces are untouched by silence (decision:
+    # the use case is audio, so crew-text/overlay keep working).
+    assert overlay_client.pushed == [spoken[0]]
+
+
+def test_silence_suppresses_an_injected_urgent_call_too() -> None:
+    """The user's explicit choice: absolute silence, including urgent
+    threat callouts -- shown the risk (silenced near a friendly airbase,
+    a Shilka opens up and says nothing) and chose absolute anyway."""
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+    console.handle_command("silence", now_sim=0.0)
+    speech_client.pushed.clear()
+
+    lines = console.handle_line(
+        "!inject-urgent CONTACT_1 Missile launch, 9 o'clock! Break right!",
+        now_sim=1.0,
+    )
+
+    # The line is still produced (the overlay/text path, and the return
+    # value, are unaffected by silence) -- only the audio push is gated.
+    assert lines == ["Missile launch, 9 o'clock! Break right!"]
+    assert speech_client.pushed == []
+
+
+def test_silence_twice_is_a_no_op_not_a_toggle() -> None:
+    """A repeated `silence` must stay silent, not un-silence -- a toggle
+    would make a repeated press ambiguous when the pilot has lost track
+    of whether he is already silenced."""
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+
+    first = console.handle_command("silence", now_sim=0.0)
+    second = console.handle_command("silence", now_sim=1.0)
+
+    assert first == []
+    assert second == []
+    assert console.silenced is True
+    # The acknowledgement was spoken exactly once, not once per `silence`.
+    assert speech_client.pushed == [("Quiet.", False)]
+
+
+def test_a_subsequent_command_ends_silence_and_is_itself_heard() -> None:
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+    console.handle_command("silence", now_sim=0.0)
+    speech_client.pushed.clear()
+
+    lines = console.handle_command("watch_nearest", now_sim=1.0)
+
+    assert console.silenced is False
+    assert lines  # watch_nearest without enrichment still speaks a line
+    assert speech_client.pushed == [(lines[0], False)]
+
+
+def test_silence_ends_and_the_next_drained_callout_is_heard() -> None:
+    store = ContactStore()
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
+    console.handle_command("silence", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=1.0)  # any command ends it
+    speech_client.pushed.clear()
+
+    # Well clear of both prior replies' `busy_until_sim` budgets.
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=10.0, classification_raw="BMP-2")],
+        now_sim=10.0,
+    )
+    store.tick(now_sim=10.0)
+    spoken = console.drain_events(now_sim=10.0)
+
+    assert len(spoken) == 1
+    assert speech_client.pushed == [(spoken[0], False)]
+
+
+def test_unrecognised_free_text_does_not_end_silence() -> None:
+    """Stray speech recognised as nothing (the use case: radio traffic
+    picked up while silenced) must not break silence -- only a real
+    command does."""
+    console = CrewConsole(store=ContactStore())
+    console.handle_command("silence", now_sim=0.0)
+
+    console.handle_line("should we go north of the ridge?", now_sim=1.0)
+
+    assert console.silenced is True
+
+
+def test_recognised_free_text_command_ends_silence() -> None:
+    """Unlike stray speech, a typed/spoken sentence the grammar actually
+    resolves to an intent (`belief.utterance.parse_utterance`) is a real
+    command and ends silence, same as a token-level one."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store)
+    console.handle_command("silence", now_sim=0.0)
+
+    console.handle_line(f"watch {contact_id}", now_sim=1.0)
+
+    assert console.silenced is False
 
 
 def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:
@@ -2455,8 +2632,9 @@ def test_dispatched_command_tokens_all_return_something(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The regression guard for the whole milestone: every token this
-    project claims to have wired must either speak something or be
-    `stop_talking`'s documented, deliberate no-readback no-op -- never the
+    project claims to have wired must either speak something or be one of
+    `NO_RETURN_VALUE_COMMAND_TOKENS`' documented, deliberate no-readback-
+    via-return-value no-ops (`stop_talking`, `silence`) -- never the
     silent `[]` that sent 20 of 41 recognised voice tokens nowhere."""
     tasks = TaskStore()
     console = CrewConsole(
@@ -2466,7 +2644,7 @@ def test_dispatched_command_tokens_all_return_something(
     )
     for token in sorted(DISPATCHED_COMMAND_TOKENS):
         lines = console.handle_command(token, now_sim=0.0)
-        if token == "stop_talking":
+        if token in NO_RETURN_VALUE_COMMAND_TOKENS:
             assert lines == [], token
         else:
             assert lines, token
