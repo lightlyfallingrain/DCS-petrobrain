@@ -276,6 +276,110 @@ $V/ruff check world-model/src world-model/tests
 
 ---
 
+## 7. A second theatre: Afghanistan (`afghanistan-full`)
+
+Everything above is written against Syria, the first theatre built. Afghanistan
+(`multi-theatre-afghanistan` plan) follows the exact same two jobs; this section only states
+what differs. See `world-model/research/2026-10-04-multi-theatre-afghanistan-caucasus-recon.md`
+(recon) and `.../2026-10-05-afghanistan-theatre-build.md` (this build's results) for the
+reasoning.
+
+**Path casing differs from Syria's.** Afghanistan ships `beacons.lua` top-level and `towns.lua`
+under lowercase `map/`, same as Syria (unlike Caucasus, which capitalizes both `Beacons.lua` and
+`Map/`) -- so Afghanistan's paths below look identical in shape to Syria's own, just with
+`Afghanistan` substituted for `Syria`.
+
+### 7.1 Job (a): OSM dataset (six countries, not seven)
+
+Afghanistan's bbox touches Afghanistan, Iran, Pakistan, Tajikistan, Turkmenistan, Uzbekistan --
+not Turkey/Cyprus/Lebanon/Israel/Jordan/Iraq as Syria's does. Geofabrik paths are all under
+`asia/`:
+
+```bash
+for path in asia/afghanistan asia/iran asia/pakistan asia/tajikistan asia/turkmenistan \
+            asia/uzbekistan; do
+  curl -L -O "https://download.geofabrik.de/${path}-latest.osm.pbf"
+done
+```
+
+Clip bbox (reproducible with `tools/derive_m9_osm_clip_bbox.py afghanistan-full`, in
+`west,south,east,north` order): `59.8920,28.4585,75.5807,39.2511`. Then the same
+clip/merge/filter steps as §2.2-2.4, substituting the six-country list and this bbox:
+
+```bash
+for country in afghanistan iran pakistan tajikistan turkmenistan uzbekistan; do
+  osmium extract -b 59.8920,28.4585,75.5807,39.2511 \
+      --strategy=smart \
+      -o "${country}-clipped.osm.pbf" --overwrite \
+      "${country}-latest.osm.pbf"
+done
+
+osmium merge afghanistan-clipped.osm.pbf iran-clipped.osm.pbf pakistan-clipped.osm.pbf \
+    tajikistan-clipped.osm.pbf turkmenistan-clipped.osm.pbf uzbekistan-clipped.osm.pbf \
+    -o afghanistan-theatre-unfiltered.osm.pbf --overwrite
+
+osmium tags-filter afghanistan-theatre-unfiltered.osm.pbf \
+    -e <repo>/world-model/tools/osm_tags_filter.txt \
+    -o afghanistan-theatre.osm.pbf --overwrite
+```
+
+Filtered result (this session's actual run): 7,493,892 nodes / 279,134 ways / 6,806 relations --
+16.1% of the merged-unfiltered file's nodes, 5.6% of its ways (Syria's own filter pass was in
+the same ~13-29%/~3-6% order).
+
+### 7.2 Job (b): build `afghanistan-full`
+
+```bash
+DCS="/mnt/f/Games/DCS World/Mods/terrains/Afghanistan"
+
+.venv/bin/python tools/build_world_model.py afghanistan-full \
+    --towns   "$DCS/map/towns.lua" \
+    --beacons "$DCS/beacons.lua" \
+    --routes  "$DCS/roads/Afghanistan.routes" \
+    --srtm-dir /path/to/dem/afganistan-full/ \
+    --osm-pbf  /path/to/osm/afganistan-full/afghanistan-theatre.osm.pbf \
+    2>&1 | tee afghanistan-full-build.log
+```
+
+Output (override with `--out`): `data/world-model/afghanistan-full.sqlite`.
+
+**Took ~82 minutes end to end** (this session's real run, per-stage): towns.lua/beacons.lua
+near-instant, OSM overlay 85.9s, `Afghanistan.routes` (~1 GB) 320.2s, road junctions
+**1751.1s (~29.2 min)**, SRTM elevation grid (288 tiles staged, 158 actually sampled by the
+region's grid) 136.8s, terrain semantics (ridge/valley) **2640.2s (~44.0 min)** -- the last two
+stages dominate, same as `syria-full`.
+
+**Result (§3.5's check, run against this real build):**
+
+```
+  airfield: 7
+  junction: 196
+  landcover: 24417
+  named_place: 23595
+  navaid: 49
+  ridge: 634867
+  road: 1590
+  settlement: 25774
+  valley: 551657
+  water: 12189
+```
+
+`road`/`junction`/`settlement`/`named_place`/`water`/`landcover` are all non-zero, as §3.5
+requires. **`coastline` is absent (= 0) -- expected for landlocked Afghanistan**, not a missing
+input (the OSM ingest stats confirm `coastline_features=0` explicitly). Spot-checked against
+Kabul (`describe_position.py ... Afghanistan --latlon 34.5456 69.2075`): resolves to the correct
+area (nearest named places include "Kabul" city/town, "Bibi Mahroo hill"; nearest navaids
+include the real Kabul TACAN/VOR-DME; elevation 1792.2 m against Kabul's real ~1,791 m).
+
+**Projection status:** `coordinates.projections.THEATRE_PROJECTIONS["Afghanistan"]` is
+`confidence="provisional"` (beacon-fit only, no pydcs source exists, not yet confirmed against
+a live `coord.LOtoLL` probe) -- see that registry entry's `source` field for the upgrade path.
+Positions and distances above are internally consistent but should be read with that caveat
+until a live probe (Stage 4 of the `multi-theatre-afghanistan` plan, a user task on the Windows
+DCS box) confirms or revises the fit.
+
+---
+
 ## Troubleshooting
 
 **`No module named pyproj` / `osmium`**: system Python instead of the venv. Use the
