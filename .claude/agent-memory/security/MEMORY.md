@@ -25,3 +25,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [terrain_cache resumable fail-closed, APPROVED](project_terrain_cache_resumable_fail_closed_approved.md) -- WM-B6 per-tile SQLite cache verified crash-safe without tmp-rename; theatre not in invalidation key mirrors pre-existing osm_cache gap, not new.
 - [silence-command security approved](project_silence_command_security_approved.md) — ack-before-mute and clear-cannot-stick both checked by tracing code/exception paths, not assertion; CANCEL_TOKENS floor confirmed live on real voice path. APPROVED 2026-10-04.
 - [landform-relief-gate security approved](project_landform_relief_gate_security_approved.md) — cache fail-closed on missing META_FIELDS confirmed independently; decimation deviation-check direction correct; DP O(n²) zig-zag noted non-finding (offline/trusted DEM input). APPROVED 2026-10-04.
+
+- [contact-report-flood class-gate permissive by design](project_contact_report_flood_class_gate_permissive_by_design.md) -- contacts_plausibly_same's class check passes freely for OP_GROUPSOMETHING; inherited from already-trusted passes_gate, not a new weakness. APPROVED 2026-10-05.
