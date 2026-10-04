@@ -138,7 +138,30 @@ cardinality belief are untouched and still reachable via `report`/console.
 runaway/plan.md`** -- `ContactStore.ingest`'s own "2+ candidates -> always
 a new contact" rule, the root policy question both leave open, is
 unchanged by this suppression; only the audible symptom of its merge-
-driven instance goes quiet."""
+driven instance goes quiet.
+
+**A group's own first disclosure can be redundant too (`plans/
+redundant-group-disclosure/plan.md`), a second instance of the same
+"the content already reached the pilot" idea above, one layer up.** A
+group's `last_spoken_signature is None` branch used to always speak the
+full roster the instant two-plus members first clustered, even when every
+one of those members had already been announced individually -- real
+sortie-1004 evidence, 2026-10-05: three ground contacts founded and
+spoken individually at `t_sim=699.1`, one of them re-founded under a
+fresh id at 714.5 and correctly silenced by the merge-echo suppression
+above, and then at 730.9 a brand-new `Group` of those same contacts still
+spoke "A couple of contacts, 1 o'clock, 2.5 kilometres" -- telling the
+pilot, a second time, about things he had already been told about
+individually. `_already_reported_member_ids` (below) answers "has this
+member's own content already reached the pilot" for each current member
+of a never-spoken group, counting a member reported either because its
+own `CONTACT_DETECTED`/`CONTACT_REACQUIRED` was actually spoken, or
+because it was itself merge-echo-suppressed by the mechanism directly
+above -- and `belief.speech.render_group_disclosure`'s own first-
+disclosure branch uses that set to decide full disclosure / a delta
+naming only what is new / silence. See that function's own docstring for
+the three-way split; see `_already_reported_member_ids`'s own docstring
+for why this is computed here rather than stored on `Contact`/`Group`."""
 
 from __future__ import annotations
 
@@ -148,7 +171,7 @@ from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
 from belief.association_over_time import contacts_plausibly_same
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -525,6 +548,30 @@ def group_facts(
     return groups
 
 
+def _is_merge_echo_of_earlier_contact(
+    contact: Contact, store: ContactStore, now_sim: float
+) -> bool:
+    """Whether `contact` is a merge echo of some strictly-earlier-founded,
+    not-`lost`, plausibly-same contact already in `store` -- the one
+    condition shared, character for character, by `_render_event`'s own
+    `CONTACT_DETECTED` suppression branch and
+    `CalloutScheduler._already_reported_member_ids`'s branch 2 (`plans/
+    redundant-group-disclosure/plan.md`, review item 1). Factored out here
+    so the two call sites can never drift apart silently: `_render_event`
+    asks this of its own candidate event's contact; `_already_reported_
+    member_ids` asks it of a member reached by iterating a group's
+    membership with no event in hand -- both questions are "does an
+    earlier, live, plausibly-same contact already account for this one,"
+    answered the same way regardless of which caller is asking."""
+    return any(
+        other.id != contact.id
+        and other.first_seen_sim < contact.first_seen_sim
+        and certainty_of(other, now_sim) != "lost"
+        and contacts_plausibly_same(contact, other, now_sim)
+        for other in store.contacts
+    )
+
+
 @dataclass
 class CalloutScheduler:
     """Owns speech-time occupancy for one `CrewConsole` -- see module
@@ -589,6 +636,46 @@ class CalloutScheduler:
             now_sim + estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S,
         )
 
+    def _already_reported_member_ids(
+        self, store: ContactStore, member_contact_ids: frozenset[str], now_sim: float
+    ) -> frozenset[str]:
+        """Which of a group's current `member_contact_ids` already had
+        their own content reach the pilot, for `render_group_disclosure`'s
+        `already_reported_contact_ids` gate (`plans/
+        redundant-group-disclosure/plan.md`) -- computed here, not stored
+        on `Contact` or `Group`, because the fact being asked is "what has
+        this scheduler actually said," which only this scheduler's own
+        `_last_spoken_signature` plus the store's contact graph can answer.
+
+        A member counts as already reported two ways:
+
+        1. **Its own `CONTACT_DETECTED`/`CONTACT_REACQUIRED` was actually
+           spoken** -- `contact_id in self._last_spoken_signature`, the
+           same dict `_render_event`'s singleton gate already reads.
+        2. **It was itself merge-echo-suppressed** (module docstring's
+           "Merge-echo `CONTACT_DETECTED` suppression") -- via the shared
+           `_is_merge_echo_of_earlier_contact`, the same predicate
+           `_render_event`'s `CONTACT_DETECTED` branch evaluates to decide
+           whether to suppress that announcement in the first place, so
+           the two can never drift apart silently. Per that predicate's
+           own condition, this does not additionally require the earlier,
+           plausibly-same contact to itself appear in
+           `_last_spoken_signature` -- a contact that is not `lost` and
+           strictly earlier-founded is, by the same reasoning the
+           suppression itself relies on, the contact whose continuity the
+           newer one is an echo of, not a second unreported thing."""
+        reported: set[str] = set()
+        for contact_id in member_contact_ids:
+            contact = store.contact(contact_id)
+            if contact is None:
+                continue
+            if contact_id in self._last_spoken_signature:
+                reported.add(contact_id)
+                continue
+            if _is_merge_echo_of_earlier_contact(contact, store, now_sim):
+                reported.add(contact_id)
+        return frozenset(reported)
+
     def _render_event(
         self,
         store: ContactStore,
@@ -639,27 +726,24 @@ class CalloutScheduler:
             # CONTACT_DETECTED suppression" section for the full rationale,
             # including why this also silences some genuine splits.
             this_contact = store.contact(event.contact_id)
-            if this_contact is not None and any(
-                other.id != this_contact.id
-                # Strictly earlier founding only -- a contact founded in
-                # the very same poll is a simultaneous, independent
-                # sighting, never a merge echo of an abandoned identity
-                # (the mechanism this check exists for always has the
-                # abandoned identity surviving from an *earlier* poll).
-                # Discovered against the real sortie-1004 snapshot
-                # (`plans/contact-report-flood/implementation.md`): without
-                # this, several genuinely distinct, genuinely simultaneous
-                # foundings that are mutually close (a common real scene --
-                # several vehicles entering view in the same scan poll)
-                # see each other as live peers and mutually suppress,
-                # producing *zero* spoken lines for the whole cluster --
-                # worse than the flood this fix exists to reduce, and a
-                # direct violation of this plan's own "at most 2, not 6"
-                # acceptance bound on its own named six-vehicle example.
-                and other.first_seen_sim < this_contact.first_seen_sim
-                and certainty_of(other, now_sim) != "lost"
-                and contacts_plausibly_same(this_contact, other, now_sim)
-                for other in store.contacts
+            # Strictly earlier founding only (see
+            # `_is_merge_echo_of_earlier_contact`'s docstring) -- a contact
+            # founded in the very same poll is a simultaneous, independent
+            # sighting, never a merge echo of an abandoned identity (the
+            # mechanism this check exists for always has the abandoned
+            # identity surviving from an *earlier* poll). Discovered
+            # against the real sortie-1004 snapshot (`plans/
+            # contact-report-flood/implementation.md`): without this,
+            # several genuinely distinct, genuinely simultaneous foundings
+            # that are mutually close (a common real scene -- several
+            # vehicles entering view in the same scan poll) see each other
+            # as live peers and mutually suppress, producing *zero* spoken
+            # lines for the whole cluster -- worse than the flood this fix
+            # exists to reduce, and a direct violation of this plan's own
+            # "at most 2, not 6" acceptance bound on its own named
+            # six-vehicle example.
+            if this_contact is not None and _is_merge_echo_of_earlier_contact(
+                this_contact, store, now_sim
             ):
                 return None
         speech = route_event(store, event, now_sim, enrichment)
@@ -743,7 +827,16 @@ class CalloutScheduler:
                 # Fewer than two members currently resolve -- self-corrects
                 # on the next `GroupStore.reconcile`, nothing to do here.
                 continue
-            speech = render_group_disclosure(store, belief_group, now_sim, enrichment)
+            already_reported = self._already_reported_member_ids(
+                store, belief_group.member_contact_ids, now_sim
+            )
+            speech = render_group_disclosure(
+                store,
+                belief_group,
+                now_sim,
+                enrichment,
+                already_reported_contact_ids=already_reported,
+            )
             if speech is None:
                 continue
             # Compared by *content*, not the full rendered line -- a pure
@@ -775,7 +868,16 @@ class CalloutScheduler:
                 # scoring-time text -- the same "nothing exists ahead of
                 # being spoken" invariant every other candidate gets
                 # (Stage 4 design, section 4, step 4).
-                speech = render_group_disclosure(store, candidate, now_sim, enrichment)
+                already_reported = self._already_reported_member_ids(
+                    store, candidate.member_contact_ids, now_sim
+                )
+                speech = render_group_disclosure(
+                    store,
+                    candidate,
+                    now_sim,
+                    enrichment,
+                    already_reported_contact_ids=already_reported,
+                )
                 if speech is None:
                     continue
                 content_signature = speech.content_signature

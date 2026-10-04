@@ -34,6 +34,13 @@ Plan / Risks updates.
 > of the echo rather than changing `ContactStore.ingest`'s ambiguity rule. The root policy this
 > plan is about is untouched; see `plans/contact-report-flood/plan.md`.
 
+> **Still open, noted 2026-10-05.** `fix/redundant-group-disclosure` closes a second,
+> speech-layer symptom one level up — a `Group`'s own opening line used to re-announce members
+> that had already individually reached the pilot, directly or via the merge-echo suppression
+> above. It, too, changes only what gets *said*, never what `ContactStore.ingest` resolves a
+> percept to; the root "2+ candidates → always a new contact" policy this plan is about remains
+> untouched. See `plans/redundant-group-disclosure/implementation.md`.
+
 ### Decision
 
 **Primary fix, generalized: object-permanence correlation via `object_id`, for both perception

@@ -1471,11 +1471,40 @@ def render_group_full_disclosure(
     )
 
 
+def _render_member_delta_clause(
+    delta_members: list[dict[str, object]],
+    member_facts: list[dict[str, object]],
+) -> tuple[str, str]:
+    """`render_group_disclosure`'s one delta-clause rendering, shared by
+    its two callers -- the opening line's "say only the new part" case
+    (branch 1's partially-covered sub-case) and a later tick's own arrival
+    delta (branch 4) -- which compose identically: just the newly-worth-
+    announcing `delta_members`, suffixed with the *group's* own nearest
+    clock position (`_nearest_clock_position(member_facts)`, never
+    `delta_members`' own nearest) so a line about one new truck still
+    reads as part of the group everyone already knows about, not as its
+    own independent position report. Returns `(text, content_signature)`;
+    the two are identical here, as they already were at both pre-existing
+    call sites -- this clause carries no clock/range figure of its own to
+    strip for signature purposes (§4's own worked examples, restated in
+    `render_group_disclosure`'s docstring)."""
+    composition = _group_composition_clause(delta_members)
+    composed = composition[0].upper() + composition[1:]
+    clock = _nearest_clock_position(member_facts)
+    if clock is not None:
+        text = f"{composed}, in {clock} o'clock group."
+    else:
+        text = f"{composed}, in the group."
+    return text, text
+
+
 def render_group_disclosure(
     store: ContactStore,
     group: Group,
     now_sim: float,
     enrichment: EnrichmentContext | None = None,
+    *,
+    already_reported_contact_ids: frozenset[str] | None = None,
 ) -> OutgoingSpeech | None:
     """`plans/group-reporting/plan.md` Stage 3's disclosure ladder for a
     persisted `belief.groups.Group` -- **not** `render_group_report` above,
@@ -1508,7 +1537,40 @@ def render_group_disclosure(
     differentiated`), in this priority order -- first match decides, since
     only one utterance is ever returned per call:
 
-    1. **Never spoken** (`last_spoken_signature is None`): full disclosure.
+    1. **Never spoken** (`last_spoken_signature is None`): full disclosure
+       -- **unless every current member's own content has already reached
+       the pilot some other way** (`plans/redundant-group-disclosure/
+       plan.md`), per the caller-supplied `already_reported_contact_ids`:
+
+       - **Every member already reported**: silent. The grouping itself is
+         never news on its own (user direction, 2026-10-05, "for now, no
+         'those are together', prioritize less speaking") -- a group whose
+         members were each already told individually has nothing left to
+         say by forming.
+       - **Some, but not all, members already reported**: a delta clause
+         naming only the unreported, differentiated members, through the
+         identical "worth-announcing" filter branch 4 below already
+         applies to a *later* arrival (new classification, or another
+         instance of an already-known air-defence class) -- this is that
+         same filter applied to the *opening* line instead, reusing one
+         taxonomy rather than inventing a second rule for "new" at time
+         zero. If nothing among the unreported members clears that filter,
+         silent, same as branch 5.
+       - **No member already reported** (the caller passed `None`, meaning
+         no information, or an empty set, meaning genuinely nothing was
+         ever said about any of them): full disclosure, unchanged.
+
+       `already_reported_contact_ids` is deliberately not a `Contact` or
+       `Group` field -- it is a fact about *what `belief.callouts.
+       CalloutScheduler` has actually said*, which only that scheduler's
+       own `_last_spoken_signature` (plus the belief store's contact
+       graph, for a member whose own announcement was itself merge-echo-
+       suppressed -- see that scheduler's `_already_reported_member_ids`)
+       can answer; `render_group_disclosure` has no such state of its own
+       and is not the right place to grow one. `None` (the default) means
+       "no information available," not "nothing was reported" -- every
+       caller that does not pass it gets exactly the pre-existing
+       always-full-disclosure behaviour.
     2. **The leading member changed** (a new leader, or leader gained --
        `None` to some contact id): a short `"Now leading: {type}."` delta,
        never a full restatement (Correction 1) -- reusing `_identification_
@@ -1613,9 +1675,51 @@ def render_group_disclosure(
     )
     first_differentiation = not group.last_spoken_differentiated and differentiated
 
+    current_member_ids = frozenset(contact.id for contact in member_contacts)
+
+    # Never-spoken, but some/all current members' own content already
+    # reached the pilot some other way -- see this function's own
+    # docstring, branch 1's sub-cases. `already_reported_contact_ids is
+    # None` (the default, no caller opinion) always takes the ordinary
+    # full-disclosure path below, unchanged.
+    already_reported_now: frozenset[str] = frozenset()
+    if never_spoken and already_reported_contact_ids is not None:
+        already_reported_now = current_member_ids & already_reported_contact_ids
+    never_spoken_fully_covered = (
+        never_spoken
+        and already_reported_contact_ids is not None
+        and already_reported_now == current_member_ids
+    )
+    never_spoken_partially_covered = (
+        never_spoken and already_reported_now and not never_spoken_fully_covered
+    )
+
+    if never_spoken_fully_covered:
+        # Every current member was already told about individually (or
+        # via a merge-echo-suppressed duplicate) -- the grouping itself is
+        # not news (user direction 2026-10-05). Silent, not a candidate.
+        return None
+
     delta_members: list[dict[str, object]] = []
-    if not (never_spoken or leader_changed or first_differentiation):
-        current_member_ids = frozenset(contact.id for contact in member_contacts)
+    if never_spoken_partially_covered:
+        known_classes = {
+            _classification_key(facts)
+            for facts in member_facts
+            if facts["id"] in already_reported_now
+            and _classification_level(facts) not in ("presence", "unknown")
+        }
+        unreported_ids = current_member_ids - already_reported_now
+        for facts in member_facts:
+            if facts["id"] not in unreported_ids:
+                continue
+            if _classification_level(facts) in ("presence", "unknown"):
+                continue
+            key = _classification_key(facts)
+            is_new_class = key not in known_classes
+            is_air_defence_repeat = not is_new_class and _is_air_defence(facts)
+            if is_new_class or is_air_defence_repeat:
+                delta_members.append(facts)
+    elif not (never_spoken or leader_changed or first_differentiation):
         new_arrival_ids = current_member_ids - group.last_spoken_member_contact_ids
         known_classes = {
             _classification_key(facts)
@@ -1634,7 +1738,17 @@ def render_group_disclosure(
             if is_new_class or is_air_defence_repeat:
                 delta_members.append(facts)
 
-    if never_spoken or first_differentiation:
+    if never_spoken_partially_covered:
+        if not delta_members:
+            # Nothing among the unreported members clears the
+            # worth-announcing filter -- silent, same as the "otherwise"
+            # branch below gives a later tick's non-worth-announcing
+            # arrival.
+            return None
+        text, content_signature = _render_member_delta_clause(
+            delta_members, member_facts
+        )
+    elif never_spoken or first_differentiation:
         text, content_signature = _render_full_group_composition(
             member_facts, leading_index, differentiated
         )
@@ -1648,14 +1762,9 @@ def render_group_disclosure(
         text = f"Now leading: {leading_word}."
         content_signature = text
     elif delta_members:
-        composition = _group_composition_clause(delta_members)
-        composed = composition[0].upper() + composition[1:]
-        clock = _nearest_clock_position(member_facts)
-        if clock is not None:
-            text = f"{composed}, in {clock} o'clock group."
-        else:
-            text = f"{composed}, in the group."
-        content_signature = text
+        text, content_signature = _render_member_delta_clause(
+            delta_members, member_facts
+        )
     else:
         return None
 

@@ -27,3 +27,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [landform-relief-gate security approved](project_landform_relief_gate_security_approved.md) — cache fail-closed on missing META_FIELDS confirmed independently; decimation deviation-check direction correct; DP O(n²) zig-zag noted non-finding (offline/trusted DEM input). APPROVED 2026-10-04.
 
 - [contact-report-flood class-gate permissive by design](project_contact_report_flood_class_gate_permissive_by_design.md) -- contacts_plausibly_same's class check passes freely for OP_GROUPSOMETHING; inherited from already-trusted passes_gate, not a new weakness. APPROVED 2026-10-05.
+- [redundant-group-disclosure approved](project_redundant_group_disclosure_approved.md) -- group-first-disclosure silencing composes safely with merge-echo suppression (per-member, not per-group); no cycle, no new dep. APPROVED 2026-10-05.
