@@ -126,3 +126,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Relief gate + decimation fix](project_landform_relief_gate_decimation_fix.md) — windowed deviation check silently neutered decimation; check whole polyline, not one segment.
 
 - [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression checks must exclude same-poll peers or mutual lockout silences everything.
+- [Redundant group disclosure](project_redundant_group_disclosure.md) — already-reported lives in scheduler, not Contact/Group; fix broke+fixed a real second redundant case the plan didn't name.
