@@ -123,3 +123,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Landform-geomorphons perf fix](project_landform_geomorphons_perf_fix.md) — streaming terrain inserts via callback; O(N) Chaikin via per-point support windows.
 - [macOS ru_maxrss unit is bytes](reference_macos_ru_maxrss_unit_bytes.md) — bytes on macOS, KB on Linux; divide by 1024*1024 for MB on Mac.
 - [Landform geomorphons implementation](project_landform_geomorphons.md) — plan cited wrong spike's min_cells; junction-walk is order-dependent; M8 chunk pipeline had no equivalent.
+- [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression checks must exclude same-poll peers or mutual lockout silences everything.
