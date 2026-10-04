@@ -325,3 +325,39 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
     covariance = _percept_covariance(percept) + _contact_covariance(contact, elapsed_s)
     return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2
+
+
+def contacts_plausibly_same(a: Contact, b: Contact, now_sim: float) -> bool:
+    """Whether two already-founded `Contact`s could plausibly be one real
+    thing -- `plans/contact-report-flood/plan.md` Stage 1. Generalises
+    `passes_gate` above (class compatibility, then a Mahalanobis test
+    against the **sum** of both sides' own covariances, each inflated by
+    its own elapsed time since its own `last_seen_sim`) from percept-vs-
+    contact to contact-vs-contact, reusing `GATE_SIGMA_THRESHOLD` unchanged
+    -- no new constant, no new radius. This is the same calibrated gate
+    `ingest`'s ambiguity rule already trusts to mean "plausibly one real
+    thing," applied symmetrically to two contacts instead of a percept and
+    a contact.
+
+    **Built to answer one specific question: is a freshly-founded contact
+    a merge-echo of another contact's just-abandoned identity** (`belief.
+    callouts.CalloutScheduler`'s `CONTACT_DETECTED` suppression check), not
+    a general "are these the same" oracle. It is structurally unable to
+    distinguish that merge-echo from a genuine split producing two
+    plausibly-close contacts -- see `plans/contact-report-flood/plan.md`,
+    "The honest cost of the chosen fix, stated plainly," for why that
+    cost is accepted rather than fixed, and do not strengthen this
+    function to try to tell the two apart; the ambiguity is structural,
+    not a bug in this gate.
+
+    Order of `a`/`b` does not matter -- the covariance sum and the
+    class-compatibility check are both symmetric."""
+    if class_compatibility(a.last_class_raw, b.last_class_raw) == "incompatible":
+        return False
+
+    dx = a.last_position.x - b.last_position.x
+    dz = a.last_position.z - b.last_position.z
+    elapsed_a = max(0.0, now_sim - a.last_seen_sim)
+    elapsed_b = max(0.0, now_sim - b.last_seen_sim)
+    covariance = _contact_covariance(a, elapsed_a) + _contact_covariance(b, elapsed_b)
+    return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2

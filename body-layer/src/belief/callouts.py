@@ -77,7 +77,68 @@ never acknowledged) -- a repeated detection/reacquisition cycle at the same
 rounded range/clock no longer re-speaks the identical line. A grouped
 contact's own detection never reaches this check at all (filtered out
 before scoring, above); this gate now only ever sees a contact with no
-group."""
+group.
+
+**Merge-echo `CONTACT_DETECTED` suppression (`plans/contact-report-flood/
+plan.md` Stage 1).** When the naked-eye gaze sweep folds several already-
+separate, already-identified contacts into one supercluster, continuity's
+majority-overlap vote inherits one historical identity and abandons the
+rest (`perception.naked_eye_source._build_observations`'s own module
+docstring, point 6); those abandoned contacts decay to `lost` and the same
+real objects later re-found under fresh ids, each earning an ordinary
+first-sighting `CONTACT_DETECTED`. `_render_event`'s `CONTACT_DETECTED`
+branch (never `CONTACT_REACQUIRED` -- see that branch's own comment for
+why) checks whether any other, **strictly earlier-founded**, not-yet-
+`lost` contact is spatially and class-plausibly the same real thing
+(`belief.association_over_time.contacts_plausibly_same`, the already-
+calibrated percept-vs-contact gate generalised to contact-vs-contact) and,
+if so, suppresses the candidate the same one-shot way an expired or
+stale-signature candidate already is (`tick`'s `for _, candidate in
+scored` loop adds any `_render_event`-`None` result straight to
+`_consumed` -- permanent for this scheduler instance, never retried on a
+later call, though the event stays unacknowledged for a future brain's
+`poll_events`).
+
+**The strictly-earlier-founded condition (`other.first_seen_sim <
+this_contact.first_seen_sim`) is load-bearing, not cosmetic -- found
+missing against the real sortie-1004 snapshot, not in review.** Without
+it, several genuinely distinct, genuinely simultaneous foundings that
+happen to be mutually close (an ordinary real scene: several vehicles
+entering view in the same scan poll) see *each other* as live,
+plausibly-same peers the instant they are all founded, and every one of
+them suppresses every other the first time any of them is attempted --
+`tick()` tries every scored candidate in priority order until one
+succeeds, but if all N already exist as of the first attempt, all N fail
+identically. Confirmed directly against this module's own `CalloutScheduler.
+tick` using the real believed positions of `plans/contact-report-flood/
+debug.md`'s own named six-vehicle cluster (`CONTACT_3/4/5/7` all founded at
+`t_sim=699.073`, pairwise `contacts_plausibly_same`): zero lines spoken for
+the whole cluster, not "at most 2" -- worse than the flood this fix exists
+to reduce, on the plan's own acceptance example. The merge-echo mechanism
+this check targets always has the abandoned identity surviving from an
+*earlier* poll than the re-founding it echoes; a same-poll peer is never
+that, so excluding it costs nothing against the mechanism this check
+targets while fixing the real regression.
+
+**This necessarily also silences some genuine splits, and that is accepted,
+not a defect to fix here.** A merge-echo re-founding and an honest "actually
+that's two things" split look structurally identical at this layer: once a
+merge overwrites every absorbed member's own `_object_id_to_last_
+observation_id` entry to point at the survivor, a later re-split off that
+survivor produces the exact same shape whether or not a merge ever touched
+it. Nothing in this module -- or in `contacts_plausibly_same` -- can tell
+the two apart, and no amount of local cleverness fixes that; it is a
+consequence of the project's twice-reaffirmed decision not to track
+per-member identity in clustering (see `plans/contact-report-flood/
+plan.md`, "The honest cost of the chosen fix, stated plainly"). What is
+lost is only the incremental "actually that's two things" spoken line --
+the new contact's own record, classification and the survivor's
+cardinality belief are untouched and still reachable via `report`/console.
+**This does not close `BL-B24` or `plans/contact-duplication-ambiguity-
+runaway/plan.md`** -- `ContactStore.ingest`'s own "2+ candidates -> always
+a new contact" rule, the root policy question both leave open, is
+unchanged by this suppression; only the audible symptom of its merge-
+driven instance goes quiet."""
 
 from __future__ import annotations
 
@@ -86,7 +147,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
+from belief.association_over_time import contacts_plausibly_same
 from belief.contacts import ContactStore
+from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
@@ -564,6 +627,40 @@ class CalloutScheduler:
             if candidate is None:
                 return None
             if self._last_spoken_signature.get(event.contact_id) == candidate.text:
+                return None
+        if event.kind == CONTACT_DETECTED:
+            # `plans/contact-report-flood/plan.md` Stage 1 -- merge-echo
+            # suppression. Scoped to `CONTACT_DETECTED` only, never
+            # `CONTACT_REACQUIRED`: that kind only ever fires for a contact
+            # id that already existed and had gone `lost`
+            # (`belief.events.lifecycle_event_kind`), which is exactly "the
+            # same guy is back" and must stay audible regardless of what
+            # else is nearby. See module docstring's "Merge-echo
+            # CONTACT_DETECTED suppression" section for the full rationale,
+            # including why this also silences some genuine splits.
+            this_contact = store.contact(event.contact_id)
+            if this_contact is not None and any(
+                other.id != this_contact.id
+                # Strictly earlier founding only -- a contact founded in
+                # the very same poll is a simultaneous, independent
+                # sighting, never a merge echo of an abandoned identity
+                # (the mechanism this check exists for always has the
+                # abandoned identity surviving from an *earlier* poll).
+                # Discovered against the real sortie-1004 snapshot
+                # (`plans/contact-report-flood/implementation.md`): without
+                # this, several genuinely distinct, genuinely simultaneous
+                # foundings that are mutually close (a common real scene --
+                # several vehicles entering view in the same scan poll)
+                # see each other as live peers and mutually suppress,
+                # producing *zero* spoken lines for the whole cluster --
+                # worse than the flood this fix exists to reduce, and a
+                # direct violation of this plan's own "at most 2, not 6"
+                # acceptance bound on its own named six-vehicle example.
+                and other.first_seen_sim < this_contact.first_seen_sim
+                and certainty_of(other, now_sim) != "lost"
+                and contacts_plausibly_same(this_contact, other, now_sim)
+                for other in store.contacts
+            ):
                 return None
         speech = route_event(store, event, now_sim, enrichment)
         if speech is None:

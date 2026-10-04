@@ -12,6 +12,7 @@ import math
 from belief.association_over_time import (
     _FALLBACK_UNCERTAINTY_RADIUS_M,
     class_compatibility,
+    contacts_plausibly_same,
     implied_position,
     passes_gate,
     uncertainty_radius_m,
@@ -274,3 +275,112 @@ def test_gate_is_tighter_across_the_line_of_sight_than_along_it() -> None:
 
     assert passes_gate(down_range_offset, contact, now_sim=0.0)
     assert not passes_gate(cross_range_offset, contact, now_sim=0.0)
+
+
+# --- contacts_plausibly_same (plans/contact-report-flood/plan.md Stage 1) --
+
+
+def test_contacts_plausibly_same_at_zero_elapsed_time_mirrors_passes_gate() -> None:
+    """Same inputs that would pass `passes_gate` between a percept and a
+    contact (`test_passes_gate_within_spatial_radius` above) should pass
+    `contacts_plausibly_same` between two contacts built from those same two
+    percepts, at zero elapsed time -- it is the same calibrated gate,
+    generalised symmetrically."""
+    founding = _percept(
+        classification_raw="Ural truck", bearing_deg=0.0, range_m=1000.0
+    )
+    contact_a = _contact_from(founding, contact_id="CONTACT_A")
+
+    nearby_percept = _percept(
+        t_sim=1.0,
+        classification_raw="Ural truck",
+        bearing_deg=0.0,
+        range_m=1000.0 + SCOPE_UNCERTAINTY_M / 2.0,
+        observation_id="OBS_2",
+    )
+    contact_b = _contact_from(nearby_percept, contact_id="CONTACT_B")
+
+    assert contacts_plausibly_same(contact_a, contact_b, now_sim=1.0)
+
+
+def test_contacts_plausibly_same_fails_outside_spatial_radius() -> None:
+    """Mirrors `test_fails_gate_outside_spatial_radius` for the
+    contact-vs-contact gate."""
+    founding = _percept(
+        classification_raw="Ural truck", bearing_deg=0.0, range_m=1000.0
+    )
+    contact_a = _contact_from(founding, contact_id="CONTACT_A")
+
+    far_percept = _percept(
+        t_sim=1.0,
+        classification_raw="Ural truck",
+        bearing_deg=0.0,
+        range_m=1000.0 + SCOPE_UNCERTAINTY_M * 10.0,
+        observation_id="OBS_2",
+    )
+    contact_b = _contact_from(far_percept, contact_id="CONTACT_B")
+
+    assert not contacts_plausibly_same(contact_a, contact_b, now_sim=1.0)
+
+
+def test_contacts_plausibly_same_fails_on_incompatible_class_even_if_close() -> None:
+    """Mirrors `test_fails_gate_on_incompatible_class_even_if_spatially_close`
+    for the contact-vs-contact gate."""
+    founding = _percept(classification_raw="OP_TRUCK", bearing_deg=0.0, range_m=1000.0)
+    contact_a = _contact_from(founding, contact_id="CONTACT_A")
+
+    close_but_incompatible = _percept(
+        t_sim=1.0,
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        observation_id="OBS_2",
+    )
+    contact_b = _contact_from(close_but_incompatible, contact_id="CONTACT_B")
+
+    assert not contacts_plausibly_same(contact_a, contact_b, now_sim=1.0)
+
+
+def test_contacts_plausibly_same_is_symmetric() -> None:
+    """Order of `a`/`b` must not matter -- both the covariance sum and
+    `class_compatibility` are symmetric."""
+    founding = _percept(
+        classification_raw="Ural truck", bearing_deg=0.0, range_m=1000.0
+    )
+    contact_a = _contact_from(founding, contact_id="CONTACT_A")
+
+    nearby_percept = _percept(
+        t_sim=1.0,
+        classification_raw="Ural truck",
+        bearing_deg=0.0,
+        range_m=1000.0 + SCOPE_UNCERTAINTY_M / 2.0,
+        observation_id="OBS_2",
+    )
+    contact_b = _contact_from(nearby_percept, contact_id="CONTACT_B")
+
+    assert contacts_plausibly_same(
+        contact_a, contact_b, now_sim=1.0
+    ) == contacts_plausibly_same(contact_b, contact_a, now_sim=1.0)
+
+
+def test_contacts_plausibly_same_grows_with_elapsed_time() -> None:
+    """Mirrors `test_gate_radius_grows_with_elapsed_time` -- a contact not
+    seen in a while gets a wider, more forgiving gate against another
+    contact too, since each side's own covariance inflates by its own
+    elapsed time since its own `last_seen_sim`."""
+    founding = _percept(
+        classification_raw="Ural truck", bearing_deg=0.0, range_m=1000.0
+    )
+    contact_a = _contact_from(founding, contact_id="CONTACT_A")
+
+    offset_m = SCOPE_UNCERTAINTY_M * 5.0
+    later_percept = _percept(
+        t_sim=100.0,
+        classification_raw="Ural truck",
+        bearing_deg=0.0,
+        range_m=1000.0 + offset_m,
+        observation_id="OBS_2",
+    )
+    contact_b = _contact_from(later_percept, contact_id="CONTACT_B")
+
+    assert contacts_plausibly_same(contact_a, contact_b, now_sim=100.0)
