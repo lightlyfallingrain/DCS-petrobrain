@@ -1642,6 +1642,96 @@ def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
         main()
 
 
+def test_main_rejects_neither_theatre_pair_nor_mission_understanding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5 (multi-theatre-afghanistan plan): with neither
+    `--theatre`/`--world-model-db` nor `--mission-understanding` given,
+    `main()` must reject rather than silently falling back to a default
+    theatre."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["logger", "--aircraft-layer-url", "http://127.0.0.1:7791"],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_main_rejects_mission_understanding_without_world_model_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5: deriving theatre from `--mission-understanding` requires
+    `--world-model-dir` -- without it there is nowhere to resolve the
+    per-theatre store path to."""
+    monkeypatch.chdir(tmp_path)
+    mission_understanding_path = (
+        Path(__file__).parent / "fixtures" / "mission_understanding_sample.json"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--mission-understanding",
+            str(mission_understanding_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_main_rejects_world_model_db_theatre_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5's mismatch guard: a `--world-model-db` built for a
+    different theatre than the resolved `--theatre` must be rejected
+    before the first poll, rather than silently applying the wrong
+    projection to every contact."""
+    from store.models import Region
+    from store.writer import insert_region
+
+    db_path = tmp_path / "afghanistan-full.sqlite"
+    conn = open_for_build(db_path)
+    insert_region(
+        conn,
+        Region(
+            name="afghanistan-full",
+            theatre="Afghanistan",
+            centre_x=0.0,
+            centre_z=0.0,
+            half_extent_x_m=1000.0,
+            half_extent_z_m=1000.0,
+            built_at="2026-10-05T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--theatre",
+            "Syria",
+            "--world-model-db",
+            str(db_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
 def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
     tmp_path: Path,
 ) -> None:
