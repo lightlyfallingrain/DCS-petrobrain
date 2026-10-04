@@ -888,9 +888,11 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   A real correctness bug was found and fixed *during* verification of the second fix (not a named
   defect, but worth recording): an early version of the decimation deviation check compared each
   original point against only the one decimated segment a windowing shortcut assigned it to, which
-  understated real deviation by up to 5x on real traced lines near a genuine turn — caught because
-  the real built output's density barely dropped when it should have dropped ~37x, not because the
-  (technically passing, just wrong) check itself failed. Fixed to check against the whole decimated
+  **overstated** real deviation by up to 5x on real traced lines near a genuine turn (it measured
+  70-155 m where the true distance to the decimated line was 15-30 m) — so it was *safe*, never
+  admitting a decimation it should have rejected, and useless, rejecting almost every one it should
+  have accepted. Caught because the real built output's density barely dropped when it should have
+  dropped ~37x, not because the check itself ever failed. Fixed to check against the whole decimated
   polyline; see the implementation doc for the full account.
 
   Both falsifiable checks hold on real renders (`data/renders/{coastal-hills,baalbek,palmyra}-
