@@ -844,3 +844,10 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   Note the existing lost-and-reacquired test only ever exercised a single contact, which is why
   this had no coverage until a two-contact fixture was written.
+
+  **Still open after `fix/contact-report-flood` (2026-10-04).** That branch muted the *audible*
+  symptom of the same underlying engine — `ContactStore.ingest`'s "2+ candidates → always found a
+  new contact" rule — by suppressing the spoken first-report of a merge-echo. It did not touch the
+  rule, and this item's own case (two close contacts ambiguous for each other after a long gap) is
+  unaffected: suppression is scoped to `CONTACT_DETECTED` and never to `CONTACT_REACQUIRED`, which
+  is the path this item is about. See `plans/contact-report-flood/plan.md`.
