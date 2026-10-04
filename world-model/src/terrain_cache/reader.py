@@ -26,6 +26,8 @@ _META_TYPES: dict[str, type] = {
     "max_turn_cos": float,
     "min_line_length_cells": int,
     "chaikin_iterations": int,
+    "min_relief_m": float,
+    "decimation_tolerance_fraction": float,
     "built_at": str,
 }
 
