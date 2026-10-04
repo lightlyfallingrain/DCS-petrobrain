@@ -557,6 +557,70 @@ def test_merge_echo_refounding_near_a_live_contact_is_not_spoken() -> None:
     assert spoken == ["Ural truck.", "Ural truck."]  # C's founding never spoke
 
 
+def test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent() -> (
+    None
+):
+    """`plans/redundant-group-disclosure/plan.md`'s own worked case, built
+    directly on the merge-echo fixture above: A already spoke its own
+    `CONTACT_DETECTED` individually, and C's own founding was merge-echo-
+    suppressed against A (the test above). If a `Group` later persists A
+    and C together -- a real shape, since C is believed to be the same
+    real thing continuity already abandoned -- the group's first
+    disclosure must say nothing: both members' content already reached
+    the pilot, A directly and C via the contact its announcement was
+    suppressed in favour of (`CalloutScheduler._already_reported_member_
+    ids`'s second case). The group is built by direct construction
+    (mirrors `test_speech.py`'s own `stale_group` pattern) rather than via
+    `GroupStore.reconcile`, because A and C are 500 m apart -- inside the
+    *contact* association gate this fixture's geometry is borrowed from,
+    but outside `belief.groups`' own, tighter cohesion gate, so they never
+    cohere naturally; the taxonomy under test does not care how a group
+    came to exist, only what it currently contains."""
+    from belief.groups import Group
+
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    spoken: list[str] = []
+
+    def poll(now_sim: float) -> None:
+        spoken.extend(scheduler.tick(store, now_sim))
+
+    store.ingest(
+        [
+            _br_observation(obs_id="OBS_A", t_sim=0.0, range_m=1000.0),
+            _br_observation(obs_id="OBS_B", t_sim=0.0, range_m=2000.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    poll(0.0)
+    poll(3.0)
+    assert spoken == ["Ural truck.", "Ural truck."]
+
+    store.ingest(
+        [_br_observation(obs_id="OBS_C", t_sim=6.0, range_m=1500.0)],
+        now_sim=6.0,
+    )
+    store.tick(now_sim=6.0)
+    poll(6.0)
+    poll(9.0)
+    assert spoken == ["Ural truck.", "Ural truck."]  # unchanged -- C stays silent
+
+    group = Group(
+        id="GROUP_AC",
+        member_contact_ids=frozenset({"CONTACT_1", "CONTACT_3"}),
+        established_sim=12.0,
+        last_reconciled_sim=12.0,
+    )
+    store._groups._groups[group.id] = group  # type: ignore[attr-defined]
+
+    for t in (12.0, 15.0, 18.0, 21.0):
+        poll(t)
+
+    assert spoken == ["Ural truck.", "Ural truck."]  # the group adds nothing
+    assert store.groups[0].last_spoken_signature is None  # never became a candidate
+
+
 def test_simultaneously_founded_mutually_close_contacts_both_speak() -> None:
     """The real regression `plans/contact-report-flood/implementation.md`
     found against the live sortie-1004 snapshot: debug.md's own named
@@ -845,7 +909,24 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     exclusion). This fixture's four lines come out exactly as before.
     Confirmed by actually running this fixture against the implementation,
     not predicted from the mechanism alone. This test pins the real,
-    current behaviour."""
+    current behaviour.
+
+    **Line 3's wording changed under `plans/redundant-group-disclosure/
+    plan.md` (2026-10-05) -- confirmed by running this fixture, not
+    guessed.** The five-member group's own first disclosure used to
+    always speak the full roster ("Three infantry, BTR-70 and truck, 1
+    o'clock, very close."), even though one of its members (`CONTACT_2`,
+    the 1-o'clock infantry) had already been individually announced as
+    line 1. That line's own `OP_INFANTRY` classification is now a *known*
+    class by the time the group first speaks -- the identical "one more
+    of an already-known class makes no difference" rule branch 4 already
+    applies to a later arrival (`render_group_disclosure`'s own
+    docstring, branch 1's partially-covered sub-case) -- so the other two
+    infantry (`CONTACT_1`/`CONTACT_3`, never themselves spoken, grouped
+    from the instant they were founded) are silently folded in rather than
+    re-announced, and the group's opening line now names only what is
+    genuinely new relative to what was already said: the BTR-70 and the
+    truck."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
@@ -1010,7 +1091,7 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     assert spoken == [
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
-        "Three infantry, BTR-70 and truck, 1 o'clock, very close.",
+        "BTR-70 and truck, in 1 o'clock group.",
         "unit 12 o'clock, very close is truck.",
     ]
 
