@@ -7,20 +7,25 @@ Not part of the pipeline; run once to produce the fixed numbers written into
 this at build time (per the plan's "Affected Modules / Files" entry for
 that doc).
 
-Padding: `RegionDefinition.to_wgs84_envelope()` already returns
-`syria-full`'s own padded (+30 km/side, see `build.region.REGIONS`
-`"syria-full"` comment) DCS-space corners converted to lat/lon -- that
-padding absorbs DCS's own point-cloud-derived extent uncertainty, not the
-OSM clip's own margin. This script adds a further +0.3 degree pad on every
-side (~30-33 km at these latitudes: 1 deg latitude ~111 km, 1 deg longitude
-~91 km at 35 deg N) so `osmium extract`'s bbox comfortably contains the
-built region's own clip window with room to spare -- a way whose nodes
-straddle the *region's* edge should never also straddle the *extract's*
-edge, which is what `--strategy=smart` (see Design Decision 1) protects
-within the extract, not what protects the extract's own boundary from
-being flush with the region it needs to cover.
+Padding: `RegionDefinition.to_wgs84_envelope()` already returns the named
+region's own padded (+30 km/side, see `build.region.REGIONS`'s per-region
+comments) DCS-space corners converted to lat/lon -- that padding absorbs
+DCS's own point-cloud-derived extent uncertainty, not the OSM clip's own
+margin. This script adds a further +0.3 degree pad on every side (~30-33 km
+at these latitudes: 1 deg latitude ~111 km, 1 deg longitude ~91 km at 35
+deg N) so `osmium extract`'s bbox comfortably contains the built region's
+own clip window with room to spare -- a way whose nodes straddle the
+*region's* edge should never also straddle the *extract's* edge, which is
+what `--strategy=smart` (see Design Decision 1) protects within the
+extract, not what protects the extract's own boundary from being flush
+with the region it needs to cover.
+
+Takes an optional `region_name` positional CLI arg (default `"syria-full"`,
+keeping the existing invocation working) so a second theatre's region can
+reuse this script without a copy (multi-theatre-afghanistan plan, Stage 1).
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -33,7 +38,16 @@ _CLIP_PAD_DEG = 0.3
 
 
 def main() -> None:
-    region = REGIONS["syria-full"]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "region_name",
+        nargs="?",
+        default="syria-full",
+        help="REGIONS key to derive the clip bbox for (default: syria-full)",
+    )
+    args = parser.parse_args()
+
+    region = REGIONS[args.region_name]
     south, west, north, east = region.to_wgs84_envelope()
 
     clip_south = south - _CLIP_PAD_DEG
@@ -42,7 +56,7 @@ def main() -> None:
     clip_east = east + _CLIP_PAD_DEG
 
     print(
-        f"syria-full envelope (south, west, north, east): "
+        f"{args.region_name} envelope (south, west, north, east): "
         f"{south:.4f}, {west:.4f}, {north:.4f}, {east:.4f}"
     )
     print(

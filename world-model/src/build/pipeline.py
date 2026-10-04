@@ -314,7 +314,7 @@ def build_region(
             ),
         )
         with _stage("towns.lua", 1):
-            towns = parse_towns_lua(towns_lua_path)
+            towns = parse_towns_lua(towns_lua_path, region.theatre)
             town_features = ingest_towns(
                 towns,
                 region.theatre,
@@ -339,7 +339,7 @@ def build_region(
             ),
         )
         with _stage("beacons.lua", 2):
-            beacons = parse_beacons_lua(beacons_lua_path)
+            beacons = parse_beacons_lua(beacons_lua_path, region.theatre)
             beacon_features, beacon_stats = ingest_beacons(
                 beacons,
                 region.centre_x,
@@ -553,7 +553,7 @@ def build_region(
             roadnet_source_id = insert_source(
                 conn,
                 Source(
-                    name="Syria.routes",
+                    name=routes_path.name,
                     fetched_at=built_at,
                     raw_path=str(routes_path),
                     attribution="DCS terrain module (Eagle Dynamics)",
@@ -562,7 +562,7 @@ def build_region(
                     "research/2026-09-04-m5-roadnet-byte-decode.md.",
                 ),
             )
-            with _stage(f"Syria.routes ({routes_path.stat().st_size} bytes)", 4):
+            with _stage(f"{routes_path.name} ({routes_path.stat().st_size} bytes)", 4):
                 road_features, roadnet_stats = ingest_roadnet(
                     routes_path,
                     region.centre_x,
