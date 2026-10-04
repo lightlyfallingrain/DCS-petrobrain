@@ -50,8 +50,8 @@ _PROBE_SPACING_M = 100.0
 
 @pytest.fixture(autouse=True)
 def _patch_parsers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("build.pipeline.parse_towns_lua", lambda path: [])
-    monkeypatch.setattr("build.pipeline.parse_beacons_lua", lambda path: [])
+    monkeypatch.setattr("build.pipeline.parse_towns_lua", lambda path, theatre: [])
+    monkeypatch.setattr("build.pipeline.parse_beacons_lua", lambda path, theatre: [])
 
 
 def _build_base(tmp_path: Path) -> Path:

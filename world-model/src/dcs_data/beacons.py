@@ -38,13 +38,23 @@ beacons.py spec):
 Some beacon types (RSBN, PRMG_LOCALIZER/GLIDESLOPE) carry a `channel` field
 instead of `frequency` -- `frequency` is therefore optional and `None` when
 absent, never guessed or defaulted to zero.
+
+`EXPECTED_BEACON_COUNT` is keyed per theatre (multi-theatre-afghanistan
+plan, Stage 1), same reasoning and same counts source as
+`dcs_data.towns.EXPECTED_TOWN_COUNT` -- see that module's docstring.
+`parse_beacons_lua` takes an explicit `theatre` argument and raises
+`ValueError` (not `KeyError`) naming the theatre if it has no entry yet.
 """
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-EXPECTED_BEACON_COUNT = 151
+EXPECTED_BEACON_COUNT: dict[str, int] = {
+    "Syria": 151,
+    "Afghanistan": 49,
+    "Caucasus": 164,
+}
 
 _TABLE_START = "beacons = {"
 _BLOCK_START = "{"
@@ -158,14 +168,21 @@ def _parse_block(block_text: str) -> BeaconEntry:
     )
 
 
-def parse_beacons_lua(path: Path) -> list[BeaconEntry]:
+def parse_beacons_lua(path: Path, theatre: str) -> list[BeaconEntry]:
     """Parse a `beacons.lua` file at `path` into a list of `BeaconEntry`.
 
     Raises `ValueError` if a block inside the `beacons = { ... }` table is
     missing a required field, or if `beaconId` matches neither the
     `airfield<N>_<M>` nor `world_<N>` form. Raises `ValueError` if the
-    parsed entry count does not exactly equal `EXPECTED_BEACON_COUNT`.
+    parsed entry count does not exactly equal
+    `EXPECTED_BEACON_COUNT[theatre]`. Raises `ValueError` (not `KeyError`)
+    naming `theatre` if it has no entry in `EXPECTED_BEACON_COUNT` yet.
     """
+    if theatre not in EXPECTED_BEACON_COUNT:
+        raise ValueError(
+            f"No EXPECTED_BEACON_COUNT entry for theatre {theatre!r} -- add "
+            "one before parsing this theatre's beacons.lua"
+        )
     entries: list[BeaconEntry] = []
     in_table = False
     block_lines: list[str] | None = None
@@ -197,9 +214,10 @@ def parse_beacons_lua(path: Path) -> list[BeaconEntry]:
             "beacons.lua ended with an unterminated block (no matching '};')"
         )
 
-    if len(entries) != EXPECTED_BEACON_COUNT:
+    expected = EXPECTED_BEACON_COUNT[theatre]
+    if len(entries) != expected:
         raise ValueError(
-            f"Expected {EXPECTED_BEACON_COUNT} beacons.lua entries, found "
+            f"Expected {expected} beacons.lua entries, found "
             f"{len(entries)} -- format or content may have changed"
         )
     return entries

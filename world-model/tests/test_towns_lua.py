@@ -50,7 +50,7 @@ def _write_fixture(tmp_path: Path, entries: list[str]) -> Path:
 def _patch_expected_count(monkeypatch: pytest.MonkeyPatch, n: int) -> None:
     import dcs_data.towns as towns_module
 
-    monkeypatch.setattr(towns_module, "EXPECTED_TOWN_COUNT", n)
+    monkeypatch.setitem(towns_module.EXPECTED_TOWN_COUNT, "Syria", n)
 
 
 def test_parse_towns_lua_parses_all_entries(
@@ -59,7 +59,7 @@ def test_parse_towns_lua_parses_all_entries(
     _patch_expected_count(monkeypatch, len(_SMALL_FIXTURE_ENTRIES))
     fixture_path = _write_fixture(tmp_path, _SMALL_FIXTURE_ENTRIES)
 
-    entries = parse_towns_lua(fixture_path)
+    entries = parse_towns_lua(fixture_path, "Syria")
 
     assert len(entries) == len(_SMALL_FIXTURE_ENTRIES)
 
@@ -70,7 +70,7 @@ def test_parse_towns_lua_parses_fields_exactly(
     _patch_expected_count(monkeypatch, len(_SMALL_FIXTURE_ENTRIES))
     fixture_path = _write_fixture(tmp_path, _SMALL_FIXTURE_ENTRIES)
 
-    entries = parse_towns_lua(fixture_path)
+    entries = parse_towns_lua(fixture_path, "Syria")
 
     assert entries[2] == TownEntry(
         name="Jablah", display_name="Jablah", lat=35.363965, lon=35.927291
@@ -85,7 +85,7 @@ def test_parse_towns_lua_duplicate_name_survives(
     _patch_expected_count(monkeypatch, len(_SMALL_FIXTURE_ENTRIES))
     fixture_path = _write_fixture(tmp_path, _SMALL_FIXTURE_ENTRIES)
 
-    entries = parse_towns_lua(fixture_path)
+    entries = parse_towns_lua(fixture_path, "Syria")
 
     yeniyurt_entries = [e for e in entries if e.name == "Yeniyurt"]
     assert len(yeniyurt_entries) == 3
@@ -107,13 +107,26 @@ def test_parse_towns_lua_raises_on_malformed_entry(
     fixture_path = _write_fixture(tmp_path, malformed_entries)
 
     with pytest.raises(ValueError, match="Unparseable"):
-        parse_towns_lua(fixture_path)
+        parse_towns_lua(fixture_path, "Syria")
 
 
 def test_parse_towns_lua_raises_on_count_mismatch(tmp_path: Path) -> None:
-    # Real EXPECTED_TOWN_COUNT is 1182; this fixture has 7 entries, so the
-    # count assertion must fire without needing a malformed line.
+    # Real EXPECTED_TOWN_COUNT["Syria"] is 1182; this fixture has 7
+    # entries, so the count assertion must fire without needing a
+    # malformed line.
     fixture_path = _write_fixture(tmp_path, _SMALL_FIXTURE_ENTRIES)
 
     with pytest.raises(ValueError, match="Expected 1182"):
-        parse_towns_lua(fixture_path)
+        parse_towns_lua(fixture_path, "Syria")
+
+
+def test_parse_towns_lua_raises_value_error_on_unknown_theatre(
+    tmp_path: Path,
+) -> None:
+    """A theatre with no `EXPECTED_TOWN_COUNT` entry must fail loudly with
+    a clear `ValueError` naming the theatre -- not a bare `KeyError` -- per
+    the multi-theatre-afghanistan plan's Stage 1."""
+    fixture_path = _write_fixture(tmp_path, _SMALL_FIXTURE_ENTRIES)
+
+    with pytest.raises(ValueError, match="Nevada"):
+        parse_towns_lua(fixture_path, "Nevada")

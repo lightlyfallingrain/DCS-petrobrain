@@ -55,9 +55,9 @@ _TEST_REGION = RegionDefinition(
 def _patch_parsers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "build.pipeline.parse_towns_lua",
-        lambda path: [_ALEPPO_TOWN, _FAR_AWAY_TOWN],
+        lambda path, theatre: [_ALEPPO_TOWN, _FAR_AWAY_TOWN],
     )
-    monkeypatch.setattr("build.pipeline.parse_beacons_lua", lambda path: [])
+    monkeypatch.setattr("build.pipeline.parse_beacons_lua", lambda path, theatre: [])
 
 
 def test_build_region_rectangular_region_without_osm_cache(tmp_path: Path) -> None:

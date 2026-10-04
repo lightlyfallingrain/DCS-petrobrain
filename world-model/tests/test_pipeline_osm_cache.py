@@ -51,8 +51,10 @@ _TEST_REGION = RegionDefinition(
 
 @pytest.fixture(autouse=True)
 def _patch_parsers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("build.pipeline.parse_towns_lua", lambda path: [_ALEPPO_TOWN])
-    monkeypatch.setattr("build.pipeline.parse_beacons_lua", lambda path: [])
+    monkeypatch.setattr(
+        "build.pipeline.parse_towns_lua", lambda path, theatre: [_ALEPPO_TOWN]
+    )
+    monkeypatch.setattr("build.pipeline.parse_beacons_lua", lambda path, theatre: [])
 
 
 def _write_fixture_osm_pbf(
