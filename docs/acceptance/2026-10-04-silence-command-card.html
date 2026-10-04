@@ -1,0 +1,383 @@
+<!doctype html>
+<title>Silence Command Sortie</title>
+<style>
+  :root {
+    --ground: #f4f2ee;
+    --panel: #ffffff;
+    --panel-2: #ebe8e2;
+    --ink: #1b1d1f;
+    --ink-dim: #55585c;
+    --line: #d8d4cc;
+    --amber: #b5680a;
+    --amber-ink: #6f3f04;
+    --record: #1f6f74;
+    --record-bg: #e4f0f1;
+    --danger: #a3271f;
+    --danger-bg: #f6e6e3;
+    --mono-bg: #26241f;
+    --mono-ink: #f0ead8;
+    --mono-border: #3a3730;
+    color-scheme: light dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a;
+      --panel: #1c1f24;
+      --panel-2: #23262c;
+      --ink: #ece8de;
+      --ink-dim: #a3a099;
+      --line: #34373d;
+      --amber: #e2a13d;
+      --amber-ink: #f3c874;
+      --record: #6fd3d9;
+      --record-bg: #17302f;
+      --danger: #e2695f;
+      --danger-bg: #33201e;
+      --mono-bg: #0f1113;
+      --mono-ink: #e9e4d6;
+      --mono-border: #33363c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a;
+    --panel: #1c1f24;
+    --panel-2: #23262c;
+    --ink: #ece8de;
+    --ink-dim: #a3a099;
+    --line: #34373d;
+    --amber: #e2a13d;
+    --amber-ink: #f3c874;
+    --record: #6fd3d9;
+    --record-bg: #17302f;
+    --danger: #e2695f;
+    --danger-bg: #33201e;
+    --mono-bg: #0f1113;
+    --mono-ink: #e9e4d6;
+    --mono-border: #33363c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    padding-inline: 16px;
+  }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  h1, h2, h3, .display {
+    font-family: "Barlow Condensed", "Segoe UI Condensed", system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-wrap: balance;
+  }
+  code, pre, .mono {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 64px; }
+
+  .topbar {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    font-weight: 700;
+  }
+  .branch-name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 1.05rem;
+    color: var(--amber-ink);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 8px;
+    display: inline-block;
+  }
+  .branch-note { color: var(--ink-dim); font-size: 0.92rem; }
+
+  pre.cmd {
+    background: var(--mono-bg);
+    color: var(--mono-ink);
+    border: 1px solid var(--mono-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    margin: 8px 0 0;
+    white-space: pre;
+  }
+
+  h1.title { font-size: clamp(1.9rem, 5vw, 2.6rem); margin: 0 0 4px; font-weight: 800; }
+  .subtitle { color: var(--ink-dim); font-size: 1rem; margin: 0 0 22px; max-width: 62ch; }
+
+  section.block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px 20px;
+    margin-bottom: 18px;
+  }
+
+  h2 { font-size: 1.15rem; margin: 0 0 10px; color: var(--ink); font-weight: 700; }
+  h2 .num { color: var(--amber); margin-right: 6px; }
+  p { margin: 0 0 10px; }
+  .lede { color: var(--ink-dim); font-size: 0.95rem; }
+
+  .prize {
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 0 1px var(--amber) inset;
+  }
+  .prize .badge {
+    display: inline-block;
+    background: var(--amber);
+    color: #1b1305;
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 800;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    margin-bottom: 10px;
+  }
+
+  .row { margin: 12px 0; }
+  .row-label {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 4px;
+  }
+  .row.expect .row-label { color: var(--amber); }
+  .row.record .row-label { color: var(--record); }
+
+  .line {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 7px;
+    font-size: 0.92em;
+  }
+  .line.danger { color: var(--danger); background: var(--danger-bg); border-color: var(--danger); }
+  .line.good { color: var(--record); background: var(--record-bg); border-color: var(--record); }
+
+  .checks { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--record-bg);
+    border: 1px solid var(--record);
+    border-radius: 8px;
+    padding: 9px 11px;
+  }
+  .check input[type="checkbox"] {
+    margin-top: 3px;
+    width: 17px;
+    height: 17px;
+    accent-color: var(--record);
+    flex: 0 0 auto;
+  }
+  .check label { font-size: 0.95rem; cursor: pointer; }
+
+  .not-built {
+    border-left: 4px solid var(--danger);
+    background: var(--danger-bg);
+  }
+  .not-built h2 { color: var(--danger); }
+
+  .quirk { border-left: 4px solid var(--amber); }
+
+  .pass { border-left: 4px solid var(--amber); }
+
+  .bringback {
+    background: var(--panel-2);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-top: 6px;
+  }
+  .bringback ol { margin: 8px 0 0; padding-left: 1.3em; }
+  .bringback li { margin-bottom: 6px; }
+  .invite {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  :root:not([data-theme="light"]) .invite,
+  :root[data-theme="dark"] .invite { color: var(--danger); }
+
+  footer { color: var(--ink-dim); font-size: 0.82rem; margin-top: 30px; text-align: center; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="eyebrow">Checkout before you fly</div>
+    <div><span class="branch-name">feature/silence-command</span> <span class="branch-note">— not merged yet; DoD/Reviewer/Security have all passed, your acceptance call is what's left</span></div>
+    <pre class="cmd">git checkout feature/silence-command &amp;&amp; git pull</pre>
+  </div>
+
+  <h1 class="title">Silence Command Sortie</h1>
+  <p class="subtitle">You asked for a way to tell Petrovich to go quiet — friendly airbase, radio
+    traffic — until your next command. He now says <span class="line good">"Quiet."</span> once,
+    then nothing at all, including danger calls, until you give him a real command. Static review
+    can't tell you whether the recogniser hears you, whether one word is the right amount, or
+    whether absolute silence still feels right once a threat actually shows up while you're muted.</p>
+
+  <section class="block">
+    <h2>Setup</h2>
+    <p class="lede">From <code class="line">run-scripts/</code> on the Mac, Windows collector
+      already running:</p>
+    <pre class="cmd">cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text.sh</pre>
+    <p class="lede" style="margin-top:10px;"><strong>Describing what this script does on this
+      branch, not quoting it as gospel</strong> — you have your own local edits to these scripts,
+      so check your own copy. As committed, <code class="line">run-crew-text.sh</code> runs
+      body-layer's logger with <code class="line">--speech-audio --speech-input --crew-text
+      --f10-commands --audio-adapter-url http://127.0.0.1:7795 --brain-client http --brain-url
+      http://127.0.0.1:7796 --speech-log ~/dcs-speech.jsonl</code>, forwarding anything extra you
+      pass it. Keep <code class="line">--speech-log</code> — it's the only record of what the
+      recogniser actually heard if a phrase misfires.</p>
+  </section>
+
+  <section class="block prize">
+    <span class="badge">Unbenched — the real question tonight</span>
+    <h2>The three phrases</h2>
+    <p><span class="line">"silence"</span> &nbsp; <span class="line">"be quiet"</span> &nbsp;
+      <span class="line">"shut up"</span></p>
+    <p class="lede">No recordings exist of you saying any of these — unlike the F10 vocabulary,
+      which went through a full accent-adapted benchmark, these three were only checked against
+      the matcher's text logic. Recognition accuracy on your own voice is unmeasured.</p>
+    <div class="row expect">
+      <div class="row-label">Record</div>
+      <p>Which phrasing the recogniser actually resolves to <span class="line">silence</span>, and
+        whether any needed repeating. That's cheap for you to notice and expensive for anyone else
+        to guess at from a transcript.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>What to expect</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Say one of the three phrases.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p><span class="line good">"Quiet."</span> — one word — then nothing else at all until your
+        next command. <strong>This includes danger calls.</strong> If a threat appears while
+        you're silenced, he will not warn you about it — your own choice when this was built,
+        worth remembering at the exact moment you'd otherwise expect to hear him. Text/overlay
+        readouts keep working throughout; only the spoken audio goes quiet.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c1" data-k="c1"><label for="c1">Ack was one word, then genuine silence — nothing leaked through, including a threat if one appeared.</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>What ends it</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>While silenced, give a real command (scan, watch, cancel — anything that actually does
+        something). Separately, talk over him with ordinary chatter that is <em>not</em> a
+        command.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>The real command ends silence and is itself heard normally. The ordinary chatter — the
+        radio-traffic case this command exists for — changes nothing; he stays silenced.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c2" data-k="c2"><label for="c2">A real command ended silence and was itself heard.</label></div>
+      <div class="check"><input type="checkbox" id="c3" data-k="c3"><label for="c3">Unresolved chatter did NOT end silence.</label></div>
+    </div>
+  </section>
+
+  <section class="block quirk">
+    <h2>One quirk — not a bug if you hear it</h2>
+    <p><span class="line">"stop"</span> (the existing <em>stop talking</em> command) also ends
+      silence, because it's a dispatched command like any other — even though its own job is
+      different ("stop talking right now" vs. "say nothing from here on"). Harmless: nothing is
+      queued to interrupt if nothing was ever spoken while silenced. If you hit
+      <span class="line">"stop"</span> while muted and he comes back, that's expected.</p>
+  </section>
+
+  <section class="block not-built">
+    <h2>Not wired — don't expect this tonight</h2>
+    <p><strong>No DCS F10 radio-menu button for <code class="line">silence</code>.</strong> Voice
+      is the only way to reach it today. The dispatcher already accepts the token generically —
+      an F10 entry later is a Hook-script-only change.</p>
+  </section>
+
+  <section class="block pass">
+    <h2>Pass criteria</h2>
+    <p>All three phrases are reachable in some form, the ack is heard once and only once per
+      <span class="line">silence</span>, nothing is spoken while silenced — including any threat
+      that appears — and any real command, including an accidental <span class="line">"stop"</span>,
+      brings him back.</p>
+  </section>
+
+  <div class="bringback">
+    <h2 style="margin-bottom:6px;">Bring back</h2>
+    <ol>
+      <li>Which of the three phrases did the recogniser actually catch, and did any need
+        repeating?</li>
+      <li>Did one word of acknowledgement feel like the right amount, too little, or too much?</li>
+      <li>Did a threat actually appear while you were silenced — and if so, now that you've felt
+        it in the seat, does absolute silence still feel like the right call, or would you want
+        urgent callouts to break through next time?</li>
+      <li>Anything that surprised you.</li>
+    </ol>
+    <div class="invite">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>docs/acceptance/2026-10-04-silence-command.md is the source of truth — this card is generated from it.</footer>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'silence-command-sortie-2026-10-04';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+})();
+</script>
