@@ -1485,6 +1485,119 @@ def test_render_group_disclosure_returns_none_when_membership_has_collapsed() ->
     assert render_group_disclosure(store, stale_group, now_sim=0.0) is None
 
 
+# --- render_group_disclosure's first-disclosure already-reported gate
+# (plans/redundant-group-disclosure/plan.md) ---------------------------------
+
+
+def test_render_group_disclosure_all_members_already_reported_is_silent() -> None:
+    """Every current member's own content already reached the pilot some
+    other way (the caller-supplied `already_reported_contact_ids` covers
+    the whole group) -- the grouping itself is never news on its own
+    (user direction 2026-10-05, "no 'those are together', prioritize less
+    speaking"), so the group's first disclosure says nothing at all."""
+    store, group = _cohering_group_store(
+        [("OP_ARMORED", 2), ("OP_ARMORED", 2), ("OP_TRUCK", 2)]
+    )
+    all_ids = frozenset(group.member_contact_ids)
+
+    speech = render_group_disclosure(
+        store, group, now_sim=0.0, already_reported_contact_ids=all_ids
+    )
+
+    assert speech is None
+
+
+def test_render_group_disclosure_one_unreported_member_speaks_only_the_new_part() -> (
+    None
+):
+    """Two members already reported, one never-reported truck -- the
+    opening line names only the truck, through the identical
+    "worth-announcing" filter a later arrival already goes through
+    (branch 4), not the whole five-word roster."""
+    store, group = _cohering_group_store(
+        [("OP_ARMORED", 2), ("OP_ARMORED", 2), ("OP_TRUCK", 2)]
+    )
+    truck_id = next(
+        c.id for c in store.contacts if c.classification.value == "OP_TRUCK"
+    )
+    already_reported = frozenset(group.member_contact_ids - {truck_id})
+
+    speech = render_group_disclosure(
+        store, group, now_sim=0.0, already_reported_contact_ids=already_reported
+    )
+
+    assert speech is not None
+    assert speech.text == "Truck, in the group."
+
+
+def test_render_group_disclosure_already_reported_set_ignored_once_group_has_spoken() -> (
+    None
+):
+    """`already_reported_contact_ids` only ever gates branch 1 (never
+    spoken) -- scope to the first disclosure. A group that has already
+    spoken once and now sees a genuinely new arrival still speaks that
+    arrival's own delta exactly as before (same fixture/geometry as
+    `test_render_group_disclosure_new_class_arrival_is_a_delta`), even if
+    the caller passes a (here, nonsensical) already-reported set covering
+    every current member alongside it."""
+    store = _store_with_direct_contacts(
+        [
+            _direct_contact(
+                "CONTACT_1",
+                0.0,
+                0.0,
+                class_raw="OP_TRUCK",
+                level=SpecificityLevel.CLASS,
+            ),
+            _direct_contact(
+                "CONTACT_2",
+                10.0,
+                0.0,
+                class_raw="OP_TRUCK",
+                level=SpecificityLevel.CLASS,
+            ),
+        ]
+    )
+    group = store.groups[0]
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    new_armor = _direct_contact(
+        "CONTACT_3", 20.0, 0.0, class_raw="OP_ARMORED", level=SpecificityLevel.CLASS
+    )
+    store._contacts[new_armor.id] = new_armor  # type: ignore[attr-defined]
+    store._groups.reconcile(list(store._contacts.values()), now_sim=1.0)  # type: ignore[attr-defined]
+    group = store.groups[0]
+
+    speech = render_group_disclosure(
+        store,
+        group,
+        now_sim=1.0,
+        already_reported_contact_ids=frozenset(group.member_contact_ids),
+    )
+
+    assert speech is not None
+    assert speech.text == "Armor, in the group."
+
+
+def test_render_group_disclosure_no_members_already_reported_still_speaks_in_full() -> (
+    None
+):
+    """A genuinely new group -- nothing among its members was already
+    reported (an explicit empty set, not just the `None` default every
+    other test in this module relies on) -- still gets the ordinary full
+    disclosure, unchanged."""
+    store, group = _cohering_group_store(
+        [("OP_ARMORED", 2), ("OP_ARMORED", 2), ("OP_TRUCK", 2)]
+    )
+
+    speech = render_group_disclosure(
+        store, group, now_sim=0.0, already_reported_contact_ids=frozenset()
+    )
+
+    assert speech is not None
+    assert speech.text == "Two armor and truck."
+
+
 # --- render_group_disclosure's delta taxonomy (plans/group-cohesion-redesign/
 # plan.md §4) ------------------------------------------------------------
 
