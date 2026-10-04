@@ -38,6 +38,17 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   noticed. Also flyable on the same sortie: `feature/silence-command` (merged, already on `main`)
   — the manual half of quieting the cockpit, this fix being the automatic half.
 
+- [ ] **`fix/redundant-group-disclosure` — DoD PASSED on fixtures 2026-10-05, not yet merged, not
+  yet flown.** Silences a `belief.groups.Group`'s first disclosure when every member was already
+  individually reported (directly or via the flood fix's merge-echo above), and speaks only the
+  unreported delta otherwise. **Rides the same sortie as `fix/contact-report-flood` above rather
+  than needing a separate flight** — both fixes change what the pilot hears about the same
+  contact/group stream, on the same cockpit, so one flight settles both: does the stream read as
+  signal rather than noise, and does anything go unreported that should have been (the
+  over-suppression risk direction both fixes share). Acceptance card published alongside DoD
+  sign-off; add its ask to the already-pending contact-report-flood sortie rather than scheduling
+  a second one.
+
 - [ ] **`fix/confirm-band-affirmatives` — the confirm band was unanswerable in the air; fixed and
   merged 2026-09-28 (`583d786`), unflown.** **Merged before its acceptance flight at user
   direction** — *"so many things at this stage are intertwined that it's better to test to current

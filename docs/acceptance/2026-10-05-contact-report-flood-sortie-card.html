@@ -264,6 +264,7 @@
     <div class="eyebrow">Checkout before you fly</div>
     <div><span class="branch-name">fix/contact-report-flood</span> <span class="branch-note">— not merged yet; Reviewer and Security have both approved, your acceptance call is what's left</span></div>
     <pre class="cmd">git checkout fix/contact-report-flood &amp;&amp; git pull</pre>
+    <div class="branch-note"><strong>Added 2026-10-05:</strong> <span class="branch-name">fix/redundant-group-disclosure</span> rides this same sortie (DoD passed, not yet merged) — a group's first disclosure now stays quiet about anything you already heard individually. One flight covers both. If both have merged by the time you fly, check out <span class="branch-name">main</span> instead.</div>
   </div>
 
   <h1 class="title">Contact-Report Flood Sortie</h1>
@@ -410,6 +411,27 @@
     </div>
   </section>
 
+  <section class="block">
+    <h2><span class="num">5a</span>A group's opening line doesn't repeat what you already heard</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Watch a group form from contacts you've already individually heard about — e.g. you heard
+        "infantry, 1 o'clock" and "armor, 1 o'clock, is BTR-70" separately, and a truck then joins
+        them into one group.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>The group's first line names only the genuinely new part (e.g. "BTR-70 and truck, in
+        1 o'clock group" when the truck is what's new) — not a full re-read of the whole roster
+        including things you already heard individually. If every member was already individually
+        reported, the group's opening line should be silent entirely.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c6" data-k="c6"><label for="c6">A group's first disclosure never repeated something I was sure I'd already heard individually.</label></div>
+      <div class="check"><input type="checkbox" id="c7" data-k="c7"><label for="c7">A group didn't go silent on formation when I'd expect at least the new part.</label></div>
+    </div>
+  </section>
+
   <section class="block surprising">
     <h2><span class="num">5</span>Listen for a missed split</h2>
     <div class="row">
@@ -444,6 +466,8 @@
         "silence" less than usual?</li>
       <li>The detection-trace and belief-truth logs from this flight, so the real suppression
         count can be measured against the 17/34 estimate.</li>
+      <li>Did a group's opening line ever repeat something already heard individually, or go
+        silent when you expected at least a partial line (item 5a)?</li>
     </ol>
     <div class="invite">Anything that surprises you is worth more than anything on this list.</div>
   </div>
