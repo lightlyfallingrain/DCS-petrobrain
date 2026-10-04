@@ -1754,6 +1754,21 @@ def test_tick_without_ownship_is_a_no_op_for_engagement() -> None:
 # --- Eighth block: group reconciliation (plans/group-reporting/plan.md) ----
 
 
+def test_contact_looks_up_by_id() -> None:
+    """`ContactStore.contact` -- `plans/contact-report-flood/plan.md` Stage
+    1's named lookup, added for `belief.callouts.CalloutScheduler`'s
+    merge-echo suppression check."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+
+    assert store.contact(contact_id) is store.contacts[0]
+    assert store.contact("CONTACT_NONEXISTENT") is None
+
+
 def test_tick_reconciles_group_membership_for_a_cohering_trio() -> None:
     """`ContactStore.tick`'s eighth, cross-contact block wires `belief.
     groups.GroupStore.reconcile` -- three tightly-spaced contacts cohere

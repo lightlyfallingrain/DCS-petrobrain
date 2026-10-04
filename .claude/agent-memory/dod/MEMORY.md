@@ -14,3 +14,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Recurring: multi-round threshold widening](project_recurring_multiround_threshold_widening.md) — widening a fixed set/threshold/window tends to take several rounds, each caught only by running the real subsystem, not by inspection.
 - [Current cadence: one security pass per feature](project_current_cadence_one_security_pass_per_feature.md) — under the 2026-09-24 cadence, a missing security-plan-review.md is expected for ANY feature, not just change-request fixes.
 - [Inspect tool drifted from real pipeline](project_inspect_tool_drifted_from_real_pipeline.md) — a dev `tools/` script can silently stop calling the real pipeline function it claims to visualize; check that at DoD.
+
+- [Recurring: approved plan wrong on real data](project_recurring_approved_plan_wrong_on_real_data.md) — 2nd occurrence this week (contact-report-flood, geomorphons perf); consider a real-data check earlier than Implementer.

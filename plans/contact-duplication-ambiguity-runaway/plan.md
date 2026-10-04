@@ -27,6 +27,13 @@ existing half-life table rather than as a new ad hoc timeout — see the new "De
 continuity must expire" subsection below, and the corresponding Affected Modules / Implementation
 Plan / Risks updates.
 
+
+> **Still open, noted 2026-10-04.** `fix/contact-report-flood` found a fourth trigger for this
+> same engine — a gaze-sweep merge abandoning the identities it does not inherit, so the same
+> vehicles are re-founded under fresh ids — and deliberately muted only the spoken first-report
+> of the echo rather than changing `ContactStore.ingest`'s ambiguity rule. The root policy this
+> plan is about is untouched; see `plans/contact-report-flood/plan.md`.
+
 ### Decision
 
 **Primary fix, generalized: object-permanence correlation via `object_id`, for both perception

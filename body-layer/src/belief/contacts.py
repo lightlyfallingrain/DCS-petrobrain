@@ -731,6 +731,16 @@ class ContactStore:
         delegates to `belief.groups.GroupStore.group_for_contact`."""
         return self._groups.group_for_contact(contact_id)
 
+    def contact(self, contact_id: str) -> Contact | None:
+        """Named lookup of one `Contact` by id, or `None` if it does not
+        exist -- `plans/contact-report-flood/plan.md` Stage 1. Nothing
+        outside `ingest`/`_resolve_continuity` could resolve an id back to
+        a `Contact` from outside this module before this; added for
+        `belief.callouts.CalloutScheduler`'s merge-echo suppression check,
+        which needs to look up *other* contacts than the one an event
+        already names."""
+        return self._contacts.get(contact_id)
+
     def mark_group_spoken(
         self,
         group_id: str,

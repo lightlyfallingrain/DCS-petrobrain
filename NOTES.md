@@ -119,6 +119,21 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
   own effect size independently, not just that its guard never trips (`fix/landform-relief-gate`,
   2026-10-04).
 
+- **An approved plan can be wrong in a way only real data shows.** `contact-report-flood`'s plan
+  specified a `CONTACT_DETECTED` suppression check ("suppress if any other not-yet-`lost`,
+  plausibly-same contact exists") that reads correctly and passed Architect review. Implemented
+  literally, it has a failure mode no synthetic fixture caught: when N contacts are founded in the
+  *same poll* and are pairwise plausibly-same, each sees every other as a live peer and suppresses
+  — a 4-vehicle cluster founded together produced zero spoken lines, directly violating the plan's
+  own stated acceptance bound. Found only by running the real scheduler against a real sortie
+  snapshot; the fix (exclude same-poll peers) cost one boolean clause. General shape: any "does
+  another live X already exist" dedup check scored once per batch must explicitly exclude peers
+  from the *same* batch unless the guarded-against mechanism can originate within one batch — a
+  hand-picked fixture with contacts founded on different polls will never exercise this. Second
+  time in one week real data overturned a design that had already passed review (see the
+  geomorphons deviation-check entry above) — a pattern worth treating as recurring rather than
+  isolated (`plans/contact-report-flood/plan.md`, `implementation.md`).
+
 ## Type Checking & Python Conventions
 
 - **`float ** float` returns `Any` under `mypy --strict` — use `math.pow()` instead.** The `**` exponentiation operator's overloads admit a `complex` result in general, so mypy cannot narrow the return type to `float` even when both operands are `float` and the result is mathematically `float`. Solution: `math.pow(0.5, x)` has an unambiguous `float -> float` signature in typeshed and passes strict checking without surprises. Lesson: any future exponentiation in this codebase should use `math.pow()` proactively rather than triggering a `no-any-return` error later (BL-3 implementation note).

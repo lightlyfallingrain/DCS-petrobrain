@@ -126,3 +126,5 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Landform geomorphons perf fix round3 approved](project_landform_geomorphons_perf_fix_round3_approved.md) — APPROVED clean; subset-of-candidates safety arg needs subset-ness not exactness; re-derive empirical claims on different inputs; watch macOS ru_maxrss units.
 - [Silence command approved](project_silence_command_approved.md) — APPROVED clean; single-choke-point and suppressed-not-deferred claims re-verified by grep/read, not trust; stop_talking-also-clears-silence gap logged as optional only.
 - [Landform relief gate review](project_landform_relief_gate_review.md) — APPROVED clean; reconstructed old windowed deviation check to verify regression test wasn't vacuous; caught ROADMAP.md's bug direction backwards vs. implementer's own agent-memory.
+
+- [Contact report flood review](project_contact_report_flood_review.md) — APPROVED W/ MINOR FIXES; verify a deviation's "always later-founded" claim by tracing the state machine, not trusting prose; staging deliverable in plan.md not satisfied by implementation.md prose alone.

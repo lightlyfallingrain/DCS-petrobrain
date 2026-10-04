@@ -416,14 +416,13 @@ def test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken(
     # position` is instead derived from `bearing_deg`/`range_m` against
     # `ownship_at_observation`, which both observations share (bearing 0,
     # range 1000 m, ownship at the origin), so OBS_A and OBS_B actually
-    # fold to the *same* fused position. That makes this a real,
-    # legitimately-cohering pair (0 m apart) -- not the two-contact
-    # cohesion backstop's concern (`belief.groups.GROUP_REPORTING_
-    # COHESION_GAP_UNIT_WIDTHS`, which only rescues a pair that is not
-    # actually close) -- so the workaround below still earns its place; it
-    # isolates this test's own vanished-candidate scenario from group
-    # disclosure, exactly as before (`tests/test_groups.py` already covers
-    # group formation on its own).
+    # fold to the *same* fused position (0 m apart). That coincidence is
+    # harmless for `plans/contact-report-flood/plan.md` Stage 1's merge-
+    # echo suppression too, despite being spatially plausibly-same: both
+    # are founded in the *same* poll (`t_sim=0.0`), and that check only
+    # ever compares against a *strictly earlier-founded* contact
+    # (`other.first_seen_sim < this_contact.first_seen_sim`), so neither
+    # suppresses the other here.
     store._groups._groups = {}
     vanished_id = store.contacts[0].id
     live_id = store.contacts[1].id
@@ -458,6 +457,251 @@ def test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken(
     unacked_ids = {event.contact_id for event in store.unacknowledged_events}
     assert vanished_id not in unacked_ids or live_id not in unacked_ids
     assert live_id not in {e.contact_id for e in store.unacknowledged_events}
+
+
+# --- Merge-echo CONTACT_DETECTED suppression (plans/contact-report-flood/
+# plan.md Stage 1-2) -----------------------------------------------------
+
+
+def _br_observation(
+    *,
+    obs_id: str,
+    t_sim: float,
+    bearing_deg: float = 0.0,
+    range_m: float = 1000.0,
+    classification_raw: str = "Ural truck",
+    classification_level: int = 2,
+    continues_observation_id: str | None = None,
+) -> Observation:
+    """Direct bearing/range control, unlike this file's own `_observation`
+    (which fixes `bearing_deg`/`range_m` and varies `ownship_x`/`ownship_z`
+    instead) -- needed here to reuse `tests/test_contacts.py::test_two_
+    ambiguous_candidates_create_a_new_contact_not_a_merge`'s own already-
+    proven overlapping-gate geometry (bearing 0, ranges 1000/1500/2000)
+    rather than re-deriving new numbers for the merge-echo tests below."""
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=bearing_deg,
+        range_m=range_m,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=classification_level,
+        continues_observation_id=continues_observation_id,
+    )
+
+
+def test_merge_echo_refounding_near_a_live_contact_is_not_spoken() -> None:
+    """The mechanism `debug.md`'s live trace found: two already-separate,
+    already-identified contacts (A, B) are founded and both speak, then a
+    third, ambiguous founding (C) appears between them -- `ContactStore.
+    ingest`'s own anti-guessing rule (`test_two_ambiguous_candidates_
+    create_a_new_contact_not_a_merge`'s proven geometry: A at range 1000,
+    B at range 2000, C at range 1500, all bearing 0 -- A and B are 1000 m
+    apart, just outside the ~900 m gate so neither suppresses the other,
+    while C at 500 m from each falls inside both) founds C as a *new*
+    contact rather than guessing which of A/B it continues. This is
+    exactly the merge-echo re-founding shape: C's own `CONTACT_DETECTED`
+    is suppressed because a live, plausibly-same contact (A or B) already
+    exists -- one spoken line is permanently lost here, not retried
+    (`_render_event` returning `None` adds the event to `_consumed`
+    immediately, the same one-shot treatment the pre-existing vanished-
+    candidate/duplicate-signature cases already get), collapsing what
+    would otherwise be 3 spoken lines for one patch of ground down to 2 --
+    the plan's own "at most 2, not 6" bound for the live six-vehicle
+    shape."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    spoken: list[str] = []
+
+    def poll(now_sim: float) -> None:
+        spoken.extend(scheduler.tick(store, now_sim))
+
+    store.ingest(
+        [
+            _br_observation(obs_id="OBS_A", t_sim=0.0, range_m=1000.0),
+            _br_observation(obs_id="OBS_B", t_sim=0.0, range_m=2000.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.contacts) == 2
+
+    # Two separate `tick()` calls, spaced past `busy_until_sim`'s
+    # occupancy -- only one candidate is ever rendered per call, so A and
+    # B's own `CONTACT_DETECTED` lines come out on separate polls.
+    poll(0.0)
+    poll(3.0)
+    assert spoken == ["Ural truck.", "Ural truck."]
+
+    # t=4: the ambiguous founding -- ingest resolves 2+ gate-passing
+    # candidates (A and B, both still live) and founds a third contact
+    # rather than merging into either.
+    store.ingest(
+        [_br_observation(obs_id="OBS_C", t_sim=6.0, range_m=1500.0)],
+        now_sim=6.0,
+    )
+    store.tick(now_sim=6.0)
+    assert len(store.contacts) == 3
+
+    poll(6.0)
+    poll(9.0)  # a second chance, in case the first poll only cleared occupancy
+
+    assert spoken == ["Ural truck.", "Ural truck."]  # C's founding never spoke
+
+
+def test_simultaneously_founded_mutually_close_contacts_both_speak() -> None:
+    """The real regression `plans/contact-report-flood/implementation.md`
+    found against the live sortie-1004 snapshot: debug.md's own named
+    six-vehicle cluster has four contacts (`CONTACT_3/4/5/7`) founded in
+    the *exact same poll*, and they are pairwise `contacts_plausibly_same`
+    of each other (confirmed against their real recorded believed
+    positions). Without the `other.first_seen_sim < this_contact.
+    first_seen_sim` condition in `_render_event`, every one of them sees
+    the others as live peers the instant all four exist, and all four
+    mutually suppress -- zero spoken lines for the whole cluster, directly
+    verified against this module's own `CalloutScheduler` in that
+    investigation. With the condition, a same-poll peer never suppresses
+    another: both contacts here speak, even though they are mutually
+    plausibly-same by the same gate the ambiguous-founding test above
+    uses (range 1000/1500, 500 m apart -- well inside the ~900 m gate)."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    spoken: list[str] = []
+
+    def poll(now_sim: float) -> None:
+        spoken.extend(scheduler.tick(store, now_sim))
+
+    store.ingest(
+        [
+            _br_observation(obs_id="OBS_X", t_sim=0.0, range_m=1000.0),
+            _br_observation(obs_id="OBS_Y", t_sim=0.0, range_m=1500.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.contacts) == 2
+
+    poll(0.0)
+    poll(3.0)
+
+    assert spoken == ["Ural truck.", "Ural truck."]
+
+
+def test_two_well_separated_foundings_both_speak() -> None:
+    """Control for the suppression above: two contacts founded well outside
+    the spatial gate must both be spoken -- the merge-echo check must
+    never suppress a genuinely distant, unrelated founding."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    spoken: list[str] = []
+
+    def poll(now_sim: float) -> None:
+        spoken.extend(scheduler.tick(store, now_sim))
+
+    store.ingest(
+        [_br_observation(obs_id="OBS_NEAR", t_sim=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    poll(0.0)
+
+    store.ingest(
+        [
+            _br_observation(
+                obs_id="OBS_FAR", t_sim=3.0, bearing_deg=180.0, range_m=1000.0
+            )
+        ],
+        now_sim=3.0,
+    )
+    store.tick(now_sim=3.0)
+    poll(3.0)
+
+    assert spoken == ["Ural truck.", "Ural truck."]
+
+
+def test_contact_reacquired_is_never_suppressed_by_a_nearby_contact() -> None:
+    """The scoping that keeps the "same guy is back" story audible: a
+    contact (B) that fully decays to `lost` and later reacquires under its
+    own id (via `continues_observation_id`, bypassing the ordinary gate
+    entirely -- `ContactStore._resolve_continuity`) must speak, even with
+    another live, class-compatible, spatially plausible-same contact (A)
+    nearby -- `CONTACT_REACQUIRED` is never checked by the merge-echo
+    suppression (only `CONTACT_DETECTED` is).
+
+    A and B are founded together (same gate-overlapping geometry as the
+    suppression test above: A at range 1000, B at range 1500, 500 m apart,
+    well inside the gate) so B's eventual reacquisition is a real "another
+    live contact is right here" case, not a coincidence."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    spoken: list[str] = []
+
+    def poll(now_sim: float) -> None:
+        spoken.extend(scheduler.tick(store, now_sim))
+
+    store.ingest(
+        [
+            _br_observation(obs_id="OBS_A", t_sim=0.0, range_m=1000.0),
+            _br_observation(obs_id="OBS_B", t_sim=0.0, range_m=1500.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.contacts) == 2
+
+    # Keep A alive via continuity (bypassing the gate -- a repeat
+    # observation positioned near B would otherwise risk re-triggering the
+    # same ambiguity rule that founded A/B as separate contacts in the
+    # first place). B is deliberately never re-observed, so it decays.
+    store.ingest(
+        [
+            _br_observation(
+                obs_id="OBS_A_REPEAT",
+                t_sim=60.0,
+                range_m=1000.0,
+                continues_observation_id="OBS_A",
+            )
+        ],
+        now_sim=60.0,
+    )
+    store.tick(now_sim=60.0)
+
+    lost_at = 121.0  # just past B's own 120s `LOST_THRESHOLD_S`
+    store.tick(now_sim=lost_at)
+
+    reacquire_at = 122.0
+    store.ingest(
+        [
+            _br_observation(
+                obs_id="OBS_B_REACQUIRE",
+                t_sim=reacquire_at,
+                range_m=1500.0,
+                continues_observation_id="OBS_B",
+            )
+        ],
+        now_sim=reacquire_at,
+    )
+    store.tick(now_sim=reacquire_at)
+
+    assert [e.kind for e in store.events if e.contact_id == store.contacts[1].id] == [
+        "CONTACT_DETECTED",
+        "CONTACT_LOST",
+        "CONTACT_REACQUIRED",
+    ]
+
+    spoken.clear()
+    poll(reacquire_at)
+    poll(reacquire_at + 2.0)  # a second chance, same pattern as above
+
+    assert "Ural truck." in spoken
 
 
 def test_urgent_call_resets_occupancy_even_mid_routine_line() -> None:
@@ -587,17 +831,21 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     group-cohesion-redesign/plan.md` §4) -- their own `CONTACT_DETECTED`
     events are also suppressed once grouped (`belief/callouts.py`'s own
     docstring: only `CONTACT_DETECTED`/`CONTACT_REACQUIRED` are filtered
-    for a grouped contact), so nothing is ever spoken for them. Four lines
-    still come out, through a genuinely different mix than either the
-    pre-cohesion-redesign backstop-bounded behaviour or a naive "just the
-    infantry pair merges" guess: one individual infantry report (the
-    scheduler's same pre-existing same-tick priority-contention property
-    the old docstring already described -- which member wins is not this
-    test's claim), the BTR-70's own identification, the five-member
-    group's one full disclosure (first-ever, so full per the delta
-    taxonomy), and the truck's own identification. Confirmed by actually
-    running this fixture against the implementation, not predicted from
-    the mechanism alone. This test pins the real, current behaviour."""
+    for a grouped contact), so nothing is ever spoken for them.
+
+    **Unaffected by `plans/contact-report-flood/plan.md` Stage 1's
+    `CONTACT_DETECTED` merge-echo suppression (confirmed by running this
+    fixture, not guessed).** The first three infantry are founded in the
+    *same* poll (`t_sim=0.0`, one `ingest()` call), and the suppression
+    check only ever compares against a *strictly earlier-founded* contact
+    (`other.first_seen_sim < this_contact.first_seen_sim`) -- a same-poll
+    peer is a simultaneous, independent sighting, never a merge-echo of an
+    abandoned identity, so it is excluded from the check by design (see
+    that check's own comment for why real sortie data forced this
+    exclusion). This fixture's four lines come out exactly as before.
+    Confirmed by actually running this fixture against the implementation,
+    not predicted from the mechanism alone. This test pins the real,
+    current behaviour."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
