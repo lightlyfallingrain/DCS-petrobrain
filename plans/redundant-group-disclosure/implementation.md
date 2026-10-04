@@ -159,3 +159,42 @@ confirmed empirically while writing the test.
 this fix only changes what a group's *first disclosure* says about members it already has: the
 root "2+ candidates -> always a new contact" policy question, and the duplication-runaway backlog
 item, are unaffected.
+
+### Review follow-up (2026-10-05)
+
+Two optional findings from `plans/redundant-group-disclosure/review.md`, actioned:
+
+**Item 1 -- the restated merge-echo predicate, shared rather than guarded.** Reviewer confirmed
+`_already_reported_member_ids`'s branch 2 restated `_render_event`'s own `CONTACT_DETECTED`
+merge-echo suppression condition character-for-character, with no shared helper and no test that
+would catch the two drifting apart. Sharing turned out to fit cleanly despite the two call sites
+asking the question in different shapes (one has an `Event`'s own contact in hand, the other
+reaches a member by iterating a group's membership with no event at all): both questions reduce to
+the same single predicate over `(contact, store, now_sim)` -- "is there a strictly-earlier-founded,
+not-`lost`, plausibly-same contact already in the store" -- once the event-specific wrapping is
+stripped away. Factored into a new module-level function, `_is_merge_echo_of_earlier_contact`
+(`body-layer/src/belief/callouts.py`), and both call sites now call it instead of repeating the
+four-condition `any(...)`. The "strictly earlier founding only" rationale comment (why same-poll
+foundings must never mutually suppress) moved to the call site that still carries the full
+sortie-1004 history behind it, rather than duplicating it into the helper's own docstring. No drift
+guard test was needed once there is only one copy of the condition to drift from.
+
+**Item 3 -- the current-tick re-evaluation residual, recorded not fixed.** Filed as `BL-B25`
+(`body-layer/BACKLOG.md`): `_already_reported_member_ids` asks the merge-echo question against
+*current* belief, not the belief state at the moment the original suppression happened, so a
+member that has since gone `lost` or drifted apart from its echo source can stop counting as
+reported and cause one extra spoken line. Bounded to the first-disclosure window, pushes toward
+speaking rather than silence (the safer direction given a no-omniscience system, though the
+opposite of this fix's own "less speaking" goal), not a correctness issue -- recorded for
+discoverability per the Reviewer's own recommendation, not actioned.
+
+**Item 2 -- `body-layer/ROADMAP.md`/`body-layer/BACKLOG.md`/`plans/
+contact-duplication-ambiguity-runaway/plan.md` bookkeeping**, mirroring `fix/contact-report-flood`'s
+own `3884840`: a new Status entry for this fix, and a note on both `BL-B24` and the
+duplication-runaway plan that this fix doesn't close them either -- the root `ContactStore.ingest`
+ambiguity policy remains untouched by any of these three speech/callout-layer fixes.
+
+Checks after this follow-up, from `body-layer/`: `ruff format --check src tests` pass,
+`ruff check src tests` pass, `mypy --strict src` pass (53 files), `pytest tests -q` -> 1414
+passed, 4 xfailed (unchanged from the implementer's original figure -- a pure refactor, no test
+added or removed).
