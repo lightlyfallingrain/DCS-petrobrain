@@ -997,9 +997,15 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Kola is a genuinely harder case, not just "repeat the pattern":** SRTM only covers ±60°
   latitude, and Kola peninsula sits ~68-69°N, entirely outside SRTM's coverage — needs a
   different DEM source (ASTER GDEM to 83°N, or a Nordic national elevation dataset), unresolved
-  and needs its own investigation before committing. Afghanistan and Caucasus are both within
+  and needs its own investigation before committing. **Update 2026-10-04: resolved in principle —
+  viewfinderpanoramas.org DEM3 covers the Kola area (user-checked), same `.hgt` format the SRTM
+  ingest already reads, so Kola needs no new elevation source.** Afghanistan and Caucasus are both within
   SRTM range, no elevation-source blocker. Needs an Architect + investigator pass before any
   theatre starts, per this project's standing convention for DCS-internals-uncertain work.
+  **Started 2026-10-04 with Afghanistan, then Caucasus, Kola last (user direction).** Raw DEM and
+  OSM extracts for both are staged under `world-model/data/raw/{dem,osm}/{afganistan,caucasus}-full/`
+  (gitignored; `.hgt` tiles flattened to the folder top level, since `--srtm-dir` globs only `*.hgt`
+  there). Caucasus DEM has 123 of 144 tiles — the missing ones are open Black Sea.
 
 - **RESOLVED: `roadnet/junctions.py` memory issue at `syria-full`+OSM scale (2026-09-13).**
   Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`
