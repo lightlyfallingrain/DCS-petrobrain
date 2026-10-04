@@ -108,3 +108,101 @@ restoring and confirming the clean 1414/4 pass. Baseline (1409/4) independently 
 `git archive` snapshot of `main`, not taken on the implementer's word. Did not independently
 re-derive the sortie-1004 object-id evidence (699.1/714.5/730.9) from the raw log — relied on the
 task's own pre-verified numbers, which the implementation.md measurement is consistent with.
+
+---
+
+## Round 2 — follow-up review (2026-10-05)
+
+Reviewed `fix/redundant-group-disclosure` tip `9adaccf` (one commit over round 1's `4d81c43`,
+range `a2aeda8..9adaccf`), checked out directly in a fresh worktree (`git rev-parse HEAD` confirmed
+`9adaccf` before anything else). Scope: the single follow-up commit actioning round 1's three
+Optional Refinements.
+
+**Item 1 — shared predicate, read against both former copies.** New module-level
+`_is_merge_echo_of_earlier_contact(contact, store, now_sim)` (`callouts.py`) extracts the
+four-condition `any(...)` both call sites previously restated. Read all three sites side by side
+against the commit's parent:
+
+- `_already_reported_member_ids` previously tested `other.id != contact_id` (the dict key) where
+  `contact = store.contact(contact_id)`; the helper tests `other.id != contact.id`. Since
+  `ContactStore.contact` looks a contact up by its own id, `contact.id == contact_id` always holds
+  here — no semantic shift.
+- `_render_event`'s call site previously tested `other.id != this_contact.id`; the helper's
+  `contact.id` is the same object passed in as `this_contact`. Identical.
+- Both remaining three conditions (`first_seen_sim` ordering, `certainty_of(...) != "lost"`,
+  `contacts_plausibly_same(...)`) are copied verbatim into the helper, argument order and all.
+
+The refactor is behaviour-preserving, not merely claimed so — confirmed by argument-level
+comparison, not just diff-reading, and independently by the unchanged 1414/4 test count (a pure
+extraction has no reason to move it, and it didn't).
+
+**Call sites still differ where they should.** `_render_event` still does its own
+`event.kind in (CONTACT_DETECTED, ...)` gating, its own `store.contact(event.contact_id)` lookup
+and `None` check, and its own post-hoc `route_event`/`_last_spoken_signature` bookkeeping — none of
+that moved into the helper. `_already_reported_member_ids` still does its own membership iteration
+and its own `_last_spoken_signature` branch-1 check before ever reaching the helper. Only the one
+condition both sites literally restated character-for-character moved; nothing specific to either
+caller was hoisted in with it.
+
+**The "strictly earlier founding only" rationale comment** stayed at the `_render_event` call site,
+not the helper — confirmed by reading the current file (`callouts.py`, around the `CONTACT_DETECTED`
+branch). The helper's own docstring states the condition itself and names both call sites and the
+plan/review item it comes from, but not the sortie-1004 "why strictly earlier, not same-poll"
+reasoning. A reader arriving at the helper from the group-disclosure path (`_already_reported_
+member_ids`) sees *that* the condition requires strict earlier founding but not *why* same-poll
+foundings must never mutually suppress — they'd have to follow the docstring's pointer back to
+`_render_event` to find it. This is a real asymmetry, but a minor one: the docstring does link the
+two sites together by name, and the condition is unchanged either way (not a case where a reader
+could act on wrong reasoning, just slower to find the right reasoning). Optional, not a blocker.
+
+**No drift guard, because no duplication — agree.** Round 1 flagged the missing guard test as a
+risk specifically *because* there were two copies that could diverge silently. There is now exactly
+one definition; a future edit to the condition edits one function, and both callers see it change
+together by construction. The two call sites could in principle need to diverge (e.g. if
+group-disclosure ever needed a different staleness tolerance than event-time suppression), but
+nothing in this fix or its plan suggests that's coming, and if it ever does, the helper would be the
+first place to look, not a silent trap — a reviewer reading `grep -rn _is_merge_echo_of_earlier_
+contact` would immediately find both callers. Agreed that a guard test is no longer owed.
+
+**`BL-B25`** — `body-layer/BACKLOG.md`'s highest prior id was `BL-B24`; `BL-B25` is the next unused
+number (verified by listing every `BL-B<n>` in the file and sorting numerically, not by eyeballing
+the tail). The entry accurately restates the residual (current-tick re-evaluation vs.
+suppression-time state) and explicitly says it "pushes in the opposite direction from the user's
+'prioritize less speaking' instruction... it risks one extra spoken line, never a missed one" —
+correctly flagged as the less-preferred direction, not glossed over or minimized.
+
+**Bookkeeping landed in all three files as claimed:**
+- `body-layer/ROADMAP.md` Status list gains the fix's entry (Reviewer-approved, not yet DoD'd),
+  including the BL-B25 residual and a "does not change what's next" milestone-completion line.
+- `body-layer/BACKLOG.md`'s `BL-B24` entry gains a note that this fix doesn't close it either
+  (speech-layer symptom, root `ContactStore.ingest` policy untouched).
+- `plans/contact-duplication-ambiguity-runaway/plan.md` gains the equivalent note.
+
+All three read consistently with each other and with `implementation.md`'s own addendum (one minor
+cosmetic mismatch: `implementation.md` labels the bookkeeping note "Item 2" and the residual "Item
+3", while `review.md`'s own Optional Refinements list them in the reverse order — content maps
+correctly regardless, this is a numbering-label slip only, not a required fix).
+
+**Verification, inside `body-layer/` (fresh `.venv` built from `pyproject.toml`):**
+`ruff format --check src tests` — 114 files already formatted. `ruff check src tests` — all checks
+passed. `mypy src` — success, 53 source files. `pytest tests -q` — **1414 passed, 4 xfailed**,
+unchanged from round 1, as expected for a pure refactor plus doc-only bookkeeping.
+
+### Round 2 Required Fixes
+None.
+
+### Round 2 Optional Refinements
+- The sortie-1004 "strictly earlier founding only" rationale lives only at the `_render_event` call
+  site, not the shared helper's docstring — a reader reaching the helper via the group-disclosure
+  path has to follow a pointer rather than find the reasoning in place (optional).
+- `implementation.md`'s "Item 2"/"Item 3" labels don't match `review.md`'s own ordering of the two
+  findings they refer to — content is correct, labels are swapped (cosmetic only).
+
+### Round 2 Verdict
+APPROVED
+
+### Round 2 Review Confidence
+Full read of the one commit's diff (`callouts.py`, `BACKLOG.md`, `ROADMAP.md`,
+`contact-duplication-ambiguity-runaway/plan.md`, `implementation.md`), both former call sites
+against the parent commit, and the full numeric `BL-B<n>` sequence in `BACKLOG.md`. All four
+verification commands run directly, not taken on the commit message's word.

@@ -129,3 +129,4 @@ removed; read the linked file for full detail.
 - [Landform relief gate review](project_landform_relief_gate_review.md) - caught ROADMAP.md's bug direction backwards vs. agent-memory.
 - [Contact report flood review](project_contact_report_flood_review.md) - verify "always later-founded" by tracing the state machine.
 - [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - an early-return branch's test can pass disabled if a fallback degenerates to the same result.
+- [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; shared merge-echo predicate verified equivalent to both old copies by argument-level read.
