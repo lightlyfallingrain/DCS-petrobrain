@@ -39,6 +39,8 @@ def _meta(**overrides: object) -> TerrainCacheMeta:
         "max_turn_cos": -0.2,
         "min_line_length_cells": 4,
         "chaikin_iterations": 4,
+        "min_relief_m": 50.0,
+        "decimation_tolerance_fraction": 0.25,
         "built_at": "2026-01-01T00:00:00Z",
     }
     defaults.update(overrides)

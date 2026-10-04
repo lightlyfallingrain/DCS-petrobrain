@@ -868,6 +868,41 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Full card with expected figures per block: `docs/acceptance/2026-10-02-geomorphons-latin-names-
   rebuild.md` / https://claude.ai/artifact/DKf9eTTWKmJtAKmKF96FdW.
 
+  **Two real defects found and fixed against the user's own build (`fix/landform-relief-gate`,
+  `plans/landform-relief-gate/implementation.md`), both checked directly against the real
+  `syria-full.sqlite` (8.1 GB, read-only, not modified)**:
+
+  - **No relief gate.** 89%/92% of ridges/valleys stored under 50 m of relief (measured: `>=50 m`
+    keeps 234,799 of 1,440,397, exact match on a direct SQL query), and the Bekaa floor read as a
+    valley — the exact case the user's own criteria (`plans/terrain-feature-probing/
+    explore-notes.md`, "maskable-behind: sharp and/or high", ~50-150 m) rule out.
+    `terrain.features.filter_by_relief` (default `min_relief_m=50.0`, the floor of that band) now
+    drops any line below threshold before it reaches the cache or store.
+  - **~16x-denser-than-DEM-justifies stored geometry** (one point per 5.6 m on a 90 m DEM; `feature`
+    was 7.98 GB of the 8.1 GB store). `terrain.features._decimate_for_storage` (Douglas-Peucker,
+    reusing the existing `geometry.simplify_polyline`) now decimates the smoothed line back toward
+    DEM resolution, with its own deviation check against the real sampled points (never exceeding
+    the pre-existing half-cell cap) — measured **36.7x point-count reduction** on a real
+    region-scoped rebuild, worst real deviation **32.3 m** against a 45 m cap.
+
+  A real correctness bug was found and fixed *during* verification of the second fix (not a named
+  defect, but worth recording): an early version of the decimation deviation check compared each
+  original point against only the one decimated segment a windowing shortcut assigned it to, which
+  understated real deviation by up to 5x on real traced lines near a genuine turn — caught because
+  the real built output's density barely dropped when it should have dropped ~37x, not because the
+  (technically passing, just wrong) check itself failed. Fixed to check against the whole decimated
+  polyline; see the implementation doc for the full account.
+
+  Both falsifiable checks hold on real renders (`data/renders/{coastal-hills,baalbek,palmyra}-
+  relief-gate.png`): **the Bekaa floor is clean of ridge/valley lines**, and **Palmyra's isolated
+  ridge chains survive** (a continuous ~6+ km chain visible through flat desert). Theatre-wide
+  feature count after the gate is a direct measurement (234,799), not an extrapolation; expected
+  new store size is extrapolated from the measured decimation ratio to **~2.4-2.5 GB** (down from
+  8.1 GB) — not measured, since no full-theatre build was run here, per the project's execution-
+  boundary rule. The terrain cache is fully invalidated by this change (new `min_relief_m`/
+  `decimation_tolerance_fraction` knobs plus an `EXTRACTOR_VERSION` bump), so the user's next
+  `syria-full` rebuild reprocesses every tile rather than serving stale, ungated geometry.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a

@@ -32,7 +32,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from geometry import Point, distance_point_polyline
+from geometry import Point, distance_point_polyline, simplify_polyline
 from store.models import StoredFeature
 
 # `_smooth_for_storage`'s deviation cap, as a fraction of `position_
@@ -46,6 +46,44 @@ _MAX_SMOOTHING_DEVIATION_FRACTION = 0.5
 # commit's own tuning note: 4 passes kept the real `syria-full` theatre's
 # staircase comfortably inside the half-cell deviation cap).
 DEFAULT_CHAIKIN_ITERATIONS = 4
+
+# `fix/landform-relief-gate` defect 1 -- there was no relief gate at all,
+# and the retired marker-controlled-watershed mechanism's own
+# `relief_threshold_m` (100.0) had no geomorphons equivalent, which is why
+# the first geomorphons pass stored 89%/92% of ridges/valleys under 50 m
+# of relief and classified the Bekaa floor as a valley (measured on the
+# real `syria-full` build; see `plans/terrain-feature-probing/
+# explore-notes.md`).
+#
+# The user's own criterion is "maskable-behind: sharp and/or high", worked
+# out as a range-independent LOS-masking height against a 200 m AGL
+# sightline: ~150 m of rise a quarter of the way to the target, ~100 m
+# halfway, ~50 m three-quarters of the way, ~20 m close to the target --
+# "~50-150 m of rise over a short horizontal run, scale-free". This picks
+# the *floor* of that band (50 m) rather than a number tuned to produce a
+# particular feature count: a feature's relief is a fixed property of the
+# terrain, not of any one sightline, so a single scalar threshold has to
+# cover every position along a plausible sightline a feature might sit on
+# -- including close to the target, where even 50-100 m of relief still
+# breaks LOS. Picking 100 m (the band's middle) would additionally drop
+# every 50-100 m feature, discarding exactly the near-target cover/
+# exposure information the explore-notes call out as the tactically
+# important regime. Below 50 m, nothing in the stated band ever masks.
+DEFAULT_MIN_RELIEF_M = 50.0
+
+# `fix/landform-relief-gate` defect 2 -- stored geometry was ~16x denser
+# than the source DEM supports (four Chaikin passes multiply point count
+# ~16x; the median line carried one point per 5.6 m on a 90 m DEM). This
+# is the `simplify_polyline` tolerance `_decimate_for_storage` runs on the
+# *smoothed* curve, expressed (like `_MAX_SMOOTHING_DEVIATION_FRACTION`)
+# as a fraction of `position_uncertainty_m`: a quarter of a grid cell,
+# deliberately well inside the half-cell smoothing cap so decimation's
+# own contribution to the final deviation-from-sampled-points bound still
+# leaves headroom under that cap even when Chaikin's own (typically much
+# smaller) deviation is added to it. `_decimate_for_storage` verifies this
+# empirically against the cap rather than relying on the headroom alone --
+# see that function's docstring.
+DEFAULT_DECIMATION_TOLERANCE_FRACTION = 0.25
 
 
 @dataclass(frozen=True)
@@ -100,6 +138,30 @@ def component_from_trace(
         elevation_range_m=(min(elevations), max(elevations)),
         orientation_deg=orientation_deg,
     )
+
+
+def filter_by_relief(
+    components: list[TerrainComponent], min_relief_m: float = DEFAULT_MIN_RELIEF_M
+) -> list[TerrainComponent]:
+    """Drop traced lines whose own `elevation_range_m` span (max - min
+    over the component's sampled cells) is below `min_relief_m` -- the
+    relief gate the retired watershed mechanism had
+    (`relief_threshold_m = 100.0`) and the first geomorphons pass shipped
+    with no equivalent of (see `DEFAULT_MIN_RELIEF_M`'s docstring).
+
+    Applied over the whole component's elevation span, not per vertex or
+    per adjacent-cell step: geomorphons classifies a cell purely from its
+    local line-of-sight pattern, with no notion of how much the terrain
+    actually rises, so this is the one place that notion gets applied.
+    A short flat stretch of an otherwise-tall ridge still keeps the whole
+    ridge -- consistent with treating a traced crest as one feature
+    elsewhere in this module."""
+    return [
+        component
+        for component in components
+        if component.elevation_range_m[1] - component.elevation_range_m[0]
+        >= min_relief_m
+    ]
 
 
 def _chaikin_smooth(points: list[Point], iterations: int) -> list[Point]:
@@ -173,16 +235,73 @@ def _chaikin_smooth_with_support(
     return current, support
 
 
+def _decimate_for_storage(
+    smoothed: list[Point],
+    original_points: list[Point],
+    tolerance_m: float,
+    cap_m: float,
+) -> list[Point]:
+    """Reduce `smoothed` (already Chaikin-smoothed) toward DEM resolution
+    via Douglas-Peucker (`geometry.simplify_polyline`), without ever
+    letting the final line's deviation from the real sampled
+    `original_points` exceed `cap_m` -- the same half-cell bound
+    `_smooth_for_storage`'s own fallback already enforces, now checked
+    again on the *decimated* geometry rather than assumed to still hold
+    once points are removed.
+
+    **Why this checks every original point against the whole decimated
+    polyline, not a windowed per-segment slice** (an earlier version of
+    this function tried exactly that, using `_chaikin_smooth_with_support`'s
+    support windows the way `_smooth_for_storage`'s own check does, and it
+    was wrong -- caught on real traced lines, not reasoned away). That
+    check only bounds how far each *smoothed* point sits from its
+    *nearest* original point in its support window
+    (`distance_point_polyline` finds the closest point on a short
+    polyline, not a per-point correspondence) -- it says nothing about
+    the *other* original points sharing that same window if the raw
+    traced path genuinely turns within it (a real, common case: a
+    skeleton trace through a staircase of discrete cells turns often).
+    Decimating across such a window can leave an original point well
+    over 100 m from the resulting straight chord even though every
+    individual bound along the way (Douglas-Peucker's own tolerance,
+    `_smooth_for_storage`'s nearest-point check) measured clean --
+    confirmed on a real `syria-full` SRTM tile. `tolerance_m` only
+    bounds smoothed-vs-decimated deviation (what `simplify_polyline`
+    measures); checking it alone, or checking it through a windowed
+    proxy for the original points, both miss this.
+
+    Checking every original point against the *whole* decimated
+    polyline is unconditionally correct instead, and still cheap: the
+    decimated line is always short (that is the point of decimating),
+    so this is O(len(original_points) * len(decimated)), far below the
+    O(line_length^2) cost `plans/landform-geomorphons/performance.md`
+    already ruled out for the *smoothed* line (thousands of points) --
+    here the larger operand is the raw cell count, typically tens to a
+    few hundred per traced line."""
+    if len(smoothed) < 3:
+        return smoothed
+    decimated = simplify_polyline(smoothed, tolerance_m)
+    if len(decimated) >= len(smoothed):
+        return smoothed
+    if all(
+        distance_point_polyline(point, decimated) <= cap_m for point in original_points
+    ):
+        return decimated
+    return smoothed
+
+
 def _smooth_for_storage(
     points: list[Point],
     position_uncertainty_m: float,
     iterations: int = DEFAULT_CHAIKIN_ITERATIONS,
+    decimation_tolerance_fraction: float = DEFAULT_DECIMATION_TOLERANCE_FRACTION,
 ) -> list[Point]:
     """The geometry `to_stored_features` writes for one component: `points`
-    run through `_chaikin_smooth`, or `points` itself unchanged if there
-    are fewer than 3 of them (nothing to smooth) or if the smoothed curve's
-    own *measured* maximum deviation from the original polyline exceeds
-    half a grid cell (`_MAX_SMOOTHING_DEVIATION_FRACTION *
+    run through `_chaikin_smooth` and then decimated back toward DEM
+    resolution (`_decimate_for_storage`), or `points` itself unchanged if
+    there are fewer than 3 of them (nothing to smooth) or if the smoothed
+    curve's own *measured* maximum deviation from the original polyline
+    exceeds half a grid cell (`_MAX_SMOOTHING_DEVIATION_FRACTION *
     position_uncertainty_m`) -- a belt-and-suspenders fallback, not an
     assumption that Chaikin's structural bound always holds for every
     input shape.
@@ -196,7 +315,15 @@ def _smooth_for_storage(
     distance, never less, so this can only make the fallback trigger in
     cases the full scan would also have triggered (or, in principle, a
     pathological case the full scan would not have) -- it never accepts a
-    smoothing the full scan would have rejected."""
+    smoothing the full scan would have rejected.
+
+    Decimation only ever runs on geometry that already passed the
+    smoothing deviation check above, and `_decimate_for_storage` runs its
+    own independent deviation check against the same `cap_m` before
+    accepting the decimated result -- so this function's return value
+    always satisfies "maximum deviation from the sampled points stays
+    below half a cell," whichever of smoothing/decimation ends up
+    applied."""
     if len(points) < 3:
         return points
     smoothed, support = _chaikin_smooth_with_support(points, iterations)
@@ -204,18 +331,25 @@ def _smooth_for_storage(
     for point, (lo, hi) in zip(smoothed, support, strict=True):
         if distance_point_polyline(point, points[lo : hi + 1]) > cap_m:
             return points
-    return smoothed
+    return _decimate_for_storage(
+        smoothed,
+        points,
+        decimation_tolerance_fraction * position_uncertainty_m,
+        cap_m,
+    )
 
 
 def to_stored_features(
     components: list[TerrainComponent],
     source_id: int | None,
     position_uncertainty_m: float,
+    decimation_tolerance_fraction: float = DEFAULT_DECIMATION_TOLERANCE_FRACTION,
 ) -> list[StoredFeature]:
     """Wrap each `TerrainComponent`'s pure geometry into a store-facing
     `StoredFeature`: `kind="ridge"`/`"valley"`, `LineString` geometry
-    (Chaikin-smoothed, see `_smooth_for_storage`), `provenance=
-    {"geometry": "dcs_derived"}`, `confidence={"geometry": "low"}`."""
+    (Chaikin-smoothed and decimated, see `_smooth_for_storage`),
+    `provenance={"geometry": "dcs_derived"}`, `confidence=
+    {"geometry": "low"}`."""
     features: list[StoredFeature] = []
     for index, component in enumerate(components):
         min_elevation, max_elevation = component.elevation_range_m
@@ -228,7 +362,11 @@ def to_stored_features(
             StoredFeature(
                 kind=component.kind,
                 geom_type="LineString",
-                geometry=_smooth_for_storage(component.points, position_uncertainty_m),
+                geometry=_smooth_for_storage(
+                    component.points,
+                    position_uncertainty_m,
+                    decimation_tolerance_fraction=decimation_tolerance_fraction,
+                ),
                 name=None,
                 subtype=None,
                 tags=tags,
