@@ -53,4 +53,22 @@ THEATRE_PROJECTIONS: dict[str, TmercParams] = {
         ),
         confidence="confirmed",
     ),
+    "Afghanistan": TmercParams(
+        central_meridian=63,
+        false_easting=-300150.0,
+        false_northing=-3759657.0,
+        scale_factor=0.9996,
+        lat_0=0,
+        source=(
+            "Live-confirmed against DCS coord.LOtoLL output on the Afghanistan "
+            "terrain (tools/dcs-mission-probe/coord_probe.lua, 2026-10-05: map "
+            "origin + 29 airbases, worst residual <0.001m). The 2026-10-04 beacon "
+            "fit (FE -300149.9912, FN -3759656.9499) left a uniform 0.051m offset "
+            "at every point; three unplaced FOBs that DCS reports at lat/lon 0,0 "
+            "sit at exactly x=-3759657, z=-9428368, which pins the false northing "
+            "to the round value, and the round false easting fits as well. See "
+            "world-model/research/2026-10-05-afghanistan-projection-live-check.md."
+        ),
+        confidence="confirmed",
+    ),
 }

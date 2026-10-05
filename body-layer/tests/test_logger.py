@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
@@ -1687,6 +1687,230 @@ def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
 
     with pytest.raises(SystemExit):
         main()
+
+
+def test_main_rejects_neither_theatre_pair_nor_mission_understanding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5 (multi-theatre-afghanistan plan): with neither
+    `--theatre`/`--world-model-db` nor `--mission-understanding` given,
+    `main()` must reject rather than silently falling back to a default
+    theatre."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["logger", "--aircraft-layer-url", "http://127.0.0.1:7791"],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_main_rejects_mission_understanding_without_world_model_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5: deriving theatre from `--mission-understanding` requires
+    `--world-model-dir` -- without it there is nowhere to resolve the
+    per-theatre store path to."""
+    monkeypatch.chdir(tmp_path)
+    mission_understanding_path = (
+        Path(__file__).parent / "fixtures" / "mission_understanding_sample.json"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--mission-understanding",
+            str(mission_understanding_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_main_rejects_world_model_db_theatre_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5's mismatch guard: a `--world-model-db` built for a
+    different theatre than the resolved `--theatre` must be rejected
+    before the first poll, rather than silently applying the wrong
+    projection to every contact."""
+    from store.models import Region
+    from store.writer import insert_region
+
+    db_path = tmp_path / "afghanistan-full.sqlite"
+    conn = open_for_build(db_path)
+    insert_region(
+        conn,
+        Region(
+            name="afghanistan-full",
+            theatre="Afghanistan",
+            centre_x=0.0,
+            centre_z=0.0,
+            half_extent_x_m=1000.0,
+            half_extent_z_m=1000.0,
+            built_at="2026-10-05T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--theatre",
+            "Syria",
+            "--world-model-db",
+            str(db_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def _write_mission_understanding_with_theatre(path: Path, theatre_value: str) -> None:
+    """Minimal `--emit-compact`-shaped artifact with an arbitrary (possibly
+    malicious) `theatre.value` -- `load_mission_understanding` places no
+    constraint on that string's content (`_parse_theatre` only checks it is
+    a `str`), so this is exactly what a `.miz`-derived artifact can carry
+    through unvalidated per `plans/multi-theatre-afghanistan/security.md`."""
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "phases": [],
+                "route": [],
+                "theatre": {
+                    "value": theatre_value,
+                    "epistemic_status": "FACT",
+                    "basis": ["miz:theatre"],
+                    "confidence": None,
+                },
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "theatre_value",
+    [
+        "Narnia",
+        "/etc/passwd",
+        "//attacker-host/share/x",
+        "Syria?mode=rwc&x=",
+    ],
+    ids=["unknown-theatre", "absolute-path", "unc-path", "query-string-injection"],
+)
+def test_main_rejects_unregistered_theatre_from_mission_understanding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    theatre_value: str,
+) -> None:
+    """Security (multi-theatre-afghanistan plan, required fix): a
+    mission-understanding-derived `theatre` that is not an exact key in
+    `coordinates.projections.THEATRE_PROJECTIONS` must be rejected by
+    `main()` before any path is built or any file is opened -- whatever
+    the string actually contains (an unknown name, an absolute-path
+    override, a UNC-path override, or a SQLite URI-query-string injection
+    suffix shaped like security.md's own reproduction: an `&`-separated
+    second query parameter, which is what makes SQLite's URI parser split
+    the filename at the attacker's injected `?` -- a bare `"Syria?mode=rwc"`
+    with no second parameter instead fails as a malformed access-mode
+    string, which doesn't exercise the mechanism this case is named for.
+    `open_world_model` must never be called for any of these -- tightened
+    (reviewer finding on f7f2827) from asserting only *some* `SystemExit`,
+    which also passed when just the optional `try/except` guard (not the
+    required registry check) converted a downstream failure into the same
+    SystemExit, silently passing even with the required fix removed."""
+    monkeypatch.chdir(tmp_path)
+    mission_understanding_path = tmp_path / "mission_understanding.json"
+    _write_mission_understanding_with_theatre(mission_understanding_path, theatre_value)
+
+    def _fail_if_open_world_model_called(*_args: object, **_kwargs: object) -> NoReturn:
+        pytest.fail(
+            "open_world_model was called -- the registry-check rejection "
+            "must happen strictly before any world-model store is opened"
+        )
+
+    monkeypatch.setattr(
+        logger_module, "open_world_model", _fail_if_open_world_model_called
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--mission-understanding",
+            str(mission_understanding_path),
+            "--world-model-dir",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    # No file matching the attacker-influenced suffix was ever created or
+    # opened -- the rejection happens before any path is built.
+    assert not any(tmp_path.glob("*-full.sqlite"))
+
+    # Assert the specific rejection reason, not just that *some* SystemExit
+    # occurred -- this is what actually fails if the required registry
+    # check is removed while the optional except-block stays in place (see
+    # docstring above).
+    stderr = capsys.readouterr().err
+    assert "not a known theatre" in stderr
+
+
+def test_main_gives_clean_error_for_unbuilt_theatre_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Security (multi-theatre-afghanistan plan, optional item): a
+    validated, known theatre whose store has not been built yet must give
+    a clean `parser.error` naming the expected path, not a raw `sqlite3`
+    traceback -- the mismatch guard's `open_world_model`/`load_only_region`
+    call is wrapped in `try/except (sqlite3.Error, OSError)`."""
+    monkeypatch.chdir(tmp_path)
+    mission_understanding_path = tmp_path / "mission_understanding.json"
+    _write_mission_understanding_with_theatre(mission_understanding_path, "Syria")
+    expected_store = tmp_path / "syria-full.sqlite"
+    assert not expected_store.exists()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--mission-understanding",
+            str(mission_understanding_path),
+            "--world-model-dir",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    err = capsys.readouterr().err
+    assert "world model" in err
+    assert str(expected_store) in err
 
 
 def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(

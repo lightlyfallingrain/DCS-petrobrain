@@ -81,14 +81,35 @@ class MissionPhaseInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class TaggedTheatre:
+    """Local mirror of `runtime.compact.RuntimeMissionUnderstanding.theatre`'s
+    `Tagged[str]` envelope (multi-theatre-afghanistan plan, Stage 5) --
+    `value` is the plain DCS theatre name (e.g. `"Afghanistan"`), matched
+    exactly against `logger.py`'s derived store path and
+    `coordinates.projections.THEATRE_PROJECTIONS`'s registry keys."""
+
+    value: str
+    epistemic_status: str
+    basis: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MissionUnderstandingData:
     """Immutable, loaded once by `load_mission_understanding`. `phases` is
     defensively re-sorted ascending by `waypoint_index` even though MI-3/
     MI-6 already guarantee that order -- cheap, and this is the one place a
-    violated upstream guarantee would silently break phase sequencing."""
+    violated upstream guarantee would silently break phase sequencing.
+
+    `theatre` defaults to `None` so the many existing tests that construct
+    this dataclass directly (not through `load_mission_understanding`) for
+    phase/route-tracking logic unrelated to theatre selection keep working
+    unchanged -- `load_mission_understanding` itself always populates it
+    (required, fail-loud, same posture as `phases`/`route`) from a real
+    compact artifact, which always carries the field."""
 
     phases: tuple[MissionPhaseInfo, ...]
     route: tuple[CompactRoutePoint, ...]
+    theatre: TaggedTheatre | None = None
 
 
 def _require_list(raw: object, key: str) -> list[object]:
@@ -120,6 +141,26 @@ def _unwrap_tagged(
     if not isinstance(basis, list) or not all(isinstance(b, str) for b in basis):
         raise ValueError(f"{field_name} entry has malformed 'basis': {item!r}")
     return value, epistemic_status, tuple(basis)
+
+
+def _parse_theatre(item: object) -> TaggedTheatre:
+    """Unwraps the `theatre` field's `Tagged[str]` envelope -- its `value`
+    is a plain string, unlike `phases`/`route`'s dict-shaped `value`, so
+    this cannot reuse `_unwrap_tagged` (which asserts `value` is a dict)."""
+    if not isinstance(item, dict):
+        raise ValueError(f"theatre entry is not a Tagged-shaped object: {item!r}")  # noqa: TRY004
+    value = item.get("value")
+    epistemic_status = item.get("epistemic_status")
+    basis = item.get("basis")
+    if not isinstance(value, str):
+        raise ValueError(f"theatre entry has no string 'value': {item!r}")  # noqa: TRY004
+    if not isinstance(epistemic_status, str):
+        raise ValueError(f"theatre entry missing 'epistemic_status': {item!r}")  # noqa: TRY004
+    if not isinstance(basis, list) or not all(isinstance(b, str) for b in basis):
+        raise ValueError(f"theatre entry has malformed 'basis': {item!r}")
+    return TaggedTheatre(
+        value=value, epistemic_status=epistemic_status, basis=tuple(basis)
+    )
 
 
 def _parse_phase(item: object) -> MissionPhaseInfo:
@@ -171,8 +212,14 @@ def load_mission_understanding(path: Path) -> MissionUnderstandingData:
     Empty `phases`/`route` lists are valid (not an error) -- they degrade
     to `MissionPhaseTracker.current_phase() is None` rather than raising;
     only a missing or malformed field is treated as a schema violation.
+    `theatre` (Stage 5, multi-theatre-afghanistan plan) is required here
+    -- every real `--emit-compact` artifact carries it (`schema/build.py`'s
+    `Tagged[str]` field) -- and raises `ValueError` if missing or
+    malformed, same fail-loud posture as `phases`/`route`.
     """
     raw = json.loads(path.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError("mission understanding artifact root is not a JSON object")  # noqa: TRY004
     phases = tuple(
         sorted(
             (_parse_phase(item) for item in _require_list(raw, "phases")),
@@ -180,7 +227,10 @@ def load_mission_understanding(path: Path) -> MissionUnderstandingData:
         )
     )
     route = tuple(_parse_route_point(item) for item in _require_list(raw, "route"))
-    return MissionUnderstandingData(phases=phases, route=route)
+    if "theatre" not in raw:
+        raise ValueError("mission understanding artifact missing 'theatre' field")
+    theatre = _parse_theatre(raw["theatre"])
+    return MissionUnderstandingData(phases=phases, route=route, theatre=theatre)
 
 
 def _route_point_distance_m(position: GeoPosition, point: CompactRoutePoint) -> float:
