@@ -32,6 +32,30 @@ from events -- no `time.time()`, no thread, no I/O. Replaying the same
 recorded stream therefore produces a byte-identical sequence of spoken
 lines (`tests/test_callouts.py`'s replay-determinism test).
 
+**Every spontaneous candidate passes an observability gate, and this is
+the one place that is true (`plans/callout-observability-gate/debug.md`).**
+`tick` asks `ContactStore.callout_observable` of each event candidate's
+contact, and of each `Group`'s members, before it will consider speaking:
+the no-omniscience invariant says Petrovich may not volunteer a position
+and a classification for something his own cockpit mask puts out of sight.
+`plans/sortie-2026-09-26-fixes/plan.md` Stage 1 placed that gate at
+*emission* instead, inside `ContactStore.tick`'s fifth and sixth blocks,
+which reached `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED` and
+nothing else -- so the 2026-10-05 sortie spoke 20 lines about 5, 6 and 7
+o'clock, all of them `CONTACT_CLASSIFICATION_CHANGED` or group-disclosure
+lines. Gating here instead of there is what makes it total: group
+disclosure mints no `Event` at all, so no emission-site gate could ever
+have covered it, and a per-kind list at emission is a list the next new
+kind silently fails to join.
+
+**This gate is for the *push* path only.** A pilot-initiated `report`
+(`CrewConsole._handle_report`) must never be filtered by it -- belief
+survives the aircraft turning away, and the pilot *asked*. That path
+renders straight through `belief.speech` and never reaches `tick`, which
+is what keeps the two answers separate; where no-omniscience bites on the
+pull path it does so as an absence claim (`render_no_view`) or as
+freshness phrasing, not as silence. See `plans/crew-query-path/plan.md`.
+
 **Priority is an explicitly disposable placeholder.** `callout_priority`'s
 first tuple element, `threat_band`, is a constant (`_DEFAULT_THREAT_BAND`)
 -- no threat model is built here. The shape is chosen so a real threat band
@@ -807,6 +831,37 @@ class CalloutScheduler:
             if now_sim - event.t_sim > CALLOUT_MAX_AGE_S:
                 self._consumed.add(event.id)
                 continue
+            # `plans/callout-observability-gate/debug.md` -- the
+            # no-omniscience invariant applied to every spoken kind, not
+            # only the two `plans/sortie-2026-09-26-fixes/plan.md` Stage 1
+            # wired at emission. `CONTACT_CLASSIFICATION_CHANGED` passes
+            # through neither gated block, and the 2026-10-05 sortie spoke
+            # it at 6 and 7 o'clock -- body azimuths of 180 and 150
+            # degrees, both past `_CO_PILOT_MASK.rear_cutoff_deg`'s 130.
+            #
+            # **Skipped without consuming -- deferred, not lost.** Unlike
+            # `WATCH_REPORT_MIN_GAP_S` above, there is nothing stale about
+            # a classification Petrovich simply cannot see *yet*: the
+            # contact sliding back inside the mask makes the same line
+            # correct, and the `CALLOUT_MAX_AGE_S` check immediately above
+            # is what bounds the wait (it retires the candidate on a later
+            # tick if the bearing never comes back). Placed *after* that
+            # check for exactly that reason -- ahead of it, a permanently
+            # astern contact's event would never be consumed at all.
+            #
+            # Deliberately gates every kind including `CONTACT_DETECTED`/
+            # `CONTACT_REACQUIRED`, which this is close to a no-op for
+            # (both perception channels already respect the mask at
+            # founding time -- `naked_eye_source` via `check_visibility`,
+            # `hybrid_source` via `association.FORWARD_HEMISPHERE_HALF_
+            # WIDTH_DEG`'s narrower 90 degrees -- and `CALLOUT_OBSERVABILITY_
+            # GRACE_S` equals `CALLOUT_MAX_AGE_S`). One total gate at the
+            # one choke point beats a per-kind list that the next new kind
+            # silently fails to join, which is the whole shape of this
+            # defect.
+            contact = store.contact(event.contact_id)
+            if contact is not None and not store.callout_observable(contact, now_sim):
+                continue
             live.append(event)
 
         scored: list[tuple[tuple[int, int, float, float], _Candidate]] = []
@@ -820,6 +875,26 @@ class CalloutScheduler:
             scored.append((callout_priority(result["facts"], event, now_sim), event))
 
         for belief_group in store.groups:
+            # `plans/callout-observability-gate/debug.md` -- the same
+            # no-omniscience gate the event loop above applies, for the one
+            # candidate source that mints no `Event` at all and so could
+            # never have been reached by a gate placed at emission. The
+            # 2026-10-05 sortie's *"A couple of contacts, 5 o'clock, 2.5
+            # kilometres."* and *"Group, 5 o'clock, 4 kilometres."* are
+            # both this path, at a 150-degree body azimuth.
+            #
+            # **Any one member observable is enough**, not all of them: a
+            # group straddling the cutoff is a group Petrovich can
+            # genuinely see, and the disclosure line renders its position
+            # from the nearest member rather than per-member, so requiring
+            # every member would silence a visibly-present group for the
+            # sake of one straggler behind the doorframe.
+            if not any(
+                (member := store.contact(member_id)) is not None
+                and store.callout_observable(member, now_sim)
+                for member_id in belief_group.member_contact_ids
+            ):
+                continue
             member_facts = _group_member_facts(
                 store, belief_group, now_sim, enrichment=enrichment
             )

@@ -89,7 +89,20 @@ MOTION_ANGULAR_THRESHOLD_RAD_S: Final[float] = math.radians(
 )
 
 #: `plans/movement-detection/plan.md` Decision 3: objects arrive at 5 Hz,
-#: velocity at 1 Hz, so worst-case skew is ~1 s plus transport. Beyond this
+#: velocity at 1 Hz, so worst-case skew is ~1 s plus transport.
+#:
+#: **Both rates are the aircraft-layer *producers*, not body-layer's own
+#: poll rate, and both were re-verified 2026-10-05** against the installed
+#: Lua rather than left as a plan quotation: `aircraft-layer/dcs-export/
+#: Export.lua`'s `EXPORT_INTERVAL_S = 0.2` gates the `LoGetWorldObjects`
+#: send, and `petrobrain-mission-telemetry-hook.lua`'s `POLL_INTERVAL_S =
+#: 1.0` gates the velocity send. `logger._DEFAULT_POLL_INTERVAL_S` (1.0 s,
+#: unchanged since `abf49cd`) is irrelevant to this bound: the skew below
+#: is `|world_objects_t - unit_velocity_t|`, a difference between two
+#: *producer* sim stamps, so how often body-layer reads the two `/latest`
+#: endpoints cannot change it. Stated here because `BL-B34` and
+#: `BL-B30` both read this comment as a claim about the poll loop and
+#: flagged it as a mis-calibration; it is not one. Beyond this
 #: bound a joined velocity sample is dropped to `None` (unknown, never
 #: reused as stale) -- tolerable because a ground vehicle's velocity barely
 #: changes over ~1 s, and anything whose velocity *does* change materially

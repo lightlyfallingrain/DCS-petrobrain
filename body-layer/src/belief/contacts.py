@@ -670,6 +670,57 @@ class ContactStore:
         #: module docstring for the cohesion rule and the split/merge
         #: reconciliation it performs against its own prior state.
         self._groups = GroupStore()
+        #: `plans/callout-observability-gate/debug.md` -- has `tick` ever
+        #: run with an `ownship`, i.e. is `Contact.last_observable_sim`'s
+        #: bookkeeping actually being maintained? `callout_observable`
+        #: below reads that bookkeeping rather than recomputing the mask,
+        #: so it needs to distinguish "confirmed unobservable" from "never
+        #: evaluated". Every caller that omits `ownship` (every unit test
+        #: that only wants lifecycle events, and `tick`'s own documented
+        #: `None` default) leaves this `False`, which makes the gate a
+        #: true no-op for them -- the same shape `tick`'s own `ownship is
+        #: None` branch already uses at emission.
+        self._observability_tracked = False
+
+    def callout_observable(self, contact: Contact, now_sim: float) -> bool:
+        """Whether a spontaneous callout about `contact` may be *spoken*
+        right now, per the no-omniscience invariant: is it observable from
+        Petrovich's own seat, or was it within the last `belief.decay.
+        CALLOUT_OBSERVABILITY_GRACE_S` seconds?
+
+        **A read of bookkeeping, not a second mask computation.**
+        `_callout_may_speak` (above) already evaluates
+        `perception.cockpit_mask.is_visible` against every contact's
+        current true bearing once per `tick(ownship=...)` call and stamps
+        `Contact.last_observable_sim`, and the poll loop runs
+        `ContactStore.tick` immediately before `CrewConsole.drain_events`
+        (`logger.Runner.run_once`), so by the time `belief.callouts.
+        CalloutScheduler.tick` asks this question the answer is already
+        computed for this `now_sim`. Recomputing it here would duplicate
+        the mask geometry in a second place and let the two drift.
+
+        **Why the speech layer needs this at all, when emission is already
+        gated.** `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 wired the
+        observability gate into `tick`'s fifth and sixth blocks
+        (`CONTACT_MOTION_CHANGED`, `CONTACT_RANGE_CROSSED`) only. The
+        2026-10-05 sortie then spoke 20 lines about clock hours this very
+        mask declares unviewable -- 5, 6 and 7 o'clock, at body azimuths
+        150/180/150 degrees against a 130-degree `rear_cutoff_deg` -- all
+        of them `CONTACT_CLASSIFICATION_CHANGED` lines or group-disclosure
+        lines, neither of which passes through either gated block. See
+        `plans/callout-observability-gate/debug.md`.
+
+        Returns `True` when the bookkeeping has never run (see
+        `_observability_tracked`), and `False` for a contact that has never
+        once been confirmed observable -- `CALLOUT_OBSERVABILITY_GRACE_S`'s
+        own docstring explains at length why the grace window must be
+        measured from the last confirmed sighting rather than from the
+        first failed check."""
+        if not self._observability_tracked:
+            return True
+        if contact.last_observable_sim is None:
+            return False
+        return now_sim - contact.last_observable_sim < CALLOUT_OBSERVABILITY_GRACE_S
 
     @property
     def contacts(self) -> list[Contact]:
@@ -1085,6 +1136,13 @@ class ContactStore:
         date by then. This is what preserves BL-0's replay determinism: the
         same recorded stream, ticked at the same sim-times, always produces
         the same event log."""
+        if ownship is not None:
+            # `callout_observable`'s precondition: from here on `Contact.
+            # last_observable_sim` is maintained for every contact, so a
+            # `None` there means "confirmed never observable", not "never
+            # asked". Set before the loop, not inside it -- a store whose
+            # only contact is added later must still read as tracked.
+            self._observability_tracked = True
         for contact in self._contacts.values():
             current_certainty = certainty_of(contact, now_sim)
             kind = lifecycle_event_kind(

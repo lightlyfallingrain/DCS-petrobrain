@@ -46,7 +46,7 @@ from belief.classification import (
     new_classification_belief,
 )
 from belief.contacts import ContactStore
-from belief.decay import LOST_THRESHOLD_S
+from belief.decay import CALLOUT_OBSERVABILITY_GRACE_S, LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.events import CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, Event
 from belief.speech import render_group_report
@@ -1902,3 +1902,204 @@ def test_ungrouped_singleton_output_is_byte_identical() -> None:
     store.tick(now_sim=0.0)
 
     assert scheduler.tick(store, now_sim=0.0) == ["truck."]
+
+
+# --- `plans/callout-observability-gate/debug.md` -------------------------
+#
+# The no-omniscience gate at the *speech* choke point. `plans/
+# sortie-2026-09-26-fixes/plan.md` Stage 1 wired the observability gate
+# into `ContactStore.tick`'s fifth and sixth blocks only (`CONTACT_MOTION_
+# CHANGED`, `CONTACT_RANGE_CROSSED`); the 2026-10-05 sortie then spoke 20
+# lines about 5/6/7 o'clock -- body azimuths 150/180/150 against `_CO_
+# PILOT_MASK.rear_cutoff_deg`'s 130 -- every one of them either a
+# `CONTACT_CLASSIFICATION_CHANGED` line or a group-disclosure line, neither
+# of which passes through either gated block. These tests cover the two
+# newly-gated paths plus the two directions this fix must *not* break
+# (grace window, and deferral rather than loss).
+#
+# Geometry: `_observation`'s fixed `bearing_deg=0.0`/`range_m=1000.0` put
+# every contact in this file at `(1000.0, 0.0, alt 500.0)`, so ownship at
+# the origin at the same altitude sees it at depression ~0 and body azimuth
+# equal to the *negated heading* -- heading 0 puts it dead ahead (visible,
+# 22 deg of depression clearance there), heading 180 puts it dead astern
+# (masked unconditionally by the rear cutoff, at any elevation).
+_HEADING_CONTACT_AHEAD: float = 0.0
+_HEADING_CONTACT_ASTERN: float = 180.0
+
+
+def _ownship_heading(heading_true_deg: float, t_sim: float = 0.0) -> OwnshipState:
+    """Ownship at the origin at the contacts' own altitude (see the block
+    comment above), pointed so that the contact at `(1000, 0)` falls either
+    inside or outside `perception.cockpit_mask`'s co-pilot mask."""
+    return OwnshipState(
+        t_sim=t_sim, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=heading_true_deg
+    )
+
+
+def _store_with_one_presence_contact() -> ContactStore:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_OBSERVABILITY",
+                t_sim=0.0,
+                classification_raw="Ural truck",
+                classification_level=1,
+            )
+        ],
+        now_sim=0.0,
+    )
+    return store
+
+
+def _refine_classification(store: ContactStore, t_sim: float) -> None:
+    """Drives `ContactStore.tick`'s own `last_emitted_classification`
+    comparison by mutating belief directly, for the same reason
+    `test_grouped_contacts_own_classification_changed_still_speaks_on_its_
+    own` does -- a second `ingest` this close to the existing contact is a
+    genuinely ambiguous association and would found a new contact instead
+    of refining this one."""
+    store.contacts[0].classification = new_classification_belief(
+        value="OP_TRUCK", level=SpecificityLevel.CLASS, established_sim=t_sim
+    )
+
+
+def test_classification_change_is_silent_about_a_cockpit_masked_bearing() -> None:
+    """The defect itself: `unit 7 o'clock, very close is Tigr armored
+    vehicle.` spoken while the gaze was `11_oclock` and the believed
+    bearing was 150 deg -- past the 130 deg rear cutoff, so unviewable from
+    *any* gaze direction, not merely outside the current one. The event is
+    still emitted and logged (belief is allowed to know); it simply must
+    never reach speech. The clock hour is not asserted here -- rendering it
+    needs the enrichment fixture and is orthogonal: a line about a contact
+    Petrovich cannot see is the violation whatever bearing word it carries.
+    """
+    store = _store_with_one_presence_contact()
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_ASTERN))
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == []
+
+    _refine_classification(store, t_sim=1.0)
+    store.tick(
+        now_sim=1.0, ownship=_ownship_heading(_HEADING_CONTACT_ASTERN, t_sim=1.0)
+    )
+
+    assert any(
+        event.kind == "CONTACT_CLASSIFICATION_CHANGED"
+        for event in store.unacknowledged_events
+    )
+    assert scheduler.tick(store, now_sim=1.0) == []
+
+
+def test_classification_change_still_speaks_about_an_observable_bearing() -> None:
+    """The other direction, and the reason this gate reads the cockpit mask
+    rather than the gaze cone or the rendered hour: a contact Petrovich can
+    actually see must still be identified out loud."""
+    store = _store_with_one_presence_contact()
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_AHEAD))
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == ["ground."]
+
+    _refine_classification(store, t_sim=1.0)
+    store.tick(now_sim=1.0, ownship=_ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=1.0))
+
+    assert scheduler.tick(store, now_sim=8.0) == ["unit is truck."]
+
+
+def test_classification_change_speaks_inside_the_observability_grace_window() -> None:
+    """The debug task's own caveat: the spoken hour derives from *believed*
+    position, which lags, so a contact genuinely observable may render a few
+    degrees past the cutoff. `CALLOUT_OBSERVABILITY_GRACE_S` is what absorbs
+    that -- a contact confirmed observable within the window still speaks
+    even though its current believed bearing is masked."""
+    store = _store_with_one_presence_contact()
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_AHEAD))
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == ["ground."]
+
+    inside_grace = CALLOUT_OBSERVABILITY_GRACE_S / 2.0
+    _refine_classification(store, t_sim=inside_grace)
+    store.tick(
+        now_sim=inside_grace,
+        ownship=_ownship_heading(_HEADING_CONTACT_ASTERN, t_sim=inside_grace),
+    )
+
+    assert scheduler.tick(store, now_sim=inside_grace) == ["unit is truck."]
+
+
+def test_classification_change_masked_past_the_grace_window_is_deferred_not_lost() -> (
+    None
+):
+    """Skipped *without consuming*, unlike `WATCH_REPORT_MIN_GAP_S`'s
+    deliberate "lost, not deferred": there is nothing stale about an
+    identification Petrovich cannot see *yet*, and the same line is correct
+    the moment the bearing comes back inside the mask. `CALLOUT_MAX_AGE_S`
+    is what bounds the wait, which is why the gate sits after that check."""
+    store = _store_with_one_presence_contact()
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_AHEAD))
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == ["ground."]
+
+    masked_at = 2.0 * CALLOUT_OBSERVABILITY_GRACE_S
+    _refine_classification(store, t_sim=masked_at)
+    store.tick(
+        now_sim=masked_at,
+        ownship=_ownship_heading(_HEADING_CONTACT_ASTERN, t_sim=masked_at),
+    )
+    assert scheduler.tick(store, now_sim=masked_at) == []
+
+    back_in_view = masked_at + CALLOUT_MAX_AGE_S / 2.0
+    store.tick(
+        now_sim=back_in_view,
+        ownship=_ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=back_in_view),
+    )
+
+    assert scheduler.tick(store, now_sim=back_in_view) == ["unit is truck."]
+
+
+def test_group_disclosure_is_silent_when_every_member_is_masked() -> None:
+    """The sortie's *"A couple of contacts, 5 o'clock, 2.5 kilometres."* and
+    *"Group, 5 o'clock, 4 kilometres."* -- the group-disclosure path, which
+    mints no `Event` at all and so could never have been reached by a gate
+    placed at emission."""
+    store = ContactStore()
+    _cohering_group(store)
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_ASTERN))
+
+    assert CalloutScheduler().tick(store, now_sim=0.0) == []
+
+
+def test_group_disclosure_speaks_when_any_one_member_is_observable() -> None:
+    """Any one member observable is enough -- a group straddling the cutoff
+    is a group Petrovich can genuinely see, and the disclosure line renders
+    its position from the nearest member rather than per-member.
+
+    One member's bookkeeping is stamped directly because the geometry
+    cannot express this case: `_cohering_group`'s members sit metres apart
+    (cohesion requires it), so they necessarily share one body azimuth. The
+    stamp is exactly what `_callout_may_speak` would have left behind for a
+    member the other side of the cutoff."""
+    store = ContactStore()
+    contact_ids = _cohering_group(store)
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_ASTERN))
+    observable_member = store.contact(contact_ids[0])
+    assert observable_member is not None
+    observable_member.last_observable_sim = 0.0
+
+    assert CalloutScheduler().tick(store, now_sim=0.0) == ["Group."]
+
+
+def test_observability_gate_is_a_no_op_for_a_store_never_ticked_with_ownship() -> None:
+    """`ContactStore.callout_observable`'s `_observability_tracked` escape:
+    every caller that omits `ownship` (every test in this file that predates
+    this fix, and `tick`'s own documented `None` default) leaves `Contact.
+    last_observable_sim` unmaintained, where `None` means "never evaluated"
+    rather than "confirmed unobservable". Gating on it there would silence
+    everything."""
+    store = ContactStore()
+    _cohering_group(store)
+    contact = store.contacts[0]
+
+    assert contact.last_observable_sim is None
+    assert store.callout_observable(contact, now_sim=0.0)
+    assert CalloutScheduler().tick(store, now_sim=0.0) == ["Group."]
