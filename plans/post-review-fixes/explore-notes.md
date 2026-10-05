@@ -89,3 +89,105 @@ unresolved: *"Whether `LoGetWorldObjects`'s key equals `Unit.getObjectID()`, `Un
 neither, or ..."*. One probe answers it — log name + `getID()` + `getObjectID()` from the Hook and
 the table key + `UnitName` from `Export.lua` for the same frame, and compare. Investigator work,
 before any plan depends on it.
+
+---
+
+## 2. Re-identification is a group-level judgement, and the data says it can only be
+
+**User, on what survives losing sight:**
+
+> *"Losing line of sight alone does not do it. Because I remember where it is, and if it was moving.
+> I can go hide behind a ridge, circle to different position and pop up for an attack run, or to
+> just observe from different angle. It such case, I compare what I see againt what I remember.
+> Even if the units have moved, does the count match? Classification? Movement (direction? on
+> road?). It could be that I see more units from a different angle and maybe some are hidden by
+> buildings, but I can remember that they were there. If I see no movement, then I especially expect
+> that the units I remember have not moved."*
+
+**On what makes something a new unit:**
+
+> *"It not being *with* the group I remember. There being more units in the group that memory tells,
+> so some unit(s) have to be newly detected. Group composition changing from what I remember.
+> Location changing so much that unit movemnt is not an explanation (considering typical unit
+> movement speeds). Different type of group, e.g. AAA installment (especially entrenced = not
+> capable of movememnt) would be different than other units that are nearby."*
+
+Every predicate in that list is over a **remembered group compared with an observed cluster**.
+`ContactStore.ingest` (`belief/contacts.py:957-971`) compares one percept against every individual
+contact with a Mahalanobis gate and nothing else, and `Group` — which already exists from the
+group-reporting work — takes no part in association.
+
+### The flat inflation rate is the churn mechanism
+
+`GATE_GROWTH_RATE_MPS = 20.0` (`belief/position_belief.py:161`) inflates a contact's position
+uncertainty at 20 m/s of **elapsed time, regardless of observed motion state**. 20 m/s is 72 km/h,
+a truck on a road, applied equally to an entrenched Shilka. 30 s unseen is a ±600 m disc. The
+user's sentence replaces it with a per-classification rate, and `object_model.profile_for` already
+carries per-type data.
+
+### Measured spacing, which is the number the parked decision was waiting for
+
+`plans/contact-duplication-ambiguity-runaway/debug.md` escalated the gate-sizing trade-off to
+Architect and said picking a value *"requires knowing what real DCS mission object spacing and
+naked-eye range distributions actually look like, not just a code read."* Reduced from this
+sortie's belief-truth log (deduplicated by `object_id` — the raw log double-counts, which is the
+churn itself; 1,200 polls, median 5 distinct tracked objects, max 69):
+
+| nearest-neighbour spacing, distinct objects | |
+|---|---|
+| p05 | 2 m |
+| p25 | 6 m |
+| **median** | **16 m** |
+| p75 | 55 m |
+| p95 | 342 m |
+
+Flat per-object, by range band, the median sits at 11–23 m everywhere.
+
+**That settles the trade-off by showing it has no solution at the unit grain.** A gate that
+tolerates 30 s of motion is ±600 m; the objects it must separate are 16 m apart. No single radius
+is both. So per-unit identity is **not recoverable from position** at real DCS spacing — which is
+not a tuning failure, it is the same fact the group contact model already established in the
+*resolution* domain (twelve units at 9 km are one mark). The user's group-level model is not merely
+more human, it is the only grain the data supports.
+
+At the group grain the numbers invert and become workable — single-link clustering of the same
+data:
+
+| link | cluster-to-cluster nearest separation | |
+|---|---|---|
+| 100 m | p05 124 m · p25 168 m · **median 236 m** · p75 378 m |
+| 250 m | p05 328 m · p25 389 m · **median 625 m** · p75 962 m |
+
+### Why "never a guessed merge" needs revisiting, and it is a premise failure not a wrong call
+
+`ingest`'s "two or more plausible candidates → found a new contact" is a deliberate, named
+invariant (`plans/pb2-contact-memory/plan.md` Stage 1, "never a guessed merge"). The user supplies
+the density assumption it was silently resting on:
+
+> *"DCS missions are not usually saturated with units, like real life frontlines would be. DCS just
+> cannot handle so many units. So a group that leaves the road and heads off is likely the same one,
+> if the group composition matches."*
+
+In a saturated world, refusing to guess a merge is right: the alternative explanation (a different
+unit) is cheap. In a sparse world it is backwards — ambiguity should resolve toward *the group I
+already know*, because there usually is no second candidate group. The invariant is not wrong; its
+premise is, and nothing wrote the premise down.
+
+### Road-following, in the user's own terms
+
+> *"Units traveling on a road typically follow that road. That is the whole point of roads… They may
+> turn at intersecions naturally and I typically cannot predict where and when they turn, unless I
+> know the route or destination. When attacked DCS units spread and take cover, so they move a bit
+> off the road and stop. Then after a certain time of not being attacked they resume their route on
+> the road. Units can, of course, also leave the road and drive through terrain, though that's less
+> usual. Direction matters too, units typically do not turn around and head back, not in DCS (real
+> life is very different, but DCS follows routes)."*
+
+Design consequences, each cheap because world-model already holds the data:
+
+- The search region for a remembered moving group is a **directional corridor along the road
+  graph**, branching at junctions (`M10` junction detection exists), not a disc.
+- **Direction is monotone** — a reversal is evidence against identity, since DCS units follow routes.
+- **"Spread off-road and stopped" is a recognised state**, the signature of having been attacked,
+  and it should read as the same group displaced rather than new units. It also expires: they resume.
+- Off-road is allowed but less likely; composition match outweighs it.
