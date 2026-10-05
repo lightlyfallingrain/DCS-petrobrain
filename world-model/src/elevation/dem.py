@@ -31,6 +31,25 @@ _VOID = -32768
 _FILENAME_RE = re.compile(r"^([NS])(\d{2})([EW])(\d{3})\.hgt$", re.IGNORECASE)
 
 
+def srtm_tile_sw_corner(path: Path) -> tuple[float, float]:
+    """`(sw_lat, sw_lon)` of the `.hgt` tile at `path`, from its filename
+    alone -- the file is not read, so a caller can decide which tiles it
+    needs before paying for parsing them. Raises `ValueError` if the
+    filename doesn't match SRTM naming."""
+    match = _FILENAME_RE.match(path.name)
+    if match is None:
+        raise ValueError(
+            f"{path.name!r} doesn't match SRTM .hgt naming "
+            "(<N|S><lat><E|W><lon>.hgt, e.g. N39E036.hgt)"
+        )
+    lat_sign = 1 if match.group(1).upper() == "N" else -1
+    lon_sign = 1 if match.group(3).upper() == "E" else -1
+    return (
+        float(lat_sign * int(match.group(2))),
+        float(lon_sign * int(match.group(4))),
+    )
+
+
 @dataclass(frozen=True)
 class SrtmTile:
     """One parsed SRTM `.hgt` tile (or a small real-data crop of one, for
@@ -57,16 +76,7 @@ class SrtmTile:
         """Parse a `.hgt` tile at `path`. Raises `ValueError` if the
         filename doesn't match SRTM naming or the file size doesn't match a
         square grid of 16-bit samples."""
-        match = _FILENAME_RE.match(path.name)
-        if match is None:
-            raise ValueError(
-                f"{path.name!r} doesn't match SRTM .hgt naming "
-                "(<N|S><lat><E|W><lon>.hgt, e.g. N39E036.hgt)"
-            )
-        lat_sign = 1 if match.group(1).upper() == "N" else -1
-        lon_sign = 1 if match.group(3).upper() == "E" else -1
-        sw_lat = lat_sign * int(match.group(2))
-        sw_lon = lon_sign * int(match.group(4))
+        sw_lat, sw_lon = srtm_tile_sw_corner(path)
 
         raw = path.read_bytes()
         sample_count = len(raw) // 2
@@ -82,9 +92,7 @@ class SrtmTile:
         if _is_little_endian():
             samples.byteswap()  # .hgt samples are big-endian
 
-        return cls(
-            sw_lat=float(sw_lat), sw_lon=float(sw_lon), size=size, samples=samples
-        )
+        return cls(sw_lat=sw_lat, sw_lon=sw_lon, size=size, samples=samples)
 
     def _row_col(self, lat: float, lon: float) -> tuple[float, float]:
         """Fractional (row, col) into `samples` for (lat, lon).

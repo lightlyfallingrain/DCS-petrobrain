@@ -9,6 +9,10 @@ existing lines without dropping entries). On 2026-09-20 a single commit replaced
 entries with 1, leaving 73 memory files on disk unreachable. Rebuilt 2026-09-21. Compacted
 2026-10-05: removed a full duplicated block (lines had been appended twice with longer text) and
 shortened lines; no entries dropped, read the linked file for full detail.
+lines without dropping entries). 2026-09-20: a commit replaced 27 entries with 1, orphaning 73
+memory files. Rebuilt 2026-09-21. Compacted twice on 2026-10-05 — the first pass appended its
+shortened lines above the old long-form block instead of replacing it, duplicating every entry
+and blowing the cap again; this pass merged them into one list.
 
 - [Aircraft layer stage1 2 review](aircraft-layer-stage1-2-review.md) - Export.lua + collector review.
 - [Body layer plan review](body-layer-plan-review.md) - invariants held, plan contradicted own provenance claim.
@@ -107,7 +111,7 @@ shortened lines; no entries dropped, read the linked file for full detail.
 - [BR-1 Stage 2 fold review](project_br1_stage2_fold_review.md) - split composition test closes seam via transitivity.
 - [Aircraft hardening accept race required fix](project_aircraft_hardening_accept_race_required_fix.md) - 300-run reproduction; 2 of N passages uncorrected.
 - [Claude config self-audit 2026-09-27](project_claude_config_self_audit_2026_09_27.md) - hook-injected strings drifted from CLAUDE.md text.
-- [Audio adapter review fixes negative length test gap](project_audio_adapter_review_fixes_negative_length_test_gap.md) - pre-existing guard already prevented the claimed hang.
+- [Audio adapter review fixes negative length test gap](project_audio_adapter_review_fixes_negative_length_test_gap.md) - guard already prevented the claimed hang.
 - [Audio adapter negative length round2 confirmed](project_audio_adapter_negative_length_round2_confirmed.md) - re-review via git archive of a branch checked out elsewhere.
 - [Sortie 0926 fixes observability gate review](project_sortie_0926_fixes_observability_gate_review.md) - patch-and-rerun beats reading alone.
 - [Confirm band affirmatives grace swallow](project_confirm_band_affirmatives_grace_swallow.md) - 5 rounds; each bug hid behind a hand-picked test param.
@@ -123,12 +127,14 @@ shortened lines; no entries dropped, read the linked file for full detail.
 - [WM-B1 Latin names approved](project_wm_b1_latin_names_approved.md) - cache-invalidation verified via a stale OsmCacheMeta construction.
 - [Landform geomorphons review](project_landform_geomorphons_review.md) - cross-process PYTHONHASHSEED determinism check.
 - [Landform geomorphons round2 approved](project_landform_geomorphons_round2_approved.md) - "kept as baseline" figure checked against git log.
-- [Landform geomorphons perf fix round3 approved](project_landform_geomorphons_perf_fix_round3_approved.md) - subset-of-candidates safety arg needs subset-ness not exactness.
+- [Landform geomorphons perf fix round3 approved](project_landform_geomorphons_perf_fix_round3_approved.md) - subset-of-candidates safety needs subset-ness, not exactness.
 - [Silence command approved](project_silence_command_approved.md) - single-choke-point claims re-verified by grep/read.
 - [Landform relief gate review](project_landform_relief_gate_review.md) - caught ROADMAP.md's bug direction backwards vs. agent-memory.
 - [Contact report flood review](project_contact_report_flood_review.md) - verify "always later-founded" by tracing the state machine.
 - [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - early-return branch's test can pass disabled if a fallback degenerates to the same result.
 - [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; shared merge-echo predicate verified equivalent by argument-level read.
+- [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - an early-return test can pass disabled if the fallback degenerates to the same result.
+- [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED; shared merge-echo predicate verified equivalent to both old copies.
 - [Multi theatre afghanistan review](project_multi_theatre_afghanistan_review.md) - APPROVED; crossing measurement separated authoring from a defect.
 - [MTA security fix test gap](project_mta_security_fix_test_gap.md) - NEEDS REVISION; required-fix test passed even with required fix alone removed.
 - [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam.
@@ -136,3 +142,5 @@ shortened lines; no entries dropped, read the linked file for full detail.
 - [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; 4-mechanism disable-and-rerun check.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp empirically re-run under a standalone Lua interpreter.
 - [Sortie 1005 items234 scan ahead cadence review](project_sortie_1005_items234_scan_ahead_cadence_review.md) - APPROVED; instrumented-run beat hand-derived dwell-cadence arithmetic.
+- [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
+- [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
