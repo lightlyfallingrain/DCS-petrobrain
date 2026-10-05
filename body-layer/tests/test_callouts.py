@@ -1965,9 +1965,16 @@ def test_group_callout_member_id_names_exactly_one_live_member() -> None:
     fixtures, `envelope_for` needing a threat table -- it falls back to
     the first still-resolving member in id order, which is what matters
     for suppression: deterministic, and always exactly one of the live
-    members, never `None` and never an id the store has lost."""
+    members, never `None` and never an id the store has lost.
+
+    Every member is watched here so that keeper *eligibility* (`belief.
+    speech.may_be_callout_keeper`) is not what this test isolates -- the
+    mixed-watched case has its own test below. "First in id order" is
+    therefore first among the eligible, which is all of them."""
     store = ContactStore()
     member_ids = _cohering_group(store, n=3)
+    for member_id in member_ids:
+        set_attention(store, member_id, "watch")
     belief_group = store.groups[0]
 
     keeper_id = group_callout_member_id(store, belief_group)
@@ -1985,9 +1992,15 @@ def test_group_callout_member_id_is_none_when_the_group_has_shrunk() -> None:
     `render_group_disclosure`/`_group_member_facts` enforce. `None` means
     the caller suppresses *nothing* -- a stale group must not be able to
     silence the one real member's callout, which would be a worse failure
-    than the flood."""
+    than the flood.
+
+    Both members are watched so the `None` under test is the shrunken-group
+    guard and not keeper ineligibility -- the two reasons for `None` are
+    independent and this one is about group coherence alone."""
     store = ContactStore()
     member_ids = _cohering_group(store, n=2)
+    for member_id in member_ids:
+        set_attention(store, member_id, "watch")
     belief_group = store.groups[0]
     assert group_callout_member_id(store, belief_group) is not None
 
@@ -1999,6 +2012,63 @@ def test_group_callout_member_id_is_none_when_the_group_has_shrunk() -> None:
     )
 
     assert group_callout_member_id(store, stale) is None
+
+
+def test_a_watched_peer_still_speaks_when_the_groups_keeper_is_unwatched() -> None:
+    """Review round 2, 2026-10-05, required fix 1. The suppression elects
+    one keeper per group and `_consumed`s the peers; if the keeper is
+    chosen without regard for whether it is itself *watched*, the filter's
+    own not-watched check drops the keeper's event with a bare `continue`
+    while every peer is already consumed -- so **nothing speaks for the
+    group at all**. Going quiet is the worse failure direction here (it is
+    unobservable to the pilot, and "says too little" is one of the ED
+    Petrovich failures this project exists to fix) and strictly worse than
+    the flood the suppression was added to stop.
+
+    Mixed-watched groups are this feature's own accepted design, not a
+    contrived state: Item 3's settled scope is "tag once, static" (see
+    `test_a_unit_that_joins_the_group_later_is_not_retroactively_watched`)
+    while `belief.groups.GroupStore.reconcile` rebuilds `member_contact_
+    ids` on every call, so a watched group gains unwatched members as
+    contacts are founded, re-founded after a loss, or drift into cohesion.
+
+    Leaving `min(member_contact_ids)` unwatched is what makes this test
+    bite rather than merely pass: with no threat envelope resolvable for
+    these fixtures the pre-fix keeper election was exactly that `min`, so
+    the unwatched member *is* the member the old code would have kept.
+    Asserted below rather than assumed."""
+    store = ContactStore()
+    member_ids = _cohering_group(store, n=3, apparent_motion=None)
+    CalloutScheduler().tick(store, now_sim=0.0)  # drain the group's own line
+    belief_group = store.groups[0]
+    unwatched_id = min(belief_group.member_contact_ids)
+    watched_ids = sorted(set(member_ids) - {unwatched_id})
+    assert len(watched_ids) == 2
+    for member_id in watched_ids:
+        set_attention(store, member_id, "watch")
+    for contact in store.contacts:
+        contact.motion = MotionBelief(
+            state="moving", confidence=0.9, established_sim=1.0
+        )
+    store.tick(now_sim=1.0)
+    assert len([e for e in store.events if e.kind == CONTACT_MOTION_CHANGED]) == 3
+
+    # The keeper must be one of the watched peers, never the unwatched
+    # member -- that is the whole fix, and it is the same `("watch",
+    # "priority")` expression the filter gates these kinds on.
+    assert group_callout_member_id(store, belief_group) in set(watched_ids)
+
+    scheduler = CalloutScheduler()
+    spoken = [
+        line
+        for now_sim in (1.0, 5.0, 9.0)
+        for line in scheduler.tick(store, now_sim=now_sim)
+    ]
+
+    # Exactly one: the group is still suppressed down to a single line
+    # (the 2N-to-2 saving is preserved), but that line exists.
+    assert len(spoken) == 1
+    assert "moving" in spoken[0].lower()
 
 
 def test_an_ungrouped_watched_contacts_motion_callout_is_untouched() -> None:
