@@ -135,6 +135,12 @@ All documentation. No `src/` behaviour change: the only `src` edits are the modu
     Reviewer's recommendation"*, with the explicit note that the user was **not** consulted. The
     section it is filed under is called "Decided without you"; claiming the user's authority for
     it both misreports who decided and quietly removes the reason the entry exists.
+    **Correction, round 4: this sweep was not complete, and this entry overstated it.** The
+    security deep analysis (Finding 2) found one surviving occurrence at
+    `body-layer/tests/test_callouts.py:1929`, twelve lines above a docstring that said the
+    opposite — so the file contradicted itself on exactly the fact worth keeping honest. Fixed in
+    round 4; the claim here is left standing with this correction attached rather than rewritten,
+    because "swept throughout" reading as verified is itself part of what went wrong.
   - **Optional 1, taken** — a new paragraph records what the exempt line *actually says*
     (`_contact_report_text(facts, lead="Danger, ")`, so with an `EnrichmentContext` it also speaks
     believed clock hour, range and unit type, e.g. `"Danger, ZU-23-3, six o'clock, 1.0 km."`), that
