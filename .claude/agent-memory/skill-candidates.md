@@ -29,13 +29,5 @@ recurring false positives are not re-litigated every merge.
   and handles the security dispatch/worktree-addressing logic.
 - 2026-10-04 `scratch-hillshade-render` — **rejected**. ~5x render cycles. Now mostly covered by
   `tools/inspect_terrain.py`, which automates the multi-scale hillshade snapshot pipeline.
-
-## 2026-10-04 harvest an agent's worktree commit
-- **Pattern**: Sequence: `git worktree remove .claude/worktrees/agent-<id>` → fast-forward or cherry-pick onto the feature branch → verify against the agent's reported file list → delete the `worktree-agent-<id>` branch. Three complications hit ad hoc each time: a locked worktree (`git worktree unlock` first; never `--force`, which is in the deny list); the branch already checked out elsewhere (temp worktree in the scratchpad, `merge --ff-only`, remove); and a commit stranded on a detached HEAD after deleting its branch too early, recovered by sha and nearly lost.
-- **Count**: ~25 times across the session
-- **Benefit**: AGENTS.md rule 1 states the policy, nothing automates the mechanics, and the `merge` skill covers branch→main rather than agent→branch. A dedicated skill would eliminate the manual worktree locking, branch-conflict resolution, and detached-HEAD recovery steps on every agent harvest.
-
-## 2026-10-04 sortie-log triage
-- **Pattern**: Ad-hoc Python over `~/dcs-belief-truth.jsonl` and `~/dcs-detection-trace.jsonl`: speech rows and rate per minute, distinct contacts vs distinct objects, objects mapped to 2+ contact ids, contact lifespans, cluster size binned by range, admitted-row outcome histogram. Found both of 2026-10-04's defects (grouping under-merge, contact churn). `dcs-log-recon` exists but targets `aircraft_layer_debug.log` probe output, not these two files. Snapshot the logs before analysing — they are appended to while the user is still flying.
-- **Count**: ~8 times across two sorties
-- **Benefit**: A sortie-log triage skill would reuse the analysis templates and snapshots, capture the post-flight insights (speech rate, contact lifecycle, cluster stats) into a structured report, and avoid rediscovering the same queries each time.
+- 2026-10-04 `harvest an agent's worktree commit` — **created** as `.claude/skills/harvest-agent-commit/` (user approved 2026-10-05).
+- 2026-10-04 `sortie-log triage` — **created** as `.claude/skills/sortie-log-triage/` (user approved 2026-10-05).
