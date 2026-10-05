@@ -102,3 +102,29 @@ query cone is unaffected. The real effect is dwell: each hour is revisited a thi
 - **Arbitrary FOV** for the LOS cone *"that way future changes, like peripheral vision, can easily
   be taken aboard"* — and the command shape *"will be something like `look(int bearing, int FOV)`.
   It could also be `look_around(x_coord, y_coord, (alt))`, but that is not needed now."*
+
+---
+
+## Reading the four review reports, 2026-10-05 (later the same day)
+
+The user read the whole-subproject performance and security reports
+(`{body-layer,world-model}/research/2026-10-05-{performance-review,security-audit}.md`) and raised
+two things. Verbatim:
+
+> *"2 - Agents on worktrees cannot use graphify -> needs to be fixed"*
+
+> *"3 - LOS on world model being a backup and potentially taking a lot of time -> As discussed when
+> doing the DCS LOS change, world model LOS_must not be used_. It is to be a *testing* only tool,
+> not for live flight. Not only because of performance, but especially for *correctness*."*
+
+**Item 3 is a restatement of direction already in this very file** ("The 12 m LOS tolerance…
+must not be used in actual code", "Offline LOS is for testing only"), and it is worth recording
+that it had to be restated. Both reports, and the `BL-11` / `M11` milestones written from them,
+treated the offline fallback as something to make **observable** — a coverage counter, a provenance
+field, a tolerance derived from the store. That is the right fix for a fallback that is *allowed to
+exist*. The standing direction is that on the live path it is **not** allowed to exist, and the
+reason is correctness first and performance second. An observable that reports a 77 % share of a
+path that should be 0 % is measuring the wrong thing.
+
+Explored with the user immediately after (see the `/explore` session that follows this entry).
+
