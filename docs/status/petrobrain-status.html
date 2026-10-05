@@ -513,28 +513,29 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 01 Oct 2026</span>
+      <span>Derived from ROADMAP.md · 05 Oct 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems, two hundred tracked items &mdash; and today the project
-      <strong>built something, proved it against the whole theatre, and then parked it on the
-      pilot's own eye</strong>. The new ridge/valley detector merged with both falsifiable checks
-      holding and sinuosity down from 2.2 to 1.2; then hillshade renders of the real output were put
-      side by side with the terrain they describe, and the verdict was that the detection itself is
-      wrong &mdash; <em>&ldquo;smoothing or finer grid does not solve that.&rdquo;</em> The whole
-      landform line is now parked behind one decision that replaces the mechanism: geomorphons,
-      classified then vectorised, chosen from rendered comparisons over a spike's own
-      recommendation. Elsewhere the group cohesion redesign cleared every gate there is and waits
-      on a flight, and the tree question closed with a clean negative: <strong>no DCS call sees
-      trees</strong>, so OSM landcover is the shipping answer rather than the fallback.</p>
+    <p class="lede">Six subsystems, two hundred tracked items &mdash; and the chain that was parked
+      four days ago on the pilot's own eye is <strong>unparked, rebuilt and accepted</strong>. The
+      third landform detector (geomorphons, classified then traced) was built with its cache in from
+      the first pass, and the 2026-10-04 full-theatre rebuild cleared it by the pilot's own
+      criteria: <strong>zero relief-gate violations, 234,799 ridge and valley lines, a 720&nbsp;MB
+      store where 2.4&nbsp;GB was predicted</strong>, the Bekaa floor clean and Palmyra's chains
+      intact by eye. Nothing in the cockpit changes from it &mdash; the three callout stages are
+      still unbuilt and still gated on a consumer that wants landform references. Everything that
+      <em>would</em> change the cockpit went the other way this cycle: the 10&nbsp;km bubble, lost
+      contacts out of clustering, a <code>silence</code> command, merge-echo suppression and group
+      lines that stop repeating what was already said. All of it is merged, and <strong>none of it
+      has been heard in the air</strong>.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>117</b><span>Done</span></div>
-    <div class="count is-active"><b>12</b><span>In progress</span></div>
-    <div class="count is-open"><b>56</b><span>Open</span></div>
-    <div class="count is-hold"><b>15</b><span>Deferred</span></div>
+    <div class="count is-done"><b>127</b><span>Done</span></div>
+    <div class="count is-active"><b>11</b><span>In progress</span></div>
+    <div class="count is-open"><b>60</b><span>Open</span></div>
+    <div class="count is-hold"><b>14</b><span>Deferred</span></div>
     <div class="count is-block"><b>3</b><span>Await you</span></div>
   </div>
 
@@ -546,15 +547,16 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="wm">
         <h3>World Model</h3>
         <span class="path">world-model/</span>
-        <div class="bar"><i style="width:97%"></i></div>
-        <span class="chip active">M0–M10 complete &mdash; the landform line parked today</span>
-        <p class="next">All query surfaces serving the Mission Interpreter over HTTP. The new
-          watershed ridge/valley detector merged today and the full-theatre build confirmed every
-          prediction it made &mdash; then the pilot looked at the output over a hillshade and judged
-          the detection itself wrong, which parks <b>the entire landform line</b> (smoothing, valley
-          boundaries, the three unbuilt callout stages). <b>Next:</b> nothing in this subproject is
-          actionable &mdash; the replacement mechanism is decided but deliberately not started, and
-          multi-theatre is the only other open milestone.</p>
+        <div class="bar"><i style="width:98%"></i></div>
+        <span class="chip done">M0–M10 complete &mdash; landforms rebuilt and accepted</span>
+        <p class="next">All query surfaces serving the Mission Interpreter over HTTP. The third
+          ridge/valley detector &mdash; geomorphons, with a relief gate and DEM-scale decimation
+          added after the first theatre build exposed both gaps &mdash; <b>cleared acceptance on
+          your 2026-10-04 rebuild</b>: no stored line under 50&nbsp;m of relief, 234,799 lines, a
+          720&nbsp;MB store. Latin-script place names cleared on the same run. <b>Next:</b> still
+          nothing urgent here. Callout stages 3&ndash;5 are unbuilt and gated on a consumer that
+          actually wants landform references; multi-theatre (Kola has no SRTM) is the other open
+          milestone; the 12&nbsp;m LOS tolerance is still unflown.</p>
         <span class="more">Details</span>
       </article>
 
@@ -586,15 +588,16 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="bl">
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
-        <div class="bar"><i style="width:93%"></i></div>
-        <span class="chip active">Cohesion redesign through every gate &mdash; unmerged, unflown</span>
-        <p class="next">Grouping shipped last week; today's work is the correction to it. Cohesion is
-          now <b>size-relative and kind-aware</b> rather than one distance: infantry merge eagerly by
-          the pilot's own instruction, a real SAM site's components merge inside 500&nbsp;m, and a
-          re-arrival speaks a short delta instead of restating the roster. Reviewer, Security,
-          Performance and DoD all passed on <code>fix/group-undermerging</code>. <b>Next:</b> your
-          call &mdash; fly it from the branch, or merge it and fly it from <code>main</code> with
-          everything else outstanding.</p>
+        <div class="bar"><i style="width:94%"></i></div>
+        <span class="chip active">Five quieting changes merged &mdash; not one of them flown</span>
+        <p class="next">The whole cycle was spent on how much Petrovich says and about what. Cohesion
+          went <b>size-relative and kind-aware</b> (merged); a 10&nbsp;km bubble bounds what is
+          computed at all; lost contacts left clustering, which took sortie-length cost out of the
+          tick; <code>silence</code> mutes him absolutely on one word; and two speech-layer fixes
+          stop the same units being announced twice &mdash; once as a merge echo, once as a group
+          line restating members already named. <b>Next:</b> one flight settles all of it, and the
+          open question underneath is still yours: what should he <em>say</em> when sixteen
+          separately-resolvable vehicles sit in one sector?</p>
         <span class="more">Details</span>
       </article>
 
@@ -622,6 +625,8 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <p class="next">Outbound audio closed 2026-09-26 without its own flight: latency under a
           second does not read as laggy, callout queueing was fixed by flight feedback rather than
           graded, and a generic voice survives a loud cockpit while staying monotonous.
+          The only change this cycle was one word of vocabulary: <code>silence</code> and its two
+          phrasings, so the body layer's mute command can be spoken rather than typed.
           <b>Next:</b> press-to-readback latency, measured at ~3&nbsp;s &mdash; the lag a pilot
           actually feels, and it is upstream in speech-to-text.</p>
         <span class="more">Details</span>
@@ -632,11 +637,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 
   <section>
     <h2>Dependency map</h2>
-    <p class="section-note">What gates what, done work included. Two chains ended today rather than
-      advancing: the landform line reached a working detector and was parked on the pilot's judgement
-      of its output, and the tree investigation reached a definite <em>no</em> &mdash; which is an
-      answer, so its node is green. A chain that stops is still progress if what stopped it is
-      knowledge.</p>
+    <p class="section-note">What gates what, done work included. The landform chain &mdash; parked
+      on a judgement four days ago, which is why its nodes were grey last time &mdash; now runs
+      green all the way to a theatre build the pilot accepted. The crew-behaviour chain did the
+      opposite: it grew five green nodes that all feed one red one, because every single change in
+      it is merged and unheard.</p>
 
     <div class="diagram-wrap">
       <button class="expand" id="gv-open" data-graph="#graph-deps" type="button">Expand graph</button>
@@ -668,8 +673,14 @@ flowchart LR
   NOISE["2026-09-28 sortie&lt;br/&gt;5 reports/min, 25 min"]:::done
   GREP["Group reporting&lt;br/&gt;one line per group"]:::done
   CONF["Confirm band&lt;br/&gt;answerable at last"]:::done
-  COH["Cohesion redesign&lt;br/&gt;every gate passed, unmerged"]:::block
-  CBS["Four cards on main&lt;br/&gt;still unflown"]:::block
+  COH["Cohesion redesign&lt;br/&gt;size-relative, kind-aware"]:::done
+  N1004["2026-10-04 sortie&lt;br/&gt;same units, reported twice"]:::done
+  SIL["silence command&lt;br/&gt;one word, absolute quiet"]:::done
+  FLOOD["Merge-echo suppression&lt;br/&gt;17 of 34 foundings silent"]:::done
+  RGD["Group lines stop&lt;br/&gt;restating known members"]:::done
+  BUBBLE["10 km player bubble&lt;br/&gt;built, no cockpit observable"]:::done
+  PRUNE["BL-B23 lost contacts&lt;br/&gt;out of clustering"]:::done
+  CBS["Everything on main&lt;br/&gt;still unflown"]:::block
 
   PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
   DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
@@ -682,9 +693,11 @@ flowchart LR
   SURF[".surface5 payload wall&lt;br/&gt;hit twice, deferred"]:::hold
 
   M6["M6 curvature detector&lt;br/&gt;checkerboard noise"]:::done
-  WSHED["Watershed detector&lt;br/&gt;merged, theatre-confirmed"]:::done
-  WMB6["WM-B6 output judged wrong&lt;br/&gt;geomorphons decided"]:::hold
-  PARK["Smoothing · valley bounds&lt;br/&gt;callout stages 3–5"]:::hold
+  WSHED["Watershed detector&lt;br/&gt;merged, then judged wrong"]:::done
+  WMB6["WM-B6 geomorphons&lt;br/&gt;classify · thin · trace · cache"]:::done
+  GATE["Relief gate + decimation&lt;br/&gt;720 MB, 234,799 lines"]:::done
+  WMB1["WM-B1 Latin place names&lt;br/&gt;cleared on the same build"]:::done
+  PARK["Callout stages 3–5&lt;br/&gt;unbuilt, waiting on a consumer"]:::open
 
   BL8["BL-8&lt;br/&gt;memory interfaces"]:::open
   BR1["BR-1 Stage 1&lt;br/&gt;async wire, stub decider"]:::done
@@ -700,12 +713,16 @@ flowchart LR
   BL5a --> S1
   S1 --> ST15 --> BR1
   BL27 --> CONES --> CALL --> EVS
-  EVS --> NOISE --> GREP --> COH
+  EVS --> NOISE --> GREP --> COH --> CBS
   GC --> GREP
   NOISE --> CONF --> CBS
   GREP --> CBS
   LOS --> CBS
-  COH -.->|"merge, or fly the branch"| CBS
+  COH --> N1004
+  N1004 --> SIL --> CBS
+  N1004 --> FLOOD --> RGD --> CBS
+  COH --> PRUNE --> CBS
+  BL27 --> BUBBLE --> CBS
   AL --> PROBE --> DMG
   AL --> BRIDGE --> TREE
   TREE --> OSMV
@@ -715,8 +732,9 @@ flowchart LR
   BR1 --> BR2 --> BRAIN
   CBS -.->|"tunes"| BRAIN
   BL27 -.->|"needs real flights"| BL8 -.-> BRAIN
-  WM --> M6 --> WSHED --> WMB6 --> PARK
-  DLOS -.->|"removes the grid's last gate"| WMB6
+  WM --> M6 --> WSHED --> WMB6 --> GATE --> PARK
+  WM --> WMB1 -.->|"one rebuild carried both"| GATE
+  DLOS -.->|"removes the grid's last gate"| GATE
 </pre>
       </div>
     </div>
@@ -733,10 +751,10 @@ flowchart LR
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
     <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing that is
-      done. The groups were redrawn rather than inherited this time, because one of them stopped
-      being a group: &ldquo;terrain&rdquo; used to be a single chain waiting on a single unread
-      number. That number was read, and what it answered split the chain in two halves that no
-      longer touch.</p>
+      done. The landform group has shrunk to almost nothing: last cycle it was four parked nodes
+      with no edge to anything, and the only thing left in it now is the callout work nobody has
+      asked for yet. What replaced it as the largest group is the one that cannot be reasoned
+      about from a desk at all.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -750,24 +768,24 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  SORTIE["Five cards unflown&lt;br/&gt;four on main, one on a branch"]:::block
+  SORTIE["Everything merged since 25 Sep&lt;br/&gt;eight cards, one flight"]:::block
+  SAY["What does he SAY about&lt;br/&gt;sixteen vehicles in one sector?"]:::block
 
   subgraph REPORT ["Crew behaviour &mdash; everything here is downstream of the flight"]
     direction LR
-    COH["Cohesion redesign&lt;br/&gt;merge it, or fly the branch"]:::block
     GBOUND["Cohesion constants are guesses&lt;br/&gt;500 m cap · 20 unit widths"]:::open
     GC5["Group stage 5&lt;br/&gt;common fate"]:::hold
     POL["Callout policy follow-ons&lt;br/&gt;repetition · sector fairness"]:::open
+    OVER["Over-suppression risk&lt;br/&gt;a real split sounds like an echo"]:::open
     DMG["Damage + fire reporting&lt;br/&gt;probes answered it"]:::open
   end
 
   subgraph PERC ["Perception"]
     direction LR
-    BUBBLE["10 km player bubble&lt;br/&gt;decided, unbuilt"]:::open
     CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
     COND["Conditions&lt;br/&gt;f(condition, optical path) + a ceiling"]:::open
     FRAG["X-B6 outpost fragments&lt;br/&gt;diagnosed, not the noise cause"]:::open
-    PERF["BL-B23 clustering cost&lt;br/&gt;grows with sortie length"]:::open
+    AMB["BL-B24 · BL-B25&lt;br/&gt;the ambiguity rule itself, untouched"]:::open
   end
 
   subgraph LOSG ["Line of sight, the DCS way"]
@@ -777,11 +795,11 @@ flowchart LR
     SURF["X-B32 per-tree placement&lt;br/&gt;behind the payload wall"]:::hold
   end
 
-  subgraph LANDF ["Landform &mdash; parked whole, and touches nothing else"]
+  subgraph LANDF ["Landform &mdash; detection solved, nothing consumes it"]
     direction LR
-    WMB6["WM-B6 detection is wrong&lt;br/&gt;geomorphons, then vectorise"]:::hold
-    PARK["Smoothing built · valley bounds&lt;br/&gt;callout stages 3–5"]:::hold
-    GRID["Retire the elevation grid&lt;br/&gt;interpolate from structure lines"]:::hold
+    PARK["Callout stages 3–5&lt;br/&gt;adjacency · bearing · the phrase"]:::open
+    DENS["Density is a product question&lt;br/&gt;234,799 lines, few worth speaking"]:::open
+    GRID["Retire the elevation grid&lt;br/&gt;49 MB, and few readers left"]:::hold
   end
 
   subgraph BRAINCHAIN ["The brain layer"]
@@ -800,22 +818,24 @@ flowchart LR
   BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
   THEATRE["Multi-theatre&lt;br/&gt;Kola has no SRTM above 60°N"]:::open
 
-  SORTIE --> COH --> GBOUND --> GC5
+  SORTIE --> GBOUND --> GC5
   SORTIE --> POL
+  SORTIE --> OVER
   SORTIE -.->|"judge after flying"| FRAG
   SORTIE --> CAP
   SORTIE -.->|"judge after flying"| COND
   SORTIE --> LAT
   SORTIE -.->|"needs many flights"| BL8
   SORTIE -.->|"tunes the prompts"| D10
-  COH --> PERF
-  BUBBLE -.->|"bounds what clustering ever sees"| PERF
+  SORTIE --> SAY --> POL
+  OVER -.->|"the root rule, below both fixes"| AMB
+  FRAG -.-> AMB
   DMG --> POL
   ELEV --> DLOS
   DLOS -.->|"only route left"| SURF
   DLOS -.->|"removes the grid's last live reader"| GRID
-  WMB6 --> PARK
-  WMB6 --> GRID
+  PARK --> DENS
+  SAY -.->|"same question, different data"| DENS
   D10 --> BR3
   BR3 -.-> IDLE
   BR3 -.->|"a question needs a contact resolver"| D10
@@ -831,65 +851,62 @@ flowchart LR
     </div>
 
     <p class="section-note"><strong>What the drawing shows that the lists do not.</strong>
-      <strong>There is now a group with no edge to the flight at all</strong> &mdash; and that has
-      not happened before on this board. Every other chain here is either waiting on the cockpit or
-      one step behind something that is. The landform group is parked on a judgement already made:
-      the pilot looked at real output and said the detection is wrong, so no sortie can advance it
-      and no measurement is outstanding. It is the first chain this project has stopped by
-      <em>looking</em> rather than by flying or measuring, and drawing it is what makes the
-      difference visible &mdash; the roadmap lists it among open items as though it were waiting its
-      turn.</p>
-    <p class="section-note"><strong>The terrain group dissolved when its one blocker was
-      read.</strong> Last cycle this was a single chain gated on <code>bridge_call_ms</code>, a
-      number production code had been writing to <code>dcs.log</code> for a fortnight that nobody had
-      opened. It was read: 568 units at a mean of 1.99&nbsp;ms. That made probing obviously
-      affordable, which moved line of sight to DCS &mdash; and the moment it moved, the two halves of
-      &ldquo;terrain&rdquo; stopped sharing anything. Line of sight no longer needs the elevation
-      grid; landform detection wants to stop reading it too. <strong>They now touch only through a
-      data structure both of them are trying to retire.</strong></p>
-    <p class="section-note"><strong>One more thing the shape says.</strong> The crew-behaviour chain
-      is the only place where a single node carries a decision rather than work: whether the cohesion
-      redesign is merged before its flight or flown from its branch. Everything downstream of it is
-      calibration &mdash; constants the pilot already said to pick and refine &mdash; so that one
-      choice sets whether the next sortie tests one feature or five.</p>
+      <strong>Nearly everything now hangs off one node</strong>, and it is a flight. Eight separate
+      acceptance cards have accumulated on <code>main</code> because feature after feature was
+      merged ahead of its sortie &mdash; which was the right call each time, on your own reasoning
+      that intertwined work is better tested against current HEAD, and which has the compounding
+      side effect this picture makes obvious. The board has stopped being a set of parallel chains
+      and become a funnel.</p>
+    <p class="section-note"><strong>Two fixes landed on top of a rule neither of them touched, and
+      the drawing is where that shows.</strong> Merge-echo suppression and the group-disclosure
+      fix both silence a <em>symptom</em> of <code>ContactStore.ingest</code>'s
+      &ldquo;two-or-more candidates &rarr; always found a new contact&rdquo; rule. The rule itself
+      is still there, which is why <code>BL-B24</code>, <code>BL-B25</code> and the old
+      fragmentation defect all sit in one node downstream of them rather than being closed by them.
+      Both roadmap entries say so explicitly &mdash; the value of drawing it is that the three stop
+      reading as unrelated backlog.</p>
+    <p class="section-note"><strong>The landform group is no longer a chain, it is a question.</strong>
+      Detection was the hard part and it is solved and accepted at theatre scale. What is left is
+      not engineering: 234,799 ridge and valley lines exist and almost none of them are worth
+      <em>saying</em>. That is the same question the sixteen-vehicles node asks about contacts, from
+      the opposite direction &mdash; which is why the two are now joined, and why neither of them is
+      a coding task.</p>
   </section>
 
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Three, and the first one is a decision rather than a flight &mdash; it changes what the
-        other two are worth doing in. Nothing here can be answered from the Mac except the first
-        half of the first item.</p>
+      <p>Three. The landform acceptance that sat here last time is cleared, and what replaced it is
+        one large flight, one small isolated one, and a question only you can answer. Nothing here
+        can be settled from the Mac.</p>
       <ul class="blockers">
-        <li class="bl" role="button" tabindex="0" data-detail="cohesion">
-          <span class="chip block">Decision + sortie</span>
-          <div>
-            <b>Merge the cohesion redesign, or fly it from its branch</b>
-            <p><code>fix/group-undermerging</code> is through Reviewer (twice), Security,
-              Performance and DoD's mechanical gate, and is <strong>not merged</strong>. The
-              precedent is already set both ways: three earlier features were merged before their
-              flight at your direction, on the grounds that <em>&ldquo;so many things at this stage
-              are intertwined that it's better to test to current HEAD&rdquo;</em>. Merging folds it
-              into the four cards already waiting; not merging means a separate flight on a branch
-              that will drift. What the flight settles either way: whether the 500&nbsp;m
-              installation cap and the air-defence class list hold against real unit placement, and
-              whether six delta branches land by ear. Card:
-              <code>docs/acceptance/2026-10-01-group-cohesion-sortie.md</code>.</p>
-          </div>
-        </li>
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>Four cards on <code>main</code>, none heard in the air</b>
-            <p>Group reporting and the 12&nbsp;m line-of-sight tolerance (2026-09-29), the confirm
-              band (2026-09-28), the 2026-09-26 crew-behaviour fixes, and the brain's first real
-              model &mdash; all merged, none flown. The most valuable single answer is whether the
-              group boundary (<code>20</code> unit widths, about 140&nbsp;m between neighbouring
-              vehicles) draws groups where you perceive them; it is a number you were asked for and
-              declined to guess at, which is exactly why it needs ears rather than review. Fly with
-              <code>--detection-trace</code>: the belief log structurally cannot record a
-              <em>rejected</em> candidate, which is why the missed-AAA defect needed an offline
-              reproduction to find at all.</p>
+            <b>Eight cards on <code>main</code>, none heard in the air</b>
+            <p>Everything merged since 2026-09-25 is waiting on one flight: group reporting and the
+              12&nbsp;m line-of-sight tolerance, the confirm band, the 2026-09-26 crew-behaviour
+              fixes, the brain's first real model, the cohesion redesign, <code>silence</code>, and
+              the two fixes that stop the same units being announced twice. <strong>The two newest
+              are the reason to fly now rather than later</strong>: both reduce what you hear, and
+              both carry the same risk in the same direction &mdash; a genuine split immediately
+              after a merge is indistinguishable from a merge echo at the speech layer and also goes
+              quiet. That is an accepted cost on paper; whether it is ever actually <em>noticed</em>
+              is a cockpit question. Fly with <code>--detection-trace</code>: the belief log
+              structurally cannot record a <em>rejected</em> candidate.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="saywhat">
+          <span class="chip block">Your judgement</span>
+          <div>
+            <b>What should he say about sixteen vehicles in one sector?</b>
+            <p>This is the open question under all of the quieting work, and it is explicitly
+              recorded as needing your judgement before anyone writes a plan. The 2026-09-19
+              vocabulary decisions do not cover it: they assumed the plural case arrives as
+              <em>one plural contact</em>, not as sixteen separately-resolvable singular ones &mdash;
+              and the 2026-09-28 log showed the clustering is right to see them as sixteen. So the
+              remaining lever is what a crew member would actually <em>say</em>, and no amount of
+              code reading produces that sentence.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="elevprobe">
@@ -918,19 +935,50 @@ flowchart LR
 
     <div class="work">
 
-      <div class="row s-hold" role="button" tabindex="0" data-detail="wmb6">
+      <div class="row s-open" role="button" tabindex="0" data-detail="wmb6">
         <span class="who">world-model</span>
         <div class="what">
-          <b>Ridge and valley detection is wrong, and the replacement is already chosen</b>
-          <p>The watershed detector merged today having passed every check set for it &mdash; then the
-            real output over a hillshade settled it: <em>&ldquo;500&nbsp;m grid is too coarse&hellip;
-            250&nbsp;m, if smoothed, would be precise enough, but the data is bad.&rdquo;</em> The
-            replacement is geomorphons &mdash; classify each cell by what it <em>looks like</em>,
-            thin, then trace through junctions &mdash; chosen from side-by-side renders over a
-            spike's own recommendation, because inverted-drainage breaks a long crest at every saddle
-            and geomorphons does not. Parked deliberately: no consumer needs landform references yet.</p>
+          <b>Landform detection is solved and accepted &mdash; and nothing speaks it yet</b>
+          <p>Geomorphons replaced the watershed detector, the relief gate and decimation fixed what
+            the first theatre build exposed, and your 2026-10-04 rebuild cleared all three
+            acceptance blocks. What is left is not detection: Stages 3&ndash;5 (adjacency, bearing,
+            the actual phrase) are unbuilt and gated on a consumer that wants landform references,
+            and the store now holds 234,799 lines of which very few are worth <em>saying</em>. The
+            density question survived the rewrite unchanged &mdash; it just moved from
+            &ldquo;reconnect the pieces&rdquo; to &ldquo;which of these is worth mentioning&rdquo;.</p>
         </div>
-        <span class="chip hold">Parked, decided</span>
+        <span class="chip open">Accepted, unconsumed</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="quieting">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Two fixes that make him quieter, and both can be too quiet</b>
+          <p>Merge-echo suppression silences a freshly-founded contact's first callout when an
+            existing contact is plausibly the same real thing (17 of 34 foundings on the 2026-10-04
+            sortie, reconstructed); the group fix silences a group's opening line when every member
+            was already named, speaking only the delta. Both push in the direction you asked for.
+            Both share one accepted cost, named in the plan rather than discovered later: <b>a
+            genuine split right after a merge is indistinguishable from an echo</b> and also goes
+            quiet. Only a flight can say whether that is ever noticed.</p>
+        </div>
+        <span class="chip open">Merged, unflown</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="ambiguity">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>The rule underneath all three noise defects is still untouched</b>
+          <p><code>ContactStore.ingest</code> treats &ldquo;two or more plausible candidates&rdquo;
+            as ambiguous and founds a <em>new</em> contact rather than guessing &mdash; deliberate
+            anti-guessing, and the engine behind the duplication runaway, the fragmenting outpost,
+            and <code>BL-B24</code>'s two-contacts-after-a-long-gap case. Everything shipped this
+            cycle muted symptoms one layer up, at the speech boundary, and every one of those
+            roadmap entries says so in its own text. <code>BL-B25</code> is the small honest
+            footnote: the suppression predicate is re-evaluated each tick rather than snapshotted,
+            so it can forget that it suppressed something.</p>
+        </div>
+        <span class="chip open">Diagnosed, deliberate</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
@@ -945,33 +993,6 @@ flowchart LR
             <em>position</em> stays as fuzzy as it is now.</p>
         </div>
         <span class="chip open">Planned</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="blb23">
-        <span class="who">body-layer</span>
-        <div class="what">
-          <b>Clustering cost grows with how long you fly, not with what is out there</b>
-          <p>Found by the performance pass on the cohesion redesign and pre-existing to it:
-            <code>ContactStore</code> has no delete path anywhere, and every tick hands the whole
-            store to clustering &mdash; every contact ever seen, not the live set. Measured clean
-            quadratic: 2.96&nbsp;ms at 100 contacts, 70&nbsp;ms at 500, 406&nbsp;ms at 1200. Trivial
-            today at 22 objects; a 90-minute sortie accumulating lost records is where it starts
-            costing latency.</p>
-        </div>
-        <span class="chip open">New today</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="bubble">
-        <span class="who">body-layer</span>
-        <div class="what">
-          <b>The 10&nbsp;km player bubble &mdash; decided, not yet built</b>
-          <p>Nothing beyond 10&nbsp;km is computed at all: not gated late, not scored and discarded,
-            simply never considered. Ground and air units only &mdash; world features stay
-            unbounded, because they do not move and enrichment reaches for them by proximity to a
-            contact. Memory outlives the bubble: once BL-8 exists, a unit seen and then left behind
-            stays remembered. What stops is detection computation, not belief.</p>
-        </div>
-        <span class="chip open">Priority</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="cond">
@@ -1253,10 +1274,11 @@ flowchart TB
     Generated from <code>ROADMAP.md</code> across six subprojects plus <code>todo/todo.md</code>,
     <code>todo/backlog.md</code> and each subproject's own <code>BACKLOG.md</code>. This page is a
     view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
-    files is a bug in this page, not in them. One exception worth naming: the cohesion redesign's
-    roadmap and backlog entries live on <code>fix/group-undermerging</code> rather than on
-    <code>main</code>, because the branch is not merged — so three of the counts above include items
-    no file on <code>main</code> currently carries.
+    files is a bug in this page, not in them. Last cycle's exception is gone: everything the counts
+    cover now lives on <code>main</code>. One thing the roadmap itself is briefly behind on, noted
+    rather than corrected here: <code>body-layer/ROADMAP.md</code> still describes the two newest
+    fixes as &ldquo;not yet merged&rdquo; — they merged the same day as their DoD, in
+    <code>3fe93fd</code> and <code>2ae34cc</code>.
   </footer>
 
 </div>
@@ -1295,19 +1317,19 @@ flowchart TB
 <script>
 const DETAIL = {
   wmb6: {
-    kicker: "world-model/", title: "The landform line, parked whole", chip: ["hold", "Parked 2026-10-01, mechanism decided"],
-    facts: [["Merged today", "marker-controlled watershed (0bef4b9)"], ["Then parked", "WM-B6, by the pilot's own look"], ["Chosen replacement", "geomorphons, classified then vectorised"]],
+    kicker: "world-model/", title: "Landforms: detected, gated, accepted", chip: ["open", "Cleared 2026-10-05; no consumer yet"],
+    facts: [["Unparked", "2026-10-01, the same day it was parked"], ["Accepted on", "your 2026-10-04 23:59 syria-full rebuild"], ["Stored", "122,567 ridge + 112,232 valley = 234,799"], ["Store size", "720 MB, against 2.4-2.5 GB predicted"]],
     sections: [
-      { h: "It passed every check it was given, and that was not enough", p: "Acceptance ran against the real <code>syria-full</code> store rather than a test region, and both falsifiable predictions held: <strong>zero valleys within 8 km of Baalbek</strong> (the Bekaa floor correctly excluded by the width gate, three ridges flanking it) and <strong>Palmyra's isolated chains intact</strong> (14 ridges within 20 km). Counts collapsed from 11,749 ridges / 11,477 valleys to 8,189 / 2,314, and sinuosity landed at 1.202 / 1.172 against the old 2.17 / 2.21. Then the output was rendered over an aligned hillshade at three spacings and judged by eye." },
-      { h: "The verdict, in the pilot's own words", p: "<em>\"500 m grid is too coarse, not useful. 250 m grid, if smoothed, would be precise enough, but the data is bad. The real problem is that the ridge/valley detection itself does not seem to produce correct results. Smoothing or finer grid does not solve that.\"</em> The merge stands and the code is sound as written &mdash; but the <code>ridge</code>/<code>valley</code> rows in the store are now explicitly <strong>not a layer to build on</strong>, and three further items are parked with them: smoothing (built and measured on an unmerged branch), valley boundary extraction, and the three unbuilt callout stages." },
-      { h: "What the detector was never given a fair chance at", p: "Two findings a future attempt must not rediscover. The <code>min_cell_count</code> floor <strong>scaled by area while gating a one-dimensional line feature</strong>, demanding ~150 cells at 100 m where 500 m demands 6 &mdash; which is why three separate sweeps each concluded \"finer spacing does not help\". They were measuring their own floor. And the hillshade renders that produced the verdict came <em>straight from the raw <code>.hgt</code> tiles at ~90 m</em>, not from the stored 500 m grid: the detector has been running at one fifth of the resolution the source already offers, for no reason except that the pipeline happened to detect off the stored grid." },
-      { h: "The decision, and why it overturns the spike's own recommendation", p: "The spike preferred in-house D8 drainage. The pilot then pointed at one long ridge spanning a test window and asked what each approach did with it. Inverted-DEM drainage finds a crest only where the inverted catchment accumulates, so <strong>every saddle breaks the line</strong> &mdash; high threshold detected almost nothing, low threshold gave disconnected pieces plus branch noise. Geomorphons labels a crest because the cell <em>looks like</em> a crest, independent of what is upstream, so a long ridge survives as one. Measured on that window: longest traced ridge 8.3 km, valley 6.5 km. <em>\"It does get the ridges and valleys correctly and that is what matters.\"</em>" },
-      { h: "The pipeline as validated by eye, and its honest costs", p: "Geomorphons over the native-resolution DEM (pure numpy, ~40 lines, no dependency &mdash; WhiteboxTools turned out unnecessary, removing a binary dependency, a licence question and a Windows-support question at once), ridge/valley family masks, <strong>binary closing before thinning</strong> (without it one dropped cell breaks a crest), Zhang-Suen thinning, then tracing that <strong>walks through junctions instead of cutting at them</strong> &mdash; that step is what makes or breaks it: naive cut-at-every-junction gave 516 fragments with a 2.2 km longest, junction-walking gave 312 lines and the 8.3 km crest. Costs named rather than discovered later: the thinning is the scaling problem, not the classification (a pure-Python double loop that extrapolates to hours over a theatre), and density is still a product question &mdash; 135 ridges and 121 valleys in one 16 km window is fine as geometry and far too many to <em>speak</em>." },
-      { h: "And it must be cached, on the pattern that already exists", p: "<em>\"Data must be cached to a file, similar to OSM processing. It's too expensive to run at every world model rebuild.\"</em> That is the established third-store pattern, not a new mechanism: a sibling cache file per region, validity as a conjunction (DEM hash and size, an extractor version constant covering every parameter, a schema version, the region bbox), any mismatch meaning a full rebuild rather than partial reuse, populated at a <code>.tmp</code> path and moved into place only on success. The cache holds the <em>lines</em>, which are small &mdash; 4.6 MB of ridge and valley geometry against 49 MB of elevation grid." },
-      { h: "Reopening condition", p: "A consumer that actually needs landform references &mdash; the \"at the foot of the hill\" / \"next valley\" callout, or navigation phrasing once Petrovich flies. Until then this is <strong>unbuilt capability, not a defect in anything shipping</strong>. The algorithm itself is explicitly in scope when it reopens: <em>\"can and should be refined if it does not produce correct results. Or swapped/rewritten completely.\"</em>" }
+      { h: "Why it reopened within hours of being parked", p: "It was parked on your verdict that the watershed detector's output was wrong &mdash; <em>\"the real problem is that the ridge/valley detection itself does not seem to produce correct results\"</em>. It reopened the same day for two reasons that only coincided once: a prior-art spike produced a mechanism you accepted from rendered comparisons, and <code>WM-B1</code> already forced a full-theatre rebuild, so the expensive pass could ride along instead of triggering a second one. Your own instruction set the build order: <em>\"build the cache from the beginning so that we don't have to recreate the data every world model rebuild.\"</em>" },
+      { h: "The mechanism, and why it overturned the spike's own recommendation", p: "The spike preferred in-house D8 drainage. You then pointed at one long ridge spanning a test window and asked what each approach did with it. Inverted-DEM drainage finds a crest only where the inverted catchment accumulates, so <strong>every saddle breaks the line</strong>. Geomorphons labels a crest because the cell <em>looks like</em> a crest, independent of what is upstream, so a long ridge survives as one. The step that actually makes or breaks the result is the tracing: naive cut-at-every-junction gave 516 fragments with a 2.2 km longest; <strong>walking through junctions</strong> gave 312 lines and an 8.3 km crest. That is a heuristic, right for a spur leaving a ridge and wrong where two comparable crests genuinely meet." },
+      { h: "The first theatre build passed, and then failed your own criteria", p: "The 2026-10-02 rebuild confirmed extraction, tracing, caching and store-write all work at full 131-tile scale &mdash; <code>ridge=700,142, valley=740,255</code>, exactly the pipeline's own figures. Checked against <em>your</em> acceptance criteria rather than the pipeline's, it failed twice: <strong>89&ndash;92% of stored lines had under 50 m of relief</strong> (the Bekaa floor at Baalbek read as a valley &mdash; precisely the case your \"maskable-behind: sharp and/or high\" band rules out), and geometry was ~16x denser than a 90 m DEM justifies, one point per 5.6 m, which is why <code>feature</code> was 7.98 GB of an 8.1 GB store." },
+      { h: "What the relief gate and decimation actually did", p: "A 50 m relief floor &mdash; the bottom of your own 50&ndash;150 m band &mdash; drops any line below it before the cache, let alone the store. Douglas-Peucker decimation pulls the smoothed line back toward DEM resolution, with a deviation check against the real sampled points. On your 2026-10-04 rebuild: <strong>zero relief-gate violations</strong>, 234,799 lines (the predicted 230&ndash;240k band, hit exactly, because that figure was a direct SQL measurement rather than an extrapolation), median stored line 5&ndash;6 vertices over ~1 km, median relief 90 m, hard floor exactly 50.0 m. By eye: the Bekaa floor clean, Palmyra's chains intact and crest-following, longest 6.06 km." },
+      { h: "The prediction that missed, and the pattern it makes", p: "Store size came out <strong>720 MB against an extrapolated 2.4&ndash;2.5 GB</strong> &mdash; 3.3x in the safe direction. The mechanism checks out rather than the geometry having been destroyed; the extrapolation came from a geometry-byte reduction measured on sample data, and at theatre scale the gate and the decimation compound in a way the sample could not show. <strong>This is the second sample-derived estimate on this feature to be off conservatively</strong> (the first was a deviation check overstating by 5x). Treat that class of prediction as order-of-magnitude only." },
+      { h: "A correction that reaches backwards, and is worth knowing", p: "Every terrain render judged by eye before this branch &mdash; including the ones that produced the \"choose geomorphons\" decision and the 2026-10-02 acceptance &mdash; was of raw or Chaikin-only geometry, <em>not what the store actually held</em>. That does not reopen the mechanism choice, which was made on a zoomed-in window where the gap is proportionally small. But any impression of density or clutter taken from those earlier pictures should not be trusted for what ships." },
+      { h: "What is genuinely left, and it is not detection", p: "Stages 3&ndash;5 &mdash; adjacency, bearing, and the actual spoken phrase &mdash; are unbuilt, and still gated on the same reopening condition as before: a consumer that wants landform references. <strong>Nothing in the cockpit changes from any of this yet.</strong> And the density question survived the rewrite unchanged: 234,799 lines is fine as geometry and far too many to speak, so \"which of these is worth mentioning\" is still open. One known gap: a <em>region-scoped</em> build does not clip terrain output to its own bbox, so a <code>latakia-20km</code> rebuild stores a whole SRTM tile's lines." }
     ],
-    items: [["done","Watershed detector merged, theatre-confirmed"],["done","Prior-art survey; licences checked"],["done","Geomorphons spike, rendered and chosen"],["hold","WM-B4 smoothing (built, unmerged)"],["hold","WM-B5 valley boundaries"],["hold","Callout stages 3-5"],["hold","Retire the elevation grid"]],
-    src: "world-model/ROADMAP.md (WM-B6), research/2026-10-01-terrain-feature-detection-prior-art.md, research/2026-10-01-terrain-detection-resolution-spike.md"
+    items: [["done","Geomorphons classify, thin, trace, cache"],["done","Theatre build: extraction confirmed at 131 tiles"],["done","Relief gate (50 m) + DEM-scale decimation"],["done","Acceptance cleared on the 2026-10-04 rebuild"],["done","WM-B1 Latin place names, same build"],["open","Stages 3-5: adjacency, bearing, the callout"],["open","Density: which lines are worth speaking"],["open","Region-scoped builds do not clip to bbox"],["hold","Retire the elevation grid"]],
+    src: "world-model/ROADMAP.md (WM-B6, Live acceptance debt), plans/landform-relief-gate/implementation.md, docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md"
   },
 
   dcslos: {
@@ -1323,43 +1345,45 @@ const DETAIL = {
     src: "plans/dcs-driven-los/plan.md, todo/backlog.md (X-B29, X-B30, X-B31)"
   },
 
-  blb23: {
-    kicker: "body-layer/", title: "Clustering cost grows with sortie length", chip: ["open", "BL-B23, filed today"],
-    facts: [["Found by", "the cohesion redesign's performance pass"], ["Pre-existing", "group reporting created the growth path"], ["Today's sortie", "22 objects admitted"]],
+  quieting: {
+    kicker: "body-layer/", title: "Two fixes that make him quieter", chip: ["open", "Both merged, both unflown"],
+    facts: [["Trigger", "your words, mid-flight 2026-10-04"], ["Reconstructed effect", "17 of 34 contact foundings silenced"], ["Shared cost", "a real split can go quiet too"], ["Flight", "one card covers both"]],
     sections: [
-      { h: "The mechanism", p: "<code>ContactStore._contacts</code> has <strong>no delete path anywhere in the class</strong>, and every tick passes the whole dictionary's values to group reconciliation &mdash; every contact ever folded, not the live set. So the O(n&sup2;) pairing scales with total-ever-seen rather than with how many contacts are actually out there." },
-      { h: "Measured, not extrapolated", p: "22 contacts 0.17 ms · 50 0.72 ms · 100 2.96 ms · 300 24.75 ms · 500 70 ms · 800 180 ms · 1200 406 ms &mdash; clean quadratic from 100 up. Trivial today. The point is that <strong>it is the sortie length that drives it, not the threat picture</strong>: a 90-minute mission accumulating long-lost records reaches the 70&ndash;180 ms band on a 5 Hz loop, which is where it starts costing the pilot latency." },
-      { h: "The fix shape, and why it is not pruning", p: "Filter clustering's <em>input</em> by lifecycle or age, rather than pruning the store. A lost contact is still memory Petrovich should have &mdash; dropping the record is the wrong move; excluding it from clustering is the right one." }
+      { h: "What you actually said, and what it turned out to be", p: "<em>\"It feels like many of those reports were about the same units.\"</em> The diagnosis: a naked-eye gaze sweep loses continuity in the <em>merge direction</em> &mdash; when two contacts the store had been tracking separately become one, the surviving contact is founded fresh, and a fresh founding speaks. So you heard the same vehicles announced again as if newly seen." },
+      { h: "The first fix, at the speech layer deliberately", p: "A freshly-founded contact's <code>CONTACT_DETECTED</code> callout is suppressed when an existing, not-yet-lost contact is spatially and class-plausibly the same real thing. <code>CONTACT_REACQUIRED</code> and group lines are untouched. Reconstructed against the 2026-10-04 sortie: 17 of 34 foundings would have gone quiet, and the six-vehicle cluster everyone noticed speaks once for each of its four genuinely simultaneous sightings, with the later re-founding echo silent." },
+      { h: "The second fix, one layer up", p: "The same thing was happening to <em>groups</em>: a group's first disclosure would read out members the pilot had already been told about individually. Now that opening line is silent when every current member's content already reached him &mdash; including by way of the first fix's suppression &mdash; and speaks only the unreported delta otherwise." },
+      { h: "The cost both of them carry, named in the plan rather than discovered later", p: "<strong>A genuine split immediately after a merge is indistinguishable from a merge echo at this layer</strong>, and also goes quiet. Suppression is one-shot and permanent for the sortie, though belief stays queryable with <code>report</code>. This pushes against the risk direction of everything else here: the failure mode is now under-reporting rather than over-reporting, which is harder to notice in the air precisely because nothing happens." },
+      { h: "Why they ride one flight", p: "Both change what the pilot hears about the same contact and group stream on the same cockpit, so one sortie settles both questions: does the stream read as signal rather than noise, and did anything go unreported that should not have. The 17-of-34 figure is a <em>retrospective reconstruction from pipeline outputs</em>, not a byte-for-byte replay &mdash; which is exactly why it needs ears." },
+      { h: "What they do not fix, and both roadmap entries say so", p: "Neither touches <code>ContactStore.ingest</code>'s \"two or more candidates means found a new contact\" rule, which is the engine under all of it. <code>BL-B24</code> and the duplication runaway are unaffected. These are symptom fixes at the speech boundary, chosen knowingly." }
     ],
-    items: [["done","Measured across seven contact counts"],["open","Filter reconcile's input by lifecycle or age"]],
-    src: "body-layer/BACKLOG.md (BL-B23), plans/group-cohesion-redesign/performance.md"
+    items: [["done","Merge-direction continuity diagnosed"],["done","Merge-echo suppression merged"],["done","Redundant group disclosure merged"],["done","Reviewer, Security, DoD on both"],["open","The flight that judges both"],["open","The root ambiguity rule"]],
+    src: "body-layer/ROADMAP.md (Live acceptance debt), plans/contact-report-flood/plan.md, plans/redundant-group-disclosure/implementation.md"
   },
 
-  bubble: {
-    kicker: "body-layer/", title: "The 10 km player bubble", chip: ["open", "Decided 2026-09-28, unbuilt"],
-    facts: [["Radius", "10 km around ownship"], ["Decided", "user, 2026-09-28"], ["Applies to", "ground and air units only"]],
+  ambiguity: {
+    kicker: "body-layer/", title: "The anti-guessing rule under three defects", chip: ["open", "BL-B24 / BL-B25, deliberate"],
+    facts: [["The rule", "2+ plausible candidates -> found a new contact"], ["Why it exists", "Petrovich must not guess which truck"], ["Symptoms", "duplication runaway, 18-contact outpost, BL-B24"]],
     sections: [
-      { h: "The decision", p: "<em>\"Let's settle on 10 km for the player bubble radius. While some very large units may be visible beyond that, we don't usually care about things that far.\"</em> Nothing outside it is computed at all &mdash; not gated late, not scored and discarded, simply never considered." },
-      { h: "The scope boundary that matters, stated because the misreading is expensive", p: "It applies to <strong>units</strong>, not to world features. Landmarks, settlements, roads, beacons and airports stay unbounded: they do not move, and enrichment already reaches for them by proximity to a contact rather than by scanning. Bounding them would break <code>describe_position</code> for no gain." },
-      { h: "Memory outlives the bubble", p: "Once BL-8 exists, a unit that was seen and then fell outside the radius stays <em>remembered</em>. What stops is detection computation, not belief &mdash; a contact does not cease to exist because it is 11 km away; Petrovich simply is not working on it." },
-      { h: "It also bounds the cost problem above", p: "BL-B23's quadratic is driven by how many contacts the store has ever held. A hard admission radius is upstream of that, which makes the two items worth sequencing together rather than separately." }
+      { h: "The rule is correct and the symptoms are real at the same time", p: "When a percept has two or more plausible existing contacts, <code>ingest</code> refuses to pick one and founds a new contact instead. That is the no-omniscience invariant working as designed &mdash; guessing which identical truck this is would be exactly the omniscience this project forbids. The cost is that ambiguity <em>creates</em> contacts, and each new contact makes the next look more ambiguous." },
+      { h: "BL-B24: two contacts can become ambiguous for each other", p: "The association gate inflates with elapsed time since a contact was last seen, which is right in itself &mdash; a unit unobserved for two minutes could genuinely have moved. But two contacts ~17 m apart, both reacquired in the same poll after a 120 s gap, each fall inside the other's inflated gate. Real traffic routes around it: naked-eye and hybrid observations both carry a continuation id that resolves the pairing without consulting the gate. <strong>So the honest first step is establishing whether an observation ever arrives without one in production</strong> &mdash; if it does not, the right outcome is a test and a comment, not a change to the gate." },
+      { h: "BL-B25: the suppression predicate forgets", p: "Found by Reviewer on the group-disclosure fix and recorded rather than fixed. Whether a member was merge-echo-suppressed is re-evaluated against <em>current</em> belief, not snapshotted at the moment it happened &mdash; so if the earlier contact has since gone lost or drifted, a genuinely suppressed member stops counting as already-reported and the group can re-speak it. It risks one extra line, never a missed one, and it is bounded to the first-disclosure window. Fixing it would mean adding per-contact state this project has so far avoided; worth doing only if it is ever actually heard." },
+      { h: "Why these three sit in one node now", p: "The fragmenting outpost, the duplication runaway and <code>BL-B24</code> are the same engine with different triggers &mdash; range-scaled sigma, elapsed-time inflation, and a merge. Everything shipped this cycle muted them at the speech layer. That was the right call for a cockpit problem, and it means the count of contacts Petrovich believes in is still wrong where it was wrong before; he is simply quieter about it." }
     ],
-    items: [["done","Radius decided"],["open","Apply at admission, not at scoring"]],
-    src: "todo/todo.md (User priority tasks)"
+    items: [["done","Both filed with their own IDs"],["open","Establish when a percept arrives with no continuation id"],["open","The root rule itself"],["hold","BL-B25 - fix only if heard"]],
+    src: "body-layer/BACKLOG.md (BL-B24, BL-B25), plans/contact-duplication-ambiguity-runaway/"
   },
 
-  cohesion: {
-    kicker: "Waiting on you", title: "Merge the cohesion redesign, or fly its branch", chip: ["block", "Decision + sortie"],
-    facts: [["Branch", "fix/group-undermerging @ 6d6ea3f"], ["Gates passed", "Reviewer x2, Security, Performance, DoD"], ["Tests", "1367 passed / 4 xfailed, lint and types clean"]],
+  saywhat: {
+    kicker: "Waiting on you", title: "Sixteen vehicles, one sector, what does he say?", chip: ["block", "Your judgement"],
+    facts: [["Status", "needs your judgement before any plan"], ["Not covered by", "the 2026-09-19 vocabulary decisions"], ["Evidence", "3 of 52 contacts ever plural, 62 real objects"]],
     sections: [
-      { h: "What it changes about how he groups things", p: "Cohesion stops being one distance. A gap is judged against the local median <em>and</em> bounded in unit widths, so it scales with what the units are; a genuine fixed installation gets its own 500 m cap; and infantry get no backstop at all, by your instruction &mdash; <em>\"ok to merge infantry too eagerly.\"</em> Then the disclosure ladder gained a delta taxonomy: a leader change speaks a short \"now leading\" line rather than restating the roster, a new or repeat air-defence arrival names just the new member, and a repeat non-air-defence arrival or a pure departure says nothing at all." },
-      { h: "The decision in front of you, with precedent both ways", p: "This is not merged. Three earlier features were merged <em>before</em> their flight at your own direction &mdash; <em>\"so many things at this stage are intertwined that it's better to test to current HEAD\"</em> &mdash; because a correction the flight produces then lands on <code>main</code> rather than on a branch that has drifted. Merging folds this into the four cards already waiting. Not merging means its own separate flight, and a branch that ages against everything else landing." },
-      { h: "Two findings that came out of building it, both worth keeping", p: "<strong>A real S-300 battery's own ground-truth geometry was used as a test</strong>, from a sortie trace rather than a hand-built fixture &mdash; and under the settled rules it forms a three-member cluster with the fourth component isolated, which <em>contradicts the plan's own acceptance wording</em> (\"one four-member group\"). That wording was stale, inherited from before the installation flag was narrowed, and it was flagged rather than quietly worked around. And <code>op_class</code> alone would have conflated the genuine fixed S-125 site with four single-vehicle systems that must stay excluded, so the flag became a per-type property." },
-      { h: "What static review explicitly cannot settle", p: "Whether the 500 m installation cap and the air-defence class membership hold against real unit placement &mdash; both are single-source-of-evidence by the plan's own admission. Whether the six delta branches land correctly <em>by ear</em>. And whether two behaviours you approved but which remain surprising read as intended in the cockpit: infantry bridging a non-infantry pair into one group, and the S-300 deliberately not flagged as an installation so its own components do not single-merge." },
-      { h: "The precedent that justifies all of this caution", p: "The F10 vocabulary passed every fixture test and then flew: Scan was driving the wrong sight entirely, and Cancel Task spoke a raw task id aloud. A fixture pass and a flight pass are different claims." }
+      { h: "Why this is not a coding task", p: "The 2026-09-28 sortie was loud &mdash; roughly five reports a minute for half an hour, the same sentence up to seven times. It was blamed on the known fragmentation defect until the belief-truth log was opened, and then the numbers said the opposite: <strong>3 of 52 contacts were ever plural against 62 distinct real objects</strong>, near 1:1. Clustering was right. There really were that many individually-resolvable vehicles, and one resolvable vehicle produces one callout." },
+      { h: "The gap in the existing decisions", p: "The 2026-09-19 vocabulary work assumed the plural case <em>arrives as one plural contact</em> &mdash; \"a couple of trucks\" &mdash; not as sixteen singular ones that are each correctly distinct. Grouping, cohesion and the disclosure ladder all attack the problem from the clustering side. None of them answers what a crew member would actually say when the picture genuinely is sixteen separate things." },
+      { h: "Why asking you is the cheap move", p: "This project's record is unambiguous on it. The mission-frequency constraint removed a planned transport; a sentence about how recognition unfolds turned a bug fix into a belief model; \"ten trucks in one glance is one perceptual event\" reshaped the group model. Each arrived in conversation and each would have been expensive to discover from code. A worked sample of what you would want to hear is worth more here than any amount of further analysis." },
+      { h: "The same question, from the other end", p: "World-model now holds 234,799 ridge and valley lines, correctly detected and accepted. Almost none of them are worth mentioning either. Both are the same product question &mdash; what is worth saying &mdash; arriving from opposite directions, which is why neither is unblocked by more engineering." }
     ],
-    items: [["done","Three Explore rounds + SAM-site recon"],["done","Reviewer round 2, Security, Performance"],["done","DoD mechanical gate at the tip"],["open","Your merge call"],["open","The acceptance flight"]],
-    src: "plans/group-cohesion-redesign/plan.md, docs/acceptance/2026-10-01-group-cohesion-sortie.md"
+    items: [["done","Diagnosis corrected from the real log"],["open","Your answer: the sentence itself"],["open","Callout policy follow-ons, downstream of it"]],
+    src: "todo/todo.md (Sortie 2026-09-28), plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md"
   },
 
   elevprobe: {
@@ -1376,17 +1400,18 @@ const DETAIL = {
   },
 
   wm: {
-    kicker: "world-model/", title: "World Model", chip: ["active", "M0-M10 complete, landform parked"],
-    facts: [["Scope", "Persistent geographic knowledge of a DCS theatre"], ["Authority", "DCS geometry always wins; OSM augments, never overrides"], ["Last full build", "syria-full, with the new landform detector, 2026-10-01"]],
+    kicker: "world-model/", title: "World Model", chip: ["done", "M0-M10 complete, landforms accepted"],
+    facts: [["Scope", "Persistent geographic knowledge of a DCS theatre"], ["Authority", "DCS geometry always wins; OSM augments, never overrides"], ["Last full build", "syria-full, 2026-10-04 23:59 - geomorphons + Latin names"], ["Store", "720 MB, 234,799 ridge/valley lines"]],
     sections: [
       { h: "What it does", p: "Roads, settlements, terrain, elevation, coastline, landcover and road junctions, built offline and served to the Mission Interpreter over HTTP. Line-of-sight was generalised out of body-layer into here, so masking is a point-A-to-point-B primitive rather than something the perception code owns." },
       { h: "Why it's effectively finished", p: "Every query surface the layers above it need is live. The last full-theatre rebuild validated both the junction-streaming fix and the OSM ingest split in one run — OSM now contributes landcover, coastline, water and named places, and never roads. DCS <code>.routes</code> stays authoritative for those. OSM landcover also just became the <em>shipping</em> answer for seeing through woods rather than a fallback: no DCS call sees trees." },
-      { h: "Today: the landform line was built, confirmed, and parked", p: "The marker-controlled watershed detector replaced M6's curvature classifier and the real <code>syria-full</code> build held every prediction &mdash; then the output was judged wrong by eye over a hillshade. <strong>Treat the stored <code>ridge</code>/<code>valley</code> rows as unreliable</strong> rather than as a layer later work can assume. Geomorphons is the chosen replacement, with a line cache on the OSM cache's own pattern; deliberately not started." },
+      { h: "The landform line: three detectors, and the third one holds", p: "M6's curvature classifier gave checkerboard noise; the marker-controlled watershed passed every check set for it and was then judged wrong by eye; geomorphons was chosen from rendered comparisons and is the one that shipped. Two defects the first theatre build exposed &mdash; no relief gate, and stored geometry 16x denser than a 90 m DEM justifies &mdash; were fixed, and your 2026-10-04 rebuild cleared all three acceptance blocks. <strong>The stored <code>ridge</code>/<code>valley</code> rows are now a layer later work can build on</strong>, which is the opposite of what this entry said four days ago. Nothing consumes them yet." },
+      { h: "Latin-script place names, cleared on the same build", p: "<code>WM-B1</code>: named places stored OSM's raw <code>name</code>, which in Syria is frequently Arabic script &mdash; and DCS cannot render non-Latin-1 text, so those names reached the cockpit overlay as blanks. Body-layer was already dropping them at render time, which made the data usable while losing real information. Ingest now prefers <code>name:en</code>, then <code>int_name</code>, then <code>name</code>, keeping only what actually encodes as Latin-1, and records which tag won. Name-source counts landed exactly as predicted on the real build &mdash; ~12,926 via <code>name:en</code>, ~864 via <code>int_name</code>, 13,073 of 49,226 places affected. Riding one rebuild for both this and the landform pass is why the expensive geomorphons work was unparked when it was." },
       { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and it is add-entries-and-verify rather than a rewrite — projections and regions are per-theatre registries, not code forks. Per theatre you need verified projection parameters, a region bbox, and a hand-derived raster chart registration. Kola is the exception that needs thought: SRTM has no coverage above 60 degrees north, so its elevation source has to change." },
       { h: "The elevation grid's future is now in question, and that is new", p: "Line of sight is moving to DCS, which was the grid's strongest claimed consumer; contact enrichment can use a unit's own DCS-reported altitude, which is exact; and the Mission Interpreter turns out to receive elevation as unread payload rather than reading it. Measured, so the size argument is not guessed at: the grid is 49 MB of a 608 MB store &mdash; about 8% &mdash; while OSM features are the bulk. <strong>The reason to do that work is quality, not disk.</strong>" },
       { h: "Unmeasured", p: "Full-theatre OSM parse time and peak memory were never measured — the validating build hit a warm cache and skipped the parse. Stage 5 of that pipeline also has pathological single-chunk stalls. Both are backlog, neither is a correctness gate." }
     ],
-    items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive + 12 m tolerance"],["done","HTTP API server"],["done","Watershed landform detector (merged, then parked)"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["open","Latin-script place names at OSM ingest"],["hold","WM-B6 - landform detection, geomorphons decided"],["hold","Power lines from DCS data"]],
+    items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive + 12 m tolerance"],["done","HTTP API server"],["done","WM-B6 geomorphons landforms, accepted at theatre scale"],["done","WM-B1 Latin-script place names"],["open","Callout stages 3-5 (adjacency, bearing, phrase)"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["open","Region-scoped builds do not clip terrain to bbox"],["hold","WM-B4/B5 retired into WM-B6"],["hold","Power lines from DCS data"]],
     src: "world-model/ROADMAP.md"
   },
   al: {
@@ -1419,8 +1444,8 @@ const DETAIL = {
     src: "mission-interpreter/ROADMAP.md, docs/acceptance/2026-09-24-mission-interpreter-sortie.md"
   },
   bl: {
-    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Cohesion redesign through every gate, unmerged"],
-    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["Tests", "1367 passing, 4 xfailed (branch tip)"]],
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Five quieting changes merged, none flown"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["This cycle", "bubble, pruning, silence, two suppression fixes"], ["Flown", "none of it"]],
     sections: [
       { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state -- never LLM chat history." },
       { h: "The invariant everything serves", p: "Contact identity is <strong>perceptual</strong>, never a DCS object id or any truth field. That is deliberate: Petrovich can confuse two identical trucks, which is exactly the fallibility this project exists to model." },
@@ -1431,10 +1456,13 @@ const DETAIL = {
       { h: "Position belief needed a gate nobody had built", p: "The day-after sortie on precise position belief produced <em>\"couple contacts, 4 o'clock, 87.5 kilometres\"</em> against a 10 km detection cap. The user's one-line diagnosis named the reachable path -- <em>\"position uncertainty needs a gate, cannot be further than detection range\"</em> -- and it was the correct one; this orchestrator's own hypothesis, ill-conditioned covariance fusion, was reproducible in isolation but unreachable, because the association gate already blocks it. Worth recording as the pattern: a defect that reproduces is not thereby the defect that happened." },
       { h: "Two instruments built for the calibration problem itself", p: "A top-down ASCII eyesight view (5 km radius, watched contacts in orange) and an optional belief-versus-ground-truth log, which deliberately breaks the no-omniscience boundary because its entire purpose is catching the moments belief and truth diverge. Both earned their place immediately: the log found the eighteen-contact outpost, the view caught the scan/watch conflation. The log also carries what Petrovich <em>says</em>, with his gaze at that instant -- which turns \"he called 10 o'clock while scanning right\" from a two-file correlation into one line." },
       { h: "The noise problem, and the diagnosis that was wrong first", p: "A 2026-09-28 sortie produced roughly five reports a minute for half an hour, the same sentence up to seven times. It was attributed in conversation to the known fragmentation defect &mdash; then the belief-truth log was actually opened and <strong>3 of 52 contacts were ever plural, against 62 real objects</strong>, which is near 1:1 and the exact opposite of that defect's signature. Clustering was right: there were simply that many individually-resolvable vehicles. The lever was callout <em>policy</em>, not association, which is what group reporting then addressed." },
-      { h: "Today: cohesion redesigned, and the branch is still a branch", p: "Group reporting's one-line-per-group ladder shipped with a flat cohesion bound; the redesign makes it <strong>size-relative and kind-aware</strong> &mdash; infantry merge eagerly by your instruction, a real SAM installation's components merge inside 500 m (grounded in S-75/S-125 doctrine, replacing a discredited 1000 m guess), and a re-arrival speaks a short delta rather than restating the roster. Reviewer twice, Security, Performance and DoD's mechanical gate all passed. A design gap surfaced while wiring it: the pull-based \"report\" command assumed disclosure always returned a full composition, which the delta taxonomy breaks &mdash; so a taxonomy-free full-disclosure renderer was added for that path." },
-      { h: "What's next", p: "Your merge call on <code>fix/group-undermerging</code>, then the flight that carries it alongside four cards already on <code>main</code>. Behind that: the 10 km player bubble (decided, unbuilt), sector fairness (staged out as needing its own <code>/explore</code>), and the clustering-cost item the performance pass just filed." }
+      { h: "Cohesion redesigned, and merged this time", p: "Group reporting's one-line-per-group ladder shipped with a flat cohesion bound; the redesign makes it <strong>size-relative and kind-aware</strong> &mdash; infantry merge eagerly by your instruction, a real SAM installation's components merge inside 500 m (grounded in S-75/S-125 doctrine, replacing a discredited 1000 m guess), and a re-arrival speaks a short delta rather than restating the roster. Reviewer twice, Security, Performance and DoD all passed; merged on your instruction with the flight tracked as debt. A design gap surfaced while wiring it: the pull-based \"report\" command assumed disclosure always returned a full composition, which the delta taxonomy breaks &mdash; so a taxonomy-free full-disclosure renderer was added for that path." },
+      { h: "Two scope limits built, neither of which the pilot can hear", p: "The <strong>10 km player bubble</strong> now bounds what is computed at all for ground and air units &mdash; not gated late, not scored and discarded, never considered. World features stay unbounded: they do not move, and enrichment reaches for them by proximity to a contact. It passed DoD with <em>no live acceptance owed</em>, and that is a waiver rather than deferred debt: it has no in-cockpit observable until the 9K113 sight's 20 km cone makes the bubble radius diverge from the naked-eye cap. Separately, <code>BL-B23</code> took <em>lost</em> contacts out of clustering's input &mdash; <code>ContactStore</code> has no delete path, so every tick had been handing group reconciliation every contact ever seen. Measured before: 2.96 ms at 100 contacts, 406 ms at 1200, clean quadratic. After: 0.15&ndash;1.4 ms flat given 20 live contacts regardless of how many are long-lost. The cost now tracks the live picture, not sortie length. The record kept, deliberately &mdash; a lost contact is still memory Petrovich should have." },
+      { h: "The 2026-10-04 sortie, and the two fixes it produced", p: "<em>\"It feels like many of those reports were about the same units.\"</em> The cause was continuity loss in the <strong>merge direction</strong>: when two separately-tracked contacts become one, the survivor is founded fresh, and a fresh founding speaks. Two fixes, both at the speech layer by choice: a merge-echo contact's first callout is suppressed (17 of 34 foundings on that sortie, reconstructed), and a group's opening line goes silent when every member was already named, speaking only the delta. <strong>Both can also silence a genuine split</strong> &mdash; stated in the plan, not discovered later. Neither touches the root rule in <code>ContactStore.ingest</code>, and both roadmap entries say so." },
+      { h: "And one word that stops him entirely", p: "<code>silence</code> (also \"be quiet\", \"shut up\") mutes everything &mdash; including urgent calls &mdash; after one spoken acknowledgement, until any other command ends it. Absolute, by decision rather than by omission. Whether that is still what you want when a threat appears while muted is one of the things its flight has to answer, along with which of the three phrasings the recogniser actually hears." },
+      { h: "What's next", p: "The flight. Eight acceptance cards are queued on <code>main</code> and nothing else in this subproject is worth starting ahead of them, because most of what remains is calibration the air decides. Behind it: sector fairness (<code>BL-B20</code>, needs its own <code>/explore</code>), attention capture, and the question of what he should say about sixteen vehicles in one sector &mdash; which is yours, not the code's." }
     ],
-    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["active","Cohesion redesign - gates passed, unmerged"],["open","10 km player bubble"],["open","BL-B20 sector fairness"],["open","BL-B23 clustering cost"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
+    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["done","Cohesion redesign (merged, unflown)"],["done","10 km player bubble - no observable, waived"],["done","BL-B23 - lost contacts out of clustering"],["done","silence command (merged, unflown)"],["done","Merge-echo + group-disclosure suppression (unflown)"],["open","BL-B20 sector fairness"],["open","BL-B24/B25 - the ambiguity rule itself"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
     src: "body-layer/ROADMAP.md"
   },
   srs: {
@@ -1537,17 +1565,18 @@ const DETAIL = {
   },
 
   crewsortie: {
-    kicker: "Waiting on you", title: "Four cards on main, none flown", chip: ["block", "Sortie"],
-    facts: [["Branch", "main -- all four are merged"], ["Oldest card", "2026-09-25, crew behaviour"], ["Newest", "2026-09-29, group reporting + LOS tolerance"]],
+    kicker: "Waiting on you", title: "Eight cards on main, none flown", chip: ["block", "Sortie"],
+    facts: [["Branch", "main -- everything here is merged"], ["Oldest card", "2026-09-25, crew behaviour"], ["Newest", "2026-10-05, the two quieting fixes"], ["Fly with", "--detection-trace"]],
     sections: [
-      { h: "What is waiting, and why it is cards rather than features", p: "Group reporting and the 12 m line-of-sight tolerance (2026-09-29), the confirm band (2026-09-28), the 2026-09-26 crew-behaviour fixes, and the brain's first real model. All merged, none heard in the air. Several of these were deliberately merged ahead of their flight at your direction, so a correction the flight produces lands on <code>main</code> rather than on a branch that has drifted &mdash; which is the right call and is also why the backlog of unflown cards keeps growing rather than clearing." },
-      { h: "The single answer worth most", p: "Whether the group boundary draws groups where you perceive them. It is 20 unit widths &mdash; about 140 m between neighbouring vehicles &mdash; and it is your own <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Two audible failure directions: too tight and a convoy fragments into pieces that should be one thing; too loose and separate clusters merge into a group you do not perceive." },
-      { h: "Fly with the detection trace on", p: "The belief-truth log records what Petrovich believes; it <strong>structurally cannot record a candidate he rejected</strong>. That is precisely why the missed-AAA defect needed an offline reproduction to find at all &mdash; the evidence of the miss was the absence of a row. The trace records every visibility call, including the rejections." },
-      { h: "Two things no flight here can judge", p: "<code>follow &lt;descriptor&gt;</code> still cannot pick the right contact &mdash; the validator's rule is right and currently unsatisfiable, so he will correctly ask rather than pick, and that is not a defect to report. And the 12 m tolerance's second effect is a thing to watch for rather than test: it will also reveal units genuinely masked by a ridge clearing the sightline by less than that. Accepted knowingly; only a real flight shows it happening." },
-      { h: "The one card deliberately not in this set", p: "The elevation-cost probe. It may hitch the frame by design, which would contaminate any judgement about whether callouts feel right." }
+      { h: "What is waiting, and why it keeps growing", p: "Group reporting and the 12 m line-of-sight tolerance, the confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, the cohesion redesign, the <code>silence</code> command, and the two fixes that stop the same units being announced twice. All merged, none heard. Most were merged ahead of their flight at your direction &mdash; <em>\"so many things at this stage are intertwined that it's better to test to current HEAD\"</em> &mdash; which is the right call each time and is also exactly why eight cards now sit behind one flight." },
+      { h: "The newest two are the reason to fly now", p: "Merge-echo suppression and the group-disclosure fix both <em>reduce</em> what you hear, and both carry the same accepted cost: a genuine split right after a merge is indistinguishable from an echo at the speech layer and also goes quiet. Every other item on this list fails loudly if it is wrong. These two fail silently, which makes them the hardest thing here to catch and the thing a flight is most needed for. The 17-of-34 suppression figure is a reconstruction from pipeline outputs, not a replay." },
+      { h: "The single calibration answer worth most", p: "Whether the group boundary draws groups where you perceive them. It is 20 unit widths &mdash; about 140 m between neighbouring vehicles &mdash; and it is your own <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Two audible failure directions: too tight and a convoy fragments; too loose and separate clusters merge into a group you do not perceive. The 500 m installation cap and the air-defence class list are single-source-of-evidence guesses in the same position." },
+      { h: "Fly with the detection trace on", p: "The belief-truth log records what Petrovich believes; it <strong>structurally cannot record a candidate he rejected</strong>. That is precisely why the missed-AAA defect needed an offline reproduction to find at all &mdash; the evidence of the miss was the absence of a row. The trace records every visibility call, including the rejections, which is doubly worth having on a flight whose two newest features work by suppression." },
+      { h: "Three things no flight here can judge", p: "<code>follow &lt;descriptor&gt;</code> still cannot pick the right contact &mdash; the validator's rule is right and currently unsatisfiable, so he will correctly ask rather than pick, and that is not a defect to report. The 12 m tolerance will also reveal units genuinely masked by a ridge by less than that: accepted knowingly, watch for it rather than test it. And sector fairness is explicitly not in any of this &mdash; \"all ten units to my left get identified\" is still expected to fail and must not be read as a regression." },
+      { h: "The one card deliberately not in this set", p: "The elevation-cost probe. It may hitch the frame by design, which would contaminate any judgement about whether callouts feel right &mdash; and the reverse holds too." }
     ],
-    items: [["open","Group reporting - one line per group"],["open","12 m LOS tolerance - the missed AAA"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
-    src: "docs/acceptance/2026-09-29-group-reporting-sortie.md, 2026-09-29-los-tolerance-sortie.md, 2026-09-28-confirm-band-sortie.md, 2026-09-26-sortie-fixes-sortie.md"
+    items: [["open","Merge-echo suppression + group disclosure"],["open","silence - one word, absolute quiet"],["open","Cohesion redesign - six delta branches by ear"],["open","Group reporting - one line per group"],["open","12 m LOS tolerance - the missed AAA"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
+    src: "docs/acceptance/2026-10-05-contact-report-flood-sortie.md, 2026-10-04-silence-command.md, 2026-10-01-group-cohesion-sortie.md, 2026-09-29-group-reporting-sortie.md, 2026-09-29-los-tolerance-sortie.md, 2026-09-28-confirm-band-sortie.md, 2026-09-26-sortie-fixes-sortie.md"
   },
 
   gc4b: {
