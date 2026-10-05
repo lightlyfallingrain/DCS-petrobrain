@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import cache
 from typing import Final
 
 from perception.reporting_names import reporting_name_for
@@ -553,8 +554,21 @@ _REPORTING_NAME_KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...
 _WWII_REPORTING_NAME_PREFIX: Final[str] = "old "
 
 
+@cache
 def profile_for(object_type: str) -> ObjectTypeProfile:
     """Look up `object_type`'s size/class profile.
+
+    **Cached (`functools.cache`), and safe to be**: a pure function of one
+    `str`, over module-level tables that are never mutated and
+    `reporting_names._load_mapping`'s own already-`@cache`d file-backed
+    dict, returning a `frozen=True` `ObjectTypeProfile` that no caller can
+    mutate. The key space is the few hundred DCS type names one mission
+    contains, so the cache is bounded in practice without a `maxsize`.
+    Measured 0.93 -> 0.04 us/call (`body-layer/research/
+    2026-10-05-performance-review.md` finding 1), against 11.45 M calls in
+    a 300-poll profile -- the largest single `tottime` entry in the whole
+    subsystem, because the uncached body is a linear substring scan over
+    two keyword tables with a `.lower()` allocation per call.
 
     Two passes, in order:
 
