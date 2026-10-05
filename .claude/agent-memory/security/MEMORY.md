@@ -36,3 +36,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [body-layer full audit 2026-10-05](project_body_layer_full_audit_2026_10_05.md) — what cleared and why (no listener, no model-text-to-speech path, guards present); findings A1-A5. NEEDS FIXES.
 - [LOS join key unit_name is not total](project_los_join_key_unit_name_not_total.md) — nameless scenery/statics can never get a live LOS verdict, so they silently use the building-blind SRTM fallback forever.
 - [Poll loop has no 5 Hz spec](project_poll_loop_has_no_5hz_spec.md) — default is 1.0 s fixed-DELAY, so ~1.44 s observed is correct; BL-B30's "seven times slower" premise is wrong.
+- [world-model full audit 2026-10-05](project_world_model_full_audit_2026_10_05.md) -- provenance solid in describe_position, absent in line_of_sight_clear/raster; pipeline measures its own error and delivers it as prose (WM-B3's mechanism). Verified sqlite URI/nan/bind-limit behaviours.
