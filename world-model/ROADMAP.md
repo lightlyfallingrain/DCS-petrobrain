@@ -1008,8 +1008,31 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   already-pending `fix/contact-report-flood` / `fix/redundant-group-disclosure` sortie rather
   than needing its own flight — see `body-layer/ROADMAP.md`'s "Live acceptance debt" list.
 
-- [ ] **WM-B7 — A coarse elevation grid derived from the ridge/valley lines, as the deterministic
-  test oracle. LOW PRIORITY.** User direction, 2026-10-05: *"I'd rather use coarse grid calculated
+- [x] **WM-B7 — REJECTED 2026-10-05, same day it was filed. Its rationale was removed by a user
+  decision hours later; the reasoning is kept because it is the record of why the elevation grid
+  has no consumer left.** Replaced by `WM-B8` below.
+
+  **Why it was filed**: to be the coarse, deterministic elevation source the *offline* LOS
+  primitive would read at theatre scale once `X-B29` moved the live answer into DCS.
+
+  **Why that disappeared**: the user relaxed the offline requirement the same day — *"we only need
+  it for testing. If we build a fine grid for a very small area, we can use that for test
+  scenarios. Recreating LOS of actual flights offline makes no sense, we cannot get required
+  accuracy without DCS."* A fixture-scale fine grid is a **different artifact**, not a reshaping of
+  this one, so it gets its own ID rather than inheriting this name and quietly changing what the
+  old commits mean.
+
+  **What this leaves**: nothing needs a theatre-scale elevation grid. `describe_position`'s
+  `elevation.dcs_m` has zero production callers (its only non-test caller, `perception/geometry.
+  elevation_at`, is itself uncalled); geomorphons reads SRTM `.hgt` directly; `query/divides.py`
+  samples no elevation; enrichment uses the features' own `elevation_range_m`; mission-interpreter
+  has no `elevation` reference in `src`. Retiring the stored grid is therefore a separate, later
+  cleanup question — not blocked on anything, and worth about 46 MB of a 704 MB store.
+
+  Original entry follows, kept for its design questions, several of which transfer to `WM-B8`.
+
+- [ ] **WM-B7 (original text) — A coarse elevation grid derived from the ridge/valley lines, as the
+  deterministic test oracle. LOW PRIORITY.** User direction, 2026-10-05: *"I'd rather use coarse grid calculated
   from ridge/valley data and not poll elevation data in DCS."* Replacement work for `X-B26`, which
   closed the same day by rejecting live elevation polling outright.
 
@@ -1046,6 +1069,20 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Do not start this before `X-B29` lands.** Until the live LOS path actually moves to DCS, the
   existing grid is still answering a live question and replacing it with a coarse one would
   degrade something real.
+
+- [ ] **WM-B8 — A fixture-scale fine elevation grid for offline LOS tests. LOW PRIORITY.**
+  User direction, 2026-10-05, replacing `WM-B7`: *"If we build a fine grid for a very small area,
+  we can use that for test scenarios."*
+
+  **Note the inversion** — `WM-B7` was coarse-everywhere; this is **fine-but-tiny**. The offline
+  LOS primitive is no longer trying to stand in for DCS over a theatre. It serves fixtures, so it
+  needs to be *small, fine and deterministic*, and agreement with what DCS would say is an explicit
+  **non-goal** (see `plans/dcs-driven-los/plan.md` §3): the two answer different questions.
+
+  Open: how small an area, what resolution, and whether it is generated into the test fixtures or
+  built once and committed. The `WM-B7` entry above carries design questions that transfer —
+  particularly what it reports where there are no landform control points at all, which must be
+  "unknown" rather than an invented height.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
