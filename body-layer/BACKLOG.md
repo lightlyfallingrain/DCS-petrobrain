@@ -389,7 +389,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   - These replace the current "near X (~200m)" shape entirely at short distances. The existing
     1000 m `NEAR_FACT_RADIUS_M` gate stays above them.
 
-  **Needs world-model support — the one expensive item:**
+  **Needs world-model support — the one expensive item. Unblocked 2026-10-05, not done.**
   - **"200 meters north of the road"** and **"next to the road, north side"** both need the
     *direction from the feature to the contact*. `query.describe.RoadInfo` carries `distance_m` and
     `orientation_deg` (the road's own heading) but **no such bearing**, and neither do
@@ -397,6 +397,12 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     phrasing change in body-layer. Given a bearing *and* the road's existing `orientation_deg`,
     "which side" falls out; without the bearing, neither does. Sequence this before the two wording
     items that depend on it rather than half-building them.
+    **`plans/terrain-feature-probing/plan.md` Revision 3, Stage 4 closed the world-model half**:
+    `RoadInfo`/`SettlementInfo`/`WaterInfo`/`TerrainLineInfo` all now carry `bearing_deg: float |
+    None` (direction from the feature's closest point to the query position, via `store.reader.
+    closest_point_on_feature`). This bullet does **not** go to `[x]` — the two wording items above
+    are body-layer phrasing and are still unbuilt; only the world-model dependency they were blocked
+    on is gone.
 
   **Deferred (user, 2026-09-19):**
   - [>] **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
@@ -882,5 +888,32 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   duplicate on a live sortie; until then, the fix would require either snapshotting the
   suppression decision at the moment it happens (a new piece of per-contact state this project has
   so far avoided adding) or accepting the current, cheaper, re-evaluated-each-tick approximation.
+
+- [ ] **BL-B26 — `CalloutScheduler.tick` gathers each group's full member facts up to three times
+  per tick, whether or not anything changed.** Found by the performance pass on
+  `feature/terrain-callout-stages-345` (2026-10-05); **pre-existing to that change, not caused by
+  it** — it is `group-reporting` Stage 4's scheduling-loop architecture.
+
+  For every tracked group, every 5 Hz tick, `tick()` gathers full member facts — one
+  `describe_contact` call per member, and now one `divides_between` query per member as well —
+  in three separate places: scoring, candidate re-render, and `group_membership_state`'s own
+  re-gather. **The "nothing changed, skip" check runs *after* the gather, not before it**, so the
+  work is done and then discarded on every tick where the group is unchanged, which is most of
+  them.
+
+  **Order of magnitude, estimated rather than measured** (no live sortie log was available to the
+  pass): ~15 ms/tick for 5 groups × 10 members. That is not alarming on its own, and the terrain
+  qualifier adds one cheap SQL query (0.02–0.11 ms measured) to each redundant gather rather than
+  creating the redundancy. Recorded because the multiplier is what matters: any future per-member
+  enrichment pays 3× for nothing.
+
+  **Escalate to Architect, not to a one-line fix.** Hoisting the changed-check above the gather
+  sounds trivial and is not — scoring needs facts to decide whether the group is worth speaking
+  at all, so the three gathers are not obviously redundant from inside any one of them. This is a
+  scheduling-loop design question. Related: `BL-B23` was the same shape of finding (cost scaling
+  with something other than the threat picture) and the fix there was to filter the input, not to
+  restructure the loop.
+
+  See `plans/terrain-feature-probing/performance-rev3.md`.
   See `plans/redundant-group-disclosure/review.md`, "Optional Refinements" (second finding), and
   `plans/redundant-group-disclosure/implementation.md`.

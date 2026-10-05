@@ -15,8 +15,21 @@ git checkout fix/contact-report-flood && git pull
 group was already individually reported (directly, or via the merge-echo this card's own fix
 silences), and speaks only the genuinely new part otherwise. Both fixes change what you hear about
 the same contact/group stream, so one flight settles both rather than needing a second sortie.
-**If you are flying after both branches have merged, check out `main` instead** — the two fixes
-land as separate merges but this card's setup and test items cover both regardless of which branch
+
+**Added 2026-10-05: a third thing rides this same sortie — `feature/terrain-callout-stages-345`
+(DoD mechanical checks PASSED, not yet merged).** This one adds a relative terrain reference to a
+contact report — *"armor, ten o'clock, four kilometres, next valley"* — computed from the shipped
+ridge/valley lines at query time. It changes the same spoken contact-report line the two fixes
+above are also tuning, so it belongs on the same flight rather than a separate one. If you are
+flying this branch specifically rather than `main`, check it out instead (it already carries the
+other two fixes, since it branched after them):
+
+```sh
+git checkout feature/terrain-callout-stages-345 && git pull
+```
+
+**If you are flying after all branches have merged, check out `main` instead** — the fixes land as
+separate merges but this card's setup and test items cover all of them regardless of which branch
 or combination you're actually on:
 
 ```sh
@@ -173,11 +186,46 @@ for *how often*, not for whether it's "wrong."
 **Record.**
 - [ ] Did you ever catch a case where a real second contact seemed to go unannounced?
 
+### 6 — A terrain reference shows up where it would make sense
+
+**Do.** Listen to contact reports while flying near real terrain relief — a ridgeline, a valley,
+anything with a visible flank. The Anti-Lebanon range around Baalbek is the one already checked
+against the real store: a report on a contact across the flank should pick up a terrain qualifier,
+one along the Bekaa valley floor should not.
+
+**Expect.** Occasionally, a report gains a trailing qualifier — *"...next valley"* or *"...beyond
+the ridge"* — when the straight line from you to the contact crosses one ridgeline, and stays
+silent when it crosses none or more than one. This qualifier **replaces** the generic "near
+<place>" fragment when both would otherwise apply — it never adds on top.
+
+**Record.**
+- [ ] Did a terrain qualifier ever fire when you'd say it out loud yourself — "yeah that's the next
+  valley over"?
+- [ ] Did it ever stay silent somewhere you expected to hear it, or speak somewhere you didn't?
+- [ ] **The one to watch for specifically**: did a terrain qualifier ever replace something more
+  useful — a landmark, a road, a settlement name — that would have helped you more than "next
+  valley" did?
+
+### 7 — The four shipped-to-be-flown constants
+
+**Do.** Nothing extra — just notice, across the flight, whether terrain qualifiers feel too eager,
+too rare, or about right.
+
+**Expect.** These four numbers are first guesses, not swept or tuned against real flying: the 300 m
+ceiling on how close a landform has to be to get named at all, the 2x dominance factor one landform
+needs over the next-nearest to win the naming, the 400 m merge distance for counting two nearby
+ridge crossings as one divide, and the rule that 2-or-more divides on the line of sight means stay
+silent rather than guess which one matters.
+
+**Record.**
+- [ ] Across the whole flight, did terrain qualifiers feel roughly right, too frequent, or too
+  rare?
+
 ## Pass criteria
 
 The feature passes if the busy-area chatter is noticeably reduced, genuinely simultaneous sightings
-and true reacquisitions are unaffected, and any missed-split cases you notice feel occasional
-rather than routine.
+and true reacquisitions are unaffected, any missed-split cases you notice feel occasional rather
+than routine, and a terrain qualifier never crowds out something more useful than itself.
 
 ## Ask for the trace afterwards
 
@@ -199,5 +247,10 @@ suppression count from this flight can be checked against the 17/34 estimate.
    measured against the 17/34 estimate above.
 5. Did a group's opening line ever repeat something already heard individually, or go silent when
    you expected at least a partial line (item 5a)?
+6. Did a terrain qualifier ("next valley"/"beyond the ridge") ever fire or stay silent in a way
+   that didn't match what you'd say out loud yourself?
+7. Did a terrain qualifier ever displace something more useful — a landmark, road, or settlement
+   name — that would have helped you more?
+8. Overall across the flight: did terrain qualifiers feel about right, too eager, or too rare?
 
 Anything that surprises you is worth more than anything on this list.

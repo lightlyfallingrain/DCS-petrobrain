@@ -869,6 +869,15 @@ def _contact_report_text(
     SemanticFact`, mirroring `belief.console.format_event_for_overlay`'s own
     selection (`max(semantic, key=lambda fact: fact["confidence"])`).
 
+    **`facts["terrain_qualifier"]` (`plans/terrain-feature-probing/plan.md`
+    Revision 3, Decision 5), when present, replaces the semantic-fragment
+    selection above entirely** -- *"next valley"*/*"beyond the ridge"*
+    outranks whatever `max(semantic, ...)` would otherwise have picked.
+    Absent for a group report (`render_group_report` never reads this key):
+    one member's divide crossing is not necessarily true of the whole
+    group, same reasoning as that function's own dropped semantic
+    fragment.
+
     **Count clause (`plans/group-contact-model/plan.md` Stage 4b).** A
     plural cardinality prepends a hedged quantity word (`"several"`/
     `"a handful"`/`"many"`, never an exact number -- `_cardinality_phrase`)
@@ -922,10 +931,21 @@ def _contact_report_text(
         range_m = relative_now["range_m"]
         assert isinstance(range_m, float)
         text += f", {clock} o'clock, {_format_range_km(range_m)}"
-    semantic = facts.get("semantic")
-    if isinstance(semantic, list) and semantic:
-        best = max(semantic, key=lambda fact: fact["confidence"])
-        text += f" {_round_enrichment_fragment(best['text'])}"
+    terrain_qualifier = facts.get("terrain_qualifier")
+    if isinstance(terrain_qualifier, str):
+        # Decision 5 (`plans/terrain-feature-probing/plan.md` Revision 3):
+        # the divide-relative form -- "next valley"/"beyond the ridge" --
+        # replaces whatever the semantic-fact selection below would have
+        # picked, rather than competing in it. "There is a ridge between
+        # you and it" outranks "it is near a road" for a pilot deciding
+        # whether to climb, and only fires when `belief.enrichment.
+        # terrain_divide_qualifier` found exactly one divide crossed.
+        text += f" {terrain_qualifier}"
+    else:
+        semantic = facts.get("semantic")
+        if isinstance(semantic, list) and semantic:
+            best = max(semantic, key=lambda fact: fact["confidence"])
+            text += f" {_round_enrichment_fragment(best['text'])}"
     if event_clause is not None:
         text += f", {event_clause}"
     else:

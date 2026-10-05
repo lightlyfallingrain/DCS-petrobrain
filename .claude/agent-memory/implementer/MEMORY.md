@@ -124,6 +124,8 @@ Write directly to this directory — it already exists, no need to create it or 
 - [macOS ru_maxrss unit is bytes](reference_macos_ru_maxrss_unit_bytes.md) — bytes on macOS, KB on Linux; divide by 1024*1024 for MB on Mac.
 - [Landform geomorphons implementation](project_landform_geomorphons.md) — plan cited wrong spike's min_cells; junction-walk is order-dependent; M8 chunk pipeline had no equivalent.
 - [Relief gate + decimation fix](project_landform_relief_gate_decimation_fix.md) — windowed deviation check silently neutered decimation; check whole polyline, not one segment.
+- [Terrain-feature-probing Rev3 Stages 3a-5](project_terrain_feature_probing_rev3_stages345.md) — nearest_feature shape frozen; 5 fixtures shared one latent trap; scratch-copy commit-split technique.
 
 - [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression checks must exclude same-poll peers or mutual lockout silences everything.
 - [Redundant group disclosure](project_redundant_group_disclosure.md) — already-reported lives in scheduler, not Contact/Group; fix broke+fixed a real second redundant case the plan didn't name.
+- [Test pure function and its wiring separately](feedback_test_pure_function_and_its_wiring_separately.md) — 5 well-tested fns, 0 tests on the write/read call sites that deliver it.

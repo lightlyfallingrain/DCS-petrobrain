@@ -124,6 +124,7 @@ from belief.enrichment import (
     motion_when_seen,
     relative_geometry,
     semantic_facts_for,
+    terrain_divide_qualifier,
 )
 from belief.events import Event
 from belief.mission_phase import MissionPhaseTracker, mission_phase_relevance
@@ -331,7 +332,16 @@ def _add_enrichment_facts(
     `_contact_facts` above gains a `confidence` key; `semantic`/
     `relative_now`/`motion_when_seen` are new top-level keys, the last one
     omitted entirely rather than `None` when `belief.enrichment.
-    motion_when_seen` has too little history to derive a direction)."""
+    motion_when_seen` has too little history to derive a direction).
+
+    **`terrain_qualifier` (`plans/terrain-feature-probing/plan.md` Revision
+    3, Decision 1/2/5) is computed here too, uncached, right beside
+    `relative_now`** -- both are ownship-relative and must be recomputed
+    every call, never read from `WorldEnrichmentCache` (which keys only on
+    `Contact.last_position`, not on where ownship itself currently is).
+    Omitted from `facts` entirely (not `None`) when `terrain_divide_
+    qualifier` returns `None` -- the same absent-not-null convention as
+    `motion_when_seen` above."""
     position_conf = position_confidence(contact, now_sim)
     position_dict = facts["position"]
     assert isinstance(position_dict, dict)
@@ -342,6 +352,12 @@ def _add_enrichment_facts(
     )
     facts["semantic"] = [asdict(fact) for fact in semantic_facts]
     facts["relative_now"] = relative_geometry(enrichment.ownship, world_position)
+
+    terrain_qualifier = terrain_divide_qualifier(
+        enrichment.conn, enrichment.theatre, enrichment.ownship, world_position
+    )
+    if terrain_qualifier is not None:
+        facts["terrain_qualifier"] = terrain_qualifier
 
     motion = motion_when_seen(store, contact)
     if motion is not None:

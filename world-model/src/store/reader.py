@@ -244,6 +244,68 @@ def _distance_to_feature(x: float, z: float, feature: StoredFeature) -> float:
     raise ValueError(f"Unknown geom_type {feature.geom_type!r}")
 
 
+def _closest_point_on_segment(p: Point, a: Point, b: Point) -> Point:
+    ax, az = a
+    bx, bz = b
+    px, pz = p
+    dx, dz = bx - ax, bz - az
+    length_sq = dx * dx + dz * dz
+    if length_sq == 0.0:
+        return a
+    t = ((px - ax) * dx + (pz - az) * dz) / length_sq
+    t = max(0.0, min(1.0, t))
+    return (ax + t * dx, az + t * dz)
+
+
+def _closest_point_on_polyline(p: Point, points: list[Point]) -> Point:
+    best_point = points[0]
+    best_distance: float | None = None
+    for i in range(len(points) - 1):
+        candidate = _closest_point_on_segment(p, points[i], points[i + 1])
+        distance = distance_point_point(p, candidate)
+        if best_distance is None or distance < best_distance:
+            best_distance = distance
+            best_point = candidate
+    return best_point
+
+
+def closest_point_on_feature(x: float, z: float, feature: StoredFeature) -> Point:
+    """The closest point on `feature`'s own geometry to `(x, z)` -- the
+    companion to `_distance_to_feature` above (same `geom_type` handling),
+    added for `query.describe.py`'s `bearing_deg` fields (`plans/
+    terrain-feature-probing/plan.md` Revision 3, Stage 4): for a
+    `LineString`/`Polygon` feature, the honest bearing *origin* is the
+    closest point on its actual geometry, not its centroid.
+
+    **Deliberately a separate function, not a change to `nearest_feature`'s
+    own return shape** -- several existing callers in `query/describe.py`
+    unpack `nearest_feature`'s result as a bare `(feature, distance)` 2-tuple
+    (`feature, distance = match`), which a wider return tuple would break.
+    Callers that need the point call this directly on the `StoredFeature`
+    a `nearest_feature`/`features_in_bbox` call already returned, the same
+    way `_distance_to_feature` itself is only ever called with a feature
+    already in hand.
+
+    Returns `(x, z)` itself when the point lies inside a `Polygon` (distance
+    0 case) -- there is no meaningful "closest point on the boundary" that
+    is more honest than the point's own position when it is already inside;
+    callers must treat a coincident closest point (distance 0) as "bearing
+    undefined", not compute a bearing from a point to itself."""
+    point: Point = (x, z)
+    if feature.geom_type == "Point":
+        return feature.geometry[0]
+    if feature.geom_type == "LineString":
+        return _closest_point_on_polyline(point, feature.geometry)
+    if feature.geom_type == "Polygon":
+        for hole in _inner_rings(feature):
+            if point_in_polygon(point, hole):
+                return _closest_point_on_polyline(point, _closed(hole))
+        if point_in_polygon(point, feature.geometry):
+            return point
+        return _closest_point_on_polyline(point, _closed(feature.geometry))
+    raise ValueError(f"Unknown geom_type {feature.geom_type!r}")
+
+
 def nearest_feature(
     conn: sqlite3.Connection,
     kinds: list[str] | None,

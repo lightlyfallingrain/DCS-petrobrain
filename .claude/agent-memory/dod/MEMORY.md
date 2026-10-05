@@ -16,3 +16,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Inspect tool drifted from real pipeline](project_inspect_tool_drifted_from_real_pipeline.md) — a dev `tools/` script can silently stop calling the real pipeline function it claims to visualize; check that at DoD.
 
 - [Recurring: approved plan wrong on real data](project_recurring_approved_plan_wrong_on_real_data.md) — 2nd occurrence this week (contact-report-flood, geomorphons perf); consider a real-data check earlier than Implementer.
+- [Plan staleness across parked stages](project_plan_staleness_across_parked_stages.md) — terrain-feature-probing's parked Stages 3-5 assumed basin adjacency from a since-replaced detector; 1st occurrence, watch for a 2nd.
