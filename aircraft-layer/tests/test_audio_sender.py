@@ -471,6 +471,82 @@ def test_scale_wav_volume_handles_a_malformed_file(tmp_path: Path) -> None:
     assert path.read_bytes() == before
 
 
+def _write_truncated_odd_length_pcm_wav(path: Path) -> None:
+    """A WAV whose header declares more frames than the file actually
+    holds, truncated to an *odd* byte count -- the specific shape Security
+    reproduced (deep analysis, SPU-8 intercom, 2026-10-05): `wave.open`
+    parses the header cleanly, `readframes` does not raise on the
+    short read, but the odd byte count makes `array("h").frombytes()`
+    raise `ValueError` two lines later, outside the original guard."""
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(22050)
+        w.writeframes(array("h", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).tobytes())
+
+    full = path.read_bytes()
+    header_len = len(full) - 20  # 20 bytes of 16-bit PCM data were written
+    path.write_bytes(full[: header_len + 15])  # keep only 15 (odd) data bytes
+
+
+def test_scale_wav_volume_handles_truncated_odd_length_pcm(tmp_path: Path) -> None:
+    """The `array("h").frombytes()` step sits outside the original
+    `except (wave.Error, OSError, EOFError)` guard -- this is the path
+    Security's crafted WAV exploited to kill the playback worker thread
+    permanently. Reverting the widened `except` clause (removing
+    `ValueError`, or narrowing the `try` back to just the `wave.open`
+    block) makes this test fail with an uncaught `ValueError`."""
+    path = tmp_path / "truncated.wav"
+    _write_truncated_odd_length_pcm_wav(path)
+    before = path.read_bytes()
+
+    scale_wav_volume(str(path), 0.5)  # must not raise
+
+    # Played unscaled, same posture as every other malformed-input case:
+    # the file is left exactly as it was found, not rewritten.
+    assert path.read_bytes() == before
+
+
+def test_run_survives_scale_wav_volume_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defense in depth, independent of the `scale_wav_volume` parse fix
+    above: even if something inside `scale_wav_volume` raises, the worker
+    thread in `_run()` must keep processing the queue rather than dying.
+    Removing `_run()`'s own `try`/`except` around the `scale_wav_volume`
+    call (leaving only the fix inside `scale_wav_volume` itself) makes
+    this test fail -- the worker loop exits on the first raise and the
+    second queued line is never played."""
+    import collector.audio_sender as audio_sender_module
+
+    call_count = 0
+    real_scale_wav_volume = audio_sender_module.scale_wav_volume
+
+    def _raise_once(path: str, volume: float) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise ValueError("simulated scale_wav_volume failure")
+        real_scale_wav_volume(path, volume)
+
+    monkeypatch.setattr(audio_sender_module, "scale_wav_volume", _raise_once)
+
+    player = _CapturingPlayer()
+    sender = AudioPlaybackSender(
+        player=player, gate_state=lambda: Spu8GateState(gate_open=True, volume=0.5)
+    )
+    sender.open()
+    try:
+        sender.play_audio(b"RIFF-FAKE-ONE", urgent=False)
+        sender.play_audio(b"RIFF-FAKE-TWO", urgent=False)
+        assert _wait_until(lambda: len(player.paths) == 2)
+    finally:
+        sender.close()
+
+    assert call_count == 2
+    assert player.contents == [b"RIFF-FAKE-ONE", b"RIFF-FAKE-TWO"]
+
+
 def test_run_applies_volume_scaling_before_playback(tmp_path: Path) -> None:
     """End-to-end through the worker thread: a real 16-bit WAV handed to
     play_audio comes out scaled by the time the player sees it."""
