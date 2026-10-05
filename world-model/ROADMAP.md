@@ -14,15 +14,36 @@ for the kind whose live-DCS acceptance was *deferred*, not waived, and hasn't be
 sortie actually exercises it, and say which one.
 
 - [ ] **`fix/los-elevation-tolerance` — `_TERRAIN_TOLERANCE_M = 12.0` added to
-  `query.line_of_sight.line_of_sight_clear` (merged 2026-09-29), unflown.** Fixes a reproduced
-  (offline, not yet re-confirmed live) defect: the SRTM elevation grid can place a real unit
-  below the modelled terrain at its own position, permanently blocking terrain LOS to it from
-  every angle. Card: `docs/acceptance/2026-09-29-los-tolerance-sortie.md` — same flight as the
-  group-reporting acceptance. Settles two things a fixture cannot: whether Petrovich now detects
-  the previously-missed insurgent AAA on a similar attack pass, and whether the 12 m tolerance
-  starts revealing units genuinely masked by a ridge (accepted cost, but only a real flight can
-  show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
-  reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
+  `query.line_of_sight.line_of_sight_clear` (merged 2026-09-29), unflown.** **Narrowed 2026-10-05 by
+  `X-B29`'s DoD gate**: once `feature/dcs-driven-los` lands, gate 4 never calls this primitive at all
+  once a live DCS verdict exists for a unit (`candidate.live_los_clear is not None` short-circuits
+  it) — the tolerance is now test-path/fallback-only by construction, documented at its own
+  definition site. The original two questions this entry tracked split accordingly:
+  - **"Does Petrovich now detect the previously-missed AAA on a similar pass"** — this is now
+    answered by the *live* path, not by this tolerance, and is covered by
+    `X-B29`'s own Stage 4 acceptance card (`docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`),
+    not this one. Still unflown.
+  - **"Does the 12 m tolerance start revealing units genuinely masked by a ridge"** — this is the
+    one question still actually owned by this entry, and only for the narrower surface it now
+    covers: gate 4's fallback branch (live feed absent/outside the wedge/stale) and `WM-B8`'s
+    fixtures. Lower-stakes than originally framed, since the live path no longer depends on it for
+    the common case. Still unflown; card `docs/acceptance/2026-09-29-los-tolerance-sortie.md` is
+    stale in scope (it was written when this tolerance was the only LOS answer) and should be
+    re-read against this narrower claim before being flown, not flown as originally written.
+
+- [ ] **`feature/dcs-driven-los` (`X-B29`/`X-B30`, Stages 1-3) — DoD PASSED on fixtures 2026-10-05,
+  not yet merged, not yet flown.** Petrovich asks DCS directly whether terrain or a building blocks
+  a sightline, cone-scoped to his gaze wedge, instead of approximating it from this subproject's
+  SRTM grid; buildings occlude for the first time in this project. What a fixture cannot confirm, and
+  what Stage 4's sortie must: whether the `atan2` heading convention inside the Hook script's
+  `LOS_CODE` actually matches DCS's own Mission Scripting Engine convention (wrong would mean a
+  silently mis-aimed wedge, not a wrong detection), whether a building actually occludes in the
+  running game, whether the missed-AAA geometry now resolves without the 12 m tolerance, and whether
+  the per-frame look-direction socket poll produces any felt stutter (no DCS-side Lua profiler
+  exists to measure this offline). Acceptance card:
+  `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`. Full record: `plans/dcs-driven-los/{plan.md,
+  security-plan-review.md, implementation.md, review.md, security-deep-analysis.md, performance.md,
+  dod-check.md}`; backlog entries `todo/backlog.md`'s `X-B29`/`X-B30`.
 
 - [x] **`fix/latin-place-names` (`WM-B1`) — cleared by the user's 2026-10-02 `syria-full` build.**
   Name-source counts landed exactly as predicted: `via_name_en`≈12,926, `via_int_name`≈864,
@@ -1072,7 +1093,10 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
 - [ ] **WM-B8 — A fixture-scale fine elevation grid for offline LOS tests. LOW PRIORITY.**
   User direction, 2026-10-05, replacing `WM-B7`: *"If we build a fine grid for a very small area,
-  we can use that for test scenarios."*
+  we can use that for test scenarios."* **Unblocked 2026-10-05, `X-B29` DoD gate**: `WM-B7`'s "do
+  not start before `X-B29` lands" gate is cleared now that `feature/dcs-driven-los` has passed DoD
+  on fixtures (merge still pending, which does not block starting this). Still low priority in
+  ordering, not in importance.
 
   **Note the inversion** — `WM-B7` was coarse-everywhere; this is **fine-but-tiny**. The offline
   LOS primitive is no longer trying to stand in for DCS over a theatre. It serves fixtures, so it
