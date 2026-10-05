@@ -998,6 +998,39 @@ ATTITUDE_HISTORY_LEN = 3
 
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
+
+def _wait_for_next_tick(
+    stop_event: threading.Event, deadline: float, poll_interval_s: float
+) -> float:
+    """Sleep until `deadline`, then return the next poll's deadline --
+    `BL-11` Stage 1.
+
+    **Both poll loops used to end with `stop_event.wait(poll_interval_s)`,
+    which sleeps the full interval *after* the work**, so the realised
+    period was `work + interval` and never `interval`. With work measured
+    at a median ~330 ms at sortie scale, a 1.0 s setting realised 1.33 s
+    (`body-layer/research/2026-10-05-performance-review.md`, "The headline
+    correction") -- quantitatively the whole of the sortie's observed
+    ~1.4x miss. Sleeping to a deadline instead makes the configured number
+    mean what it says.
+
+    **Overrun policy: drop the missed ticks, do not queue them.** When the
+    work takes longer than `poll_interval_s` the remaining wait clamps to
+    zero and the *next* deadline is re-based on the clock now, so a slow
+    poll costs exactly the ticks it overran and nothing afterwards. The
+    alternative -- advancing the deadline by one interval regardless --
+    accumulates debt, and the loop would then run back-to-back with no
+    sleep at all for as long as it takes to repay it, which is the worst
+    possible behaviour on a thread that is already behind. There is nothing
+    to catch up on in any case: each poll reads the *latest* telemetry, so
+    a skipped tick has no backlog, only a gap."""
+    remaining = deadline - time.monotonic()
+    if remaining > 0.0:
+        stop_event.wait(remaining)
+        return deadline + poll_interval_s
+    return time.monotonic() + poll_interval_s
+
+
 #: The LOS query cone body-layer pushes for an ordinary naked-eye scan --
 #: `plans/dcs-driven-los/plan.md` SS17's own settled value: three o'clock
 #: hours (the one being scanned plus one either side), wide enough that a
@@ -1144,6 +1177,9 @@ def _run_console_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         connection = _ConnectionReporter()
+        # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
+        # the work -- see `_wait_for_next_tick`.
+        next_tick = time.monotonic() + poll_interval_s
         while not stop_event.is_set():
             # Same log-and-continue guard as `_run_crew_text_poll_loop`'s,
             # and for the same reason -- see that function for the full
@@ -1189,7 +1225,7 @@ def _run_console_poll_loop(
                     connection.report_failure(exc)
                 else:
                     logger.exception("console poll cycle failed; continuing")
-            stop_event.wait(poll_interval_s)
+            next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
         if trace_writer is not None:
             trace_writer.close()
@@ -1429,6 +1465,9 @@ def _run_crew_text_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         connection = _ConnectionReporter()
+        # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
+        # the work -- see `_wait_for_next_tick`.
+        next_tick = time.monotonic() + poll_interval_s
         while not stop_event.is_set():
             # One log-and-continue guard around the whole poll body, not
             # just the HTTP calls inside `_poll_f10_commands`/
@@ -1443,7 +1482,20 @@ def _run_crew_text_poll_loop(
             # frame, and perception, belief and speech are simply dead from
             # that moment on, with a stderr traceback as the only symptom.
             # Nothing in the cockpit says so. A skipped poll, by contrast,
-            # costs one cycle at 5 Hz and the next one recovers.
+            # costs one cycle at the configured poll rate
+            # (`_DEFAULT_POLL_INTERVAL_S`, 1.0 s since `abf49cd`) and the
+            # next one recovers.
+            #
+            # (This comment used to name a five-hertz rate, and so did two
+            # docstrings in `belief/brain_client.py`. All three were wrong
+            # and load-bearing: nothing in body-layer's configuration has
+            # ever been five hertz -- that is `Export.lua`'s *producer*
+            # rate, not this consumer's -- and they are what produced
+            # `BL-B30`'s wrong premise that every decay half-life and
+            # cadence constant had been tuned against a tick the runtime
+            # never ran. `BL-11` Stage 1; the rate is spelled out in words
+            # here so `test_no_stale_five_hertz_claims_remain_in_src` can
+            # hold the correction mechanically.)
             #
             # Found by the security pass on `plans/watch-reporting/`
             # (`security-review.md`), pre-existing rather than introduced
@@ -1549,7 +1601,7 @@ def _run_crew_text_poll_loop(
                     connection.report_failure(exc)
                 else:
                     logger.exception("crew-text poll cycle failed; continuing")
-            stop_event.wait(poll_interval_s)
+            next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
         if trace_writer is not None:
             trace_writer.close()

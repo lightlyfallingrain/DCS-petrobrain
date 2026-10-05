@@ -2188,3 +2188,94 @@ def test_only_a_dead_socket_counts_as_connection_loss() -> None:
     assert logger_module._is_connection_loss(timed_out) is True
     assert logger_module._is_connection_loss(bad_json) is False
     assert logger_module._is_connection_loss(ValueError("something else")) is False
+
+
+# --- _wait_for_next_tick (BL-11 Stage 1) ---------------------------------
+
+
+def test_wait_for_next_tick_sleeps_only_the_remainder_of_the_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The defect this fixes: the loops used to wait the *whole* interval
+    after the work, so a 1.0 s setting with 0.33 s of work realised 1.33 s.
+    Sleeping to a deadline means the wait absorbs the work."""
+    waits: list[float] = []
+    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 100.33)
+    stop_event = threading.Event()
+    monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
+
+    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+
+    assert waits == [pytest.approx(0.67)]
+    assert next_tick == pytest.approx(102.0)
+
+
+def test_wait_for_next_tick_does_not_sleep_when_the_work_overran(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An overrunning poll gets no sleep at all -- it is already late."""
+    waits: list[float] = []
+    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 101.4)
+    stop_event = threading.Event()
+    monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
+
+    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+
+    assert waits == []
+    assert next_tick == pytest.approx(102.4)
+
+
+def test_wait_for_next_tick_drops_missed_ticks_rather_than_queueing_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stated overrun policy (`_wait_for_next_tick`'s own docstring):
+    a poll that overran by several intervals re-bases its next deadline on
+    the clock now, so the debt is *dropped*. Advancing by one interval
+    regardless would queue the missed ticks and make the loop run
+    back-to-back with no sleep until it had repaid them -- on a thread that
+    is already behind, and with nothing to catch up on, since every poll
+    reads the latest telemetry rather than a backlog."""
+    waits: list[float] = []
+    # Four intervals past a 1.0 s deadline.
+    monkeypatch.setattr(logger_module.time, "monotonic", lambda: 105.0)
+    stop_event = threading.Event()
+    monkeypatch.setattr(stop_event, "wait", lambda timeout: waits.append(timeout))
+
+    next_tick = logger_module._wait_for_next_tick(stop_event, 101.0, 1.0)
+
+    assert waits == []
+    # 106.0, not 102.0: the three skipped ticks are gone, and the next poll
+    # gets a full interval of sleep rather than none.
+    assert next_tick == pytest.approx(106.0)
+
+
+def test_wait_for_next_tick_returns_immediately_when_stopping() -> None:
+    """A set `stop_event` must not hold the loop for a whole interval --
+    `Event.wait` returns at once, which is what makes shutdown prompt."""
+    stop_event = threading.Event()
+    stop_event.set()
+
+    started = time.monotonic()
+    logger_module._wait_for_next_tick(stop_event, started + 5.0, 5.0)
+
+    assert time.monotonic() - started < 1.0
+
+
+def test_no_stale_five_hertz_claims_remain_in_src() -> None:
+    """`BL-11` Stage 1/6: body-layer's poll interval has been 1.0 s since
+    `abf49cd` and has never been 5 Hz -- that is `Export.lua`'s producer
+    rate. Three docstrings claiming otherwise produced `BL-B30`'s wrong
+    premise, so a reappearance is worth failing a build over.
+
+    `perception/motion.py` is deliberately exempt: its 5 Hz claim is a
+    *behavioural* assumption about object arrival rate, tracked as
+    `BL-B34`, not a statement about this loop's own rate."""
+    src = Path(logger_module.__file__).parent
+    offenders = sorted(
+        str(path.relative_to(src))
+        for path in src.rglob("*.py")
+        if path.name != "motion.py"
+        and any(claim in path.read_text(encoding="utf-8") for claim in ("5 Hz", "5Hz"))
+    )
+
+    assert offenders == []
