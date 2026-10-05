@@ -133,8 +133,6 @@ and blowing the cap again; this pass merged them into one list.
 - [Contact report flood review](project_contact_report_flood_review.md) - verify "always later-founded" by tracing the state machine.
 - [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - early-return branch's test can pass disabled if a fallback degenerates to the same result.
 - [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; shared merge-echo predicate verified equivalent by argument-level read.
-- [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - an early-return test can pass disabled if the fallback degenerates to the same result.
-- [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED; shared merge-echo predicate verified equivalent to both old copies.
 - [Multi theatre afghanistan review](project_multi_theatre_afghanistan_review.md) - APPROVED; crossing measurement separated authoring from a defect.
 - [MTA security fix test gap](project_mta_security_fix_test_gap.md) - NEEDS REVISION; required-fix test passed even with required fix alone removed.
 - [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam.
@@ -142,5 +140,4 @@ and blowing the cap again; this pass merged them into one list.
 - [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; 4-mechanism disable-and-rerun check.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp empirically re-run under a standalone Lua interpreter.
 - [Sortie 1005 items234 scan ahead cadence review](project_sortie_1005_items234_scan_ahead_cadence_review.md) - APPROVED; instrumented-run beat hand-derived dwell-cadence arithmetic.
-- [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
 - [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
