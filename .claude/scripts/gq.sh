@@ -31,6 +31,32 @@ if [ $# -eq 0 ]; then
     exit 2
 fi
 
+# `graphify-out/` is gitignored, so it exists only in the main checkout -- an
+# agent running with isolation "worktree" has a complete source tree and no
+# graph. That made the project's own "query the graph before writing a plan,
+# diagnosis or research note" rule *structurally unavailable* to exactly the
+# roles it is aimed at: Architect, Investigator, Reviewer, Security and
+# Performance Reviewer all run isolated. Found 2026-10-05, when a worktree-
+# isolated performance pass reported it could not run the step at all.
+#
+# Queries are read-only, so a worktree borrows the main checkout's graph.
+# `--git-common-dir` points at the shared `.git`, whose parent is the main
+# working tree; in the main checkout it is already `.git`, so this is a no-op
+# there. The borrowed graph was built from whatever the main checkout last had,
+# which is the same caveat every answer already carries -- a miss means "not
+# indexed yet", never "does not exist".
+if [ ! -f graphify-out/graph.json ]; then
+    common=$(git rev-parse --git-common-dir 2>/dev/null || true)
+    if [ -n "$common" ]; then
+        main_root=$(cd "$(dirname "$common")" 2>/dev/null && pwd)
+        if [ -n "${main_root:-}" ] && [ -f "$main_root/graphify-out/graph.json" ]; then
+            printf 'note: no graph in this worktree; querying the main checkout'\''s graph at %s\n' \
+                "$main_root/graphify-out" >&2
+            cd "$main_root"
+        fi
+    fi
+fi
+
 if [ ! -f graphify-out/graph.json ]; then
     echo "No graph yet. Build it with /graphify, then query." >&2
     exit 1
