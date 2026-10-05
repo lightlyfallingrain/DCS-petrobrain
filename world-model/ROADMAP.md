@@ -1156,6 +1156,14 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   OSM extracts for both are staged under `world-model/data/raw/{dem,osm}/{afganistan,caucasus}-full/`
   (gitignored; `.hgt` tiles flattened to the folder top level, since `--srtm-dir` globs only `*.hgt`
   there). Caucasus DEM has 123 of 144 tiles — the missing ones are open Black Sea.
+  **Update 2026-10-05: Caucasus and Kola registered** (`feature/multi-theatre-caucasus-kola`,
+  Reviewer APPROVED, `plans/multi-theatre-caucasus-kola/review.md`). Recon
+  (`research/2026-10-05-kola-caucasus-theatre-recon.md`) found nothing blocking: pydcs projections
+  reproduced by beacon fits (~0.04 m RMS, both `provisional`), Kola's 64–71°N `.hgt` tiles parse
+  unchanged, all parsers work on both theatres' files, staged OSM covers both envelopes. Regions
+  `caucasus-full`/`kola-full`; run steps in `RUN.md` §8. **Remaining, user-run:** OSM clip/merge
+  and the two builds; a live `coord_probe.lua` on each terrain to confirm the projections; optional
+  Kola DEM tile `N71E023` (Tufjord, the one unstaged land tile).
 
 - **RESOLVED: `roadnet/junctions.py` memory issue at `syria-full`+OSM scale (2026-09-13).**
   Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`
