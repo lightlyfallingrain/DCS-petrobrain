@@ -1,6 +1,6 @@
 ---
 name: sortie-log-triage
-description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth-<stamp>.jsonl, dcs-detection-trace-<stamp>.jsonl, dcs-speech-<stamp>.jsonl (run-stamped since 2026-10-06; glob for the newest, and take all three from the same stamp). Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
+description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth, dcs-detection-trace, dcs-speech (.jsonl). Resolve the filenames first: pre-BL-11-Stage-5 they are single files every sortie appended to, so the flight is a region; once stamped, glob for the newest and take all three from the same stamp. Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
 type: user-invocable
 ---
 
@@ -22,9 +22,32 @@ line-by-line, never loaded whole.
 This skill reads the three JSONL files **body-layer** writes on the Mac side. Different files,
 different producers, no overlap.
 
-## The filenames carry a run stamp — glob, never hardcode
+## Resolve the filenames — they may or may not carry a run stamp
 
-**Changed by `BL-11` Stage 5 (2026-10-06): each run writes its own file.** The path passed on the
+**Both forms exist right now, so look before you read.** Per-run stamping is `BL-11` Stage 5, which
+is **not on `main` yet** (branch `feature/bl11-tick-cost`, unmerged as of 2026-10-06). An earlier
+version of this section stated stamping as current fact; it described an unmerged branch, which is
+corrected here. Check which world you are in:
+
+```sh
+ls -t ~/dcs-detection-trace*.jsonl logs/dcs-detection-trace*.jsonl 2>/dev/null | head -3
+```
+
+- **A stamped name** (`dcs-detection-trace-20261006-143500.jsonl`) means the pilot is running
+  `BL-11` Stage 5 or later: one file per run, and the rest of this section applies.
+- **A bare name** (`dcs-detection-trace.jsonl`) means the pre-Stage-5 writers: **one file that every
+  sortie has appended to since it was created**, so the flight you want is a *region* of it, not the
+  whole file. That is why the 2026-10-05 analysis had to locate byte offset 2,448,471,603 in a
+  3.55 GB file. Find the region before computing anything, or two sorties get averaged together and
+  the result is fiction that looks like a finding.
+
+Note also that Stage 5 moves the files from `~` into `logs/`, so the directory changes with the
+name. The logger prints each resolved path to stderr as it starts, and **that line is the
+authoritative answer to "where did it go"** in either world.
+
+### Once stamping is in force
+
+**`BL-11` Stage 5: each run writes its own file.** The path passed on the
 command line is *not* the path written — the logger stamps the run's start time in before the
 suffix, so `--detection-trace logs/dcs-detection-trace.jsonl` actually produces
 `logs/dcs-detection-trace-20261006-143500.jsonl`. All three logs of one run share the same stamp,
