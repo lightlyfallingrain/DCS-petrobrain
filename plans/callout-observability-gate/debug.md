@@ -170,7 +170,9 @@ astern, past the rear cutoff at any elevation).
 
 **Why the gate is total rather than a per-kind list.** The defect's whole shape is a per-kind
 list that a new kind silently fails to join. The gate therefore discriminates on the **contact**,
-not on the kind, and covers **four** of `_TEMPLATED_KINDS`' six kinds plus group disclosure:
+not on the kind, and covers **five** of `_TEMPLATED_KINDS`' six kinds plus group disclosure —
+**three of them newly** (`CONTACT_CLASSIFICATION_CHANGED`, `CONTACT_DETECTED`,
+`CONTACT_REACQUIRED`), two already gated at emission, and one exempt:
 
 | kind | before this fix | now |
 |---|---|---|
@@ -179,19 +181,22 @@ not on the kind, and covers **four** of `_TEMPLATED_KINDS`' six kinds plus group
 | `CONTACT_MOTION_CHANGED` | gated at emission (`contacts.py:1237`) | gated here too |
 | `CONTACT_RANGE_CROSSED` | gated at emission (`contacts.py:1349`) | gated here too |
 | `CONTACT_DETECTED` / `CONTACT_REACQUIRED` | ungated | gated (near no-op, see Evidence 4) |
-| `CONTACT_ENGAGEMENT_CHANGED` | ungated | **exempt — user decision, below** |
+| `CONTACT_ENGAGEMENT_CHANGED` | ungated | **exempt — decided in the review loop, below** |
 
 `CONTACT_DETECTED`/`CONTACT_REACQUIRED` being gated is close to a no-op in practice (see
 Evidence 4, and `CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`) but closes the
 overflight case where a contact founded ahead is spoken about several seconds later from astern.
 
-**`CONTACT_ENGAGEMENT_CHANGED` is excluded from the gate — user decision, 2026-10-06.** The
-Reviewer found the seventh block (`contacts.py:1456`) mints it, that it is in `_TEMPLATED_KINDS`,
-and that a contact-discriminating gate therefore swept it in silently. The user took the
-Reviewer's recommendation and excluded it. Also recorded in `todo/questions.md`'s "Decided
-without you" section.
+**`CONTACT_ENGAGEMENT_CHANGED` is excluded from the gate — decided in the review loop,
+2026-10-06.** The Reviewer found the seventh block (`contacts.py:1456`) mints it, that it is in
+`_TEMPLATED_KINDS`, and that a contact-discriminating gate therefore swept it in silently. The
+exclusion was decided here, on the Reviewer's recommendation; **the user was not consulted on it**
+and has not ruled on it either way. It is recorded for them to overrule in `todo/questions.md`'s
+"Decided without you" section — added by commit `156f965`, which is the citation to use, since
+that entry postdates this branch's own copy of the file and grepping the branch for it comes up
+empty.
 
-The reasoning, in the user's own terms: the gate exists to stop Petrovich *identifying* things he
+The reasoning: the gate exists to stop Petrovich *identifying* things he
 cannot see. An engagement-envelope change is not an identification — it is a threat cue about a
 contact **already perceived and already watched**, derived from that contact's believed
 classification plus ownship's own position. A real co-pilot who saw a SAM twenty seconds ago
@@ -293,7 +298,18 @@ claims to pin rather than by reading:
 | test | counterfactual | result |
 |---|---|---|
 | `test_engagement_change_speaks_about_a_cockpit_masked_bearing` | `_OBSERVABILITY_EXEMPT_KINDS` emptied | **FAIL** — it pins the exclusion, not just current behaviour |
-| `test_masked_event_is_retired_once_it_outlives_the_candidate_max_age` | `CALLOUT_MAX_AGE_S` raised to 1e9 | **FAIL** — it pins bounded deferral, the property the gate's *placement* rests on |
+| `test_masked_event_is_retired_once_it_outlives_the_candidate_max_age` | the retirement check itself disabled (`callouts.py`'s `if now_sim - event.t_sim > CALLOUT_MAX_AGE_S:` → `if False and …`) | **FAIL** — `assert ['unit is truck.'] == []`: a 12-second-stale identification spoken once the bearing returns, which is exactly the property the test claims |
+
+**The second row's counterfactual was corrected in review round 3 (2026-10-06), because the one
+originally recorded there failed open.** It read *"`CALLOUT_MAX_AGE_S` raised to 1e9 → FAIL"*, and
+the Reviewer re-ran it: the test **passes** at `1e9`. The cause is structural rather than a flaky
+run — the test imports `CALLOUT_MAX_AGE_S` (`tests/test_callouts.py:33`) and derives its own clock
+from it (`aged_out = masked_at + CALLOUT_MAX_AGE_S + 1.0`), so raising the constant moves the
+test's whole timeline with it and the deferral always ends just past the budget; at `1e9` it also
+passes for a second, unrelated reason, the contact being long past `LOST_THRESHOLD_S`. A recorded
+counterfactual exists so a later reader can re-run it and trust the result, so one that reports the
+property as pinned either way is worse than none. The replacement above was re-run in round 3 and
+produced the failure quoted, then reverted (tree clean).
 
 The second closes the Reviewer's optional gap: the existing deferral test proved "not consumed,
 speaks when the bearing returns", and nothing asserted that a *permanently* astern event is
@@ -315,12 +331,20 @@ reversible edit, reverted).
    founding, and the grace window equals the candidate max age — and they stay gated; a contact
    founded ahead and spoken about several seconds later from astern now goes quiet.
 
+   The final tally, since an earlier draft of this report got it wrong twice: **5 of
+   `_TEMPLATED_KINDS`' 6 kinds are gated**, 3 of them newly here
+   (`CONTACT_CLASSIFICATION_CHANGED`, `CONTACT_DETECTED`, `CONTACT_REACQUIRED`) and 2 already
+   gated at emission (`CONTACT_MOTION_CHANGED`, `CONTACT_RANGE_CROSSED`), plus group disclosure,
+   with 1 exempt.
+
    `CONTACT_ENGAGEMENT_CHANGED` was the only safety-relevant member, because gating it is a
    *missed threat cue* rather than a missed identification, and because the grace window equals
-   `CALLOUT_MAX_AGE_S` it would be missed **permanently rather than late**. **You excluded it
-   (2026-10-06)**, and the reasoning is in "Fix Applied" above and in
-   `callouts._OBSERVABILITY_EXEMPT_KINDS`'s own docstring. Also recorded in
-   `todo/questions.md`'s "Decided without you" section.
+   `CALLOUT_MAX_AGE_S` it would be missed **permanently rather than late**. **It was excluded in
+   the review loop on 2026-10-06, on the Reviewer's recommendation — not by you; you were not
+   consulted, and this is the overrule point.** The reasoning is in "Fix Applied" above and in
+   `callouts._OBSERVABILITY_EXEMPT_KINDS`'s own docstring, which also carries the bar any further
+   member would have to clear. Recorded in `todo/questions.md`'s "Decided without you" section by
+   commit `156f965`.
 2. **This silences, it does not re-time.** The 17 unprompted masked-hour lines are now unspoken rather
    than spoken correctly — the contacts are still believed, still in the debug view, still
    answerable by a `report`. Whether some of them *should* reach you another way (an "I lost

@@ -51,20 +51,24 @@ disclosure mints no `Event` at all, so no emission-site gate could ever
 have covered it, and a per-kind list at emission is a list the next new
 kind silently fails to join.
 
-**The breadth is four kinds plus group disclosure, and one deliberate
-exemption.** Because the gate discriminates on the *contact* and not on
-the kind, it covers every member of `_TEMPLATED_KINDS` that reaches it:
-`CONTACT_CLASSIFICATION_CHANGED` (the measured defect),
-`CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED` (which were already
-gated at emission), and `CONTACT_DETECTED`/`CONTACT_REACQUIRED` (close to
-a no-op, since both perception channels already constrain founding).
-`CONTACT_ENGAGEMENT_CHANGED` is **exempt** by user decision, 2026-10-06:
-it is a threat cue about an already-perceived, already-watched contact,
-derived from believed classification plus ownship's own position rather
-than from a fresh look, and gating it would silence an astern SAM or ZSU
-entering its firing envelope *permanently* rather than late. The
-exemption lives in `_OBSERVABILITY_EXEMPT_KINDS`, whose docstring carries
-the whole argument and the bar anything else must clear to join it.
+**The breadth is five of `_TEMPLATED_KINDS`' six kinds, plus group
+disclosure, with one deliberate exemption.** Because the gate
+discriminates on the *contact* and not on the kind, it covers every
+member of `_TEMPLATED_KINDS` that reaches it. Three of those five are
+newly gated here -- `CONTACT_CLASSIFICATION_CHANGED` (the measured
+defect) and `CONTACT_DETECTED`/`CONTACT_REACQUIRED` (close to a no-op,
+since both perception channels already constrain founding) -- and the
+other two, `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED`, were
+already gated at emission and are now gated here as well. The sixth,
+`CONTACT_ENGAGEMENT_CHANGED`, is **exempt** (decided in the review loop,
+2026-10-06, on the Reviewer's recommendation, and recorded for the user
+to overrule): it is a threat cue about an already-perceived,
+already-watched contact, derived from believed classification plus
+ownship's own position rather than from a fresh look, and gating it would
+silence an astern SAM or ZSU entering its firing envelope *permanently*
+rather than late. The exemption lives in `_OBSERVABILITY_EXEMPT_KINDS`,
+whose docstring carries the whole argument and the bar anything else must
+clear to join it.
 
 **This gate is for the *push* path only.** A pilot-initiated `report`
 (`CrewConsole._handle_report`) must never be filtered by it -- belief
@@ -260,9 +264,14 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 )
 
 #: The one kind the observability gate in `CalloutScheduler.tick` does
-#: **not** apply to (user decision, 2026-10-06 -- recorded in `plans/
-#: callout-observability-gate/debug.md` and `todo/questions.md`'s "Decided
-#: without you").
+#: **not** apply to. Decided in the review loop on 2026-10-06, on the
+#: Reviewer's recommendation -- **not** by the user, who was not consulted
+#: on it; it is recorded for them to overrule in `plans/callout-
+#: observability-gate/debug.md` and in `todo/questions.md`'s "Decided
+#: without you" section, the latter added by commit `156f965` (cite the
+#: commit rather than the filename alone: the entry postdates this
+#: branch's own copy of that file, so grepping the wrong tree for it comes
+#: up empty).
 #:
 #: **Why an exemption exists at all.** The gate stops Petrovich
 #: *identifying* something he cannot see. A `CONTACT_ENGAGEMENT_CHANGED` is
@@ -273,6 +282,19 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: tick`'s seventh block) -- never from a fresh look. A real co-pilot who
 #: saw a SAM twenty seconds ago would say "we're inside its range now"
 #: without needing eyes on it, and saying so invents no knowledge.
+#:
+#: **What the exempt line actually says is broader than its trigger.** It
+#: renders through `_contact_report_text(facts, lead="Danger, ")`, so with
+#: an `EnrichmentContext` present it also speaks the believed clock hour,
+#: the believed range and the believed unit type -- e.g. `"Danger, ZU-23-3,
+#: six o'clock, 1.0 km."`. Every one of those facts is still belief-derived
+#: (`_classification_facts` reads `Contact.classification`, never
+#: `last_class_raw`; the geometry is `relative_geometry` over
+#: `Contact.last_position`) and is word-for-word what the deliberately
+#: ungated *pull* path already discloses on a `report`, so this is not a
+#: leak. It is recorded because a future reader deciding a new kind's
+#: membership on "it only speaks the cue" would be working from a narrower
+#: picture than the code's.
 #:
 #: **Why gating it would be worse than asymmetric.** Because `CALLOUT_
 #: OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`, a watched threat
@@ -286,10 +308,32 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: **Why it is a named set rather than an inline `!=`.** This whole fix
 #: exists because a per-kind list at emission was a list the next new kind
 #: silently failed to join. An exemption list has the same failure shape in
-#: reverse -- a kind added here, or added to `_TEMPLATED_KINDS` under a
-#: mistaken reading of this one, exempts itself quietly. Anything added here
-#: must be a cue derivable from already-held belief plus ownship state, and
-#: never a claim about what Petrovich can see *right now*.
+#: reverse, and in one direction only: adding a kind to `_TEMPLATED_KINDS`
+#: *gates* it, which is the safe direction, but adding one **here** exempts
+#: it quietly and nothing at the gate will say so.
+#:
+#: **The bar a new member must clear.** It is not "derivable from
+#: already-held belief plus ownship state" -- that is equally true of
+#: `CONTACT_RANGE_CROSSED` (`ContactStore.tick`'s sixth block compares
+#: `contact.last_position` against ownship exactly as the seventh block
+#: does) and of `CONTACT_MOTION_CHANGED`, and range-crossing lines are
+#: precisely what must stay gated. Nor is it "never a claim about what
+#: Petrovich can see right now", which the rendered text described above
+#: would itself fail. Membership turns instead on the two properties that
+#: actually separate this kind from the other five, both argued above, and
+#: **both must hold**:
+#:
+#: 1. **The cost of silence is a missed *threat cue the pilot needs in
+#:    order to evade*, not a missed identification.** A kind whose silence
+#:    costs an identification belongs in the gate however cheaply it is
+#:    derived -- that is the defect this gate exists to fix.
+#: 2. **Gating it would cost the callout permanently rather than late**,
+#:    because `CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S`. A kind
+#:    that would merely be spoken late has no claim on an exemption: the
+#:    gate's skip-without-consuming is already the right answer for it.
+#:
+#: Either property alone admits something that should stay gated --
+#: `CONTACT_RANGE_CROSSED` satisfies (2) and fails (1).
 _OBSERVABILITY_EXEMPT_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_ENGAGEMENT_CHANGED}
 )
@@ -906,15 +950,18 @@ class CalloutScheduler:
             # check for exactly that reason -- ahead of it, a permanently
             # astern contact's event would never be consumed at all.
             #
-            # **Breadth: this gates four of `_TEMPLATED_KINDS`' six kinds**
-            # -- `CONTACT_CLASSIFICATION_CHANGED` (the measured defect),
-            # `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED` (already
-            # gated at emission, now gated here too), and `CONTACT_
-            # DETECTED`/`CONTACT_REACQUIRED`. `CONTACT_ENGAGEMENT_CHANGED`
-            # is exempt by user decision -- see `_OBSERVABILITY_EXEMPT_
-            # KINDS` for the full reasoning. The gate discriminates on the
-            # *contact*, not on the kind, so every templated kind is in
-            # scope unless that set says otherwise.
+            # **Breadth: this gates five of `_TEMPLATED_KINDS`' six
+            # kinds.** Three are newly gated here -- `CONTACT_
+            # CLASSIFICATION_CHANGED` (the measured defect) and `CONTACT_
+            # DETECTED`/`CONTACT_REACQUIRED` -- and two, `CONTACT_MOTION_
+            # CHANGED` and `CONTACT_RANGE_CROSSED`, were already gated at
+            # emission and are gated here too. The sixth, `CONTACT_
+            # ENGAGEMENT_CHANGED`, is exempt (decided in the review loop,
+            # 2026-10-06) -- see `_OBSERVABILITY_EXEMPT_KINDS` for the full
+            # reasoning and the bar a further member would have to clear.
+            # The gate discriminates on the *contact*, not on the kind, so
+            # every templated kind is in scope unless that set says
+            # otherwise.
             #
             # For `CONTACT_DETECTED`/`CONTACT_REACQUIRED` this is close to
             # a no-op, because both perception channels already constrain
