@@ -7,9 +7,9 @@ the log read in its place.
 
 Sources: `~/dcs-detection-trace.jsonl` (3.55 GB; the new-schema region begins at byte offset
 2,448,471,603 — the file is appended to, not replaced, so the head is a previous sortie),
-`~/dcs-belief-truth.jsonl`, `~/dcs-speech.jsonl`. **`win-mac-sync/from-windows/dcs.log` is stale
-(13:09, pre-flight)**, so none of the Hook's own counters — `bridge_call_ms`, `units_in_wedge`,
-`sightlines_computed` — could be read. Everything below is inferred from the body-layer side.
+`~/dcs-belief-truth.jsonl`, `~/dcs-speech.jsonl`, and — supplied by the user after the first draft
+of this note — **`~/dcs.log`** (1.8 MB, 7,113 `PetrobrainLineOfSight` lines). That last file
+overturned §2's original conclusion; the correction is kept visible rather than edited away.
 
 Sortie: **1.64 M trace rows, t_sim 0 → 4,234 s (70.5 min), 2,104 polls past the player bubble.**
 
@@ -106,21 +106,14 @@ Per-poll coverage is **bimodal, not partial**:
 - **19 % of polls have zero coverage** — not one verdict
 - median per-poll coverage **0.44**
 
-Zero-coverage polls **cluster into runs**, which rules out per-unit join failures and points at the
-feed stopping: **211 distinct outages**, the longest **20.7 s / 10 consecutive polls** (t_sim
-2172–2193), with several 7–11 s runs. The gap between verdict-bearing polls has a **median of
-1.63 s** — already longer than the intended 1 Hz publish — **p90 4.33 s and a maximum of 60.9 s**.
+Zero-coverage polls **cluster into runs** — **211 distinct outages**, the longest **20.7 s / 10
+consecutive polls**, with the gap between verdict-bearing polls reaching **60.9 s** at worst.
 
-A 61-second hole means more than a missed tick. Candidate causes, none yet distinguished:
-
-1. **The look-direction directive stops being sent or applied**, so the Hook computes a wedge that
-   no longer matches where Petrovich is looking and returns units body-layer does not ask about.
-2. **The Hook's own publish stalls** — the `dostring_in` call failing, the socket wedging, or the
-   bridge returning an error that is swallowed.
-3. **A unit-name join mismatch** that happens to correlate in time rather than per unit.
-
-`dcs.log` would separate these immediately, and it was not captured. **That is the single most
-valuable thing to collect on the next flight.**
+**The first draft of this note read that clustering as the DCS feed stopping, and named three
+candidate causes. All three are now excluded by `dcs.log` (§2): the Hook published every 1.00 s
+without interruption for the whole flight.** The clustering is the *consumer* not polling — the
+same ~0.7 Hz loop, with its own 4.98 s p90 and 193 s maximum gaps. The two findings are one
+finding, seen from either side of the seam.
 
 ### A second, odd detail inside the same finding
 
