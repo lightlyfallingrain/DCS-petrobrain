@@ -220,3 +220,87 @@ implausible for the type, different kind of group).
 Petrovich may therefore speak of a group as the same group across a repositioning — *"that column,
 now 2 o'clock, three kilometres, still moving north on the road"* — which is the pilot-facing payoff
 of the whole change.
+
+---
+
+## 4. The memory layer is the home for long-horizon re-identification (BL-8 gets its first real spec)
+
+> *"We could use the memory layer for exactly this sort of things. Units that have been detected go
+> to memory (group, where, movement, etc) and when they have not been visible for a (long) while the
+> memory layer data can be used to determine if these are the ones we saw 10 mins ago. Or expect
+> that on the other side of the ridge there's a group of units, we better not go there."*
+
+This draws the seam for the §2/§3 work: **short-horizon continuity stays in the belief layer**
+(seconds to a minute — the pop-up-from-behind-a-ridge case), **long-horizon re-identification and
+spatial expectation belong to BL-8**. The second sentence is the more important half and is a
+*new* capability, not a restatement: a remembered group becomes an expectation about a place the
+aircraft has not yet looked at — *"we better not go there"* — which is route-level advice, not a
+callout. `BL-8` has been "deliberately last, gated on BL-2..BL-7 real-flight experience"; this is
+that experience arriving, and it is the first consumer-driven requirement the milestone has had.
+
+## 5. `GATE_GROWTH_RATE_MPS = 20.0` is far too fast, by the pilot's own reckoning
+
+> *"20 m/s is *fast* for most units. Armor can barely make that at full speed. Expect slower."*
+
+72 km/h. Confirms the per-classification rate from §2 and sets its scale: the default belongs well
+below 20 m/s, with entrenched classes at ~0.
+
+## 6. The "7 o'clock" callout is not late — it is a no-omniscience violation, and it is measured
+
+> *"Some callouts have been late. Like unit 7 o'clock, which is late by definition because Petrovich
+> can't even see 7 o'clock."*
+
+The pilot read it as lateness. The log says it is worse than that. Of 357 spoken lines in the
+2026-10-05 sortie, broken down by the clock hour spoken:
+
+| hour | lines | body azimuth | `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` says |
+|---|---|---|---|
+| 4 | 6 | 120° | visible |
+| **5** | **5** | 150° | **masked** |
+| **6** | **4** | 180° | **masked** |
+| **7** | **11** | 150° | **masked** |
+| 8 | 11 | 120° | visible |
+
+**20 lines about hours the project's own cockpit mask declares unviewable**, and they carry
+classification, not just position — *"unit 7 o'clock, very close is Tigr armored vehicle"* spoken
+while the gaze was at 11 o'clock, *"unit 6 o'clock, very close is infantry"* while gazing 12.
+
+This is the same class as the defect fixed on 2026-09-27, when "Getting closer" was being said about
+contacts behind the cockpit mask, two of them dead astern. That fix put crossing and motion callouts
+behind an observability gate (FOV + cockpit mask + LOS, with a grace window). **Classification and
+group-disclosure lines were evidently not put behind it.** So the gate exists, is correct, and is
+applied to two callout kinds out of several.
+
+(Caveat worth keeping: the spoken hour derives from *believed* position, which lags, so a contact
+genuinely at 8:30 could be rendered "8 o'clock". Hours 6 and 7 are far inside the cutoff and cannot
+be explained that way.)
+
+## 7. The real pilot-facing bottleneck is the query path, not detection
+
+> *"I did see a lot of unknown detected units in the degub ASCII graph, but getting usefull reports
+> was difficult. Also because "report" comamnds did either not STT correctly or the command logic
+> did not exits."*
+
+Detection is working — he can see in the debug view that Petrovich knows things — and he cannot get
+them out of him. That reframes the priority: `BL-B28` (`report right` → `say_again` while
+`report left` → `confirm`) and the missing `describe` synonym are not small vocabulary chores, they
+are the only channel to everything the belief layer holds.
+
+**Requested command grammar, in the user's own words:**
+
+> *"I'd need way to say "report/describe 2 o'clock close" of more generally "report/describe <what>
+> <where> <how far>" where shat can be "group" or classification etc, where typically clock hand,
+> but could be north/etc or even south of village, and how far would be near (<2km)/medium distance
+> (2-5km)/far(5+km)."*
+
+| slot | values |
+|---|---|
+| verb | `report` / `describe` (synonyms) |
+| **what** | `group`, or a classification (armor, trucks, air defence, infantry…) |
+| **where** | clock hour *typically*; also cardinal (`north`); also landmark-relative (`south of <village>`) |
+| **how far** | `near` < 2 km · `medium distance` 2–5 km · `far` 5 km+ |
+
+Every slot optional, by the shape of the example (`"report 2 o'clock close"` has no *what*).
+Landmark-relative `where` needs world-model place names and therefore runs into `WM-B1`'s
+Latin-script problem (DCS cannot render non-Latin-1, so Arabic names reach the cockpit as blanks) —
+`WM-B1` is already open and already forcing a rebuild.
