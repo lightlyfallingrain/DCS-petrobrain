@@ -70,3 +70,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [LOS fixed-literal command channel](project_los_fixed_literal_command_channel.md) — the Lua rule forbids composing code, not commands; three Lua states; digit dispatch passes an arbitrary number intact.
 - [DCS-driven LOS cost revision](project_dcs_driven_los_cost_revision.md) — budget the single bridge call not the duty cycle; the Lua snippet is a fixed literal so filtering/ordering must live in Lua; round-robin dies against an existing max-age bound.
 - [Non-goals must be written down](feedback_non_goals_must_be_written_down.md) — when a relaxation turns a constraint into a non-goal, record the non-goal AND the machinery you dropped.
+- [Crew query path design](project_crew_query_path_design.md) — `report left` silently matched *report east*; the `describe` synonym anchors but doesn't substitute; pull ≠ push observability.
