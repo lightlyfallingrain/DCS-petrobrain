@@ -12,6 +12,9 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+**Questions waiting on you live in `todo/questions.md`** (new 2026-10-06) — created when you asked
+for input to be queued rather than asked. Two open as of this writing, neither blocking.
+
 ### Where things stand, 2026-10-05 end of day
 
 A long day: seven features merged, two sorties flown. Written here because a cleared session needs
