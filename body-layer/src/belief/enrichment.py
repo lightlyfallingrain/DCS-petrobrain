@@ -628,12 +628,26 @@ def _terrain_aware_world_position(
 #:
 #: 50 m is the tight end of that finding's own 50-100 m suggestion, and the
 #: trade is the one this cache already accepts: `describe_position`'s output
-#: is nearest-feature *names* and coarse distance bands, so a query point
-#: moved under 50 m almost never changes a spoken line, and the cache's
+#: is nearest-feature *names* and coarse distance bands, and the cache's
 #: docstring below already accepts staleness of the same kind in the
 #: confidence numbers. Applied to altitude on the same grain, since a
 #: sub-50 m altitude change moves the terrain-aware projection by less than
 #: the horizontal grain it is paired with.
+#:
+#: **The staleness bound is the cell *diagonal*, not the grain, and
+#: `describe_position` is not the widest consumer.** Two positions sharing a
+#: cell differ by up to ~70.7 m horizontally and ~86.6 m in 3D -- and
+#: floor-based cells do not mean "within 50 m share a result" either: two
+#: points 1 m apart across a boundary still miss. Besides
+#: `describe_position`, the cached `world_position` also feeds
+#: `relative_geometry` (whose `range_m` is rendered at 0.1 km by
+#: `tools._format_range_km`, so a bucket can shift by one) and
+#: `terrain_divide_qualifier` (a binary "beyond the ridge" phrase, which a
+#: contact sitting within ~70 m of a ridge line can flip). Both effects are
+#: real and both are accepted: they are far inside the believed position's
+#: own uncertainty, which is hundreds of metres on the scope and hybrid
+#: channels, and both functions are still recomputed on every call -- only
+#: their position *input* is quantised.
 ENRICHMENT_CACHE_POSITION_GRID_M: Final[float] = 50.0
 
 
@@ -735,6 +749,14 @@ def terrain_divide_qualifier(
     `ownship` moves every poll even when the target's believed position
     does not, so a cached divide count would go stale mid-flight and
     produce a confidently wrong "next valley".
+
+    That conclusion still stands but is weaker than it reads since `BL-11`
+    Stage 3b, which put up to ~70 m of staleness into this computation's
+    *target* input: `target` arrives from the cached `world_position`, whose
+    key is quantised onto `ENRICHMENT_CACHE_POSITION_GRID_M`. The argument
+    holds because ownship motion dominates by orders of magnitude -- but the
+    staleness it rules out is no longer zero, and a contact within ~70 m of
+    a ridge line can flip this qualifier. See that constant's own comment.
 
     When exactly one divide fires, the wording is picked by whether the
     *target* itself sits in a dominant valley (`_dominant_terrain_kind_
