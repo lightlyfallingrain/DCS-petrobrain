@@ -1335,7 +1335,14 @@ def test_recognised_free_text_command_ends_silence() -> None:
 # ground) -----------------------------------------------------------------
 
 
-def _ownship(alt_agl_m: float) -> OwnshipState:
+def _ownship_at_agl(alt_agl_m: float) -> OwnshipState:
+    """Ownship at a given height above ground, for the on-ground silent default.
+
+    Deliberately *not* named `_ownship` -- this module already has one at the
+    top of the file, with a different signature (x/z, fixed 500 m alt). A
+    second module-level `_ownship` silently shadowed it and broke 80
+    pre-existing tests with `unexpected keyword argument 'x'`.
+    """
     return OwnshipState(
         t_sim=0.0, x=0.0, z=0.0, alt_m=0.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
     )
@@ -1344,7 +1351,7 @@ def _ownship(alt_agl_m: float) -> OwnshipState:
 def test_on_ground_at_mission_start_applies_silent_mode() -> None:
     console = CrewConsole(store=ContactStore())
 
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
 
     assert console.silenced is True
 
@@ -1352,7 +1359,7 @@ def test_on_ground_at_mission_start_applies_silent_mode() -> None:
 def test_airborne_at_mission_start_does_not_apply_silent_mode() -> None:
     console = CrewConsole(store=ContactStore())
 
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=500.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=500.0))
 
     assert console.silenced is False
 
@@ -1364,7 +1371,7 @@ def test_on_ground_default_does_not_speak_an_acknowledgement() -> None:
     speech_client = FakeSpeechClient()
     console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
 
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
 
     assert console.silenced is True
     assert speech_client.pushed == []
@@ -1375,7 +1382,7 @@ def test_on_ground_default_is_evaluated_only_once() -> None:
     later altitude -- a call made on the ground does not get a second
     chance to reconsider once ownship climbs."""
     console = CrewConsole(store=ContactStore())
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
     assert console.silenced is True
 
     # A player command ends silence (the existing, unrelated mechanism) --
@@ -1383,7 +1390,7 @@ def test_on_ground_default_is_evaluated_only_once() -> None:
     console.handle_command("watch_nearest", now_sim=1.0)
     assert console.silenced is False
 
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
 
     assert console.silenced is False
 
@@ -1392,10 +1399,10 @@ def test_airborne_first_call_latches_even_though_later_on_ground() -> None:
     """The first call sets the one-shot flag regardless of outcome -- a
     later on-ground call must not apply the default retroactively."""
     console = CrewConsole(store=ContactStore())
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=500.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=500.0))
     assert console.silenced is False
 
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
 
     assert console.silenced is False
 
@@ -1407,7 +1414,7 @@ def test_on_ground_default_ends_only_via_a_command_not_by_leaving_the_ground() -
     store = ContactStore()
     speech_client = FakeSpeechClient()
     console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
-    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
     assert console.silenced is True
 
     # A drained callout stays suppressed while airborne, same as ordinary

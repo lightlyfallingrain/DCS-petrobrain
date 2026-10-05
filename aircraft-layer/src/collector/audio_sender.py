@@ -96,6 +96,7 @@ logger = logging.getLogger(__name__)
 _INT16_MIN = -32768
 _INT16_MAX = 32767
 
+
 #: `AudioPlaybackSender`'s own constructor default (plan Decision 3) -- a
 #: backward-compatibility value for every pre-existing call site/test that
 #: never wires a real gate/volume provider, not a production path. The real
@@ -103,6 +104,7 @@ _INT16_MAX = 32767
 #: fail-safe-closed instead.
 def _always_open() -> Spu8GateState:
     return Spu8GateState(gate_open=True, volume=1.0)
+
 
 #: Sentinel put on the queue by `close()` to unblock the worker thread's
 #: blocking `queue.get()` call.
