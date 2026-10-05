@@ -185,3 +185,96 @@ answered by directly querying the real built `afghanistan-full.sqlite`/`syria-fu
 (geometric crossing counts, junction counts, airfield/beacon counts) and by listing the real
 `AirfieldsTaxiways/` directory on the Windows-mounted DCS install — not inferred from documentation
 alone.
+
+### Fix review (f7f2827)
+
+Reviewed the security fix chain `58fa966 → 5e30050` (security review) `→ 8a777c8` (performance
+review, independent, no code touched) `→ f7f2827` (fix), checked out detached at `f7f2827`
+(confirmed via `git rev-parse HEAD`). Diff scope `8a777c8..f7f2827`: `body-layer/src/logger.py`,
+`body-layer/tests/test_logger.py`, `plans/multi-theatre-afghanistan/implementation.md`, plus an
+implementer agent-memory file — against `plans/multi-theatre-afghanistan/security.md`'s one
+required fix and one optional item.
+
+**Required fix — validation placement.** `theatre = mission_data.theatre.value` is immediately
+followed by `if theatre not in THEATRE_PROJECTIONS: parser.error(...)`, strictly before
+`world_model_db = args.world_model_dir / f"{theatre.lower()}-full.sqlite"` is built — the one
+route security.md identified as attacker-reachable (an externally-sourced `.miz`-derived string
+flowing through `mission_data.theatre.value`). Re-read the whole derivation block: the sibling
+explicit-flag route (`args.theatre is not None and args.world_model_db is not None`) takes
+`theatre`/`world_model_db` straight from operator-typed CLI args, never from the mission artifact,
+so it has no parallel issue — this matches security.md's own clean-bill finding for that branch,
+and I confirm it on reread rather than taking it on trust. The registry check uses exact-case
+membership against `coordinates.projections.THEATRE_PROJECTIONS`'s real keys (`"Syria"`,
+`"Afghanistan"`, …), consistent with the pre-existing `.lower()` suffix convention — no bypass via
+case folding.
+
+**Optional item — exception handling.** `guard_conn = open_world_model(world_model_db)` and
+`built_region = load_only_region(guard_conn)` are both now inside one `try: ... except
+(sqlite3.Error, OSError): parser.error(...)`, with `guard_conn.close()` kept in its own nested
+`finally`. Traced both failure points: if `open_world_model` itself raises, the nested block is
+never entered (no `UnboundLocalError` risk); if `load_only_region` raises after a successful
+connect, the `finally` closes the connection before the exception reaches the outer `except`. The
+mismatch check (`built_region.theatre != theatre`) sits *outside* this `try/except`, unaffected,
+so the catch cannot mask a real theatre/store mismatch — it only converts a missing/corrupt-store
+`sqlite3`/`OSError` into a clean `parser.error`. Nothing that should propagate is swallowed.
+
+**Regression-test gap (required fix, found by empirical disable-and-rerun, not by reading).**
+Per this project's own standing check, I disabled only the required fix (removed the
+`THEATRE_PROJECTIONS` membership check, left the optional `try/except` in place) and reran the 5
+new tests: **all 5 still passed.** The reason: the optional fix's broad `except (sqlite3.Error,
+OSError)` converts *any* downstream failure — an unknown theatre's well-formed-but-nonexistent
+path, an absolute/UNC override that lands outside `tmp_path`, or a malformed URI — into the same
+generic `SystemExit`, and the four parametrized tests assert only `pytest.raises(SystemExit)` plus
+`not any(tmp_path.glob("*-full.sqlite"))`. That glob assertion passes in every case regardless of
+the required fix: the absolute/UNC payloads resolve outside `tmp_path` entirely (so no match
+there either way), and the unknown-theatre payload simply doesn't exist on disk yet. Reverting
+*both* the required and optional fix together does make all 5 tests fail (confirmed), so the
+suite does catch total regression — but it does not catch the required fix specifically being
+removed while the optional item remains, which is exactly the scenario a future unrelated edit to
+this block could produce silently.
+
+A second, smaller problem in the same test: the `"Syria?mode=rwc"` ("query-string-injection")
+parametrize case does not actually reproduce the SQLite URI-injection security.md itself
+demonstrated — that demonstration needed a second, `&`-separated query parameter
+(`...?mode=rwc&dummy=-full.sqlite`) for SQLite's URI parser to split the string the way the attack
+depends on. Reproduced directly in this worktree's venv: `"Syria?mode=rwc"` alone makes
+`sqlite3.connect` raise `OperationalError: no such access mode: rwc-full.sqlite?mode=ro` (a
+malformed access-mode string, not a successful mode override), while the security.md-shaped
+payload with `&dummy=...` does create a stray file on disk exactly as that document describes.
+The test's intent (prove the injection vector is closed) is right; the specific payload doesn't
+exercise the mechanism it's named after.
+
+**Why this is a required fix, not optional:** this is a security control, and the whole point of
+a regression test here is to fail loudly if the registry check is ever weakened or removed later.
+As written, that specific regression — the one the security review's entire "Confirmed
+exploitable" finding is about — would pass silently. Fix by asserting on the *reason* for
+rejection, not just that *some* `SystemExit` occurred: either assert the captured stderr contains
+the registry-check's own message (`"not a known theatre"`), or monkeypatch `open_world_model` to
+raise if called at all for the four rejected-theatre cases, proving the rejection happens strictly
+before that call rather than merely before it is observed to matter. Also swap the
+`"Syria?mode=rwc"` payload for one that actually reproduces the demonstrated injection (an
+`&`-separated second parameter), so that test case is exercising the vulnerability its own name
+claims.
+
+**Checks reproduced** (no `.venv` existed in this worktree; created fresh, `cd body-layer`):
+
+| ruff format --check | ruff check | mypy --strict | pytest |
+|---|---|---|---|
+| pass (114 files already formatted) | pass (All checks passed!) | pass (53 source files, no issues) | 1407 passed, 4 xfailed |
+
+Matches the implementer's own reported numbers exactly.
+
+#### Fix Verdict
+
+**NEEDS REVISION** — one required fix: tighten the new tests so they actually fail when the
+required-fix registry check specifically is removed (currently they only fail when *both* fixes
+are removed together), and correct the query-string-injection payload to match the mechanism it
+claims to test. The security fix's production code itself (`logger.py`) is correct and complete —
+this is a test-coverage gap on a security-relevant control, not a code defect in the fix.
+
+#### Fix Review Confidence
+
+Full read of the diff. Empirically verified both the required fix's placement (reproduced the
+explicit-flag route has no parallel issue) and the test gap (disabled the required fix alone,
+reran; disabled both, reran) rather than inferring from the code or the implementer's note. All
+four verification commands re-run from a fresh venv in this worktree, not taken on report.
