@@ -37,7 +37,6 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -73,6 +72,7 @@ from belief.classification import (
 from belief.decay import (
     CALLOUT_OBSERVABILITY_GRACE_S,
     LOS_MASK_CONFIRM_S,
+    OBSERVED_WINDOW_S,
     Certainty,
     certainty_of,
     object_id_continuity_valid,
@@ -106,7 +106,6 @@ from perception.association import RANGE_CAP_M as _HYBRID_RANGE_CAP_M
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
 from perception.geometry import (
     GeoPosition,
-    bearing_deg,
     body_relative_direction,
     range_m,
 )
@@ -166,13 +165,6 @@ RANGE_CROSS_MAX_SIGMA_M: Final[float] = 500.0
 #: burns the `EVENT_COOLDOWN_S` budget doing it.
 ENGAGEMENT_LEAVING_HYSTERESIS: Final[float] = 1.5
 
-#: Decision 4f-ii-a's uncertainty sweep -- the believed position plus two
-#: lateral offsets at `+-Contact.last_position_uncertainty_m`,
-#: perpendicular to the ownship->threat bearing. An isolated constant
-#: documenting the sample count `_threat_has_los`'s three-point sweep
-#: below is written against, not a loop bound it reads.
-LOS_UNCERTAINTY_SAMPLES: Final[int] = 3
-
 #: `ContactStore`-minted contact id prefix. Distinct in shape from the
 #: per-source `Observation.id` prefixes (`perception.source.
 #: OBSERVATION_ID_PREFIX_*`) -- a contact id never collides with an
@@ -187,36 +179,6 @@ _EVENT_ID_PREFIX = "EVENT"
 #: `ContactStore`-minted `AttentionArea.id` prefix, distinct in shape from
 #: every id space above for the same reason (BL-4).
 _AREA_ID_PREFIX = "AREA"
-
-
-def _threat_has_los(
-    los_clear: Callable[[GeoPosition, GeoPosition], bool],
-    observer: GeoPosition,
-    believed_target: GeoPosition,
-    uncertainty_radius_m: float,
-) -> bool:
-    """Decision 4f-ii-a's uncertainty sweep: samples the believed target
-    position and two lateral offsets at `+-uncertainty_radius_m`,
-    perpendicular to the observer->target bearing -- **if any sample is
-    clear, the threat is treated as having LOS** (fail-open: a false
-    danger call costs a glance, a missed one costs the aircraft, so LOS
-    may only *suppress* a warning when the whole uncertainty disc is
-    masked). Lateral is the axis that matters -- whether a ridge
-    intervenes turns on which side of it the threat is, far more than on
-    how far along the bearing."""
-    if uncertainty_radius_m <= 0.0:
-        return los_clear(observer, believed_target)
-    theta = math.radians(bearing_deg(observer, believed_target) + 90.0)
-    perp_x, perp_z = math.cos(theta), math.sin(theta)
-    for offset in (0.0, uncertainty_radius_m, -uncertainty_radius_m):
-        sample = GeoPosition(
-            x=believed_target.x + offset * perp_x,
-            z=believed_target.z + offset * perp_z,
-            alt_m=believed_target.alt_m,
-        )
-        if los_clear(observer, sample):
-            return True
-    return False
 
 
 def _callout_may_speak(contact: Contact, ownship: OwnshipState, now_sim: float) -> bool:
@@ -489,6 +451,18 @@ class Contact:
     #: may_speak` -- see that function's own docstring for why this is "last
     #: confirmed observable" rather than "how long has it been failing."
     last_observable_sim: float | None = None
+    #: `plans/dcs-driven-los/plan.md` (X-B29) -- the most recent look's own
+    #: DCS-driven LOS fact (`building_clear and terrain_clear`), set
+    #: unconditionally from `Percept.live_los_clear` in `record()`/
+    #: `from_percept()`. An overwrite, not a fold -- the same semantics as
+    #: `last_class_raw` (a raw most-recent-look value), since there is no
+    #: ordering/specificity relation between "clear" and "masked" to fold
+    #: over. `None` means "no live verdict as of the most recent look" --
+    #: never a guessed clear/masked. `ContactStore.tick`'s engagement term
+    #: treats this as meaningful only while the contact is within
+    #: `belief.decay.OBSERVED_WINDOW_S` of its own `last_seen_sim`, and as
+    #: unknown (fail-open) otherwise -- see that block's own comments.
+    live_los_clear: bool | None = None
 
     @property
     def last_position(self) -> GeoPosition:
@@ -582,6 +556,7 @@ class Contact:
         self.motion_pending_stop_since_sim = motion_outcome.pending_stop_since_sim
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
+        self.live_los_clear = percept.live_los_clear
         self._extend_or_open_span(percept)
 
     def _extend_or_open_span(self, percept: Percept) -> None:
@@ -650,6 +625,7 @@ class Contact:
             ).motion,
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
+            live_los_clear=percept.live_los_clear,
         )
         contact.contributing_observation_ids.append(percept.observation_id)
         contact.sighting_spans.append(
@@ -1027,7 +1003,6 @@ class ContactStore:
         self,
         now_sim: float,
         ownship: OwnshipState | None = None,
-        los_clear: Callable[[GeoPosition, GeoPosition], bool] | None = None,
     ) -> None:
         """Materialise lifecycle, classification, *and* attention events
         for every known contact as of `now_sim`. For each contact, per event
@@ -1363,24 +1338,14 @@ class ContactStore:
 
                     if not (range_ok and alt_ok):
                         # Short-circuit: `current_engaged` is `False`
-                        # whatever LOS says, so asking is pure cost --
-                        # `line_of_sight_clear` samples terrain elevation
-                        # out of an on-disk SQLite store and is the most
-                        # expensive primitive `belief/` can reach, while
-                        # this block runs once per watched contact on every
-                        # poll of the live loop. Measured before fixing
-                        # (`plans/watch-reporting/performance-review.md`):
-                        # 20 watched contacts 20 km out, against a 2,408 m
-                        # envelope, produced 20 LOS calls per tick -- ~3x
-                        # that in practice, since a real detection carries
-                        # nonzero position uncertainty and `_threat_has_los`
-                        # sweeps three points. Watch count is not capped in
-                        # code either: one `AttentionArea` ("watch left")
-                        # can pull an arbitrary number of contacts into
+                        # whatever LOS says, so asking is pure cost. Watch
+                        # count is not capped in code either: one
+                        # `AttentionArea` ("watch left") can pull an
+                        # arbitrary number of contacts into
                         # watch-equivalent attention.
                         #
                         # **The reset is load-bearing, not tidying.**
-                        # Skipping the call also skips the masking
+                        # Skipping the term also skips the masking
                         # bookkeeping below, so without it a contact that
                         # drifts out of range keeps a stale
                         # `los_masked_since_sim`; on re-entry `masked_for_s`
@@ -1391,32 +1356,37 @@ class ContactStore:
                         # measures nothing worth carrying.
                         los_ok = True
                         contact.los_masked_since_sim = None
-                    elif los_clear is None:
-                        # No world-model connection -- correct degradation
-                        # is to skip the term entirely, not to fail closed.
+                    elif (
+                        contact.live_los_clear is None
+                        or (now_sim - contact.last_seen_sim) > OBSERVED_WINDOW_S
+                    ):
+                        # `plans/dcs-driven-los/plan.md` (X-B29): no fresh
+                        # live verdict -- either the naked-eye channel has
+                        # never carried one for this contact this poll, or
+                        # it is stale relative to the last time Petrovich
+                        # actually looked at it. Correct degradation is
+                        # fail-open, the same posture as "no world-model
+                        # connection" under the pre-X-B29 design: a watch is
+                        # a standing instruction to keep looking, not a
+                        # subscription to continuous truth (plan SS11a) --
+                        # with no fresh look, there is nothing to clear a
+                        # danger state on.
                         los_ok = True
                         contact.los_masked_since_sim = None
+                    elif contact.live_los_clear:
+                        contact.los_masked_since_sim = None
+                        los_ok = True
                     else:
-                        raw_clear = _threat_has_los(
-                            los_clear,
-                            observer,
-                            contact.last_position,
-                            contact.last_position_uncertainty_m,
-                        )
-                        if raw_clear:
-                            contact.los_masked_since_sim = None
-                            los_ok = True
-                        else:
-                            if contact.los_masked_since_sim is None:
-                                contact.los_masked_since_sim = now_sim
-                            masked_for_s = now_sim - contact.los_masked_since_sim
-                            # Decision 5a-ii: a masked verdict may only
-                            # clear a danger state after holding
-                            # continuously for LOS_MASK_CONFIRM_S -- until
-                            # then, still treated as having LOS (fail-open,
-                            # in the direction of not clearing a warning
-                            # too eagerly).
-                            los_ok = masked_for_s < LOS_MASK_CONFIRM_S
+                        if contact.los_masked_since_sim is None:
+                            contact.los_masked_since_sim = now_sim
+                        masked_for_s = now_sim - contact.los_masked_since_sim
+                        # Decision 5a-ii: a masked verdict may only
+                        # clear a danger state after holding
+                        # continuously for LOS_MASK_CONFIRM_S -- until
+                        # then, still treated as having LOS (fail-open,
+                        # in the direction of not clearing a warning
+                        # too eagerly).
+                        los_ok = masked_for_s < LOS_MASK_CONFIRM_S
 
                     current_engaged = range_ok and alt_ok and los_ok
                     if current_engaged != prior_engaged and self._cooldown_elapsed(

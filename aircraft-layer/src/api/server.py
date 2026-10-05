@@ -122,6 +122,27 @@ the body/brain process, on either Windows or Mac (compute topology note in
   exists to preserve. The join (by `unit_name`, within a skew bound) is
   `perception.motion`'s job on the body-layer side, not this layer's.
 
+- `GET /line_of_sight/latest` -> the most recent `LineOfSightSnapshot`
+  (`plans/dcs-driven-los/plan.md`, X-B29) as JSON, or JSON `null` on the
+  same "not an error" basis as every other `/latest` endpoint. A separate
+  endpoint from `/world_objects/latest`/`/unit_velocity/latest`, same
+  "separate feed, separate clock, joined client-side by `unit_name`"
+  reasoning as `/unit_velocity/latest`'s own docstring.
+- `POST /command/look_direction` -> the aircraft layer's fifth
+  inbound/write path (`plans/dcs-driven-los/plan.md` SS9). Body
+  `{"hour": <int 0..11>, "fov_half_deg": <int 5..180>}`; forwards to
+  `collector.command_sender.LookDirectionSender.send_look_direction`,
+  which fires the JSON command at the LOS Hook script's own inbound UDP
+  listener (not Export.lua's -- see that sender's own docstring for why),
+  and responds `200 {"ok": true}` on the same "attempted the call" contract
+  as `/command/petrovich_search`. `400 {"error": ...}` on a missing/
+  out-of-range `hour`/`fov_half_deg` or non-JSON body; `503
+  {"error": "look direction not configured"}` if this server was built
+  without a `look_direction_sender`; a send failure propagates as
+  `500 {"error": ...}`, same posture as `/command/petrovich_search`
+  (a dropped look-direction push is a real coverage gap, not an opaque
+  display string to swallow).
+
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
 content, so during a paused mission it returned every motionless sample as
@@ -151,6 +172,7 @@ from urllib.parse import urlparse
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
+    LineOfSightCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -159,7 +181,12 @@ from collector.cache import (
     UnitVelocityCache,
     WorldObjectsCache,
 )
-from collector.command_sender import CommandSender, CommandSendError, SearchMode
+from collector.command_sender import (
+    CommandSender,
+    CommandSendError,
+    LookDirectionSender,
+    SearchMode,
+)
 from collector.text_sender import TextOverlaySender
 
 logger = logging.getLogger(__name__)
@@ -171,12 +198,14 @@ DEFAULT_PORT = 7791
 _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
+_LINE_OF_SIGHT_LATEST_PATH = "/line_of_sight/latest"
 _PTT_STATE_PATH = "/ptt/state"
 _SPU8_STATE_PATH = "/spu8/state"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
+_COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
 _F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 _AUDIO_PLAY_PATH = "/audio/play"
 _AUDIO_STOP_PATH = "/audio/stop"
@@ -184,6 +213,18 @@ _AUDIO_STOP_PATH = "/audio/stop"
 #: `SearchMode`'s two valid wire values -- checked against the request
 #: body's `mode` field before forwarding to `CommandSender.send_command`.
 _VALID_SEARCH_MODES: tuple[SearchMode, ...] = ("forward", "boresight")
+
+#: `POST /command/look_direction`'s own range validation (`plans/
+#: dcs-driven-los/plan.md` SS9b) -- the collector-side layer of the
+#: three-deep defense (body-layer -> collector -> Hook) the Security plan
+#: review's Finding 4 confirmed sound. `0..11` is an o'clock hour
+#: (`perception.gaze`'s own granularity on the body-layer side);
+#: `5..180` degrees half-angle is the Hook's own accepted range (SS9b),
+#: 180 being the honest full-circle ceiling, never a fallback.
+_LOOK_DIRECTION_HOUR_MIN = 0
+_LOOK_DIRECTION_HOUR_MAX = 11
+_LOOK_DIRECTION_FOV_MIN_DEG = 5
+_LOOK_DIRECTION_FOV_MAX_DEG = 180
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -200,6 +241,13 @@ def _handle_world_objects_latest(
 
 def _handle_unit_velocity_latest(
     cache: UnitVelocityCache,
+) -> dict[str, Any] | None:
+    snapshot = cache.latest()
+    return None if snapshot is None else snapshot.to_dict()
+
+
+def _handle_line_of_sight_latest(
+    cache: LineOfSightCache,
 ) -> dict[str, Any] | None:
     snapshot = cache.latest()
     return None if snapshot is None else snapshot.to_dict()
@@ -267,6 +315,8 @@ def _make_handler(
     unit_velocity_cache: UnitVelocityCache,
     ptt_cache: PttCache,
     spu8_cache: Spu8Cache,
+    line_of_sight_cache: LineOfSightCache,
+    look_direction_sender: LookDirectionSender | None,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -282,6 +332,11 @@ def _make_handler(
             if path == _UNIT_VELOCITY_LATEST_PATH:
                 self._respond_json(
                     200, _handle_unit_velocity_latest(unit_velocity_cache)
+                )
+                return
+            if path == _LINE_OF_SIGHT_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_line_of_sight_latest(line_of_sight_cache)
                 )
                 return
             if path == _PTT_STATE_PATH:
@@ -313,6 +368,9 @@ def _make_handler(
                 return
             if path == _COMMAND_PETROVICH_SEARCH_PATH:
                 self._handle_command_petrovich_search()
+                return
+            if path == _COMMAND_LOOK_DIRECTION_PATH:
+                self._handle_command_look_direction()
                 return
             if path == _AUDIO_PLAY_PATH:
                 self._handle_audio_play()
@@ -376,6 +434,69 @@ def _make_handler(
 
             try:
                 command_sender.send_command(mode)
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_look_direction(self) -> None:
+            if look_direction_sender is None:
+                self._respond_json(503, {"error": "look direction not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            hour = data.get("hour")
+            if (
+                isinstance(hour, bool)
+                or not isinstance(hour, int)
+                or not (_LOOK_DIRECTION_HOUR_MIN <= hour <= _LOOK_DIRECTION_HOUR_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'hour' must be an integer in "
+                            f"[{_LOOK_DIRECTION_HOUR_MIN}, "
+                            f"{_LOOK_DIRECTION_HOUR_MAX}], got {hour!r}"
+                        )
+                    },
+                )
+                return
+
+            fov_half_deg = data.get("fov_half_deg")
+            if (
+                isinstance(fov_half_deg, bool)
+                or not isinstance(fov_half_deg, int)
+                or not (
+                    _LOOK_DIRECTION_FOV_MIN_DEG
+                    <= fov_half_deg
+                    <= _LOOK_DIRECTION_FOV_MAX_DEG
+                )
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'fov_half_deg' must be an integer in "
+                            f"[{_LOOK_DIRECTION_FOV_MIN_DEG}, "
+                            f"{_LOOK_DIRECTION_FOV_MAX_DEG}], got {fov_half_deg!r}"
+                        )
+                    },
+                )
+                return
+
+            try:
+                look_direction_sender.send_look_direction(hour, fov_half_deg)
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return
@@ -469,6 +590,8 @@ class TelemetryAPIServer:
         unit_velocity_cache: UnitVelocityCache | None = None,
         ptt_cache: PttCache | None = None,
         spu8_cache: Spu8Cache | None = None,
+        line_of_sight_cache: LineOfSightCache | None = None,
+        look_direction_sender: LookDirectionSender | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
@@ -510,9 +633,15 @@ class TelemetryAPIServer:
         )
         self._ptt_cache = ptt_cache if ptt_cache is not None else PttCache()
         self._spu8_cache = spu8_cache if spu8_cache is not None else Spu8Cache()
+        self._line_of_sight_cache = (
+            line_of_sight_cache
+            if line_of_sight_cache is not None
+            else LineOfSightCache()
+        )
         self._text_sender = text_sender
         self._command_sender = command_sender
         self._audio_sender = audio_sender
+        self._look_direction_sender = look_direction_sender
         self._host = host
         self._port = port
         self._httpd: ThreadingHTTPServer | None = None
@@ -552,6 +681,8 @@ class TelemetryAPIServer:
                 self._unit_velocity_cache,
                 self._ptt_cache,
                 self._spu8_cache,
+                self._line_of_sight_cache,
+                self._look_direction_sender,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

@@ -43,6 +43,7 @@ from typing import NamedTuple
 
 from schema import (
     F10CommandEvent,
+    LineOfSightSnapshot,
     PetrovichIndicationSample,
     PetrovichWheelSample,
     PttSample,
@@ -223,6 +224,25 @@ class UnitVelocityCache:
         self._latest = snapshot
 
     def latest(self) -> UnitVelocitySnapshot | None:
+        """Return the most recently pushed snapshot, or `None` if empty."""
+        return self._latest
+
+
+class LineOfSightCache:
+    """Holds the latest `LineOfSightSnapshot` (`plans/dcs-driven-los/
+    plan.md`, X-B29). Same "latest of one" shape as `UnitVelocityCache`,
+    kept as its own small concrete class for the same reason that one is --
+    one class per feed is clearer at `line_of_sight_receiver`'s own call
+    site than a generic "latest of anything" cache."""
+
+    def __init__(self) -> None:
+        self._latest: LineOfSightSnapshot | None = None
+
+    def push(self, snapshot: LineOfSightSnapshot) -> None:
+        """Record a newly-received snapshot as the current latest state."""
+        self._latest = snapshot
+
+    def latest(self) -> LineOfSightSnapshot | None:
         """Return the most recently pushed snapshot, or `None` if empty."""
         return self._latest
 
