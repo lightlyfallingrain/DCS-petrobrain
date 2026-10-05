@@ -65,5 +65,7 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Terrain Stages 3-5 revision](project_terrain_stages_345_revision.md) — "next valley" is an observer-relative crossing count, not a basin graph; terrain facts are structurally outbid in speech.py.
 - [Contact report flood plan](project_contact_report_flood.md) — merge already analysed/approved; split-vs-echo structurally indistinguishable; cross-contact gate reuse; CALLOUT_MAX_AGE_S << LOST_THRESHOLD_S makes suppression permanent.
 - [SPU-8 intercom plan](project_spu8_intercom_plan.md) — the BL-6 "wheel" misdirect; capture gate lives in the collector not audio-adapter; two opposite empty-cache defaults, same feature.
+- [LOS cone scoping](project_los_cone_scoping.md) — the gaze cone defines the query set, not a budget; 162 of 172 bubble units die at gate 0; no safe range cut exists inside the bubble.
+- [LOS fixed-literal command channel](project_los_fixed_literal_command_channel.md) — the Lua rule forbids composing code, not commands; three Lua states; digit dispatch passes an arbitrary number intact.
 - [DCS-driven LOS cost revision](project_dcs_driven_los_cost_revision.md) — budget the single bridge call not the duty cycle; the Lua snippet is a fixed literal so filtering/ordering must live in Lua; round-robin dies against an existing max-age bound.
 - [Non-goals must be written down](feedback_non_goals_must_be_written_down.md) — when a relaxation turns a constraint into a non-goal, record the non-goal AND the machinery you dropped.

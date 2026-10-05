@@ -1045,3 +1045,510 @@ Under a cap that covers the whole bubble, ordering stops mattering at all. The t
 therefore one decision, and it is the user's: **frame budget against coverage.**
 
 This supersedes the revision's expectation that Stage 0 would be "informative, not blocking".
+
+> **SUPERSEDED IN ITS CONCLUSION by SECOND REVISION §8 below.** The two population figures (172
+> median, 195 max in the 10 km bubble) are measured and stand. The framing — "frame budget against
+> coverage", a cap, an ordering policy — does not: the same log says **162 of those 172 are rejected
+> at the gaze gate before LOS is ever asked**, so the set that matters is ~10, and the tradeoff this
+> section posed to the user does not exist.
+
+---
+
+# SECOND REVISION (2026-10-05, later the same day) — the cone replaces the cap
+
+**The user rejected the cap-vs-coverage framing outright** and supplied the replacement in two
+messages. First:
+
+> *"How many units are in the bubble depends entirely on the mission. Scanning is per o'clock sector
+> -> can we tell the LOS query which o'clock we are scanning -> then LOS for only that sector? Other
+> option, prioritize targets that are within possible detection range and closer units more than
+> distant units."*
+
+Then, dissolving the constraint the first message ran into:
+
+> *"We anyway need to manipulate the aircraft — switches, buttons, etc — so directive 'look in this
+> direction' would be well in line and instead of manipulating the aircraft, would just tell the
+> export script what area to LOS check. While thinking about this, we could also simply not query all
+> the units always, just ones that are in the visibility cone (FOV dependent on optics, possible
+> peripheral vision, etc)."*
+
+And then, closing the last open risk this revision had — **the governing principle for the whole
+design, and the sentence to read first:**
+
+> *"Watch list items still need Petrovich to **look at** them to get an update. Threat warnings as
+> well (perception capture is not implemented yet). Memory of something is independent of LOS, it's
+> memory. Update on its status does require LOS and looking at it. → If Petrovich is not looking at
+> something, for all practical purposes it has no LOS or LOS does not matter. **LOS only matters for
+> things that we would process, if there is LOS.**"*
+
+**He is right, and the measurement is more decisive than the argument.** This revision replaces §1's
+cap, §2's overflow/ordering policy and §6 decisions 1–2 with a cone-scoped query. Everything else in
+both earlier revisions stands.
+
+### The principle, stated as the design rule it is
+
+**The visibility cone is not an optimisation. It is the definition of the query set.**
+
+The earlier revisions treated coverage and frame time as opposing quantities and spent several pages
+rationing between them — a cap, an ordering policy, a round-robin, a two-tier threat vocabulary, an
+"accepted cost". **All of that was answering a question that does not exist.** A unit outside the
+cone is not *uncovered*, *truncated* or *degraded*: nothing downstream would consume its LOS, because
+every consumer of LOS requires Petrovich to have looked at the thing (§11). Its absence from the
+payload is **semantically correct**, and the `None` the tri-state join produces there means *"not
+looked at"* — which is precisely, and independently, what gate 0 already concludes about the same
+unit on the same poll.
+
+Two things follow, and they are load-bearing for how the rest of this file should be read:
+
+- **Anything in this plan phrased as truncation, a cap as a budget compromise, coverage loss across
+  the cone boundary, or splitting work across ticks is superseded.** Those passages are left in place
+  per `docs/PROCESS.md` with forward pointers (§7), not because either framing might still apply.
+  Where this revision still says "coverage", it means **one specific residual case only**: a unit
+  inside the current gaze that a *lagging wedge* missed (§9c) — he is looking at it and we failed to
+  ask. That is a real, bounded gap and the 90° wedge exists to close it. It is not the same thing as
+  a unit outside the cone, and the two must not be conflated.
+- **The one condition that reopens this: attention capture.** `Optic.peripheral=True` already lets
+  salience bypass the gaze gate (`gaze_for`, gate 0) and `perception/gaze.py` records that **no
+  triggers are wired behind it**. The day one is, something outside the focus cone becomes a thing
+  "we would process, if there is LOS" — the principle's own condition — and the query set must widen
+  with it. **That is the named reopening trigger for this scoping, and the only one** — and because
+  the query cone crosses the seam as an arbitrary number rather than a named preset (§9b, user
+  direction), reopening it is *sending a bigger number* (45 → 130), not a redesign.
+
+## §7. What this revision overturns, with pointers
+
+| superseded | by | why |
+|---|---|---|
+| §1 `MAX_SIGHTLINES_PER_CALL = 64` as the cost control | §9–§10 | the cone bounds the work by geometry; the cap survives only as a blow-up guard |
+| §2 "overflow policy: order by range, truncate the tail" | §10 | nothing overflows — there is no tail to truncate at the measured scale |
+| §2 "accepted cost of nearest-first… a long-range SAM crowded out by 64 trucks" | §10 | does not arise; the deferred two-tier threat ordering is **withdrawn, not deferred** |
+| §6 decision 2 (nearest-first vs two-tier now) | §10 | moot |
+| "Stage 0 result" framing ("frame budget against coverage") | §8 | the tradeoff was posed against the wrong population |
+| body §"What exactly is asked" — *"No cone filtering, deliberately"* | §8–§10 | its reason 1 (LOS is gaze-independent) is still true and is **not** why it is being reversed; reason 2 (not needed as an optimisation) is now contradicted by measurement, and the cross-seam-duplication objection is answered by passing the direction as a command rather than replicating the logic |
+| §6 decision 3's premise (is a ≤2 ms call imperceptible?) | §10 | still worth flying, but the call is now ~0.25–1.1 ms, not 2 ms |
+| §2's round-robin-across-ticks discussion | the governing principle above | it rationed coverage across a boundary that carries no information |
+| body §Risks — *"a real behaviour change for contacts that are watched but not currently corroborated"* | §11a | the user's principle reframes this: a watch is a standing instruction to look, not a subscription to continuous truth |
+
+**Not superseded, and carried forward unchanged:** the true-to-true rule, the two-field
+(`building_clear` / `terrain_clear`) call shape, the `unit_name` join, the tri-state `None`
+discipline, `LOS_MAX_AGE_S = 3.0`, the deferred "safe from" callout, §3's offline-primitive
+relaxation and `DetectionTrace` recording, §4's reading that `land.isVisible` is terrain-only.
+
+**One open question in the first revision is settled, not open.** The body of this plan and §4 both
+treat "does `SEGMENT` catch terrain?" as needing a probe. `aircraft-layer/research/2026-09-29-bridge-
+terrain-probe-results.md` **Finding 21 already answers it**: *"`land.isVisible` costs 10.6 µs/ray and
+sees only terrain. A SEGMENT search costs 8.7 µs and sees buildings in 3D."* Both calls are needed;
+that is exactly what the 25 µs/unit figure assumes. **§6 decision 1 is therefore resolved by the
+repo rather than by the user: unblock and build, no probe gates this plan.**
+
+**`WM-B7` is retired and `WM-B8` filed** (fixture-scale fine grid, `world-model/ROADMAP.md`, commit
+`7dd6f92`). **§6 decision 4 is closed.** §3b's pointer should be read as naming `WM-B8`.
+
+**Withdrawn claim kept withdrawn:** the probe note's *"~130 rays comfortably covers a bubble"* is
+still unsupported and is not relied on anywhere below.
+
+## §8. The measurement that settles it — 94% of the bubble never reaches the LOS gate
+
+**Method:** the same `~/dcs-detection-trace.jsonl` Stage 0 used, first 2,000,001 rows, **deduplicated
+by `(t_sim, object_id)`** — the earlier pass did not dedupe, which is why its per-poll outcome counts
+did not reconcile with its own 403-objects figure. 1,028 polls, 403 distinct objects per poll
+(median), matching Stage 0 exactly. Gate order is `visibility.py`'s own: **gaze (0) → cockpit mask
+(1) → optic FOV (2) → range/size (3) → terrain LOS (4)**, first failure wins, so an outcome count
+*is* a per-gate survivor count.
+
+| gate outcome | share of rows | **per poll (median)** |
+|---|---|---|
+| `player_bubble` (outside 10 km) | 61.9% | 298 |
+| **`gaze` (outside the focus cone)** | **34.4%** | **162** |
+| `range_or_size` | 1.8% | 2 |
+| `optic_fov` | 0.7% | 0 |
+| `admitted` | 0.7% | 0–1 |
+| `cockpit_mask` | 0.4% | 0 |
+| `terrain_los` | 0.1% | 0 (332 in 1,028 polls) |
+
+**In the bubble: 172 per poll (median), 185 p95, 195 max — of which 162 die at gate 0.** About **10
+units per poll** ever reach gate 4, where LOS is asked.
+
+Three consequences, each of which kills a piece of the earlier design:
+
+1. **LOS computed for the other ~162 units is work whose answer a gate upstream of it discards.**
+   Cone scoping is not a budget compromise — it removes work that was never needed. This is the
+   user's point and it is the whole argument.
+2. **At 25 µs/unit the real workload is ~0.25 ms, not 4.3 ms.** The cap was sized against a
+   population 17× larger than the one that matters.
+3. **`cockpit_mask` rejects essentially nothing (0 per poll)** because the 30° gaze cone sits wholly
+   inside the 260° mask. So the mask is *not* a useful Lua-side filter on its own — an earlier draft
+   of this revision proposed it as the safe, body-layer-free cut and the data says it buys ~28% where
+   the gaze buys 94%. Recorded because it reads as the obvious conservative move and is nearly
+   worthless.
+
+**What is measured and what is not.** Measured: every number in the table, from one sortie's log.
+Estimated: every widened-wedge figure in §10, which scales the measured 172 by wedge fraction
+assuming units are spread evenly in azimuth — **they are not** (units cluster, and the aircraft is
+usually flown toward them, so the forward wedge is denser than uniform). Treat §10's estimates as
+order-of-magnitude, and note that `units_in_wedge` on the snapshot (§11) measures the real figure on
+the first sortie. Nothing here needs a flight; nothing here is a live-DCS measurement.
+
+**Effort/value, re-read once more:** unchanged in direction. Note soberly that gate 4 rejects ~0.3
+candidates per poll today — terrain LOS is a rarely-firing gate, so the terrain half of this plan
+changes few answers. Buildings remain the valuable half (new capability, cheaper call), and cone
+scoping makes the whole thing ~17× cheaper than the design it replaces. Still worth building; still
+buildings-first.
+
+## §9. "Look in this direction" as a command — where the state lives, and why the literal rule holds
+
+**The rule is not in tension here, and the first revision framed it too narrowly.** The constraint in
+`petrobrain-mission-telemetry-hook.lua`'s docstring is that the snippet is *"a fixed string literal,
+baked in at authoring time — never built from network input, mission data, or any other runtime
+value."* That forbids **composing** executable text from runtime bytes. It does not forbid a runtime
+value from *selecting among* audited literals, and this repo already does exactly that, inside DCS:
+
+- `Export.lua`'s `handle_petrovich_search_command(mode, …)` rejects anything but `"forward"` /
+  `"boresight"` and dispatches to fixed `performClickableAction` sequences — a closed enum from the
+  LAN driving real cockpit switches, shipped today.
+- `aircraft-layer/src/api/server.py` validates against `_VALID_SEARCH_MODES` before
+  `command_sender.send_command` ever runs.
+- `Export.lua` already **binds a UDP socket and polls `receivefrom()` non-blockingly every frame**
+  (`try_open_command_socket`, `settimeout(0)`), so an inbound command path into DCS is proven, not
+  proposed.
+
+A *"look in this direction"* directive is the same class of traffic as flipping a switch. **So the
+rule holds unweakened: the sector arrives as a command, never as a string fragment.**
+
+### §9a. Where the state must live — forced, not chosen
+
+Three candidate homes, and two are impossible:
+
+| home | verdict |
+|---|---|
+| collector's Python | **impossible.** The only channel from the Hook state into the scripting state is the code string. Putting the value there means composing the snippet from it — the thing the rule forbids. |
+| `Export.lua` globals | **impossible.** Export.lua runs in the **Export** Lua state; the LOS snippet runs in the **mission-scripting** state via `net.dostring_in("scripting", …)`. Separate states, no shared globals. That separation is why these Hook scripts exist at all — `land.*` / `world.*` are not reachable from Export. |
+| **a global in the mission-scripting state** | **the only possibility, and it is already precedented.** `petrobrain-f10-commands-hook.lua` keeps `PB_F10_QUEUE` alive in that state across `dostring_in` calls: `REGISTRATION_CODE` creates it, `POLL_CODE` drains it. Persistence across calls is proven in this repo. |
+
+### §9b. The mechanism, stated so a reviewer can audit it in one read
+
+- **Vocabulary — a direction and an angular width, both numeric.** User direction: *"We'd better
+  accept arbitrary FOV for the LOS cone, that way future changes, like peripheral vision, can easily
+  be taken aboard."* **So the Lua side holds no optic table, no preset names and no idea what a
+  9K113 is.** It takes a look direction and a half-angle and answers for whatever falls inside.
+  Optic selection, peripheral widening and any future cone shaping stay in `perception/optics.py`
+  where the model already lives, and cross the boundary as **one number**.
+  - **Direction:** the **12 o'clock hours** (`0`–`11`), the granularity `perception.gaze` already
+    uses (`FOCUS_CONE_HALF_WIDTH_DEG = 15.0`, 30° per hour — the o'clock cone *is* the o'clock
+    position, per that module's own docstring). Not generalised further because nothing asks for it
+    yet; the mechanism below extends to arbitrary bearing for free if it ever does.
+  - **Width:** `PB_LOOK_FOV_DEG`, an **arbitrary integer half-angle in degrees**, not an enum.
+- **Naming: `PB_LOOK_*`, not `PB_LOS_*`** — see §15; LOS is this channel's first consumer, not its
+  only one.
+- **How an arbitrary number crosses without the snippet being built from it — digit dispatch.** A
+  closed enum of presets would have been three literals; an arbitrary value cannot be. The resolution
+  keeps the rule **exactly** intact: three hand-authored setter tables of ten one-line literals each,
+  `PB_FOV_H = <d>` / `PB_FOV_T = <d>` / `PB_FOV_U = <d>` for `<d>` in `0`–`9`, every digit typed out
+  by hand. The Hook decomposes a validated integer into three digits and executes **three literals
+  selected by index**; the poll snippet recomposes `fov = 100*H + 10*T + U`. **Nothing is
+  concatenated at any point, and the set of strings the Hook can ever execute is fixed at authoring
+  time at 42 entries** (12 hour + 30 digit). The value is data; only audited literals are code.
+  *(Rejected alternative: one validated `string.format("%d", clamped)` splice. It is four lines
+  instead of forty and is almost certainly safe — but it moves the invariant from "structurally
+  impossible" to "correct because a validator is correct", on a rule this repo deliberately audits.
+  Named in §16 as the user's call, not taken unilaterally.)*
+- **Validation, and what happens to a bad value — stated because the failure mode is the exact cost
+  this scoping exists to prevent.** Accepted range **5–180 degrees half-angle**. The collector
+  rejects anything outside it with 400; the Hook **validates again and clamps** into range, logging
+  what it clamped. An unset, unparseable or zero value resolves to the **default 45**, never to a
+  360° query. 180 is a full-circle query and is legal only because it is the honest ceiling; it is
+  never the fallback.
+- **The LOS poll snippet stays one fixed literal** and reads the globals exactly as `POLL_CODE` reads
+  `PB_F10_QUEUE`.
+- **Transport:** body-layer `POST /command/look_direction {"hour": <int 0..11>, "fov_half_deg":
+  <int 5..180>}` → collector range-validates (the `_VALID_SEARCH_MODES` pattern, generalised from a
+  tuple membership to a range check) → UDP to a **new loopback-bound listener in the LOS Hook
+  script**, `receivefrom()` polled per frame (`Export.lua`'s own pattern).
+- **What the parameter means, so nobody reads more into it:** it is the **LOS query cone** — which
+  units are worth asking DCS about. It is **not** a claim about what Petrovich can perceive. Every
+  perception gate downstream (gaze, cockpit mask, optic FOV, range/size) remains the sole authority
+  on detectability, unchanged. A query cone wider than the perceptual one costs frame time; a query
+  cone narrower than it costs coverage (§9c). Neither changes what is detectable.
+- **Pushed on change, not per poll.** The Hook re-issues the setter only when the value differs from
+  what it last sent, plus unconditionally on `onSimulationStart` and whenever the poll snippet
+  reports the globals unset (mission restart clears the scripting state). Self-healing, no handshake.
+
+### §9c. Latency, and why it costs coverage rather than correctness
+
+Round trip is body-layer → collector (LAN HTTP, pushed on change) → loopback UDP → next DCS frame →
+next 1 Hz LOS poll. Against `FOCUS_DWELL_S = 2.0 s` a dwell change can still straddle a poll.
+
+**Do not drop mismatched verdicts.** A verdict is a physical fact about one unit at one instant; the
+hour only decided *which* units got one. So:
+
+- a unit covered by the old wedge and still inside the current gaze → a correct verdict, at most one
+  poll old, already governed by `LOS_MAX_AGE_S = 3.0`;
+- a unit newly inside the gaze but outside the queried wedge → **absent → `None` → gate 4 falls back
+  to today's offline path.**
+
+**The safety property, stated once because everything else rests on it: a wrong, stale or absent
+wedge costs coverage for a poll and can never produce a wrong answer.** The tri-state join already
+specified in the body of this plan is what makes that true, and it is already tested.
+
+**This is the one place in this revision where "coverage" still means something lost.** It is a unit
+Petrovich *is* looking at that a lagging wedge failed to ask about — not a unit outside the cone,
+whose absence is correct by the governing principle. Do not read the two as the same failure.
+
+Latency is then handled by **geometry rather than timing**: query a wedge wider than the gaze (§10),
+so one dwell of lag still covers the current focus cone. The hour the snippet actually used is
+published alongside the verdicts and recorded in the trace — as observability, not as a gate.
+
+## §10. The cone — how wide, per optic, and the arithmetic
+
+`body-layer/src/perception/optics.py`, read rather than assumed:
+
+| optic | `fov_half_angle_deg` | `peripheral` | effective cone today |
+|---|---|---|---|
+| `UNAIDED_OPTIC` (the default since 2026-09-20) | `None` — no FOV restriction | `True` | the **gaze focus cone, 30° full** (the cockpit mask is its only other envelope, and the mask never binds — §8) |
+| `BINOCULAR_OPTIC` | 4.25 (≈8.5° true field) | `False` | **8.5°**, and always *inside* the gaze cone |
+| 9K113 | deferred entirely (that module's own scope cut, 2026-09-20) | — | not modelled |
+
+**So the optic does not need to change the wedge at all in the current two-optic world, and that
+directly answers "which optic's cone is authoritative when it changes."** A single 45°-half-width
+pushed wedge (90° full) is a strict superset of both the 30° unaided focus cone and the 8.5°
+binocular field, with a full o'clock hour of lag margin on each side. Making the wedge
+optic-dependent would introduce exactly one failure mode — binocular→unaided with a stale *narrow*
+wedge is a **subset** of the new gaze, i.e. silent coverage loss — for no saving. **Recommendation:
+send a constant 45 today**, and let the number become dynamic when something actually needs it.
+
+**That "when" is the whole reason the width is a number rather than a preset**, and it is worth
+being concrete about it here because it converts the reopening trigger named above from a redesign
+into a parameter change:
+
+- **Attention capture** (the standing backlog item, `Optic.peripheral=True`, zero triggers wired):
+  salience bypasses gate 0, so something outside the focus cone becomes a thing "we would process,
+  if there is LOS". **The change is `fov_half_deg: 45 → 130`** — the cockpit-mask rear cutoff — or a
+  second, wider query with a cheaper downstream gate. No new mechanism, no schema change, no Lua
+  edit.
+- **The 9K113 slice**, whenever it lands: a narrower field, which is simply a smaller number.
+- Diagnostics: `180` for a full-circle query, which is why the range runs that far.
+
+Useful reference values, for whoever sets the number: **45** (ships — the 30° gaze focus cone plus a
+full o'clock hour of lag margin either side), **130** (cockpit-mask rear cutoff, the attention-capture
+value), **180** (everything in the bubble).
+
+**Arithmetic. The first row is measured; the rest scale the measured 172 by wedge fraction assuming
+uniform azimuth, which §8 says to distrust.**
+
+| wedge | fraction of 360° | units/poll | cost @ 25 µs/unit |
+|---|---|---|---|
+| **gaze focus, 30° (what gate 0 actually admits)** | 1/12 | **~10, measured** | **~0.25 ms** |
+| **90° full (`fov_half_deg = 45`) — what ships** | 1/4 | ~43 est. | ~1.1 ms est. |
+| 260° full (`fov_half_deg = 130`) — only if attention capture is built | 0.72 | ~124 est. | ~3.1 ms est. |
+| whole bubble (the superseded design) | 1 | 172 med / 195 max | 4.3 / 4.9 ms |
+
+**The cap survives only as a blow-up guard, and should be read as an assertion rather than a
+policy.** `MAX_SIGHTLINES_PER_CALL` stays in the snippet at **128** (~3.2 ms, covering the `mask`
+`fov_half_deg = 130` estimate), with nearest-first ordering deciding only what a guard drop
+discards. **If
+`sightlines_computed < units_in_wedge` ever appears in a log, the wedge is wrong — not the budget.**
+It is not a truncation policy and must not be reasoned about as one. **§2's two-tier threat ordering,
+its round-robin discussion and its "accepted cost of nearest-first" are all withdrawn**: they
+rationed a cap that no longer binds, for a coverage question the governing principle dissolves.
+
+**On the user's second option — "prioritize targets within possible detection range".** Worked
+through and **not adopted as a filter**, for a reason worth recording rather than leaving as an
+unexplained omission. A *provably safe* range cut needs an upper bound on detection range over all
+unit types and optics: largest `size_m` in `object_model.py` is 100 m (ships), loosest presence
+threshold is `RESOLUTION_ANGULAR_RADIUS_RAD = 0.00128`, best multiplier is binocular
+`presence_range_mult = 2.42`. Even for a 7 m vehicle that is `7/0.00128 × 2.42 ≈ 13.2 km` — **beyond
+the 10 km bubble.** The bubble is already tighter than the detection envelope, so a safe range cut
+removes nothing. A range cut keyed on the unit's actual type would work, but requires the ~400-row
+size table to exist in Lua and stay in step with body-layer's — the cross-seam duplication this plan
+already rejected once. **Range survives only as the ordering key for the guard.** The user's
+intuition was right about *prioritisation*; the cone is what delivers the *reduction*.
+
+## §11. Who actually reads LOS — the audit, and why absence outside the cone is correct
+
+Audited by grep over `body-layer/src/`, not assumed. **Four readers, and the user's principle settles
+every one of them: none consumes LOS for something Petrovich is not looking at.**
+
+1. **`visibility.check_visibility` gate 4.** Runs **only** for candidates that already passed gate 0
+   (gaze). By construction it can never want a verdict outside the cone. **Absence is impossible
+   here, not merely acceptable.** ✅
+2. **`perception/detection_trace.py` via `annotate_los` (§3c).** Records `None` for everything outside
+   the wedge. Honest — a debrief asking "why wasn't that seen?" for such a unit already gets the real
+   answer, `outcome: "gaze"`, from gate 0. ✅
+3. **`HybridPerceptionSource`.** Has no geometric gate and never sourced LOS (`naked_eye_source.py`'s
+   own docstring states this). Unaffected. ✅
+4. **`belief/contacts.py::tick`, seventh block — the engagement term (watch list / threat warnings).
+   Settled by the principle, not a problem.** ✅ — see §11a.
+
+### §11a. The engagement term, and the three things the user settled about it
+
+It runs for a contact that is **watched** *and* has a threat envelope *and* passes `range_ok and
+alt_ok`. Those contacts can be anywhere: a watched SAM at 4 o'clock while free scan looks at 12. That
+looked like the case the cone breaks, and I raised it as the main open risk. **It is not, and the
+reason is the user's own, in three parts:**
+
+- **Watch-list contacts** — *"still need Petrovich to look at them to get an update."* Watching a
+  contact is a standing instruction to keep looking, not a subscription to continuous truth. No gaze,
+  no update — **with or without LOS.**
+- **Threat warnings** — same, and attention capture is not built, so nothing can fire from outside
+  the focus cone today in any case.
+- **Belief's memory** — *"Memory of something is independent of LOS, it's memory."* A `Contact`
+  persists, decays and is reported from memory whether or not a sightline exists. Only a **status
+  update** needs LOS, and a status update needs him looking.
+
+So the engagement term never wanted a verdict for an unlooked-at contact. Its existing `None` →
+fail-open branch is not a degradation the cone imposes; it is the correct reading of "we have not
+looked at this recently", which `OBSERVED_WINDOW_S` (16.0 s, equal to `SCAN_CYCLE_PERIOD_S` so a
+forward-hemisphere contact is re-gazed once per cycle) already expresses. The user has separately
+deferred the **"safe from"** utterance entirely, so the fail-open direction produces no callout the
+pilot hears.
+
+**What changes versus today is real but is not a loss of information Petrovich was entitled to.**
+Today `_threat_has_los` queries world-model's terrain LOS against a **believed** position for any
+watched contact, gazed at or not — which is precisely the kind of answer this plan exists to stop
+producing (a verdict about a point where nothing may stand; see the body's "Why it must be
+true-to-true"). Replacing it with "no recent look, therefore no verdict" is **more honest, not less
+covered.**
+
+### §11b. ~~A second wedge for watched contacts~~ — WITHDRAWN
+
+An earlier draft of this revision proposed pushing a second o'clock hour derived from each watched
+contact's believed bearing, so the engagement term could keep getting verdicts outside the gaze.
+**Withdrawn on the user's direction above**: it would compute LOS for things Petrovich is not looking
+at, which is exactly what the principle says has no meaning. It is recorded rather than deleted
+because it is a plausible-sounding "restore the old behaviour" move that a later reader may re-derive
+— and the reason it is wrong is a product decision about what a watch *is*, not a technical one.
+**The corresponding decision in §16 is closed, not deferred.**
+
+## §12. Affected modules — delta against §4b and the body's list
+
+Additions and changes only.
+
+- `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` — **gains the inbound loopback UDP
+  listener** (`setsockname("127.0.0.1", <port>)`, `settimeout(0)`, polled per frame, mirroring
+  `Export.lua`'s `try_open_command_socket`), the **42-entry literal setter table** (§9b — 12 hour,
+  30 digit), the FOV clamp, the push-on-change/re-issue-on-restart logic, and the wedge filter in
+  the poll snippet. The cap becomes `MAX_SIGHTLINES_PER_CALL = 128` and is a guard, not a policy.
+- `aircraft-layer/src/api/server.py` — new `POST /command/look_direction`, validating `hour` as an
+  int in `0..11` and `fov_half_deg` as an int in `5..180`, structurally copying
+  `_handle_command_petrovich_search`.
+- `aircraft-layer/src/collector/command_sender.py` (or a sibling) —
+  `send_look_direction(hour, fov_half_deg)`, same shape as `send_command`.
+- `aircraft-layer/src/schema/line_of_sight.py` — snapshot gains `hour_used`, `fov_half_deg_used`,
+  `units_in_bubble`, **`units_in_wedge`**, `sightlines_computed`, `bridge_call_ms`.
+  `units_in_wedge` is the field that turns §10's estimates into measurements.
+- `body-layer/src/aircraft_client.py` — `post_look_direction()`.
+- `body-layer/src/logger.py` — pushes the look direction on change from the gaze it already resolves
+  (`_active_gaze`). **One source of truth for gaze stays `perception.gaze.gaze_at`; the Lua side
+  never re-derives it.**
+- `body-layer/src/perception/detection_trace.py` — `annotate_los` additionally records `hour_used` /
+  `fov_half_deg_used` so a debrief can tell "outside the queried wedge" from "queried and no
+  verdict".
+- Everything else in §4b and the body's Affected Modules list is unchanged.
+
+## §13. Restaged implementation plan
+
+Stage 0 is **done** (§8 supersedes its own conclusion but keeps its numbers). Stages renumbered;
+content otherwise as the first revision's §5.
+
+1. **Stage 1 — one hook, both fields, cone-scoped, and the trace records it.** Hook script + schema +
+   cache + endpoint + client method + body-layer join, computing and publishing **both**
+   `building_clear` and `terrain_clear` (2026-09-29 revision, unchanged). **Plus** the look-direction
+   command path end to end (§9) and the wedge filter. Body-layer wires **buildings only** into gate 4;
+   `annotate_los` records both fields, the joined verdict, the skew and the wedge actually used.
+   Zero regression risk: `live_los_clear` is `None` until the feed exists, and the fallback branch is
+   today's code.
+   *Build order inside the stage, so a failure is attributable:* (a) the look-direction command path
+   with the snippet ignoring it, verified from `dcs.log` alone; (b) the wedge filter; (c) the gate
+   wiring.
+2. **Stage 2 — belief carries the observed value.** Unchanged, including the deletions
+   (`_threat_has_los`, `tick`'s `los_clear` parameter, `LOS_UNCERTAINTY_SAMPLES`, `logger.py`'s
+   closure) and the deferred "safe from" callout.
+3. **Stage 3 — body-layer starts reading `terrain_clear`.** No Windows-side work.
+   `clear = building_clear and terrain_clear`.
+4. **Stage 4 — the acceptance sortie, read back from the trace.** As before, plus: read `hour_used`
+   against the trace's own `gaze` outcomes to confirm the wedge tracked the scan, and read
+   `units_in_wedge` / `sightlines_computed` / `bridge_call_ms` to replace §10's estimates with
+   measurements before anyone tunes a constant.
+5. **Not this plan:** the tree probes and the OSM-landcover model (unchanged); the
+   `isVisible`-sees-buildings cost optimisation (§4, next sortie of opportunity); `WM-B8`'s
+   fixture-scale fine grid; widening the query cone for attention capture (§10 — a number, when
+   that backlog item is built). **The watch wedge is withdrawn, not deferred** (§11b).
+
+## §14. Risks & Unknowns added by this revision
+
+- **A new inbound network listener inside DCS.** The LOS Hook binds a UDP socket. Mitigations, all
+  specified rather than assumed: **bind 127.0.0.1 only** (the collector runs on the same Windows box
+  as DCS), validate twice (collector and Hook), and use the value **only as an index into a fixed
+  literal table**. The pattern is shipped in `Export.lua`, but **in the Export state, not a Hook
+  state** — same LuaSocket, and the Hook state is the less restricted of the two, so this is low risk
+  rather than no risk. First deployment confirms it from `dcs.log`; no probe sortie needed.
+- **The wedge can silently be narrower than the gaze** if a push is lost and the Hook never notices.
+  That is coverage loss, not wrongness (§9c) — but it is *invisible* without `hour_used` in the
+  payload and in the trace. Treat those two fields as required, the same way §2 treated
+  `units_in_bubble`.
+- **§10's non-measured rows.** Every figure except the ~10/poll is a uniform-azimuth estimate and
+  units are not uniform in azimuth. `units_in_wedge` is the fix and it arrives with Stage 1.
+- **`SEGMENT` cost at 10 km ray length is still unmeasured** (Finding 21 used 2 km rays). The margin
+  is now enormous rather than 20%: at ~10 units/poll even a 5× penalty is ~1.3 ms. **This risk is
+  effectively retired by cone scoping** — recorded as such rather than deleted.
+- **The 18–20 ms payload-indifferent bridge tail remains** and is not ours (Finding 3). Expect one;
+  do not re-open the cone over it.
+- **Reciprocity of `land.isVisible` / `SEGMENT` is still assumed, not measured.** Unchanged, and the
+  engagement term's justification still rests on it.
+- **The peripheral-bypass seam is a live tripwire for this design.** The day an attention-capture
+  trigger is wired, `gaze_for` starts returning `None` for salient candidates, gate 0 stops filtering
+  them, and a 45° query cone becomes narrower than what gate 4 is asked for — silently, as coverage
+  loss. **Whoever wires the first trigger must widen `fov_half_deg` to 130**, and this sentence is
+  the only thing that will tell them so. Worth a line in the attention-capture backlog item too; the
+  arbitrary-FOV parameter (§9b) is what makes that a one-number change rather than a redesign.
+
+## §15. Second-order effect
+
+**This revision creates a general "tell the aircraft where to look" command channel, and LOS is its
+first consumer rather than its only one.** The user's own framing — a look directive is the same class
+of traffic as a switch press — makes it reusable by anything that needs the simulation side to know
+where Petrovich's attention is: the 9K113 slice when it lands, any future tree-aware LOS call, and the
+in-cockpit feedback that would let the pilot *see* where the copilot is looking. That is a larger
+unlock than the frame-time saving, and it is worth not burying it inside the LOS hook: **the setter
+table and the listener should be written so a second consumer can read `PB_LOOK_HOUR` /
+`PB_LOOK_FOV_DEG` without owning them** — hence the `PB_LOOK_*` naming rather than `PB_LOS_*` (§9b).
+The user's instruction to carry an **arbitrary** FOV rather than a named preset is what makes this
+general: a channel that says "look here, this wide" serves any consumer, whereas one that says
+`focus | mask | off` only ever serves the thing those names were coined for.
+
+Narrowing, in the other direction: binding the LOS feed to the gaze couples a *DCS-side* feed to a
+body-layer concept for the first time. The coupling is one integer with a closed vocabulary and a
+fail-safe degradation, which is about as thin as it gets — but a future redesign of the scan model
+(`gaze.py`'s plan-C "swap the table" escape hatch) now has a second place to look.
+
+## §16. Decisions Requiring User Input (two)
+
+**Closed since §6:** (1) the SEGMENT gate — resolved by Finding 21, no probe needed; (2) nearest-first
+vs two-tier ordering — moot, withdrawn; (3) is a ≤2 ms call imperceptible — superseded, the call is
+now ~0.25–1.1 ms and Stage 4 still measures it; (4) `WM-B7` — retired, `WM-B8` filed.
+**Closed by the user during this revision:** the watch-wedge question I was about to ask — *"LOS only
+matters for things that we would process, if there is LOS"* settles it, and §11b records the
+withdrawn design; and the preset-vs-arbitrary-FOV interface — *"accept arbitrary FOV"*, now §9b.
+
+1. **Confirm the command-channel reading of the fixed-literal rule, and which variant.** This
+   revision holds that a validated numeric selecting among 42 hand-authored literals (§9b's digit
+   dispatch) honours the rule rather than bending it, on the precedent of `Export.lua`'s own
+   `petrovich_search` dispatch — which already takes a LAN command and drives real cockpit switches.
+   The rule is audited and load-bearing, so **this should be your call, not mine.** Two sub-choices:
+   - **Digit dispatch (recommended).** 42 trivial literals, nothing ever concatenated, invariant
+     untouched. Costs about forty lines of repetitive Lua.
+   - **One validated `string.format("%d", clamped)` splice.** Four lines instead of forty, almost
+     certainly safe — but the property becomes "correct because the validator is correct" rather
+     than "structurally impossible". Cheaper to write, more to audit forever.
+
+   If you would rather not touch the rule at all, the fallback is to derive the free-scan hour
+   Lua-side from `timer.getTime()` (the scan plan is a pure function of sim time), needing no
+   inbound channel — but it **duplicates body-layer's scan table across the seam and goes blind the
+   moment you issue a commanded scan or raise binoculars**, i.e. it fails exactly when you asked for
+   attention. Not recommended.
+2. **Does the query cone (90° full, `fov_half_deg = 45`) feel right, or should it be one o'clock
+   hour (30°)?** 90° is three
+   o'clock hours: the one being scanned plus one either side, so a poll straddling a dwell change
+   still covers the gaze. 30° is 3× cheaper and would drop coverage on roughly half the polls at 1 Hz
+   against a 2 s dwell. **Recommendation: 90°** — the cost it saves is already negligible, and the
+   thing it buys is not having to reason about timing at all.
