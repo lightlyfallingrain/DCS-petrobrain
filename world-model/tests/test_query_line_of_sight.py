@@ -189,6 +189,56 @@ def test_line_of_sight_clear_when_terrain_excess_is_just_inside_tolerance(
     )
 
 
+def test_line_of_sight_clear_is_reciprocal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`plans/dcs-driven-los/plan.md` §3a: the offline primitive's own
+    reciprocity, on its own terms -- `los(a, b) == los(b, a)` for a
+    deterministic function of a symmetric sightline. This is a property
+    of this function, not a claim about DCS: the live reciprocity the
+    engagement term's justification rests on is a separate, unmeasured
+    assumption (that plan's own Risks section), not what this test
+    exercises."""
+
+    def fake_sample_grid(conn: object, kind: str, x: float, z: float) -> float:
+        return 2000.0 if 4000.0 < x < 6000.0 else 0.0
+
+    monkeypatch.setattr(line_of_sight, "sample_grid", fake_sample_grid)
+
+    a = (0.0, 0.0, 100.0)
+    b = (10000.0, 0.0, 100.0)
+
+    assert line_of_sight.line_of_sight_clear(
+        _FAKE_CONN, "Syria", a, b
+    ) == line_of_sight.line_of_sight_clear(_FAKE_CONN, "Syria", b, a)
+
+
+def test_raising_the_observer_never_turns_clear_into_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/dcs-driven-los/plan.md` §3a: monotonicity -- raising the
+    observer's altitude, holding everything else fixed, can only ever
+    straighten a grazing sightline over an obstruction, never introduce a
+    new one. A clear verdict at the lower altitude must stay clear at the
+    higher one."""
+
+    def fake_sample_grid(conn: object, kind: str, x: float, z: float) -> float:
+        return 150.0 if 4000.0 < x < 6000.0 else 0.0
+
+    monkeypatch.setattr(line_of_sight, "sample_grid", fake_sample_grid)
+
+    target = (10000.0, 0.0, 100.0)
+    low_observer = (0.0, 0.0, 200.0)
+    high_observer = (0.0, 0.0, 2000.0)
+
+    assert (
+        line_of_sight.line_of_sight_clear(_FAKE_CONN, "Syria", low_observer, target)
+        is True
+    )
+    assert (
+        line_of_sight.line_of_sight_clear(_FAKE_CONN, "Syria", high_observer, target)
+        is True
+    )
+
+
 def test_line_of_sight_blocked_when_terrain_excess_is_just_outside_tolerance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

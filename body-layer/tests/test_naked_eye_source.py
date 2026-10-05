@@ -128,6 +128,9 @@ class FakeAircraftClient:
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return self._unit_velocity
 
+    def get_line_of_sight_latest(self) -> dict[str, Any] | None:
+        return None
+
 
 @pytest.fixture(autouse=True)
 def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:

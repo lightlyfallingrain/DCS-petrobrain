@@ -42,6 +42,7 @@ from belief.mission_phase import (
 from belief.tasks import TaskStore
 from logger import (
     DEFAULT_SPEECH_LOG_PATH,
+    LOOK_DIRECTION_FOV_HALF_DEG,
     ConsolePerceptionRunner,
     PerceptionLogger,
     _active_gaze,
@@ -81,9 +82,19 @@ def _telemetry_dict() -> dict[str, Any]:
 class FakeAircraftClient:
     def __init__(self, telemetry: dict[str, Any] | None) -> None:
         self._telemetry = telemetry
+        #: `plans/dcs-driven-los/plan.md` (X-B29) -- every `hour,
+        #: fov_half_deg` pair `ConsolePerceptionRunner.run_once` has
+        #: pushed, in order, for tests that want to assert on it.
+        self.look_direction_pushes: list[tuple[int, int]] = []
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
+
+    def get_line_of_sight_latest(self) -> dict[str, Any] | None:
+        return None
+
+    def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
+        self.look_direction_pushes.append((hour, fov_half_deg))
 
 
 class FakeSource:
@@ -648,6 +659,12 @@ class FakeConsoleAircraftClient:
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
+    def get_line_of_sight_latest(self) -> dict[str, Any] | None:
+        return None
+
+    def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
+        pass
+
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return None
 
@@ -1154,6 +1171,36 @@ def test_run_once_compass_scan_actually_changes_naked_eye_gaze() -> None:
     commanded_gaze = gaze_at(3.0, naked_eye.scan_plan)
     free_scan_gaze = gaze_at(3.0, FREE_SCAN_PLAN)
     assert commanded_gaze != free_scan_gaze
+
+
+def test_run_once_pushes_look_direction_on_change_only() -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29): the look-direction command
+    is pushed from the same `scan_plan` the naked-eye source is handed
+    (one source of truth), and only when it changes -- a second poll with
+    an unchanged gaze must not re-push."""
+    telemetry = _telemetry_dict()
+    store = ContactStore()
+    tasks = TaskStore()
+    naked_eye = _naked_eye_source()
+    client = FakeAircraftClient(telemetry)
+    runner = ConsolePerceptionRunner(
+        aircraft_client=client,  # type: ignore[arg-type]
+        sources=[naked_eye],
+        store=store,
+        tasks=tasks,
+    )
+
+    runner.run_once()
+
+    assert len(client.look_direction_pushes) == 1
+    hour, fov_half_deg = client.look_direction_pushes[0]
+    assert 0 <= hour <= 11
+    assert fov_half_deg == LOOK_DIRECTION_FOV_HALF_DEG
+
+    # Same telemetry (same t_sim via FakeAircraftClient, same scan_plan) --
+    # the resolved gaze is identical, so no second push.
+    runner.run_once()
+    assert len(client.look_direction_pushes) == 1
 
 
 # -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------

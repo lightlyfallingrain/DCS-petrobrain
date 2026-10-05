@@ -242,7 +242,7 @@ from perception.gaze import (
     gaze_at,
     legs_within_wedge,
 )
-from perception.geometry import GeoPosition, line_of_sight_clear, open_world_model
+from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
@@ -413,6 +413,20 @@ class ConsolePerceptionRunner:
     #: the decision.
     optic: Optic = UNAIDED_OPTIC
 
+    #: `plans/dcs-driven-los/plan.md` (X-B29) -- the `(hour, fov_half_deg)`
+    #: pair last actually pushed via `POST /command/look_direction`, or
+    #: `None` before the first poll. "Pushed on change" (plan SS9b) is
+    #: enforced here, one source of truth away from the Lua side's own
+    #: `lastSentHour`/`lastSentFovHalfDeg` bookkeeping -- this field is
+    #: this *process's* last push, the Hook script's is the mission-
+    #: scripting state's last applied value; the two can legitimately
+    #: differ for one push's worth of network/poll latency (plan SS9c),
+    #: which is why the join on the aircraft-layer side is tri-state, not
+    #: an assumption that they always agree.
+    _last_look_direction: tuple[int, int] | None = field(
+        default=None, init=False, repr=False
+    )
+
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
@@ -481,6 +495,24 @@ class ConsolePerceptionRunner:
             )
         )
         self.scan_plan = _active_gaze(self.tasks, ownship.heading_true_deg)
+        # `plans/dcs-driven-los/plan.md` (X-B29): push the look-direction
+        # command only on change (SS9b), from the same `scan_plan` that is
+        # about to be handed to `NakedEyePerceptionSource` -- one source of
+        # truth for gaze (`perception.gaze.gaze_at`), the Lua side never
+        # re-derives it. A push failure degrades to "the Hook script keeps
+        # querying whatever wedge it last had" (or its own default), never
+        # stops the poll loop -- same posture as the overlay push below.
+        gaze_for_look_direction = gaze_at(ownship.t_sim, self.scan_plan)
+        look_direction = (
+            _hour_for_gaze(gaze_for_look_direction),
+            LOOK_DIRECTION_FOV_HALF_DEG,
+        )
+        if look_direction != self._last_look_direction:
+            try:
+                self.aircraft_client.post_look_direction(*look_direction)
+                self._last_look_direction = look_direction
+            except AircraftLayerError:
+                logger.warning("look-direction push failed (continuing)", exc_info=True)
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
@@ -502,19 +534,13 @@ class ConsolePerceptionRunner:
         events_before = len(self.store.events)
         # `plans/watch-reporting/plan.md` Stage 2 -- `ownship` is already in
         # hand at this call site; `ContactStore.tick`'s sixth block (range
-        # crossings) is a no-op without it. Stage 4's seventh block (engagement)
-        # additionally needs `los_clear` -- a closure over this runner's own
-        # `world_model_conn`/`theatre`, `None` (correct degradation, the term
-        # is simply skipped) when no world-model connection is configured.
-        los_clear = None
-        if self.world_model_conn is not None and self.theatre is not None:
-            conn = self.world_model_conn
-            theatre = self.theatre
-
-            def los_clear(observer: GeoPosition, target: GeoPosition) -> bool:
-                return line_of_sight_clear(conn, theatre, observer, target)
-
-        self.store.tick(ownship.t_sim, ownship=ownship, los_clear=los_clear)
+        # crossings) is a no-op without it. The seventh block (engagement)
+        # no longer takes a `los_clear` callable at all as of `plans/
+        # dcs-driven-los/plan.md` (X-B29): it reads `Contact.live_los_clear`,
+        # a value carried on the contact itself (set from `Percept` in
+        # `record()`/`from_percept()`), never a live callback into
+        # world-model.
+        self.store.tick(ownship.t_sim, ownship=ownship)
         self.tasks.tick(self.store, ownship.t_sim)
         self.last_t_sim = ownship.t_sim
         if self.overlay_client is not None:
@@ -965,6 +991,26 @@ def _build_sources(
 ATTITUDE_HISTORY_LEN = 3
 
 _DEFAULT_POLL_INTERVAL_S = 1.0
+
+#: The LOS query cone body-layer pushes for an ordinary naked-eye scan --
+#: `plans/dcs-driven-los/plan.md` SS17's own settled value: three o'clock
+#: hours (the one being scanned plus one either side), wide enough that a
+#: poll straddling a dwell change still covers the gaze, so command lag
+#: never has to be reasoned about (geometry instead of timing). The Lua
+#: side's own `FOV_DEFAULT_DEG` (45) is only the fallback for "no directive
+#: has arrived yet" -- this is what gets sent once body-layer starts
+#: pushing.
+LOOK_DIRECTION_FOV_HALF_DEG = 90
+
+
+def _hour_for_gaze(gaze: Gaze) -> int:
+    """The o'clock hour (`0`..`11`) nearest `gaze.center_azimuth_deg`
+    (body-relative, `perception.gaze`'s own convention: `12` o'clock = 0
+    degrees, positive clockwise, one hour = 30 degrees) -- the inverse of
+    `perception.gaze._gaze_for_clock_hour`'s own formula. Used only to pick
+    which wedge to ask the LOS Hook script to query (`plans/dcs-driven-los/
+    plan.md` SS9); it is not itself a detectability decision."""
+    return round(gaze.center_azimuth_deg / 30.0) % 12
 
 
 def _is_connection_loss(exc: BaseException) -> bool:

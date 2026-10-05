@@ -36,6 +36,11 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from .f10_command import F10CommandEvent, F10CommandParseError
+from .line_of_sight import (
+    LineOfSightParseError,
+    LineOfSightSnapshot,
+    LineOfSightVerdict,
+)
 from .petrovich_indication import (
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
@@ -57,6 +62,9 @@ from .world_objects import (
 __all__ = [
     "F10CommandEvent",
     "F10CommandParseError",
+    "LineOfSightParseError",
+    "LineOfSightSnapshot",
+    "LineOfSightVerdict",
     "PetrovichIndicationParseError",
     "PetrovichIndicationSample",
     "PetrovichWheelParseError",
