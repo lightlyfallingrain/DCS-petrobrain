@@ -107,6 +107,28 @@ attention is elsewhere will keep being broken. This one is structural instead.
    dispatch, because the moment it matters is the moment attention is on the task instead — the
    same argument that made rule 1 structural.
 
+   **Observed 2026-10-06, and it is worse than "the worktree lands on `main`": a worktree can land
+   on a commit that is neither the named tip nor `main`'s current tip.** Two Architects dispatched
+   minutes apart both got `19143fa` — **eleven commits behind** the `dce2534` they were told to work
+   at — with clean trees and nothing unique. Both caught it because the prompt named a sha and they
+   checked; neither could `git reset --hard` to the target (denied by permissions), so one read every
+   input document through `git show <tip>:<path>` instead, which is the snapshot approach this rule
+   prescribes and is worth knowing works for *documents* even when a checkout does not.
+
+   **Two consequences that bite quietly:**
+
+   - **A stale base means the agent's tooling is stale too.** `gq.sh` was fixed that same day to let
+     a worktree borrow the main checkout's graph (`c33af2e`) — and the Architect based at `19143fa`
+     still got *"No graph yet"*, because the fix was not in its tree. A fix to agent tooling only
+     reaches agents whose base commit contains it, which is not the same thing as "it is on `main`".
+   - **A stale base is harmless for source and dangerous for inputs.** Here
+     `git diff 19143fa dce2534 --stat` was docs and agent-memory only, so every `src` file read was
+     byte-identical — but those eleven commits included `plans/post-review-fixes/explore-notes.md`,
+     the agent's *primary input*, which simply did not exist in its tree. **So the check is not
+     "is the source the same", it is "is everything I was told to read present".** Name the input
+     documents in the prompt, and have the agent verify they exist rather than trusting a clean
+     `git diff --stat`.
+
 ### The main checkout's branch is a contract with the user
 
 **The user tests on the main checkout. They do not operate in worktrees.** So the branch checked out
