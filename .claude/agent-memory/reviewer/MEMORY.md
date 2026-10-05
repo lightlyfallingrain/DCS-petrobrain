@@ -144,3 +144,5 @@ and blowing the cap again; this pass merged them into one list.
 - [Sortie 1005 items234 scan ahead cadence review](project_sortie_1005_items234_scan_ahead_cadence_review.md) - APPROVED; instrumented-run beat hand-derived dwell-cadence arithmetic.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
 - [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
+- [Callout observability gate review](project_callout_observability_gate_review.md) - derive a "total gate"'s newly-covered kinds yourself; found an unnamed third kind.
+- [Worktree without venv, borrow tooling](feedback_worktree_without_venv_borrow_tooling.md) - agent worktrees have no .venv; borrow main's binaries, prove imports resolve locally.
