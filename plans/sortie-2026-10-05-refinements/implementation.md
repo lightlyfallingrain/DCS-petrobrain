@@ -164,3 +164,134 @@ left asserting the old one.
   formation baked into a "descriptor matching" fixture, which is exactly the kind of thing that
   silently stops exercising what it was written for when behaviour downstream of grouping
   changes (the same risk class as the role brief's own worked example).
+
+---
+---
+
+## Round 2 -- review change requests (Security finding 1, Performance finding 1)
+
+Loop re-entry per `AGENTS.md`: the two reviews' change requests are implementation work, so they
+take the Implementer -> Reviewer -> DoD path rather than going straight to DoD. Branch
+`feature/sortie-refinements`, applied on tip `6467067` (both review documents are on it).
+
+Two commits, because mechanism and calibration -- and here, two independent mechanisms -- do not
+share a commit (body-layer convention).
+
+### Files Changed
+
+- `body-layer/src/belief/crew_console.py` -- `_mark_watched_with_group` now counts the members it
+  actually marked and returns that, instead of `len(member_ids)` (the *intended* count). The two
+  call sites (`_handle_watch_nearest`, `_handle_follow`) rename their local to `marked` so the
+  variable does not read as a group size it no longer is. Docstring rewritten: it promised "the
+  real member count" and now states the shrunken-group fallback and why.
+- `body-layer/src/belief/speech.py` -- new `group_callout_member_id(store, group)`: which single
+  member of a group speaks for it on a `_WATCHED_ONLY_KINDS` event. Shares `_leading_index` with
+  `group_membership_state`/`render_group_disclosure`, so "the leader" has one definition.
+- `body-layer/src/belief/callouts.py` -- `tick`'s filter extends the existing grouped-contact
+  suppression to `_WATCHED_ONLY_KINDS`: a grouped contact that is not the group's keeper has its
+  event `_consumed` *before* the filter's `describe_contact`, which is the call being avoided.
+  Memoised per group per tick (`group_keeper`). `_WATCHED_ONLY_KINDS`' own docstring records the
+  wording tension (below).
+
+### Decisions made during implementation
+
+- **`group_callout_member_id` resolves the leader with zero `describe_contact` calls, and that is
+  the whole design.** The obvious implementation calls `group_membership_state`, which is what the
+  performance review names -- but that goes through `_group_member_facts`, i.e. one
+  `describe_contact` per member, which is precisely the ~51 ms call the finding exists to remove.
+  Calling it from the filter would have made the fix cost O(members) describes to save O(2 x
+  members), a far weaker result than the review's "2N to 2". `_leading_index` needs only
+  `Contact.classification`, and `describe_contact` returns `None` under *precisely* the condition
+  `ContactStore.contact` does (an id that no longer resolves -- checked, not assumed), so the
+  describe-free path resolves the same member set, in the same order, with the same
+  fewer-than-two-members guard.
+- **It falls back to the first still-resolving member when no member has a resolvable threat
+  envelope**, unlike `group_membership_state`'s `leading_contact_id`, which is legitimately `None`
+  there. The two answer different questions: "who leads the disclosure line" may have no answer,
+  but "which single event survives" must always have one once there is a group at all -- `None`
+  there would silence the entire group. In practice this fallback is the common path in tests,
+  because `envelope_for` needs a threat table none of the fixtures load.
+- **`_consumed`, not a bare `continue`, for the suppressed peers** -- as the review specifies.
+  Lost, not deferred, the same treatment `WATCH_REPORT_MIN_GAP_S` already gives a suppressed
+  watched-only event. A bare `continue` would re-offer every peer on every tick, which is the
+  cost being removed.
+
+### Tests Added
+
+- `test_watch_nearest_group_readback_counts_only_members_actually_marked`
+  (`tests/test_crew_console.py`) -- a `Group` whose membership names an id the store has lost must
+  fall back to the single-contact readback, not say "Watching two.", and must register exactly one
+  task. Monkeypatches `store.group_for_contact` to return the stale `Group`, which is the exact
+  condition `GroupStore.reconcile` can leave behind between a reconcile and a command.
+- `test_a_watched_group_that_starts_moving_speaks_one_line_not_one_per_member`
+  (`tests/test_callouts.py`) -- three watched grouped members start moving on the same tick (three
+  real `CONTACT_MOTION_CHANGED` events, asserted); three scheduler ticks spread across the window
+  must yield exactly one spoken line.
+- `test_group_callout_member_id_names_exactly_one_live_member` -- the keeper is deterministic, is
+  one of the live members, and is stable across calls.
+- `test_group_callout_member_id_is_none_when_the_group_has_shrunk` -- the fewer-than-two guard: a
+  stale group suppresses nothing, rather than silencing the one real member.
+- `test_an_ungrouped_watched_contacts_motion_callout_is_untouched` -- regression guard; the
+  suppression keys off group membership only.
+
+### Non-decorative test verification (revert-and-confirm)
+
+Done on a scratch copy of `callouts.py` (never `git checkout --`, which would discard unstaged
+work). With the suppression's condition forced false,
+`test_a_watched_group_that_starts_moving_speaks_one_line_not_one_per_member` fails with
+`assert 3 == 1` and the three identical lines `['ground, moving.', 'ground, moving.', 'ground,
+moving.']` -- i.e. the flood itself, reproduced.
+
+**The first version of that test passed with the fix disabled**, and it is worth recording why,
+because it is a trap any test of this filter will hit: `tick` speaks at most one line per call, so
+a single tick asserts nothing about suppression, and a later tick far enough away to be past
+`busy_until_sim` is also past `CALLOUT_MAX_AGE_S`, so the peers expire rather than being
+suppressed. The test only has teeth across *several* ticks that are each past the previous line's
+`busy_until_sim` and all inside `CALLOUT_MAX_AGE_S` -- which the final version asserts explicitly
+rather than leaving to the reader.
+
+### Test-impact check (role step 1b)
+
+Both change requests named exact file:line locations, and both existed. Grepped the suite for
+tests touching the modified modules: every existing `_WATCHED_ONLY_KINDS` test
+(`test_callouts.py`'s motion/range-crossing/engagement family) uses a **single** contact, which
+cannot form a `Group` (`GROUP_REPORTING_MIN_MEMBERS` is 2), so none of them changes behaviour --
+consistent with the suite going 1470 -> 1475 with no failures and nothing needing modification.
+No existing test was modified in this round.
+
+### Checks
+
+**body-layer/** (`cd body-layer`):
+- `ruff format src tests`: pass (115 files unchanged)
+- `ruff check src tests`: pass
+- `mypy src`: pass (53 source files, no issues)
+- `pytest tests -q`: pass -- **1475 passed, 4 xfailed** (branch baseline `1470 passed, 4 xfailed`;
+  +1 for the security fix, +4 for the performance fix)
+
+**audio-adapter/**: not touched this round (`git diff --name-only` confirms the diff is three
+`body-layer/` files), so its suite was not re-run; its round-1 result of 222 passed / 1 skipped
+stands.
+
+### Notable Discoveries
+
+- **The performance review's option A -- "the group is moving" -- contradicts
+  `_WATCHED_ONLY_KINDS`' own existing docstring, which neither review cites.** That docstring
+  already explains why these kinds are *not* folded into a group's line: they render through
+  `_contact_report_text`'s `event_clause`/`lead` affixes ("Getting closer, ", ", moving"), which
+  `render_group_report`/`render_group_disclosure` have no concept of, "so folding one into a
+  group's own line would silently drop the very fact the event exists to report." So the
+  suppression is implemented as specified -- one line, the leading member's, affix intact -- which
+  satisfies the decided "one line for the group" in *cardinality*. The line's **wording** still
+  names one member. Building a group-level rendering of these kinds would need new templates that
+  carry the affix at group grain, which is well beyond the ~6-line mitigation and is a product
+  question, not an implementation one. Flagged rather than resolved unilaterally; the docstring now
+  records the tension in-code so it is not re-discovered.
+- **The security fix's own call sites were already shaped to absorb it.** `if group_size > 1` /
+  `if not found` needed no change: a group that has shrunk to one marked member now takes the
+  single-contact branch automatically, and `found` already covered the resolved-contact-failed
+  case. This is why the fix is three lines -- the branch structure was right, only the number
+  flowing into it was wrong.
+- **No overlap with `fix/callout-observability-gate`.** That branch adds an observability gate at
+  `CalloutScheduler.tick`'s `callout_observable` call sites; this change touches only the
+  grouped-contact suppression earlier in the same filter loop and adds no `callout_observable`
+  call. The two should merge without conflict beyond adjacent-line context in `tick`.
