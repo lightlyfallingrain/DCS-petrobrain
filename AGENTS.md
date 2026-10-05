@@ -48,6 +48,24 @@ attention is elsewhere will keep being broken. This one is structural instead.
      signal the accumulation destroyed. The 41 already-ambiguous ones were left in place rather than
      guessed at.
 
+     **Near-miss 2026-10-06, and it is the one hole in this rule: an agent can produce a *second*
+     commit after its report.** A Debugger delivered `0825415`, which was cherry-picked; it then sent
+     a follow-up message with `76c3550` — a docs-only correction it had made after reading a
+     measurement sent to it mid-run. The branch was deleted on the strength of the *first* harvest,
+     with the second commit unharvested, and it survived only because a deleted branch's objects are
+     still reachable until `gc`. It is now pinned at `refs/keep/debugger-17-correction`.
+
+     **So the check before `git branch -D` is not "did I cherry-pick its report's sha" but "is the
+     branch tip the sha I harvested".** One command:
+
+     ```sh
+     git rev-parse worktree-agent-<id>   # must equal the sha you picked
+     ```
+
+     A mismatch means there is work you have not taken. This matters more as agents are messaged
+     mid-run — an agent that is still live can commit again after reporting, and nothing announces
+     it except the agent choosing to say so.
+
      `--force` is not needed, and that was established by testing rather than assumed: a plain
      remove succeeds on a clean worktree, succeeds when the only leftovers are **gitignored** build
      artifacts, and refuses only when genuinely untracked files are present. **That refusal is the
