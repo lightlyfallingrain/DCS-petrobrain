@@ -1611,8 +1611,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   hears it anymore (recorded in the plan's own "Second-order effect" section). Does not invalidate
   any downstream assumption and does not change what the next milestone should be.
 
-- [ ] **Redundant group disclosure — Reviewer APPROVED 2026-10-05, not yet DoD'd, not yet
-  merged.** `fix/redundant-group-disclosure`. A second, speech-layer duplicate-report path one
+- [x] **Redundant group disclosure — Reviewer, Security and DoD all APPROVED 2026-10-05, merged
+  the same day (`2ae34cc`); live acceptance still outstanding.** `fix/redundant-group-disclosure`. A second, speech-layer duplicate-report path one
   level above the merge-echo fix above: a `belief.groups.Group`'s **first** disclosure used to
   always speak the full roster the instant two-plus members first clustered, even when every one
   of those members had already been announced individually — directly, or via a merge-echo the
