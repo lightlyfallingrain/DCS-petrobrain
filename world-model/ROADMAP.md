@@ -984,6 +984,14 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   rule retuning `NEAR_FACT_RADIUS_M`, and the speech-priority wiring) is `plans/
   terrain-feature-probing/implementation-rev3.md`'s to describe; not duplicated here.
 
+  **DoD mechanical checks passed, 2026-10-05, `feature/terrain-callout-stages-345` — not yet
+  merged.** World-model: 548 passed / 3 skipped; body-layer: 1434 passed / 4 xfailed. Reviewer
+  (round 2), Security deep analysis and Performance (MONITOR) all APPROVED. Live acceptance of
+  the terrain qualifier itself (does "next valley"/"beyond the ridge" fire where the pilot would
+  say it, does it ever displace something more useful) is outstanding and rides along with the
+  already-pending `fix/contact-report-flood` / `fix/redundant-group-disclosure` sortie rather
+  than needing its own flight — see `body-layer/ROADMAP.md`'s "Live acceptance debt" list.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
