@@ -73,6 +73,9 @@ class FakeAircraftClient:
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
+    def get_line_of_sight_latest(self) -> dict[str, Any] | None:
+        return None
+
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return {
             "fields": {"middle_list_text": "Infantry"},

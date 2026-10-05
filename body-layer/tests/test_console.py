@@ -260,6 +260,15 @@ def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
         "project_terrain_aware",
         lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
     )
+    # `terrain_divide_qualifier` (`plans/terrain-feature-probing/plan.md`
+    # Revision 3) queries `store.reader.features_in_bbox` directly rather
+    # than through `describe_position` -- `_FAKE_CONN` has no `feature_
+    # bbox` table either, so stub the divide count to 0.
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
+    )
     return EnrichmentContext(
         conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
     )

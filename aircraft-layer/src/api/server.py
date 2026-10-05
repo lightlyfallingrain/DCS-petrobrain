@@ -103,6 +103,14 @@ the body/brain process, on either Windows or Mac (compute topology note in
   has moved at all (`plans/inbound-speech/plan.md` Stage 5). A pure,
   idempotent read of a *state*, not a queue: the capture process polls it
   tens of times a second and must never consume anything by asking.
+  **Since `plans/spu8-intercom/plan.md` Stage 2, the served `"intercom"`
+  field is already gated by the SPU-8 switches** (`_handle_ptt_state`
+  combines this with `Spu8Cache`) -- see that function's own docstring.
+  `"radio"` is untouched.
+- `GET /spu8/state` -> the SPU-8 intercom panel (pilot NET-1, co-pilot ICS
+  power, volume), or `null` before the first line arrives
+  (`plans/spu8-intercom/plan.md` Stage 1). Same shape/lifecycle as
+  `/ptt/state`.
 - `GET /unit_velocity/latest` -> the most recent `UnitVelocitySnapshot`
   (`plans/movement-detection/plan.md` Stage 1) as JSON, or JSON `null` on
   the same "not an error" basis as every other `/latest` endpoint. A
@@ -113,6 +121,27 @@ the body/brain process, on either Windows or Mac (compute topology note in
   1 Hz polls) -- silently destroying the provenance the dual-clock schema
   exists to preserve. The join (by `unit_name`, within a skew bound) is
   `perception.motion`'s job on the body-layer side, not this layer's.
+
+- `GET /line_of_sight/latest` -> the most recent `LineOfSightSnapshot`
+  (`plans/dcs-driven-los/plan.md`, X-B29) as JSON, or JSON `null` on the
+  same "not an error" basis as every other `/latest` endpoint. A separate
+  endpoint from `/world_objects/latest`/`/unit_velocity/latest`, same
+  "separate feed, separate clock, joined client-side by `unit_name`"
+  reasoning as `/unit_velocity/latest`'s own docstring.
+- `POST /command/look_direction` -> the aircraft layer's fifth
+  inbound/write path (`plans/dcs-driven-los/plan.md` SS9). Body
+  `{"hour": <int 0..11>, "fov_half_deg": <int 5..180>}`; forwards to
+  `collector.command_sender.LookDirectionSender.send_look_direction`,
+  which fires the JSON command at the LOS Hook script's own inbound UDP
+  listener (not Export.lua's -- see that sender's own docstring for why),
+  and responds `200 {"ok": true}` on the same "attempted the call" contract
+  as `/command/petrovich_search`. `400 {"error": ...}` on a missing/
+  out-of-range `hour`/`fov_half_deg` or non-JSON body; `503
+  {"error": "look direction not configured"}` if this server was built
+  without a `look_direction_sender`; a send failure propagates as
+  `500 {"error": ...}`, same posture as `/command/petrovich_search`
+  (a dropped look-direction push is a real coverage gap, not an opaque
+  display string to swallow).
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -143,14 +172,21 @@ from urllib.parse import urlparse
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
+    LineOfSightCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
     WorldObjectsCache,
 )
-from collector.command_sender import CommandSender, CommandSendError, SearchMode
+from collector.command_sender import (
+    CommandSender,
+    CommandSendError,
+    LookDirectionSender,
+    SearchMode,
+)
 from collector.text_sender import TextOverlaySender
 
 logger = logging.getLogger(__name__)
@@ -162,11 +198,14 @@ DEFAULT_PORT = 7791
 _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
+_LINE_OF_SIGHT_LATEST_PATH = "/line_of_sight/latest"
 _PTT_STATE_PATH = "/ptt/state"
+_SPU8_STATE_PATH = "/spu8/state"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
+_COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
 _F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 _AUDIO_PLAY_PATH = "/audio/play"
 _AUDIO_STOP_PATH = "/audio/stop"
@@ -174,6 +213,18 @@ _AUDIO_STOP_PATH = "/audio/stop"
 #: `SearchMode`'s two valid wire values -- checked against the request
 #: body's `mode` field before forwarding to `CommandSender.send_command`.
 _VALID_SEARCH_MODES: tuple[SearchMode, ...] = ("forward", "boresight")
+
+#: `POST /command/look_direction`'s own range validation (`plans/
+#: dcs-driven-los/plan.md` SS9b) -- the collector-side layer of the
+#: three-deep defense (body-layer -> collector -> Hook) the Security plan
+#: review's Finding 4 confirmed sound. `0..11` is an o'clock hour
+#: (`perception.gaze`'s own granularity on the body-layer side);
+#: `5..180` degrees half-angle is the Hook's own accepted range (SS9b),
+#: 180 being the honest full-circle ceiling, never a fallback.
+_LOOK_DIRECTION_HOUR_MIN = 0
+_LOOK_DIRECTION_HOUR_MAX = 11
+_LOOK_DIRECTION_FOV_MIN_DEG = 5
+_LOOK_DIRECTION_FOV_MAX_DEG = 180
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -195,11 +246,41 @@ def _handle_unit_velocity_latest(
     return None if snapshot is None else snapshot.to_dict()
 
 
-def _handle_ptt_state(cache: PttCache) -> dict[str, Any] | None:
+def _handle_line_of_sight_latest(
+    cache: LineOfSightCache,
+) -> dict[str, Any] | None:
+    snapshot = cache.latest()
+    return None if snapshot is None else snapshot.to_dict()
+
+
+def _handle_ptt_state(cache: PttCache, spu8_cache: Spu8Cache) -> dict[str, Any] | None:
     """`null` until the trigger first moves. That is the ordinary startup
     state, not an error -- `Export.lua` sends a line only on change, so an
     untouched trigger produces nothing. A consumer reads `null` as "not
-    pressed", which is also what it means."""
+    pressed", which is also what it means.
+
+    **The served `"intercom"` field is already gated by the SPU-8 switches**
+    (`plans/spu8-intercom/plan.md` Stage 2, plan Decision 1): `"intercom"`
+    is `sample.intercom and spu8_gate_open`, where `spu8_gate_open` is
+    `False` whenever `spu8_cache.latest() is None` -- fail-safe-closed, an
+    unknown intercom state must not let capture through (plan Decision 3).
+    `"radio"` is untouched -- a full press is talking to ATC/another
+    player, independent of the SPU-8 gate. This is the entire capture-
+    gating mechanism: `audio-adapter`'s `DcsPTT` already reads `"intercom"`
+    verbatim off the wire, so no audio-adapter change is needed."""
+    sample = cache.latest()
+    if sample is None:
+        return None
+    spu8_sample = spu8_cache.latest()
+    spu8_gate_open = spu8_sample is not None and spu8_sample.gate_open
+    payload = sample.to_api_dict()
+    payload["intercom"] = sample.intercom and spu8_gate_open
+    return payload
+
+
+def _handle_spu8_state(cache: Spu8Cache) -> dict[str, Any] | None:
+    """`null` before the first SPU-8 line arrives -- same "not an error"
+    posture as `/ptt/state`."""
     sample = cache.latest()
     return None if sample is None else sample.to_api_dict()
 
@@ -233,6 +314,9 @@ def _make_handler(
     audio_sender: AudioPlaybackSender | None,
     unit_velocity_cache: UnitVelocityCache,
     ptt_cache: PttCache,
+    spu8_cache: Spu8Cache,
+    line_of_sight_cache: LineOfSightCache,
+    look_direction_sender: LookDirectionSender | None,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -250,8 +334,16 @@ def _make_handler(
                     200, _handle_unit_velocity_latest(unit_velocity_cache)
                 )
                 return
+            if path == _LINE_OF_SIGHT_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_line_of_sight_latest(line_of_sight_cache)
+                )
+                return
             if path == _PTT_STATE_PATH:
-                self._respond_json(200, _handle_ptt_state(ptt_cache))
+                self._respond_json(200, _handle_ptt_state(ptt_cache, spu8_cache))
+                return
+            if path == _SPU8_STATE_PATH:
+                self._respond_json(200, _handle_spu8_state(spu8_cache))
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
@@ -276,6 +368,9 @@ def _make_handler(
                 return
             if path == _COMMAND_PETROVICH_SEARCH_PATH:
                 self._handle_command_petrovich_search()
+                return
+            if path == _COMMAND_LOOK_DIRECTION_PATH:
+                self._handle_command_look_direction()
                 return
             if path == _AUDIO_PLAY_PATH:
                 self._handle_audio_play()
@@ -339,6 +434,69 @@ def _make_handler(
 
             try:
                 command_sender.send_command(mode)
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_look_direction(self) -> None:
+            if look_direction_sender is None:
+                self._respond_json(503, {"error": "look direction not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            hour = data.get("hour")
+            if (
+                isinstance(hour, bool)
+                or not isinstance(hour, int)
+                or not (_LOOK_DIRECTION_HOUR_MIN <= hour <= _LOOK_DIRECTION_HOUR_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'hour' must be an integer in "
+                            f"[{_LOOK_DIRECTION_HOUR_MIN}, "
+                            f"{_LOOK_DIRECTION_HOUR_MAX}], got {hour!r}"
+                        )
+                    },
+                )
+                return
+
+            fov_half_deg = data.get("fov_half_deg")
+            if (
+                isinstance(fov_half_deg, bool)
+                or not isinstance(fov_half_deg, int)
+                or not (
+                    _LOOK_DIRECTION_FOV_MIN_DEG
+                    <= fov_half_deg
+                    <= _LOOK_DIRECTION_FOV_MAX_DEG
+                )
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'fov_half_deg' must be an integer in "
+                            f"[{_LOOK_DIRECTION_FOV_MIN_DEG}, "
+                            f"{_LOOK_DIRECTION_FOV_MAX_DEG}], got {fov_half_deg!r}"
+                        )
+                    },
+                )
+                return
+
+            try:
+                look_direction_sender.send_look_direction(hour, fov_half_deg)
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return
@@ -431,16 +589,22 @@ class TelemetryAPIServer:
         audio_sender: AudioPlaybackSender | None = None,
         unit_velocity_cache: UnitVelocityCache | None = None,
         ptt_cache: PttCache | None = None,
+        spu8_cache: Spu8Cache | None = None,
+        line_of_sight_cache: LineOfSightCache | None = None,
+        look_direction_sender: LookDirectionSender | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
-        # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`
-        # default to a fresh, never-populated cache/queue rather than being
-        # required -- keeps every existing `TelemetryAPIServer(cache,
-        # host=..., port=...)` call site (tests included) working unchanged;
-        # the corresponding `/latest` (or `/f10_commands/poll`) endpoint on
-        # such a server just always answers `null` (or `[]`), same as an
-        # empty cache would. `text_sender`/`command_sender`/`audio_sender`
-        # default to `None` rather than a real sender for the same reason --
+        # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
+        # `spu8_cache` default to a fresh, never-populated cache/queue
+        # rather than being required -- keeps every existing
+        # `TelemetryAPIServer(cache, host=..., port=...)` call site (tests
+        # included) working unchanged; the corresponding `/latest` (or
+        # `/f10_commands/poll`) endpoint on such a server just always
+        # answers `null` (or `[]`), same as an empty cache would -- and
+        # `/ptt/state`'s served `"intercom"` correctly reads as fail-safe-
+        # closed (plan Decision 3) against a never-populated `Spu8Cache`.
+        # `text_sender`/`command_sender`/`audio_sender` default to `None`
+        # rather than a real sender for the same reason --
         # `/text/push`/`/command/petrovich_search`/`/audio/play` answer
         # `503` rather than crashing when they aren't configured.
         self._cache = cache
@@ -468,9 +632,16 @@ class TelemetryAPIServer:
             else UnitVelocityCache()
         )
         self._ptt_cache = ptt_cache if ptt_cache is not None else PttCache()
+        self._spu8_cache = spu8_cache if spu8_cache is not None else Spu8Cache()
+        self._line_of_sight_cache = (
+            line_of_sight_cache
+            if line_of_sight_cache is not None
+            else LineOfSightCache()
+        )
         self._text_sender = text_sender
         self._command_sender = command_sender
         self._audio_sender = audio_sender
+        self._look_direction_sender = look_direction_sender
         self._host = host
         self._port = port
         self._httpd: ThreadingHTTPServer | None = None
@@ -509,6 +680,9 @@ class TelemetryAPIServer:
                 self._audio_sender,
                 self._unit_velocity_cache,
                 self._ptt_cache,
+                self._spu8_cache,
+                self._line_of_sight_cache,
+                self._look_direction_sender,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

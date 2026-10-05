@@ -661,6 +661,14 @@ def check_visibility(
     always populated regardless of which gate fired. No change to this
     function's existing return value or gate order.
 
+    **Gate 4 (terrain LOS), as of `plans/dcs-driven-los/plan.md` (X-B29):**
+    `candidate.live_los_clear` (a DCS-driven, true-to-true verdict joined
+    onto the candidate upstream, `naked_eye_source.py`) is consulted first
+    when it is not `None`; world-model's offline `line_of_sight_clear`
+    primitive is the fallback, exactly as before, whenever no live verdict
+    exists this poll. See `WorldObjectCandidate.live_los_clear`'s own
+    docstring for the tri-state contract.
+
     **Merge note (2026-09-20).** BL-9 and cones slice 1 were developed in
     parallel and their interaction produced two defects that neither
     branch's own tests could see, both fixed here. First, BL-9 computed the
@@ -766,7 +774,19 @@ def check_visibility(
         _record(GateOutcome.RANGE_OR_SIZE)
         return None
 
-    if not line_of_sight_clear(conn, theatre, observer, target):
+    # `plans/dcs-driven-los/plan.md` (X-B29): a live, DCS-driven verdict
+    # (true position to true position, computed collector-side) takes
+    # priority over world-model's offline terrain-only primitive. `None`
+    # means no live verdict this poll (feed absent, this unit outside the
+    # queried wedge, or too stale) -- the `elif` branch below is then
+    # exactly today's code, unchanged, which is also what every test
+    # fixture and the replay harness still exercises (candidates built
+    # without `live_los_clear` default to `None`).
+    if candidate.live_los_clear is not None:
+        if not candidate.live_los_clear:
+            _record(GateOutcome.TERRAIN_LOS)
+            return None
+    elif not line_of_sight_clear(conn, theatre, observer, target):
         _record(GateOutcome.TERRAIN_LOS)
         return None
 

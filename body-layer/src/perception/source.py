@@ -268,6 +268,15 @@ class Observation:
     #: (test fixtures included) keeps compiling. `belief.percept.percept_of`
     #: carries this straight through -- see that module's own field.
     position_uncertainty: PositionUncertainty | None = None
+    #: `plans/dcs-driven-los/plan.md` (X-B29) -- the DCS-driven, true-to-true
+    #: LOS verdict (`building_clear and terrain_clear`) joined onto this
+    #: observation's own cluster, when every member agrees (including
+    #: all-`None`), else `None` -- `apparent_motion`'s own "identical keeps,
+    #: disagreement degrades" rule, generalised. `None` is the default and
+    #: means "no live verdict" (unknown, never a guessed clear/masked) --
+    #: set by `naked_eye_source.py` only for admitted candidates; the hybrid
+    #: channel has no geometric gate to source it from and never sets this.
+    live_los_clear: bool | None = None
 
 
 @runtime_checkable
