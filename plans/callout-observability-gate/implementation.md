@@ -228,3 +228,92 @@ printed worktree paths.)
   constant the test does not read. This generalises beyond this file: several tests in this suite
   derive thresholds from the constants they exercise, which is good practice for the test and a
   trap for its counterfactual.
+
+---
+
+## Round 4 — security deep analysis required fixes
+
+Source: `plans/callout-observability-gate/security-review.md` (APPROVED WITH REQUIRED FIXES).
+Two required fixes plus its "fix before public release" item 3, taken now because two agents had
+separately named it as the residual risk.
+
+### Files changed
+
+- `body-layer/src/belief/callouts.py` — the gate now requires `event.engaged is True` in addition
+  to kind membership, and the three places that describe the exemption (module docstring,
+  `_OBSERVABILITY_EXEMPT_KINDS`' docstring and bar, the inline comment at the gate) all say
+  **per-transition** rather than per-kind.
+- `body-layer/tests/test_callouts.py` — the provenance correction, plus three tests.
+- this file — the round-3 sweep claim corrected in place.
+
+### Required fix 1 — the exemption is per-transition
+
+**The decision taken, and it is a fork the review left open.** Narrowed to `engaged is True`
+rather than ratifying the kind-level form. Two reasons, both recorded in the commit: it is what
+the written admission bar actually licenses (property (1) is a *threat cue the pilot needs in
+order to evade*, and a "Safe from" line is not one), and the user's standing complaint about
+Petrovich is report *volume*, so the default should be to say less about what he cannot see.
+The reviewer's counter-argument — that a pilot who heard "Danger" is arguably owed the "Safe
+from" that closes it — is real, and is queued for the user to reverse. **It is not settled
+engineering; it is the conservative branch of a live disclosure question.**
+
+**What made it a defect rather than a preference**: the code and the docstring disagreed about
+which branch had been chosen. The bar's own closing sentence says *"Either property alone admits
+something that should stay gated"*, and the leaving transition was admitted on property (2)
+alone.
+
+### Required fix 2 — the surviving false attribution
+
+`test_callouts.py:1929` still read *"user decision 2026-10-06"*, twelve lines above a docstring
+in the same file saying *"not by the user"*. Committed separately from the mechanism, and
+round 3's "swept throughout" claim above was corrected in place rather than rewritten — see that
+entry.
+
+### Finding 3 — two assertions, no production change
+
+- `test_exempt_line_discloses_only_belief_derived_facts` renders the exempt line the way it
+  renders in flight: through `_contact_report_text` with an `EnrichmentContext`, which also
+  speaks believed clock hour and believed range. The contact is astern with
+  `last_observable_sim is None` — never once observable — so the test is asserting what he is
+  willing to volunteer about something he has never been able to see.
+- `test_observability_exemption_set_membership_is_pinned` asserts the set's exact contents.
+  Growing it is now a two-part deliberate edit: that assertion, and the per-transition condition
+  at the gate.
+
+### Counterfactual run
+
+One, against the **shipped** file rather than an intermediate: reverting the `engaged is True`
+condition (`exempt = event.kind in _OBSERVABILITY_EXEMPT_KINDS`) fails
+`test_engagement_change_is_silent_about_leaving_a_masked_envelope` with
+`AssertionError: assert ['Safe from ZU-23-3 Sergey.'] == []` — the exact line the review
+predicted, from the production path rather than a reconstruction. Restored from a scratch copy
+(never `git checkout --`) and confirmed byte-identical, `shasum 207f191360cade4e7e232adb90505b8b036df3a2`.
+It perturbs the **code path**, not a constant the test imports, per round 3's own discovery.
+
+### Checks (round 4)
+
+(`body-layer/` only, the sole subproject touched. Worktree has no `.venv`; the main checkout's
+`body-layer/.venv` binaries were used by absolute path with `cwd` inside the worktree's
+`body-layer/`, after proving `belief.callouts` imports from the worktree's own `src`.)
+
+- `ruff format --check src tests`: **pass**
+- `ruff check src tests`: **pass**
+- `mypy src` (cwd `body-layer/`): **pass**
+- `pytest tests -q`: **pass** — **1478 passed, 4 xfailed** (baseline 1475/4, +3 new tests)
+
+### Notable discoveries (round 4)
+
+- **A docstring written to compensate for a missing test had itself gone stale, and writing the
+  test is what found it.** The `_OBSERVABILITY_EXEMPT_KINDS` paragraph recorded the exempt line's
+  enriched form as `"Danger, ZU-23-3, six o'clock, 1.0 km."`; the real render is
+  `"Danger, ZU-23-3 Sergey, 6 o'clock, 1 kilometre."` — `belief.speech`'s `_format_range_km` had
+  replaced that wording (`speech.py:162`) and the prose did not follow. Round 3 took this
+  paragraph as "Optional 1" *in place of* Round 2's "Optional 2" test, so the cheaper half was
+  taken and the thing it substituted for was what would have kept it honest. Prose explaining
+  what a test would have asserted is not a weaker version of the test; it is a claim with no
+  mechanism holding it true.
+- **`-k` substring selection silently skipped a new test.** `-k "engagement or exemption"` matched
+  the leaving-transition and membership tests but **not**
+  `test_exempt_line_discloses_only_belief_derived_facts` — "exempt" is not "exemption". It
+  reported `4 passed` and looked like full coverage of the new work; the full suite then failed on
+  the untested one. Run the full suite before believing a `-k` selection was representative.

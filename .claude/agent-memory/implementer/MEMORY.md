@@ -134,3 +134,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [DCS-driven LOS Stages 1-3](project_dcs_driven_los_stage1_3.md) — snapshot-vs-worktree edit trap; relaxed "exactly one %d" test to two, documented why; tolerance fix was doc-only.
 - [Subject-discriminating gate breadth](feedback_subject_discriminating_gate_breadth.md) — breadth comes from the kinds set, not the call sites; test an exemption's bar against the non-members.
 - [Counterfactuals must not perturb an imported constant](feedback_counterfactual_must_not_perturb_a_constant_the_test_imports.md) — the test's timeline moves with it; it fails open.
+- [Prose is no substitute for the test it replaces](feedback_prose_is_not_a_substitute_for_the_test_it_replaces.md) — a quoted example string in a docstring is an unasserted expectation; it went stale.
+- [pytest -k can silently skip a new test](feedback_pytest_k_substring_skips_new_tests.md) — "exempt" doesn't match "exemption"; 4 passed looked like full coverage.
