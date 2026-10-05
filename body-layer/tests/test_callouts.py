@@ -1909,13 +1909,16 @@ def test_ungrouped_singleton_output_is_byte_identical() -> None:
 # The no-omniscience gate at the *speech* choke point. `plans/
 # sortie-2026-09-26-fixes/plan.md` Stage 1 wired the observability gate
 # into `ContactStore.tick`'s fifth and sixth blocks only (`CONTACT_MOTION_
-# CHANGED`, `CONTACT_RANGE_CROSSED`); the 2026-10-05 sortie then spoke 20
-# lines about 5/6/7 o'clock -- body azimuths 150/180/150 against `_CO_
-# PILOT_MASK.rear_cutoff_deg`'s 130 -- every one of them either a
-# `CONTACT_CLASSIFICATION_CHANGED` line or a group-disclosure line, neither
-# of which passes through either gated block. These tests cover the two
-# newly-gated paths plus the two directions this fix must *not* break
-# (grace window, and deferral rather than loss).
+# CHANGED`, `CONTACT_RANGE_CROSSED`); the 2026-10-05 sortie then spoke 17
+# *unprompted* lines about 5/6/7 o'clock -- body azimuths 150/180/150
+# against `_CO_PILOT_MASK.rear_cutoff_deg`'s 130 -- every one of them
+# either a `CONTACT_CLASSIFICATION_CHANGED` line or a group-disclosure
+# line, neither of which passes through either gated block. (20
+# masked-hour lines in all; the other 3 answered a `report` and are the
+# pull path, deliberately not gated -- `plans/post-review-fixes/
+# explore-notes.md` §9.) These tests cover the two newly-gated paths plus
+# the two directions this fix must *not* break (grace window, and deferral
+# rather than loss).
 #
 # Geometry: `_observation`'s fixed `bearing_deg=0.0`/`range_m=1000.0` put
 # every contact in this file at `(1000.0, 0.0, alt 500.0)`, so ownship at

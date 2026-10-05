@@ -11,8 +11,8 @@ A gate on *what Petrovich says* belongs in `belief/callouts.py::CalloutScheduler
 **Why:** `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 put the cockpit-mask observability gate at
 emission, inside `ContactStore.tick`'s fifth and sixth blocks. That reached exactly two event kinds
 (`CONTACT_MOTION_CHANGED`, `CONTACT_RANGE_CROSSED`) and nothing else. Nine days later the
-2026-10-05 sortie spoke 20 lines about 5/6/7 o'clock — body azimuths 150/180/150 against
-`_CO_PILOT_MASK.rear_cutoff_deg = 130.0` — every one of them either
+2026-10-05 sortie spoke **17 unprompted** lines about 5/6/7 o'clock — body azimuths 150/180/150
+against `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` — every one of them either
 `CONTACT_CLASSIFICATION_CHANGED` or **group disclosure**. Group disclosure was unreachable *in
 principle*: `tick` reads `store.groups` as a second candidate source and mints no `Event` for a
 group's trigger (`plans/group-reporting/plan.md` Stage 4), so there is no emission site to gate.
@@ -30,7 +30,11 @@ Fixed in `plans/callout-observability-gate/debug.md`.
   via `note_reply` (occupancy bookkeeping, gates nothing). Never filter the pull path by
   observability — belief survives the aircraft turning away and the pilot *asked*. There it bites
   as an absence claim (`render_no_view`) or freshness phrasing. Cross-plan constraint from
-  `plans/crew-query-path/plan.md`.
+  `plans/crew-query-path/plan.md`. **`_handle_report` is a genuine third producer of masked-hour
+  output and is correct** — 3 of the sortie's 20 masked-hour lines, all within 4.4 s of a `report`
+  command (`plans/post-review-fixes/explore-notes.md` §9). When counting a push-path reporting
+  defect from a speech log, **split by `acted_token` proximity first** or you will over-count it and
+  then "fix" a documented decision. 20 vs. 17 here.
 - **Deferred vs. lost is a real choice in `tick`.** Skipping *before* the `CALLOUT_MAX_AGE_S` check
   leaks the event forever (nothing ever consumes it); skipping *after* it defers with a bound. Gate
   after. Contrast `WATCH_REPORT_MIN_GAP_S`, which deliberately consumes ("lost, not deferred").
