@@ -102,9 +102,13 @@ provider (`Spu8GateState(gate_open: bool, volume: float)`), consulted once per i
 thread (`_run`), immediately before `self._player.play(path)` — see Decision 2 for why this single
 point, not enqueue time. If closed: log, clean up the temp file, do not call `play()`, move on —
 no special-casing for `urgent` (an off switch means off, unconditionally). If open: scale the WAV's
-PCM samples in place by the current `volume` (0..1 linear) via stdlib `audioop.mul(frames,
-sampwidth, factor)` — chosen over hand-rolled sample math or a `winsound` volume call, since
-`winsound` has none (confirmed, `audio-adapter/ROADMAP.md`) — then play. "Next-utterance
+PCM samples by the current `volume` (0..1 linear) with stdlib `wave` + `array` (16-bit signed
+samples: `array('h')`, byteswap on big-endian hosts, multiply, clamp to int16, write back) — a
+`winsound` volume call is impossible (`winsound` has none, `audio-adapter/ROADMAP.md`). **Not
+`audioop`** (main-loop amendment 2026-10-05): it was deprecated in 3.11 and removed in Python 3.13,
+and the collector's `requires-python = ">=3.11"` does not pin below 3.13 — on a 3.13 Windows
+interpreter `import audioop` fails. If the WAV is not 16-bit PCM, play it unscaled and log once
+rather than guess — then play. "Next-utterance
 granularity" per spec: the factor used is whatever is current when this item reaches the front of
 the queue, not resampled mid-playback.
 
@@ -196,7 +200,7 @@ later touch-down in the same sortie (one-shot, mission-start-only — not re-arm
   for ~100ms during any switch flip.** By design this just drops audio momentarily (no replay
   buffer, per spec) — low risk, but worth confirming by ear it doesn't sound like a glitch/click
   rather than clean silence.
-- **Linear PCM scaling (`audioop.mul`) is not a perceptual loudness curve.** Accepted per the
+- **Linear PCM scaling is not a perceptual loudness curve.** Accepted per the
   spec's own reduced-scope language ("modify the audio waveform for volume... acceptable
   tradeoff"); revisit only if the knob feels non-linear in the cockpit.
 - **Stage 2 changes an existing test's expected payload.** `test_ptt.py`'s
