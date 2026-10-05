@@ -197,7 +197,17 @@ def scale_wav_volume(path: str, volume: float) -> None:
                 )
                 return
             raw_frames = reader.readframes(params.nframes)
-    except (wave.Error, OSError, EOFError):
+
+        samples = array("h")
+        samples.frombytes(raw_frames)
+    except (wave.Error, OSError, EOFError, ValueError):
+        # ValueError covers a WAV whose declared `nframes` exceeds the
+        # file's real size: `readframes` does not raise on a truncated
+        # `data` chunk -- it just returns however many bytes are actually
+        # there -- and if that byte count is odd, `array("h").frombytes()`
+        # raises. Same posture as this function's other malformed-input
+        # cases: play it unscaled rather than guess (Security deep
+        # analysis, SPU-8 intercom, 2026-10-05).
         logger.warning(
             "SPU-8 volume: %s could not be read as a WAV -- playing unscaled",
             path,
@@ -205,8 +215,6 @@ def scale_wav_volume(path: str, volume: float) -> None:
         )
         return
 
-    samples = array("h")
-    samples.frombytes(raw_frames)
     if sys.byteorder == "big":
         samples.byteswap()
 
@@ -424,7 +432,19 @@ class AudioPlaybackSender:
                 self._cleanup(path)
                 continue
 
-            scale_wav_volume(path, state.volume)
+            try:
+                scale_wav_volume(path, state.volume)
+            except Exception:
+                # Defense in depth, independent of scale_wav_volume's own
+                # guard: a future unguarded parse path in there must not
+                # be able to kill this worker thread for the rest of the
+                # sortie (Security deep analysis, SPU-8 intercom,
+                # 2026-10-05). Play the file unscaled rather than skip it.
+                logger.warning(
+                    "SPU-8 volume scaling failed for %s (playing unscaled)",
+                    path,
+                    exc_info=True,
+                )
             try:
                 self._player.play(path)
             except Exception:
