@@ -42,6 +42,7 @@ from .petrovich_indication import (
 )
 from .petrovich_wheel import PetrovichWheelParseError, PetrovichWheelSample
 from .ptt import PttParseError, PttSample
+from .spu8 import Spu8ParseError, Spu8Sample
 from .unit_velocity import (
     UnitVelocityParseError,
     UnitVelocitySample,
@@ -62,6 +63,8 @@ __all__ = [
     "PetrovichWheelSample",
     "PttParseError",
     "PttSample",
+    "Spu8ParseError",
+    "Spu8Sample",
     "TelemetryParseError",
     "TelemetrySample",
     "UnitVelocityParseError",

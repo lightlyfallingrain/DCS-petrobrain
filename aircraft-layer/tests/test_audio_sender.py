@@ -4,10 +4,12 @@ module's own docstring on why (Windows-only, unverified live behavior)."""
 
 from __future__ import annotations
 
+import io
 import os
 import threading
 import time
 import wave
+from array import array
 from collections.abc import Callable
 from pathlib import Path
 
@@ -17,8 +19,10 @@ from collector.audio_sender import (
     _MAX_QUEUE_LEN,
     AudioPlaybackSender,
     WavPlayer,
+    scale_wav_volume,
     wav_duration_s,
 )
+from collector.cache import Spu8GateState
 
 
 class _FakePlayer:
@@ -315,3 +319,175 @@ def test_wav_duration_returns_none_for_a_malformed_file(tmp_path: Path) -> None:
 
 def test_wav_duration_returns_none_for_a_missing_file(tmp_path: Path) -> None:
     assert wav_duration_s(str(tmp_path / "absent.wav")) is None
+
+
+# --- SPU-8 gate/volume (plans/spu8-intercom/plan.md Stage 3) --------------
+#
+# Consulted once per queued item, in the worker thread, immediately before
+# play() -- not at play_audio()/enqueue time (plan Decision 2). Closed
+# drops silently (no play() call, no special-casing for urgent); open
+# scales the WAV's PCM by the current volume via scale_wav_volume
+# (stdlib wave + array, not audioop -- see that function's own docstring).
+
+
+def _write_16bit_wav(path: Path, samples: list[int], *, rate: int = 22050) -> None:
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(array("h", samples).tobytes())
+
+
+def _read_16bit_samples(path: str) -> list[int]:
+    with wave.open(path, "rb") as r:
+        data = array("h")
+        data.frombytes(r.readframes(r.getnframes()))
+        return list(data)
+
+
+def test_gate_closed_drops_the_queued_line_without_playing() -> None:
+    player = _CapturingPlayer()
+    sender = AudioPlaybackSender(
+        player=player, gate_state=lambda: Spu8GateState(gate_open=False, volume=1.0)
+    )
+    sender.open()
+    try:
+        sender.play_audio(b"RIFF....fake wav bytes....", urgent=False)
+        time.sleep(0.2)
+    finally:
+        sender.close()
+
+    assert player.paths == []
+
+
+def test_gate_open_plays_the_queued_line() -> None:
+    player = _CapturingPlayer()
+    sender = AudioPlaybackSender(
+        player=player, gate_state=lambda: Spu8GateState(gate_open=True, volume=1.0)
+    )
+    sender.open()
+    try:
+        sender.play_audio(b"HELLO", urgent=False)
+        assert _wait_until(lambda: len(player.paths) == 1)
+    finally:
+        sender.close()
+
+    assert player.contents == [b"HELLO"]
+
+
+def test_gate_closed_drops_the_line_even_when_urgent() -> None:
+    """An off switch means off, unconditionally -- no special-casing for
+    urgent (plan Stage 3)."""
+    player = _CapturingPlayer()
+    sender = AudioPlaybackSender(
+        player=player, gate_state=lambda: Spu8GateState(gate_open=False, volume=1.0)
+    )
+    sender.open()
+    try:
+        sender.play_audio(b"URGENT-BUT-GATED", urgent=True)
+        time.sleep(0.2)
+    finally:
+        sender.close()
+
+    assert player.paths == []
+
+
+def test_default_gate_state_is_always_open_full_volume() -> None:
+    """The constructor default (`_always_open`) is a backward-compatibility
+    value for pre-existing call sites/tests, not a production path --
+    `AudioPlaybackSender()` with no `gate_state=` keeps playing exactly as
+    it did before this feature existed."""
+    player = _CapturingPlayer()
+    sender = AudioPlaybackSender(player=player)
+    sender.open()
+    try:
+        sender.play_audio(b"NOT-GATED", urgent=False)
+        assert _wait_until(lambda: len(player.paths) == 1)
+    finally:
+        sender.close()
+
+    assert player.contents == [b"NOT-GATED"]
+
+
+def test_scale_wav_volume_scales_16bit_pcm_samples(tmp_path: Path) -> None:
+    path = tmp_path / "tone.wav"
+    original = [1000, -2000, 32000, -32000, 0]
+    _write_16bit_wav(path, original)
+
+    scale_wav_volume(str(path), 0.5)
+
+    scaled = _read_16bit_samples(str(path))
+    assert scaled == [500, -1000, 16000, -16000, 0]
+
+
+def test_scale_wav_volume_clamps_to_int16_range(tmp_path: Path) -> None:
+    path = tmp_path / "loud.wav"
+    _write_16bit_wav(path, [32767, -32768])
+
+    # volume > 1.0 is not a value Export.lua is expected to send, but the
+    # clamp is defensive: this code never trusts the cockpit value blindly.
+    scale_wav_volume(str(path), 1.5)
+
+    scaled = _read_16bit_samples(str(path))
+    assert scaled == [32767, -32768]
+
+
+def test_scale_wav_volume_is_a_no_op_at_full_volume(tmp_path: Path) -> None:
+    """Skips the wave round-trip entirely at volume == 1.0 -- also what
+    keeps this module's own non-WAV fake-player test fixtures (plain ASCII
+    bytes, not real WAV files) working unchanged, since the default
+    gate_state provider reports full volume."""
+    path = tmp_path / "plain.wav"
+    path.write_bytes(b"not a real wav file at all")
+
+    scale_wav_volume(str(path), 1.0)  # must not raise
+
+    assert path.read_bytes() == b"not a real wav file at all"
+
+
+def test_scale_wav_volume_plays_unscaled_for_non_16bit_pcm(tmp_path: Path) -> None:
+    """8-bit PCM (sampwidth=1) is not guessed at -- left untouched, logged,
+    and played as-is."""
+    path = tmp_path / "eight-bit.wav"
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(1)
+        w.setframerate(22050)
+        w.writeframes(bytes([10, 20, 30]))
+    before = path.read_bytes()
+
+    scale_wav_volume(str(path), 0.5)
+
+    assert path.read_bytes() == before
+
+
+def test_scale_wav_volume_handles_a_malformed_file(tmp_path: Path) -> None:
+    path = tmp_path / "garbage.wav"
+    path.write_bytes(b"this is not a RIFF header at all")
+    before = path.read_bytes()
+
+    scale_wav_volume(str(path), 0.5)  # must not raise
+
+    assert path.read_bytes() == before
+
+
+def test_run_applies_volume_scaling_before_playback(tmp_path: Path) -> None:
+    """End-to-end through the worker thread: a real 16-bit WAV handed to
+    play_audio comes out scaled by the time the player sees it."""
+    player = _CapturingPlayer()
+    sender = AudioPlaybackSender(
+        player=player, gate_state=lambda: Spu8GateState(gate_open=True, volume=0.5)
+    )
+    sender.open()
+    try:
+        wav_path = tmp_path / "source.wav"
+        _write_16bit_wav(wav_path, [1000, -2000])
+        sender.play_audio(wav_path.read_bytes(), urgent=False)
+        assert _wait_until(lambda: len(player.contents) == 1)
+    finally:
+        sender.close()
+
+    with wave.open(io.BytesIO(player.contents[0]), "rb") as r:
+        data = array("h")
+        data.frombytes(r.readframes(r.getnframes()))
+    assert list(data) == [500, -1000]

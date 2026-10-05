@@ -22,11 +22,12 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    Spu8Cache,
     TelemetryCache,
     WorldObjectsCache,
 )
 from collector.server import CollectorServer
-from schema import PttParseError, PttSample
+from schema import PttParseError, PttSample, Spu8Sample
 
 
 class TestPttSample:
@@ -144,16 +145,21 @@ class TestCollectorRouting:
 
 class TestPttEndpoint:
     @pytest.fixture
-    def server(self) -> Iterator[tuple[str, PttCache]]:
+    def server(self) -> Iterator[tuple[str, PttCache, Spu8Cache]]:
         cache = PttCache()
+        spu8_cache = Spu8Cache()
         api = TelemetryAPIServer(
-            TelemetryCache(), host="127.0.0.1", port=0, ptt_cache=cache
+            TelemetryCache(),
+            host="127.0.0.1",
+            port=0,
+            ptt_cache=cache,
+            spu8_cache=spu8_cache,
         )
         api.open()
         thread = threading.Thread(target=api.serve_forever, daemon=True)
         thread.start()
         try:
-            yield f"http://127.0.0.1:{api.port}", cache
+            yield f"http://127.0.0.1:{api.port}", cache, spu8_cache
         finally:
             api.close()
             thread.join(timeout=5)
@@ -163,18 +169,35 @@ class TestPttEndpoint:
             return json.loads(response.read())
 
     def test_null_before_the_trigger_has_moved(
-        self, server: tuple[str, PttCache]
+        self, server: tuple[str, PttCache, Spu8Cache]
     ) -> None:
-        base_url, _ = server
+        base_url, _, _ = server
         assert self._get(base_url) is None
 
+    def test_intercom_is_gated_closed_with_no_spu8_data(
+        self, server: tuple[str, PttCache, Spu8Cache]
+    ) -> None:
+        """Plan Decision 3, fail-safe-closed: an unknown SPU-8 state must
+        not let capture through even though the raw trigger reading is at
+        the intercom stop -- `test_serves_the_raw_value_and_both_
+        predicates` below is the open-gate counterpart of this case
+        (`plans/spu8-intercom/plan.md` Stage 2's risk note)."""
+        base_url, cache, _ = server
+        cache.push(PttSample(11.423, 99.0, 0.5))
+        payload = self._get(base_url)
+        assert isinstance(payload, dict)
+        assert payload["intercom"] is False
+
     def test_serves_the_raw_value_and_both_predicates(
-        self, server: tuple[str, PttCache]
+        self, server: tuple[str, PttCache, Spu8Cache]
     ) -> None:
         """Both, deliberately: the raw value is the ground truth a consumer
         may want to debounce itself, and the booleans save every consumer
-        re-deriving the same two thresholds."""
-        base_url, cache = server
+        re-deriving the same two thresholds. The SPU-8 gate is open here
+        (both switches on) so `"intercom"` reflects the trigger reading
+        alone -- `plans/spu8-intercom/plan.md` Stage 2."""
+        base_url, cache, spu8_cache = server
+        spu8_cache.push(Spu8Sample(11.0, 98.0, net1=1.0, ics_power=1.0, vol=1.0))
         cache.push(PttSample(11.423, 99.0, 0.5))
         payload = self._get(base_url)
         assert payload == {
@@ -184,3 +207,28 @@ class TestPttEndpoint:
             "intercom": True,
             "radio": False,
         }
+
+    def test_intercom_is_gated_closed_when_either_spu8_switch_is_off(
+        self, server: tuple[str, PttCache, Spu8Cache]
+    ) -> None:
+        base_url, cache, spu8_cache = server
+        spu8_cache.push(Spu8Sample(11.0, 98.0, net1=0.0, ics_power=1.0, vol=1.0))
+        cache.push(PttSample(11.423, 99.0, 0.5))
+        payload = self._get(base_url)
+        assert isinstance(payload, dict)
+        assert payload["intercom"] is False
+        # "radio" is untouched by the SPU-8 gate either way (plan Stage 2).
+        assert payload["radio"] is False
+
+    def test_radio_is_not_gated_by_spu8(
+        self, server: tuple[str, PttCache, Spu8Cache]
+    ) -> None:
+        """A full press is talking to ATC/another player, independent of
+        the SPU-8 gate (plan Stage 2)."""
+        base_url, cache, spu8_cache = server
+        spu8_cache.push(Spu8Sample(11.0, 98.0, net1=0.0, ics_power=0.0, vol=1.0))
+        cache.push(PttSample(11.423, 99.0, 1.0))
+        payload = self._get(base_url)
+        assert isinstance(payload, dict)
+        assert payload["radio"] is True
+        assert payload["intercom"] is False
