@@ -295,3 +295,101 @@ stands.
   `CalloutScheduler.tick`'s `callout_observable` call sites; this change touches only the
   grouped-contact suppression earlier in the same filter loop and adds no `callout_observable`
   call. The two should merge without conflict beyond adjacent-line context in `tick`.
+
+  **Corrected in round 3 (review round 2's optional refinement 3): "without conflict" was too
+  strong and must not be read as licence to resolve blind.** A trial merge
+  (`git merge-tree --write-tree`) confirms `body-layer/src/belief/callouts.py` auto-merges cleanly
+  and coherently, which is the claim that matters, but **six other files conflict**:
+  `body-layer/tests/test_callouts.py`, `body-layer/BACKLOG.md`,
+  `docs/acceptance/2026-10-05-sortie-feedback.md` (add/add), and the `implementer`,
+  `performance-reviewer` and `security` `MEMORY.md` files. All look append-shaped, but
+  `test_callouts.py` is where both branches add test blocks and must be read rather than resolved
+  by taking either side.
+
+---
+
+## Round 3 -- review round 2's two required fixes
+
+Spec: `plans/sortie-2026-10-05-refinements/review-round2.md`. Two commits, mechanism and docs kept
+apart per the body-layer invariant.
+
+### Files Changed
+
+- `body-layer/src/belief/speech.py` -- new `may_be_callout_keeper(store, contact)` predicate, and
+  `group_callout_member_id` now elects the keeper among members that satisfy it, returning `None`
+  when none does. The "fewer than two members still resolve" guard still counts *every* resolving
+  member (it asks whether there is a cluster to speak for, which eligibility has no bearing on);
+  `_leading_index` is applied to the eligible subset, so an ineligible member can neither become
+  keeper nor shift which eligible member does.
+- `body-layer/src/belief/callouts.py` -- docstrings only. The two falsified claims corrected, the
+  new paragraph's back-reference narrowed to the no-folding half it actually endorses, and
+  `may_be_callout_keeper` named as what decides the surviving member.
+- `body-layer/tests/test_callouts.py` -- one new test, plus a one-line extension to each of two
+  existing ones (see Notable Discoveries).
+
+### Why a named predicate rather than an inline condition
+
+Required by the spec and worth restating: `fix/callout-observability-gate` adds an observability
+gate to this same filter loop, and once both land an *unobservable* keeper reaches the identical
+dead end -- peers consumed, keeper dropped, nothing spoken. The sibling branch already solved this
+shape for its group path (*"any one member observable is enough … requiring every member would
+silence a visibly-present group for the sake of one straggler behind the doorframe"*). With
+eligibility behind one named predicate, extending it is `and observable` in one place; with an
+inline condition it is a second special case bolted beside the first. The docstring says it is the
+single place keeper eligibility is decided, and why.
+
+### Tests Added
+
+- `test_a_watched_peer_still_speaks_when_the_groups_keeper_is_unwatched` -- the mixed-watched group
+  the review identified as uncovered: three cohering members, `min(member_contact_ids)` left
+  unwatched (precisely the member the old election kept, asserted rather than assumed), the other
+  two watched, all three starting to move. Asserts the keeper is one of the watched peers, and
+  that exactly one line is spoken -- the group is still suppressed to a single line, so the
+  2N-describes-to-2 saving is intact, but that line exists.
+
+### Counterfactual -- run, not reasoned
+
+Neutered the eligibility filter in place (`if True or may_be_callout_keeper(...)`) against a
+scratch backup of `speech.py`, restored by checksum afterwards (`8c8b79a6…`, verified identical):
+
+- The new test fails: `AssertionError: assert 'CONTACT_1' in {'CONTACT_2', 'CONTACT_3'}`.
+- A standalone probe over the same fixture reproduces the Reviewer's own observable exactly --
+  `keeper = CONTACT_1`, `watched = ['CONTACT_2', 'CONTACT_3']`, **`spoken = []`** reverted, against
+  `spoken = ['ground, moving.']` with the fix. So the test bites on the behaviour, not only on the
+  intermediate keeper assertion.
+
+### Checks (body-layer; `audio-adapter` not in this diff)
+
+Main checkout's binaries borrowed by absolute path, `cwd` inside the worktree's `body-layer/`.
+Imports proven worktree-local first: `belief.callouts.__file__`, `belief.speech.__file__`,
+`belief.attention.__file__` all under `.claude/worktrees/agent-a889ea41fda46b00a/body-layer/src/`,
+and `query.describe.__file__` under the worktree's own `world-model/src/`.
+
+- `ruff format --check src tests`: pass -- 115 files already formatted
+- `ruff check src tests`: pass -- All checks passed
+- `mypy src`: pass -- no issues in 53 source files
+- `pytest tests -q`: pass -- **1476 passed, 4 xfailed** (round-2 baseline 1475/4, +1 for the new
+  test)
+
+### Notable Discoveries
+
+- **Two existing tests broke on the contract change and neither was in the review's impact list.**
+  `test_group_callout_member_id_names_exactly_one_live_member` and
+  `test_group_callout_member_id_is_none_when_the_group_has_shrunk` are direct unit tests of
+  `group_callout_member_id`, and their fixtures leave `Contact.attention` at its `"normal"`
+  default -- so with eligibility enforced the function correctly returns `None` and both fail.
+  Measured before touching them: `2 failed, 1473 passed, 4 xfailed`. Extended with one
+  `set_attention` call each, intent preserved, and each docstring now states why its members are
+  watched: in the first so eligibility is not what the test isolates, in the second so the `None`
+  under test is the shrunken-group guard rather than ineligibility. Flagged rather than silently
+  worked around -- the review named one new test as the gap and these two as nothing, which is the
+  "missing entry" direction of a test-impact mismatch.
+- **The `None` return now has two independent causes**, group incoherence and no-eligible-member,
+  and they answer different questions. Keeping the first counted over all resolving members is
+  deliberate: making it count only eligible members would let a watched pair inside a larger mostly
+  unwatched group fall below the threshold and lose its suppression, which is a different bug in
+  the flood direction.
+- **`may_be_callout_keeper` is the designed extension point, not a convenience.** The silence mode
+  it closes is reachable from any gate the filter applies after electing a keeper, so the next such
+  gate belongs inside this predicate. Stated in its docstring so the next author does not have to
+  re-derive it from the review.
