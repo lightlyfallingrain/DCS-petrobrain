@@ -134,6 +134,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from coordinates import dcs_to_wgs84
+from geometry import bearing_deg as _bearing_deg
 from geometry import distance_point_point, signed_side_of_polyline
 from probe_store.reader import chunk_status as probe_chunk_status
 from probe_store.reader import grid_spacing_m as probe_grid_spacing_m
@@ -142,6 +143,7 @@ from probe_store.schema import check_probe_paired_with_base, check_probe_schema_
 from store.chunks import chunk_index_for
 from store.models import StoredFeature
 from store.reader import (
+    closest_point_on_feature,
     containing_polygons,
     features_in_bbox,
     grid_provenance,
@@ -188,6 +190,15 @@ class SurfaceTypeInfo:
 
 @dataclass(frozen=True)
 class RoadInfo:
+    """`bearing_deg` (Revision 3 Stage 4, `plans/terrain-feature-probing/
+    plan.md`, closing `body-layer/BACKLOG.md`'s `BL-B14` world-model half)
+    is the compass bearing *from the feature's closest point to `(x, z)`*
+    -- the direction a pilot would need to look from the road to find the
+    position being described, not the road's own `orientation_deg` axis.
+    `None` when the closest point coincides with `(x, z)` (distance 0 --
+    direction is undefined, not a default), same absent-is-a-fact
+    convention as every other field here."""
+
     distance_m: float
     orientation_deg: float | None
     subtype: str | None
@@ -195,6 +206,7 @@ class RoadInfo:
     provenance: str
     confidence: str
     position_uncertainty_m: float
+    bearing_deg: float | None
 
 
 @dataclass(frozen=True)
@@ -210,13 +222,15 @@ class SettlementInfo:
     provenance: str
     confidence: str
     position_uncertainty_m: float
+    bearing_deg: float | None
 
 
 @dataclass(frozen=True)
 class WaterInfo:
     """`subtype` (osm-landcover-optimization) is `"river"` (a line) or
     `"lake"`/`"reservoir"`/`"river_area"` (a polygon) -- see `build.
-    ingest_osm`'s D2 "Areas" rule 1 and "Lines" section."""
+    ingest_osm`'s D2 "Areas" rule 1 and "Lines" section. `bearing_deg`
+    (Stage 4) -- see `RoadInfo`'s docstring for the convention."""
 
     name: str | None
     distance_m: float
@@ -224,6 +238,7 @@ class WaterInfo:
     provenance: str
     confidence: str
     position_uncertainty_m: float
+    bearing_deg: float | None
 
 
 @dataclass(frozen=True)
@@ -312,7 +327,9 @@ class TerrainLineInfo:
     `PositionDescription.nearby_ridges`/`nearby_valleys` being `None` at a
     position with a built terrain layer means "no notable relief found
     nearby" (flat), not "data unavailable" -- see the module docstring's M6
-    status note."""
+    status note. `bearing_deg` (Stage 4) -- see `RoadInfo`'s docstring for
+    the convention; this is what `body-layer`'s `belief.enrichment.
+    terrain_divide_qualifier` and Decision 3's dominance rule build on."""
 
     distance_m: float
     orientation_deg: float | None
@@ -320,6 +337,7 @@ class TerrainLineInfo:
     provenance: str
     confidence: str
     position_uncertainty_m: float
+    bearing_deg: float | None
 
 
 @dataclass(frozen=True)
@@ -378,7 +396,24 @@ def _confidence_str(feature: StoredFeature, key: str = "geometry") -> str:
     return feature.confidence.get(key, "unknown")
 
 
-def _road_info(match: tuple[StoredFeature, float] | None) -> RoadInfo | None:
+def _bearing_from_feature(
+    x: float, z: float, feature: StoredFeature, distance_m: float
+) -> float | None:
+    """Compass bearing from `feature`'s own geometry (its closest point to
+    `(x, z)`, `store.reader.closest_point_on_feature`) to `(x, z)` -- `None`
+    when `distance_m` is zero, since a zero-distance closest point
+    coincides with `(x, z)` itself and `geometry.bearing_deg` has no
+    direction to report for `a == b` (Stage 4, see `RoadInfo`'s docstring
+    for the convention)."""
+    if distance_m == 0.0:
+        return None
+    closest = closest_point_on_feature(x, z, feature)
+    return _bearing_deg(closest, (x, z))
+
+
+def _road_info(
+    match: tuple[StoredFeature, float] | None, x: float, z: float
+) -> RoadInfo | None:
     if match is None:
         return None
     feature, distance = match
@@ -390,10 +425,13 @@ def _road_info(match: tuple[StoredFeature, float] | None) -> RoadInfo | None:
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+        bearing_deg=_bearing_from_feature(x, z, feature, distance),
     )
 
 
-def _settlement_info(feature: StoredFeature, distance: float) -> SettlementInfo:
+def _settlement_info(
+    feature: StoredFeature, distance: float, bearing: float | None
+) -> SettlementInfo:
     return SettlementInfo(
         name=feature.name,
         distance_m=distance,
@@ -401,6 +439,7 @@ def _settlement_info(feature: StoredFeature, distance: float) -> SettlementInfo:
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+        bearing_deg=bearing,
     )
 
 
@@ -418,7 +457,9 @@ def _preferred_settlement(candidates: list[StoredFeature]) -> StoredFeature | No
     )
 
 
-def _water_info(feature: StoredFeature, distance: float) -> WaterInfo:
+def _water_info(
+    feature: StoredFeature, distance: float, bearing: float | None
+) -> WaterInfo:
     return WaterInfo(
         name=feature.name,
         distance_m=distance,
@@ -426,6 +467,7 @@ def _water_info(feature: StoredFeature, distance: float) -> WaterInfo:
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+        bearing_deg=bearing,
     )
 
 
@@ -476,7 +518,7 @@ def _airfield_info(match: tuple[StoredFeature, float] | None) -> AirfieldInfo | 
 
 
 def _terrain_line_info(
-    match: tuple[StoredFeature, float] | None,
+    match: tuple[StoredFeature, float] | None, x: float, z: float
 ) -> TerrainLineInfo | None:
     if match is None:
         return None
@@ -488,6 +530,7 @@ def _terrain_line_info(
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+        bearing_deg=_bearing_from_feature(x, z, feature, distance),
     )
 
 
@@ -622,12 +665,16 @@ def describe_position(
             conn.execute("DETACH DATABASE probe")
 
     nearest_road = _road_info(
-        nearest_feature(conn, ["road"], x, z, provenance_geometry="dcs")
+        nearest_feature(conn, ["road"], x, z, provenance_geometry="dcs"), x, z
     )
 
     settlement_match = nearest_feature(conn, ["settlement"], x, z)
     nearest_settlement = (
-        _settlement_info(settlement_match[0], settlement_match[1])
+        _settlement_info(
+            settlement_match[0],
+            settlement_match[1],
+            _bearing_from_feature(x, z, settlement_match[0], settlement_match[1]),
+        )
         if settlement_match is not None
         else None
     )
@@ -635,14 +682,23 @@ def describe_position(
     inside_settlement_matches = containing_polygons(conn, ["settlement"], x, z)
     preferred_settlement = _preferred_settlement(inside_settlement_matches)
     inside_settlement = (
-        _settlement_info(preferred_settlement, 0.0)
+        # Already "inside" by definition -- distance and bearing are both
+        # forced rather than computed (bearing undefined at distance 0,
+        # same convention `_bearing_from_feature` applies everywhere else).
+        _settlement_info(preferred_settlement, 0.0, None)
         if preferred_settlement is not None
         else None
     )
 
     water_match = nearest_feature(conn, ["water"], x, z)
     nearest_water = (
-        _water_info(water_match[0], water_match[1]) if water_match is not None else None
+        _water_info(
+            water_match[0],
+            water_match[1],
+            _bearing_from_feature(x, z, water_match[0], water_match[1]),
+        )
+        if water_match is not None
+        else None
     )
 
     nearest_coastline = _coastline_info(
@@ -654,8 +710,8 @@ def describe_position(
     )
     inside_landcover = _landcover_info(inside_landcover_matches)
 
-    nearby_ridges = _terrain_line_info(nearest_feature(conn, ["ridge"], x, z))
-    nearby_valleys = _terrain_line_info(nearest_feature(conn, ["valley"], x, z))
+    nearby_ridges = _terrain_line_info(nearest_feature(conn, ["ridge"], x, z), x, z)
+    nearby_valleys = _terrain_line_info(nearest_feature(conn, ["valley"], x, z), x, z)
 
     nearest_junction = _junction_info(nearest_feature(conn, ["junction"], x, z))
 
