@@ -16,3 +16,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Inspect tool drifted from real pipeline](project_inspect_tool_drifted_from_real_pipeline.md) — a dev `tools/` script can silently stop calling the real pipeline function it claims to visualize; check that at DoD.
 
 - [Recurring: approved plan wrong on real data](project_recurring_approved_plan_wrong_on_real_data.md) — 2nd occurrence this week (contact-report-flood, geomorphons perf); consider a real-data check earlier than Implementer.
+- [Recurring: outcome-only regression test](project_recurring_outcome_only_regression_test.md) — 2nd occurrence of a guard test asserting only final status/exception, not the specific mechanism, next to a broader catch-all; raise at Reviewer.
+- [Branch ref lags reviewed tip](project_branch_ref_lags_reviewed_tip.md) — HEAD matching the dispatched sha doesn't mean the feature branch itself was fast-forwarded; check `git rev-parse <branch>` too.
