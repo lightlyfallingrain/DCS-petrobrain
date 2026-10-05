@@ -12,6 +12,44 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+### Where things stand, 2026-10-05 end of day
+
+A long day: seven features merged, two sorties flown. Written here because a cleared session needs
+the *state*, not the account of it — and because two of these are waiting on the user, not on code.
+
+**Owed by the user, nothing else blocks them:**
+
+- **Fly the contact/terrain sortie** — card https://claude.ai/artifact/VJZnmdF3aqxhVGZea3iKN4,
+  branch `main`. Covers contact-flood suppression, group-disclosure silence and the `"next valley"`
+  terrain qualifier. The terrain half has **never been confirmed heard** — if no terrain qualifier
+  ever fires, that is itself the finding (the dominance rule is too tight, and `WM-B5` is the named
+  fallback).
+- **`/explore` the location-fragment rewrite** (item 1 of `plans/sortie-2026-10-05-refinements/`)
+  before anything is built. It rewrites the line the pilot hears most often, and the new
+  capture-then-explore hooks exist precisely to stop it being planned off a first reading.
+
+**In flight, mid-sequence:**
+
+- **`feature/sortie-refinements`** (pushed) — items 2/3/4 of the refinements: `describe` synonym,
+  group watch, `scan ahead` sweeping 11-12-1. Reviewer APPROVED. **Next: Security deep analysis,
+  then DoD, then merge.** Item 1 is deliberately *not* on this branch.
+
+**The two findings that matter most, both filed, both unstarted:**
+
+- **`BL-B30`** — the poll loop runs at ~0.7 Hz against a specified 5 Hz. Largest finding of the
+  2026-10-05 sortie, pre-existing, and it means every cadence constant in the belief layer was
+  calibrated against a tick seven times faster than the real one.
+- **`BL-B31`** — 77 % of admissions silently used the offline LOS fallback and nothing noticed.
+
+**Also new today and unstarted:** `BL-B26` (group tick gathers member facts 3×), `BL-B27`
+(`say again` fires on ordinary cockpit speech), `BL-B28` (`report right` unrecognised while
+`report left` works), `BL-B29` (`cancel all` missing), `WM-B8` (fixture-scale fine elevation grid,
+gated on nothing now that `X-B29` has landed).
+
+**Process change, 2026-10-05**: flight feedback is **captured, then explored, then planned** — see
+root `CLAUDE.md`'s "Direction before speed" and the three `flight-feedback-*.sh` hooks that make it
+structural rather than remembered.
+
 ### Player bubble: 10 km, settled 2026-09-28
 
 - [x] **Unit detection computations are bounded to a 10 km radius around ownship. DONE, merged

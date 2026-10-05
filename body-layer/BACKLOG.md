@@ -945,6 +945,56 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Cheap, and worth doing alongside the `describe` synonym (`plans/sortie-2026-10-05-refinements/`
   item 2) since both touch the same table.
 
+- [ ] **BL-B30 — The poll loop runs at roughly 0.7 Hz against a specified 5 Hz. HIGH — the largest
+  finding of the 2026-10-05 sortie, and it degrades everything downstream of the tick.**
+
+  Measured from two independent logs of the same flight
+  (`aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md` §2):
+
+  | source | polls | span | median gap |
+  |---|---|---|---|
+  | DCS Hook (producer, for reference) | 5,534 | 5,568 s wall | **1.00 s** |
+  | detection trace | 2,621 | 4,235 s sim | **1.44 s** |
+  | belief-truth log | 1,340 | 4,233 s sim | **1.43 s**, p90 **4.98 s**, **max 193 s** |
+
+  Specified 5 Hz (0.2 s), observed ~0.7 Hz — **about seven times slower** — with a 193-second window
+  in which body-layer did not poll at all.
+
+  **Pre-existing, not caused by `X-B29`.** The LOS work only made it visible, by adding a producer
+  with a known, independently-logged 1 Hz cadence to compare the consumer against. There was no
+  reference clock before.
+
+  **Why it matters beyond latency**: every decay half-life, dwell and cadence constant, the
+  movement-detection thresholds and the callout timing were tuned against an assumed 5 Hz tick. At a
+  real 1.4 s tick they are being applied at a seventh of their intended rate — so any that "felt
+  about right" in flight were calibrated against the wrong cadence.
+
+  **Diagnose before fixing.** Candidates, none confirmed: the world-model LOS fallback (an SQLite
+  query per candidate per poll, and that path carried 77 % of admissions — see `BL-B31`);
+  `BL-B26`'s triple-gather in `CalloutScheduler.tick`; the detection-trace writer; LAN latency on
+  the aircraft-layer poll. **A timing instrument around the loop is the next step, not more log
+  reading** — the existing logs record what happened per poll, never how long the poll took.
+
+- [ ] **BL-B31 — Nothing notices when the live LOS feed is absent and the offline fallback takes
+  over.** Security flagged this before the flight as low/low; the flight upgraded it.
+
+  On 2026-10-05 **only 23 % of admitted contacts used a live DCS verdict**; the other 77 % silently
+  used world-model's offline SRTM primitive with the 12 m terrain tolerance the user has ruled
+  obsolete for live use. Every degradation path (no feed, stale skew, malformed verdict, duplicate
+  unit name) converges on "absent" — correct behaviour, and completely silent.
+
+  It *is* visible per-poll in the detection trace's `live_los_clear`/`hour_used`/`fov_half_deg_used`
+  fields, but only to someone who goes looking. A whole sortie can run on the fallback while the
+  pipeline reports success.
+
+  Wanted: something that notices — a periodic log line when the live-verdict share over the last N
+  polls drops below a threshold is probably enough. **It must not become a callout**; the pilot
+  cannot act on it mid-flight.
+
+  **Interaction with `BL-B30`**: if the loop is slow *because* the fallback is doing SQLite work per
+  candidate, these are one problem seen from both ends and fixing availability would fix the rate.
+  A hypothesis, not a finding.
+
 - [ ] **BL-B29 — `cancel all` is not in the vocabulary.** Same sortie: `"cancel all."` (0.77) →
   `say_again`. `cancel task` and `cancel everything` exist; `all` does not. One phrase to add,
   recorded so it is not rediscovered on the next flight.
