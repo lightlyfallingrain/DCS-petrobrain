@@ -206,6 +206,57 @@ knowledge graph honest".
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list — every subproject has one, each equally canonical, ruff format/check + mypy --strict + pytest in each case, and the set of subprojects comes from root `ROADMAP.md`'s status table rather than from a list here. A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
 
+## Direction before speed
+
+**Moving in the correct direction beats moving fast.** User direction, 2026-10-05, and it is the
+project's standing tiebreak whenever the two compete.
+
+This is not a counsel of slowness. Most of what this project does is ordinary work that should be
+done briskly and merged. It is a rule about *one specific moment*: when new information arrives
+and the obvious next move is to act on the first reading of it.
+
+### Flight feedback is captured, then explored, then planned — in that order
+
+The user's own words:
+
+> *"Often when I provide feedback or observations from flight, we jump straight into fixing them.
+> That's actually not a very good strategy. Instead, write down the provided feedback so that it is
+> not lost. Then use the explore skill to investigate with user what the behaviour should be."*
+
+1. **Write it down first**, verbatim where the wording carries the reasoning, in
+   `docs/acceptance/<date>-sortie-feedback.md`. The user's own words are the specification —
+   paraphrasing them loses the part that decides the design.
+2. **`/explore` it with them** before an Architect pass. Cannot be delegated: a subagent has no
+   channel to the user. This is `AGENTS.md`'s "Explore Before Deciding" applied to the case it most
+   obviously covers.
+3. **Then** plan and build.
+
+**The failure this prevents is not losing the feedback. It is acting on the first reading of it**,
+which repeatedly turns out to be wrong in a way that only a conversation surfaces — the Bekaa
+reversal, the water-flow analogue replacing rooms-and-doorways, *"still one clock hour at a time"*
+correcting a 90° cone that was about to be built, and the direction word turning out to be per-kind
+rather than universal. Every one of those arrived *after* a reading that looked obviously right,
+and each would have been built wrong.
+
+### It is enforced structurally, because remembering it does not work
+
+Three hooks, because a rule that must be recalled at the exact moment attention is elsewhere will
+keep being broken — the same reasoning `AGENTS.md` applies to the worktree rule:
+
+| hook | when | what it does |
+|---|---|---|
+| `flight-feedback-gate.sh` | UserPromptSubmit | recognises feedback-shaped input, sets a marker, says capture-then-explore |
+| `flight-feedback-dispatch-gate.sh` | PreToolUse on `Agent` | fires when dispatching **architect or implementer** while the marker is up — the moment the step would be skipped |
+| `flight-feedback-clear.sh` | PostToolUse on `Write`/`Edit` | clears the marker when a file lands under `docs/acceptance/` |
+
+**None of them block.** The user sets direction; a hook that refused to dispatch would be the hook
+overruling them. If the feedback is unambiguous, or already explored, or they say "just fix it" —
+proceed, and say that is what you are doing.
+
+The hooks were written the same day the failure happened: five observations arrived from a sortie
+and an Architect was dispatched on all five within one turn. Nothing was lost, but only because the
+user separately asked for the feedback to be written down.
+
 ## Talking to the user
 
 The user is the **product owner**, not the orchestrator. Write for someone who sets direction and
