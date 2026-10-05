@@ -191,3 +191,32 @@ Design consequences, each cheap because world-model already holds the data:
 - **"Spread off-road and stopped" is a recognised state**, the signature of having been attacked,
   and it should read as the same group displaced rather than new units. It also expires: they resume.
 - Off-road is allowed but less likely; composition match outweighs it.
+
+---
+
+## 3. Persistent spoken group identity, and the error the user prefers
+
+> *"persistent, spoken group identity. In most cases units do not actively move, so it'll be mostly
+> right by default. If a new group is mistakes as existing group, it's the unusual occurence and I
+> can live with that easier than new group beliefs popping up all the time."*
+
+**This is the decision the ambiguity policy needed, stated as an asymmetry rather than a
+threshold**, and it is the opposite of the current invariant's bias:
+
+| error | current policy | user's preference |
+|---|---|---|
+| a new group reported as an existing one (false continuity) | avoided at all costs | **acceptable, rare** |
+| an existing group re-founded as new (duplicate beliefs) | accepted as the safe default | **the one to eliminate** |
+
+The justification is the same sparsity fact as above plus a second one: *most units do not actively
+move*, so continuity is right by default and the flat 20 m/s inflation is modelling a world that
+mostly is not happening.
+
+So `ingest`'s "two or more plausible candidates → found a new contact" inverts: ambiguity resolves
+toward the remembered group, and founding a new one requires positive evidence — the user's own
+list in §2 (not *with* the group, count exceeds memory, composition differs, displacement
+implausible for the type, different kind of group).
+
+Petrovich may therefore speak of a group as the same group across a repositioning — *"that column,
+now 2 o'clock, three kilometres, still moving north on the road"* — which is the pilot-facing payoff
+of the whole change.
