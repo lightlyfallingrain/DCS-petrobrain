@@ -562,3 +562,51 @@ pilot is not surprised when a late arrival goes unreported.
 The watched-only gate on road fragments (reading **(a)**) stands as built — a road fragment speaks
 only when there is no settlement, no terrain feature, no water, **and** the contact is watched.
 Distance bands remain first guesses to be flown.
+
+---
+
+## The direction word is per-kind, not universal (user, 2026-10-05)
+
+> *"'armor, 3 o'clock, next valley, medium distance' → yes, this is good and enough.*
+> *'in a valley, north' → not really informative for valleys. North of village, south of lake, west
+> of junction, etc are useful.*
+> *for ridges it could be useful, since one side hides and the other exposes → north of ridge or
+> near/far side of ridge"*
+
+So the direction word is **not** a uniform decoration on every location fragment. Whether it carries
+information depends on the kind of feature, and the rule is about what the pilot can *do* with it:
+
+| feature kind | direction word | why |
+|---|---|---|
+| settlement, water, junction, road | **yes** — compass (*"north of village"*, *"south of lake"*, *"west of junction"*) | the feature is a point or an edge; which side of it a contact sits on is a real, actionable locator |
+| **valley** | **no** | a contact in a valley is *in* it; "north" of a valley floor locates nothing a pilot would use. `"in a valley"` is the whole fact |
+| **ridge** | **yes, and it is the most useful case of all** | **one side hides and the other exposes.** Which side a contact is on is a line-of-sight statement, not a map coordinate |
+| divide form (`"next valley"`) | **no** | settled above: the fact relates ownship to the contact, so there is no feature to be north of. The o'clock and the distance band already carry it |
+
+### The ridge case deserves its own treatment, and `near/far side` is probably better than compass
+
+The user offers both forms for a ridge — *"north of ridge"* **or** *"near/far side of ridge"* — and
+the second is the one that says what the pilot actually wants to know. A compass bearing makes them
+do the work of relating the ridge, the contact and their own position; **near side / far side states
+the masking conclusion directly**, and masking is the entire reason a ridge is worth naming.
+
+**This is exactly what `geometry.signed_side_of_polyline` is for**, and it reverses the architect's
+earlier rejection of that helper — which was correct *for compass mapping* (a polyline's signed side
+has no stable compass meaning) and is wrong here. Near/far is not a compass question: evaluate the
+sign for **ownship** and for the **contact** against the same ridge line; same sign → near side,
+opposite → far side. That is the one thing the helper does well, and it already handles the 180°
+ambiguity a bearing subtraction reintroduces.
+
+Two caveats for the implementer:
+
+- **Sign is only meaningful against the *same* line.** A ridge stored as several fragments (they are,
+  by construction — cut at tile seams and skeleton junctions) can put ownship nearest one fragment
+  and the contact nearest another. Resolve both against one chosen line, or decline to say
+  near/far at all rather than comparing signs across two fragments.
+- **Near/far is ownship-relative, so it must not be cached** on a per-contact basis — same rule the
+  divide count already follows (`WorldEnrichmentCache` holds nothing ownship-dependent).
+
+**Open, and worth the user's ear rather than a decision here:** whether a ridge should say
+*"far side of the ridge"* (masking-relevant, ownship-relative) or *"north of the ridge"*
+(map-relative, stable) — or both in different circumstances. Build near/far first, since the user
+named the masking reason; keep the compass form reachable.
