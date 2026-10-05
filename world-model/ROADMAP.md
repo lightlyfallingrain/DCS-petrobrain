@@ -1037,6 +1037,12 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   - Whether `query.line_of_sight`'s `_TERRAIN_TOLERANCE_M = 12.0` still makes sense against a
     much coarser surface. It was tuned against SRTM-derived samples.
 
+  **Promoted from "maybe" to "the plan", user 2026-10-05.** Asked whether world-model's LOS
+  primitive stays as the offline/test path once DCS answers LOS live, the user's answer was *"yes,
+  there's no other way"* — and this grid is what that primitive will read. So this is no longer an
+  optional cleanup of a redundant table; it is the elevation source the offline and test path
+  stands on. Still **low priority in ordering**, not in importance.
+
   **Do not start this before `X-B29` lands.** Until the live LOS path actually moves to DCS, the
   existing grid is still answering a live question and replacing it with a coarse one would
   degrade something real.
