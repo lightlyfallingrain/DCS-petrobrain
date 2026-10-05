@@ -156,16 +156,33 @@ body-side view and the slice numbering both files share.
     and early Petrobrain moved the ASP-17 the same way. So the question is **not** whether a write
     is possible.
 
-    What *is* open: **SPU-8 is device 55, arg 664 is `CMD_SPU8_O_ICS` (cmd 3015), and 664 carries
-    `crew_member_access = {1}` — the operator's seat, not the pilot's.** Static evidence suggests
-    that flag gates mouse clickspots rather than dispatched commands, which would mean a
-    `performClickableAction` from Export reaches it regardless of which seat the player occupies —
-    but that is **inferred, not demonstrated**, and it is the one yes/no the probe exists to
-    answer. If it turns out the flag does gate dispatched commands too, the fallback is to treat
-    664 as a read-only precondition and have the player flip it.
+    **The cross-seat case is settled too — flown 2026-10-05, and it works.** SPU-8 is device 55;
+    arg 664 is `CMD_SPU8_O_ICS` (cmd 3015) and carries `crew_member_access = {1}`, the operator's
+    seat. From the **pilot** seat, `GetDevice(55):performClickableAction(3015, v)` moved 664 0→1
+    and back 1→0, held both times, **and the user saw the switch physically move in the cockpit**.
+    So that flag gates mouse clickspots, not dispatched commands — as the static recon inferred,
+    now demonstrated. The "wait 5 s, set co-pilot ICS ON" step is buildable as specified and the
+    hand-flip fallback is not needed.
 
-    Recon and the probe card: `aircraft-layer/research/2026-10-05-spu8-intercom-write-path-recon.md`
-    and `docs/acceptance/2026-10-05-spu8-intercom-probe.md`.
+    **Observed values, from the same probe — build against these, not against the declared
+    ranges:**
+
+    | Arg | Reads | Note |
+    |---|---|---|
+    | 377 | 0 / 1 | **animates through intermediate values (0.32, 0.64) for ~0.1 s.** A reader must threshold at 0.5, never test equality — this is the one that will silently misbehave if ignored |
+    | 457 | continuous 0..1 | pilot SPU-8 volume, as declared |
+    | 664 | starts 0 | co-pilot ICS, writable from the pilot seat per above |
+    | 456 | 0.000 throughout | **not a finding** — the user confirms it was simply never clicked during the probe |
+
+    **The gate is `377 AND 664`, not the `456 + 376/377` this entry's own table note below
+    speculates.** The switch the spec calls "pilot intercom 1" is **arg 377** (NET-1 ON/OFF), user-
+    confirmed by clicking it and watching 377 toggle 0→1→0. Treat the table note as superseded on
+    that point.
+
+    Recon, raw log and probe script: `aircraft-layer/research/2026-10-05-spu8-intercom-write-path-recon.md`,
+    `docs/acceptance/2026-10-05-spu8-intercom-probe.md` and `aircraft-layer/dcs-export/Export.probe-spu8.lua`,
+    on branch `investigate/spu8-intercom-write-path` (`40f0173`) — **not yet in this clone**, so
+    every figure above is relayed from the Windows-box session rather than read here.
   - **On-ground silent mode reuses the shipped `silence` command** (`crew_console.silenced`), not a
     new suppression path. It is absolute silence including urgent calls, per the same user
     direction that built it, and **any subsequent command ends it** — so a player who wants him
