@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
@@ -1761,12 +1761,15 @@ def _write_mission_understanding_with_theatre(path: Path, theatre_value: str) ->
         "Narnia",
         "/etc/passwd",
         "//attacker-host/share/x",
-        "Syria?mode=rwc",
+        "Syria?mode=rwc&x=",
     ],
     ids=["unknown-theatre", "absolute-path", "unc-path", "query-string-injection"],
 )
 def test_main_rejects_unregistered_theatre_from_mission_understanding(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, theatre_value: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    theatre_value: str,
 ) -> None:
     """Security (multi-theatre-afghanistan plan, required fix): a
     mission-understanding-derived `theatre` that is not an exact key in
@@ -1774,10 +1777,29 @@ def test_main_rejects_unregistered_theatre_from_mission_understanding(
     `main()` before any path is built or any file is opened -- whatever
     the string actually contains (an unknown name, an absolute-path
     override, a UNC-path override, or a SQLite URI-query-string injection
-    suffix). None of these ever reach `open_world_model`/`Path.__truediv__`."""
+    suffix shaped like security.md's own reproduction: an `&`-separated
+    second query parameter, which is what makes SQLite's URI parser split
+    the filename at the attacker's injected `?` -- a bare `"Syria?mode=rwc"`
+    with no second parameter instead fails as a malformed access-mode
+    string, which doesn't exercise the mechanism this case is named for.
+    `open_world_model` must never be called for any of these -- tightened
+    (reviewer finding on f7f2827) from asserting only *some* `SystemExit`,
+    which also passed when just the optional `try/except` guard (not the
+    required registry check) converted a downstream failure into the same
+    SystemExit, silently passing even with the required fix removed."""
     monkeypatch.chdir(tmp_path)
     mission_understanding_path = tmp_path / "mission_understanding.json"
     _write_mission_understanding_with_theatre(mission_understanding_path, theatre_value)
+
+    def _fail_if_open_world_model_called(*_args: object, **_kwargs: object) -> NoReturn:
+        pytest.fail(
+            "open_world_model was called -- the registry-check rejection "
+            "must happen strictly before any world-model store is opened"
+        )
+
+    monkeypatch.setattr(
+        logger_module, "open_world_model", _fail_if_open_world_model_called
+    )
 
     monkeypatch.setattr(
         sys,
@@ -1799,6 +1821,13 @@ def test_main_rejects_unregistered_theatre_from_mission_understanding(
     # No file matching the attacker-influenced suffix was ever created or
     # opened -- the rejection happens before any path is built.
     assert not any(tmp_path.glob("*-full.sqlite"))
+
+    # Assert the specific rejection reason, not just that *some* SystemExit
+    # occurred -- this is what actually fails if the required registry
+    # check is removed while the optional except-block stays in place (see
+    # docstring above).
+    stderr = capsys.readouterr().err
+    assert "not a known theatre" in stderr
 
 
 def test_main_gives_clean_error_for_unbuilt_theatre_store(
