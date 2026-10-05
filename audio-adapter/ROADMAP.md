@@ -104,12 +104,18 @@ body-side view and the slice numbering both files share.
   whenever the collector next runs with `--debug`: count `GET /ptt/state` lines over a fixed
   window, expect ~30/s rather than ~60/s.
 
-- [~] **Slice 2 — cockpit state drives the audio. Un-deferred 2026-10-05** (the user wrote the
+- [x] **Slice 2 — cockpit state drives the audio. FLOWN, TESTED AND ACCEPTED 2026-10-05** (user:
+  *"SPU-8 feature works, tested and accepted."*). Merged `be12734`. Un-deferred the same day the
+  user wrote the behaviour out in full (the user wrote the
   behaviour out in full; it was `todo/SPUU-8.md`, folded in here and the loose file deleted).
   Replaces the original SRS ICS injection, which is cancelled with the SRS dependency itself.
 
-  **Built 2026-10-05, DoD PASSED on fixtures, not yet merged or flown** (branch
-  `feature/spu8-intercom`, tip `bc10f14`). All five stages below (telemetry, capture gating,
+  **Built, merged and accepted on 2026-10-05 — the whole slice inside one day.** Architect →
+  Implementer (both cross-machine, on the Windows box) → full gate sequence here → flown by the
+  user → accepted. **The acceptance flight also clears the two uncalibrated constants**
+  (`ON_GROUND_AGL_THRESHOLD_M = 10.0`, `MISSION_START_ICS_DELAY_S = 5.0`) and Performance's one
+  unmeasurable item, the three added per-frame cockpit reads in `Export.lua` — the user flew it
+  and accepted, so no stutter was reported. All five stages below (telemetry, capture gating,
   playback gating + volume, mission-start ICS write, on-ground silent default) are implemented
   against this entry's own spec, with Architect/Implementer having run cross-machine ahead of any
   gate, a Security `NEEDS FIXES` (unguarded `ValueError` that could permanently kill the audio

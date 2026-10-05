@@ -15,8 +15,8 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
-- [ ] **`feature/spu8-intercom` (audio-adapter Slice 2) — DoD PASSED on fixtures 2026-10-05, not yet
-  merged, not yet flown.** Gates Petrovich's capture and playback both ways on the cockpit's real
+- [x] **`feature/spu8-intercom` (audio-adapter Slice 2) — CLEARED 2026-10-05. Flown and accepted**
+  (user: *"SPU-8 feature works, tested and accepted."*), merged `be12734`.** Gates Petrovich's capture and playback both ways on the cockpit's real
   SPU-8 intercom switches (pilot NET-1, arg 377, AND co-pilot ICS power, arg 664) and scales his
   playback volume by the SPU-8 knob (arg 457); two automatic defaults ride along (co-pilot ICS
   switches on 5s after mission start, silence on the ground until the first command). **This one
