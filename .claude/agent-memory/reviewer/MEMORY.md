@@ -136,3 +136,4 @@ and blowing the cap again; this pass merged them into one list.
 - [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; 4-mechanism disable-and-rerun check.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
 - [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
+- [Caucasus Kola registration approved](project_caucasus_kola_registration_approved.md) - APPROVED; re-derive registry numbers against real DCS install, not the note.
