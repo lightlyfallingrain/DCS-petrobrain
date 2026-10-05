@@ -31,3 +31,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [World-model query layer costs](project_world_model_query_layer_costs.md) — 0.7 Hz was a body-layer 1.0s constant; nearest_feature's kind-blind R*Tree is 73% of describe_position; sample_grid = 5 SQL/point.
 - [Synthetic store calibration](feedback_synthetic_store_calibration.md) — no committed .sqlite fixture: synthetic stores give honest ratios but understate absolutes 3-12x; anchor on the committed real measurement.
 - [World-model build stage shares](project_world_model_build_stage_shares.md) — 449.3s baseline obsolete; real ~82min, terrain 54%/junctions 36%; geomorphons tiling already exists (near-miss).
+- [Body-layer poll loop diagnosis](project_body_layer_poll_loop_diagnosis.md) — BL-B30 solved: no 5 Hz config exists (default 1.0 s), loop sleeps AFTER work, group_salient_ids is ~300 ms/poll and 8.1x fixable.
