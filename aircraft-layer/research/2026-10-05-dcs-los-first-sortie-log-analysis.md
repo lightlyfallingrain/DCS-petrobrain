@@ -42,7 +42,56 @@ staleness is not a problem.
 
 ---
 
-## 2. The unusual thing: the LOS feed is intermittent, and the fallback is carrying most admissions
+## 2. CORRECTED — `dcs.log` arrived, and it moves the fault from the producer to the consumer
+
+**The first version of this note blamed the DCS-side feed. `~/dcs.log` (captured after the fact,
+1.8 MB, 7,113 `PetrobrainLineOfSight` lines) shows that was wrong, and the real finding is larger.**
+
+**The Hook never faltered.** 5,534 LOS polls over 93 minutes of wall clock, 15:40:16 → 17:13:04:
+
+| | |
+|---|---|
+| wall gap between LOS polls | **median 1.00 s, p90 1.01 s** |
+| gaps over 5 s | **1**, of 5.5 s |
+| total time inside those gaps | 6 s of 5,568 s (**0 %**) |
+| `bridge_call_ms` | med **1.00**, p90 2.00, p99 5.00, **max 26.00** |
+| calls over 8 ms / 16 ms / 24 ms | 14 / 4 / **1** |
+| units in a result | median **43**, max **71** |
+| `fov_half_deg` sent | **90 on all 1,576 directives** |
+| hours commanded | 0, 1, 2, 3, 9, 10, 11 — a real scan pattern |
+
+So: a metronomic 1 Hz producer, never truncating (71 against a 128 cap), and a bridge cost that
+sits at 1 ms. **The user's hypothesis that a paused DCS caused the gaps does not hold either** —
+pausing stops `onSimulationFrame`, which would show as wall-clock gaps in this log, and there are
+none.
+
+### What is actually slow is **body-layer's own poll loop**
+
+| source | distinct polls | span | median gap |
+|---|---|---|---|
+| DCS Hook (producer) | 5,534 | 5,568 s wall | **1.00 s** |
+| detection trace (consumer) | 2,621 | 4,235 s sim | **1.44 s** |
+| belief-truth log (consumer) | 1,340 | 4,233 s sim | **1.43 s**, p90 **4.98 s**, **max 193 s** |
+
+**The poll loop is specified at 5 Hz — 0.2 s — and is observed at roughly 0.7 Hz, about seven times
+slower.** The belief log's own rate is 0.32 polls/s. That single fact explains the LOS "outages"
+without any fault in the LOS feed: verdicts are published every 1.0 s and consumed every 1.4 s, so
+the consumer skips publishes, and whole stretches of sim time pass with no poll at all — the 193 s
+maximum gap in the belief log is not a feed outage, it is **body-layer not polling for over three
+minutes**.
+
+**This is the finding of the sortie, and it is not an X-B29 defect.** It predates this feature and
+affects everything downstream of the poll loop — detection latency, movement detection, callout
+timing, every decay half-life that assumes a 5 Hz tick. The LOS work merely made it visible, by
+adding a producer with a known, independently-logged cadence to compare against.
+
+Cause unknown and not diagnosable from these logs. Candidates, in rough order of suspicion: the
+world-model LOS fallback (an SQLite query per candidate per poll, on the path that is now carrying
+77 % of admissions — see below); the `BL-B26` triple-gather in `CalloutScheduler.tick`; the
+detection-trace writer itself; or simple network latency on the aircraft-layer poll. **A timing
+instrument around the poll loop is the next step, not more log reading.**
+
+## 3. The fallback is carrying most admissions
 
 This is the finding worth acting on, and it is precisely the failure Security's deep analysis
 predicted and called unobservable without reading the log.
@@ -88,7 +137,7 @@ does not intend it to be the common case.
 
 ---
 
-## 3. Non-LOS: contact identity churn is the standout, and it got worse
+## 4. Non-LOS: contact identity churn is the standout, and it got worse
 
 | | 2026-10-04 sortie | **this sortie** |
 |---|---|---|
@@ -116,7 +165,7 @@ Position quality is unchanged and healthy: **median error 181 m, p90 599 m** (pr
 
 ---
 
-## 4. Speech: the pilot used a command that does not exist yet, and `say again` fires on ordinary talk
+## 5. Speech: the pilot used a command that does not exist yet, and `say again` fires on ordinary talk
 
 63 utterances: 44 acted, 7 confirmed, 8 `say_again`, 4 fell through.
 
@@ -145,11 +194,10 @@ non-commands.
 
 ## What to do next
 
-1. **Capture `dcs.log` on the next flight.** Without it the feed-outage cause cannot be separated,
-   and the Hook's own `bridge_call_ms` / `units_in_wedge` / `sightlines_computed` counters — which
-   exist specifically to answer this — were never read.
-2. **Treat the intermittent feed as the first real defect of `X-B29`**, ahead of any tuning. The
-   mechanism is proven correct; its availability is not.
+1. ~~Capture `dcs.log`.~~ **Done — the user supplied it, and it exonerated the feed.** See §2.
+2. **Instrument the poll loop.** It is running at ~0.7 Hz against a specified 5 Hz, and that is the
+   largest finding here. It is a pre-existing defect that X-B29 exposed rather than caused, and it
+   degrades everything downstream of the tick.
 3. **Add an observable for silent fallback.** Security flagged this as low/low before the flight;
    the flight shows the fallback carrying 77 % of admissions, which upgrades it.
 4. `report right` vs `report left` — direct and probably small.
