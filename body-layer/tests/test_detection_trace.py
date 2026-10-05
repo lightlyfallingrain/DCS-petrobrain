@@ -584,3 +584,152 @@ def test_trace_defaults_to_the_unaided_optic() -> None:
     )
 
     assert [entry.optic for entry in trace.records] == [UNAIDED_OPTIC.name]
+
+
+# --- BL-11 Stage 5: row size and write-failure policy --------------------
+
+
+def _unannotated_entry() -> DetectionTrace:
+    """A rejected candidate -- every optional annotation field (motion,
+    live LOS, achieved tier, cluster membership) left `None`, which is the
+    overwhelmingly common row."""
+    return DetectionTrace(
+        object_id=7,
+        object_type="Infantry",
+        t_sim=100.0,
+        true_bearing_deg=12.0,
+        true_range_m=5000.0,
+        range_threshold_m=2400.0,
+        threshold_bound="size_curve",
+        outcome=GateOutcome.RANGE_OR_SIZE,
+    )
+
+
+def test_none_annotation_fields_are_omitted_from_the_row(tmp_path: Any) -> None:
+    """`BL-11` Stage 5: `asdict` emitted all 25 fields including the ~13
+    that are `None` on a rejected candidate, which is roughly half the
+    bytes of a 290 KB/poll artifact. Absent means `None`."""
+    trace = DetectionTraceCollector()
+    trace.record(_unannotated_entry())
+    path = tmp_path / "trace.jsonl"
+    writer = DetectionTraceWriter(path, flush_every_n_polls=1)
+
+    writer.write_poll(trace, ContactStore())
+    writer.close()
+
+    record = json.loads(path.read_text().strip())
+    for omitted in (
+        "achieved_tier",
+        "cluster_member_object_ids",
+        "motion_speed_mps",
+        "apparent_motion",
+        "live_los_clear",
+    ):
+        assert omitted not in record, f"{omitted} should be omitted when None"
+
+
+def test_the_join_keys_stay_present_even_when_null(tmp_path: Any) -> None:
+    """`observation_id`/`contact_id` are the exception to the omission
+    above: they answer "did this candidate ever become something Petrovich
+    believed", and an absent key there would read as *unknown* rather than
+    the definite *never admitted* that `null` states."""
+    trace = DetectionTraceCollector()
+    trace.record(_unannotated_entry())
+    path = tmp_path / "trace.jsonl"
+    writer = DetectionTraceWriter(path, flush_every_n_polls=1)
+
+    writer.write_poll(trace, ContactStore())
+    writer.close()
+
+    record = json.loads(path.read_text().strip())
+    assert record["observation_id"] is None
+    assert record["contact_id"] is None
+
+
+def test_every_unconditionally_read_field_survives_the_omission(
+    tmp_path: Any,
+) -> None:
+    """The omission is only safe because the fields `tools/` and the
+    sortie-triage script read without `.get` are all non-optional on
+    `DetectionTrace`. Pinned here so a future field moving to
+    `X | None = None` fails this rather than a debrief six weeks later."""
+    trace = DetectionTraceCollector()
+    trace.record(_unannotated_entry())
+    path = tmp_path / "trace.jsonl"
+    writer = DetectionTraceWriter(path, flush_every_n_polls=1)
+
+    writer.write_poll(trace, ContactStore())
+    writer.close()
+
+    record = json.loads(path.read_text().strip())
+    for required in (
+        "object_id",
+        "object_type",
+        "t_sim",
+        "true_bearing_deg",
+        "true_range_m",
+        "range_threshold_m",
+        "threshold_bound",
+        "outcome",
+        "optic",
+    ):
+        assert required in record, f"{required} is read unconditionally by tools/"
+
+
+class _FullDiskFile:
+    """A file object whose `write` always raises `OSError`, standing in for
+    a disk that filled mid-flight."""
+
+    def __init__(self) -> None:
+        self.flushes = 0
+        self.writes = 0
+
+    def write(self, text: str) -> int:
+        self.writes += 1
+        raise OSError(28, "No space left on device")
+
+    def flush(self) -> None:
+        self.flushes += 1
+
+    def close(self) -> None:
+        pass
+
+
+def test_a_write_failure_is_reported_once_then_the_writer_gives_up(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`BL-11` Stage 5: an `ENOSPC` mid-flight used to be caught by the
+    poll loop's own broad `except Exception`, one traceback per poll, with
+    nothing saying the trace had stopped being useful -- and the loop kept
+    calling this writer for the rest of the sortie."""
+    writer = DetectionTraceWriter(tmp_path / "trace.jsonl", flush_every_n_polls=1)
+    full_disk = _FullDiskFile()
+    writer._file = full_disk  # type: ignore[assignment]
+    store = ContactStore()
+
+    for _ in range(4):
+        trace = DetectionTraceCollector()
+        trace.record(_unannotated_entry())
+        writer.write_poll(trace, store)
+
+    assert full_disk.writes == 1, "kept writing after the first failure"
+    message = capsys.readouterr().err
+    assert message.count("detection-trace: write to") == 1
+    assert "No space left on device" in message
+
+
+def test_a_disabled_writer_still_clears_the_collector(tmp_path: Any) -> None:
+    """Otherwise the collector's buffer grows unboundedly for the rest of
+    the sortie -- turning a lost debug log into a memory leak."""
+    writer = DetectionTraceWriter(tmp_path / "trace.jsonl", flush_every_n_polls=1)
+    writer._file = _FullDiskFile()  # type: ignore[assignment]
+    store = ContactStore()
+    trace = DetectionTraceCollector()
+
+    trace.record(_unannotated_entry())
+    writer.write_poll(trace, store)
+    assert trace.records == []
+
+    trace.record(_unannotated_entry())
+    writer.write_poll(trace, store)
+    assert trace.records == []

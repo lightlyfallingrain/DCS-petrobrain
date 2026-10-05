@@ -25,6 +25,7 @@ import because a debug artifact exists.
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,8 @@ class SpeechLogWriter:
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        #: Set after the first write failure — see `write`.
+        self._disabled = False
 
     def write(self, row: dict[str, Any]) -> None:
         """Write one row, stamped with wall-clock time.
@@ -50,7 +53,27 @@ class SpeechLogWriter:
         file is orderable even when `now_sim` stalls — a paused mission
         keeps its sim clock still, and two utterances a minute apart would
         otherwise be indistinguishable.
+
+        **A write failure is reported once, then this writer gives up for
+        the rest of the run** (`BL-11` Stage 5, the same policy as
+        `detection_trace_writer`/`belief_truth_log`). `CrewConsole.
+        _log_transcript`'s own `except Exception` deliberately swallows
+        everything, so a logging failure never costs the player the command
+        they just spoke — which is right, and also meant a full disk or an
+        unwritable path produced no symptom anywhere at all. Reporting here
+        closes that without weakening the caller's guarantee: nothing is
+        propagated.
         """
+        if self._disabled:
+            return
         stamped = {"t_wall": time.time(), **row}
-        with self._path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(stamped, default=str) + "\n")
+        try:
+            with self._path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(stamped, default=str) + "\n")
+        except OSError as exc:
+            self._disabled = True
+            print(
+                f"speech-log: write to {self._path} failed ({exc}); "
+                f"no further transcripts will be logged this run",
+                file=sys.stderr,
+            )

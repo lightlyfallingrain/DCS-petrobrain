@@ -1948,6 +1948,37 @@ def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
     assert "t_wall" in row
 
 
+def test_an_unwritable_speech_log_says_so_once_and_keeps_the_command_working(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`BL-11` Stage 5. `CrewConsole._log_transcript` swallows every
+    exception so a logging failure never costs the player the command they
+    just spoke -- which is right, and also meant an unwritable path
+    produced no symptom anywhere at all. Both halves are asserted: one
+    report, and the dispatch still returns a spoken line."""
+    from speech_log import SpeechLogWriter
+
+    # A directory where the file should be: every `open("a")` raises.
+    log_path = tmp_path / "speech.jsonl"
+    log_path.mkdir()
+    writer = SpeechLogWriter(log_path)
+    console = CrewConsole(store=ContactStore(), transcript_log=writer.write)
+
+    for _ in range(3):
+        spoken = console.handle_transcript(
+            transcript="scan uh the thing",
+            confidence=0.9,
+            token=None,
+            match_ratio=0.0,
+            verb_anchored=True,
+            ambiguous=False,
+            now_sim=10.0,
+        )
+        assert spoken, "a failing debug log must not cost the player a reply"
+
+    assert capsys.readouterr().err.count("speech-log: write to") == 1
+
+
 # --- the poll thread must survive a raising dispatch -----------------------
 
 

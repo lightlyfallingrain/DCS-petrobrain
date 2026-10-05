@@ -252,6 +252,7 @@ from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
+from run_log_paths import per_run_log_path
 from speech_log import SpeechLogWriter
 from store.reader import load_only_region
 
@@ -1675,6 +1676,40 @@ def _resolve_speech_log_path(
     return DEFAULT_SPEECH_LOG_PATH
 
 
+def _per_run_log_paths(
+    *,
+    detection_trace: Path | None,
+    belief_truth_log: Path | None,
+    speech_log: Path | None,
+    when: float | None = None,
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Give each of the three JSONL logs this run's own filename -- `BL-11`
+    Stage 5, see `run_log_paths.per_run_log_path` for why timestamping
+    rather than truncating.
+
+    **One stamp for all three**, taken once here rather than per writer, so
+    a sortie's detection trace, belief-truth log and speech log carry the
+    same name component and a reader can tell at a glance which three files
+    belong to one flight. A run that straddled midnight, or three writers
+    opened a second apart, would otherwise produce three unrelated-looking
+    names.
+
+    `None` passes through as `None` -- every one of these logs is off by
+    default."""
+    stamp_at = time.time() if when is None else when
+    return (
+        None
+        if detection_trace is None
+        else per_run_log_path(detection_trace, stamp_at),
+        (
+            None
+            if belief_truth_log is None
+            else per_run_log_path(belief_truth_log, stamp_at)
+        ),
+        None if speech_log is None else per_run_log_path(speech_log, stamp_at),
+    )
+
+
 def main() -> None:
     """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
     ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
@@ -2038,6 +2073,22 @@ def main() -> None:
         crew_text=args.crew_text,
         speech_input=args.speech_input,
     )
+
+    # BL-11 Stage 5: each run writes its own files rather than appending to
+    # one that grows across sorties. Applied after the default resolution
+    # above, so `--speech-log`'s default and an explicit path roll alike.
+    args.detection_trace, args.belief_truth_log, args.speech_log = _per_run_log_paths(
+        detection_trace=args.detection_trace,
+        belief_truth_log=args.belief_truth_log,
+        speech_log=args.speech_log,
+    )
+    for label, rolled in (
+        ("detection-trace", args.detection_trace),
+        ("belief-truth-log", args.belief_truth_log),
+        ("speech-log", args.speech_log),
+    ):
+        if rolled is not None:
+            print(f"{label}: writing {rolled}", file=sys.stderr)
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
