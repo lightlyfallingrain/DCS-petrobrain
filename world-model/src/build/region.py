@@ -159,4 +159,27 @@ REGIONS: dict[str, RegionDefinition] = {
         half_extent_x_m=413672.3,
         half_extent_z_m=385608.0,
     ),
+    "afghanistan-full": RegionDefinition(
+        theatre="Afghanistan",
+        name="afghanistan-full",
+        # Padded (+30 km/side) DCS-space bbox from the **union** of
+        # towns.lua (n=1225, projected via the provisional Afghanistan
+        # tmerc fit) and beacons.lua (n=49, native x/z) -- not beacons
+        # alone (main-loop amendment 2026-10-05, see
+        # plans/multi-theatre-afghanistan/plan.md Stage 2: Afghanistan's
+        # 49 beacons are all airfield-tied, and the investigator found
+        # towns.lua the safer lower-bound source). Derived by
+        # tools/derive_afghanistan_full_region.py (this session's run):
+        #   raw union x: [-498,489.9, 525,448.8] -> padded [-528,489.9, 555,448.8]
+        #   raw union z: [-513,487.2, 745,003.2] -> padded [-543,487.2, 775,003.2]
+        # giving a padded footprint of ~1,083.9 x 1,318.5 km (aspect ratio
+        # ~0.82) -- this is a point-cloud lower bound, not a
+        # corner-verified terrain edge; see
+        # world-model/research/2026-10-04-multi-theatre-afghanistan-
+        # caucasus-recon.md Q1 and this plan's "Risks & Unknowns".
+        centre_x=13479.5,
+        centre_z=115758.0,
+        half_extent_x_m=541969.3,
+        half_extent_z_m=659245.2,
+    ),
 }

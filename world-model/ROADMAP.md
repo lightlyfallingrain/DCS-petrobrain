@@ -124,6 +124,27 @@ sortie actually exercises it, and say which one.
   changes from this. Follow-up queued as `WM-B4` (curve-smooth the polylines, user direction the
   same day after seeing the staircase in a real render).
 
+- [x] **`feature/multi-theatre-afghanistan` — Afghanistan projection live-confirmed 2026-10-05.**
+  The user ran `coord_probe.lua` on the Afghanistan terrain (map origin + 29 airbases). The beacon
+  fit was off by a uniform 0.051 m everywhere; three unplaced FOBs that DCS reports at lat/lon 0,0
+  sit at exactly x=-3759657, which pins the false northing. With round `false_easting=-300150`,
+  `false_northing=-3759657` the worst residual is under 1 mm, and `confidence` is now `"confirmed"`
+  (`world-model/research/2026-10-05-afghanistan-projection-live-check.md`). The 5 cm change does
+  not warrant a rebuild of `afghanistan-full.sqlite` (500 m grid). The probe output
+  (`data/raw/dcs/2026-10-05/coord_probe_output.json`, gitignored) holds 26 real airbase
+  positions, the seed for widening airfields beyond the 7 beacon-derived ones; the three FOBs at
+  0,0 have no real position and must be filtered. Block 2 (Bagram sortie) remains optional.
+
+  **Performance Reviewer finding, relevant to Kola before Afghanistan's own acceptance clears
+  it:** the terrain-semantics (ridge/valley) build stage processes every `.hgt` tile physically
+  staged in `--srtm-dir` rather than clipping to the region's own padded bbox — pre-existing,
+  not introduced here, but measured concretely for the first time on this build (288 staged tiles,
+  only 158 actually needed by the SRTM elevation grid; the stage cost 44.0 min of this build's 82
+  min total). Kola's elongated footprint is exactly the shape rectangular half-extents were built
+  to stop wasting compute on, and this stage never got that fix — whoever stages Kola's DEM tiles
+  should either stage only bbox-overlapping tiles or filter `ingest_terrain`'s tile list before a
+  Kola build is attempted. See `plans/multi-theatre-afghanistan/performance.md` finding #3.
+
 - [x] **M0 — Repo + research notebook.** Scaffold done. DCS version + Syria theatre presence recorded in `research/`.
 - [x] **M1 — One coordinate.** Prove DCS x/z ↔ lat/lon for Syria against a known real-world control point. Measure error. Done: `src/coordinates/` (pyproj-based, theatre-agnostic), three real-world ARP control points (Damascus, Latakia, Beirut), measured residual ~1.0-1.3km (DCS terrain-art placement error, not transform error). See `research/2026-09-03-m1-coordinate-transform-verification.md`.
 - [x] **M2 — Raster understanding.** Read Syria's `RasterCharts`: tile hierarchy, dimensions, scales, registration. Render a known DCS coordinate onto the raster. Done: `src/raster/` (Pillow-based DDS loader + empirical x/z-arithmetic registration, `confidence="provisional"`), `tools/inspect_raster.py` (`scan`/`mark` diagnostic CLI), control-point + held-out-point tests. Registration fitted against Sivas/Kahramanmaras/Hama/Erzincan; independently validated against held-out Gemerek (~129m x-axis, ~5.5km z-axis residual). Scope note: this raster is scanned real-world cartography (Turkish JOG-A-class chart), not DCS-rendered geometry — feeds only the F10 paper-map mode; provenance-taxonomy follow-up still open, see `plans/m2-raster-understanding/plan.md` "Decisions Requiring User Input". `level` tile-suffix semantics (`-2`/`-1`/`00`/`01`) remain unresolved, no sample beyond `"00"`. See `research/2026-09-03-m2-rastercharts-recon.md`.
@@ -1124,9 +1145,15 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Kola is a genuinely harder case, not just "repeat the pattern":** SRTM only covers ±60°
   latitude, and Kola peninsula sits ~68-69°N, entirely outside SRTM's coverage — needs a
   different DEM source (ASTER GDEM to 83°N, or a Nordic national elevation dataset), unresolved
-  and needs its own investigation before committing. Afghanistan and Caucasus are both within
+  and needs its own investigation before committing. **Update 2026-10-04: resolved in principle —
+  viewfinderpanoramas.org DEM3 covers the Kola area (user-checked), same `.hgt` format the SRTM
+  ingest already reads, so Kola needs no new elevation source.** Afghanistan and Caucasus are both within
   SRTM range, no elevation-source blocker. Needs an Architect + investigator pass before any
   theatre starts, per this project's standing convention for DCS-internals-uncertain work.
+  **Started 2026-10-04 with Afghanistan, then Caucasus, Kola last (user direction).** Raw DEM and
+  OSM extracts for both are staged under `world-model/data/raw/{dem,osm}/{afganistan,caucasus}-full/`
+  (gitignored; `.hgt` tiles flattened to the folder top level, since `--srtm-dir` globs only `*.hgt`
+  there). Caucasus DEM has 123 of 144 tiles — the missing ones are open Black Sea.
 
 - **RESOLVED: `roadnet/junctions.py` memory issue at `syria-full`+OSM scale (2026-09-13).**
   Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`

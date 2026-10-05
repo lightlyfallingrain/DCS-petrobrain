@@ -209,7 +209,11 @@ from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
-from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
+from belief.mission_phase import (
+    MissionPhaseTracker,
+    MissionUnderstandingData,
+    load_mission_understanding,
+)
 from belief.optic_policy import (
     LookTarget,
     OpticDecision,
@@ -223,6 +227,7 @@ from belief.optic_policy import (
 from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
+from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
 from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
 from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
@@ -248,6 +253,7 @@ from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
 from speech_log import SpeechLogWriter
+from store.reader import load_only_region
 
 logger = logging.getLogger(__name__)
 
@@ -1634,17 +1640,39 @@ def main() -> None:
     )
     parser.add_argument(
         "--theatre",
-        required=True,
-        help="DCS theatre name for world-object lat/lon -> DCS x/z conversion, e.g. Syria",
+        default=None,
+        help=(
+            "DCS theatre name for world-object lat/lon -> DCS x/z conversion, "
+            "e.g. Syria. Together with --world-model-db, this wins unchanged "
+            "(needed for small test regions like latakia-20km/gemerek-20km, "
+            "and for running without a mission-understanding artifact at "
+            "all). Omit both to derive theatre from --mission-understanding "
+            "instead (Stage 5, multi-theatre-afghanistan plan) -- see "
+            "--world-model-dir."
+        ),
     )
     parser.add_argument(
         "--world-model-db",
-        required=True,
+        default=None,
         type=Path,
         help=(
             "path to a built world-model region .sqlite (see body-layer/CLAUDE.md's "
             "world-model seam note) -- NakedEyePerceptionSource's visibility filter "
-            "needs it for the terrain line-of-sight gate"
+            "needs it for the terrain line-of-sight gate. See --theatre on when this "
+            "can be omitted in favour of --mission-understanding + --world-model-dir."
+        ),
+    )
+    parser.add_argument(
+        "--world-model-dir",
+        default=None,
+        type=Path,
+        help=(
+            "directory holding per-theatre full-theatre world-model stores, named "
+            "<theatre.lower()>-full.sqlite (Stage 5, multi-theatre-afghanistan plan) "
+            "-- required together with --mission-understanding when --theatre/"
+            "--world-model-db are omitted, so theatre and store are derived from "
+            "the loaded mission-understanding artifact's theatre field instead of "
+            "a remembered flag."
         ),
     )
     parser.add_argument(
@@ -1884,6 +1912,74 @@ def main() -> None:
     if args.brain_client == "http" and args.brain_url is None:
         parser.error("--brain-client http requires --brain-url")
 
+    # Stage 5 (multi-theatre-afghanistan plan): resolve theatre/world-
+    # model-db. --theatre/--world-model-db win unchanged when both are
+    # given (needed for small test regions like latakia-20km/
+    # gemerek-20km, and for running without a mission-understanding
+    # artifact at all). Otherwise derive both from a loaded
+    # --mission-understanding artifact's own theatre field -- never a
+    # silent fallback to a default theatre.
+    mission_data: MissionUnderstandingData | None = None
+    if args.mission_understanding is not None:
+        mission_data = load_mission_understanding(args.mission_understanding)
+
+    if args.theatre is not None and args.world_model_db is not None:
+        theatre = args.theatre
+        world_model_db = args.world_model_db
+    elif mission_data is not None:
+        if mission_data.theatre is None:
+            parser.error(
+                "--mission-understanding artifact has no 'theatre' field -- "
+                "cannot derive --theatre/--world-model-db from it"
+            )
+        if args.world_model_dir is None:
+            parser.error(
+                "deriving theatre from --mission-understanding requires "
+                "--world-model-dir"
+            )
+        theatre = mission_data.theatre.value
+        # Security (multi-theatre-afghanistan plan, required fix): `theatre`
+        # is the raw .miz-derived string from an externally-sourced mission
+        # file, unvalidated all the way up the mission-interpreter chain
+        # (see plans/multi-theatre-afghanistan/security.md). Reject anything
+        # outside the known-theatre registry before it is used to build a
+        # path or (transitively, via open_world_model's sqlite3 URI) a
+        # connection string -- a path-traversal/UNC/absolute-path value or a
+        # SQLite URI-query-string injection otherwise reaches both.
+        if theatre not in THEATRE_PROJECTIONS:
+            parser.error(
+                f"--mission-understanding artifact's theatre {theatre!r} is "
+                "not a known theatre -- no entry in "
+                "coordinates.projections.THEATRE_PROJECTIONS"
+            )
+        world_model_db = args.world_model_dir / f"{theatre.lower()}-full.sqlite"
+    else:
+        parser.error(
+            "give either both --theatre and --world-model-db, or "
+            "--mission-understanding together with --world-model-dir"
+        )
+
+    # Mismatch guard, independent of how theatre was resolved: the
+    # resolved store's own built region must agree with the resolved
+    # theatre -- catches "pointed --theatre Syria at an Afghanistan
+    # store" before the first poll, rather than silently applying the
+    # wrong projection and producing a plausible-looking, wrong position
+    # for every contact.
+    try:
+        guard_conn = open_world_model(world_model_db)
+        try:
+            built_region = load_only_region(guard_conn)
+        finally:
+            guard_conn.close()
+    except (sqlite3.Error, OSError):
+        parser.error(f"world model for {theatre} not built: {world_model_db}")
+    if built_region is not None and built_region.theatre != theatre:
+        parser.error(
+            f"--world-model-db {world_model_db} was built for theatre "
+            f"{built_region.theatre!r}, but the resolved theatre is "
+            f"{theatre!r}"
+        )
+
     args.speech_log = _resolve_speech_log_path(
         speech_log=args.speech_log,
         no_speech_log=args.no_speech_log,
@@ -1893,14 +1989,14 @@ def main() -> None:
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
-    # BL-7: a plain JSON file load, not a sqlite connection -- built once,
-    # here, on the main thread, before either poll thread starts, and
-    # shared as the same MissionPhaseTracker instance across threads (see
+    # BL-7: `mission_data` was already loaded above (Stage 5 needs it to
+    # resolve theatre before this point) -- built once, on the main
+    # thread, before either poll thread starts, and shared as the same
+    # MissionPhaseTracker instance across threads (see
     # ConsolePerceptionRunner.mission_phase_tracker's own docstring for the
     # write-thread/read-thread split this relies on).
     mission_phase_tracker: MissionPhaseTracker | None = None
-    if args.mission_understanding is not None:
-        mission_data = load_mission_understanding(args.mission_understanding)
+    if mission_data is not None:
         mission_phase_tracker = MissionPhaseTracker(data=mission_data)
 
     if args.crew_text:
@@ -1949,8 +2045,8 @@ def main() -> None:
                 crew_runner,
                 crew_console,
                 aircraft_client,
-                args.theatre,
-                args.world_model_db,
+                theatre,
+                world_model_db,
                 args.poll_interval_s,
                 stop_event,
                 args.f10_commands,
@@ -1987,8 +2083,8 @@ def main() -> None:
             args=(
                 console_runner,
                 aircraft_client,
-                args.theatre,
-                args.world_model_db,
+                theatre,
+                world_model_db,
                 args.poll_interval_s,
                 stop_event,
                 args.detection_trace,
@@ -2008,20 +2104,18 @@ def main() -> None:
         )
         print(HELP_TEXT, file=sys.stdout)
         try:
-            _run_console_repl(
-                console_runner, console, args.world_model_db, args.theatre
-            )
+            _run_console_repl(console_runner, console, world_model_db, theatre)
         finally:
             stop_event.set()
             poll_thread.join()
     else:
-        world_model_conn = open_world_model(args.world_model_db)
+        world_model_conn = open_world_model(world_model_db)
         try:
             perception_logger = PerceptionLogger(
                 aircraft_client=aircraft_client,
                 sources=_build_sources(
                     aircraft_client,
-                    args.theatre,
+                    theatre,
                     world_model_conn,
                     emit_mode="on_change",
                 ),

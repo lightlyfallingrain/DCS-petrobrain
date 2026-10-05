@@ -12,6 +12,8 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
 
 - **Theatre-agnostic transform design means adding a second theatre requires only a registry entry.** `src/coordinates/` layer doesn't encode Syria-specific logic — the `dcs_to_wgs84`/`wgs84_to_dcs` functions are theatre-agnostic. New theatres need only a new `TmercParams` entry in `THEATRE_PROJECTIONS` dict with `source` and `confidence` fields populated. Confidence starts `"provisional"` for unprobe-verified theatres; flips to `"confirmed"` only after live `coord.LOtoLL` cross-check.
 
+- **A provisional projection's self-consistency test proves the fit reproduces its own source data, not that the fit is geographically correct — SRTM elevation agreement at a known place name is a free, independent second check.** Afghanistan's provisional `tmerc` fit was validated by reproducing a `beacons.lua` entry's own `positionGeo` (self-consistency, explicitly disclaimed as such). Separately, `describe_position` at Kabul's published lat/lon returned SRTM elevation ≈1792 m against Kabul's real-world ~1791 m — this agreement depends on the projected x/z landing on the *correct ground cell* in an independently-sourced DEM, which a purely circular (beacon-derived) check cannot produce by construction. Cheap and worth doing for any future provisional-projection theatre before its live `coord.LOtoLL` probe lands: a known city's SRTM elevation at its published lat/lon is a real, if informal, external cross-check.
+
 ## Testing & Provenance
 
 - **Control-point tests must use externally-published ARPs, not DCS-derived points.** Early approach using pydcs's hardcoded `Damascus` point inflated the residual by ~1741m (the pydcs point itself was imprecise vs. live `coord.LOtoLL` output). M1 control points use SkyVector/eAIP real-world ARPs instead, avoiding circularity (Finding 3 of M1 verification note). Lesson: when validating a DCS extraction pipeline against external truth, ensure the external truth is actually independent, not recalculated from the same source.
@@ -133,6 +135,27 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
   time in one week real data overturned a design that had already passed review (see the
   geomorphons deviation-check entry above) — a pattern worth treating as recurring rather than
   isolated (`plans/contact-report-flood/plan.md`, `implementation.md`).
+- **When a public constant changes shape (e.g. int → dict-keyed-by-theatre), grep every real call
+  site of the functions that read it, not just the plan's named "Affected Modules" list — tests
+  that call the function directly are easy to miss alongside the ones that only monkeypatch it.**
+  `multi-theatre-afghanistan`'s plan named the three pipeline tests that monkeypatch
+  `parse_towns_lua`/`parse_beacons_lua`'s now-dict `EXPECTED_*_COUNT` constants, but missed
+  `test_towns_lua.py`/`test_beacons_lua.py`, which call the real parsers directly and
+  `monkeypatch.setattr` the old bare-int constant — a pattern that would have silently replaced
+  the new dict with an int rather than failing loudly. Caught by grepping every call site across
+  both `src/` and `tests/` before starting, not by trusting the plan's own list.
+
+- **A plan's "context already established" section (meant to avoid re-deriving prior findings)
+  can itself overstate how far existing wiring actually reaches — verify the real consumer
+  function before treating the plan's forward-reference as confirmed.** `multi-theatre-
+  afghanistan`'s plan stated the mission-interpreter `theatre` field "carries through to ... the
+  runtime artifact body-layer already loads at startup ... → `load_mission_understanding`",
+  reading as if that function already parsed it. It did not — the field existed in the JSON
+  artifact, but body-layer's own loader only ever parsed `phases`/`route`; the Stage 5 code to
+  read `theatre` had to be written, not merely wired through. The plan's own Stage 5 prose
+  already assumed this field would be readable, so the gap was implemented in scope rather than
+  escalated, but it would have been worth catching before implementation began by actually
+  reading `mission_phase.py` rather than trusting the context section's forward-reference.
 
 ## Type Checking & Python Conventions
 

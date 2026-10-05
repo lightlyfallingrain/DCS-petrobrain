@@ -139,7 +139,7 @@ def _write_fixture(tmp_path: Path, blocks: str) -> Path:
 def _patch_expected_count(monkeypatch: pytest.MonkeyPatch, n: int) -> None:
     import dcs_data.beacons as beacons_module
 
-    monkeypatch.setattr(beacons_module, "EXPECTED_BEACON_COUNT", n)
+    monkeypatch.setitem(beacons_module.EXPECTED_BEACON_COUNT, "Syria", n)
 
 
 def test_parse_beacons_lua_parses_all_entries(
@@ -148,7 +148,7 @@ def test_parse_beacons_lua_parses_all_entries(
     _patch_expected_count(monkeypatch, 9)
     fixture_path = _write_fixture(tmp_path, _WORLD_ENTRY + "\n" + _AIRFIELD21_ENTRIES)
 
-    entries = parse_beacons_lua(fixture_path)
+    entries = parse_beacons_lua(fixture_path, "Syria")
 
     assert len(entries) == 9
 
@@ -163,7 +163,7 @@ def test_parse_beacons_lua_position_field_order_middle_is_elevation(
     _patch_expected_count(monkeypatch, 8)
     fixture_path = _write_fixture(tmp_path, _AIRFIELD21_ENTRIES)
 
-    entries = parse_beacons_lua(fixture_path)
+    entries = parse_beacons_lua(fixture_path, "Syria")
     homer = next(e for e in entries if e.beacon_id == "airfield21_3")
 
     assert homer.x == pytest.approx(50737.488281)
@@ -191,7 +191,7 @@ def test_parse_beacons_lua_airfield_group_parsing(
     _patch_expected_count(monkeypatch, 9)
     fixture_path = _write_fixture(tmp_path, _WORLD_ENTRY + "\n" + _AIRFIELD21_ENTRIES)
 
-    entries = parse_beacons_lua(fixture_path)
+    entries = parse_beacons_lua(fixture_path, "Syria")
 
     banias = next(e for e in entries if e.beacon_id == "world_0")
     assert banias.airfield_group is None
@@ -208,7 +208,7 @@ def test_parse_beacons_lua_optional_frequency_is_none_when_absent(
     _patch_expected_count(monkeypatch, 8)
     fixture_path = _write_fixture(tmp_path, _AIRFIELD21_ENTRIES)
 
-    entries = parse_beacons_lua(fixture_path)
+    entries = parse_beacons_lua(fixture_path, "Syria")
     rsbn = next(e for e in entries if e.beacon_id == "airfield21_4")
 
     assert rsbn.frequency is None
@@ -224,12 +224,24 @@ def test_parse_beacons_lua_raises_on_malformed_block(
     fixture_path = _write_fixture(tmp_path, _WORLD_ENTRY + "\n" + malformed_block)
 
     with pytest.raises(ValueError, match="missing required field"):
-        parse_beacons_lua(fixture_path)
+        parse_beacons_lua(fixture_path, "Syria")
 
 
 def test_parse_beacons_lua_raises_on_count_mismatch(tmp_path: Path) -> None:
-    # Real EXPECTED_BEACON_COUNT is 151; this fixture has 8 entries.
+    # Real EXPECTED_BEACON_COUNT["Syria"] is 151; this fixture has 8 entries.
     fixture_path = _write_fixture(tmp_path, _AIRFIELD21_ENTRIES)
 
     with pytest.raises(ValueError, match="Expected 151"):
-        parse_beacons_lua(fixture_path)
+        parse_beacons_lua(fixture_path, "Syria")
+
+
+def test_parse_beacons_lua_raises_value_error_on_unknown_theatre(
+    tmp_path: Path,
+) -> None:
+    """A theatre with no `EXPECTED_BEACON_COUNT` entry must fail loudly
+    with a clear `ValueError` naming the theatre -- not a bare `KeyError`
+    -- per the multi-theatre-afghanistan plan's Stage 1."""
+    fixture_path = _write_fixture(tmp_path, _AIRFIELD21_ENTRIES)
+
+    with pytest.raises(ValueError, match="Nevada"):
+        parse_beacons_lua(fixture_path, "Nevada")

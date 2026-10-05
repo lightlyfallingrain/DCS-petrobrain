@@ -64,6 +64,7 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [WM-B6 geomorphons plan](project_wmb6_geomorphons_plan.md) — committed spike tracer is naive/rejected; SRTM pixel space is anisotropic; resumable-cache pattern deviates from osm_cache template; seams clip, don't merge.
 - [Terrain Stages 3-5 revision](project_terrain_stages_345_revision.md) — "next valley" is an observer-relative crossing count, not a basin graph; terrain facts are structurally outbid in speech.py.
 - [Contact report flood plan](project_contact_report_flood.md) — merge already analysed/approved; split-vs-echo structurally indistinguishable; cross-contact gate reuse; CALLOUT_MAX_AGE_S << LOST_THRESHOLD_S makes suppression permanent.
+- [Multi-theatre Afghanistan plan](project_multi_theatre_afghanistan_plan.md) — store/query already theatre-generic; real gap was no mission→theatre wiring and no store/theatre mismatch guard in body-layer.
 - [SPU-8 intercom plan](project_spu8_intercom_plan.md) — the BL-6 "wheel" misdirect; capture gate lives in the collector not audio-adapter; two opposite empty-cache defaults, same feature.
 - [LOS cone scoping](project_los_cone_scoping.md) — the gaze cone defines the query set, not a budget; 162 of 172 bubble units die at gate 0; no safe range cut exists inside the bubble.
 - [LOS fixed-literal command channel](project_los_fixed_literal_command_channel.md) — the Lua rule forbids composing code, not commands; three Lua states; digit dispatch passes an arbitrary number intact.
