@@ -150,3 +150,66 @@ Matches the plan's own predicted check ("a segment across a flank should read 1,
   reading like it collides with the new `bearing_deg` dataclass fields it sits beside -- no actual
   naming conflict exists (class attributes and module-level names are different namespaces), but the
   alias keeps the diff easy to read at the call sites.
+
+## Review round 1 fix: Stage 5 wiring test coverage
+
+`review-rev3.md` (tip `4da9758`) approved everything except one required fix: the wire-up between
+`terrain_divide_qualifier`'s result and the spoken contact-report text -- `tools.py`'s
+`facts["terrain_qualifier"] = ...` write and `speech.py`'s priority-override read -- had zero test
+coverage. `grep -rn "terrain_qualifier" body-layer/tests/` returned nothing, and the reviewer
+confirmed empirically that disabling either half with `if False and ...` left the full suite passing
+unchanged.
+
+### Fix applied
+
+Five tests added, no production code touched (Reviewer's own verdict said this half was approved;
+scope was the test gap only):
+
+- `test_tools.py::test_describe_contact_with_enrichment_sets_terrain_qualifier_when_one_divide_crossed`
+  -- drives `describe_contact` with `divides_between` patched to `1` and a valley-dominant
+  `nearest_feature`, asserts `facts["terrain_qualifier"] == "next valley"`. Covers the `tools.py`
+  write half.
+- `test_tools.py::test_describe_contact_with_enrichment_adds_the_four_bl3_fields` -- extended with one
+  extra assertion (`"terrain_qualifier" not in facts`) under the existing zero-divide stub, pinning
+  the silence case alongside the four fields it already checked.
+- `test_speech.py::test_contact_report_text_terrain_qualifier_replaces_semantic_fragment` -- drives
+  `_contact_report_text` directly (dict literal, no monkeypatching) with `facts["terrain_qualifier"]`
+  and `facts["semantic"]` both present; asserts the qualifier text appears and the semantic fragment
+  ("road") does not. Covers the `speech.py` read/override half.
+- `test_speech.py::test_contact_report_text_no_terrain_qualifier_falls_back_to_semantic_fragment` --
+  the companion regression guard: absent `terrain_qualifier` must still fall through to the
+  pre-existing `max(semantic, ...)` selection.
+- `test_speech.py::test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic` -- full
+  pipeline through `render_contact_report` with the same `divides_between`/`nearest_feature` patch as
+  the `tools.py` test above; asserts `"next valley"` appears and the semantic fragment's `"Jableh"`
+  does not reach the spoken text.
+
+### Proof the tests are not decorative
+
+Reproduced the reviewer's own disable-and-rerun method against each new test, one mechanism at a
+time, reverting between runs:
+
+- `tools.py`: wrapped `facts["terrain_qualifier"] = terrain_qualifier` in `if False and ...` ->
+  `test_describe_contact_with_enrichment_sets_terrain_qualifier_when_one_divide_crossed` and
+  `test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic` failed (`KeyError`
+  resp. missing text); every other test still passed.
+- `speech.py`: wrapped `isinstance(terrain_qualifier, str)` in `if False and ...` ->
+  `test_contact_report_text_terrain_qualifier_replaces_semantic_fragment` and
+  `test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic` failed; every other
+  test still passed.
+
+Both edits reverted after confirming; suite re-ran clean.
+
+### Checks (post-fix)
+
+**body-layer/** (world-model untouched by this fix)
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass (53 source files)
+- `pytest tests -q`: pass (1434 passed, 4 xfailed -- Review round 1's baseline was 1430/4; 4 net new
+  tests matching the list above, plus the one extended assertion in an existing test)
+
+Verified first in an isolated snapshot (`git archive feature/terrain-callout-stages-345 | tar -x`,
+cwd inside `<scratch>/body-layer`, main checkout's own `.venv/bin/{ruff,mypy,pytest}`), then
+reproduced identically after copying the two test-file changes into the actual worktree at the
+branch tip (`a806b1e`).
