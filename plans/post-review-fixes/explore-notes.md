@@ -304,3 +304,64 @@ Every slot optional, by the shape of the example (`"report 2 o'clock close"` has
 Landmark-relative `where` needs world-model place names and therefore runs into `WM-B1`'s
 Latin-script problem (DCS cannot render non-Latin-1, so Arabic names reach the cockpit as blanks) —
 `WM-B1` is already open and already forcing a rebuild.
+
+## 8. A report's job is to aim the pilot's eyes, not to transfer the picture
+
+Two mock answers to *"describe 2 o'clock near"* were put side by side — **A** enumerating every
+group with staleness marked, **B** summarising and deferring (*"About eight units, mostly infantry,
+one o'clock through two o'clock, inside two kilometres. Still checking the truck group."*).
+
+> *"B. I can also look myself, so a summary is good, I then know where and what to look for."*
+
+**That is a principle, not a preference about one line.** The pilot has eyes; the copilot's answer
+is a *pointer* — enough to aim a look. It costs less time to say, which matters in a hover, and it
+degrades gracefully when belief is uncertain, because a summary can be vague where an enumeration
+would have to either lie or hedge four times. It also means the answer's grain should follow the
+belief's grain: groups, counts, a dominant classification, a bearing span, a distance band — all of
+which the group model already produces.
+
+---
+
+# Decisions this conversation produced
+
+Numbered for citation from plans and roadmap entries. Everything here is user direction given
+2026-10-05/06, not inference.
+
+1. **World-model LOS leaves the live path entirely.** Testing-only tool. Correctness first,
+   performance second. (§1)
+2. **"No verdict" must mean fail-closed, not fallback** — and the join is fixed *first*, because
+   failing closed today would drop 76 % of objects. (§1)
+3. **DCS unit IDs may be used**, bounded to standing in for what a human could have re-identified
+   anyway — same place a second ago, small displacement — never as an oracle across occlusion or
+   long gaps. (§1)
+4. **Re-identification is group-level**, matching a remembered group against an observed cluster on
+   count, composition, movement state, plausible displacement and kind. Per-unit identity is not
+   recoverable from position at measured DCS spacing (16 m median). (§2)
+5. **The ambiguity policy inverts**: ambiguity resolves toward the remembered group; founding a new
+   one requires positive evidence. False continuity is the acceptable error; duplicate group
+   beliefs are the one to eliminate. (§3)
+6. **Air-defence classes are the exception to 5** — they require positive confirmation to inherit an
+   identity, because `belief/threat.py` keys envelope warnings on believed classification, so a
+   wrongly-continued SAM suppresses the warning rather than mislabelling a contact. (agreed §3)
+7. **Persistent group identity is spoken**, not just held internally. (§3)
+8. **Position-uncertainty growth becomes per-classification** and much slower than 20 m/s, ~0 for
+   entrenched. (§5)
+9. **Road-following is directional and graph-shaped**: corridor along the road graph branching at
+   junctions, monotone direction, "spread off-road and stopped" a recognised post-attack state that
+   expires. (§2)
+10. **Long-horizon re-identification and spatial expectation are BL-8's**, including the new
+    route-advice capability (*"there's a group behind that ridge, we better not go there"*). (§4)
+11. **The observability gate applies to every callout kind**, not just crossing and motion. 20 of
+    357 lines last sortie named masked hours, with classification attached. (§6)
+12. **`report|describe [what] [where] [how far]`**, every slot optional, bands near <2 km / medium
+    2–5 km / far 5 km+; *where* accepts clock hour, cardinal, or landmark-relative. (§7)
+13. **Answers summarise, they do not enumerate** — the report aims the pilot's eyes. (§8)
+
+## Still open, and decided by the orchestrator rather than re-asked
+
+**The poll rate stays at 1.0 s.** The user was asked whether anything felt late and answered with
+the 7 o'clock callout, which turned out to be §6's masked-hour defect rather than latency — so the
+evidence for raising the rate evaporated, and 0.2 s would multiply speaking opportunities fivefold
+against a pilot whose standing complaint has been report volume. `BL-11` Stage 1 therefore reduces
+to fixing the loop shape (sleep to a deadline, not after the work) and correcting the stale
+docstrings. Revisit if a future sortie produces lateness that is not an observability defect.
