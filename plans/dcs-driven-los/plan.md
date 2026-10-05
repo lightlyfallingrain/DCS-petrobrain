@@ -346,11 +346,42 @@ a single call site.
 
 ### What happens to the 12 m tolerance and the probe grid
 
-Unchanged, and this plan does not touch either. `_TERRAIN_TOLERANCE_M` and world-model's
+**CORRECTED (user direction, 2026-10-05, mid-implementation) — read this before trusting the
+paragraph below, which is now half wrong.** The claim that `_TERRAIN_TOLERANCE_M` is "unchanged,
+not touched" is no longer accurate in the sense that matters. The tolerance was sized to absorb
+SRTM-vs-DCS elevation error — a guessed margin compensating for a grid that is wrong in a way DCS's
+own terrain is not. Once a live caller asks DCS directly, applying that margin to the DCS answer is
+not merely unnecessary, it is **wrong**: it would loosen a verdict that no longer has the error it
+was correcting for. The user, settling this explicitly:
+
+> *"With DCS LOS, the item '12 m LOS tolerance' becomes obsolete and incorrect. It may be used in
+> test code when LOS is simulated offline, but must not be used in actual code."*
+
+So, corrected:
+
+- **The tolerance must never be applied on the live path.** `visibility.check_visibility`'s gate 4
+  already satisfies this by construction (not by a new check added for this correction): when
+  `WorldObjectCandidate.live_los_clear is not None`, the DCS-driven boolean is used as-is and
+  `line_of_sight_clear` (the function `_TERRAIN_TOLERANCE_M` lives inside) is never called at all
+  for that candidate this poll.
+- **It survives only as the offline/test primitive's own constant** — gate 4's *fallback* branch
+  (live feed absent, unit outside the queried wedge, or too stale) and fixtures/the replay harness.
+  That fallback is a real, permanent live-code path (it is reachable in a running mission, not only
+  in tests), but the tolerance's *job* on that path is no longer "correct for a real sortie's
+  elevation error" — §3a's non-goal already says offline LOS does not attempt that. The constant's
+  own definition site (`world-model/src/query/line_of_sight.py`, immediately above
+  `_TERRAIN_TOLERANCE_M`) now states this boundary explicitly, so a future reader does not
+  reasonably apply it to a live-detection input.
+- **The probe grid (M8) and its spacing redesign are unaffected by this correction** — they were
+  already lower priority and about land formations/`describe_position`, not line of sight; nothing
+  above changes that.
+
+Original text, kept for the reader asking why this section needed correcting rather than a silent
+rewrite: *"Unchanged, and this plan does not touch either. `_TERRAIN_TOLERANCE_M` and world-model's
 `line_of_sight_clear` remain the offline/test path and gate 4's fallback — both real, permanent
 uses, not a stopgap this plan replaces. The probe grid (M8) and its spacing redesign stay exactly
 where `todo/backlog.md`'s X-B28 (superseded) already left them: lower priority, for land
-formations/`describe_position`, not line of sight. Nothing here changes that.
+formations/`describe_position`, not line of sight. Nothing here changes that."*
 
 ### Trees
 

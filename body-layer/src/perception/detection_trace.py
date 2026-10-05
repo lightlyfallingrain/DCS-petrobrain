@@ -146,6 +146,29 @@ class DetectionTrace:
     motion_skew_s: float | None = None
     apparent_motion: bool | None = None
 
+    #: DCS-driven LOS (`plans/dcs-driven-los/plan.md`, X-B29), annotated by
+    #: `NakedEyePerceptionSource.poll` via `annotate_los` below, mirroring
+    #: `annotate_motion`'s own call-site shape and timing (same poll step).
+    #: `building_clear`/`terrain_clear` are the two independently-computed
+    #: fields the Hook script publishes; `live_los_clear` is the joined
+    #: verdict `visibility.check_visibility`'s gate 4 actually used
+    #: (`building_clear and terrain_clear`, or `None` if the join never
+    #: resolved); `los_skew_s` is the join's own time offset, mirroring
+    #: `motion_skew_s`. `hour_used`/`fov_half_deg_used` are the query wedge
+    #: the Hook script actually used that poll -- recording them lets a
+    #: debrief tell "outside the queried wedge" from "queried and no
+    #: verdict" (plan SS12). All `None` when no live LOS feed was joined
+    #: this poll (feed absent, unit outside the queried wedge, too stale,
+    #: or the trace sink never got the chance to see it) -- never a
+    #: guessed boolean, same tri-state discipline as every other joined
+    #: field in this module.
+    building_clear: bool | None = None
+    terrain_clear: bool | None = None
+    live_los_clear: bool | None = None
+    los_skew_s: float | None = None
+    hour_used: int | None = None
+    fov_half_deg_used: int | None = None
+
     #: The instrument this candidate was evaluated through (`plans/
     #: binocular-optic/plan.md` Stage 1) -- `optics.Optic.name`.
     #:
@@ -226,3 +249,31 @@ class DetectionTraceCollector:
         entry.motion_threshold_rad_s = threshold_rad_s
         entry.motion_skew_s = skew_s
         entry.apparent_motion = apparent_motion
+
+    def annotate_los(
+        self,
+        object_id: int,
+        *,
+        building_clear: bool | None,
+        terrain_clear: bool | None,
+        live_los_clear: bool | None,
+        skew_s: float | None,
+        hour_used: int | None,
+        fov_half_deg_used: int | None,
+    ) -> None:
+        """Fill in the DCS-driven LOS fields on `object_id`'s most recently
+        recorded entry (`plans/dcs-driven-los/plan.md`, X-B29) -- mirrors
+        `annotate_motion`'s own shape exactly: a no-op if that entry
+        doesn't exist, not restricted to `ADMITTED` entries (the join
+        happens upstream of the gate chain, in `naked_eye_source.py`'s
+        candidate construction, so it is meaningful for a candidate at any
+        gate outcome, including `TERRAIN_LOS` itself)."""
+        entry = self._last_by_object_id.get(object_id)
+        if entry is None:
+            return
+        entry.building_clear = building_clear
+        entry.terrain_clear = terrain_clear
+        entry.live_los_clear = live_los_clear
+        entry.los_skew_s = skew_s
+        entry.hour_used = hour_used
+        entry.fov_half_deg_used = fov_half_deg_used

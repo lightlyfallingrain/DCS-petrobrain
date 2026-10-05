@@ -67,7 +67,16 @@ class Percept:
     through unchanged (`plans/precise-position-belief/plan.md` Stage 1) --
     the channel's own declared error ellipse for `bearing_deg`/`range_m`,
     perceived metadata on the same footing as everything else on this
-    dataclass, never a truth field."""
+    dataclass, never a truth field.
+
+    `live_los_clear` carries `Observation.live_los_clear` through unchanged
+    (`plans/dcs-driven-los/plan.md`, X-B29) -- a DCS-driven *fact about
+    physical space* (whether a sightline was clear), not an identity or
+    position claim, so it crosses this boundary on the same footing as
+    everything else here: the moment a naked-eye observation is admitted
+    is itself proof the ray was clear (see the plan's own "why this is not
+    a boundary violation" section). Belief remembers this value; it never
+    re-derives it."""
 
     t_sim: float
     source: str
@@ -81,6 +90,7 @@ class Percept:
     count_bucket: str | None = None
     apparent_motion: bool | None = None
     position_uncertainty: PositionUncertainty | None = None
+    live_los_clear: bool | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -102,4 +112,5 @@ def percept_of(observation: Observation) -> Percept:
         count_bucket=observation.count_bucket,
         apparent_motion=observation.apparent_motion,
         position_uncertainty=observation.position_uncertainty,
+        live_los_clear=observation.live_los_clear,
     )

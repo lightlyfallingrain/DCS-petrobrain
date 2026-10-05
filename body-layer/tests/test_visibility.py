@@ -29,6 +29,7 @@ level, not tied to any specific number in the table itself.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import sqlite3
 
@@ -524,6 +525,59 @@ def test_terrain_los_blocked_drops_an_otherwise_visible_candidate(
     candidate = _candidate("Infantry", x=500.0, z=0.0)
 
     assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
+
+
+def test_live_los_clear_false_drops_a_candidate_without_consulting_the_offline_primitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29): a DCS-driven `False` verdict
+    on the candidate itself blocks gate 4 outright -- the offline
+    `line_of_sight_clear` primitive (here monkeypatched to always say
+    "clear") is never consulted when a live verdict already exists."""
+    called = False
+
+    def _fail_if_called(*args: object, **kwargs: object) -> bool:
+        nonlocal called
+        called = True
+        return True
+
+    monkeypatch.setattr(visibility, "line_of_sight_clear", _fail_if_called)
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = dataclasses.replace(
+        _candidate("Infantry", x=500.0, z=0.0), live_los_clear=False
+    )
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert result is None
+    assert called is False
+
+
+def test_live_los_clear_true_admits_a_candidate_without_consulting_the_offline_primitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mirror case: a DCS-driven `True` verdict admits the candidate
+    through gate 4 even if the offline primitive would have said
+    "blocked" -- the live answer takes priority, never a belt-and-braces
+    second check against it."""
+    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: False)
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = dataclasses.replace(
+        _candidate("Infantry", x=500.0, z=0.0), live_los_clear=True
+    )
+
+    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is not None
+
+
+def test_live_los_clear_none_falls_back_to_the_offline_primitive() -> None:
+    """Default behaviour (no live feed, as in every other test in this
+    file) is unchanged: `live_los_clear` stays `None` and gate 4 reads
+    exactly as it always has."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=500.0, z=0.0)
+    assert candidate.live_los_clear is None
+
+    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is not None
 
 
 def test_steep_depression_inside_the_old_cone_is_now_rejected() -> None:
