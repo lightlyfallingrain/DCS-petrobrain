@@ -55,25 +55,20 @@ THEATRE_PROJECTIONS: dict[str, TmercParams] = {
     ),
     "Afghanistan": TmercParams(
         central_meridian=63,
-        false_easting=-300149.9912,
-        false_northing=-3759656.9499,
+        false_easting=-300150.0,
+        false_northing=-3759657.0,
         scale_factor=0.9996,
         lat_0=0,
         source=(
-            "Beacon-fit (49 beacons.lua position/positionGeo pairs, least-squares, "
-            "RMS 0.03m) -- no pydcs source exists for Afghanistan (pydcs predates "
-            "ED's Afghanistan release). The fit method was validated to 0.03m "
-            "against Syria's already-live-confirmed parameters and to <0.01m "
-            "against Caucasus's already-published pydcs parameters before being "
-            "trusted here; see world-model/research/2026-10-04-multi-theatre-"
-            "afghanistan-caucasus-recon.md Q1. NOT yet confirmed against a live "
-            "coord.LOtoLL run (the M1 circularity caveat applies -- beacons.lua's "
-            "own positionGeo is DCS's internal geodesy, not an independent "
-            "source). Upgrades to confirmed via Stage 4's live probe: mirrors "
-            "M1->M1-verification (tools/dcs-mission-probe/coord_probe.lua on a "
-            "Windows DCS session with Afghanistan loaded), residual <=~0.1m at "
-            "every sampled point."
+            "Live-confirmed against DCS coord.LOtoLL output on the Afghanistan "
+            "terrain (tools/dcs-mission-probe/coord_probe.lua, 2026-10-05: map "
+            "origin + 29 airbases, worst residual <0.001m). The 2026-10-04 beacon "
+            "fit (FE -300149.9912, FN -3759656.9499) left a uniform 0.051m offset "
+            "at every point; three unplaced FOBs that DCS reports at lat/lon 0,0 "
+            "sit at exactly x=-3759657, z=-9428368, which pins the false northing "
+            "to the round value, and the round false easting fits as well. See "
+            "world-model/research/2026-10-05-afghanistan-projection-live-check.md."
         ),
-        confidence="provisional",
+        confidence="confirmed",
     ),
 }
