@@ -15,7 +15,7 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
-- [ ] **`fix/contact-report-flood` — DoD PASSED on fixtures, not yet merged, not yet flown
+- [ ] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`), not yet flown
   (2026-10-05).** Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
   when an existing, not-yet-`lost` contact is spatially/class-plausibly the same real thing — the
   speech-layer fix for the naked-eye gaze sweep's merge-direction continuity loss (the user's own
@@ -38,7 +38,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   noticed. Also flyable on the same sortie: `feature/silence-command` (merged, already on `main`)
   — the manual half of quieting the cockpit, this fix being the automatic half.
 
-- [ ] **`fix/redundant-group-disclosure` — DoD PASSED on fixtures 2026-10-05, not yet merged, not
+- [ ] **`fix/redundant-group-disclosure` — DoD PASSED on fixtures 2026-10-05, merged the same day (`2ae34cc`), not
   yet flown.** Silences a `belief.groups.Group`'s first disclosure when every member was already
   individually reported (directly or via the flood fix's merge-echo above), and speaks only the
   unreported delta otherwise. **Rides the same sortie as `fix/contact-report-flood` above rather
@@ -1596,8 +1596,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   assumption — a self-contained dispatcher addition on an existing choke point. DoD report:
   `plans/silence-command/dod-check.md`.
 
-- [ ] **Contact-report flood (merge-echo callout suppression) — DoD PASSED on fixtures 2026-10-05,
-  not yet merged.** `fix/contact-report-flood`. See the "Live acceptance debt" entry above for the
+- [x] **Contact-report flood (merge-echo callout suppression) — DoD PASSED on fixtures 2026-10-05,
+  merged the same day (`3fe93fd`); live acceptance still outstanding.** `fix/contact-report-flood`. See the "Live acceptance debt" entry above for the
   full writeup — not duplicated here. Debug → Architect → Implementer → Reviewer → Security(deep)
   → DoD sequence (bug-fix path; no plan-review stage, matching this project's current
   once-per-feature security cadence). 1399 passed/4 xfailed (up from the branch's own 1389/4,
