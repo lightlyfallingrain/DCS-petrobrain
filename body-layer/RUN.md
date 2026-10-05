@@ -92,11 +92,24 @@ start time into the filename before the suffix, so
 --detection-trace logs/dcs-detection-trace.jsonl
 ```
 
-actually writes `logs/dcs-detection-trace-20261006-143500.jsonl`. The
-directory is untouched, only the filename, and all three logs of one run share
-the same stamp so you can tell at a glance which files belong to which sortie.
-The logger prints each resolved path to stderr as it starts — that line is the
-authoritative answer to "where did it go".
+actually writes `logs/dcs-detection-trace-20261006-143500.jsonl`. Only the
+filename is rewritten — the path's directory is used as given, never
+relocated — and all three logs of one run share the same stamp so you can tell
+at a glance which files belong to which sortie. The logger prints each
+resolved path to stderr as it starts — that line is the authoritative answer
+to "where did it go".
+
+**The directory is created if it is missing**, which matters because `logs/`
+is gitignored and so absent in a fresh clone. Without that, the writers'
+`open(path, "a")` would raise `FileNotFoundError` during startup — before any
+of the write-failure handling below could report it — and the crew would not
+start at all. A directory that cannot be created disables that one log, with a
+line on stderr, rather than taking the sortie down with it.
+
+Where the run scripts put them: `run-scripts/run-crew-text.sh` and
+`run-crew-text-debug-view.sh` both `pushd` into `body-layer/` first and pass
+relative `logs/dcs-*.jsonl` paths, so the files land in `body-layer/logs/`.
+They used to land loose in `$HOME` as `~/dcs-*.jsonl`.
 
 This is `BL-11` Stage 5. Before it, all three opened with `"a"` and never
 rolled, so one path accumulated every sortie ever flown: the detection trace

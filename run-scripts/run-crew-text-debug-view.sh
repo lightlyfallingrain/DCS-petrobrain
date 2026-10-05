@@ -8,11 +8,11 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-ur
     --crew-text \
     --f10-commands \
     --audio-adapter-url http://127.0.0.1:7795 \
-    --speech-log ~/dcs-speech.jsonl \
+    --speech-log logs/dcs-speech.jsonl \
     --eyesight-view \
     --eyesight-view-radius-m 5000 \
-    --belief-truth-log ~/dcs-belief-truth.jsonl \
-    --detection-trace ~/dcs-detection-trace.jsonl \
+    --belief-truth-log logs/dcs-belief-truth.jsonl \
+    --detection-trace logs/dcs-detection-trace.jsonl \
     --brain-client http --brain-url http://127.0.0.1:7796 \
     $@
 popd
