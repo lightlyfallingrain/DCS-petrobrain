@@ -64,3 +64,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [WM-B6 geomorphons plan](project_wmb6_geomorphons_plan.md) — committed spike tracer is naive/rejected; SRTM pixel space is anisotropic; resumable-cache pattern deviates from osm_cache template; seams clip, don't merge.
 - [Terrain Stages 3-5 revision](project_terrain_stages_345_revision.md) — "next valley" is an observer-relative crossing count, not a basin graph; terrain facts are structurally outbid in speech.py.
 - [Contact report flood plan](project_contact_report_flood.md) — merge already analysed/approved; split-vs-echo structurally indistinguishable; cross-contact gate reuse; CALLOUT_MAX_AGE_S << LOST_THRESHOLD_S makes suppression permanent.
+- [SPU-8 intercom plan](project_spu8_intercom_plan.md) — the BL-6 "wheel" misdirect; capture gate lives in the collector not audio-adapter; two opposite empty-cache defaults, same feature.

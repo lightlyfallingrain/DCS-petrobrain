@@ -103,6 +103,14 @@ the body/brain process, on either Windows or Mac (compute topology note in
   has moved at all (`plans/inbound-speech/plan.md` Stage 5). A pure,
   idempotent read of a *state*, not a queue: the capture process polls it
   tens of times a second and must never consume anything by asking.
+  **Since `plans/spu8-intercom/plan.md` Stage 2, the served `"intercom"`
+  field is already gated by the SPU-8 switches** (`_handle_ptt_state`
+  combines this with `Spu8Cache`) -- see that function's own docstring.
+  `"radio"` is untouched.
+- `GET /spu8/state` -> the SPU-8 intercom panel (pilot NET-1, co-pilot ICS
+  power, volume), or `null` before the first line arrives
+  (`plans/spu8-intercom/plan.md` Stage 1). Same shape/lifecycle as
+  `/ptt/state`.
 - `GET /unit_velocity/latest` -> the most recent `UnitVelocitySnapshot`
   (`plans/movement-detection/plan.md` Stage 1) as JSON, or JSON `null` on
   the same "not an error" basis as every other `/latest` endpoint. A
@@ -146,6 +154,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
     WorldObjectsCache,
@@ -163,6 +172,7 @@ _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
 _PTT_STATE_PATH = "/ptt/state"
+_SPU8_STATE_PATH = "/spu8/state"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
@@ -195,11 +205,34 @@ def _handle_unit_velocity_latest(
     return None if snapshot is None else snapshot.to_dict()
 
 
-def _handle_ptt_state(cache: PttCache) -> dict[str, Any] | None:
+def _handle_ptt_state(cache: PttCache, spu8_cache: Spu8Cache) -> dict[str, Any] | None:
     """`null` until the trigger first moves. That is the ordinary startup
     state, not an error -- `Export.lua` sends a line only on change, so an
     untouched trigger produces nothing. A consumer reads `null` as "not
-    pressed", which is also what it means."""
+    pressed", which is also what it means.
+
+    **The served `"intercom"` field is already gated by the SPU-8 switches**
+    (`plans/spu8-intercom/plan.md` Stage 2, plan Decision 1): `"intercom"`
+    is `sample.intercom and spu8_gate_open`, where `spu8_gate_open` is
+    `False` whenever `spu8_cache.latest() is None` -- fail-safe-closed, an
+    unknown intercom state must not let capture through (plan Decision 3).
+    `"radio"` is untouched -- a full press is talking to ATC/another
+    player, independent of the SPU-8 gate. This is the entire capture-
+    gating mechanism: `audio-adapter`'s `DcsPTT` already reads `"intercom"`
+    verbatim off the wire, so no audio-adapter change is needed."""
+    sample = cache.latest()
+    if sample is None:
+        return None
+    spu8_sample = spu8_cache.latest()
+    spu8_gate_open = spu8_sample is not None and spu8_sample.gate_open
+    payload = sample.to_api_dict()
+    payload["intercom"] = sample.intercom and spu8_gate_open
+    return payload
+
+
+def _handle_spu8_state(cache: Spu8Cache) -> dict[str, Any] | None:
+    """`null` before the first SPU-8 line arrives -- same "not an error"
+    posture as `/ptt/state`."""
     sample = cache.latest()
     return None if sample is None else sample.to_api_dict()
 
@@ -233,6 +266,7 @@ def _make_handler(
     audio_sender: AudioPlaybackSender | None,
     unit_velocity_cache: UnitVelocityCache,
     ptt_cache: PttCache,
+    spu8_cache: Spu8Cache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -251,7 +285,10 @@ def _make_handler(
                 )
                 return
             if path == _PTT_STATE_PATH:
-                self._respond_json(200, _handle_ptt_state(ptt_cache))
+                self._respond_json(200, _handle_ptt_state(ptt_cache, spu8_cache))
+                return
+            if path == _SPU8_STATE_PATH:
+                self._respond_json(200, _handle_spu8_state(spu8_cache))
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
@@ -431,16 +468,20 @@ class TelemetryAPIServer:
         audio_sender: AudioPlaybackSender | None = None,
         unit_velocity_cache: UnitVelocityCache | None = None,
         ptt_cache: PttCache | None = None,
+        spu8_cache: Spu8Cache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
-        # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`
-        # default to a fresh, never-populated cache/queue rather than being
-        # required -- keeps every existing `TelemetryAPIServer(cache,
-        # host=..., port=...)` call site (tests included) working unchanged;
-        # the corresponding `/latest` (or `/f10_commands/poll`) endpoint on
-        # such a server just always answers `null` (or `[]`), same as an
-        # empty cache would. `text_sender`/`command_sender`/`audio_sender`
-        # default to `None` rather than a real sender for the same reason --
+        # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
+        # `spu8_cache` default to a fresh, never-populated cache/queue
+        # rather than being required -- keeps every existing
+        # `TelemetryAPIServer(cache, host=..., port=...)` call site (tests
+        # included) working unchanged; the corresponding `/latest` (or
+        # `/f10_commands/poll`) endpoint on such a server just always
+        # answers `null` (or `[]`), same as an empty cache would -- and
+        # `/ptt/state`'s served `"intercom"` correctly reads as fail-safe-
+        # closed (plan Decision 3) against a never-populated `Spu8Cache`.
+        # `text_sender`/`command_sender`/`audio_sender` default to `None`
+        # rather than a real sender for the same reason --
         # `/text/push`/`/command/petrovich_search`/`/audio/play` answer
         # `503` rather than crashing when they aren't configured.
         self._cache = cache
@@ -468,6 +509,7 @@ class TelemetryAPIServer:
             else UnitVelocityCache()
         )
         self._ptt_cache = ptt_cache if ptt_cache is not None else PttCache()
+        self._spu8_cache = spu8_cache if spu8_cache is not None else Spu8Cache()
         self._text_sender = text_sender
         self._command_sender = command_sender
         self._audio_sender = audio_sender
@@ -509,6 +551,7 @@ class TelemetryAPIServer:
                 self._audio_sender,
                 self._unit_velocity_cache,
                 self._ptt_cache,
+                self._spu8_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

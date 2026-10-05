@@ -104,9 +104,23 @@ body-side view and the slice numbering both files share.
   whenever the collector next runs with `--debug`: count `GET /ptt/state` lines over a fixed
   window, expect ~30/s rather than ~60/s.
 
-- [ ] **Slice 2 — cockpit state drives the audio. Un-deferred 2026-10-05** (the user wrote the
+- [~] **Slice 2 — cockpit state drives the audio. Un-deferred 2026-10-05** (the user wrote the
   behaviour out in full; it was `todo/SPUU-8.md`, folded in here and the loose file deleted).
   Replaces the original SRS ICS injection, which is cancelled with the SRS dependency itself.
+
+  **Built 2026-10-05, DoD PASSED on fixtures, not yet merged or flown** (branch
+  `feature/spu8-intercom`, tip `bc10f14`). All five stages below (telemetry, capture gating,
+  playback gating + volume, mission-start ICS write, on-ground silent default) are implemented
+  against this entry's own spec, with Architect/Implementer having run cross-machine ahead of any
+  gate, a Security `NEEDS FIXES` (unguarded `ValueError` that could permanently kill the audio
+  worker thread — fixed and re-approved) and a Performance `APPROVED — MONITOR` (the one
+  unmeasurable item: three added per-frame cockpit reads in `Export.lua`, reasoned as the same cost
+  class as the existing PTT read but needing a live sortie to confirm no stutter). Full record:
+  `plans/spu8-intercom/{plan.md, implementation.md, review.md, security-deep-analysis.md,
+  performance.md, dod-check.md}`. **Live acceptance is tracked as debt, not waived** — see
+  `body-layer/ROADMAP.md`'s "Live acceptance debt" list and the acceptance card,
+  `docs/acceptance/2026-10-05-spu8-intercom-sortie.md`. Two constants shipped as guesses pending
+  that flight: `ON_GROUND_AGL_THRESHOLD_M = 10.0`, `MISSION_START_ICS_DELAY_S = 5.0`.
 
   **What it would do.** The intercom switch gates the crew channel in **both directions** — off
   means he cannot hear you and you cannot hear him, which is what the real switch does — and the

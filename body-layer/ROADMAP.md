@@ -15,6 +15,24 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **`feature/spu8-intercom` (audio-adapter Slice 2) — DoD PASSED on fixtures 2026-10-05, not yet
+  merged, not yet flown.** Gates Petrovich's capture and playback both ways on the cockpit's real
+  SPU-8 intercom switches (pilot NET-1, arg 377, AND co-pilot ICS power, arg 664) and scales his
+  playback volume by the SPU-8 knob (arg 457); two automatic defaults ride along (co-pilot ICS
+  switches on 5s after mission start, silence on the ground until the first command). **This one
+  stands alone rather than batching with the sorties below** — it changes whether he can be heard
+  at all, so flying it alongside another speech-content change would make a gating bug
+  indistinguishable from a content bug. Reviewer APPROVED (two rounds — round 2 re-verified a
+  Security-requested fix); Security deep analysis initially NEEDS FIXES (unguarded `ValueError`
+  that could permanently kill the audio worker thread while the LAN API kept reporting success —
+  fixed, re-approved); Performance APPROVED — MONITOR (one unmeasurable item: three added
+  per-frame cockpit reads, same cost class as the existing PTT read, needs a sortie to confirm no
+  stutter). Two constants shipped as uncalibrated guesses: `ON_GROUND_AGL_THRESHOLD_M = 10.0`,
+  `MISSION_START_ICS_DELAY_S = 5.0`. Acceptance card:
+  `docs/acceptance/2026-10-05-spu8-intercom-sortie.md`. Full record:
+  `plans/spu8-intercom/{plan.md, implementation.md, review.md, security-deep-analysis.md,
+  performance.md, dod-check.md}`; roadmap entry: `audio-adapter/ROADMAP.md`'s Slice 2.
+
 - [ ] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`), not yet flown
   (2026-10-05).** Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
   when an existing, not-yet-`lost` contact is spatially/class-plausibly the same real thing — the
