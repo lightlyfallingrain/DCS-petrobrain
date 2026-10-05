@@ -29,6 +29,7 @@ from belief.enrichment import (
     motion_when_seen,
     relative_geometry,
     semantic_facts_for,
+    terrain_divide_qualifier,
 )
 from belief.percept import percept_of
 from belief.position_belief import fold_position
@@ -768,6 +769,96 @@ def test_relative_geometry_accounts_for_ownship_heading() -> None:
     assert result["clock_position"] == 12
 
 
+# --- terrain_divide_qualifier (`plans/terrain-feature-probing/plan.md`
+# Revision 3, Decision 2/5) --------------------------------------------------
+
+
+def _patch_divides(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    divide_count: int,
+    ridge_distance_m: float | None = None,
+    valley_distance_m: float | None = None,
+) -> None:
+    monkeypatch.setattr(
+        enrichment,
+        "divides_between",
+        lambda conn, theatre, observer, target: divide_count,
+    )
+
+    def fake_nearest_feature(
+        conn: object, kinds: list[str], x: float, z: float
+    ) -> tuple[object, float] | None:
+        distance = ridge_distance_m if kinds == ["ridge"] else valley_distance_m
+        return (object(), distance) if distance is not None else None
+
+    monkeypatch.setattr(enrichment, "nearest_feature", fake_nearest_feature)
+
+
+def test_terrain_divide_qualifier_zero_divides_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_divides(monkeypatch, divide_count=0)
+    ownship = _ownship(x=0.0, z=0.0)
+    target = GeoPosition(x=5000.0, z=0.0, alt_m=500.0)
+
+    assert terrain_divide_qualifier(_FAKE_CONN, "Syria", ownship, target) is None
+
+
+def test_terrain_divide_qualifier_two_or_more_divides_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Too far through the terrain for the phrase to mean anything (Decision
+    2)."""
+    _patch_divides(monkeypatch, divide_count=2, valley_distance_m=100.0)
+    ownship = _ownship(x=0.0, z=0.0)
+    target = GeoPosition(x=5000.0, z=0.0, alt_m=500.0)
+
+    assert terrain_divide_qualifier(_FAKE_CONN, "Syria", ownship, target) is None
+
+
+def test_terrain_divide_qualifier_one_divide_valley_dominant_says_next_valley(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_divides(monkeypatch, divide_count=1, valley_distance_m=100.0)
+    ownship = _ownship(x=0.0, z=0.0)
+    target = GeoPosition(x=5000.0, z=0.0, alt_m=500.0)
+
+    assert (
+        terrain_divide_qualifier(_FAKE_CONN, "Syria", ownship, target) == "next valley"
+    )
+
+
+def test_terrain_divide_qualifier_one_divide_no_dominant_form_says_beyond_the_ridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1 divide, but the target itself has no dominant landform -- the
+    generic "beyond the ridge" rather than overclaiming "next valley"."""
+    _patch_divides(monkeypatch, divide_count=1)
+    ownship = _ownship(x=0.0, z=0.0)
+    target = GeoPosition(x=5000.0, z=0.0, alt_m=500.0)
+
+    assert (
+        terrain_divide_qualifier(_FAKE_CONN, "Syria", ownship, target)
+        == "beyond the ridge"
+    )
+
+
+def test_terrain_divide_qualifier_one_divide_ridge_dominant_says_beyond_the_ridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Target sitting on/near the ridge itself: "next valley" would
+    overclaim exactly where it is relative to the ridge it crossed."""
+    _patch_divides(monkeypatch, divide_count=1, ridge_distance_m=100.0)
+    ownship = _ownship(x=0.0, z=0.0)
+    target = GeoPosition(x=5000.0, z=0.0, alt_m=500.0)
+
+    assert (
+        terrain_divide_qualifier(_FAKE_CONN, "Syria", ownship, target)
+        == "beyond the ridge"
+    )
+
+
 # --- motion_when_seen ------------------------------------------------------
 
 
@@ -842,11 +933,10 @@ def test_every_gated_kind_shares_todays_placeholder_radius() -> None:
     diff, not an accident.
 
     `ridge`/`valley` no longer appear here (`plans/terrain-feature-probing/
-    plan.md` Revision 3, Stage 3a calibration): the plain near-radius gate
-    they used to share with settlement/road/water is retired for those two
-    kinds, superseded entirely by `TERRAIN_QUALIFIER_MAX_M`/`TERRAIN_
-    DOMINANCE_FACTOR`'s dominance rule -- see `test_dominant_terrain_kind_*`
-    above."""
+    plan.md` Revision 3, Stage 3a): the plain near-radius gate they used to
+    share with settlement/road/water is retired for those two kinds,
+    superseded entirely by `TERRAIN_QUALIFIER_MAX_M`/`TERRAIN_DOMINANCE_
+    FACTOR`'s dominance rule -- see `test_dominant_terrain_kind_*` below."""
     assert set(NEAR_FACT_RADIUS_M) == {"settlement", "road", "water"}
     assert set(NEAR_FACT_RADIUS_M.values()) == {1000.0}
 

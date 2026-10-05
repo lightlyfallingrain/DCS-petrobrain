@@ -389,7 +389,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   - These replace the current "near X (~200m)" shape entirely at short distances. The existing
     1000 m `NEAR_FACT_RADIUS_M` gate stays above them.
 
-  **Needs world-model support — the one expensive item:**
+  **Needs world-model support — the one expensive item. Unblocked 2026-10-05, not done.**
   - **"200 meters north of the road"** and **"next to the road, north side"** both need the
     *direction from the feature to the contact*. `query.describe.RoadInfo` carries `distance_m` and
     `orientation_deg` (the road's own heading) but **no such bearing**, and neither do
@@ -397,6 +397,12 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     phrasing change in body-layer. Given a bearing *and* the road's existing `orientation_deg`,
     "which side" falls out; without the bearing, neither does. Sequence this before the two wording
     items that depend on it rather than half-building them.
+    **`plans/terrain-feature-probing/plan.md` Revision 3, Stage 4 closed the world-model half**:
+    `RoadInfo`/`SettlementInfo`/`WaterInfo`/`TerrainLineInfo` all now carry `bearing_deg: float |
+    None` (direction from the feature's closest point to the query position, via `store.reader.
+    closest_point_on_feature`). This bullet does **not** go to `[x]` — the two wording items above
+    are body-layer phrasing and are still unbuilt; only the world-model dependency they were blocked
+    on is gone.
 
   **Deferred (user, 2026-09-19):**
   - [>] **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
