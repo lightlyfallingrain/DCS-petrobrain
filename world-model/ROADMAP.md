@@ -103,19 +103,16 @@ sortie actually exercises it, and say which one.
   changes from this. Follow-up queued as `WM-B4` (curve-smooth the polylines, user direction the
   same day after seeing the staircase in a real render).
 
-- [ ] **`feature/multi-theatre-afghanistan` — `THEATRE_PROJECTIONS["Afghanistan"]` registered
-  `confidence="provisional"`, DoD-passed 2026-10-05 (checks, Reviewer, Security, Performance all
-  clean), live `coord.LOtoLL` projection check unflown.** Plan Stage 4: the beacon-fitted `tmerc`
-  params (`central_meridian=63, scale_factor=0.9996, false_easting=-300149.9912,
-  false_northing=-3759656.9499`) have never been checked against DCS's own live `coord.LOtoLL`
-  the way Syria's M1 was (0.00–0.03 m floor). `afghanistan-full.sqlite` is built and spot-checked
-  geographically coherent (Kabul SRTM elevation 1792.2 m vs. real ~1791 m), but every position it
-  reports still rests on an unconfirmed projection. Card:
-  `docs/acceptance/2026-10-05-afghanistan-projection-check.md` /
-  https://claude.ai/artifact/YBRPNY1LcAb37u6GMBB1Vu — run the Afghanistan-terrain `coord_probe.lua`
-  mission, compare residuals, flip `confidence` to `"confirmed"` if every point clears ~0.1 m.
-  Same card's Block 2 (optional) also seeds the full ~26-airfield list via
-  `world.getAirbases()` — only 7 of 26 are known today (beacon-derived, navaid-equipped only).
+- [x] **`feature/multi-theatre-afghanistan` — Afghanistan projection live-confirmed 2026-10-05.**
+  The user ran `coord_probe.lua` on the Afghanistan terrain (map origin + 29 airbases). The beacon
+  fit was off by a uniform 0.051 m everywhere; three unplaced FOBs that DCS reports at lat/lon 0,0
+  sit at exactly x=-3759657, which pins the false northing. With round `false_easting=-300150`,
+  `false_northing=-3759657` the worst residual is under 1 mm, and `confidence` is now `"confirmed"`
+  (`world-model/research/2026-10-05-afghanistan-projection-live-check.md`). The 5 cm change does
+  not warrant a rebuild of `afghanistan-full.sqlite` (500 m grid). The probe output
+  (`data/raw/dcs/2026-10-05/coord_probe_output.json`, gitignored) holds 26 real airbase
+  positions, the seed for widening airfields beyond the 7 beacon-derived ones; the three FOBs at
+  0,0 have no real position and must be filtered. Block 2 (Bagram sortie) remains optional.
 
   **Performance Reviewer finding, relevant to Kola before Afghanistan's own acceptance clears
   it:** the terrain-semantics (ridge/valley) build stage processes every `.hgt` tile physically

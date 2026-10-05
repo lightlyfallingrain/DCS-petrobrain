@@ -43,8 +43,9 @@ def test_control_point_within_expected_residual(point: ControlPoint) -> None:
     assert residual_m <= point.expected_max_residual_m
 
 
-def test_afghanistan_provisional_fit_self_consistency() -> None:
-    """**Not** a live-DCS or real-world accuracy check -- this is
+def test_afghanistan_beacon_fit_self_consistency() -> None:
+    """Kept from the provisional phase; the live check is
+    `test_afghanistan_matches_live_coord_lotoll` below. **Not** a live-DCS or real-world accuracy check -- this is
     self-consistency with the provisional beacon-fit only, per the M1
     circularity caveat (`beacons.lua`'s own `positionGeo` is computed by
     DCS's internal projection at terrain-build time, not an independent
@@ -66,3 +67,35 @@ def test_afghanistan_provisional_fit_self_consistency() -> None:
     lat, lon = dcs_to_wgs84("Afghanistan", 81018.583527, 277427.106402)
     residual_m = haversine_distance_m(lat, lon, 34.545599, 69.290360)
     assert residual_m <= 0.2
+
+
+# DCS coord.LOtoLL output on the Afghanistan terrain, 2026-10-05
+# (tools/dcs-mission-probe/coord_probe.lua; raw file
+# data/raw/dcs/2026-10-05/coord_probe_output.json, gitignored). Spread over
+# the map: origin, NW (Herat), SW (Zaranj), N (Maymana), E (Jalalabad),
+# S (Dwyer), plus the Kabul/Bagram area.
+AFGHANISTAN_LIVE_POINTS = [
+    ("origin", 0.0, 0.0, 33.93461301, 66.24706539),
+    ("Herat", 27163.97460938, -371062.81250000, 34.22003121, 62.23012967),
+    ("Zaranj", -333294.46875000, -408303.40625000, 30.96580738, 61.86753983),
+    ("Maymana", 217346.60937500, -140807.25000000, 35.92439132, 64.76619559),
+    ("Jalalabad", 73065.89062500, 388997.62500000, 34.40606726, 70.49063829),
+    ("Dwyer", -320083.34375000, -199276.92187500, 31.08563906, 64.05755618),
+    ("Kabul", 83220.18750000, 268612.62500000, 34.57023878, 69.19633023),
+    ("Bagram", 126849.64843750, 273171.50000000, 34.95879883, 69.27538148),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "x", "z", "lat", "lon"),
+    AFGHANISTAN_LIVE_POINTS,
+    ids=[p[0] for p in AFGHANISTAN_LIVE_POINTS],
+)
+def test_afghanistan_matches_live_coord_lotoll(
+    name: str, x: float, z: float, lat: float, lon: float
+) -> None:
+    """The live check behind `confidence="confirmed"`: DCS's own
+    coord.LOtoLL, not beacons.lua. Measured worst residual <1 mm; the 1 cm
+    bound would still catch the 5 cm offset the beacon fit had."""
+    got_lat, got_lon = dcs_to_wgs84("Afghanistan", x, z)
+    assert haversine_distance_m(got_lat, got_lon, lat, lon) <= 0.01
