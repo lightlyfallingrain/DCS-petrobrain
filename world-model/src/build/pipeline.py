@@ -79,7 +79,11 @@ from build.ingest_probe import (
 )
 from build.ingest_roadnet import RoadnetIngestStats, ingest_roadnet
 from build.ingest_srtm import SrtmIngestStats, ingest_srtm_grid
-from build.ingest_terrain import TerrainIngestStats, ingest_terrain
+from build.ingest_terrain import (
+    TerrainIngestStats,
+    ingest_terrain,
+    tiles_for_region,
+)
 from build.ingest_towns import ingest_towns
 from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
@@ -709,16 +713,26 @@ def build_region(
         else:
             report.probe_skipped = True
 
-        # `landform-geomorphons` plan, design decision 1: gated on
-        # `existing_srtm_tile_paths` directly, independent of whether an
+        # `landform-geomorphons` plan, design decision 1: gated on the
+        # staged SRTM tiles directly, independent of whether an
         # "elevation" grid was ever inserted into the store -- this stage
         # resamples straight from the SRTM tile files itself (via
         # `build.ingest_terrain`'s own per-tile pipeline), it does not
-        # read the stored grid at all.
+        # read the stored grid at all. Only the tiles the region touches
+        # (plus the neighbours feeding their processing-window margin) are
+        # passed: `ingest_terrain` extracts across each given tile's whole
+        # extent, so every other staged tile is time spent on terrain
+        # outside the region -- see `tiles_for_region`.
+        terrain_tile_paths = tiles_for_region(existing_srtm_tile_paths, region)
         if existing_srtm_tile_paths:
+            logger.info(
+                "terrain semantics: %d of %d staged tile(s) touch the region",
+                len(terrain_tile_paths),
+                len(existing_srtm_tile_paths),
+            )
+        if terrain_tile_paths:
             with _stage(
-                f"terrain semantics (ridge/valley), {len(existing_srtm_tile_paths)} "
-                "tile(s)",
+                f"terrain semantics (ridge/valley), {len(terrain_tile_paths)} tile(s)",
                 8,
             ):
 
@@ -744,7 +758,7 @@ def build_region(
                         report.feature_counts[f.kind] += 1
 
                 terrain_stats = ingest_terrain(
-                    existing_srtm_tile_paths,
+                    terrain_tile_paths,
                     region.theatre,
                     region,
                     terrain_cache_store_path(out_path),
