@@ -965,6 +965,25 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   gate/decimation gap is proportionally small), but any density or clutter impression taken from
   those earlier renders should not be trusted for what ships.
 
+  **Stages 3-5 built, Revision 3, 2026-10-05 (`plans/terrain-feature-probing/plan.md`).** The
+  "a consumer that actually needs landform references" reopening condition fired: the contact-report
+  callout is that consumer. Revision 3 replaces the void basin-adjacency design (there are no
+  basins; Option C was abandoned before shipping) with a query-time divide counter —
+  `query/divides.py`'s `divides_between(conn, theatre, observer, target)` counts distinct ridge
+  crossings on the straight observer->target segment, deduplicated within `DIVIDE_MERGE_M` (400 m)
+  — plus `store/reader.py`'s `closest_point_on_feature` (the companion to `_distance_to_feature`)
+  feeding a new `bearing_deg: float | None` on `RoadInfo`/`SettlementInfo`/`WaterInfo`/
+  `TerrainLineInfo` in `query/describe.py`. This closes `body-layer/BACKLOG.md`'s `BL-B14`
+  world-model-support bullet (unblocked, not done — the body-layer wording items it names are
+  separate). Real-store read-only check against `syria-full.sqlite` at Baalbek
+  (x=-114453.8, z=25280.8): segments east toward the Anti-Lebanon flank read 1 divide at 8 km (and
+  keep climbing with range — 2 at 12 km, 3 at 16 km — as the straight segment crosses successively
+  more of the range's ridge lines); segments west/southwest, roughly along the Bekaa valley's own
+  axis, stay at 0 divides out to 16-20 km. Matches the plan's own predicted check
+  ("a segment across a flank should read 1, along the floor 0"). Body-layer's half (the dominance
+  rule retuning `NEAR_FACT_RADIUS_M`, and the speech-priority wiring) is `plans/
+  terrain-feature-probing/implementation-rev3.md`'s to describe; not duplicated here.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a

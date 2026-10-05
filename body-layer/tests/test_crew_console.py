@@ -198,6 +198,18 @@ def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
         "project_terrain_aware",
         lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
     )
+    # `terrain_divide_qualifier` (`plans/terrain-feature-probing/plan.md`
+    # Revision 3) queries `store.reader`'s R*Tree-backed `features_in_bbox`
+    # directly rather than through `describe_position` -- the fixture's
+    # `_FAKE_CONN` has no `feature_bbox` table at all, so a non-zero
+    # ownship->target segment would hit a real `sqlite3.OperationalError`
+    # without this stub. `0` means "no divides crossed", the same no-op
+    # answer a flat/featureless store would give.
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
+    )
     return EnrichmentContext(
         conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
     )
@@ -2825,6 +2837,12 @@ def _enrichment_context_with_heading(
         enrichment_module,
         "project_terrain_aware",
         lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    # See `_enrichment_context`'s identical stub above.
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
     )
     return EnrichmentContext(
         conn=_FAKE_CONN,

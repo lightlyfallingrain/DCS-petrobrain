@@ -99,6 +99,8 @@ from perception.geometry import (
 )
 from perception.source import OwnshipState
 from query.describe import TerrainLineInfo, describe_position
+from query.divides import divides_between
+from store.reader import nearest_feature
 
 #: The width of naked-eye's own clock-position reporting vocabulary, 30
 #: degrees per hour -- moved here from `belief.association_over_time` by
@@ -673,6 +675,54 @@ def relative_geometry(ownship: OwnshipState, target: GeoPosition) -> dict[str, o
         "clock_position": _clock_position(relative_bearing_deg),
         "relative_alt_m": target.alt_m - ownship.alt_m,
     }
+
+
+def terrain_divide_qualifier(
+    conn: sqlite3.Connection,
+    theatre: str,
+    ownship: OwnshipState,
+    target: GeoPosition,
+) -> str | None:
+    """Decision 2/5's divide-relative qualifier (`plans/
+    terrain-feature-probing/plan.md` Revision 3) -- *"next valley"*/
+    *"beyond the ridge"*, or `None` when the pilot's phrase would not mean
+    anything (0 or >=2 ridge crossings between `ownship` and `target`).
+
+    **Ownship-relative, so never cached in `WorldEnrichmentCache`**
+    (Decision 1) -- call this directly from the uncached contact-report
+    build path (`belief.tools._add_enrichment_facts`), the exact place
+    `relative_geometry` above already lives and for the identical reason:
+    `ownship` moves every poll even when the target's believed position
+    does not, so a cached divide count would go stale mid-flight and
+    produce a confidently wrong "next valley".
+
+    When exactly one divide fires, the wording is picked by whether the
+    *target* itself sits in a dominant valley (`_dominant_terrain_kind_
+    from_distances`, Decision 3's rule, evaluated at the target): valley
+    dominant -> `"next valley"`; anything else (ridge dominant, or no
+    dominant form at all) -> the generic `"beyond the ridge"`, since
+    "next valley" would overclaim exactly where the contact is relative to
+    the ridge it crossed.
+
+    Deliberately queries `store.reader.nearest_feature` directly for
+    `["ridge"]`/`["valley"]` at the target, rather than a second full
+    `query.describe.describe_position` call -- the dominance test only
+    needs the two distances, and a full `describe_position` call also
+    joins settlement/road/water/etc. this caller has no use for (see
+    `query.describe`'s own module docstring on why `query.line_of_sight`
+    avoids `describe_position` for the same reason)."""
+    divide_count = divides_between(
+        conn, theatre, (ownship.x, ownship.z), (target.x, target.z)
+    )
+    if divide_count != 1:
+        return None
+    ridge_match = nearest_feature(conn, ["ridge"], target.x, target.z)
+    valley_match = nearest_feature(conn, ["valley"], target.x, target.z)
+    dominant = _dominant_terrain_kind_from_distances(
+        ridge_match[1] if ridge_match is not None else None,
+        valley_match[1] if valley_match is not None else None,
+    )
+    return "next valley" if dominant == "valley" else "beyond the ridge"
 
 
 def motion_when_seen(store: ContactStore, contact: Contact) -> dict[str, object] | None:
