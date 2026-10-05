@@ -509,6 +509,32 @@ def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     )
 
 
+def render_watch_group_readback(count: int) -> OutgoingSpeech:
+    """The readback for a `follow`/`watch nearest` resolution that landed
+    on a multi-member `belief.groups.Group` (sortie 2026-10-05 debrief,
+    Item 3). The user's own settled framing: tag every member once,
+    statically, at command time -- a unit that joins later is not watched,
+    one that leaves stays watched -- so the readback has to make that
+    one-time snapshot *audible*, closer to "watching four" than "watching
+    that group", or the pilot is surprised the first time a late arrival
+    goes unreported.
+
+    Deliberately names only the count, not the group's own composition --
+    `render_watch_nearest_readback` already speaks one contact's unit
+    type/clock/range for the single-contact case; naming all `count`
+    members' types here would make this the longest readback in the
+    vocabulary for the one case where the player asked the simplest
+    possible thing ("watch that group"). `count` is always >= 2 (the
+    caller only reaches this branch for a real multi-member group);
+    reuses `_SPOKEN_NUMBERS`' existing ladder (2-12) and its own "many"
+    overflow convention (`_group_composition_clause`'s identical fallback)
+    for the uncapped watch-count case (`plans/dcs-driven-los/
+    performance.md`'s approved-as-pre-existing uncapped `AttentionArea`
+    watch list)."""
+    spoken = _SPOKEN_NUMBERS.get(count, "many")
+    return OutgoingSpeech(text=f"Watching {spoken}.", template="readback")
+
+
 def render_no_contact(only_clock_label: str | None = None) -> OutgoingSpeech:
     """`follow`'s match-floor failure (`plans/watch-reporting/plan.md`
     Decision 2b-iii): "watch nothing and say so" rather than watching the

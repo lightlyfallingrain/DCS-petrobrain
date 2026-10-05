@@ -1492,6 +1492,168 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     assert near_contact.attention == "watch"
 
 
+def test_watch_nearest_tags_every_group_member_watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sortie 2026-10-05 debrief, Item 3: "follow/watch group <where>
+    should tag all units in that group as watched." Two contacts at the
+    same clock/range resolve into one real `belief.groups.Group`
+    (`GroupStore`'s own proximity reconciliation); `watch_nearest` picking
+    one of them must mark both watched, and register a cancellable task
+    for both when a `TaskStore` is configured -- the group tag reuses the
+    identical per-member mechanism the single-contact case already uses,
+    not a special-cased bulk write."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_NEAR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_FAR",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert lines == ["Watching two."]
+    assert all(c.attention == "watch" for c in store.contacts)
+    assert len(store.contacts) == 2
+    assert len(tasks.tasks) == 2
+    assert {task.contact_id for task in tasks.tasks} == {c.id for c in store.contacts}
+    assert all(task.kind == "watch_contact" for task in tasks.tasks)
+
+
+def test_follow_tags_every_group_member_watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same group-tagging rule (Item 3), reached through `follow`'s
+    descriptor-matching path instead of `watch_nearest`'s nearest-by-range
+    pick -- `_mark_watched_with_group` is shared between the two, so this
+    is the same mechanism exercised through its other caller, not a
+    second implementation to keep in sync."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
+
+    assert lines == ["Watching two."]
+    assert all(c.attention == "watch" for c in store.contacts)
+
+
+def test_watch_nearest_a_single_ungrouped_contact_is_unaffected_by_group_tagging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard for Item 3: a single, ungrouped contact must keep
+    behaving exactly as before -- the ordinary per-contact readback, not
+    the group-count wording, and no extra task registered for anyone
+    else."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert "watching two" not in lines[0].lower()
+    assert contact.attention == "watch"
+    assert len(tasks.tasks) == 1
+
+
+def test_a_unit_that_joins_the_group_later_is_not_retroactively_watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user's own settled scope (Item 3): "Tag once, static." A third
+    contact that is not part of the group at command time, and never
+    joins it, must not be marked watched just because it exists in the
+    same store -- this is the cheapest version of the "a late arrival
+    goes unreported" property the static design accepts by design."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_NEAR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_FAR",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            # Far away, a different clock -- not part of the group.
+            _observation_for_follow(
+                obs_id="OBS_OTHER",
+                t_sim=0.0,
+                classification_raw="OP_SAM",
+                classification_level=2,
+                clock=8,
+                range_m=9000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    other_contact = next(c for c in store.contacts if c.last_class_raw == "OP_SAM")
+
+    console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert other_contact.attention == "normal"
+
+
 def test_scan_ahead_without_enrichment_reports_not_configured() -> None:
     console = CrewConsole(store=ContactStore())
     assert console.handle_command("scan_ahead", now_sim=0.0) == [
@@ -3383,12 +3545,20 @@ def test_follow_with_descriptor_only_picks_the_matching_class(
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
     lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
-    assert "armor" in lines[0].lower()
     armor_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ARMORED")
-    assert (
-        store.contacts[[c.id for c in store.contacts].index(armor_id)].attention
-        == "watch"
-    )
+    truck_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_TRUCK")
+    # Both contacts sit at the same clock/range, so `GroupStore` resolves
+    # them into one real `belief.groups.Group` -- `follow` resolving to
+    # the armor contact therefore tags the whole group, not just the one
+    # the descriptor picked (sortie 2026-10-05 debrief, Item 3). The
+    # readback names the count rather than the single contact's class
+    # (`render_watch_group_readback`), and the truck gets tagged watched
+    # too even though the descriptor never matched it directly.
+    assert "two" in lines[0].lower()
+    armor_contact = store.contact(armor_id)
+    truck_contact = store.contact(truck_id)
+    assert armor_contact is not None and armor_contact.attention == "watch"
+    assert truck_contact is not None and truck_contact.attention == "watch"
 
 
 def test_follow_with_clock_only_picks_the_nearest_matching_clock(

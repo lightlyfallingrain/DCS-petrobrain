@@ -127,6 +127,7 @@ from belief.speech import (
     render_silence_ack,
     render_stand_by,
     render_unable,
+    render_watch_group_readback,
     render_watch_nearest_readback,
     route_event,
 )
@@ -1228,6 +1229,58 @@ class CrewConsole:
                 nearest_id = contact_id
         return nearest_id
 
+    def _mark_watched_with_group(
+        self, now_sim: float, contact_id: str, *, source: str = "player"
+    ) -> tuple[bool, int]:
+        """Marks `contact_id` watched, and -- sortie 2026-10-05 debrief,
+        Item 3 (*"follow/watch group <where> should tag all units in that
+        group as watched"*) -- every other member of its `belief.groups.
+        Group`, if it is part of one with more than one member. Shared by
+        `_handle_watch_nearest` and `_handle_follow`: both already resolve
+        to exactly one winning `contact_id` before this is called, so the
+        group-tagging step is identical regardless of how that id was
+        picked.
+
+        **Static, one-time tag, not a standing "watched group" concept**
+        (settled by the user, 2026-10-05: *"Tag once, static."*). Members
+        at the moment of this call become watched; a unit that joins the
+        group afterwards is not watched, one that leaves stays watched --
+        no new state, no watch-to-group identity binding, nothing to
+        maintain as `belief.groups.GroupStore` reconciles the group across
+        later polls. This deliberately does **not** key off the F10/voice
+        descriptor word `"group"` (`_descriptor_score`'s own `"group"`
+        branch, a classification match on `cardinality.lo > 1`) -- that is
+        a different concept (`belief.cardinality`, a single contact's own
+        estimated unit count) from `belief.groups.Group` (a set of
+        separately-tracked contacts). This keys off whichever contact the
+        resolver actually picked, through `self.store.group_for_contact`,
+        exactly as `render_report`'s existing group-disclosure roll-up
+        already does (above, `self.store.group_for_contact(contact_id)`).
+
+        Returns `(found, group_size)`: `found` is whether the resolved
+        `contact_id` itself was marked (the caller's existing "no such
+        contact" check keys off this, unchanged); `group_size` is `1` for
+        an ungrouped contact or a group of exactly one live member (no
+        group-readback branch), and the real member count otherwise."""
+        belief_group = self.store.group_for_contact(contact_id)
+        member_ids: frozenset[str]
+        if belief_group is not None and len(belief_group.member_contact_ids) > 1:
+            member_ids = belief_group.member_contact_ids
+        else:
+            member_ids = frozenset({contact_id})
+        found = False
+        for member_id in member_ids:
+            if self.tasks is not None:
+                task = watch_contact_task(
+                    self.store, self.tasks, member_id, now_sim, source=source
+                )
+                ok = task is not None
+            else:
+                ok = set_attention(self.store, member_id, "watch", source=source)
+            if member_id == contact_id:
+                found = ok
+        return found, len(member_ids)
+
     def _handle_watch_nearest(
         self, now_sim: float, *, air_defence_only: bool = False
     ) -> list[str]:
@@ -1247,7 +1300,13 @@ class CrewConsole:
         the old direct `set_attention` call -- the same graceful-
         degradation shape `_handle_scan` already follows for a missing
         `enrichment`, so watch still works standalone, it just is not
-        cancellable."""
+        cancellable.
+
+        **Tags every member of the winning contact's `belief.groups.Group`
+        watched, once, if it has more than one** (`_mark_watched_with_
+        group`, sortie 2026-10-05 debrief, Item 3) -- the readback then
+        names the group case distinctly (`render_watch_group_readback`)
+        rather than the single-contact one."""
         contact_id = self._nearest_contact_id(
             now_sim,
             predicate=self._believed_air_defence if air_defence_only else None,
@@ -1258,18 +1317,14 @@ class CrewConsole:
                 if air_defence_only
                 else "no contact to watch"
             ]
-        if self.tasks is not None:
-            task = watch_contact_task(
-                self.store, self.tasks, contact_id, now_sim, source="player"
-            )
-            found = task is not None
-        else:
-            found = set_attention(self.store, contact_id, "watch", source="player")
+        found, group_size = self._mark_watched_with_group(now_sim, contact_id)
         result = describe_contact(
             self.store, contact_id, now_sim, enrichment=self.enrichment
         )
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
+        if group_size > 1:
+            return [render_watch_group_readback(group_size).text]
         return [render_watch_nearest_readback(result["facts"]).text]
 
     def _descriptor_score(self, descriptor: str, facts: dict[str, object]) -> float:
@@ -1393,9 +1448,13 @@ class CrewConsole:
     ) -> list[str]:
         """`follow [<descriptor>] [<clock> o'clock] [<n> km]` -- resolves
         via `_resolve_follow_target` and, on a win, watches exactly the
-        same way `_handle_watch_nearest` does (a cancellable task when
-        `self.tasks` is configured, a bare `set_attention` otherwise),
-        with the identical readback (`render_watch_nearest_readback`) --
+        same way `_handle_watch_nearest` does (`_mark_watched_with_group`:
+        a cancellable task per member when `self.tasks` is configured, a
+        bare `set_attention` per member otherwise; every member of the
+        resolved contact's `belief.groups.Group` gets tagged watched, once,
+        statically, if it has more than one -- sortie 2026-10-05 debrief,
+        Item 3), with the identical readback shape
+        (`render_watch_nearest_readback`/`render_watch_group_readback`) --
         the player named no id either way, so the two commands describe
         their winner identically."""
         descriptor = slots.get("descriptor") if slots is not None else None
@@ -1424,18 +1483,14 @@ class CrewConsole:
             return no_match_lines
 
         self.last_command_target_contact_id = contact_id
-        if self.tasks is not None:
-            task = watch_contact_task(
-                self.store, self.tasks, contact_id, now_sim, source="player"
-            )
-            found = task is not None
-        else:
-            found = set_attention(self.store, contact_id, "watch", source="player")
+        found, group_size = self._mark_watched_with_group(now_sim, contact_id)
         result = describe_contact(
             self.store, contact_id, now_sim, enrichment=self.enrichment
         )
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
+        if group_size > 1:
+            return [render_watch_group_readback(group_size).text]
         return [render_watch_nearest_readback(result["facts"]).text]
 
     def _handle_scan(
