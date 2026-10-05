@@ -870,7 +870,33 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Sequence, when work resumes: wire LOS probe-first (Mac side, per X-B27), then build probing. Not
   the reverse — the probe store filling up changes nothing until LOS reads it.
 
-- [ ] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS.** User idea,
+- [ ] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS.**
+  **MEASURED LIVE 2026-10-05 — the approach holds, and the binding constraint turned out to be
+  batch size, not call frequency.** The user flew the elevation-cost probe and reported *"a small
+  but annoying stutter every few seconds"*; the log agrees and says why. Full numbers:
+  `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`. What this entry must be
+  built against, replacing the extrapolated figures quoted further down:
+
+  - **`land.getHeight` works through the bridge, exactly** — eight theatre-spread points
+    bit-identical to the 2026-09-06 mission-editor probe's recorded heights.
+  - **No meaningful fixed overhead**: the null call measured 0.00 ms. Cost is per item.
+  - **Budget against the *peak*, not the median, and against *cold*, not warm.** A 2601-point
+    `getHeight` batch is 4.5 ms steady but **24 ms peak** on first touch of a region (9.2 µs/item
+    cold against 2.3 µs warm). The worst case is correlated with flying somewhere new, which is
+    exactly when it matters.
+  - **`isVisible` costs ~7x `getHeight` per item** (10 µs vs 1.3 µs steady). They are not
+    interchangeable in a budget.
+  - **At a ≤2 ms per-call budget: ~215 `getHeight` points or ~130 `isVisible` rays.** Comfortably
+    above what a 10 km bubble needs; the probe's 2601-point batch was ~12x the real requirement
+    and was sized to find the ceiling.
+  - **Cap the batch, not just the rate.** The probe already throttled to one call per 250 ms and
+    the stutter happened anyway — spreading calls bounds the duty cycle, never the single-call
+    cost.
+
+  Still unmeasured: whether a 2 ms version is actually imperceptible. The arithmetic says it
+  vanishes; nobody has flown it.
+
+  Original entry follows. User idea,
   2026-09-29: *"could aircraft layer fire LOS calc for every known unit inside player bubble and
   within the 130 degree visibility cone? What would that cost? Maybe not every tick?"*
 
@@ -922,6 +948,25 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   development."* So the buildings half of the occluder work proceeds Mac-side now, paying the LAN
   round trip, rather than waiting on X-B27's eventual topology. X-B29 above may make the point moot
   by batching the call anyway.
+
+  **Positive evidence arrived 2026-10-05, unplanned, from the elevation-cost probe.**
+  `occlusion_urban` reported **2 of 40 pairs where terrain alone was clear but `land.isVisible`
+  said blocked**, against **0 of 40** in open desert, with `scenery_search` resolving real building
+  objects (`BUNKERHILL`, `TAXI_OMNI_BLUE`) at the same place. So the scenery half of
+  `isVisible` demonstrably fires on real geometry, at ~10 µs a ray.
+
+  This **refines rather than contradicts** `aircraft-layer/research/2026-09-29-tree-los-probe-results.md`:
+  that note concluded no DCS call sees *trees*, and its own wording was "terrain and scenery only"
+  — buildings are scenery. The tree probe could not have shown this because it was looking for the
+  half that does not exist.
+
+  **One caveat, stated because it would be easy to over-read the result**: the directly targeted
+  `through_buildings` and `through_buildings_wide` checks both returned 6/6 clear, 0 blocked, so
+  the two positives came from the broader sweep rather than the aimed test. Whether that is
+  geometry (the aimed pairs happened not to cross a building) or a real difference between the two
+  call shapes is **not established**, and should not be assumed either way before building on it.
+
+  See `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`.
 
 - [>] **X-B32 — DCS's per-tree placement is in `Syria.surface5`, behind the payload-addressing wall.
   DEFERRED 2026-10-01, same day it was opened.** Investigated on the Windows box in answer to the
