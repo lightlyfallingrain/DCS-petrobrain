@@ -421,6 +421,33 @@ def test_render_contact_report_includes_semantic_fragment_when_enriched(
     assert "Jableh" in speech.text
 
 
+def test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full pipeline (`belief.tools._add_enrichment_facts` through
+    `belief.speech._contact_report_text`) for one divide crossed,
+    valley-dominant -- `"Jableh"` (the semantic fragment `_enrichment_
+    context`'s stub would otherwise supply) must not appear."""
+    store, contact_id = _store_with_one_contact()
+    context = _enrichment_context(monkeypatch)
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 1,
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "nearest_feature",
+        lambda conn, kinds, x, z: (object(), 100.0) if kinds == ["valley"] else None,
+    )
+
+    speech = render_contact_report(store, contact_id, now_sim=0.0, enrichment=context)
+
+    assert speech is not None
+    assert "next valley" in speech.text
+    assert "Jableh" not in speech.text
+
+
 def test_route_event_auto_acknowledges_a_rendered_event() -> None:
     store, _ = _store_with_one_contact()
     detected = next(e for e in store.events if e.kind == "CONTACT_DETECTED")
@@ -796,6 +823,37 @@ def test_contact_report_text_with_no_cardinality_fact_matches_singular_text() ->
     assert _contact_report_text(facts_without_cardinality) == _contact_report_text(
         facts_with_unit_cardinality
     )
+
+
+def test_contact_report_text_terrain_qualifier_replaces_semantic_fragment() -> None:
+    """Decision 5 (`plans/terrain-feature-probing/plan.md` Revision 3): a
+    present `facts["terrain_qualifier"]` outranks the semantic-fact
+    selection entirely, rather than competing in it -- the half of the
+    Stage 5 wiring Review: terrain-feature-probing Rev3 found untested."""
+    facts: dict[str, object] = {
+        "classification": {"value": "armor", "level": "class"},
+        "semantic": [{"text": "near a road (50m)", "confidence": 0.9}],
+        "terrain_qualifier": "next valley",
+    }
+    text = _contact_report_text(facts)
+    assert "next valley" in text
+    assert "road" not in text
+
+
+def test_contact_report_text_no_terrain_qualifier_falls_back_to_semantic_fragment() -> (
+    None
+):
+    """Regression guard for the same branch: an absent `terrain_qualifier`
+    (the common case -- 0 or >=2 divide crossings) must still fall through
+    to the pre-existing `max(semantic, ...)` selection."""
+    facts: dict[str, object] = {
+        "classification": {"value": "armor", "level": "class"},
+        "semantic": [{"text": "near a road (50m)", "confidence": 0.9}],
+    }
+    text = _contact_report_text(facts)
+    assert "road" in text
+    assert "valley" not in text
+    assert "ridge" not in text
 
 
 def test_route_event_contact_detected_speaks_plural_cardinality_clause() -> None:
