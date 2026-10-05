@@ -135,15 +135,17 @@ sortie actually exercises it, and say which one.
   positions, the seed for widening airfields beyond the 7 beacon-derived ones; the three FOBs at
   0,0 have no real position and must be filtered. Block 2 (Bagram sortie) remains optional.
 
-  **Performance Reviewer finding, relevant to Kola before Afghanistan's own acceptance clears
-  it:** the terrain-semantics (ridge/valley) build stage processes every `.hgt` tile physically
-  staged in `--srtm-dir` rather than clipping to the region's own padded bbox — pre-existing,
-  not introduced here, but measured concretely for the first time on this build (288 staged tiles,
-  only 158 actually needed by the SRTM elevation grid; the stage cost 44.0 min of this build's 82
-  min total). Kola's elongated footprint is exactly the shape rectangular half-extents were built
-  to stop wasting compute on, and this stage never got that fix — whoever stages Kola's DEM tiles
-  should either stage only bbox-overlapping tiles or filter `ingest_terrain`'s tile list before a
-  Kola build is attempted. See `plans/multi-theatre-afghanistan/performance.md` finding #3.
+  **Performance Reviewer finding #3 — fixed, merged 2026-10-05 (`feature/terrain-tile-region-filter`,
+  merge `6867903`).** The terrain-semantics (ridge/valley) stage used to process every `.hgt` tile
+  staged in `--srtm-dir` (288 for this build, 158 needed; 44.0 of 82 min). `build.ingest_terrain.
+  tiles_for_region` now keeps only tiles within the ~1.8 km processing margin of the region's DCS
+  x/z rectangle: 160 of 288 on the real Afghanistan staging, a superset of all 158 grid tiles.
+  Staging a bounding rectangle of tiles for Kola/Caucasus is therefore fine. First rebuild of any
+  theatre resets its terrain cache once (the cache key hashes the tile list). Reviewer:
+  `plans/terrain-tile-region-filter/review.md` (APPROVED; two optional refinements recorded there —
+  a pipeline-level wiring test, and a note that a kept tile's far out-of-region overhang can now be
+  neighbour-starved, truncating geometry that was already out of scope). Merged on user direction
+  after review, no DoD pass.
 
 - [x] **M0 — Repo + research notebook.** Scaffold done. DCS version + Syria theatre presence recorded in `research/`.
 - [x] **M1 — One coordinate.** Prove DCS x/z ↔ lat/lon for Syria against a known real-world control point. Measure error. Done: `src/coordinates/` (pyproj-based, theatre-agnostic), three real-world ARP control points (Damascus, Latakia, Beirut), measured residual ~1.0-1.3km (DCS terrain-art placement error, not transform error). See `research/2026-09-03-m1-coordinate-transform-verification.md`.
