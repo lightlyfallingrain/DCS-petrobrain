@@ -34,23 +34,41 @@ sortie actually exercises it, and say which one.
   correctly at full 131-tile scale. Not re-opened by the item below — that run is what *found* the
   two defects it fixes, not evidence against the extraction mechanism itself.
 
-- [ ] **`fix/landform-relief-gate` — DoD-passed 2026-10-04, no real 131-tile `syria-full` rebuild
-  run by any agent.** The 2026-10-02 build above, checked against the user's own acceptance
+- [x] **`fix/landform-relief-gate` — cleared by the user's 2026-10-04 23:59 `syria-full` rebuild
+  (verified 2026-10-05).** All three blocks of
+  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` pass against the rebuilt store:
+
+  - **Block A — zero relief-gate violations.** The query returns an empty list; no stored
+    ridge/valley line has under 50 m of relief.
+  - **Block B — `ridge=122,567, valley=112,232` = 234,799 combined**, hitting the predicted
+    230-240k band exactly (it was a direct SQL measurement, and it did not move).
+  - **Store size 720 MB, against a predicted 2.4-2.5 GB.** The prediction overshot ~3.3x. That is
+    the safe direction, and the mechanism checks out rather than the geometry having been
+    destroyed: median stored line is **5-6 vertices over ~1 km** (≈200 m vertex spacing, right for
+    a 90 m DEM) and median relief is **90 m**, sitting in the middle of the user's own 50-150 m
+    maskable-behind band with a hard floor at exactly 50.0 m. The extrapolation was from a
+    geometry-byte reduction measured on sample data; at theatre scale the relief gate and the
+    decimation compound, which the sample could not show. **This is the second time a reduction
+    estimate on this feature has been off in the conservative direction** — the earlier one was a
+    deviation check overstated by 5x. Treat these sample-derived size predictions as order-of-
+    magnitude only.
+  - **Block C — by eye, both renders.** Baalbek: the Bekaa floor is clean, lines confined to the
+    flanking ranges and their real drainage (297 ridge / 282 valley lines in the 40 km window,
+    611/672 dropped by the gate). Palmyra: the long isolated chains survive intact, crest-following,
+    longest 6.06 km, flat desert clean.
+
+  Original entry, for what it was clearing, follows. The 2026-10-02 build above, checked against the user's own acceptance
   criteria, found the ridge/valley layer had no relief gate (89-92% of stored lines under 50 m of
   relief; the Bekaa floor at Baalbek read as a valley) and stored geometry ~16x denser than a 90 m
   DEM supports (`feature` was 7.98 of 8.1 GB). Both fixed — see
   `plans/landform-relief-gate/implementation.md`. The theatre-wide feature count after the gate
   (234,799) is a direct SQL measurement against the existing store, not an extrapolation; the
   resulting store size (~2.4-2.5 GB, down from 8.1 GB) *is* extrapolated from a measured
-  36.5-36.7x geometry-byte reduction, not from a full rebuild. Clears when the user re-runs
-  `syria-full` (the terrain cache fully invalidates — `EXTRACTOR_VERSION` 1→2 plus two new knobs
-  in the key, so this is a full ~14-minute cold reprocess, not the warm path) per
-  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` (card:
-  https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP) and reports back: zero relief-gate
-  violations, ridge/valley counts near the 230-240k range, store size near 2.4-2.5 GB, and —
-  the real test, by eye, same as every prior landform decision on this project — whether the
-  Bekaa still reads clean and Palmyra's isolated chains still show. Say which rebuild (date/host)
-  cleared it when it does.
+  36.5-36.7x geometry-byte reduction, not from a full rebuild. It cleared on the user's own
+  2026-10-04 23:59 rebuild, which fully invalidated the terrain cache as designed
+  (`EXTRACTOR_VERSION` 1→2 plus two new knobs in the key — a full cold reprocess, not the warm
+  path). Card: `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` /
+  https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP.
 
 - [x] **`feature/terrain-landform-features` — marker-controlled watershed replaces the M6
   curvature ridge/valley detector (Stages 1-2). Merged 2026-10-01 (`0bef4b9`), and the user's own
@@ -921,8 +939,12 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `syria-full` rebuild reprocesses every tile rather than serving stale, ungated geometry.
 
   **DoD-passed 2026-10-04 (`fix/landform-relief-gate`), Reviewer and Security both APPROVED with
-  no required fixes, live acceptance outstanding — see "Live acceptance debt" above and
-  `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` / card
+  no required fixes, and acceptance cleared on the user's 2026-10-04 23:59 `syria-full` rebuild
+  (verified 2026-10-05) — see "Live acceptance debt" above for the measured blocks.
+  The one prediction that missed: the store came out **720 MB**, not the extrapolated 2.4-2.5 GB,
+  with geometry density and relief distribution both healthy — the sample-derived byte-reduction
+  figure undershot what the gate and the decimation do together at theatre scale.
+  Card: `docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md` /
   https://claude.ai/artifact/S6sod3ZdB1mCWSYj8twCPP.** No Performance Reviewer pass — this change
   strictly reduces work in a stage whose cost was already measured (drops lines before storage,
   decimates what remains), and Security's deep analysis agreed with that framing while checking
