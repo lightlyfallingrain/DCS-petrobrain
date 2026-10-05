@@ -1926,7 +1926,8 @@ def test_ungrouped_singleton_output_is_byte_identical() -> None:
 # than loss, and no-op when `tick` is never given an `ownship`); the
 # bounded-deferral property the gate's *placement* rests on; and the one
 # kind deliberately **exempt** from the gate, `CONTACT_ENGAGEMENT_CHANGED`
-# (`callouts._OBSERVABILITY_EXEMPT_KINDS`, user decision 2026-10-06).
+# (`callouts._OBSERVABILITY_EXEMPT_KINDS`, decided in the review loop,
+# 2026-10-06, on the Reviewer's recommendation -- not by the user).
 #
 # Geometry: `_observation`'s fixed `bearing_deg=0.0`/`range_m=1000.0` put
 # every contact in this file at `(1000.0, 0.0, alt 500.0)`, so ownship at
