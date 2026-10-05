@@ -378,6 +378,76 @@ Positions and distances above are internally consistent but should be read with 
 until a live probe (Stage 4 of the `multi-theatre-afghanistan` plan, a user task on the Windows
 DCS box) confirms or revises the fit.
 
+## 8. Caucasus (`caucasus-full`) and Kola (`kola-full`)
+
+Same two jobs as §7, registered from `world-model/research/2026-10-05-kola-caucasus-theatre-recon.md`.
+Raw inputs are already staged under `data/raw/{dem,osm}/{caucasus,kola}-full/`. Both projections
+are **`provisional`** (pydcs parameters reproduced by a beacon fit, ~0.04 m RMS) until a live
+`coord_probe.lua` run on each terrain, as was done for Afghanistan.
+
+**Path casing:** Caucasus capitalizes both, `Map/towns.lua` and `Beacons.lua`. Kola matches Syria
+and Afghanistan: `map/towns.lua` and `beacons.lua`.
+
+**DEM:** stage tiles as a bounding rectangle freely; the terrain stage only processes tiles the
+region touches (`tiles_for_region`). Missing tiles are open sea, with one exception on Kola:
+`N71E023` (contains the coastal village Tufjord, extreme NE corner) is not staged. That leaves a
+small elevation gap there; fetch it from viewfinderpanoramas if it matters.
+
+### 8.1 Job (a): OSM datasets
+
+Country extracts are already downloaded. Clip, merge and filter as in §2.2-2.4:
+
+```bash
+# Caucasus -- six extracts (turkey-260911 is the Syria build's file, reused for the
+# NE Turkey sliver the terrain really contains)
+cd data/raw/osm/caucasus-full
+for f in armenia-261003 azerbaijan-261003 georgia-261003 \
+         north-caucasus-fed-district-261003 south-fed-district-261003 turkey-260911; do
+  osmium extract -b 35.8314,40.5298,46.6988,46.0123 --strategy=smart \
+      -o "${f}-clipped.osm.pbf" --overwrite "${f}.osm.pbf"
+done
+osmium merge *-clipped.osm.pbf -o caucasus-theatre-unfiltered.osm.pbf --overwrite
+osmium tags-filter caucasus-theatre-unfiltered.osm.pbf \
+    -e <repo>/world-model/tools/osm_tags_filter.txt -o caucasus-theatre.osm.pbf --overwrite
+
+# Kola -- four extracts
+cd ../kola-full
+for f in finland-261003 northwestern-fed-district-261003 norway-261003 sweden-261003; do
+  osmium extract -b 7.7852,63.8203,42.6509,71.3246 --strategy=smart \
+      -o "${f}-clipped.osm.pbf" --overwrite "${f}.osm.pbf"
+done
+osmium merge *-clipped.osm.pbf -o kola-theatre-unfiltered.osm.pbf --overwrite
+osmium tags-filter kola-theatre-unfiltered.osm.pbf \
+    -e <repo>/world-model/tools/osm_tags_filter.txt -o kola-theatre.osm.pbf --overwrite
+```
+
+Clip bboxes come from `tools/derive_m9_osm_clip_bbox.py caucasus-full` / `kola-full`.
+
+### 8.2 Job (b): build
+
+```bash
+DCS="/mnt/f/Games/DCS World/Mods/terrains"
+
+.venv/bin/python tools/build_world_model.py caucasus-full \
+    --towns   "$DCS/Caucasus/Map/towns.lua" \
+    --beacons "$DCS/Caucasus/Beacons.lua" \
+    --routes  "$DCS/Caucasus/roads/Caucasus.routes" \
+    --srtm-dir data/raw/dem/caucasus-full/ \
+    --osm-pbf  data/raw/osm/caucasus-full/caucasus-theatre.osm.pbf \
+    2>&1 | tee caucasus-full-build.log
+
+.venv/bin/python tools/build_world_model.py kola-full \
+    --towns   "$DCS/Kola/map/towns.lua" \
+    --beacons "$DCS/Kola/beacons.lua" \
+    --routes  "$DCS/Kola/roads/Kola.routes" \
+    --srtm-dir data/raw/dem/kola-full/ \
+    --osm-pbf  data/raw/osm/kola-full/kola-theatre.osm.pbf \
+    2>&1 | tee kola-full-build.log
+```
+
+Outputs: `data/world-model/{caucasus,kola}-full.sqlite`. Check with §3.5. `Caucasus.routes` is
+~1 GB like Afghanistan's, so expect a similar road-junction stage; `Kola.routes` is 68 MB.
+
 ---
 
 ## Troubleshooting

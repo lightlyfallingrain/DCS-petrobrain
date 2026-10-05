@@ -182,4 +182,39 @@ REGIONS: dict[str, RegionDefinition] = {
         half_extent_x_m=541969.3,
         half_extent_z_m=659245.2,
     ),
+    "caucasus-full": RegionDefinition(
+        theatre="Caucasus",
+        name="caucasus-full",
+        # Padded (+30 km/side) DCS-space bbox from the union of towns.lua
+        # (n=1759) and the airfield-tagged Beacons.lua entries -- the 13
+        # off-map enroute navaids that inflate the full beacon set by
+        # ~570 km in z are excluded. Same method as afghanistan-full; see
+        # world-model/research/2026-10-05-kola-caucasus-theatre-recon.md Q2:
+        #   raw union x: [-372,138.2, 39,455.0] -> padded [-402,138.2, 69,455.0]
+        #   raw union z: [191,968.0, 927,037.7] -> padded [161,968.0, 957,037.7]
+        # giving ~471.6 x 795.1 km. A point-cloud lower bound, not a
+        # corner-verified terrain edge.
+        centre_x=-166341.6,
+        centre_z=559502.8,
+        half_extent_x_m=235796.6,
+        half_extent_z_m=397534.9,
+    ),
+    "kola-full": RegionDefinition(
+        theatre="Kola",
+        name="kola-full",
+        # Padded (+30 km/side) DCS-space bbox from the union of towns.lua
+        # (n=787) and beacons.lua (n=69; no off-map navaids -- the full
+        # set gives the same bound as its airfield-tagged subset). See
+        # world-model/research/2026-10-05-kola-caucasus-theatre-recon.md Q2:
+        #   raw union x: [-300,145.9, 356,393.5] -> padded [-330,145.9, 386,393.5]
+        #   raw union z: [-498,256.1, 699,635.2] -> padded [-528,256.1, 729,635.2]
+        # giving ~716.5 x 1,257.9 km (aspect ~0.57, the elongation the
+        # rectangular half-extents exist for). A point-cloud lower bound;
+        # MissionGenerator/nodesMap.lua's nodesMapBorders is not used, as
+        # for Syria.
+        centre_x=28123.8,
+        centre_z=100689.6,
+        half_extent_x_m=358269.7,
+        half_extent_z_m=628945.7,
+    ),
 }

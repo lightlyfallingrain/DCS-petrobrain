@@ -54,6 +54,7 @@ EXPECTED_BEACON_COUNT: dict[str, int] = {
     "Syria": 151,
     "Afghanistan": 49,
     "Caucasus": 164,
+    "Kola": 69,
 }
 
 _TABLE_START = "beacons = {"
