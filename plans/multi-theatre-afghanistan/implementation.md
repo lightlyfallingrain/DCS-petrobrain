@@ -222,3 +222,55 @@ don't share the main checkout's):
   reaches the line after the `try/except`.
 - `pytest -q`: 1407 passed, 4 xfailed (was 1402 passed, 4 xfailed before this pass — 5 new tests:
   4 parametrize cases + 1 unbuilt-store test)
+
+### Reviewer change request on the fix (c3bf204 review, test-only — no production-code change)
+
+`review.md`'s "Fix review (f7f2827)" flagged a regression-test gap, found empirically: disabling
+only the required `THEATRE_PROJECTIONS` registry check (leaving the optional
+`try/except (sqlite3.Error, OSError)` in place) left all 4
+`test_main_rejects_unregistered_theatre_from_mission_understanding` parametrize cases passing,
+because that `except` block converts the resulting downstream `sqlite3.Error`/`OSError` into the
+same generic `SystemExit` the test was asserting — so the test could not tell "rejected by the
+registry check" apart from "rejected later, for an unrelated reason." A second, smaller gap: the
+`"Syria?mode=rwc"` query-string-injection payload didn't reproduce `security.md`'s own
+demonstrated mechanism — SQLite's URI parser only splits the filename at the attacker's `?` when
+a second, `&`-separated query parameter follows (`?mode=rwc&dummy=...`); a bare `?mode=rwc` with
+nothing after it instead raises `OperationalError: no such access mode` at `execute()` time, a
+different (and non-exploitable) failure.
+
+**Fix applied** (`body-layer/tests/test_logger.py` only):
+- Added a `capsys` fixture param and, at the end of the test, `assert "not a known theatre" in
+  capsys.readouterr().err` — asserts the specific rejection *reason* (the registry check's own
+  `parser.error` message), not just that *some* `SystemExit` occurred.
+- Added a `monkeypatch.setattr(logger_module, "open_world_model", _fail_if_open_world_model_called)`
+  where `_fail_if_open_world_model_called` is a local helper typed `-> NoReturn` (added `NoReturn`
+  to the `typing` import) that calls `pytest.fail(...)` if invoked at all. This proves the
+  rejection happens strictly *before* `open_world_model` is ever reached for any of the four
+  payloads, not merely before its result is observed to matter — closing the gap the empirical
+  disable-and-rerun found, independent of the stderr-text assertion (either one alone would have
+  caught the removed-registry-check regression; both are kept since they catch it for different
+  reasons — a message-wording change vs. an early-call change).
+- Replaced the `"Syria?mode=rwc"` parametrize case with `"Syria?mode=rwc&x="` (reviewer's own
+  suggested shape), which does reproduce `security.md`'s demonstrated mechanism: `theatre.lower()`
+  + the code's own `-full.sqlite` suffix yields `syria?mode=rwc&x=-full.sqlite`, the same
+  `<name>?<mode-param>&<second-param>=<suffix>` shape `security.md` reproduced directly against
+  `sqlite3.connect`.
+
+**Proof, per the dispatching instructions** (temporarily removed the required fix alone, left the
+`try/except` in place, reran; restored; reran again — `git diff --stat -- src/logger.py` showed
+no diff after restore, confirming an exact revert):
+- **Required fix removed** (`if theatre not in THEATRE_PROJECTIONS:` replaced with
+  `if False and theatre not in THEATRE_PROJECTIONS:`): all 4 parametrized cases **failed**, each on
+  `pytest.fail` inside `_fail_if_open_world_model_called` — the traceback shows `open_world_model`
+  was reached with the attacker-controlled path
+  (`.../syria?mode=rwc&x=-full.sqlite` for the injection case), proving the new test does now
+  fail when exactly this regression recurs.
+- **Required fix restored**: all 4 cases **passed** again (`4 passed, 69 deselected`).
+
+**Checks after the test change** (`cd body-layer`, same fresh `.venv` as above):
+- `ruff format --check src tests`: pass (114 files already formatted, after one local
+  reformat of the new `monkeypatch.setattr(...)` call to satisfy line length)
+- `ruff check src tests`: pass (All checks passed!)
+- `mypy src` (strict): pass (53 source files, no issues) — unchanged, no production code touched
+- `pytest -q`: 1407 passed, 4 xfailed (same totals as before — this change tightens two existing
+  parametrize cases' assertions and swaps one payload string; it adds no new test functions)
