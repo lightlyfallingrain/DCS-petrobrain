@@ -1732,6 +1732,111 @@ def test_main_rejects_world_model_db_theatre_mismatch(
         main()
 
 
+def _write_mission_understanding_with_theatre(path: Path, theatre_value: str) -> None:
+    """Minimal `--emit-compact`-shaped artifact with an arbitrary (possibly
+    malicious) `theatre.value` -- `load_mission_understanding` places no
+    constraint on that string's content (`_parse_theatre` only checks it is
+    a `str`), so this is exactly what a `.miz`-derived artifact can carry
+    through unvalidated per `plans/multi-theatre-afghanistan/security.md`."""
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "phases": [],
+                "route": [],
+                "theatre": {
+                    "value": theatre_value,
+                    "epistemic_status": "FACT",
+                    "basis": ["miz:theatre"],
+                    "confidence": None,
+                },
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "theatre_value",
+    [
+        "Narnia",
+        "/etc/passwd",
+        "//attacker-host/share/x",
+        "Syria?mode=rwc",
+    ],
+    ids=["unknown-theatre", "absolute-path", "unc-path", "query-string-injection"],
+)
+def test_main_rejects_unregistered_theatre_from_mission_understanding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, theatre_value: str
+) -> None:
+    """Security (multi-theatre-afghanistan plan, required fix): a
+    mission-understanding-derived `theatre` that is not an exact key in
+    `coordinates.projections.THEATRE_PROJECTIONS` must be rejected by
+    `main()` before any path is built or any file is opened -- whatever
+    the string actually contains (an unknown name, an absolute-path
+    override, a UNC-path override, or a SQLite URI-query-string injection
+    suffix). None of these ever reach `open_world_model`/`Path.__truediv__`."""
+    monkeypatch.chdir(tmp_path)
+    mission_understanding_path = tmp_path / "mission_understanding.json"
+    _write_mission_understanding_with_theatre(mission_understanding_path, theatre_value)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--mission-understanding",
+            str(mission_understanding_path),
+            "--world-model-dir",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    # No file matching the attacker-influenced suffix was ever created or
+    # opened -- the rejection happens before any path is built.
+    assert not any(tmp_path.glob("*-full.sqlite"))
+
+
+def test_main_gives_clean_error_for_unbuilt_theatre_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Security (multi-theatre-afghanistan plan, optional item): a
+    validated, known theatre whose store has not been built yet must give
+    a clean `parser.error` naming the expected path, not a raw `sqlite3`
+    traceback -- the mismatch guard's `open_world_model`/`load_only_region`
+    call is wrapped in `try/except (sqlite3.Error, OSError)`."""
+    monkeypatch.chdir(tmp_path)
+    mission_understanding_path = tmp_path / "mission_understanding.json"
+    _write_mission_understanding_with_theatre(mission_understanding_path, "Syria")
+    expected_store = tmp_path / "syria-full.sqlite"
+    assert not expected_store.exists()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--mission-understanding",
+            str(mission_understanding_path),
+            "--world-model-dir",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    err = capsys.readouterr().err
+    assert "world model" in err
+    assert str(expected_store) in err
+
+
 def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
     tmp_path: Path,
 ) -> None:

@@ -128,3 +128,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression checks must exclude same-poll peers or mutual lockout silences everything.
 - [Redundant group disclosure](project_redundant_group_disclosure.md) — already-reported lives in scheduler, not Contact/Group; fix broke+fixed a real second redundant case the plan didn't name.
 - [Multi-theatre Afghanistan Stages 1/2/3/5](project_multi_theatre_afghanistan.md) — test-impact list missed 2 files; Tagged[str] theatre wasn't actually parsed yet; stage 8 RUN.md table stale.
+- [sqlite3 URI connect is lazy](project_sqlite_uri_connect_lazy_open.md) — mode=ro connect() on missing file doesn't raise; first execute() does, wrap both.
