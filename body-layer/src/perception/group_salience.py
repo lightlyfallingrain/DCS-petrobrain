@@ -119,9 +119,16 @@ def _resolvable(
 ) -> bool:
     """Whether `candidate` clears the loosest presence bound any admission
     path can use -- `_resolvable_terms` above reduced to the predicate it
-    used to be. Kept as a named, tested function for the one-candidate
-    question; `group_salient_ids` itself calls `_resolvable_terms` so it
-    keeps the terms it has just computed."""
+    used to be, for the one-candidate question. `group_salient_ids` itself
+    calls `_resolvable_terms` so it keeps the terms it has just computed.
+
+    **Currently has no caller.** It was retained for
+    `tests/test_group_salience_equivalence.py`'s reference loop, but that
+    file now keeps its own copy of this body on purpose -- importing this
+    one made the equivalence test tautological for the gate, since Stage 2
+    routed it through `_resolvable_terms`, which production also uses. So
+    this is a named predicate kept for readers and for a future
+    one-candidate caller, not a tested path; do not cite it as covered."""
     return _resolvable_terms(candidate, observer, optic) is not None
 
 
@@ -157,8 +164,11 @@ def _cohesive(
     `group_salient_ids`'s pair loop no longer calls this -- it carries the
     per-candidate terms hoisted out of its `_resolvable_terms` pass and
     calls `_cohesive_from_terms` directly (see `_resolvable_terms` for why).
-    This remains the named, tested entry point for the two-candidate
-    question, and computes the same terms the loop hoists."""
+    This remains the named entry point for the two-candidate question and
+    computes the same terms the loop hoists, but like `_resolvable` it
+    **currently has no caller**: the equivalence test keeps its own copy of
+    this body rather than importing it, because this one delegates to
+    `_cohesive_from_terms` and so could not pin the formula."""
     target_a = GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m)
     target_b = GeoPosition(x=b.x, z=b.z, alt_m=b.alt_m)
     theta_sep = angular_separation_rad(observer, target_a, target_b)
