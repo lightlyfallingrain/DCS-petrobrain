@@ -193,3 +193,27 @@ Still an untuned starting value by its own docstring, and because it equals `CAL
 anything masked for over ten seconds is **dropped rather than deferred**. Not a decision needed now —
 a sortie can measure it, and nobody has changed the number.
 
+### Q8 — Should *"Safe from <threat>"* also survive the observability gate, or only *"Danger"*?
+
+The security pass found my exemption was wider than the reason I gave for it. I exempted
+`CONTACT_ENGAGEMENT_CHANGED` on the bar *"silence costs a threat cue the pilot needs in order to
+evade"* — but the gate tests the event **kind**, so **both** transitions pass, and the leaving one
+renders as *"Safe from ZU-23-3, four o'clock, 2.0 km."* That is a comfort, not a cue, and it means
+one case of the original 17-line defect survives: a watched AAA identified while visible, `"Danger"`
+spoken, you egress, it goes astern, grace lapses, range opens past the hysteresis — and he announces
+a classification and a position for something the mask says he cannot see.
+
+**I have narrowed it to the entering transition only.** Reasons: it is what my written bar actually
+licenses, and your standing complaint is report *volume*, so the conservative default is to say less
+about what he cannot see.
+
+**The counter-argument is real, which is why this is here.** The reviewer's view — which I do not
+think is wrong — is that *a pilot who heard "Danger" is owed the "Safe from" that closes it*. An
+unclosed warning leaves you believing you are still in a threat envelope you have actually left.
+That is a different argument from the one in my docstring, not a weaker one.
+
+So: do you want the close-out call back, for a threat you can no longer see? If yes it is a one-line
+reversal, and the honest version of the bar becomes "a threat-envelope *transition* either way",
+which I would then write down as the licence rather than leaving the code and the comment
+disagreeing.
+
