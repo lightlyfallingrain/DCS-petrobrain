@@ -756,3 +756,13 @@ two functions that must agree (2026-09-19).
   occurs when every member independently qualifies. Confirmed by a dedicated composition test, not
   inferred from the two mechanisms each being individually correct
   (`plans/redundant-group-disclosure/security-review.md`).
+- **A plan's own design can go stale underneath it when an earlier-stage mechanism it depends on is
+  later replaced — re-check the dependency's current shape before resuming a parked later stage,
+  not just whether the stage itself was ever built.** `terrain-feature-probing`'s original Stages
+  3-5 design assumed basin adjacency "comes free" from Stage 1-2's marker-controlled watershed
+  detector; that detector was abandoned for geomorphons before Stages 3-5 were ever built, and
+  geomorphons produces traced lines, not basins. Revision 3 replaced the whole adjacency design
+  with a query-time divide counter (count ridge-crossings on the straight observer-target segment,
+  dedup within 400 m) rather than re-deriving a basin-like structure solely to keep the original
+  design's shape. Worth checking for on any plan that sat parked across an earlier stage's own
+  redesign (`plans/terrain-feature-probing/plan.md`, Revision 3 preamble).
