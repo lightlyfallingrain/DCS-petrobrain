@@ -23,3 +23,4 @@ graphify-out/
 # Per-context markers written by .claude/scripts/session-start.sh (one file per
 # session id, swept after 12h). Local session state, not project state.
 .claude/state/sessions/
+.claude/state/

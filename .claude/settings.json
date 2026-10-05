@@ -89,6 +89,10 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/agent-worktree-reminder.sh",
             "timeout": 10,
             "statusMessage": "Checking the dispatch names a commit..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/flight-feedback-dispatch-gate.sh"
           }
         ]
       }
@@ -101,6 +105,10 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/session-start.sh",
             "timeout": 10,
             "statusMessage": "Checking session state..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/flight-feedback-gate.sh"
           }
         ]
       }
@@ -115,6 +123,10 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/posttooluse-mypy.sh || true",
             "timeout": 60,
             "statusMessage": "mypy check..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/flight-feedback-clear.sh || true"
           }
         ]
       },
