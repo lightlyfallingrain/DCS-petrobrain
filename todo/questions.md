@@ -153,3 +153,33 @@ Dropping them behind a flag is a ten-line change. **The reason I did not do it u
 been reading the debug ASCII view off these rows, and what gets recorded is a product decision, not
 a performance fix. Perf review recommended dropping them; I overrode that on those grounds.
 
+### `CONTACT_ENGAGEMENT_CHANGED` is excluded from the observability gate
+
+The Reviewer found that the masked-hour gate silently covers a **third** kind nobody had named:
+`CONTACT_ENGAGEMENT_CHANGED`, minted by `ContactStore.tick`'s seventh block, which was never gated
+at emission and is caught by the new gate because the gate discriminates on the *contact*, not the
+kind.
+
+That one is a **threat warning about a contact you already asked to watch**. And because
+`CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`, a watched threat masked for more than
+ten seconds loses the callout **permanently, not late** — a SAM or ZSU astern that starts being able
+to shoot at you simply goes quiet.
+
+**Decided: exclude it.** Gate the identification kinds totally, let threat-envelope changes through.
+The reasoning, in case you disagree: an envelope change is not an identification. It is derived from
+a contact Petrovich **already perceived** plus your own position, so it invents no knowledge — a real
+copilot who saw a SAM twenty seconds ago would say "we're inside its range now" without eyes on it.
+Set against that, silence about a threat you cannot see is the exact case root `CLAUDE.md` says he
+exists for (*"helps the pilot evade dangerous units"*), and your own decision 6 already singles air
+defence out for special handling for the same reason.
+
+Implemented as a **named, documented exclusion** rather than a buried condition, because this whole
+defect was a per-kind list that the next kind silently failed to join, and an exclusion list has the
+same failure shape in reverse.
+
+### `CALLOUT_OBSERVABILITY_GRACE_S = 10.0` is now load-bearing for three more paths
+
+Still an untuned starting value by its own docstring, and because it equals `CALLOUT_MAX_AGE_S`,
+anything masked for over ten seconds is **dropped rather than deferred**. Not a decision needed now —
+a sortie can measure it, and nobody has changed the number.
+
