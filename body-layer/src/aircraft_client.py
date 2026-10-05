@@ -48,6 +48,17 @@ resolving the per-`unit_name` join against a world-objects snapshot itself
 -- this client does no joining or interpretation, mirroring every other
 `get_*` method here.
 
+`get_line_of_sight_latest`/`post_look_direction` (`plans/dcs-driven-los/
+plan.md`, X-B29) are this seam's `GET /line_of_sight/latest` and
+`POST /command/look_direction` counterparts. `get_line_of_sight_latest`
+follows `get_unit_velocity_latest`'s exact "not an error" empty-cache
+posture; `naked_eye_source.py` resolves the per-`unit_name` join itself,
+same split of responsibility as the velocity feed. `post_look_direction`
+follows `trigger_petrovich_search`'s raise-on-failure posture, not the
+`get_*` methods' swallow-and-return-`None` one -- a dropped look-direction
+push is a real coverage gap (the query cone can go stale, plan SS9c), not
+an opaque display string to swallow.
+
 `get_f10_commands` (`plans/f10-crew-commands/plan.md`) is this seam's
 first *inbound* read -- `GET /f10_commands/poll` drains the aircraft
 layer's F10-command queue, so unlike every other `get_*` method here, its
@@ -142,6 +153,33 @@ class AircraftLayerClient:
                 f"expected a JSON object or null from /unit_velocity/latest, got {type(result).__name__}"
             )
         return result
+
+    def get_line_of_sight_latest(self) -> dict[str, Any] | None:
+        """`GET /line_of_sight/latest` -> the most recent
+        `LineOfSightSnapshot` as a dict (see `aircraft-layer/src/schema/
+        line_of_sight.py`'s `LineOfSightSnapshot.to_dict`), or `None` if
+        nothing has been received yet -- same "not an error" posture as
+        `get_unit_velocity_latest` (`plans/dcs-driven-los/plan.md`)."""
+        result = self._get_json("/line_of_sight/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /line_of_sight/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
+        """`POST /command/look_direction` -> pushes the currently-commanded
+        look-direction wedge (`aircraft-layer/src/collector/command_sender.
+        LookDirectionSender`, `plans/dcs-driven-los/plan.md` SS9). Raises
+        `AircraftLayerError` on any failure -- see the module docstring for
+        why this call, unlike the `get_*` methods above, does not swallow
+        failure."""
+        self._post_json(
+            "/command/look_direction",
+            {"hour": hour, "fov_half_deg": fov_half_deg},
+        )
 
     def push_text_line(self, text: str) -> None:
         """`POST /text/push` -> pushes one line to the in-cockpit overlay

@@ -137,6 +137,50 @@ def test_terrain_los_failure_is_recorded(monkeypatch: pytest.MonkeyPatch) -> Non
     assert entry.achieved_tier is None
 
 
+def test_annotate_los_fills_in_the_dcs_driven_fields() -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29) -- mirrors `annotate_motion`'s
+    own shape: fills in the most recently recorded entry for an
+    `object_id`, regardless of gate outcome (unlike `annotate_admission`)."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=250.0, z=0.0)
+    trace = DetectionTraceCollector()
+    check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE, trace=trace)
+
+    trace.annotate_los(
+        candidate.object_id,
+        building_clear=True,
+        terrain_clear=False,
+        live_los_clear=False,
+        skew_s=0.4,
+        hour_used=3,
+        fov_half_deg_used=90,
+    )
+
+    entry = trace.records[0]
+    assert entry.building_clear is True
+    assert entry.terrain_clear is False
+    assert entry.live_los_clear is False
+    assert entry.los_skew_s == 0.4
+    assert entry.hour_used == 3
+    assert entry.fov_half_deg_used == 90
+
+
+def test_annotate_los_on_an_unknown_object_id_is_a_no_op() -> None:
+    trace = DetectionTraceCollector()
+    # No exception, nothing to mutate -- mirrors `annotate_motion`'s own
+    # defensive no-op posture.
+    trace.annotate_los(
+        999,
+        building_clear=True,
+        terrain_clear=True,
+        live_los_clear=True,
+        skew_s=0.1,
+        hour_used=0,
+        fov_half_deg_used=45,
+    )
+    assert trace.records == []
+
+
 def test_admission_records_achieved_tier() -> None:
     ownship = _ownship(heading_true_deg=0.0)
     candidate = _candidate("Infantry", x=250.0, z=0.0)
@@ -197,6 +241,9 @@ class FakeAircraftClient:
         return self._world_objects
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
+        return None
+
+    def get_line_of_sight_latest(self) -> dict[str, Any] | None:
         return None
 
 

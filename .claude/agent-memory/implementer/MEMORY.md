@@ -129,3 +129,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression checks must exclude same-poll peers or mutual lockout silences everything.
 - [Redundant group disclosure](project_redundant_group_disclosure.md) — already-reported lives in scheduler, not Contact/Group; fix broke+fixed a real second redundant case the plan didn't name.
 - [Test pure function and its wiring separately](feedback_test_pure_function_and_its_wiring_separately.md) — 5 well-tested fns, 0 tests on the write/read call sites that deliver it.
+- [DCS-driven LOS Stages 1-3](project_dcs_driven_los_stage1_3.md) — snapshot-vs-worktree edit trap; relaxed "exactly one %d" test to two, documented why; tolerance fix was doc-only.

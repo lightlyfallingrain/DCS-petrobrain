@@ -180,6 +180,17 @@ class WorldObjectCandidate:
     #: moving` is the only thing allowed to turn it into something `belief/`
     #: can see.
     velocity: Vec3 | None = None
+    #: DCS-driven true-to-true line-of-sight verdict (`plans/dcs-driven-los/
+    #: plan.md`, X-B29) -- `building_clear and terrain_clear`, joined onto
+    #: this candidate by `naked_eye_source._resolve_los_by_unit_name`.
+    #: `None` means "no live verdict this poll" (feed absent, this unit
+    #: outside the queried wedge, or the join skew exceeded `LOS_MAX_AGE_S`)
+    #: -- never coerced to a guessed `True`/`False`, same tri-state
+    #: discipline `velocity`/`heading_true_deg` above already follow.
+    #: `visibility.check_visibility`'s gate 4 reads this first, falling
+    #: back to world-model's offline `line_of_sight_clear` primitive only
+    #: when this is `None`.
+    live_los_clear: bool | None = None
 
     @staticmethod
     def from_dict(
@@ -187,6 +198,7 @@ class WorldObjectCandidate:
         *,
         theatre: str,
         velocity: dict[str, float] | None = None,
+        live_los_clear: bool | None = None,
     ) -> WorldObjectCandidate:
         """Build a candidate from one aircraft-layer `GET /world_objects/latest`
         object dict (`aircraft-layer/src/schema/world_objects.py`'s
@@ -204,7 +216,15 @@ class WorldObjectCandidate:
         conversion, the same "converted once in `from_dict`" pattern
         `heading_true_rad` -> degrees already uses above. `None` (the
         default) keeps every existing `from_dict` call site -- test
-        fixtures included -- compiling and behaving exactly as before."""
+        fixtures included -- compiling and behaving exactly as before.
+
+        `live_los_clear` is the caller's already-resolved tri-state LOS
+        verdict (`plans/dcs-driven-los/plan.md`) -- the caller
+        (`naked_eye_source.py`) is responsible for the `unit_name` join and
+        skew check; this method just threads the resolved value through,
+        same split of responsibility as `velocity` above. `None` (the
+        default) keeps every existing `from_dict` call site compiling and
+        behaving exactly as before."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
         is_ownship_raw = data.get("is_ownship")
         heading_true_rad = data.get("heading_true_rad")
@@ -230,6 +250,7 @@ class WorldObjectCandidate:
                 else math.degrees(float(heading_true_rad))
             ),
             velocity=resolved_velocity,
+            live_los_clear=live_los_clear,
         )
 
 

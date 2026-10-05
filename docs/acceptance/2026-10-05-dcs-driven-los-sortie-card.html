@@ -1,0 +1,341 @@
+<title>DCS-Driven LOS Sortie</title>
+<style>
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08;
+  --focus:#e8a93a;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1;
+    --line:#d8cba8; --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif;
+  padding:0 16px; padding-block:24px 56px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; letter-spacing:0.01em; color:var(--amber);}
+.eyebrow{
+  font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;
+}
+.subhead{color:var(--ink-dim); font-size:1rem; margin-top:8px; line-height:1.5;}
+header.top{margin-bottom:22px;}
+
+.branch-box{
+  background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber);
+  border-radius:6px; padding:16px 18px; margin:18px 0;
+}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber); letter-spacing:0.04em;}
+code, pre{font-family:'JetBrains Mono', monospace;}
+pre{
+  background:var(--mono-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 14px; font-size:0.84rem; overflow-x:auto; line-height:1.55; margin:10px 0 0;
+  color:var(--ink);
+}
+.inline-code{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+
+.alert{
+  background:var(--panel2); border:1px solid var(--danger); border-radius:6px;
+  padding:14px 16px; margin:20px 0; color:var(--ink);
+}
+.alert .tag{color:var(--danger); font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; font-size:0.85rem; letter-spacing:0.06em;}
+
+section.block{
+  background:var(--panel); border:1px solid var(--line); border-radius:8px;
+  padding:18px 20px; margin:16px 0;
+}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{
+  font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber);
+  font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;
+}
+.block h3{font-size:1.25rem; margin-top:4px; color:var(--ink);}
+.prize-tag{
+  display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem;
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber);
+  padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;
+}
+.row{display:flex; gap:10px; align-items:flex-start; margin-top:12px;}
+.row .k{
+  flex:0 0 72px; font-family:'JetBrains Mono',monospace; font-size:0.7rem;
+  letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-faint); padding-top:3px;
+}
+.row .v{flex:1; color:var(--ink-dim); line-height:1.55; font-size:0.95rem;}
+.row.record .k{color:var(--record);}
+.row.record .v{color:var(--ink);}
+
+.checklist{display:flex; align-items:flex-start; gap:10px; margin-top:12px;}
+.checklist input[type=checkbox]{
+  width:19px; height:19px; margin-top:2px; accent-color:var(--amber); flex:0 0 auto;
+  cursor:pointer;
+}
+.checklist label{color:var(--ink); font-size:0.95rem; line-height:1.5; cursor:pointer;}
+
+.not-testing{
+  background:var(--panel2); border:1px dashed var(--line); border-radius:6px;
+  padding:14px 16px; margin:16px 0; color:var(--ink-dim); font-size:0.92rem; line-height:1.6;
+}
+.not-testing li{margin-bottom:8px;}
+.not-testing ul{margin:8px 0 0; padding-left:1.1em;}
+
+.bringback{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:8px;
+  padding:18px 20px; margin:26px 0 10px;
+}
+.bringback h3{color:var(--record); font-size:1.15rem;}
+.bringback ul{color:var(--ink); margin:10px 0 0; padding-left:1.2em; line-height:1.65;}
+.bringback .surprise{
+  margin-top:12px; font-style:italic; color:var(--ink-dim); font-size:0.92rem;
+}
+
+footer{margin-top:28px; font-size:0.78rem; color:var(--ink-faint); line-height:1.6;}
+footer a{color:var(--amber-dim);}
+
+@media (max-width:480px){
+  .row{flex-direction:column; gap:3px;}
+  .row .k{flex:none;}
+}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">Petrobrain &middot; Acceptance Sortie &middot; 2026-10-05</div>
+  <h1>DCS-Driven Line of Sight</h1>
+  <p class="subhead">Petrovich asks DCS directly whether terrain or a building blocks a sightline,
+  instead of approximating it from the stored elevation grid. Buildings occlude for the first time
+  in this project. This card is the only thing standing between this branch and a merge.</p>
+</header>
+
+<div class="branch-box">
+  <span class="label">BRANCH</span>
+  <pre style="margin-top:8px;">git checkout feature/dcs-driven-los &amp;&amp; git pull</pre>
+  <div style="margin-top:10px; color:var(--ink-dim); font-size:0.88rem;">
+    Reviewer, Security (plan + deep), Performance and DoD mechanical checks have all passed.
+    This flight is what's left. If you're flying after it has merged, check out
+    <code class="inline-code">main</code> instead &mdash; same setup and test items.
+  </div>
+</div>
+
+<div class="alert">
+  <span class="tag">Fly this alone</span>
+  <p style="margin:8px 0 0; line-height:1.55;">A separate sortie is already pending on
+  <code class="inline-code">main</code> for the contact-report-flood / redundant-group-disclosure /
+  terrain-callout fixes &mdash; those change <em>what</em> Petrovich says. This branch changes
+  <em>what he can see</em>. Mixing them makes a detection miss and a phrasing bug indistinguishable.
+  Fly this one by itself first.</p>
+</div>
+
+<h2 style="font-size:1.4rem; color:var(--ink); margin-top:30px;">Before anything works</h2>
+
+<section class="block">
+  <div class="block-num">Step 1</div>
+  <h3>Deploy the new Hook script</h3>
+  <div class="row"><div class="k">do</div><div class="v">Copy the LOS Hook script into
+  <code class="inline-code">Scripts\Hooks\</code>. Needs the same <code class="inline-code">autoexec.cfg</code>
+  opt-in the other Hook scripts already use &mdash; already set if you've flown the F10/velocity
+  scripts before.</div></div>
+  <pre>copy aircraft-layer\dcs-export\petrobrain-line-of-sight-hook.lua "Saved Games\DCS\Scripts\Hooks\"</pre>
+</section>
+
+<section class="block">
+  <div class="block-num">Step 2</div>
+  <h3>Redeploy &amp; restart</h3>
+  <div class="row"><div class="k">do</div><div class="v">Rebuild/redeploy the collector the normal
+  way (new ports for the LOS receiver + look-direction sender are baked into its defaults).</div></div>
+  <pre># Mac
+cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text.sh --detection-trace ~/dcs-detection-trace.jsonl
+
+# Windows
+cd run-scripts
+./run-collector.sh</pre>
+</section>
+
+<h2 style="font-size:1.4rem; color:var(--ink); margin-top:34px;">In the air</h2>
+
+<section class="block">
+  <div class="block-num">1</div>
+  <h3>dcs.log on mission start</h3>
+  <div class="row"><div class="k">do</div><div class="v">Tail <code class="inline-code">dcs.log</code>
+  right after mission start.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v"><code class="inline-code">PetrobrainLineOfSight</code>
+  lines on a poll cadence with <code class="inline-code">bridge_call_ms</code>, plus
+  <code class="inline-code">look direction set: hour=... fov_half_deg=...</code> lines that change
+  as the scan cycles.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Did both line kinds appear? Did
+  the look-direction value actually change over the flight, or stick at one value?</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c1"><label for="">Checked</label></div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">2 <span class="prize-tag">new capability</span></div>
+  <h3>Fly past a building with a target behind it</h3>
+  <div class="row"><div class="k">do</div><div class="v">Find a built-up area with a vehicle or AAA
+  positioned so a building sits between you and it, close enough that terrain alone would read
+  clear.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">Occluded while the building blocks it,
+  clear once you have an unobstructed angle. Nothing in this project has ever occluded behind a
+  building before &mdash; this is the single highest-value thing this card is testing.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Did it actually occlude? If
+  not, was the geometry genuinely clear, or did nothing change at all?</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c2"><label for="">Checked</label></div>
+</section>
+
+<section class="block">
+  <div class="block-num">3</div>
+  <h3>Re-fly the missed-AAA geometry</h3>
+  <div class="row"><div class="k">do</div><div class="v">Fly the attack-pass geometry from
+  <code class="inline-code">plans/missed-aaa-detection/debug.md</code> &mdash; the insurgent AAA
+  position the old 12&nbsp;m terrain tolerance was built to fix &mdash; boresight on it the way you
+  did the day that defect was found.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">Petrovich calls it out, and the
+  detection trace shows <code class="inline-code">live_los_clear=true</code> for that object &mdash;
+  resolved by the live path, not the tolerance.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Did it call out? Does the trace
+  show <code class="inline-code">live_los_clear</code> populated, or did it fall back?</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c3"><label for="">Checked</label></div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">4 <span class="prize-tag">prize</span></div>
+  <h3>Read back the real numbers</h3>
+  <div class="row"><div class="k">do</div><div class="v">After landing, grep
+  <code class="inline-code">dcs.log</code>'s <code class="inline-code">PetrobrainLineOfSight</code>
+  lines for <code class="inline-code">units_in_bubble</code>, <code class="inline-code">units_in_wedge</code>,
+  <code class="inline-code">sightlines_computed</code>, <code class="inline-code">bridge_call_ms</code>.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">No prediction &mdash; every figure
+  beyond ~10/poll in the plan is an untrusted uniform-azimuth extrapolation. This replaces estimate
+  with measurement.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">The actual numbers, at a few
+  different moments &mdash; open terrain, over a town, near a cluster of units.</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c4"><label for="">Checked</label></div>
+</section>
+
+<section class="block">
+  <div class="block-num">5</div>
+  <h3>Any felt stutter?</h3>
+  <div class="row"><div class="k">do</div><div class="v">Fly normally, watching frame smoothness
+  &mdash; separate from the LOS feature itself. Performance's review couldn't measure this (no
+  DCS-side Lua profiler) and asked specifically for a flown answer.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Any stutter, when, and whether
+  it correlates with anything (busy area, mission start, a specific moment).</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c5"><label for="">Checked</label></div>
+</section>
+
+<section class="block">
+  <div class="block-num">6</div>
+  <h3>Watch for silent fallback</h3>
+  <div class="row"><div class="k">do</div><div class="v">Check the detection trace for
+  <code class="inline-code">hour_used</code>/<code class="inline-code">fov_half_deg_used</code>
+  being populated through the flight, not null.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">Populated whenever the Hook script and
+  look-direction channel both work. If the Hook fails to load, every unit silently falls back to
+  the old SRTM-tolerance primitive &mdash; nothing currently alerts on this.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Populated throughout, or gaps?</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c6"><label for="">Checked</label></div>
+</section>
+
+<section class="block">
+  <div class="block-num">7</div>
+  <h3>Pause-state check</h3>
+  <div class="row"><div class="k">do</div><div class="v">Pause mid-flight, wait a few seconds,
+  unpause. This Hook-script family has a history of export-rate bugs invisible to in-flight-only
+  testing.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">LOS lines keep appearing or cleanly
+  stop/resume &mdash; not silently stale while the sim clock stops.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">What <code class="inline-code">dcs.log</code>
+  showed across the pause.</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c7"><label for="">Checked</label></div>
+</section>
+
+<section class="block">
+  <div class="block-num">8</div>
+  <h3>Engagement calls track the live verdict</h3>
+  <div class="row"><div class="k">do</div><div class="v">Watch a contact engage and disengage from
+  behind cover.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">Danger/safe calls track the live
+  building/terrain verdicts ("safe from" itself stays deferred, unrelated to this plan).</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Anything wrong-timed or
+  wrong-direction.</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c8"><label for="">Checked</label></div>
+</section>
+
+<div class="not-testing">
+  <strong style="color:var(--ink);">Not tested tonight</strong>
+  <ul>
+    <li>The <code class="inline-code">atan2</code> heading convention inside the Hook script's
+    geometry, against DCS's own convention &mdash; if wrong, the symptom is a silently mis-aimed
+    wedge (coverage loss), not a wrong detection. Items 1&ndash;3 are the only indirect read on it.</li>
+    <li><code class="inline-code">tonumber("nan"/"inf")</code> behaviour on DCS's bundled Lua &mdash;
+    the clamp is written to be correct either way; a crash or stuck look-direction value (item 1)
+    would be the visible symptom if wrong.</li>
+    <li>World-model's offline LOS primitive and its 12&nbsp;m tolerance &mdash; now fallback/fixture
+    only, a separate (<code class="inline-code">WM-B8</code>) question, not a live-flight one.</li>
+  </ul>
+</div>
+
+<div class="bringback">
+  <h3>Bring back</h3>
+  <ul>
+    <li>Did a building occlude something it shouldn't have, or fail to occlude something it should?</li>
+    <li>Did the missed-AAA geometry resolve &mdash; live path or fallback?</li>
+    <li>The bubble/wedge/sightline/bridge-cost numbers, at a few moments.</li>
+    <li>Any stutter, and when.</li>
+  </ul>
+  <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+</div>
+
+<footer>
+  Source of truth: <code class="inline-code">docs/acceptance/2026-10-05-dcs-driven-los-sortie.md</code>.
+  Full record: <code class="inline-code">plans/dcs-driven-los/</code>. Checkboxes persist in this
+  browser only &mdash; they're a place-keeper, not a report. Bring the answers back in words.
+</footer>
+
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='dcs-driven-los-sortie';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>

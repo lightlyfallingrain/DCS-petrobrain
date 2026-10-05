@@ -86,3 +86,11 @@ def test_percept_of_drops_derived_world_position() -> None:
     # the projected object.
     percept_values = {getattr(percept, f.name) for f in dataclasses.fields(percept)}
     assert 99999.0 not in percept_values
+
+
+def test_percept_of_carries_live_los_clear_through_unchanged() -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29) -- a physical fact about
+    space, carried through on the same footing as `apparent_motion`."""
+    for value in (True, False, None):
+        observation = _observation(live_los_clear=value)
+        assert percept_of(observation).live_los_clear is value

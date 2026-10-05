@@ -14,15 +14,36 @@ for the kind whose live-DCS acceptance was *deferred*, not waived, and hasn't be
 sortie actually exercises it, and say which one.
 
 - [ ] **`fix/los-elevation-tolerance` — `_TERRAIN_TOLERANCE_M = 12.0` added to
-  `query.line_of_sight.line_of_sight_clear` (merged 2026-09-29), unflown.** Fixes a reproduced
-  (offline, not yet re-confirmed live) defect: the SRTM elevation grid can place a real unit
-  below the modelled terrain at its own position, permanently blocking terrain LOS to it from
-  every angle. Card: `docs/acceptance/2026-09-29-los-tolerance-sortie.md` — same flight as the
-  group-reporting acceptance. Settles two things a fixture cannot: whether Petrovich now detects
-  the previously-missed insurgent AAA on a similar attack pass, and whether the 12 m tolerance
-  starts revealing units genuinely masked by a ridge (accepted cost, but only a real flight can
-  show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
-  reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
+  `query.line_of_sight.line_of_sight_clear` (merged 2026-09-29), unflown.** **Narrowed 2026-10-05 by
+  `X-B29`'s DoD gate**: once `feature/dcs-driven-los` lands, gate 4 never calls this primitive at all
+  once a live DCS verdict exists for a unit (`candidate.live_los_clear is not None` short-circuits
+  it) — the tolerance is now test-path/fallback-only by construction, documented at its own
+  definition site. The original two questions this entry tracked split accordingly:
+  - **"Does Petrovich now detect the previously-missed AAA on a similar pass"** — this is now
+    answered by the *live* path, not by this tolerance, and is covered by
+    `X-B29`'s own Stage 4 acceptance card (`docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`),
+    not this one. Still unflown.
+  - **"Does the 12 m tolerance start revealing units genuinely masked by a ridge"** — this is the
+    one question still actually owned by this entry, and only for the narrower surface it now
+    covers: gate 4's fallback branch (live feed absent/outside the wedge/stale) and `WM-B8`'s
+    fixtures. Lower-stakes than originally framed, since the live path no longer depends on it for
+    the common case. Still unflown; card `docs/acceptance/2026-09-29-los-tolerance-sortie.md` is
+    stale in scope (it was written when this tolerance was the only LOS answer) and should be
+    re-read against this narrower claim before being flown, not flown as originally written.
+
+- [ ] **`feature/dcs-driven-los` (`X-B29`/`X-B30`, Stages 1-3) — DoD PASSED on fixtures 2026-10-05,
+  not yet merged, not yet flown.** Petrovich asks DCS directly whether terrain or a building blocks
+  a sightline, cone-scoped to his gaze wedge, instead of approximating it from this subproject's
+  SRTM grid; buildings occlude for the first time in this project. What a fixture cannot confirm, and
+  what Stage 4's sortie must: whether the `atan2` heading convention inside the Hook script's
+  `LOS_CODE` actually matches DCS's own Mission Scripting Engine convention (wrong would mean a
+  silently mis-aimed wedge, not a wrong detection), whether a building actually occludes in the
+  running game, whether the missed-AAA geometry now resolves without the 12 m tolerance, and whether
+  the per-frame look-direction socket poll produces any felt stutter (no DCS-side Lua profiler
+  exists to measure this offline). Acceptance card:
+  `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`. Full record: `plans/dcs-driven-los/{plan.md,
+  security-plan-review.md, implementation.md, review.md, security-deep-analysis.md, performance.md,
+  dod-check.md}`; backlog entries `todo/backlog.md`'s `X-B29`/`X-B30`.
 
 - [x] **`fix/latin-place-names` (`WM-B1`) — cleared by the user's 2026-10-02 `syria-full` build.**
   Name-source counts landed exactly as predicted: `via_name_en`≈12,926, `via_int_name`≈864,
@@ -1008,8 +1029,31 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   already-pending `fix/contact-report-flood` / `fix/redundant-group-disclosure` sortie rather
   than needing its own flight — see `body-layer/ROADMAP.md`'s "Live acceptance debt" list.
 
-- [ ] **WM-B7 — A coarse elevation grid derived from the ridge/valley lines, as the deterministic
-  test oracle. LOW PRIORITY.** User direction, 2026-10-05: *"I'd rather use coarse grid calculated
+- [x] **WM-B7 — REJECTED 2026-10-05, same day it was filed. Its rationale was removed by a user
+  decision hours later; the reasoning is kept because it is the record of why the elevation grid
+  has no consumer left.** Replaced by `WM-B8` below.
+
+  **Why it was filed**: to be the coarse, deterministic elevation source the *offline* LOS
+  primitive would read at theatre scale once `X-B29` moved the live answer into DCS.
+
+  **Why that disappeared**: the user relaxed the offline requirement the same day — *"we only need
+  it for testing. If we build a fine grid for a very small area, we can use that for test
+  scenarios. Recreating LOS of actual flights offline makes no sense, we cannot get required
+  accuracy without DCS."* A fixture-scale fine grid is a **different artifact**, not a reshaping of
+  this one, so it gets its own ID rather than inheriting this name and quietly changing what the
+  old commits mean.
+
+  **What this leaves**: nothing needs a theatre-scale elevation grid. `describe_position`'s
+  `elevation.dcs_m` has zero production callers (its only non-test caller, `perception/geometry.
+  elevation_at`, is itself uncalled); geomorphons reads SRTM `.hgt` directly; `query/divides.py`
+  samples no elevation; enrichment uses the features' own `elevation_range_m`; mission-interpreter
+  has no `elevation` reference in `src`. Retiring the stored grid is therefore a separate, later
+  cleanup question — not blocked on anything, and worth about 46 MB of a 704 MB store.
+
+  Original entry follows, kept for its design questions, several of which transfer to `WM-B8`.
+
+- [ ] **WM-B7 (original text) — A coarse elevation grid derived from the ridge/valley lines, as the
+  deterministic test oracle. LOW PRIORITY.** User direction, 2026-10-05: *"I'd rather use coarse grid calculated
   from ridge/valley data and not poll elevation data in DCS."* Replacement work for `X-B26`, which
   closed the same day by rejecting live elevation polling outright.
 
@@ -1046,6 +1090,23 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Do not start this before `X-B29` lands.** Until the live LOS path actually moves to DCS, the
   existing grid is still answering a live question and replacing it with a coarse one would
   degrade something real.
+
+- [ ] **WM-B8 — A fixture-scale fine elevation grid for offline LOS tests. LOW PRIORITY.**
+  User direction, 2026-10-05, replacing `WM-B7`: *"If we build a fine grid for a very small area,
+  we can use that for test scenarios."* **Unblocked 2026-10-05, `X-B29` DoD gate**: `WM-B7`'s "do
+  not start before `X-B29` lands" gate is cleared now that `feature/dcs-driven-los` has passed DoD
+  on fixtures (merge still pending, which does not block starting this). Still low priority in
+  ordering, not in importance.
+
+  **Note the inversion** — `WM-B7` was coarse-everywhere; this is **fine-but-tiny**. The offline
+  LOS primitive is no longer trying to stand in for DCS over a theatre. It serves fixtures, so it
+  needs to be *small, fine and deterministic*, and agreement with what DCS would say is an explicit
+  **non-goal** (see `plans/dcs-driven-los/plan.md` §3): the two answer different questions.
+
+  Open: how small an area, what resolution, and whether it is generated into the test fixtures or
+  built once and committed. The `WM-B7` entry above carries design questions that transfer —
+  particularly what it reports where there are no landform control points at all, which must be
+  "unknown" rather than an invented height.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
