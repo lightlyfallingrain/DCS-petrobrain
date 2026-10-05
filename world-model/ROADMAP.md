@@ -1008,6 +1008,39 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   already-pending `fix/contact-report-flood` / `fix/redundant-group-disclosure` sortie rather
   than needing its own flight — see `body-layer/ROADMAP.md`'s "Live acceptance debt" list.
 
+- [ ] **WM-B7 — A coarse elevation grid derived from the ridge/valley lines, as the deterministic
+  test oracle. LOW PRIORITY.** User direction, 2026-10-05: *"I'd rather use coarse grid calculated
+  from ridge/valley data and not poll elevation data in DCS."* Replacement work for `X-B26`, which
+  closed the same day by rejecting live elevation polling outright.
+
+  **What this is for, and the reframing that makes it cheap.** Once `X-B29` moves the live
+  line-of-sight answer into DCS, the stored elevation grid's only remaining job is standing in for
+  DCS in tests and offline work — and body-layer's hard requirement is that *everything* must run
+  with no live DCS session and no collector. A stand-in does not need to be accurate. **It needs
+  to be deterministic and cheap**, which a surface interpolated from the landform lines already is:
+  the ridge and valley rows carry `elevation_range_m` per line, so the high and low control points
+  for such a surface are already in the store.
+
+  **What it is explicitly NOT**: a better live elevation answer. If anything ever genuinely needs
+  live elevation accuracy, the route is to build the probe (`X-B26`'s closing note records
+  everything measured for that), not to make this grid better.
+
+  Open design questions, none urgent:
+
+  - What interpolation, and at what spacing. "Coarse" is the point — this competes against a
+    2,365,517-sample grid that is 46 MB of a 704 MB store.
+  - Whether it replaces the stored `grid`/`grid_sample` tables or sits beside them. Replacing them
+    changes `store.schema.SCHEMA_VERSION` and the M8 probe-store pairing; a sibling does not.
+  - How it behaves where there are no landform lines at all — flat desert has neither ridges nor
+    valleys, and the relief gate removed everything under 50 m. An interpolation with no control
+    points nearby must say so rather than inventing a plausible height.
+  - Whether `query.line_of_sight`'s `_TERRAIN_TOLERANCE_M = 12.0` still makes sense against a
+    much coarser surface. It was tuned against SRTM-derived samples.
+
+  **Do not start this before `X-B29` lands.** Until the live LOS path actually moves to DCS, the
+  existing grid is still answering a live question and replacing it with a coarse one would
+  degrade something real.
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
