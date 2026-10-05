@@ -15,6 +15,14 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **`feature/dcs-driven-los` (`X-B29`/`X-B30`) — merged 2026-10-05, not yet flown.** Touches
+  this subproject's gate 4 (`perception/visibility.py`, `perception/naked_eye_source.py`,
+  `belief/contacts.py`'s engagement term), but the entry itself and its own acceptance card live in
+  `world-model/ROADMAP.md`'s "Live acceptance debt" list (the milestone's owning backlog item,
+  `X-B29`, is a cross-cutting `todo/backlog.md` entry spanning aircraft-layer/body-layer/
+  world-model, and the fallback primitive it demotes is world-model's). Pointer kept here so a
+  reader of this file's own debt list doesn't miss it.
+
 - [x] **`feature/spu8-intercom` (audio-adapter Slice 2) — CLEARED 2026-10-05. Flown and accepted**
   (user: *"SPU-8 feature works, tested and accepted."*), merged `be12734`.** Gates Petrovich's capture and playback both ways on the cockpit's real
   SPU-8 intercom switches (pilot NET-1, arg 377, AND co-pilot ICS power, arg 664) and scales his

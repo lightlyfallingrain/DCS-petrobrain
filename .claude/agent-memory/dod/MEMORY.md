@@ -18,3 +18,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Recurring: approved plan wrong on real data](project_recurring_approved_plan_wrong_on_real_data.md) — 2nd occurrence this week (contact-report-flood, geomorphons perf); consider a real-data check earlier than Implementer.
 - [Plan staleness across parked stages](project_plan_staleness_across_parked_stages.md) — terrain-feature-probing's parked Stages 3-5 assumed basin adjacency from a since-replaced detector; 1st occurrence, watch for a 2nd.
 - [Cross-machine handoff, zero gate risk](project_cross_machine_handoff_zero_gate_risk.md) — a branch built entirely on another machine/session can arrive with literally no test run ever performed on it.
+- [Roadmap edit target: feature branch vs main](project_roadmap_edit_target_feature_vs_main.md) — diff the file against the fork point first; if the feature branch already touched it, edit a branch off the feature tip, not main.

@@ -789,3 +789,18 @@ two functions that must agree (2026-09-19).
   check run on it" as its own flag when picking up cross-machine/cross-session handoff work, rather
   than assuming a clean-looking diff implies the suite was ever green (`plans/spu8-intercom/
   implementation.md`).
+- **A constant shared between an outer Hook-script Lua local and a `dostring_in` string-literal
+  snippet it dispatches cannot be a single source of truth — the snippet must be a fixed string
+  literal (per this project's own `dostring_in` safety rule) and so cannot interpolate an outer
+  Lua variable.** `MAX_SIGHTLINES_PER_CALL = 128` exists as two independent literals in
+  `petrobrain-line-of-sight-hook.lua` for exactly this reason, with no mechanical guard against them
+  drifting apart (unlike the project's own `%d`-count static test for the look-direction splice).
+  Worth a similar static test if either copy is ever revisited (`plans/dcs-driven-los/
+  implementation.md`, review.md's "Optional Refinements").
+- **Gate 4's live-first/offline-fallback join pattern (`candidate.live_los_clear is not None`
+  short-circuits the world-model primitive) silently narrows an existing live-acceptance-debt
+  entry's scope rather than clearing it** — `fix/los-elevation-tolerance`'s 12 m tolerance stopped
+  being consulted for any unit the live DCS feed covers, but the debt entry describing it still read
+  as if the tolerance were the only LOS answer. When a new mechanism supersedes part of what an old
+  debt item was tracking, the debt entry needs re-reading and re-scoping, not just a new entry
+  alongside it (`plans/dcs-driven-los/plan.md`; `world-model/ROADMAP.md`'s "Live acceptance debt").

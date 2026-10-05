@@ -922,7 +922,22 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Sequence, when work resumes: wire LOS probe-first (Mac side, per X-B27), then build probing. Not
   the reverse — the probe store filling up changes nothing until LOS reads it.
 
-- [ ] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS.**
+- [x] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS. DOD PASSED
+  2026-10-05, Stages 1-3 (`feature/dcs-driven-los`, tip `4352008`), not yet merged. Stage 4 (live
+  sortie) is acceptance debt, tracked in `world-model/ROADMAP.md`'s "Live acceptance debt" list, not
+  a blocker here.** Shipped: the cone-scoped Hook script (`aircraft-layer/dcs-export/
+  petrobrain-line-of-sight-hook.lua`) computing both building and terrain LOS per unit in the gaze
+  wedge, a new look-direction command channel so the Hook knows where to scope its cone, collector/
+  API/client plumbing, and body-layer's gate-4 join (`candidate.live_los_clear`, live-first with the
+  world-model offline primitive as fallback only). `X-B30` (building occlusion) folded in rather than
+  left as a follow-on — see its own entry below, now also closed. Full record: `plans/dcs-driven-los/
+  {plan.md, security-plan-review.md, implementation.md, review.md, security-deep-analysis.md,
+  performance.md, dod-check.md}`. Acceptance card: `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`.
+  **Consequence for other backlog items**: `WM-B8` (world-model) is now unblocked — the gate it
+  inherited from the rejected `WM-B7` ("do not start before `X-B29` lands") is clear. The original
+  entry below is kept verbatim as the design record; read it as superseded by the above, not as the
+  current state.
+
   **MEASURED LIVE 2026-10-05 — the approach holds, and the binding constraint turned out to be
   batch size, not call frequency.** The user flew the elevation-cost probe and reported *"a small
   but annoying stutter every few seconds"*; the log agrees and says why. Full numbers:
@@ -1014,7 +1029,17 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     precedent that this is not a new kind of thing, but the boundary shift should be argued, not
     assumed.
 
-- [ ] **X-B30 — Building occlusion is NOT gated on the Windows move.** User direction, 2026-09-29,
+- [x] **X-B30 — Building occlusion is NOT gated on the Windows move. CLOSED 2026-10-05, folded into
+  `X-B29`'s Stages 1-3 rather than built separately** — the batched Hook script computes
+  `building_clear` alongside `terrain_clear` in the same `world.searchObjects`/`SEGMENT` sweep, Mac-
+  side, no Windows-move dependency, exactly as this entry asked. Live confirmation that a building
+  actually occludes in the running game is Stage 4's job (acceptance card:
+  `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`), not closed by this entry alone. The
+  `through_buildings`-vs-broader-sweep call-shape discrepancy this entry flagged as unresolved
+  remains unresolved — carried into `plans/dcs-driven-los/plan.md` and `implementation.md`'s own
+  "Notable Discoveries," not silently dropped.
+
+  Original entry follows. User direction, 2026-09-29,
   correcting an earlier read of mine: *"Do not gate buildings on the Windows move. While that may be
   the eventual setup, development is easier on my mac. The LAN delay penalty is acceptable during
   development."* So the buildings half of the occluder work proceeds Mac-side now, paying the LAN
