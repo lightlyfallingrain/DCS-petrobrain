@@ -32,6 +32,13 @@ opened and run on its own background thread the same way, feeding a
 `UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the second
 channel running the Hook-to-collector direction (after the F10 one above).
 
+A `Spu8Cache` (`plans/spu8-intercom/plan.md`) is constructed the same way
+as `ptt_cache` -- fed by `CollectorServer` from Export.lua's "net1" lines,
+served by `GET /spu8/state`, and consumed by `_handle_ptt_state` to gate
+`/ptt/state`'s own `"intercom"` field (Stage 2). Its `gate_state` method is
+also handed to `AudioPlaybackSender` as the gate/volume provider consulted
+before each queued line plays (Stage 3).
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
@@ -56,6 +63,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
     WorldObjectsCache,
@@ -171,8 +179,6 @@ def main() -> None:
         target=f10_command_receiver.serve_forever, daemon=True
     )
     f10_command_receiver_thread.start()
-    audio_sender = AudioPlaybackSender()
-    audio_sender.open()
     unit_velocity_cache = UnitVelocityCache()
     unit_velocity_receiver = UnitVelocityReceiver(
         unit_velocity_cache, host=args.unit_velocity_host, port=args.unit_velocity_port
@@ -187,12 +193,23 @@ def main() -> None:
     # Export.lua's ptt lines and the API serves it to the capture process.
     ptt_cache = PttCache()
 
+    # Same shape as ptt_cache above, plus `AudioPlaybackSender`'s gate/
+    # volume provider (`plans/spu8-intercom/plan.md` Stage 3) -- real
+    # wiring passes `spu8_cache.gate_state` (fail-safe-closed when no SPU-8
+    # sample has arrived yet, matching Stage 2's capture-gating default),
+    # unlike `AudioPlaybackSender`'s own constructor default (`_always_open`)
+    # which exists only for pre-existing call sites/tests.
+    spu8_cache = Spu8Cache()
+    audio_sender = AudioPlaybackSender(gate_state=spu8_cache.gate_state)
+    audio_sender.open()
+
     collector = CollectorServer(
         cache,
         world_objects_cache,
         petrovich_indication_cache,
         petrovich_wheel_cache,
         ptt_cache=ptt_cache,
+        spu8_cache=spu8_cache,
         host=args.host,
         port=args.port,
     )
@@ -213,6 +230,7 @@ def main() -> None:
         audio_sender=audio_sender,
         unit_velocity_cache=unit_velocity_cache,
         ptt_cache=ptt_cache,
+        spu8_cache=spu8_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)

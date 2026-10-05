@@ -1329,6 +1329,104 @@ def test_recognised_free_text_command_ends_silence() -> None:
     assert console.silenced is False
 
 
+# -- maybe_apply_on_ground_default (plans/spu8-intercom/plan.md Stage 5: ----
+# mission-start on-ground silent-mode default, one-shot, ends only via the ---
+# existing "any command ends silence" logic above -- not by leaving the ----
+# ground) -----------------------------------------------------------------
+
+
+def _ownship(alt_agl_m: float) -> OwnshipState:
+    return OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=0.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
+    )
+
+
+def test_on_ground_at_mission_start_applies_silent_mode() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+
+    assert console.silenced is True
+
+
+def test_airborne_at_mission_start_does_not_apply_silent_mode() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=500.0))
+
+    assert console.silenced is False
+
+
+def test_on_ground_default_does_not_speak_an_acknowledgement() -> None:
+    """Unlike the player-issued `silence` command, there is nothing to
+    acknowledge at a cold mission start -- sets `self.silenced` directly,
+    not through `_handle_silence`."""
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+
+    assert console.silenced is True
+    assert speech_client.pushed == []
+
+
+def test_on_ground_default_is_evaluated_only_once() -> None:
+    """An internal one-shot flag, not re-evaluated afterward regardless of
+    later altitude -- a call made on the ground does not get a second
+    chance to reconsider once ownship climbs."""
+    console = CrewConsole(store=ContactStore())
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    assert console.silenced is True
+
+    # A player command ends silence (the existing, unrelated mechanism) --
+    # then a second on-ground call must be a no-op, not re-silence him.
+    console.handle_command("watch_nearest", now_sim=1.0)
+    assert console.silenced is False
+
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+
+    assert console.silenced is False
+
+
+def test_airborne_first_call_latches_even_though_later_on_ground() -> None:
+    """The first call sets the one-shot flag regardless of outcome -- a
+    later on-ground call must not apply the default retroactively."""
+    console = CrewConsole(store=ContactStore())
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=500.0))
+    assert console.silenced is False
+
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+
+    assert console.silenced is False
+
+
+def test_on_ground_default_ends_only_via_a_command_not_by_leaving_the_ground() -> None:
+    """Locked user decision, 2026-10-05: leaving the ground does not end
+    silent mode -- reuses `silenced`'s already-shipped end condition
+    unchanged (only a command ends it), with zero new suppression logic."""
+    store = ContactStore()
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
+    console.maybe_apply_on_ground_default(_ownship(alt_agl_m=0.0))
+    assert console.silenced is True
+
+    # A drained callout stays suppressed while airborne, same as ordinary
+    # `silence` -- this is the existing mechanism, not new logic.
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=10.0, classification_raw="BMP-2")],
+        now_sim=10.0,
+    )
+    store.tick(now_sim=10.0)
+    spoken = console.drain_events(now_sim=10.0)
+    assert len(spoken) == 1
+    assert speech_client.pushed == []
+
+    # A command ends it -- the existing "any command ends silence" path.
+    console.handle_command("watch_nearest", now_sim=20.0)
+
+    assert console.silenced is False
+
+
 def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:
     store = ContactStore()
     store.ingest(

@@ -1420,6 +1420,15 @@ def _run_crew_text_poll_loop(
                         trace_collector.records.clear()
                 if runner.last_t_sim is not None:
                     crew_console.enrichment = runner.enrichment
+                    # plans/spu8-intercom/plan.md Stage 5: a one-shot
+                    # mission-start default, evaluated as soon as a real
+                    # ownship state is available -- before drain_events, so
+                    # a mission-start default (if applied) takes effect
+                    # before anything from this same poll could be spoken.
+                    if runner.last_ownship_state is not None:
+                        crew_console.maybe_apply_on_ground_default(
+                            runner.last_ownship_state
+                        )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever
                     # `brain_client.poll_replies()` has decided since the
