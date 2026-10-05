@@ -498,3 +498,67 @@ exempt from it. No action proposed here beyond naming it.
   following instead, that is a materially larger, separate design (a watched-group concept
   surviving `Group` split/merge) and should be scoped as its own plan rather than folded into this
   sortie's refinement set.
+
+---
+
+## Decisions settled by the user, 2026-10-05 (after the plan was written)
+
+All three "Decisions Requiring User Input" are now answered. The plan above stands except where
+these override it.
+
+### 1. The terrain fact is **both** — divide-relative when a divide fires, position-relative otherwise
+
+The user's example *"in next valley, north, medium distance"* was ambiguous between the two terrain
+facts that both merged this morning. Answer: **both, whichever applies**, which is the precedence
+`feature/terrain-callout-stages-345` already ships — the divide-relative form (1 divide crossed)
+takes precedence, the position form (`"in a valley"` / `"on a ridge"`) competes otherwise.
+
+**The hard part this hands the implementer, and it must not be papered over**: the two facts are
+*about different things*, so the direction word means different things with each.
+
+- `"in a valley, north"` — the contact is in a valley, and it is north **of that valley's own
+  reference point** (the closest point on the landform line). Feature-relative, same as
+  `"south of village"`. Well-defined.
+- `"next valley, north"` — **north of what?** The divide fact is a relation between *ownship and
+  the contact*, not between the contact and a feature. There is no feature-relative origin to take
+  a bearing from.
+
+Work out what the direction means in the divide case before writing it. Two defensible readings —
+pick one, say why, and make it easy to change:
+
+- **Drop the direction word for the divide form.** *"armor, 3 o'clock, next valley, medium
+  distance"* already carries bearing (the o'clock) and range (the band). The direction adds
+  nothing a pilot can act on, and the fragment stays short — which is the standing instruction.
+  **This is my recommendation**; it is also the quieter option, consistent with every callout
+  decision the user has made this week.
+- **Take it from the nearest valley line's own closest point**, i.e. treat the divide form as the
+  position form plus a divide qualifier. Defensible, but it quietly asserts the contact is *in*
+  that valley, which the divide fact does not establish.
+
+### 2. Water sits **with** terrain features, not below road
+
+Revised precedence: **settlement → terrain feature + water → road → coastline / landcover.**
+
+The user's reasoning, in their choice: a river or lake shore is a landform a pilot navigates by,
+peer to a ridge or valley rather than a fallback. Coastline and landcover stay below road — the
+coast is kilometres long and landcover is a region, so neither is a point a pilot can steer by the
+way a lake shore is.
+
+Within the shared terrain+water tier, order by the existing distance/dominance rule rather than by
+kind, and reuse `WaterInfo.bearing_deg` — it landed this morning alongside the others.
+
+### 3. Group watch tags members **once, statically**
+
+*"Tag once, static."* Members at the moment the command is given become watched. A unit that joins
+the group afterwards is **not** watched; one that leaves **stays** watched.
+
+No new state, no watch-to-group identity binding, and nothing to maintain as groups split and
+merge — which they do. The readback should make the one-time nature audible rather than implying a
+standing subscription; something closer to *"watching four"* than *"watching that group"*, so the
+pilot is not surprised when a late arrival goes unreported.
+
+### Unchanged by these answers
+
+The watched-only gate on road fragments (reading **(a)**) stands as built — a road fragment speaks
+only when there is no settlement, no terrain feature, no water, **and** the contact is watched.
+Distance bands remain first guesses to be flown.
