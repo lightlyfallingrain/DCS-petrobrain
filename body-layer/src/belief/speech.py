@@ -1393,6 +1393,48 @@ def group_membership_state(
     return member_ids, leading_contact_id, differentiated
 
 
+def group_callout_member_id(store: ContactStore, group: Group) -> str | None:
+    """The one member of `group` whose own `belief.callouts.
+    _WATCHED_ONLY_KINDS` callout survives that module's grouped-contact
+    suppression -- `None` when the group has nothing coherent left to
+    suppress on behalf of (fewer than two members still resolve, the same
+    guard `_group_member_facts`/`render_group_disclosure` enforce), in
+    which case the caller suppresses nothing and the per-member callouts
+    stand.
+
+    **Deliberately computes the leader without a single `describe_contact`
+    call**, which is the whole point of the function: it is called from
+    the filter that decides whether to *skip* an event, and the cost it
+    exists to avoid is exactly the `describe_contact` the filter would
+    otherwise do per member (performance review 2026-10-05, finding 1 --
+    one watched group turned one event stream into N, at ~51 ms of
+    `describe_position` per member). `_leading_index` needs only
+    `Contact.classification`, and `describe_contact` returns `None` under
+    precisely the condition `ContactStore.contact` does (an id that no
+    longer resolves), so this resolves the same member set
+    `group_membership_state` would, by the same ordering, for free.
+
+    Falls back to the first still-resolving member when no member has a
+    resolvable `belief.threat.envelope_for` envelope -- unlike
+    `group_membership_state`'s `leading_contact_id`, which answers "who
+    leads this group's disclosure line" and is legitimately `None` there,
+    this answers "which single event survives" and must always name one
+    once there is a group at all, or suppression would silence the whole
+    group."""
+    member_contacts: list[Contact] = []
+    for member_id in sorted(group.member_contact_ids):
+        contact = store.contact(member_id)
+        if contact is None:
+            continue
+        member_contacts.append(contact)
+    if len(member_contacts) < 2:
+        return None
+    leading_index = _leading_index(member_contacts)
+    if leading_index is None:
+        return member_contacts[0].id
+    return member_contacts[leading_index].id
+
+
 def _render_full_group_composition(
     member_facts: list[dict[str, object]],
     leading_index: int | None,
