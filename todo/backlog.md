@@ -109,7 +109,20 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   about the scripting API, which is native (nothing in `Scripts/` defines `land.isVisible`; only
   `ScriptingSystem.lua`'s `class(SceneryObject, Object)`), so it can only be measured live.
 
-  `aircraft-layer/dcs-export/petrobrain-elevation-cost-probe-hook.lua` (deployed) answers all of
+  **FLOWN 2026-10-05 and answered.** Results:
+  `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`. The desert control did its
+  job: the urban-minus-desert gap was 2-of-40 against 0-of-40, which this project then weighed
+  against Finding 12's 52 rays through 52 located buildings (none blocked) and Finding 16/19's
+  direct contradiction pair, and read as **`isVisible` is terrain-only** — so the control fired
+  exactly as designed, and the 9K113 half of this item collapses as it anticipated. Buildings come
+  from `world.searchObjects` + `VolumeType.SEGMENT` instead (Finding 21: 8.7 µs/sightline, sees
+  buildings in 3D, *cheaper* than the terrain-only call), which is what `X-B29` is being built on.
+
+  The probe also killed the premise of live elevation sampling altogether — see `X-B26`, closed the
+  same day: `land.getHeight` works through the bridge and is bit-identical to the mission-editor
+  probe, but with DCS answering LOS directly almost nothing live needs elevation at all.
+
+  Original plan for the probe follows. It (deployed) answers all of
   it on the next sortie, with a **desert control** — the same 40-pair terrain-only-vs-`isVisible`
   comparison run over Mezzeh and over Deir ez-Zor, because terrain-sampling error appears in both
   and subtracts out while buildings and trees do not. A near-zero urban-minus-desert gap means
