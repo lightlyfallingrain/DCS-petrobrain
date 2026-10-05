@@ -17,8 +17,9 @@ from pathlib import Path
 
 import numpy as np
 
-from build.ingest_terrain import EXTRACTOR_VERSION, ingest_terrain
+from build.ingest_terrain import EXTRACTOR_VERSION, ingest_terrain, tiles_for_region
 from build.region import RegionDefinition
+from coordinates import wgs84_to_dcs
 from store.models import StoredFeature
 from terrain.features import (
     DEFAULT_CHAIKIN_ITERATIONS,
@@ -480,3 +481,66 @@ def test_ingest_terrain_resumes_a_partially_completed_cache(tmp_path: Path) -> N
     # tile A would come back as zero real features instead.
     assert any(f.geometry == [(0.0, 0.0), (1.0, 1.0)] for f in features)
     assert all(f.source_id == 7 for f in features)
+
+
+def _region_at(lat: float, lon: float, half_extent_m: float) -> RegionDefinition:
+    x, z = wgs84_to_dcs("Syria", lat, lon)
+    return RegionDefinition(
+        theatre="Syria",
+        name="tile-filter-test",
+        centre_x=x,
+        centre_z=z,
+        half_extent_x_m=half_extent_m,
+        half_extent_z_m=half_extent_m,
+    )
+
+
+def _stage_tiles(tmp_path: Path, names: list[str]) -> list[Path]:
+    paths = [tmp_path / name for name in names]
+    for path in paths:
+        _write_flat_tile(path, size=4)
+    return paths
+
+
+def test_tiles_for_region_drops_tiles_far_from_the_region(tmp_path: Path) -> None:
+    """A region in the middle of N35E035 keeps that tile and drops its
+    neighbours and a distant tile -- the staged-rectangle waste
+    `tiles_for_region` exists to remove."""
+    paths = _stage_tiles(
+        tmp_path, ["N35E035.hgt", "N35E036.hgt", "N34E035.hgt", "N39E040.hgt"]
+    )
+    kept = tiles_for_region(paths, _region_at(35.5, 35.5, 5000.0))
+    assert [p.name for p in kept] == ["N35E035.hgt"]
+
+
+def test_tiles_for_region_keeps_a_neighbour_within_the_margin(
+    tmp_path: Path,
+) -> None:
+    """A region ~25 km short of N35E035's east edge drops N35E036 at the
+    default (~1.8 km) margin and keeps it once the margin reaches it --
+    the margin is what keeps out-of-region neighbours whose cells feed an
+    in-region tile's processing window. Distances are kept well clear of
+    the few-km overhang `_tile_dcs_bbox`'s axis-aligned envelope has from
+    grid convergence, which only ever keeps a tile, never drops one."""
+    paths = _stage_tiles(tmp_path, ["N35E035.hgt", "N35E036.hgt"])
+    # ~91 km per degree of longitude at 35.5N: 0.3 deg short of the edge.
+    region = _region_at(35.5, 35.7, 1000.0)
+    assert [p.name for p in tiles_for_region(paths, region)] == ["N35E035.hgt"]
+    assert [p.name for p in tiles_for_region(paths, region, margin_m=40000.0)] == [
+        "N35E035.hgt",
+        "N35E036.hgt",
+    ]
+
+
+def test_tiles_for_region_keeps_every_tile_a_region_spans(tmp_path: Path) -> None:
+    paths = _stage_tiles(tmp_path, ["N35E035.hgt", "N35E036.hgt", "N36E035.hgt"])
+    kept = tiles_for_region(paths, _region_at(36.0, 36.0, 20000.0))
+    assert [p.name for p in kept] == ["N35E035.hgt", "N35E036.hgt", "N36E035.hgt"]
+
+
+def test_tiles_for_region_skips_missing_paths(tmp_path: Path) -> None:
+    paths = _stage_tiles(tmp_path, ["N35E035.hgt"])
+    kept = tiles_for_region(
+        [tmp_path / "N35E036.hgt", *paths], _region_at(35.5, 35.5, 5000.0)
+    )
+    assert [p.name for p in kept] == ["N35E035.hgt"]
