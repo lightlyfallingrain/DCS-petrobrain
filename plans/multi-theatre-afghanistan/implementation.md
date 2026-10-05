@@ -168,3 +168,57 @@ their own `RUN.md §1`/`CLAUDE.md` instructions before any check ran.
   spot-check's SRTM-sampled elevation (1792.2m) landed within ~1m of Kabul's real-world
   elevation (~1791m), which depends on the x/z landing on the correct ground cell, not on the
   fit's output being merely self-consistent.
+
+### Security fix pass (2026-10-05)
+
+Addressed `plans/multi-theatre-afghanistan/security.md`'s required fix and optional item.
+Analysed-at tip was `5e30050` (Security's own commit); `80461ef` (Performance Reviewer,
+independent — no code touched) was cherry-picked on top per the dispatching instructions, so this
+work sits on both reviews' findings at once.
+
+- **Required fix** — `body-layer/src/logger.py`, Stage 5's `elif mission_data is not None:`
+  branch: immediately after `theatre = mission_data.theatre.value`, reject with `parser.error` if
+  `theatre not in THEATRE_PROJECTIONS` (new import, `from coordinates.projections import
+  THEATRE_PROJECTIONS` — the exact registry the security review named, already body-layer's
+  existing in-process world-model coupling, no new seam). Exact-key membership closes every
+  vector the review demonstrated (absolute-path/UNC override via `Path.__truediv__`, and the
+  SQLite URI query-string injection via `open_world_model`'s `f"file:{db_path}?mode=ro"`) without
+  needing a separate charset check — none of the registered theatre names contain any character
+  that matters to either vector, and an unregistered name is useless downstream regardless of
+  what it's spelled like.
+- **Optional item** — the same function's post-resolution mismatch guard: wrapped
+  `open_world_model(world_model_db)` / `load_only_region(guard_conn)` in
+  `try/except (sqlite3.Error, OSError)`, turning a legitimate-but-unbuilt store into a clean
+  `parser.error(f"world model for {theatre} not built: {world_model_db}")` instead of a raw
+  traceback. Confirmed experimentally (not assumed) that `sqlite3.connect(..., uri=True)` with a
+  nonexistent `mode=ro` target does *not* raise at `connect()` — it raises `OperationalError` on
+  the first `execute()`, i.e. inside `load_only_region`, which is why both calls needed to be
+  inside the same `try`, not just the connect.
+- **Tests added** (`body-layer/tests/test_logger.py`) — a parametrized
+  `test_main_rejects_unregistered_theatre_from_mission_understanding` covering all four strings
+  the security review used as its own demonstration (`"Narnia"` unknown-theatre,
+  `"/etc/passwd"` absolute-path, `"//attacker-host/share/x"` UNC, `"Syria?mode=rwc"` URI-query
+  injection), each asserting `SystemExit` *and* that no `*-full.sqlite` file was ever created in
+  the target directory — i.e. the rejection happens before any path is touched, not just that the
+  process exits for some reason. Plus `test_main_gives_clean_error_for_unbuilt_theatre_store` for
+  the optional item, asserting the error text names the expected store path. A small
+  `_write_mission_understanding_with_theatre` helper writes a minimal (`phases: []`, `route: []`)
+  artifact with an arbitrary `theatre.value`, since `load_mission_understanding`/`_parse_theatre`
+  place no constraint on that string's content — confirmed by reading `mission_phase.py` rather
+  than assumed, matching the security review's own finding.
+- No other files touched; this is deliberately the minimal fix the dispatching instructions
+  asked for. `plans/multi-theatre-afghanistan/performance.md`'s findings (per-tick cost, terrain-
+  semantics tile-count observation) are unaffected — this pass adds no per-tick code, only
+  startup-time validation in the same branch the performance review already traced as
+  startup-only.
+
+**Checks** (`cd body-layer`, fresh `.venv` created in this worktree — none existed, worktrees
+don't share the main checkout's):
+- `ruff format --check src tests`: pass (114 files already formatted)
+- `ruff check src tests`: pass (All checks passed!)
+- `mypy src` (strict): pass (53 source files, no issues) — including the `try/except` around the
+  mismatch guard; mypy correctly treats `parser.error`'s `NoReturn` return type as making the
+  `except` branch never fall through, so `built_region` is recognized as bound on every path that
+  reaches the line after the `try/except`.
+- `pytest -q`: 1407 passed, 4 xfailed (was 1402 passed, 4 xfailed before this pass — 5 new tests:
+  4 parametrize cases + 1 unbuilt-store test)

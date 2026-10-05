@@ -227,6 +227,7 @@ from belief.optic_policy import (
 from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
+from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
 from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
 from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
@@ -1882,6 +1883,20 @@ def main() -> None:
                 "--world-model-dir"
             )
         theatre = mission_data.theatre.value
+        # Security (multi-theatre-afghanistan plan, required fix): `theatre`
+        # is the raw .miz-derived string from an externally-sourced mission
+        # file, unvalidated all the way up the mission-interpreter chain
+        # (see plans/multi-theatre-afghanistan/security.md). Reject anything
+        # outside the known-theatre registry before it is used to build a
+        # path or (transitively, via open_world_model's sqlite3 URI) a
+        # connection string -- a path-traversal/UNC/absolute-path value or a
+        # SQLite URI-query-string injection otherwise reaches both.
+        if theatre not in THEATRE_PROJECTIONS:
+            parser.error(
+                f"--mission-understanding artifact's theatre {theatre!r} is "
+                "not a known theatre -- no entry in "
+                "coordinates.projections.THEATRE_PROJECTIONS"
+            )
         world_model_db = args.world_model_dir / f"{theatre.lower()}-full.sqlite"
     else:
         parser.error(
@@ -1895,11 +1910,14 @@ def main() -> None:
     # store" before the first poll, rather than silently applying the
     # wrong projection and producing a plausible-looking, wrong position
     # for every contact.
-    guard_conn = open_world_model(world_model_db)
     try:
-        built_region = load_only_region(guard_conn)
-    finally:
-        guard_conn.close()
+        guard_conn = open_world_model(world_model_db)
+        try:
+            built_region = load_only_region(guard_conn)
+        finally:
+            guard_conn.close()
+    except (sqlite3.Error, OSError):
+        parser.error(f"world model for {theatre} not built: {world_model_db}")
     if built_region is not None and built_region.theatre != theatre:
         parser.error(
             f"--world-model-db {world_model_db} was built for theatre "
