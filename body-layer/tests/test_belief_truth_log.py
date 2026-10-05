@@ -432,6 +432,38 @@ def test_a_speech_write_failure_is_reported_once_then_abandoned(
     assert "No space left on device" in stderr.getvalue()
 
 
+class _CloseFailsFile(_FullDiskFile):
+    """A full disk whose buffered data only fails on `close()`, which is
+    the real shape: `flush()` early-returns once the writer is disabled, so
+    the kernel reports the failed write at close time."""
+
+    def close(self) -> None:
+        raise OSError(28, "No space left on device")
+
+
+def test_close_does_not_raise_when_the_disk_is_full(tmp_path: Path) -> None:
+    """The poll loop calls `close()` from a `finally:` block, so an
+    `OSError` escaping it is a shutdown traceback in exactly the full-disk
+    scenario `BL-11` Stage 5 exists to make legible."""
+    stderr = io.StringIO()
+    writer = BeliefTruthLogWriter(tmp_path / "belief_truth.jsonl", stderr=stderr)
+    writer._file = _CloseFailsFile()  # type: ignore[assignment]
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+
+    writer.close()  # must not raise
+
+
+def test_close_does_not_raise_on_a_healthy_writer(tmp_path: Path) -> None:
+    """The guard must not be hiding a failure on the ordinary path."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path, stderr=io.StringIO())
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+
+    writer.close()
+
+    assert path.read_text().strip() != ""
+
+
 def test_write_poll_stops_after_a_failure(tmp_path: Path) -> None:
     """The poll path shares the flag, so one failure disables both row
     kinds -- a half-written log that keeps gaining speech rows but no

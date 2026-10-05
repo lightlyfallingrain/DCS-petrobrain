@@ -33,6 +33,7 @@ belongs in one place that both read.\"
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from dataclasses import asdict
@@ -112,8 +113,17 @@ class DetectionTraceWriter:
         self._polls_since_flush = 0
 
     def close(self) -> None:
+        """Flush and close, never raising -- `BL-11` Stage 5.
+
+        `flush` above early-returns once the writer is disabled, so buffered
+        data that cannot be written surfaces from `close()` instead. The
+        poll loop calls this from its `finally:` block (`logger.py`), so an
+        unguarded `OSError` here is a traceback on shutdown in exactly the
+        full-disk scenario this stage exists to make legible -- and the
+        `_fail` line has already said what went wrong."""
         self.flush()
-        self._file.close()
+        with contextlib.suppress(OSError):
+            self._file.close()
 
     def _fail(self, exc: OSError) -> None:
         """Report one write failure, then stop writing for the rest of the

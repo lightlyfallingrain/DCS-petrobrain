@@ -718,6 +718,49 @@ def test_a_write_failure_is_reported_once_then_the_writer_gives_up(
     assert "No space left on device" in message
 
 
+class _CloseFailsFile(_FullDiskFile):
+    """A full disk whose buffered data only fails on `close()` -- the real
+    shape of the problem, since `flush()` early-returns once the writer is
+    disabled and the kernel reports the failed write at close time."""
+
+    def close(self) -> None:
+        raise OSError(28, "No space left on device")
+
+
+def test_close_does_not_raise_when_the_disk_is_full(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`close()` is called from the poll loop's `finally:` block, so an
+    `OSError` escaping it is a shutdown traceback in exactly the scenario
+    `BL-11` Stage 5 exists to make legible -- and `_fail` has already said
+    what went wrong."""
+    writer = DetectionTraceWriter(tmp_path / "trace.jsonl", flush_every_n_polls=1)
+    writer._file = _CloseFailsFile()  # type: ignore[assignment]
+    store = ContactStore()
+    trace = DetectionTraceCollector()
+    trace.record(_unannotated_entry())
+    writer.write_poll(trace, store)
+    capsys.readouterr()
+
+    writer.close()  # must not raise
+
+
+def test_close_does_not_raise_on_a_healthy_writer(tmp_path: Any) -> None:
+    """The guard must not be hiding a failure on the ordinary path: a
+    writer that never failed still flushes and closes cleanly, and its rows
+    are on disk afterwards."""
+    path = tmp_path / "trace.jsonl"
+    writer = DetectionTraceWriter(path, flush_every_n_polls=1)
+    store = ContactStore()
+    trace = DetectionTraceCollector()
+    trace.record(_unannotated_entry())
+    writer.write_poll(trace, store)
+
+    writer.close()
+
+    assert path.read_text().strip() != ""
+
+
 def test_a_disabled_writer_still_clears_the_collector(tmp_path: Any) -> None:
     """Otherwise the collector's buffer grows unboundedly for the rest of
     the sortie -- turning a lost debug log into a memory leak."""
