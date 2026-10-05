@@ -30,6 +30,7 @@ import pytest
 
 from belief import enrichment as enrichment_module
 from belief.callouts import (
+    _OBSERVABILITY_EXEMPT_KINDS,
     CALLOUT_MAX_AGE_S,
     INTER_UTTERANCE_GAP_S,
     WATCH_REPORT_MIN_GAP_S,
@@ -1927,7 +1928,9 @@ def test_ungrouped_singleton_output_is_byte_identical() -> None:
 # bounded-deferral property the gate's *placement* rests on; and the one
 # kind deliberately **exempt** from the gate, `CONTACT_ENGAGEMENT_CHANGED`
 # (`callouts._OBSERVABILITY_EXEMPT_KINDS`, decided in the review loop,
-# 2026-10-06, on the Reviewer's recommendation -- not by the user).
+# 2026-10-06, on the Reviewer's recommendation -- not by the user, and
+# narrowed to the entering transition by that day's security deep
+# analysis).
 #
 # Geometry: `_observation`'s fixed `bearing_deg=0.0`/`range_m=1000.0` put
 # every contact in this file at `(1000.0, 0.0, alt 500.0)`, so ownship at
@@ -2231,3 +2234,136 @@ def test_engagement_change_speaks_about_a_cockpit_masked_bearing() -> None:
         for event in store.unacknowledged_events
     )
     assert scheduler.tick(store, now_sim=engaged_at) == ["Danger, ZU-23-3 Sergey."]
+
+
+def _watched_aaa_store() -> tuple[ContactStore, str]:
+    """The exempt kind's fixture: one watched ZU-23-3 (AAA, `range_max_m=
+    2408`) believed at `(1000, 0)`, whose *observation* ownship is at the
+    same place -- so under `_enrichment_context`'s identity `project_
+    terrain_aware` stub the enriched world position coincides with the
+    spatial-gate position, and the rendered clock/range is decided purely
+    by the `EnrichmentContext`'s own ownship (see `_observation`'s
+    docstring on why those two are independent)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",
+                classification_level=3,
+                ownship_x=1000.0,
+                ownship_z=0.0,
+                dwp_x=1000.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    return store, contact_id
+
+
+def test_engagement_change_is_silent_about_leaving_a_masked_envelope() -> None:
+    """Security deep analysis 2026-10-06, Finding 1 -- the exemption is
+    **per-transition**, not per-kind. `_OBSERVABILITY_EXEMPT_KINDS`'
+    admission bar's property (1) is *"the cost of silence is a missed
+    threat cue the pilot needs in order to evade"*, and a *"Safe from
+    ..."* line is not that: nothing is evaded by hearing it. So the
+    `engaged is False` transition is gated like every other kind, while
+    `test_engagement_change_speaks_about_a_cockpit_masked_bearing` above
+    proves the `engaged is True` transition still speaks.
+
+    The scenario is the reachable one the review traced, not a contrived
+    state: the danger call is spoken while the contact is astern, the
+    pilot egresses, and range then opens past `ENGAGEMENT_LEAVING_
+    HYSTERESIS` -- at which point a kind-level exemption would volunteer
+    an unprompted classification-and-position line about a contact the
+    cockpit mask says he cannot see, which is the very defect this branch
+    exists to fix."""
+    store, _contact_id = _watched_aaa_store()
+    scheduler = CalloutScheduler()
+
+    # Astern throughout (heading 180 against a contact at +x), and inside
+    # the envelope at range 1000 < 2408 -- the entering transition, which
+    # is exempt and does speak.
+    store.tick(
+        now_sim=0.0,
+        ownship=_threat_ownship(x=0.0, heading_true_deg=180.0, t_sim=0.0),
+    )
+    assert store.contacts[0].last_observable_sim is None
+    assert scheduler.tick(store, now_sim=0.0) == ["Danger, ZU-23-3 Sergey."]
+
+    # Past `EVENT_COOLDOWN_S` (15) and `WATCH_REPORT_MIN_GAP_S` (8) so
+    # neither suppresses the leaving event, and well past `CALLOUT_MAX_
+    # AGE_S` so the gated `CONTACT_DETECTED` is retired rather than
+    # competing. Range now 4000 > `2408 * ENGAGEMENT_LEAVING_HYSTERESIS`
+    # (3612), still astern.
+    left_at = 2.0 * CALLOUT_MAX_AGE_S
+    store.tick(
+        now_sim=left_at,
+        ownship=_threat_ownship(x=-3000.0, heading_true_deg=180.0, t_sim=left_at),
+    )
+
+    assert any(
+        event.kind == CONTACT_ENGAGEMENT_CHANGED and event.engaged is False
+        for event in store.unacknowledged_events
+    )
+    assert scheduler.tick(store, now_sim=left_at) == []
+
+
+def test_exempt_line_discloses_only_belief_derived_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security deep analysis 2026-10-06, Finding 3 -- the one *ungated*
+    spontaneous line, rendered the way it renders in flight: through
+    `_contact_report_text` with an `EnrichmentContext`, so it speaks the
+    believed unit type **plus** the believed clock hour **plus** the
+    believed range, not the bare `"Danger, ZU-23-3 Sergey."` the test
+    above pins.
+
+    Every one of those facts is belief-derived, which is what makes the
+    exemption defensible and what this test exists to keep true:
+    `_classification_facts` reads `Contact.classification` (the folded
+    claim) and never `last_class_raw`; the geometry is `relative_geometry`
+    over `Contact.last_position`, which **cannot refresh behind the
+    cockpit mask** because both perception channels are mask- or
+    hemisphere-constrained; and `belief.threat.envelope_for` keys strictly
+    on `ClassificationBelief` with no ground-truth fallback. The contact
+    here is astern with `last_observable_sim is None` -- never once
+    observable -- so a widening of `_contact_report_text` that let a
+    fresher or more precise fact onto this line would fail here rather
+    than pass silently."""
+    _enrichment_context(monkeypatch)  # installs the describe/project fakes
+    store, _contact_id = _watched_aaa_store()
+    scheduler = CalloutScheduler()
+    enrichment = EnrichmentContext(
+        conn=_FAKE_CONN,
+        theatre="Syria",
+        ownship=_threat_ownship(x=0.0, heading_true_deg=180.0, t_sim=0.0),
+    )
+
+    store.tick(
+        now_sim=0.0,
+        ownship=_threat_ownship(x=0.0, heading_true_deg=180.0, t_sim=0.0),
+    )
+    assert store.contacts[0].last_observable_sim is None
+
+    assert scheduler.tick(store, now_sim=0.0, enrichment=enrichment) == [
+        "Danger, ZU-23-3 Sergey, 6 o'clock, 1 kilometre."
+    ]
+
+
+def test_observability_exemption_set_membership_is_pinned() -> None:
+    """Security deep analysis 2026-10-06, Finding 3's second half. The
+    whole point of a named set over an inline `!=` is that joining it is a
+    deliberate act -- but nothing asserted its contents, so a kind could
+    be added silently. `_TEMPLATED_KINDS` has the opposite failure
+    direction (adding a kind there *gates* it, which is safe), so only
+    this set needs the equality.
+
+    Growing it is therefore a two-part edit: this assertion, and the
+    per-transition condition at the gate that the new kind's own
+    admission-bar argument has to name."""
+    assert _OBSERVABILITY_EXEMPT_KINDS == frozenset({CONTACT_ENGAGEMENT_CHANGED})
