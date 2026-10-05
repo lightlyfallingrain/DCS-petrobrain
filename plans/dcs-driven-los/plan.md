@@ -1015,3 +1015,33 @@ should read that recorded boolean rather than recompute — the mistake §3a exi
    and if a fixture-scale fine grid is wanted, file that as its own small item** rather than letting
    `WM-B7` absorb a different artifact under the old name. Flagged, not decided — this plan does not
    touch `WM-B7`.
+
+---
+
+## Stage 0 result (main loop, 2026-10-05) — the bubble is bigger than the cap
+
+Run against the existing `~/dcs-detection-trace.jsonl` (4,457,317 rows, 1,034 polls) with no flight,
+exactly as the revision's Stage 0 specifies: objects per poll minus the `player_bubble`-outcome
+rows *is* the 10 km population.
+
+| | median | p90 | max |
+|---|---|---|---|
+| objects per poll, all | 403 | 415 | 425 |
+| **objects per poll, inside the 10 km bubble** | **172** | **179** | **195** |
+
+**94% of polls (970 of 1,034) hold more than 64 units in the bubble.** So a 64 cap is not a rare
+truncation — it would drop roughly two thirds of the bubble on almost every poll, and the revision's
+"units past the cap are simply absent, which is today's behaviour" is true but much larger in scope
+than the figure it was reasoned against.
+
+At the revision's own 25 µs/unit (SEGMENT ~10 µs + `isVisible` 15 µs, both peak): **172 units ≈
+4.3 ms, 195 ≈ 4.9 ms.** That is over the 2 ms budget the cap was derived from, and far under the
+24–26 ms single calls that produced the felt stutter — about 30% of one 60 fps frame, once per
+second.
+
+**This makes the ordering question (revision decision 2) load-bearing rather than hypothetical.**
+Under a 64 cap, nearest-first really would let close trucks crowd out a distant SAM, on most polls.
+Under a cap that covers the whole bubble, ordering stops mattering at all. The two decisions are
+therefore one decision, and it is the user's: **frame budget against coverage.**
+
+This supersedes the revision's expectation that Stage 0 would be "informative, not blocking".
