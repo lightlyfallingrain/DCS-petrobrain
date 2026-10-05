@@ -142,3 +142,14 @@ become unspoken rather than spoken correctly. The contacts are still believed, s
 view, still answerable by `report`. Whether some should reach you another way — an "I've lost sight
 of it" marker — is a product question nobody has answered.
 
+### Q7 — Should the detection trace keep one `PLAYER_BUBBLE` row per out-of-bubble candidate per poll?
+
+`BL-11` Stage 5 rolled the logs per run and halved the bytes, so the trace is now ~25 MB/min rather
+than ~50 — but **60–80 % of what remains is still `PLAYER_BUBBLE` rows**, one per candidate that was
+never evaluated, each carrying one bit of information ("further than 10 km") that any other row's
+`true_range_m` already implies.
+
+Dropping them behind a flag is a ten-line change. **The reason I did not do it unasked**: you have
+been reading the debug ASCII view off these rows, and what gets recorded is a product decision, not
+a performance fix. Perf review recommended dropping them; I overrode that on those grounds.
+

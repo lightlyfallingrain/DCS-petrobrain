@@ -1,6 +1,6 @@
 ---
 name: sortie-log-triage
-description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth.jsonl, dcs-detection-trace.jsonl, dcs-speech.jsonl. Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
+description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth-<stamp>.jsonl, dcs-detection-trace-<stamp>.jsonl, dcs-speech-<stamp>.jsonl (run-stamped since 2026-10-06; glob for the newest, and take all three from the same stamp). Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
 type: user-invocable
 ---
 
@@ -22,6 +22,34 @@ line-by-line, never loaded whole.
 This skill reads the three JSONL files **body-layer** writes on the Mac side. Different files,
 different producers, no overlap.
 
+## The filenames carry a run stamp — glob, never hardcode
+
+**Changed by `BL-11` Stage 5 (2026-10-06): each run writes its own file.** The path passed on the
+command line is *not* the path written — the logger stamps the run's start time in before the
+suffix, so `--detection-trace logs/dcs-detection-trace.jsonl` actually produces
+`logs/dcs-detection-trace-20261006-143500.jsonl`. All three logs of one run share the same stamp,
+so the stamp is also how you tell which three files belong to one sortie. The logger prints each
+resolved path to stderr as it starts, and that line is the authoritative answer to "where did it
+go".
+
+So resolve the newest run rather than naming a file:
+
+```sh
+ls -t logs/dcs-detection-trace-*.jsonl | head -1
+ls -t logs/dcs-belief-truth-*.jsonl    | head -1
+ls -t logs/dcs-speech-*.jsonl          | head -1
+```
+
+**Take all three from the same stamp, not three independent newest-matches** — if a run was
+restarted, the newest of each can come from different sorties, and a belief log joined against
+another flight's trace produces findings that are pure fiction.
+
+Why this changed: all three writers used to open with `"a"` and never roll, so one path accumulated
+every sortie ever flown. The 2026-10-05 analysis had to locate byte offset 2,448,471,603 to find
+that flight's region in a 3.55 GB file. **Logs from before 2026-10-06 are still single
+accumulating files** — for those, the byte-offset approach is still the only way in, and the
+unstamped names below are what they are called.
+
 ## Read a prefix, not the live file
 
 Each file is read only up to the size it had when triage started. The user is frequently **still
@@ -34,7 +62,7 @@ is 2+ GB and copying it buys nothing a byte cap does not.
 
 ## What each section answers
 
-**Belief vs truth** (`dcs-belief-truth.jsonl`, one row per contact per poll — the sanctioned
+**Belief vs truth** (`dcs-belief-truth-<stamp>.jsonl`, one row per contact per poll — the sanctioned
 ground-truth-plus-belief join):
 
 - *distinct contacts vs distinct objects*, and **objects carrying 2+ contact ids** — the contact
@@ -44,7 +72,7 @@ ground-truth-plus-belief join):
   association is failing to re-acquire, not that there are many units.
 - the four trip-wire flags the writer already computes, and the position-error distribution.
 
-**Detection trace** (`dcs-detection-trace.jsonl`, one row per `check_visibility` call):
+**Detection trace** (`dcs-detection-trace-<stamp>.jsonl`, one row per `check_visibility` call):
 
 - *outcome histogram* — which gate decided each candidate's fate. `player_bubble` dominating is
   normal (it is the cheapest gate and runs first).
@@ -52,7 +80,7 @@ ground-truth-plus-belief join):
 - *objects seen but never admitted* — the "why did Petrovich not see that" list.
 - *cluster size binned by range* — resolution clustering's behaviour as geometry changes.
 
-**Speech** (`dcs-speech.jsonl`): disposition counts, then every utterance heard and **not** acted
+**Speech** (`dcs-speech-<stamp>.jsonl`): disposition counts, then every utterance heard and **not** acted
 on, with confidence and match ratio. That list is the single most useful one for recognition bugs,
 because an utterance matching no command is otherwise unobservable.
 
