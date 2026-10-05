@@ -55,6 +55,30 @@ process's side that is indistinguishable from a talk control nobody pressed (202
 syntax is valid, so `luac5.1 -p` passes it**; this is precisely the failure that check cannot see.
 `luacheck` would catch it as an undefined-global access, and is not currently installed.
 
+**But it IS mechanically detectable without `luacheck`, found and verified independently
+2026-10-06**: the bug has an exact bytecode signature, because a name referenced before its `local`
+compiles to a `GETGLOBAL`.
+
+```sh
+luac5.1 -l -p <file> | grep -oE 'GETGLOBAL.*; [A-Za-z_]+' | awk '{print $NF}' | sort -u
+```
+
+That lists every global the chunk reads. **A name in that list that is one of the script's own
+helpers is the bug.** A clean result is exclusively Lua stdlib (`pcall`, `string`, `table`,
+`ipairs`, `type`, `tostring`, `math`) plus genuine DCS APIs — `log`, `net`, `require` in Hook state;
+`coalition`, `coord`, `Unit`, `StaticObject`, `Object`, `world`, `timer` in the scripting state.
+A mechanical ruling-out rather than an eyeball, for one command.
+
+**Two caveats, the first of which matters more than the technique:**
+
+- **`luac -p` on the outer file proves nothing about the half that actually runs.** A
+  `dostring_in`-bridged chunk lives inside a string literal, and `luac` does not look inside
+  strings — so that half has been going unchecked entirely. Extract the literal to its own file and
+  check it separately (in `petrobrain-unit-id-join-probe-hook.lua` the bridged `PROBE_CODE` is
+  lines 197-398, between `[==[` and `]==]`).
+- A global that *should* be read (a real DCS API) and one that should not (your own helper) look
+  identical to the tool. The check is only as good as knowing which names belong.
+
 **Lua syntax check (`luac5.1 -p`)** parses without executing — it catches syntax errors in `Export.lua`, the Hook scripts, and probes before a DCS launch, and nothing more (`DCS`/`net`/`log`/`Lo*` exist only inside DCS, so behaviour still needs a live run). Must be **Lua 5.1** specifically, the version DCS embeds; a newer `luac` accepts syntax DCS rejects. Install: `sudo apt install lua5.1` (WSL/Debian).
 
 ## Testing
