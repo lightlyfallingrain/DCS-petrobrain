@@ -901,6 +901,20 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   work is done and then discarded on every tick where the group is unchanged, which is most of
   them.
 
+  **UPGRADED 2026-10-05 — the estimate below is two orders of magnitude out. Scheduled as
+  `BL-11` Stage 3.** Measured against the real 738 MB `syria-full.sqlite` at the sortie's own
+  scale: `describe_position` is **median 51.6 ms, 41.4 ms even on a repeat** (CPU-bound Python,
+  not cold I/O), not the ~0.3 ms the figure below assumes, and one tick was observed making **47
+  calls for 1,579 ms**. Worse, `WorldEnrichmentCache` **misses by construction** for exactly the
+  contacts that get spoken about: its key is exact structural equality of `Contact.last_position`,
+  which a re-observed contact updates every poll — 92 % hit rate overall, but
+  `distinct_positions == describe_calls == cache_misses` in *every* callout-bearing tick, and a 1 m
+  nudge costs the full 42 ms. Cheapest fixes, neither touching the scheduling loop this entry
+  correctly assigns to Architect: memoize `describe_position` per tick on a quantised `(x,z)`, and
+  quantise the cache key. Full evidence: `body-layer/research/2026-10-05-performance-review.md`.
+  World-model's own half of the cost — `nearest_feature` spending 73 % of `describe_position`
+  proving that 86 theatre-wide features are not nearby — is `world-model/ROADMAP.md`'s `M11`.
+
   **Order of magnitude, estimated rather than measured** (no live sortie log was available to the
   pass): ~15 ms/tick for 5 groups × 10 members. That is not alarming on its own, and the terrain
   qualifier adds one cheap SQL query (0.02–0.11 ms measured) to each redundant gather rather than
@@ -975,6 +989,70 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   the aircraft-layer poll. **A timing instrument around the loop is the next step, not more log
   reading** — the existing logs record what happened per poll, never how long the poll took.
 
+  ---
+
+  **DIAGNOSED 2026-10-05, and the premise above is wrong — scheduled as `BL-11` Stage 1/2.**
+  Two whole-subproject passes (`body-layer/research/2026-10-05-performance-review.md`,
+  `body-layer/research/2026-10-05-security-audit.md`) reached this independently, from different
+  evidence.
+
+  **There is no 5 Hz specification anywhere in body-layer.** `logger.py:999` is
+  `_DEFAULT_POLL_INTERVAL_S = 1.0`, unchanged since `abf49cd` (2026-09-08); `body-layer/RUN.md`'s
+  documented run command never passes `--poll-interval-s`; and this file's own `ROADMAP.md:1288`
+  and `audio-adapter/ROADMAP.md:473` already call 1.0 s "the project's own default". The 5 Hz
+  figure survives only in four stale **docstrings** (`logger.py:1446`,
+  `belief/brain_client.py:12` and `:274`, `perception/motion.py:91`) and belongs to
+  `Export.lua`'s producer rate, not the consumer. So the gap is **1.43 s against 1.0 s, ~1.4×,
+  not 7×** — about 5× of it was a constant nobody had read.
+
+  **The mechanism is `work + interval`, not `interval`.** Both poll loops end with
+  `stop_event.wait(poll_interval_s)` *after* the work (`logger.py:1552`, `:1192`), so the period
+  is the sum. Measured work at the sortie's own scale (440 objects, 142 contacts, against the real
+  738 MB `syria-full.sqlite`): **median ~330 ms, peaks 1,736 ms** → 1.33 s period against the
+  sortie's measured 1.43 s. Quantitatively accounted for.
+
+  **The decay-constant corollary above is withdrawn.** Every half-life, dwell and cadence
+  constant was tuned in flight at 1 Hz, which is what the code has always done — they were not
+  calibrated against a rate the loop never had. (`perception/motion.py:91`'s *comment* does assert
+  5 Hz arrival; that is a correctness question, filed separately as `BL-B34`, not a cost one.)
+
+  **The leading hypothesis is ruled out.** The whole gate chain including world-model terrain LOS
+  is **2.4–21 ms/poll for all 440 candidates** — the cheap gates reject almost everything before
+  the expensive one runs. Measured independently in `world-model/research/2026-10-05-performance-review.md`
+  at 43.4 ms worst case for 71 candidates, ~4 % of the interval. `BL-B31`'s closing
+  "one problem seen from both ends" is answered: they are two problems. `BL-B31` stands entirely
+  on its own observability merits.
+
+  **What the 330 ms actually is**, measured not reasoned:
+  1. **`perception/group_salience.group_salient_ids` — ~300 ms of *every* poll, unconditionally**,
+     58 % of a 300-poll cProfile, and it was not on the suspect list above at all. `_cohesive`
+     recomputes two `profile_for` lookups and two `range_m` calls **per pair** of an O(n²) loop,
+     all four depending on one candidate only. Hoisting them into the `_resolvable` pass plus
+     `@lru_cache` on `profile_for` measures **8.1×** (215 → 27 ms at n=440) with the returned
+     `frozenset` **asserted bit-identical at every n ∈ {55,128,250,440,800}**. Pure recomputation
+     removal, not an approximation.
+  2. **`CalloutScheduler.tick` — up to 47 `describe_position` calls in one tick, 1,579 ms
+     measured.** That is `BL-B26`, whose own estimate is two orders of magnitude out — see its
+     entry.
+
+  **The 193 s "gap" is probably not a 193-second poll.** Both logs derive poll gaps from distinct
+  `t_sim` in *conditionally written* rows, so they cannot distinguish "did not poll" from "wrote
+  nothing" from "sim paused". The note's own table is the proof: two consumers of the *same* loop
+  report 2,621 and 1,340 polls over the same span.
+
+  **The one open decision is the user's**: is the intended rate 1.0 s or 0.2 s? No optimisation
+  closes a gap a constant opens, and at 0.2 s both findings above become mandatory rather than
+  worthwhile. `gaze.FOCUS_DWELL_S = 2.0` currently sits at twice the poll period either way.
+
+  **Where the instrument goes** (the sortie note's actual ask): wrap the five phases already
+  separated in `_run_crew_text_poll_loop` with `perf_counter`, emit one line per 60 polls with
+  per-phase mean/max in wall clock, and — more useful than any timing — count `len(candidates)` at
+  `naked_eye_source.py:520` and `describe_position` calls per tick. Both are the multipliers and
+  both are invisible in a timing number. **The one number that could re-rank the findings is the
+  real per-poll in-bubble candidate count**: everything above assumes 440, and the sortie logged
+  "444 distinct objects over 70 minutes" and "median 43 units in a LOS result", neither of which is
+  that quantity. It is one `len()`.
+
 - [ ] **BL-B31 — Nothing notices when the live LOS feed is absent and the offline fallback takes
   over.** Security flagged this before the flight as low/low; the flight upgraded it.
 
@@ -991,6 +1069,35 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   polls drops below a threshold is probably enough. **It must not become a callout**; the pilot
   cannot act on it mid-flight.
 
+  **2026-10-05 security audit — the 77 % has a structural cause, not a timing one, and it is worse
+  than "unobserved".** Scheduled as `BL-11` Stage 4.
+
+  The LOS join key is `unit_name` (`perception/naked_eye_source.py:1066`, drop at `:1118`), and
+  aircraft-layer's own schema declares that field `str | None`, **`None` for scenery and statics**
+  (`aircraft-layer/src/schema/world_objects.py:109`). A nameless object can therefore **never**
+  receive a live verdict — not an outage, a permanent hole — and falls through to the
+  building-blind SRTM primitive forever. Objects sharing a name are dropped too
+  (`name_counts[name] > 1`). Buildings and statics cluster close in, which is the only explanation
+  offered so far that predicts the *sign* of the sortie note's §3 anomaly correctly (no-verdict
+  rows median 3,820 m vs with-verdict 6,750 m). It means the building-occlusion capability `X-B29`
+  was built for is structurally unavailable for exactly the population whose occlusion matters
+  most — a `5p73 s-125 ln` behind a village building gets admitted and called out.
+
+  **Verify before acting**: `DetectionTrace` carries `object_type` but not `unit_name`, so no
+  existing trace can confirm it. Add `unit_name` plus a `los_join` reason enum, fly once, reduce.
+
+  **The observable gap is total, not partial.** `naked_eye_source.py:348/976` stamps the same
+  provenance string on every naked-eye `Observation` whichever primitive gated it;
+  `visibility.py:785-790`'s two branches return identical `VisibilityResult`s; and
+  `Contact.live_los_clear`'s `None` — the only in-principle signal — reaches the engagement gate
+  and nothing else, never `tools.py`, `belief_truth_log.py`, or any counter.
+
+  **Which way it fails**: the engagement gate (`belief/contacts.py:1357-1366`) fails open and is
+  *right* to (it over-warns about something already seen). The **admission** gate fails open into
+  a weaker instrument — one that cannot see buildings and carries 12 m of terrain slack. Same word,
+  different thing. Yes, contacts are admitted with no verdict at all: 11,268 of 14,703, and nothing
+  records it.
+
   **Interaction with `BL-B30`**: if the loop is slow *because* the fallback is doing SQLite work per
   candidate, these are one problem seen from both ends and fixing availability would fix the rate.
   A hypothesis, not a finding.
@@ -1000,3 +1107,50 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   recorded so it is not rediscovered on the next flight.
   See `plans/redundant-group-disclosure/review.md`, "Optional Refinements" (second finding), and
   `plans/redundant-group-disclosure/implementation.md`.
+
+- [ ] **BL-B32 — `audio-adapter`'s `POST /speak` synthesizes TTS synchronously, inside the poll
+  body.** Found by the 2026-10-05 performance pass
+  (`body-layer/research/2026-10-05-performance-review.md`). `audio-adapter/src/server.py:190`
+  synthesizes before responding, and body-layer's `push_speech` runs inside `drain_events`, inside
+  the poll body — so **every spoken callout blocks perception on speech synthesis**, and it stalls
+  exactly the polls right after Petrovich notices something. Magnitude unmeasured (no TTS engine in
+  the agent's sandbox). Crosses the body-layer/audio-adapter seam, so it is an Architect question
+  (async synthesis, or a fire-and-forget hand-off), not a local edit. Not folded into `BL-11`
+  for that reason.
+
+- [ ] **BL-B33 — The poll body makes five sequential HTTP GETs with no connection reuse, each with
+  a 2.0 s timeout.** Same pass. The loopback floor is 3.4 ms, so this is not the median cause — but
+  it is a **~10–20 s worst-case blocking budget on one thread**, which is the right shape for the
+  2026-10-05 sortie's otherwise-unexplained p90 of 4.98 s. Dropping the `/latest` timeouts to
+  0.3–0.5 s is a constant change; a shared `http.client.HTTPConnection` is the fuller fix. A stale
+  `/latest` is worth nothing anyway — these endpoints have no history.
+
+- [ ] **BL-B34 — Four stale "5 Hz" docstrings, and one of them is a behavioural assumption.**
+  `logger.py:1446`, `belief/brain_client.py:12` and `:274` are comments and cost nothing but the
+  misreading they already caused (`BL-B30`'s premise, and a wrong budget figure in the
+  performance-reviewer's own memory). **`perception/motion.py:91` is different** — it asserts
+  *"objects arrive at 5 Hz"* as the basis of `plans/movement-detection/plan.md` Decision 3, so
+  movement detection may be reasoning from a sample interval five times shorter than the real one.
+  That half is a correctness question for a debugger, not a cost one.
+
+- [ ] **BL-B35 — Unbounded `response.read()` on all seven peer HTTP calls.** 2026-10-05 security
+  audit. A peer (aircraft-layer, audio-adapter, brain-layer) that returns an enormous body puts it
+  straight into memory on the poll thread. Fix-when-public rather than fix-now: every peer is on
+  the LAN and ours. One `Content-Length` check and a cap.
+
+- [ ] **BL-B36 — The speech log is a verbatim transcript of everything the microphone heard,
+  including speech never addressed to Petrovich.** 2026-10-05 security audit. The 2026-10-05 sortie
+  log contains `"Peace."`, `"All right."`, `"Can I sell it?"` — the pilot talking, not commanding.
+  Harmless on this machine; this repo is **intended to go public open-source**, and a shared or
+  committed log is a voice transcript of someone's living room. Wanted: either hash/omit
+  non-command utterances, or make the log opt-in with that stated in `RUN.md`.
+
+- [ ] **BL-B37 — Four `assert`s doing real runtime work in `belief/tools.py` and
+  `belief/enrichment.py`.** 2026-10-05 security audit. They vanish under `python -O`, and the
+  checks they perform are not developer-only invariants. Convert to explicit raises.
+
+- [ ] **BL-B38 — `BL-B23` bounded total-ever-seen for *clustering only*; two other loops still walk
+  every contact ever founded.** 2026-10-05 performance pass. `tick`'s per-contact loop and
+  `ingest`'s non-short-circuiting gate scan are 6.4 ms / 0.7 ms today, so LATER — but they grow with
+  `BL-B24`'s churn, and that churn is getting worse (554 contacts for 444 objects on a 70-minute
+  sortie, 81 % of objects carrying 2+ contact ids). Worth re-measuring after `BL-B24`, not before.

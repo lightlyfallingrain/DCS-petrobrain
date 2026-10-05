@@ -477,6 +477,120 @@ sortie actually exercises it, and say which one.
   `plans/missed-aaa-detection/debug.md`, `.../implementation.md`, `.../review.md`,
   `.../security-review.md`.
 
+- [ ] **M11 — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild.
+  NOT STARTED, filed 2026-10-05.** From the two whole-subproject passes run on `main` @ `19143fa`
+  after the first DCS-LOS sortie — `research/2026-10-05-security-audit.md` and
+  `research/2026-10-05-performance-review.md`, directed by
+  `aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`.
+
+  **Why a milestone and not backlog items**: three of these must land *with* the `WM-B1` + `WM-B6`
+  full-theatre rebuild or they cost a second one, and the rebuild is already committed.
+
+  **Stage 1 — `line_of_sight_clear` cannot say where its answer came from, and returns `True` when
+  it knows nothing.** `query/line_of_sight.py:125-180` returns a bare `bool`: no source, no
+  tolerance, no record of how many samples were skipped. A sample with no elevation data
+  `continue`s, so **outside grid coverage (7.4 % void cells in `syria-full`) every sample can be
+  skipped and the function returns `True`** — "no evidence of terrain" rendered as "sightline
+  clear", which is the *admitting* value at the consumer. Its own docstring says absence must never
+  manufacture an outcome either way; the return type makes it do exactly that. The loss propagates
+  to all three consumers, including across the HTTP seam to mission-interpreter, and it is the
+  world-model half of body-layer's 77 %-silent-fallback finding (`BL-B31`, `BL-11` Stage 4).
+
+  Note what makes this a real design lesson rather than an oversight: **provenance discipline in
+  this subproject is excellent and this function is the exception.** Thirteen `*Info` dataclasses
+  each carry `provenance` + `confidence` + `position_uncertainty_m`, and `grid_provenance()` exists
+  *specifically* so an SRTM grid is never reported as DCS-probed. The well-implemented sibling is
+  what made the gap invisible for a month.
+
+  **Stage 2 — the measured vertical error must live in the store, not in a research note (scopes
+  the open `WM-B3`, does not replace it).** `build/validate.py:192`'s `compare_probe_to_srtm`
+  computes the DCS-vs-SRTM mean/stddev and its only caller **prints it to stdout for a human to
+  paste into a note**. `11.52` appears in this file and five research notes and in **zero lines of
+  code**, while `_TERRAIN_TOLERANCE_M = 12.0` (`query/line_of_sight.py:122`) is a hand-copy of it —
+  now applied unchanged to Afghanistan, whose error has never been measured (that build note's own
+  line 119: *"not attempted this session"*), and M4's Gemerek measurement was **28.02 m stddev,
+  2.4× the number the constant is sized to**. Four steps, no schema bump: write the alignment
+  report into the elevation `grid` row's existing `stats_json`; add `grid_vertical_error_m()`
+  beside `grid_provenance()`; add `vertical_stddev_m` to `ElevationInfo`; have
+  `line_of_sight_clear` derive its tolerance from the store. A theatre built without a probe
+  cross-check then **cannot silently inherit another theatre's error budget**.
+
+  **Stage 3 — the two cheap query-layer fixes, and they must ride the rebuild.**
+  1. **`feature` has no index at all** beyond its implicit PK (`store/schema.py:47-60`).
+     `CREATE INDEX idx_feature_kind ON feature(kind, id)` costs 0.1 s and +2 MB and takes
+     `describe_position` 40.8 → 27.8 ms. **Adding it later costs another full rebuild.**
+  2. **`nearest_feature` spends 73 % of `describe_position` proving that 86 features are not
+     nearby.** `features_in_bbox` collects every R*Tree-overlapping id *regardless of kind*, then
+     kind-filters in a second query — so `ridge` (12 features theatre-wide), `valley` (12),
+     `airfield` (35) and `runway` (27) each exhaust all four `_EXPANDING_RADII_M`, the fourth being
+     a 60×60 km bbox: 29.8 ms of a 40.8 ms call. Holding those 86 resident is **0.296 ms total,
+     101× cheaper**, with a 91 ms one-time load. This is on body-layer's per-poll path via
+     `CalloutScheduler.tick`, so it compounds with `BL-11` Stage 3 — measure after both, not after
+     either.
+
+  **Stage 4 — the build is ~82 minutes, not 449 s, and two stages are 90 % of it.** `M7`'s 449.3 s
+  figure predates M9/M10/geomorphons and used a **1000 m** grid; the current 500 m default is 4× the
+  cells. The authoritative figure is `research/2026-10-05-afghanistan-theatre-build.md`: terrain
+  semantics **2640.2 s (54 %)**, road junctions **1751.1 s (36 %)**, `.routes` walk 320.2 s, SRTM
+  grid 136.8 s, OSM overlay 85.9 s. Any rebuild plan sized against 449 s is wrong by an order of
+  magnitude, and `WM-B1` + `WM-B6` both bump cache-invalidation constants, so the forced rebuild
+  pays **every** stage cold.
+  - **The junction cost is a re-parse, not a scan.** `.routes` polylines are stored *unclipped*
+    (`build/ingest_roadnet.py:23`) at ~5,600 points / ~120 KB `geom_json` each, and
+    `build/ingest_junctions.py:211` calls `features_in_bbox(conn, ["road"], padded)` per 5 km chunk
+    — so each road is `json.loads`ed once per chunk its *bbox* overlaps. Afghanistan: 57,288 chunks
+    × ~11 roads ≈ **77 GB of JSON traffic**, which at 50–100 MB/s lands on the measured 1,751 s.
+    **Syria has 9.3× the roads.** Inverting the loop (one parse per road into a chunk-keyed vertex
+    table) should take it to tens of seconds.
+  - **No `PRAGMA` anywhere in `src/`** — `journal_mode=delete`, `synchronous=FULL` throughout.
+    Safe to relax for the base store and the OSM cache, both delete-and-recreate; **not** for
+    `terrain_cache`, whose resumability needs real durability.
+  - Two terrain-stage items worth ~800 s between them: `skeleton.thin()` allocates two
+    `(8,rows,cols)` **int64** stacks per sub-pass for values bounded by 8, and `_smooth_for_storage`
+    runs its deviation check on 16× the points *before* the decimation whose own check its docstring
+    says makes it redundant.
+
+  **Stage 5 — the fix-now security items that are not about provenance.**
+  - **A `.routes` route failing its own `_directions_plausible` check increments a counter and
+    falls through** (`query/routes.py:160-174`), becoming a `confidence={"geometry":"high"},
+    position_uncertainty_m=0.0` road. `store/container.py:51-59` documents that this already
+    happened — road `id=3711` in the Latakia store, caught by a *separate* validation pass, not by
+    the counter.
+  - **`check_schema_version` has exactly one caller and it is a write path**; `grep schema_version
+    body-layer/src` returns nothing, and `store/reader.py:402` asserts the opposite in a comment
+    ("which `check_schema_version` already refuses to open") — false on every read path.
+  - **`api/__main__.py:46` opens the authoritative store read-write** behind the `0.0.0.0` no-auth
+    socket, when `pipeline.open_region_db` already does it correctly. A typo'd `--db` silently
+    creates an empty store and the server starts cleanly.
+  - **`--srtm-grid-spacing-m` is unvalidated**: a negative value yields negative `n_rows`, zero
+    inserted samples, and a `grid` row written with `srtm_skipped=False` — a silently empty
+    elevation grid presented as built.
+
+  **Explicitly cleared, recorded so it is not re-raised**: no dynamic code execution anywhere in
+  `src/` (no `eval`/`exec`/`pickle`/shell/dynamic import); Lua is regex-parsed, never executed;
+  **no archive handling at all**, so no zip-slip surface; no secrets; SQL is not injectable (every
+  f-string is a placeholder count or a hardcoded schema literal); the **read-only-against-DCS
+  invariant holds on every current path** (`--out` is structurally separate from all nine input
+  flags, and no write target derives from a DCS path); `grid_sample` is optimally indexed; the
+  sqlite connection is long-lived, per-poll-thread and thread-affine with **no lock serializing the
+  tick**; `pyproj` transformers are `@cache`d; and the write path is already fast (`executemany`
+  would save 0.23 s of an 82-minute build, measured). `position_uncertainty_m=0.0` for DCS roads is
+  *correct* by project invariant, not an instance of the provenance finding.
+
+  **Measurement caveat that matters for ranking**: the performance pass's absolute numbers come from
+  a synthetic store 3–12× less clustered than real Syria. **M7's committed 136.8 ms mean / 497.7 ms
+  p95 stays authoritative**; read the new figures as ratios. Verifying Stage 4's savings needs a
+  `syria-full` rebuild with per-stage timings, which **only the user can run** (execution-boundary
+  rule).
+
+  **Milestone completion question**: Stage 2 is the item that changes what comes next — until the
+  measured error lives in the store, every elevation consumer must choose between trusting the grid
+  as exact or hardcoding a constant copied from a research note, and this project has now paid for
+  that twice, three weeks apart, in the same gate. Stage 3's index decision also constrains
+  `WM-B8`: a *finer* fixture grid makes Stage 1's statement count **worse** and destroys the 6.8×
+  cell redundancy that makes a cheap per-poll memo work, so **`WM-B8` should not land before Stage
+  3 is decided.**
+
 ## Backlog (open, unscheduled)
 
 Items here are `WM-B<n>`. A new one takes the next unused number; numbers are never reused or
@@ -1197,3 +1311,43 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - **Incremental per-layer pipeline builds.** `build_region` deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. Wanted: run individual pipeline sections (roads only, elevation only, validation only) and *add* that data into an existing store — staged builds, partial re-runs when debugging a single layer. Raised during M7 DoD acceptance testing (2026-09-06), explicitly considered for M8 and dropped from it to keep that milestone scoped to the probe store. M9 (OSM) would also benefit — see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` and `src/build/pipeline.py`'s `build_region`.
 
 Not doing yet (see concept doc "Things Not To Do Yet"): Petrovich dialogue, speech, embeddings, screenshot interpretation, full-theatre processing, elaborate distributed architecture. Threat-level-driven contact reporting/prioritization (`../docs/concept/threat-levels.md`) is deferred further still — runtime layer, needs contact memory + attention model (PB-2/PB-4) first.
+
+- [ ] **WM-B9 — `find_place_by_name` scans ~49k rows with four `json.loads` each: 507 ms vs 26.9 ms
+  with a SQL-side `name LIKE` prefilter.** 2026-10-05 performance pass. This is crew-command latency
+  the pilot actually hears, not a build-time cost. `all_features`-scans to substring-match a name.
+
+- [ ] **WM-B10 — `features_in_bbox` embeds one bind parameter per candidate id, against a limit that
+  is build-dependent.** 2026-10-05 passes, found independently by both. 4,191 parameters at a 30 km
+  bbox in an under-clustered synthetic store; `SQLITE_LIMIT_VARIABLE_NUMBER` is **32,766 on stock
+  SQLite ≥ 3.32** but reports **250,000** on the dev Mac, so this is a cliff on a per-poll path that
+  **cannot be ruled out by measuring here**. Exceeding it raises `OperationalError` from inside a
+  live call. Needs `python -c "import sqlite3; print(sqlite3.connect(':memory:').getlimit(9))"` on
+  the Windows Python, then either chunk the `IN` list or join against a temp table.
+
+- [ ] **WM-B11 — `f"file:{path}?mode=ro"` is bypassable two ways, five sites in-repo.** 2026-10-05
+  security audit, **verified by execution**: a path containing `?mode=rwc&x=1` wins, and a path
+  containing `#` makes SQLite discard the fragment *and* the appended mode. Both produced a
+  read-write connection and created the file. Also recorded: `ATTACH DATABASE ?` is not
+  URI-interpreted (no injection) but **opens read-write over a `mode=ro` main connection**. Fix is
+  `urllib.parse.quote` on the path, or pass the URI through a builder rather than an f-string.
+
+- [ ] **WM-B12 — `?x=nan` / `?x=inf` on `/describe_position` kill the request with no status and no
+  body.** 2026-10-05 security audit, verified by execution: they pass `float()`, propagate through
+  `dcs_to_wgs84` without raising, and die at `store/chunks.py:39`; the client gets
+  `RemoteDisconnected`. A `math.isfinite` check at the boundary.
+
+- [ ] **WM-B13 — Two documented premises are stale by an order of magnitude; documentation
+  correction only.** 2026-10-05 performance pass. (a) `world-model/CLAUDE.md` and
+  `plans/osm-classified-cache/plan.md` justify the OSM cache by a *"~25-30+ minute"* parse; post
+  `osmium tags-filter` it measures **85.9 s**, so the cache protects a 1.5-minute stage while 90 % of
+  the build is elsewhere. **No recommendation to remove the cache** — just stop citing a figure that
+  would mis-size the next decision. (b) `M7`'s 449.3 s full-build baseline is quoted project-wide
+  and is ~6× off the real ~82 minutes (see `M11` Stage 4); the `[x]` M7 entry keeps its historical
+  number, but anything *planning* against it should cite the Afghanistan build note instead.
+
+- [ ] **WM-B14 — A schema-valid but region-row-less store slips past body-layer's startup guard.**
+  2026-10-05 security audit, after correcting a subagent's overstatement: the guard **does** catch an
+  empty or foreign sqlite file (no `region` table → `sqlite3.Error` → `parser.error`). Only the
+  narrow case passes — reachable from a full-theatre build interrupted between `create_schema` and
+  `insert_region`, which `M11` Stage 5's `--srtm-grid-spacing-m` item can also produce. One row
+  count at open.

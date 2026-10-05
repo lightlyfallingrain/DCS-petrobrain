@@ -1692,6 +1692,94 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   assumption — a self-contained addition to one existing branch of `render_group_disclosure`,
   gated by a new optional parameter that defaults to the old always-full behaviour.
 
+- [ ] **BL-11 — Tick cost, and making silent degradation visible. NOT STARTED, filed 2026-10-05.**
+  The whole-subproject performance and security passes run on `main` @ `19143fa` after the first
+  DCS-LOS sortie — `body-layer/research/2026-10-05-performance-review.md` and
+  `body-layer/research/2026-10-05-security-audit.md`, both directed by
+  `aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`.
+
+  **The sortie's headline finding was real and its explanation was wrong**, which is why this is a
+  milestone rather than four backlog items: the "~7× slow poll loop" is ~5× a constant nobody had
+  read and ~1.4× work, the leading suspect (world-model's LOS fallback) is ruled out by measurement
+  at both ends, and the finding that *does* dominate the tick was on nobody's list. `BL-B30`,
+  `BL-B31` and `BL-B26` each carry the correction in their own entries; this milestone is the fix.
+
+  **Stage 1 — settle the intended poll rate. USER DECISION, blocks nothing else but re-ranks
+  everything.** `logger.py:999` is `_DEFAULT_POLL_INTERVAL_S = 1.0` and always has been
+  (`abf49cd`, 2026-09-08). Is 1.0 s intended, or 0.2 s? No optimisation closes a gap a constant
+  opens. Two things turn on the answer: at 0.2 s Stages 2 and 3 stop being worthwhile and become
+  mandatory, and `gaze.FOCUS_DWELL_S = 2.0` — currently twice the poll period — may need to move
+  either way. Also fix the loop shape while here: `stop_event.wait(poll_interval_s)` runs *after*
+  the work (`logger.py:1552`, `:1192`), so the period is `work + interval`; a deadline-based sleep
+  makes the configured number mean what it says.
+
+  **Stage 2 — `group_salient_ids`, ~300 ms of every poll, 8.1× measured.** The largest single term
+  in the tick, 58 % of a 300-poll cProfile, and unconditional.
+  `perception/group_salience._cohesive` recomputes two `profile_for` lookups and two `range_m`
+  calls **per pair** of an O(n²) loop, all four depending on one candidate only. Hoist them into
+  the `_resolvable` pass; `@lru_cache` on `profile_for` (0.93 → 0.04 µs/call). Measured 215 → 27 ms
+  at n=440, with the returned `frozenset` **asserted bit-identical at n ∈ {55,128,250,440,800}** —
+  this is recomputation removal, not an approximation, so the acceptance test is equality against
+  the current implementation, not a behavioural judgement.
+
+  **Stage 3 — `describe_position` multiplier in `CalloutScheduler.tick` (= `BL-B26`, upgraded).**
+  Up to 47 calls in one tick, 1,579 ms measured; `describe_position` is 51.6 ms median on
+  `syria-full`, not the ~0.3 ms `BL-B26` assumed. `WorldEnrichmentCache` misses **by construction**
+  for the contacts that get spoken about — its key is exact structural equality of
+  `Contact.last_position`, which a re-observed contact updates every poll, so a 1 m nudge costs the
+  full 42 ms. Memoize `describe_position` per tick on a quantised `(x,z)`, and quantise the cache
+  key. Neither touches the scheduling loop, which `BL-B26` correctly reserves for Architect. The
+  other half of this cost is world-model's and is `world-model/ROADMAP.md`'s `M11` Stage 2 — the
+  two compound, so measure after both.
+
+  **Stage 4 — the LOS join hole, and an observable for silent fallback (= `BL-B31`, with a cause).**
+  The 77 % fallback share is not timing: the join key is `unit_name`, which aircraft-layer declares
+  `None` for scenery and statics, so **nameless objects can never receive a live verdict** and
+  duplicate-named ones are dropped. Buildings are exactly the population `X-B29` was built for.
+  Order within the stage, deliberately not the order of depth:
+  1. **The observable first** — a per-poll live/fallback counter pair plus a `kind: "los_coverage"`
+     row in the belief-truth log. A day's work, it makes the rest measurable, and its absence is
+     why this was discovered by reducing a 3.55 GB file after the fact. It must not become a
+     callout; the pilot cannot act on it mid-flight.
+  2. **`unit_name` + a `los_join` reason enum into `DetectionTrace`**, then one sortie, then reduce.
+     No existing trace can confirm the diagnosis — the trace carries `object_type` only.
+  3. **Then the join itself**, with real data in hand. Fail-open vs fail-closed on the admission
+     gate is a user decision (risk matrix in the audit's §A4): the engagement gate's fail-open is
+     *right*, the admission gate's fail-open admits something never perceived, which is a
+     no-omniscience question rather than a tuning one.
+  4. Carry provenance out of the primitive so the two answers are distinguishable at all —
+     `naked_eye_source.py:348/976` stamps one string either way and `visibility.py:785-790`
+     returns identical results. This half depends on `world-model/ROADMAP.md`'s `M11` Stage 1.
+
+  **Stage 5 — roll the logs per sortie.** Three writers `open("a")` with no rotation: ~290 KB/poll
+  of detection trace (one row per candidate whatever the outcome), ~50 MB/min, 1–3.5 GB/sortie,
+  appended across sorties — which is why the 2026-10-05 analysis had to start at a byte offset. An
+  ENOSPC mid-flight is swallowed by the poll loop's broad handler with nothing in the cockpit saying
+  so. Per-run files are nearly free; a cap with a warning line closes the ENOSPC half.
+
+  **Stage 6 — the stale "5 Hz" docstrings** (`logger.py:1446`, `belief/brain_client.py:12`/`:274`).
+  Trivial, and it belongs in this milestone rather than the backlog because they are what produced
+  `BL-B30`'s wrong premise and a wrong budget figure in an agent's own memory. `perception/motion.py:91`'s
+  *behavioural* 5 Hz assumption is a separate correctness question, `BL-B34`.
+
+  **Deliberately not in this milestone**: `BL-B32` (audio-adapter's synchronous TTS blocking the
+  poll body — crosses a subproject seam, Architect's), `BL-B33` (five sequential GETs with 2.0 s
+  timeouts), `BL-B38` (two unbounded contact loops, LATER, grows with `BL-B24`), and `BL-B24` itself
+  (contact churn, still the largest untreated defect in the belief layer). The audit's
+  fix-when-public items are `BL-B35`–`BL-B37`.
+
+  **Cleared with evidence, recorded so it is not re-raised**: body-layer binds no socket, holds no
+  secrets, has no `eval`/`pickle`/`subprocess`, constructs no path from feed data, and **no free
+  model text ever reaches speech or print** — which is why the obvious prompt-injection worry does
+  not land here. The brain seam's closed-vocabulary validator is genuinely well built. Nothing in
+  either pass is an exploitable vulnerability; what they found instead is the failure this project
+  cares about more, which is a perception gate degrading silently.
+
+  **Milestone completion question**: Stage 1's answer changes what comes next. At 0.2 s the tick
+  budget is 200 ms and Stages 2–3 are load-bearing rather than tidy; at 1.0 s they buy headroom for
+  `BL-B24`'s churn instead. Stage 4's step 2 gates the rest of Stage 4 on one sortie, so this
+  milestone cannot complete in one pass without a flight.
+
 ## Backlog (body-layer)
 
 **Moved to `body-layer/BACKLOG.md` on 2026-09-27** — items keep their `BL-B<n>` ids. This file
