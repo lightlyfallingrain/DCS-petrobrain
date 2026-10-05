@@ -177,16 +177,28 @@ def test_free_scan_is_a_pure_function_of_sim_time_not_a_state_machine() -> None:
     assert first_pass == [second_pass[1], second_pass[2], second_pass[0]]
 
 
-def test_commanded_ahead_is_a_static_single_cone_regardless_of_elapsed_time() -> None:
-    # `_SECTOR_LEGS["ahead"] == (12,)` -- a single-leg sector degenerates to
-    # a static gaze by construction (module docstring): every elapsed time
-    # maps to index 0.
+def test_commanded_ahead_cycles_its_own_11_12_1_legs_from_command_time() -> None:
+    # Sortie 2026-10-05 debrief, Item 4 (user correction mid-task: "still
+    # one clock hour at a time ... repeating loop 11-12-1 o'clock") --
+    # `_SECTOR_LEGS["ahead"] == (11, 12, 1)` now cycles exactly like
+    # `left`/`right` below, not a static stare at 12. Each leg still gets
+    # the ordinary `FOCUS_DWELL_S` (2 s) dwell.
     plan = ScanPlan(commanded_sector="ahead", command_t_sim=5.0)
 
-    for t_sim in (5.0, 5.5, 6.9, 100.0):
-        gaze = gaze_at(t_sim, plan)
-        assert gaze.center_azimuth_deg == pytest.approx(0.0)
-        assert gaze.half_width_deg == pytest.approx(FOCUS_CONE_HALF_WIDTH_DEG)
+    assert gaze_at(5.0, plan).label == "11_oclock"
+    assert gaze_at(6.999, plan).label == "11_oclock"
+    assert gaze_at(7.0, plan).label == "12_oclock"
+    assert gaze_at(9.0, plan).label == "1_oclock"
+    assert gaze_at(11.0, plan).label == "11_oclock"  # wraps after 6 s
+
+    # Cone width is unchanged by the cycling -- `LOOK_DIRECTION_FOV_HALF_DEG`
+    # (`logger.py`) governs the LOS push's width and does not depend on
+    # which o'clock leg is active; this module's own cone half-width is
+    # likewise the same `FOCUS_CONE_HALF_WIDTH_DEG` every leg uses.
+    for t_sim in (5.0, 7.0, 9.0):
+        assert gaze_at(t_sim, plan).half_width_deg == pytest.approx(
+            FOCUS_CONE_HALF_WIDTH_DEG
+        )
 
 
 def test_commanded_left_cycles_its_own_three_oclock_legs_from_command_time() -> None:
