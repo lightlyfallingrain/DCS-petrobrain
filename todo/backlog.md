@@ -739,7 +739,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `ACT_FLOOR_CANCEL` split — the mechanism is already there and precedented, which is part of why
   accepting now costs little.
 
-- [ ] **X-B26 — Can DCS terrain elevation be read from its own files during flight, rather than
+- [x] **X-B26 — Can DCS terrain elevation be read from its own files during flight, rather than
   probed?** User question, 2026-09-29: *"can we sample directly from DCS terrain grid files
   dynamically during flight, or do we need to live probe DCS."* This gates the whole live-terrain
   sampling design (`plans/live-terrain-sampling/design-input.md`) and the two routes are materially
@@ -767,6 +767,45 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Recommend closing as "probe", with `.surface5` parked as a known-good fallback** should the
   elevation-cost probe (deployed, awaiting a sortie) come back expensive. Leaving `[ ]` pending
   that probe's number and the user's call.
+
+  ### CLOSED 2026-10-05 — neither route. **No live elevation polling at all.**
+
+  **User decision**, after the elevation-cost probe flew and after an audit of who actually reads
+  the elevation grid: *"I'd rather use coarse grid calculated from ridge/valley data and not poll
+  elevation data in DCS, unless another reason comes up that requires it in live missions. Reject
+  elevation probing from live missions with the caveat that something later might require it,
+  build it if that happens."*
+
+  **This closes the question the item asks by rejecting its premise.** Both routes were about
+  getting *better* elevation into a live mission. The audit found almost nothing live needs it:
+
+  - The grid's one real production consumer is `world-model/src/query/line_of_sight.py`, reached
+    from `perception/visibility.py`'s naked-eye terrain gate. `X-B29` moves the **live** LOS answer
+    to DCS, which leaves that primitive serving the offline and test path only — and a test oracle
+    needs to be *deterministic*, not accurate.
+  - `describe_position`'s `elevation.dcs_m` is exposed and has **zero production callers**: its
+    only non-test caller is `perception/geometry.elevation_at`, which nothing in `src` calls.
+  - Geomorphons reads SRTM `.hgt` directly and never touches the stored grid; `query/divides.py`
+    samples no elevation by design; contact enrichment uses the features' own
+    `elevation_range_m` tags; mission-interpreter has no `elevation` reference in `src` at all.
+  - Measured on the 2026-10-04 `syria-full` rebuild: `grid_sample` is **46 MB of a 704 MB store
+    (6.5%)**, 2,365,517 samples, and `elevation` is the only grid kind ever built. So this was
+    never a disk argument.
+
+  **The caveat is part of the decision, not a hedge**: if something later genuinely needs live
+  elevation, build it then. Everything needed to do so is now measured and written down rather
+  than guessed — `land.getHeight` works through the bridge and is bit-identical to the
+  mission-editor probe at eight theatre-spread points; cost is ~215 points per call at a 2 ms
+  budget, budgeting against the **cold** peak (9.2 µs/item) rather than the warm median; and a
+  2601-point batch visibly stutters the frame. See
+  `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`.
+
+  **`.surface5` stays parked, and this makes it less likely to ever be needed** — the fortnight's
+  decode was always justified by live sampling, which is now rejected.
+
+  Replacement work: `WM-B7` in `world-model/ROADMAP.md` (a coarse grid derived from ridge/valley
+  data, as the deterministic test oracle). Low priority, gated on `X-B29` landing first, and
+  explicitly not a live-accuracy project.
 
 - [>] **X-B27 — Topology: body-layer and world-model stay together, on the Mac for now, Windows
   eventually. DECIDED 2026-09-29, deferred as work.** User: *"I will keep body and world layers on
