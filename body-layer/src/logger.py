@@ -1695,18 +1695,45 @@ def _per_run_log_paths(
     names.
 
     `None` passes through as `None` -- every one of these logs is off by
-    default."""
+    default.
+
+    **Also creates each resolved path's parent directory**, which is the
+    other half of applying path policy at the CLI boundary rather than
+    inside the writers. Nothing else does it: `per_run_log_path` only
+    renames, and `DetectionTraceWriter.__init__` /
+    `BeliefTruthLogWriter.__init__` call `path.open("a")` with no guard --
+    so a missing parent is a `FileNotFoundError` raised at construction,
+    *before* either writer's own write-failure reporting can fire, and the
+    crew does not start at all. The run scripts point at `logs/`, which is
+    gitignored and therefore absent in a fresh clone, so this is the
+    ordinary case rather than an edge one.
+
+    A directory that cannot be created degrades that one log to `None` with
+    a line on stderr, mirroring `_resolve_speech_log_path` above: an
+    unwritable log should cost the sortie its trace, not its crew. The
+    writers keep their "handed an exact path, writes exactly there"
+    property either way."""
     stamp_at = time.time() if when is None else when
+
+    def resolve(path: Path | None, flag: str) -> Path | None:
+        if path is None:
+            return None
+        stamped = per_run_log_path(path, stamp_at)
+        try:
+            stamped.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(
+                f"{flag}: could not create log directory {stamped.parent} "
+                f"({exc}); continuing without this log",
+                file=sys.stderr,
+            )
+            return None
+        return stamped
+
     return (
-        None
-        if detection_trace is None
-        else per_run_log_path(detection_trace, stamp_at),
-        (
-            None
-            if belief_truth_log is None
-            else per_run_log_path(belief_truth_log, stamp_at)
-        ),
-        None if speech_log is None else per_run_log_path(speech_log, stamp_at),
+        resolve(detection_trace, "detection-trace"),
+        resolve(belief_truth_log, "belief-truth-log"),
+        resolve(speech_log, "speech-log"),
     )
 
 
