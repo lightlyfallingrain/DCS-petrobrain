@@ -28,3 +28,4 @@ Write directly to this directory — it already exists, no need to create it or 
 
 - [contact-report-flood class-gate permissive by design](project_contact_report_flood_class_gate_permissive_by_design.md) -- contacts_plausibly_same's class check passes freely for OP_GROUPSOMETHING; inherited from already-trusted passes_gate, not a new weakness. APPROVED 2026-10-05.
 - [redundant-group-disclosure approved](project_redundant_group_disclosure_approved.md) -- group-first-disclosure silencing composes safely with merge-echo suppression (per-member, not per-group); no cycle, no new dep. APPROVED 2026-10-05.
+- [mission theatre field unsanitized into path and sqlite URI](project_mission_theatre_field_unsanitized_into_path_and_sqlite_uri.md) — multi-theatre-afghanistan Stage 5: unvalidated mission["theatre"] into pathlib join + sqlite URI; demonstrated absolute/UNC override and mode=ro override. NEEDS FIXES 2026-10-05.
