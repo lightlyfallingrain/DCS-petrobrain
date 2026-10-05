@@ -390,3 +390,59 @@ def test_write_speech_omits_gaze_fields_when_unknown(tmp_path: Path) -> None:
 
     row = json.loads(path.read_text().strip())
     assert row == {"kind": "speech", "t_sim": 1.0, "text": "Copy.", "urgent": True}
+
+
+# --- BL-11 Stage 5: write-failure policy ---------------------------------
+
+
+class _FullDiskFile:
+    """A file object whose `write` always raises `OSError` -- a disk that
+    filled mid-flight."""
+
+    def __init__(self) -> None:
+        self.writes = 0
+
+    def write(self, text: str) -> int:
+        self.writes += 1
+        raise OSError(28, "No space left on device")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def test_a_speech_write_failure_is_reported_once_then_abandoned(
+    tmp_path: Path,
+) -> None:
+    """`BL-11` Stage 5, the same policy as `DetectionTraceWriter`: say it
+    once, stop trying. Reported on this writer's own `stderr` sink, so it
+    lands wherever the tripwire lines already do."""
+    stderr = io.StringIO()
+    writer = BeliefTruthLogWriter(tmp_path / "belief_truth.jsonl", stderr=stderr)
+    full_disk = _FullDiskFile()
+    writer._file = full_disk  # type: ignore[assignment]
+
+    for _ in range(3):
+        writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+
+    assert full_disk.writes == 1
+    assert stderr.getvalue().count("belief-truth-log: write to") == 1
+    assert "No space left on device" in stderr.getvalue()
+
+
+def test_write_poll_stops_after_a_failure(tmp_path: Path) -> None:
+    """The poll path shares the flag, so one failure disables both row
+    kinds -- a half-written log that keeps gaining speech rows but no
+    belief rows would be worse than one that plainly stops."""
+    stderr = io.StringIO()
+    writer = BeliefTruthLogWriter(tmp_path / "belief_truth.jsonl", stderr=stderr)
+    writer._file = _FullDiskFile()  # type: ignore[assignment]
+
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+    assert writer._disabled is True
+
+    # A second row of either kind is a no-op, and says nothing more.
+    writer.write_speech(t_sim=2.0, text="Scanning right.", urgent=False)
+    assert stderr.getvalue().count("belief-truth-log: write to") == 1
