@@ -132,4 +132,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [sqlite3 URI connect is lazy](project_sqlite_uri_connect_lazy_open.md) — mode=ro connect() on missing file doesn't raise; first execute() does, wrap both.
 - [Test pure function and its wiring separately](feedback_test_pure_function_and_its_wiring_separately.md) — 5 well-tested fns, 0 tests on the write/read call sites that deliver it.
 - [DCS-driven LOS Stages 1-3](project_dcs_driven_los_stage1_3.md) — snapshot-vs-worktree edit trap; relaxed "exactly one %d" test to two, documented why; tolerance fix was doc-only.
-- [Subject-discriminating gate breadth](feedback_subject_discriminating_gate_breadth.md) — breadth comes from the kinds set, not the call sites; exemptions need an admission bar.
+- [Subject-discriminating gate breadth](feedback_subject_discriminating_gate_breadth.md) — breadth comes from the kinds set, not the call sites; test an exemption's bar against the non-members.
+- [Counterfactuals must not perturb an imported constant](feedback_counterfactual_must_not_perturb_a_constant_the_test_imports.md) — the test's timeline moves with it; it fails open.

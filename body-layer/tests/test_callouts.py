@@ -2153,6 +2153,12 @@ def test_masked_event_is_retired_once_it_outlives_the_candidate_max_age() -> Non
         ownship=_ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=back_in_view),
     )
 
+    # Assert the premise, not only the silence: without this, a geometry
+    # regression that left the contact masked here would let the test pass
+    # for the wrong reason -- the gate skipping it rather than the age
+    # check having retired it.
+    assert store.callout_observable(store.contacts[0], back_in_view)
+
     assert scheduler.tick(store, now_sim=back_in_view) == []
 
 
@@ -2167,7 +2173,8 @@ def _threat_ownship(x: float, heading_true_deg: float, t_sim: float) -> OwnshipS
 
 def test_engagement_change_speaks_about_a_cockpit_masked_bearing() -> None:
     """`_OBSERVABILITY_EXEMPT_KINDS` -- the one kind the gate does not
-    apply to (user decision, 2026-10-06). A watched AAA contact that has
+    apply to (decided in the review loop, 2026-10-06, not by the user --
+    see that set's own docstring). A watched AAA contact that has
     been astern long enough for `CALLOUT_OBSERVABILITY_GRACE_S` to lapse
     still gets its danger call when ownship enters its firing envelope: an
     engagement change is a threat cue about an already-perceived contact,
