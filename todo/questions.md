@@ -125,8 +125,18 @@ from the same conversation: *"B. I can also look myself, so a summary is good, I
 what to look for."* A report aims your eyes; the answer's grain follows the belief's grain. It also
 matches what detections already do for a grouped contact.
 
-So you will hear *"the group is moving"* / *"group at two kilometres"* rather than up to eight
-separate member lines. Say if you want member-level lines back for watched groups specifically.
+**Correction after implementation — my decision was only half-satisfiable, and the code already knew
+why.** `_WATCHED_ONLY_KINDS`' own docstring, three lines above the block both reviews quote, had
+already settled this: these kinds render through `_contact_report_text`'s affixes
+(*"Getting closer, "*, *", moving"*), which `render_group_disclosure` has no concept of, **"so
+folding one into a group's own line would silently drop the very fact the event exists to
+report."** Neither review cited it and I did not know it when I decided.
+
+So what shipped is **one line per group, spoken as the leading member's line with its affix intact**.
+Eight lines become one — the flood and the 820 ms are gone, which was the point. What did *not*
+change is that the line names one member rather than "the group". A genuine *"the group is getting
+closer"* needs new templates carrying the affix at group grain, which is well beyond the six-line
+mitigation and is its own slice. Say if you want it and I will scope it.
 
 ### `CONTACT_DETECTED` / `CONTACT_REACQUIRED` are now gated by observability too
 
