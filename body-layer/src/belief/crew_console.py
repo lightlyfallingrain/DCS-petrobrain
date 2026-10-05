@@ -76,7 +76,15 @@ then nothing else until a real command -- F10/voice token, or a free-text
 utterance the grammar actually resolves -- ends it; stray speech recognised
 as nothing does not. See `_handle_silence`'s own docstring for the full
 account, including why `self.silenced` gates `_print`'s `speech_client` push
-alone, never `output`/`overlay_client`."""
+alone, never `output`/`overlay_client`.
+
+**`maybe_apply_on_ground_default`.** (`plans/spu8-intercom/plan.md` Stage
+5.) A one-shot mission-start default, not a player command: if ownship is
+on the ground the first time it is called, `self.silenced` is set
+directly (no acknowledgement -- there is nothing to acknowledge at
+startup). Reuses `silenced`'s already-shipped end condition unchanged --
+only a subsequent command ends it, per the user's own locked decision that
+leaving the ground does not."""
 
 from __future__ import annotations
 
@@ -148,6 +156,16 @@ from belief.voice_commands import (
 )
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.geometry import GeoPosition, angular_delta_deg
+from perception.source import OwnshipState
+
+#: On-ground altitude threshold (metres AGL) for `maybe_apply_on_ground_
+#: default`'s mission-start silent-mode default (`plans/spu8-intercom/
+#: plan.md` Stage 5). A guessed placeholder pending live-flight
+#: calibration -- same debt class as `mission_phase.WAYPOINT_CAPTURE_
+#: RADIUS_M` -- since no weight-on-wheels signal exists anywhere in this
+#: codebase; this is `alt_agl_m` against a placeholder value, not a real
+#: ground-contact sensor. Do not treat as validated.
+ON_GROUND_AGL_THRESHOLD_M: Final[float] = 10.0
 
 #: Spoken when "Cancel Task" finds nothing to cancel -- no task store wired
 #: up, or no still-`pending` task. Deliberately not routed through
@@ -801,6 +819,47 @@ class CrewConsole:
     #: pace -- **suppressed, not deferred**: nothing is held back to be
     #: dumped the moment silence ends, it is simply never voiced.
     silenced: bool = field(default=False, repr=False)
+
+    #: Set by `maybe_apply_on_ground_default` the first time it is called,
+    #: regardless of outcome -- an internal one-shot latch, never
+    #: re-evaluated after that first call even if ownship later lands
+    #: again in the same sortie (plan Decision 5: a startup default, not a
+    #: continuous ground/air re-assertion).
+    _on_ground_default_applied: bool = field(default=False, repr=False)
+
+    def maybe_apply_on_ground_default(self, ownship: OwnshipState) -> None:
+        """On-ground mission-start silent-mode default (`plans/spu8-
+        intercom/plan.md` Stage 5, user framing: "if on ground, default
+        to 'silent mode' ... contact reports not needed when not even
+        airborne yet").
+
+        **Evaluated once, ever, per `CrewConsole` instance** -- the first
+        call sets `_on_ground_default_applied` regardless of whether
+        `ownship.alt_agl_m` was actually at/below `ON_GROUND_AGL_
+        THRESHOLD_M`, so a call made while airborne does not leave the
+        door open for a later on-ground call to apply the default
+        retroactively. This is deliberately a startup default, not a
+        continuous ground/air re-assertion (plan Decision 5).
+
+        **Sets `self.silenced` directly, not through `_handle_silence`**
+        -- `_handle_silence` speaks a one-word acknowledgement first,
+        which is right for a player-issued `silence` command but wrong
+        here: an automatic startup default has nothing to acknowledge and
+        should not be the very first thing a cold-starting crew channel
+        says.
+
+        **The end condition is unchanged and locked** (plan Decision 6,
+        user direction 2026-10-05): only a subsequent command ends this,
+        via the existing `handle_command`/`_act` "any command ends
+        silence" logic `_handle_silence`'s own field docstring already
+        describes -- leaving the ground does **not** end it. Reuses
+        `silenced`'s already-shipped behaviour (audio-only gate) with zero
+        new suppression logic."""
+        if self._on_ground_default_applied:
+            return
+        self._on_ground_default_applied = True
+        if ownship.alt_agl_m <= ON_GROUND_AGL_THRESHOLD_M:
+            self.silenced = True
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()

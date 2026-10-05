@@ -12,18 +12,21 @@ reads newline-delimited JSON lines, and feeds each parsed line into
 whichever of `TelemetryCache`/`WorldObjectsCache`/`PetrovichIndicationCache`
 matches its shape.
 
-All four line kinds share one connection and one JSON-lines wire format but
-have distinct shapes: a telemetry line is a flat object with a top-level
-`"x"` key; a world-objects line has a top-level `"objects"` key instead; a
+All line kinds share one connection and one JSON-lines wire format but have
+distinct shapes: a telemetry line is a flat object with a top-level `"x"`
+key; a world-objects line has a top-level `"objects"` key instead; a
 Petrovich-indication line has a top-level `"indication"` key instead; a
 Petrovich-wheel line (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) has
-a top-level `"wheel"` key instead (see `schema.TelemetrySample`/
-`schema.WorldObjectsSnapshot`/`schema.PetrovichIndicationSample`/
-`schema.PetrovichWheelSample`). `_handle_line` distinguishes them by that
-key's presence before parsing, rather than trying each parser in turn and
-falling back on failure -- a genuinely malformed line of any kind should be
-logged and dropped once, not misattributed to the wrong schema's error
-message.
+a top-level `"wheel"` key instead; a push-to-talk line has a top-level
+`"ptt"` key instead; a SPU-8 intercom-state line (`plans/spu8-intercom/
+plan.md` Stage 1) has a top-level `"net1"` key instead (see
+`schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
+`schema.PetrovichIndicationSample`/`schema.PetrovichWheelSample`/
+`schema.PttSample`/`schema.Spu8Sample`). `_handle_line` distinguishes them
+by that key's presence before parsing, rather than trying each parser in
+turn and falling back on failure -- a genuinely malformed line of any kind
+should be logged and dropped once, not misattributed to the wrong schema's
+error message.
 
 This module is intentionally thin. Its correctness against a real Export.lua
 is validated by the live DCS mission test (plan stage 3), not by unit tests
@@ -46,6 +49,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    Spu8Cache,
     TelemetryCache,
     WorldObjectsCache,
 )
@@ -56,6 +60,8 @@ from schema import (
     PetrovichWheelSample,
     PttParseError,
     PttSample,
+    Spu8ParseError,
+    Spu8Sample,
     TelemetryParseError,
     TelemetrySample,
     WorldObjectParseError,
@@ -77,7 +83,14 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-09-23b"
+EXPECTED_EXPORT_VERSION = "2026-10-05"
+#: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
+#: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
+#: additive wire-format change (an old deployed script keeps working, it
+#: just never sends a "net1" line, so `Spu8Cache` stays empty and
+#: downstream gating/volume default to their documented fail-safe/
+#: backward-compatible values), but the version string still moves per
+#: this file's own version-bump rule.
 #: Bumped again 2026-09-22 (`b` suffix, `plans/movement-detection/plan.md`
 #: Stage 1) for the `unit_name` field added to `WorldObjectSample` -- the
 #: join key the unit-velocity feed needs (see `schema/world_objects.py`'s
@@ -116,6 +129,9 @@ class CollectorServer:
         # A collector without a PTT cache simply drops ptt lines, which is
         # the correct behaviour for one: nothing downstream is listening.
         ptt_cache: PttCache | None = None,
+        # Same optional-cache reasoning as ptt_cache above: a collector
+        # without a Spu8Cache simply drops "net1" lines.
+        spu8_cache: Spu8Cache | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
@@ -124,6 +140,7 @@ class CollectorServer:
         self._petrovich_indication_cache = petrovich_indication_cache
         self._petrovich_wheel_cache = petrovich_wheel_cache
         self._ptt_cache = ptt_cache
+        self._spu8_cache = spu8_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -337,6 +354,21 @@ class CollectorServer:
                 return
             logger.debug("parsed petrovich-wheel sample: %r", wheel_sample)
             self._petrovich_wheel_cache.push(wheel_sample)
+            return
+
+        if "net1" in data:
+            # Ahead of the telemetry fallthrough for the same reason the
+            # "ptt" branch above is.
+            try:
+                spu8_sample = Spu8Sample.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except Spu8ParseError:
+                logger.warning("dropping malformed spu8 line: %r", line)
+                return
+            logger.debug("parsed spu8 sample: %r", spu8_sample)
+            if self._spu8_cache is not None:
+                self._spu8_cache.push(spu8_sample)
             return
 
         try:

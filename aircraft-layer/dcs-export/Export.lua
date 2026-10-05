@@ -68,6 +68,18 @@ LuaSocket and an unsanitized `io`/`lfs` environment by default):
     WHEEL_LONG_PRESS_S, SRCH FWD (forward sweep) -- confirmed live per the
     same research summary above. Petrovich decides where to look; this
     triggers a real, un-aimed search only.
+  - GetDevice(0):get_argument_value(arg) -- reads mainpanel cockpit args
+    377 (pilot NET-1), 664 (co-pilot ICS power), 457 (pilot SPU-8 volume),
+    confirmed live 2026-10-05 (plans/spu8-intercom/plan.md Stage 1). Same
+    read path push_ptt_state already uses for arg 738.
+  - GetDevice(55):performClickableAction(3015, 1) -- sets the co-pilot ICS
+    power switch ON from the pilot seat (device 55, cmd 3015 =
+    CMD_SPU8_O_ICS), confirmed live 2026-10-05: the switch moved 0->1 and
+    back 1->0 and was seen to physically move in the cockpit. BL-6's
+    AI-Wheel effector (GetDevice(30) above) already established this
+    project writes clickable cockpit controls this way; this is the same
+    mechanism on a different device/arg (plans/spu8-intercom/plan.md
+    Stage 4).
   - LuaExportActivityNextEvent(t) -- required export callback, but NOT a
     throttle on LuaExportAfterNextFrame despite reading that way in some
     documentation: stage 5 confirmed live that DCS calls this correctly on
@@ -119,7 +131,12 @@ local socket = require("socket.core")
 -- shipped 2026-09-09 and the whole chain was correct end to end; a Windows
 -- probe and an hour of tracing went into a bug that did not exist in the code,
 -- because nothing recorded which version of this file had produced the data.
-local EXPORT_SCRIPT_VERSION = "2026-09-23b"
+-- Bumped 2026-10-05 (plans/spu8-intercom/plan.md Stage 1) for the new
+-- SPU-8 intercom state line (args 377/664/457, wire key "net1") --
+-- additive only, but the version string still moves per this comment's
+-- own rule. Update aircraft-layer/src/collector/server.py's
+-- EXPECTED_EXPORT_VERSION in the same commit.
+local EXPORT_SCRIPT_VERSION = "2026-10-05"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -459,6 +476,106 @@ local function push_ptt_state(t)
     end
 end
 
+--: SPU-8 intercom panel (plans/spu8-intercom/plan.md Stage 1): arg 377 is
+--: the pilot's NET-1 ("intercom 1") switch, arg 664 is the co-pilot's ICS
+--: power switch (operator panel -- unreachable to a player flying as
+--: pilot, but cross-seat writable, see set_copilot_ics_on below), arg 457
+--: is the pilot's SPU-8 volume knob (continuous 0..1). All three
+--: confirmed live 2026-10-05 -- see audio-adapter/ROADMAP.md's Slice 2
+--: entry. 377/664 animate through intermediate values (observed 0.32,
+--: 0.64) for ~0.1s on a flip, same as arg 738 (PTT) above -- this script
+--: reports the raw values and decides nothing, per this file's policy.
+local ARG_SPU8_NET1 = 377
+local ARG_SPU8_ICS_POWER = 664
+local ARG_SPU8_VOL = 457
+
+--: Below this, two readings of all three SPU-8 args are the same reading
+--: -- same reasoning as PTT_EPSILON above.
+local SPU8_EPSILON = 0.01
+
+local last_spu8_net1_sent = nil
+local last_spu8_ics_power_sent = nil
+local last_spu8_vol_sent = nil
+
+--: Reads the three SPU-8 args and sends a line only when at least one has
+--: moved -- same "every frame, sent only on change" shape as
+--: push_ptt_state above, and for the same reason: this must not ride the
+--: 5 Hz telemetry line, and a panel nobody has touched has no business
+--: producing output.
+local function push_spu8_state(t)
+    if client == nil then
+        return -- nothing to send to yet; the next change will be sent
+    end
+    local net1 = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SPU8_NET1)
+    end)
+    local ics_power = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SPU8_ICS_POWER)
+    end)
+    local vol = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SPU8_VOL)
+    end)
+    if net1 == nil or ics_power == nil or vol == nil then
+        return -- no mainpanel device (briefing screen, wrong airframe)
+    end
+    if last_spu8_net1_sent ~= nil
+        and math.abs(net1 - last_spu8_net1_sent) < SPU8_EPSILON
+        and math.abs(ics_power - last_spu8_ics_power_sent) < SPU8_EPSILON
+        and math.abs(vol - last_spu8_vol_sent) < SPU8_EPSILON then
+        return
+    end
+    last_spu8_net1_sent = net1
+    last_spu8_ics_power_sent = ics_power
+    last_spu8_vol_sent = vol
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"net1":' .. string.format("%.3f", net1)
+        .. ',"ics_power":' .. string.format("%.3f", ics_power)
+        .. ',"vol":' .. string.format("%.3f", vol) .. '}\n')
+    if not ok then
+        debug_log("spu8 send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
+end
+
+-- SPU-8 device (GetDevice(55)) / command code for the co-pilot's ICS power
+-- switch -- confirmed live 2026-10-05: from the pilot seat,
+-- GetDevice(55):performClickableAction(3015, v) moved arg 664 0->1 and
+-- back 1->0, held both times, and the switch was seen to physically move
+-- in the cockpit. CMD_SPU8_O_ICS gates mouse clickspots (crew_member_access
+-- = {1}, the operator's seat), not dispatched commands -- this call is not
+-- subject to that restriction.
+local SPU8_DEVICE_ID = 55
+local CMD_SPU8_O_ICS = 3015
+
+--: How long after the first frame in the cockpit to wait before setting
+--: the co-pilot ICS switch ON (plans/spu8-intercom/plan.md Stage 4,
+--: "when mission starts, wait 5 s, then set co-pilot ICS switch ON").
+local MISSION_START_ICS_DELAY_S = 5.0
+
+-- DCS model-time of the first frame LoGetSelfData() succeeded this
+-- session (i.e. actually in the cockpit, not the briefing screen), or nil
+-- before that's happened -- set alongside DUMPED_SELF_DATA below, the
+-- same "first successful self_data frame" signal. Reset in LuaExportStop
+-- so a mission restart re-triggers the 5-second wait.
+local mission_start_model_t = nil
+
+-- Whether the mission-start co-pilot ICS write has already fired this
+-- session -- a one-shot latch so it never refires after the first time.
+-- Reset in LuaExportStop, mirroring pending_release_t's reset.
+local copilot_ics_set = false
+
+-- Executes the mission-start co-pilot ICS write once (plans/spu8-intercom/
+-- plan.md Stage 4) -- self-contained here, no round trip through the
+-- collector, mirroring BL-6's AI-Wheel effector shape exactly.
+local function set_copilot_ics_on()
+    safe_call(function()
+        GetDevice(SPU8_DEVICE_ID):performClickableAction(CMD_SPU8_O_ICS, 1)
+    end)
+    debug_log("mission-start: set co-pilot ICS switch ON (device "
+        .. tostring(SPU8_DEVICE_ID) .. ", cmd " .. tostring(CMD_SPU8_O_ICS) .. ")")
+end
+
 -- BL-6's inbound command listener (plans/bl6-commands-inspect-adapt/
 -- plan.md): a UDP socket bound to COMMAND_HOST:COMMAND_PORT, polled
 -- non-blockingly every frame (see LuaExportAfterNextFrame below) --
@@ -574,6 +691,24 @@ function LuaExportStop()
         command_socket = nil
     end
     pending_release_t = nil
+    -- plans/spu8-intercom/plan.md Stage 4: reset so a mission restart
+    -- re-triggers the 5-second wait rather than staying latched from a
+    -- previous sortie.
+    mission_start_model_t = nil
+    copilot_ics_set = false
+    -- Pre-existing latent bug, found while testing the reset above (stub
+    -- harness, plans/spu8-intercom/plan.md implementation notes): DCS's
+    -- model clock resets on a mission restart, but last_export_t did not
+    -- -- so after a restart, `t - last_export_t < EXPORT_INTERVAL_S`
+    -- compared a near-zero t against the *previous* sortie's last
+    -- export time, staying true (suspending the whole self_data branch
+    -- below -- telemetry, world-objects, indication, and this stage's own
+    -- mission_start_model_t capture) for as long as that previous sortie
+    -- had run. Reset here, mirroring pending_release_t's reset, so a
+    -- restart's first frame clears the throttle immediately (same
+    -- reasoning the module-level `local last_export_t = -1` initializer
+    -- already relies on for the very first mission start).
+    last_export_t = -1
 end
 
 -- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
@@ -623,6 +758,9 @@ function LuaExportAfterNextFrame()
     -- sends only on change: a real trigger produces two lines per press,
     -- not a stream.
     push_ptt_state(t)
+    -- plans/spu8-intercom/plan.md Stage 1: same "every frame, send only
+    -- on change" reasoning as push_ptt_state immediately above.
+    push_spu8_state(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)
@@ -654,6 +792,18 @@ function LuaExportAfterNextFrame()
     if not DUMPED_SELF_DATA then
         DUMPED_SELF_DATA = true
         debug_dump("LoGetSelfData()", self_data)
+    end
+
+    -- plans/spu8-intercom/plan.md Stage 4: mission_start_model_t is
+    -- captured on the first frame LoGetSelfData() succeeds -- i.e. this
+    -- point, actually in the cockpit, not the briefing screen -- the same
+    -- signal DUMPED_SELF_DATA's one-shot check immediately above uses.
+    if mission_start_model_t == nil then
+        mission_start_model_t = t
+    end
+    if not copilot_ics_set and t - mission_start_model_t >= MISSION_START_ICS_DELAY_S then
+        set_copilot_ics_on()
+        copilot_ics_set = true
     end
 
     local pos = self_data.Position
