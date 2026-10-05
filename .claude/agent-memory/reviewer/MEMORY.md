@@ -132,3 +132,4 @@ removed; read the linked file for full detail.
 - [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; shared merge-echo predicate verified equivalent to both old copies by argument-level read.
 - [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam, confirmed by disabling it.
 - [Terrain callout stage5 wiring round2 approved](project_terrain_callout_stage5_wiring_round2_approved.md) - APPROVED; silence-path check doesn't need a redundant test for an already-collapsed input.
+- [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; cross-machine zero-prior-gate branch, 4-mechanism disable-and-rerun check.
