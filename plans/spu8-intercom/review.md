@@ -69,3 +69,91 @@ lacks a research-directory citation. Ran every check myself from a clean snapsho
 trusting the implementation log's numbers, and empirically broke/restored four mechanisms to
 confirm their tests are load-bearing rather than decorative. No part of this review was spot-
 checked or skipped for time.
+
+---
+
+## Round 2: Security change request fix (`f1d39b9`)
+
+**Verified tip:** `feature/spu8-intercom` @ `f1d39b9c63b17a5afdeffd9f2082414757e2c0c0` (matches the
+expected sha given at dispatch). This worktree's own HEAD (`78c9ad6b`) is unrelated scaffolding, as
+expected — the branch is checked out in the main checkout, so I snapshotted it: `git archive
+feature/spu8-intercom | tar -x -C <scratch>` and ran every command with `cwd` inside
+`<scratch>/aircraft-layer`, using the main checkout's `aircraft-layer/.venv/bin/{ruff,mypy,pytest}`.
+
+### Scope
+
+`git diff 5767168..f1d39b9 --stat` touches exactly three files:
+`aircraft-layer/src/collector/audio_sender.py`, `aircraft-layer/tests/test_audio_sender.py`,
+`plans/spu8-intercom/implementation.md`. No body-layer, audio-adapter, or `Export.lua` changes —
+round 1's approval of those stands untouched.
+
+### Checks (from the snapshot, `aircraft-layer/.venv` binaries)
+
+- `ruff format --check src tests` — pass (48 files already formatted)
+- `ruff check src tests` — pass (all checks passed)
+- `mypy src` (`--strict`) — pass (19 source files, no issues)
+- `pytest tests -q` — **210 passed**, matches the claimed baseline (208 + 2 new)
+
+### Independent reproduction of the two guards (not taking the implementer's word)
+
+Reverted each guard in the snapshot, in turn, and reran:
+
+1. **Removed `ValueError` from `scale_wav_volume`'s `except` tuple** (left the `_run()` call-site
+   wrap in place). Result: exactly one failure —
+   `test_scale_wav_volume_handles_truncated_odd_length_pcm`, with the uncaught `ValueError:
+   bytes length not a multiple of item size` surfacing at the `samples.frombytes(raw_frames)`
+   line, as claimed. `test_run_survives_scale_wav_volume_raising` still passed — the call-site
+   guard catches the (monkeypatched, directly-raised) error independently, confirming the two
+   guards are not merely redundant copies of each other.
+2. **Removed the `_run()` call-site `try`/`except Exception` around `scale_wav_volume(...)`** (left
+   the parse fix in place). Result: exactly one failure —
+   `test_run_survives_scale_wav_volume_raising`, with the worker thread dying on the first raise
+   (visible as a `PytestUnhandledThreadExceptionWarning` with the full traceback) and the second
+   queued item never reaching the player. `test_scale_wav_volume_handles_truncated_odd_length_pcm`
+   still passed.
+
+Both reverts restored; full suite reran clean (210 passed). The implementer's non-decorative claim
+is correct: each guard fails its own test and only its own test, and they are genuinely independent
+— the call-site wrap is defense-in-depth against a *future* unguarded path, not a duplicate of the
+parse fix.
+
+### Fixture fidelity
+
+`_write_truncated_odd_length_pcm_wav` writes a real 10-sample 16-bit PCM WAV via the stdlib `wave`
+writer (20 bytes of data, header declares `nframes` accordingly), then truncates the file to keep
+only 15 (odd) bytes of that data chunk while leaving the header's declared `nframes` unchanged. This
+is exactly Security's reproduced shape (`security-deep-analysis.md`): header `nframes` stale/too
+large, `readframes` returns the truncated bytes without raising, odd byte count trips
+`array("h").frombytes()`. Not a different malformed-file shape wearing the same name — confirmed by
+reading the fixture against the bug report side by side.
+
+### `except Exception` breadth at the call site
+
+Judged justified, not too wide. The thing being guarded against is a daemon worker thread dying
+*permanently and silently* while the LAN API keeps answering `200 {"ok": true}` — a failure mode
+with no other signal anywhere, which argues strongly for breadth over precision here. It is not a
+silent swallow: `logger.warning(..., exc_info=True)` logs the exception type and full traceback on
+every catch, so a future unrelated `TypeError` from a refactor would still be diagnosable from logs,
+just not fatal to the channel. The catch is scoped to the single `scale_wav_volume(...)` call, not
+the whole loop body — `self._player.play(path)` two lines below keeps its own separate
+`except Exception`, so a failure in one step can't be miscategorized as the other's.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None beyond what round 1 already recorded.
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read, scoped to the three-file diff as directed. Reproduced both guard claims empirically by
+reverting each in the snapshot and rerunning the suite, rather than trusting the implementation
+log's account. Ran every mechanical check myself from the snapshot. body-layer, audio-adapter and
+`Export.lua` were confirmed untouched by `git diff --stat` rather than re-reviewed — correctly out
+of scope for a one-fix re-review, not a gap.
