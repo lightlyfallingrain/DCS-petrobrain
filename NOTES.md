@@ -766,3 +766,26 @@ two functions that must agree (2026-09-19).
   dedup within 400 m) rather than re-deriving a basin-like structure solely to keep the original
   design's shape. Worth checking for on any plan that sat parked across an earlier stage's own
   redesign (`plans/terrain-feature-probing/plan.md`, Revision 3 preamble).
+- **`audioop` is removed outright in Python 3.13 (deprecated since 3.11), and a `requires-python
+  = ">=3.11"` bound does not exclude 3.13** — any PCM volume/format manipulation in this repo must
+  use stdlib `wave` + `array` instead, never `audioop`, or a 3.13 interpreter fails at import time
+  with no fallback. Caught before it shipped only because the main-loop amendment to
+  `spu8-intercom`'s plan named the Python version explicitly rather than assuming "stdlib audio
+  module" meant `audioop` as it would have on an older interpreter (`plans/spu8-intercom/plan.md`
+  Stage 3).
+- **Python's `wave.Wave_read.readframes` does not raise when a WAV's declared `nframes` header
+  value exceeds the file's actual data — it silently returns however many bytes are really
+  present**, which can be an odd byte count for 16-bit PCM. Any code that reads a `wave`-opened
+  file's frames and immediately does fixed-width sample arithmetic on the result (e.g.
+  `array("h").frombytes(...)`) needs its own guard against that odd-length case; `wave.open`'s own
+  header validation does not cover it. This was the exact unguarded path Security found in
+  `scale_wav_volume` (`plans/spu8-intercom/security-deep-analysis.md`) — reproduced with a WAV
+  whose data chunk was truncated to an odd length while its header's `nframes` stayed stale.
+- **A branch handed over from another machine/session with zero gate having run on it is a real
+  risk, not a formality** — `spu8-intercom`'s Architect and Implementer both ran cross-machine, and
+  the first gate run anywhere on the branch found the implementer had never run the test suite at
+  all: a shadowed test helper (reusing a name already bound elsewhere in the test file) was
+  breaking 80 pre-existing, unrelated tests. Worth treating "this branch has never had any
+  check run on it" as its own flag when picking up cross-machine/cross-session handoff work, rather
+  than assuming a clean-looking diff implies the suite was ever green (`plans/spu8-intercom/
+  implementation.md`).
