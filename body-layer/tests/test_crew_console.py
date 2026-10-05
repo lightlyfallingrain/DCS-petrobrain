@@ -37,6 +37,7 @@ from belief.crew_console import (
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
+from belief.groups import Group
 from belief.speech import (
     group_membership_state,
     render_group_disclosure,
@@ -1604,6 +1605,46 @@ def test_watch_nearest_a_single_ungrouped_contact_is_unaffected_by_group_tagging
     assert "watching two" not in lines[0].lower()
     assert contact.attention == "watch"
     assert len(tasks.tasks) == 1
+
+
+def test_watch_nearest_group_readback_counts_only_members_actually_marked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security review 2026-10-05, finding 1: `Group.member_contact_ids`
+    is recomputed from the live `Contact` set by `GroupStore.reconcile`,
+    so between a reconcile and the next command a member id can stop
+    resolving to a live contact. Speaking `len(member_ids)` would then
+    assert a count the code never verified -- and the pilot cannot
+    observe the discrepancy, because the un-tagged member simply never
+    reports. A two-member group that has lost one member must fall back
+    to the single-contact readback rather than say "Watching two.", and
+    must register exactly one task."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    stale_group = Group(
+        id="GROUP_STALE",
+        member_contact_ids=frozenset({contact.id, "CONTACT_NO_LONGER_LIVE"}),
+        established_sim=0.0,
+        last_reconciled_sim=0.0,
+    )
+    monkeypatch.setattr(store, "group_for_contact", lambda _id: stale_group)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert lines != ["Watching two."]
+    assert "watching two" not in lines[0].lower()
+    assert "CONTACT_NO_LONGER_LIVE" not in lines[0]
+    assert contact.attention == "watch"
+    assert [task.contact_id for task in tasks.tasks] == [contact.id]
 
 
 def test_a_unit_that_joins_the_group_later_is_not_retroactively_watched(

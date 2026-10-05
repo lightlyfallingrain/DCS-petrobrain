@@ -1257,11 +1257,22 @@ class CrewConsole:
         exactly as `render_report`'s existing group-disclosure roll-up
         already does (above, `self.store.group_for_contact(contact_id)`).
 
-        Returns `(found, group_size)`: `found` is whether the resolved
+        Returns `(found, marked)`: `found` is whether the resolved
         `contact_id` itself was marked (the caller's existing "no such
-        contact" check keys off this, unchanged); `group_size` is `1` for
-        an ungrouped contact or a group of exactly one live member (no
-        group-readback branch), and the real member count otherwise."""
+        contact" check keys off this, unchanged); `marked` is the count of
+        members **actually** marked -- not `len(member_ids)`, the intended
+        count. `Group.member_contact_ids` is recomputed from the live
+        `Contact` set by `belief.groups.GroupStore.reconcile`, so between a
+        reconcile and this command a member id can stop resolving to a live
+        contact; `set_attention`/`watch_contact_task` then return `False`
+        for it, nothing is watched, and speaking `len(member_ids)` would
+        assert a count the code never verified (security review,
+        2026-10-05, finding 1 -- the pilot cannot observe it, because the
+        un-tagged member simply never reports). Counting successes means a
+        group that lost members since the last reconcile falls back to the
+        single-contact readback rather than overstating, which is the rule
+        `render_group_disclosure` already applies to the same group
+        (`belief.speech`: `None` unless at least two members resolve)."""
         belief_group = self.store.group_for_contact(contact_id)
         member_ids: frozenset[str]
         if belief_group is not None and len(belief_group.member_contact_ids) > 1:
@@ -1269,6 +1280,7 @@ class CrewConsole:
         else:
             member_ids = frozenset({contact_id})
         found = False
+        marked = 0
         for member_id in member_ids:
             if self.tasks is not None:
                 task = watch_contact_task(
@@ -1277,9 +1289,11 @@ class CrewConsole:
                 ok = task is not None
             else:
                 ok = set_attention(self.store, member_id, "watch", source=source)
+            if ok:
+                marked += 1
             if member_id == contact_id:
                 found = ok
-        return found, len(member_ids)
+        return found, marked
 
     def _handle_watch_nearest(
         self, now_sim: float, *, air_defence_only: bool = False
@@ -1317,14 +1331,14 @@ class CrewConsole:
                 if air_defence_only
                 else "no contact to watch"
             ]
-        found, group_size = self._mark_watched_with_group(now_sim, contact_id)
+        found, marked = self._mark_watched_with_group(now_sim, contact_id)
         result = describe_contact(
             self.store, contact_id, now_sim, enrichment=self.enrichment
         )
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
-        if group_size > 1:
-            return [render_watch_group_readback(group_size).text]
+        if marked > 1:
+            return [render_watch_group_readback(marked).text]
         return [render_watch_nearest_readback(result["facts"]).text]
 
     def _descriptor_score(self, descriptor: str, facts: dict[str, object]) -> float:
@@ -1483,14 +1497,14 @@ class CrewConsole:
             return no_match_lines
 
         self.last_command_target_contact_id = contact_id
-        found, group_size = self._mark_watched_with_group(now_sim, contact_id)
+        found, marked = self._mark_watched_with_group(now_sim, contact_id)
         result = describe_contact(
             self.store, contact_id, now_sim, enrichment=self.enrichment
         )
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
-        if group_size > 1:
-            return [render_watch_group_readback(group_size).text]
+        if marked > 1:
+            return [render_watch_group_readback(marked).text]
         return [render_watch_nearest_readback(result["facts"]).text]
 
     def _handle_scan(
