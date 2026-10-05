@@ -9,7 +9,8 @@ own independent copy rather than an import of anything in `brain-layer/`
 in-process exception) with one structural difference: `handle()` must
 **never block the caller**, even briefly (D2's user constraint: "the
 game world moves on"). A synchronous `urlopen` call -- even a fast one --
-sits on `logger.py`'s 5 Hz poll thread if called directly, so `handle()`
+sits on `logger.py`'s poll thread if called directly (1.0 s per poll by
+default, and the argument does not depend on the rate), so `handle()`
 instead hands the payload to a **single-slot background worker thread**
 and returns in microseconds; the worker does the actual POST.
 
@@ -271,7 +272,7 @@ class BrainLayerClient:
         `handle()`'s own worker), then drains and returns whatever it has
         already received, oldest first. **Never touches the network and
         never blocks or raises** -- see module docstring. Safe to call
-        from a hot 5Hz loop regardless of whether `brain-layer` is
+        from the poll loop regardless of whether `brain-layer` is
         healthy, down, or wedged."""
         with self._poll_lock:
             if self._poll_worker is None or not self._poll_worker.is_alive():
