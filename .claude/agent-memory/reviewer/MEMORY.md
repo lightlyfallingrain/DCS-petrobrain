@@ -144,3 +144,5 @@ and blowing the cap again; this pass merged them into one list.
 - [Sortie 1005 items234 scan ahead cadence review](project_sortie_1005_items234_scan_ahead_cadence_review.md) - APPROVED; instrumented-run beat hand-derived dwell-cadence arithmetic.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
 - [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
+- [Equivalence test must not import the code it pins](feedback_equivalence_test_must_not_import_the_code_it_pins.md) - a shared helper makes both sides of `==` the new path; mutate to find out.
+- [BL-11 tick cost review](project_bl11_tick_cost_review.md) - APPROVED W/ REQUIRED FIXES; the task's disk-full premise was backwards.
