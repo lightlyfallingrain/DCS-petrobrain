@@ -278,3 +278,67 @@ Full read of the diff. Empirically verified both the required fix's placement (r
 explicit-flag route has no parallel issue) and the test gap (disabled the required fix alone,
 reran; disabled both, reran) rather than inferring from the code or the implementer's note. All
 four verification commands re-run from a fresh venv in this worktree, not taken on report.
+
+### Fix review 2 (91fd8a1)
+
+Re-review of the test-only follow-up to the "Fix review (f7f2827)" finding above. Checked out
+detached at `91fd8a1` (confirmed via `git rev-parse HEAD`). Diff scope `c3bf204..91fd8a1`:
+`body-layer/tests/test_logger.py` and `plans/multi-theatre-afghanistan/implementation.md` only —
+no production code touched, matching the implementer's own note.
+
+**What changed, against the two gaps this review raised:**
+
+1. **Regression-test gap (required).** The test now asserts, independently of the `SystemExit`
+   check: (a) `open_world_model` is never called — via `monkeypatch.setattr(logger_module,
+   "open_world_model", _fail_if_open_world_model_called)`, a local `-> NoReturn` helper that
+   `pytest.fail`s if invoked at all; and (b) the specific rejection reason via
+   `assert "not a known theatre" in capsys.readouterr().err`. Either assertion alone now catches
+   "required registry check removed, optional `except` left in place" — the exact regression the
+   old test let through — because that regression's only observable path is reaching
+   `open_world_model` with an attacker-influenced path and failing later with a *different*
+   message than the registry check's own.
+2. **Payload-mechanism mismatch (required).** `"Syria?mode=rwc"` → `"Syria?mode=rwc&x="`, matching
+   my own suggested shape: a second `&`-separated query parameter, which is what makes SQLite's
+   URI parser split the filename at the injected `?` — the mechanism `security.md` actually
+   demonstrated, not the bare-`?mode=rwc` malformed-access-mode failure the old payload exercised.
+
+**Verified independently, not taken on the implementation note** (per the dispatching
+instructions): disabled only the required `THEATRE_PROJECTIONS` membership check
+(`if theatre not in THEATRE_PROJECTIONS:` → `if False and theatre not in THEATRE_PROJECTIONS:`,
+`try/except` left in place), reran the 4 parametrized cases — **all 4 failed**, each on
+`pytest.fail` inside `_fail_if_open_world_model_called`, with the traceback showing
+`open_world_model` reached with the attacker-controlled path (e.g.
+`.../syria?mode=rwc&x=-full.sqlite` for the injection case). Restored the line exactly
+(`git diff --stat -- src/logger.py` empty after restore, confirming a clean revert) and reran —
+**all 4 passed** again (`4 passed, 69 deselected`). This reproduces the exact result the
+implementation note claims, independently rather than by reading it.
+
+Read `logger.py`'s resolution block (lines ~1870-1924) end to end again while here: the registry
+check still sits strictly before `world_model_db` is built, the explicit-`--theatre`/
+`--world-model-db` route still bypasses it correctly (operator-typed, never mission-derived), and
+the mismatch guard's `try/except (sqlite3.Error, OSError)` is unchanged and still sits after the
+registry check, not around it. No new issue found in production code, consistent with this diff
+touching none.
+
+**Checks** (`cd body-layer`, fresh `.venv` built in this worktree — none existed on checkout):
+
+| ruff format --check | ruff check | mypy --strict (src) | pytest (full) |
+|---|---|---|---|
+| pass (114 files already formatted) | pass (All checks passed!) | pass (53 source files, no issues) | 1407 passed, 4 xfailed |
+
+Matches the implementer's own reported numbers exactly.
+
+#### Fix Review 2 Verdict
+
+**APPROVED.** Both gaps from "Fix review (f7f2827)" are closed, verified empirically rather than
+by reading: the test now fails specifically when the required registry check is removed (not just
+when both fixes are removed together), and the injection payload now reproduces the mechanism
+`security.md` actually demonstrated. No production code changed; none needed to change. This
+closes the required fix from the earlier review — no further action needed before DoD.
+
+#### Fix Review 2 Confidence
+
+Full read of the diff (small — one test file, one plan note). Empirically reproduced the
+disable-required-fix-alone / restore cycle myself rather than trusting the implementation note's
+account of it; same result both times. Ran all four body-layer checks from a fresh venv built in
+this worktree.
