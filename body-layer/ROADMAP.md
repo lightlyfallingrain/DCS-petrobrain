@@ -15,6 +15,22 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **`fix/callout-observability-gate` (`BL-11` Stage 0) — DoD PASSED on fixtures 2026-10-06
+  (`304a367`), not yet flown.** The observable is an **absence**: after this fix no *unprompted*
+  callout should ever name clock hour 5, 6 or 7, while a pilot `report` deliberately still answers
+  about the rear hemisphere. A fixture suite cannot distinguish "silent because the gate worked"
+  from "silent because something upstream broke", and it cannot hear the one case that must still
+  speak — a watched air-defence contact going astern while its engagement envelope starts covering
+  the aircraft, which is **exempt** from the gate and must still say *"Danger, …"*. That exemption
+  is the riskiest judgement on the branch and was decided in the review loop, not by the user.
+  Acceptance card: `docs/acceptance/2026-10-06-callout-observability-sortie.md`, published at
+  https://claude.ai/artifact/N4CGoNx5xaMdXW8QD3PwMw. **Batches with the
+  two entries below** — all three change what is spoken about the same contact stream, so one
+  sortie settles them, and flying them together is cheaper than three flights only because each
+  one's observable is distinct (quieter re-foundings, terrain qualifiers, and silence about the
+  rear hemisphere). Full record: `plans/callout-observability-gate/{debug.md, review.md,
+  review-round2.md, implementation.md, dod-check.md}`.
+
 - [ ] **`feature/dcs-driven-los` (`X-B29`/`X-B30`) — merged 2026-10-05, not yet flown.** Touches
   this subproject's gate 4 (`perception/visibility.py`, `perception/naked_eye_source.py`,
   `belief/contacts.py`'s engagement term), but the entry itself and its own acceptance card live in
@@ -1704,17 +1720,84 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   at both ends, and the finding that *does* dominate the tick was on nobody's list. `BL-B30`,
   `BL-B31` and `BL-B26` each carry the correction in their own entries; this milestone is the fix.
 
-  **Stage 0 — the observability gate applies to every callout kind, not two. IN FLIGHT as
-  `fix/callout-observability-gate`.** Filed as part of this milestone because the pilot heard it and
-  nothing else on this list is audible to him. Of 357 spoken lines in the 2026-10-05 sortie, **20
-  named clock hours 5, 6 or 7 — which `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` declares
-  unviewable** — and they carried classification: *"unit 7 o'clock, very close is Tigr armored
+  **Stage 0 — [x] the observability gate applies to every callout kind, not two. DoD PASSED on
+  fixtures 2026-10-06, `fix/callout-observability-gate` @ `304a367`; live acceptance deferred (see
+  this file's "Live acceptance debt" list).** Filed as part of this milestone because the pilot
+  heard it and nothing else on this list is audible to him.
+
+  **The defect's real size is 17 unprompted lines, not 20.** Of 357 spoken lines in the 2026-10-05
+  sortie, 20 named clock hours 5, 6 or 7 — which `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` declares
+  unviewable — and they carried classification: *"unit 7 o'clock, very close is Tigr armored
   vehicle"* with the gaze at 11 o'clock, *"unit 6 o'clock, very close is infantry"* with the gaze at
-  12. Same class as the 2026-09-27 fix, which built the gate (FOV + cockpit mask + LOS with a grace
-  window) and wired it to **crossing and motion callouts only**; classification and group-disclosure
-  lines never went behind it. Decision 11. The gate must key on observability, not on the rendered
-  hour — believed bearing lags, so a contact genuinely at 8:30 may legitimately render as "8
-  o'clock".
+  12. **3 of those 20 were answers to a pilot `report` within 4.4 s** and belong to the pull path
+  (`CrewConsole._handle_report`), which deliberately answers about the rear hemisphere — *"belief
+  survives the aircraft turning away; only the absence claim is withheld"* — and is **left exactly
+  as it was**. So 17 is this defect, 3 are documented behaviour. The split was measured by
+  correlating the masked-hour lines against the sortie's own `acted_token` history and is recorded
+  as `plans/post-review-fixes/explore-notes.md` §9; the earlier "20" here and in `BL-B30` was the
+  push and pull paths added together. **Quote 17.**
+
+  **The 2026-09-27 gate was not under-wired by oversight — it was in a place that could not be
+  completed.** `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 put it at event *emission*, inside
+  `ContactStore.tick`'s fifth and sixth blocks, so it reached `CONTACT_MOTION_CHANGED` and
+  `CONTACT_RANGE_CROSSED` and nothing else. **Group disclosure mints no `Event` at all**
+  (`plans/group-reporting/plan.md` Stage 4's explicit design — `CalloutScheduler.tick` reads
+  `store.groups` as a second candidate source), so no emission-site gate could ever have covered
+  it, and a per-kind list at emission is a list the next new kind silently fails to join. The gate
+  now sits at the **speech chokepoint** (`CalloutScheduler.tick`, whose only caller is
+  `CrewConsole.drain_events`) and discriminates on the **contact** rather than the kind, via
+  `ContactStore.callout_observable` — a read of bookkeeping `_callout_may_speak` already maintains,
+  not a second mask computation.
+
+  **Breadth: five of `_TEMPLATED_KINDS`' six kinds, plus group disclosure, with one exemption**
+  (verified by import, not by counting prose). Three are newly gated here —
+  `CONTACT_CLASSIFICATION_CHANGED` (the measured defect), `CONTACT_DETECTED` and
+  `CONTACT_REACQUIRED` (close to a no-op, since both perception channels already respect the mask
+  at founding; it closes the overflight case where a contact founded ahead is spoken about several
+  seconds later from astern). Two — `CONTACT_MOTION_CHANGED`, `CONTACT_RANGE_CROSSED` — were
+  already gated at emission and are now gated here too. Candidates are **skipped without being
+  consumed**, placed after the `CALLOUT_MAX_AGE_S` check so a permanently-astern event is still
+  retired: deferred, not lost.
+
+  **`CONTACT_ENGAGEMENT_CHANGED` is exempt (`callouts._OBSERVABILITY_EXEMPT_KINDS`) — decided in
+  the review loop, 2026-10-06, on the Reviewer's recommendation. The user was not consulted and
+  has not ruled on it.** Recorded for them to overrule in `todo/questions.md`'s "Decided without
+  you" section (commit `156f965`). Reasoning: an engagement-envelope change is a *threat cue* about
+  an already-perceived, already-watched contact, derived from believed classification plus
+  ownship's own position, not an identification — and because
+  `CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`, gating it would lose the callout
+  **permanently rather than late**: an astern SAM or ZSU entering its firing envelope would simply
+  go silent, against root `CLAUDE.md`'s *"helps the pilot evade dangerous units"*. It is a named,
+  documented set rather than an inline `!=` because an exemption list has the same failure shape as
+  the per-kind list this fix removes, only inverted — and its docstring carries the two-property
+  bar any further member must clear (silence costs a *threat cue needed to evade*, **and** gating
+  costs the callout permanently rather than late; `CONTACT_RANGE_CROSSED` satisfies the second and
+  fails the first).
+
+  **This silences; it does not re-time.** The 17 lines become unspoken, not spoken later. The
+  contacts stay believed, stay in the debug view and stay answerable by `report`. Whether some
+  should reach the pilot another way (an "I've lost sight of it" marker) is an open product
+  question nobody has answered. `CALLOUT_OBSERVABILITY_GRACE_S = 10.0` is now load-bearing for
+  three more paths and is still an untuned starting value by its own docstring.
+
+  Decision 11. The gate keys on observability, never on the rendered hour — believed bearing lags,
+  so a contact genuinely at 8:30 may legitimately render as "8 o'clock", and the 10 s grace window
+  measured from the last *confirmed* sighting is what absorbs that
+  (`test_classification_change_speaks_inside_the_observability_grace_window`).
+
+  `perception/motion.py`'s 5 Hz assumption (`BL-B34`'s correctness half) was investigated in the
+  same pass and is **not a defect**: both rates are aircraft-layer *producers* (`Export.lua`'s
+  `EXPORT_INTERVAL_S = 0.2`, the telemetry hook's `POLL_INTERVAL_S = 1.0`) and body-layer's poll
+  rate cannot enter the bound, which compares two producer sim stamps. Comment-only change, adding
+  the provenance, because `BL-B30` and `BL-B34` had each already misread it as a claim about the
+  poll loop.
+
+  **Does this change the next milestone?** No. Stages 1–5 are cost and observability work on paths
+  this fix does not touch, and it removes no assumption they rest on. One second-order effect on
+  Stage 1: the *"nothing felt late"* evidence that settled the 1.0 s poll rate is now confirmed
+  rather than merely inferred — the *"unit 7 o'clock"* callout that was the only lateness datum is
+  conclusively a masked-hour correctness defect, measured at 17 lines, so Stage 1's rate question
+  stays closed.
 
   **Stage 1 — the loop shape and the stale docstrings. The rate question is SETTLED: 1.0 s
   stays.** Decided 2026-10-06 in the `/explore` conversation
