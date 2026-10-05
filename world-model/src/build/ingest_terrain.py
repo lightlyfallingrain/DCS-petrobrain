@@ -32,7 +32,7 @@ import numpy.typing as npt
 
 from build.region import RegionDefinition
 from coordinates import dcs_to_wgs84_array, wgs84_to_dcs
-from elevation.dem import SrtmTile
+from elevation.dem import SrtmTile, srtm_tile_sw_corner
 from store.models import StoredFeature
 from terrain.features import (
     DEFAULT_CHAIKIN_ITERATIONS,
@@ -140,6 +140,52 @@ def _tile_dcs_bbox(
             xs.append(x)
             zs.append(z)
     return min(xs), max(xs), min(zs), max(zs)
+
+
+def tiles_for_region(
+    srtm_tile_paths: list[Path],
+    region: RegionDefinition,
+    margin_m: float = DEFAULT_MARGIN_CELLS * DEFAULT_SPACING_M,
+) -> list[Path]:
+    """The subset of `srtm_tile_paths` whose footprint lies within
+    `margin_m` of `region`'s DCS x/z rectangle, in input order.
+
+    `ingest_terrain` processes every tile it is given across the tile's
+    whole extent, so without this a build pays for every `.hgt` file
+    physically staged in `--srtm-dir` -- 288 for `afghanistan-full`, of
+    which the region needed 158 (`plans/multi-theatre-afghanistan/
+    performance.md` finding #3). The test runs in DCS space, the
+    authoritative one (see `build.region`), against `_tile_dcs_bbox`'s
+    sampled tile envelope.
+
+    `margin_m` keeps the out-of-region neighbours whose cells feed an
+    in-region tile's processing-window margin: a neighbour's context only
+    reaches `margin_cells` cells past the shared edge, so one further than
+    that from the region cannot change any in-region cell's result.
+
+    Only filenames are parsed -- no tile is read -- and a path that
+    doesn't exist is dropped, same as `ingest_terrain`'s own convention.
+    """
+    min_x = region.centre_x - region.half_extent_x_m - margin_m
+    max_x = region.centre_x + region.half_extent_x_m + margin_m
+    min_z = region.centre_z - region.half_extent_z_m - margin_m
+    max_z = region.centre_z + region.half_extent_z_m + margin_m
+    kept: list[Path] = []
+    for path in srtm_tile_paths:
+        if not path.exists():
+            continue
+        sw_lat, sw_lon = srtm_tile_sw_corner(path)
+        tile_min_x, tile_max_x, tile_min_z, tile_max_z = _tile_dcs_bbox(
+            region.theatre, sw_lat, sw_lon, 1.0
+        )
+        if (
+            tile_max_x >= min_x
+            and tile_min_x <= max_x
+            and tile_max_z >= min_z
+            and tile_min_z <= max_z
+        ):
+            kept.append(path)
+    return kept
 
 
 def _split_core_segments(
@@ -263,7 +309,9 @@ def ingest_terrain(
     given tile(s) produce across their *whole* tile extent, not just the
     region's own smaller bbox; see `plans/landform-geomorphons/
     implementation.md` for why this is left unaddressed rather than
-    designed here.
+    designed here. `build.pipeline` narrows the tile list to the region
+    first with `tiles_for_region`, which bounds the cost; the geometry of
+    a kept tile is still stored across its whole extent.
 
     `source_id` is this build's own elevation `Source` row -- cache rows
     carry no `source_id` (a cache outlives any one build), so every tile's
