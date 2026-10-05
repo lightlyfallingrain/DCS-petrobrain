@@ -48,8 +48,11 @@ REACQUIRED` event whose contact currently belongs to a group is filtered
 out of the event candidate pool before scoring (never consumed -- it
 surfaces instead as the group's own line changing, see `belief.groups`'
 module docstring on why a membership change is always a live disclosure
-trigger); every other kind still competes and speaks exactly as it does
-today, grouped contact or not. `group_candidates` (the event-level,
+trigger). `_WATCHED_ONLY_KINDS` is filtered by group membership too, but
+differently -- suppressed down to *one member's* line rather than folded
+into the group's, see that constant's own docstring -- and every remaining
+kind still competes and speaks exactly as it does today, grouped contact or
+not. `group_candidates` (the event-level,
 report-space bucketer this replaces) is retired -- see below.
 
 **`group_facts`/`render_group_report` are report-space bucketing, kept as
@@ -221,8 +224,9 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: regardless (see `belief.events`'s own docstring for `CONTACT_MOTION_
 #: CHANGED`), and whether it is ever *spoken* depends on attention at the
 #: moment `tick` considers it -- so a contact watched after its event fired
-#: still gets the callout. Never filtered by group membership either (see
-#: module docstring's "Group disclosure now speaks for its members") --
+#: still gets the callout. Filtered by group membership since the
+#: performance review below, but **never folded into the group's own line**
+#: (see module docstring's "Group disclosure now speaks for its members") --
 #: these kinds render through `_contact_report_text`'s `event_clause`/`lead`
 #: affixes (`belief.speech`), which `render_group_report`/`render_group_
 #: disclosure` have no concept of, so folding one into a group's own line
@@ -233,11 +237,15 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: member of a group but one, exactly as it already does for `CONTACT_
 #: DETECTED`/`CONTACT_REACQUIRED` -- but the surviving line is the *leading
 #: member's*, affix and all, not a group-level "the group is moving". That
-#: is the paragraph above, unchanged: there is no group-level rendering of
-#: these kinds to fold into, and inventing one would drop the affix, which
-#: is the fact the event exists to report. The suppression fixes the
-#: cardinality (N lines about one group becomes one); the wording still
-#: names one member.
+#: is the no-folding half of the paragraph above, which the suppression
+#: leaves intact: there is no group-level rendering of these kinds to fold
+#: into, and inventing one would drop the affix, which is the fact the
+#: event exists to report. The suppression fixes the cardinality (N lines
+#: about one group becomes one); the wording still names one member. Which
+#: member is decided by `belief.speech.may_be_callout_keeper` -- always one
+#: whose own effective attention passes the gate above, or the group's
+#: whole set of these kinds would be silenced by a keeper this filter then
+#: refuses to speak for.
 _WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
 )
