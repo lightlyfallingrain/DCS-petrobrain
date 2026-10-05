@@ -1704,14 +1704,33 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   at both ends, and the finding that *does* dominate the tick was on nobody's list. `BL-B30`,
   `BL-B31` and `BL-B26` each carry the correction in their own entries; this milestone is the fix.
 
-  **Stage 1 — settle the intended poll rate. USER DECISION, blocks nothing else but re-ranks
-  everything.** `logger.py:999` is `_DEFAULT_POLL_INTERVAL_S = 1.0` and always has been
-  (`abf49cd`, 2026-09-08). Is 1.0 s intended, or 0.2 s? No optimisation closes a gap a constant
-  opens. Two things turn on the answer: at 0.2 s Stages 2 and 3 stop being worthwhile and become
-  mandatory, and `gaze.FOCUS_DWELL_S = 2.0` — currently twice the poll period — may need to move
-  either way. Also fix the loop shape while here: `stop_event.wait(poll_interval_s)` runs *after*
-  the work (`logger.py:1552`, `:1192`), so the period is `work + interval`; a deadline-based sleep
-  makes the configured number mean what it says.
+  **Stage 0 — the observability gate applies to every callout kind, not two. IN FLIGHT as
+  `fix/callout-observability-gate`.** Filed as part of this milestone because the pilot heard it and
+  nothing else on this list is audible to him. Of 357 spoken lines in the 2026-10-05 sortie, **20
+  named clock hours 5, 6 or 7 — which `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` declares
+  unviewable** — and they carried classification: *"unit 7 o'clock, very close is Tigr armored
+  vehicle"* with the gaze at 11 o'clock, *"unit 6 o'clock, very close is infantry"* with the gaze at
+  12. Same class as the 2026-09-27 fix, which built the gate (FOV + cockpit mask + LOS with a grace
+  window) and wired it to **crossing and motion callouts only**; classification and group-disclosure
+  lines never went behind it. Decision 11. The gate must key on observability, not on the rendered
+  hour — believed bearing lags, so a contact genuinely at 8:30 may legitimately render as "8
+  o'clock".
+
+  **Stage 1 — the loop shape and the stale docstrings. The rate question is SETTLED: 1.0 s
+  stays.** Decided 2026-10-06 in the `/explore` conversation
+  (`plans/post-review-fixes/explore-notes.md`, "Still open, and decided by the orchestrator rather
+  than re-asked"). The user was asked whether anything felt late and answered with the
+  *"unit 7 o'clock"* callout — which turned out to be a masked-hour observability defect (see
+  Stage 0 below), not latency. So the evidence for raising the rate evaporated, and 0.2 s would
+  multiply speaking opportunities fivefold against a pilot whose standing complaint has been report
+  volume. Revisit only if a future sortie produces lateness that is *not* an observability defect.
+
+  What remains here is small: `stop_event.wait(poll_interval_s)` runs *after* the work
+  (`logger.py:1552`, `:1192`), so the realised period is `work + interval` rather than `interval` —
+  sleep to a deadline instead, so the configured number means what it says. And correct the three
+  stale "5 Hz" docstrings (`logger.py:1446`, `belief/brain_client.py:12`/`:274`), which are what
+  produced `BL-B30`'s wrong premise and a wrong budget figure in an agent's own memory.
+  `perception/motion.py:91`'s *behavioural* 5 Hz assumption is `BL-B34` and goes to a debugger.
 
   **Stage 2 — `group_salient_ids`, ~300 ms of every poll, 8.1× measured.** The largest single term
   in the tick, 58 % of a 300-poll cProfile, and unconditional.
@@ -1732,24 +1751,51 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   other half of this cost is world-model's and is `world-model/ROADMAP.md`'s `M11` Stage 2 — the
   two compound, so measure after both.
 
-  **Stage 4 — the LOS join hole, and an observable for silent fallback (= `BL-B31`, with a cause).**
-  The 77 % fallback share is not timing: the join key is `unit_name`, which aircraft-layer declares
-  `None` for scenery and statics, so **nameless objects can never receive a live verdict** and
-  duplicate-named ones are dropped. Buildings are exactly the population `X-B29` was built for.
-  Order within the stage, deliberately not the order of depth:
-  1. **The observable first** — a per-poll live/fallback counter pair plus a `kind: "los_coverage"`
-     row in the belief-truth log. A day's work, it makes the rest measurable, and its absence is
-     why this was discovered by reducing a 3.55 GB file after the fact. It must not become a
-     callout; the pilot cannot act on it mid-flight.
-  2. **`unit_name` + a `los_join` reason enum into `DetectionTrace`**, then one sortie, then reduce.
-     No existing trace can confirm the diagnosis — the trace carries `object_type` only.
-  3. **Then the join itself**, with real data in hand. Fail-open vs fail-closed on the admission
-     gate is a user decision (risk matrix in the audit's §A4): the engagement gate's fail-open is
-     *right*, the admission gate's fail-open admits something never perceived, which is a
-     no-omniscience question rather than a tuning one.
-  4. Carry provenance out of the primitive so the two answers are distinguishable at all —
-     `naked_eye_source.py:348/976` stamps one string either way and `visibility.py:785-790`
-     returns identical results. This half depends on `world-model/ROADMAP.md`'s `M11` Stage 1.
+  **Stage 4 — REWRITTEN 2026-10-06 BY USER DIRECTION. World-model LOS leaves the live path; it
+  does not get an observable.** The user, reading this milestone's own source reports:
+
+  > *"As discussed when doing the DCS LOS change, world model LOS _must not be used_. It is to be a
+  > *testing* only tool, not for live flight. Not only because of performance, but especially for
+  > *correctness*."*
+
+  **This reverses the stage as originally filed**, and the correction is kept visible because the
+  mistake is instructive: both review reports proposed making the fallback *observable* — a coverage
+  counter, a provenance field, a tolerance derived from the store — which is the right fix for a
+  fallback that is allowed to exist. It is the wrong fix for one that must not run. An observable
+  reporting a 77 % share of a path that should be 0 % measures the wrong thing. The direction was
+  already in `docs/acceptance/2026-10-05-sortie-feedback.md` before either report was written, and
+  neither report nor this milestone picked it up. Decisions 1 and 2 of
+  `plans/post-review-fixes/explore-notes.md`.
+
+  **The order is forced, and getting it wrong blinds Petrovich.** Measured from the sortie trace
+  during the explore: **323 of 425 admitted objects never received a live verdict once**, while
+  2,602 of 2,621 polls carried *some* verdict. So failing closed today would drop 76 % of objects.
+  Join first, fallback removal second.
+
+  1. **Settle the join key.** The cause is not timing: of the no-verdict admitted rows, **4,668 were
+     inside the commanded ±90° wedge against 300 outside** (ownship heading estimated per poll from
+     that poll's own verdict-bearing rows), so these are objects Petrovich was looking straight at.
+     Two mechanisms: `unit_name` is `None` for scenery/statics
+     (`aircraft-layer/src/schema/world_objects.py:109`), and `name_counts[name] > 1`
+     (`perception/naked_eye_source.py:1118`) drops every unit sharing a name. **The user has
+     authorised DCS unit IDs for this** (decision 3), bounded to standing in for what a human could
+     have re-identified anyway — *"this was here a second ago, it's moved 20 m, it's still the same
+     unit"* — never as an oracle across occlusion or long gaps. **Blocked on a probe**:
+     `aircraft-layer/research/2026-09-10-worldobjects-object-id-stability-tacview-confirmation.md`
+     line 139 leaves open whether `LoGetWorldObjects`'s key equals `Unit:getObjectID()`,
+     `Unit:getID()` or neither. Probe written and queued for the user to fly.
+  2. **Statics and scenery are not in the feed at all**, which no join can fix.
+     `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua:261-263` walks
+     `coalition.getGroups()` → `grp:getUnits()`, so `coalition.getStaticObjects` and scenery never
+     appear in a result. An `outpost` shows up in the no-verdict population. Lua-side change.
+  3. **Then fail closed**: no live verdict means not admitted, and `world-model`'s
+     `line_of_sight_clear` is not called from the live path. Keep it for offline tests
+     (`WM-B8`'s fixture grid is the intended consumer) — and note that even for that use it has a
+     real bug, `world-model/ROADMAP.md`'s `M11` Stage 1: it returns `True` when every sample is
+     void.
+  4. **A coverage counter is still worth having, as a regression guard rather than an observable.**
+     Once the live path is the only path, a nonzero fallback count means a defect, and that is a
+     much more useful signal than a share. Cheap, and it is what would have caught this on day one.
 
   **Stage 5 — roll the logs per sortie.** Three writers `open("a")` with no rotation: ~290 KB/poll
   of detection trace (one row per candidate whatever the outcome), ~50 MB/min, 1–3.5 GB/sortie,
@@ -1779,6 +1825,102 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   budget is 200 ms and Stages 2–3 are load-bearing rather than tidy; at 1.0 s they buy headroom for
   `BL-B24`'s churn instead. Stage 4's step 2 gates the rest of Stage 4 on one sortie, so this
   milestone cannot complete in one pass without a flight.
+
+- [ ] **BL-12 — Group-level contact identity and continuity. NOT STARTED, Architect pass in flight
+  2026-10-06.** Plan: `plans/group-contact-identity/plan.md`. This is the milestone that dissolves
+  `BL-B24`'s churn, and all of it comes from the 2026-10-06 `/explore` conversation
+  (`plans/post-review-fixes/explore-notes.md` §2, §3, §5 — cite its numbered decisions).
+
+  **The finding that makes it a milestone rather than a tuning task**: measured nearest-neighbour
+  spacing between distinct tracked objects in the 2026-10-05 sortie is **16 m median** (p25 6 m,
+  p75 55 m; 11–23 m in every range band), against a gate that inflates to **600 m after 30 s
+  unseen** at the current flat `GATE_GROWTH_RATE_MPS = 20.0`. **No radius is both**, so per-unit
+  identity is not recoverable from position at real DCS spacing. That is the same fact the group
+  contact model already established in the *resolution* domain — twelve units at 9 km are one mark —
+  reappearing in the *identity* domain. At the group grain the numbers invert and become workable:
+  cluster-to-cluster separation is 236 m median at a 100 m link, 625 m at 250 m.
+
+  It also closes a decision this project explicitly parked:
+  `plans/contact-duplication-ambiguity-runaway/debug.md` escalated the gate-sizing trade-off to
+  Architect and said picking a value *"requires knowing what real DCS mission object spacing and
+  naked-eye range distributions actually look like, not just a code read."* Nobody measured it for
+  three weeks. The measurement says the trade-off has no solution at the unit grain.
+
+  Shape, per the user's own list of what makes something a new unit — *"It not being **with** the
+  group I remember"*, count exceeding memory, composition differing, displacement implausible for
+  the type, a different *kind* of group:
+
+  - **Matching is group-level**: a remembered group against an observed cluster.
+  - **The ambiguity policy inverts** (decision 5). `ingest`'s "two or more plausible candidates →
+    found a new contact" becomes "ambiguity resolves toward the remembered group; founding a new one
+    requires positive evidence". This inverts the named `plans/pb2-contact-memory/plan.md` Stage 1
+    invariant "never a guessed merge" — **whose premise, not whose logic, was wrong**: refusing to
+    guess a merge is correct in a saturated world where "a different unit" is a cheap alternative
+    explanation, and the user says DCS is not that world (*"DCS missions are not usually saturated
+    with units… DCS just cannot handle so many units"*). Nothing had written the density assumption
+    down, which is why it survived. The user stated the trade as an error preference: *"If a new
+    group is mistakes as existing group, it's the unusual occurence and I can live with that easier
+    than new group beliefs popping up all the time."*
+  - **Air defence is the exception** (decision 6): positive confirmation required to inherit an
+    identity, because `belief/threat.py` keys envelope warnings on believed classification, so a
+    wrongly-continued SAM **suppresses the warning** rather than mislabelling a contact.
+  - **Per-classification uncertainty growth** (decision 8), well below 20 m/s — the user:
+    *"20 m/s is fast for most units. Armor can barely make that at full speed."* — and ~0 for
+    entrenched classes.
+  - **Road-following is directional and graph-shaped** (decision 9): a corridor along the road graph
+    branching at junctions (`M10`'s junctions already exist and are consumed in-process), monotone
+    in direction because DCS units follow routes and do not reverse, with "spread off-road and
+    stopped" a recognised post-attack state that expires when they resume.
+  - **Identity is spoken** (decision 7): *"that column, now 2 o'clock, three kilometres, still moving
+    north on the road"*.
+
+  **Scope boundary with `BL-8`** (decision 10): the belief layer keeps seconds-to-a-minute — the
+  pop-up-from-behind-a-ridge case. Ten-minute-scale re-identification and spatial expectation are
+  the memory layer's.
+
+  **Milestone completion question**: this changes `BL-8`'s shape before `BL-8` starts, and it
+  partially supersedes `BL-B24`, `BL-B25` and the parked half of
+  `plans/contact-duplication-ambiguity-runaway/`. It does **not** depend on the unit-id probe —
+  the plan must stand without it and say what improves if it lands.
+
+- [ ] **BL-13 — The crew query path: `report`/`describe` and the shape of an answer. NOT STARTED,
+  Architect pass in flight 2026-10-06.** Plan: `plans/crew-query-path/plan.md`. From
+  `plans/post-review-fixes/explore-notes.md` §7, §8, decisions 12 and 13.
+
+  **Why this outranks most of the backlog**, in the user's own words: *"I did see a lot of unknown
+  detected units in the degub ASCII graph, but getting usefull reports was difficult. Also because
+  "report" comamnds did either not STT correctly or the command logic did not exits."* Detection
+  works; **the query path is the bottleneck**. He could see in the debug view that Petrovich knew
+  things and could not get them out of him. That moves `BL-B28` (`report right` → `say_again` while
+  `report left` → `confirm`, same session, *higher* confidence on the failing one — a phrase-table
+  defect, not a recognition accident) from a vocabulary chore to the only channel to everything the
+  belief layer holds.
+
+  **The grammar** (decision 12): `report|describe [what] [where] [how far]`, every slot optional —
+  his own example `"report 2 o'clock close"` has no *what*. *what* is `group` or a classification;
+  *where* is typically a clock hour but also cardinal (`north`) or landmark-relative (`south of
+  <village>`); *how far* is `near` < 2 km / `medium distance` 2–5 km / `far` 5 km+. The
+  landmark-relative slot needs world-model place names and so inherits `WM-B1`'s Latin-script
+  problem (DCS cannot render non-Latin-1, so Arabic names arrive as blanks) — `WM-B1` is already
+  open and already forcing a rebuild, so it rides along.
+
+  **The answer shape** (decision 13), settled by putting two mock answers side by side and taking
+  the user's choice: **summaries, not enumerations.** *"B. I can also look myself, so a summary is
+  good, I then know where and what to look for."* The principle is that a report **aims the pilot's
+  eyes**; it does not transfer the picture. So the answer's grain follows the belief's grain —
+  groups, counts, a dominant classification, a bearing span, a distance band — it degrades
+  gracefully under uncertainty where an enumeration would have to lie or hedge four times, and it
+  costs less time to say, which matters in a hover.
+
+  Folds in `plans/sortie-2026-10-05-refinements/` item 2 (the `describe` synonym — check
+  `feature/sortie-refinements` for what already exists before building), `BL-B28`, `BL-B29`
+  (`cancel all`), and the D10 structured-candidate gap, which is the same resolution problem one
+  step along.
+
+  **The invariant question the plan must answer**: this is a *pull* channel, so no-omniscience has
+  to hold on a query the pilot initiated about a direction Petrovich may not have looked at. A
+  queried direction is not the same case as an unprompted callout — but it is not obviously the
+  opposite either.
 
 ## Backlog (body-layer)
 

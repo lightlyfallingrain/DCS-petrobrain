@@ -486,6 +486,34 @@ sortie actually exercises it, and say which one.
   **Why a milestone and not backlog items**: three of these must land *with* the `WM-B1` + `WM-B6`
   full-theatre rebuild or they cost a second one, and the rebuild is already committed.
 
+  **REVISED 2026-10-06 BY USER DIRECTION — the primitive is testing-only, which re-ranks this
+  milestone's own stages.** The user, reading the reports that produced it:
+
+  > *"As discussed when doing the DCS LOS change, world model LOS _must not be used_. It is to be a
+  > *testing* only tool, not for live flight. Not only because of performance, but especially for
+  > *correctness*."*
+
+  So the consumer of `line_of_sight_clear` is going away: `body-layer`'s `BL-11` Stage 4 removes it
+  from the live path (join first, then fail closed — 323 of 425 objects in the 2026-10-05 sortie
+  never got a live verdict, so the order matters). Three consequences for the stages below, and the
+  correction is kept visible because the reports got this wrong in a specific, instructive way —
+  they proposed making a silent fallback *observable*, which is right for a fallback allowed to
+  exist and wrong for one that must not run:
+
+  - **Stage 1 still stands, and the bug is still real** — an offline test oracle that answers
+    "clear" when it has no data is worse than useless, because the tests built on it
+    (`WM-B8`'s fixture grid is the intended consumer) would silently pass. But its *urgency* drops
+    from "a live gate is lying to the pilot" to "a test oracle will lie to us".
+  - **Stage 2 keeps its priority for a different reason.** Deriving the tolerance from the store no
+    longer protects a live gate; it protects every *other* elevation consumer, and it is still
+    `WM-B3`'s literal mechanism. The 12 m constant itself is on its way out of the live path with
+    its only caller, which the user had already said in
+    `docs/acceptance/2026-10-05-sortie-feedback.md`: *"becomes obsolete and incorrect. It may be
+    used in test code when LOS is simulated offline, but must not be used in actual code."*
+  - **Stages 3–5 are unaffected and become the milestone's centre of gravity** — they are about the
+    query layer, the build and the store, none of which depends on the LOS primitive's fate.
+    Stage 3 in particular is still rebuild-gated.
+
   **Stage 1 — `line_of_sight_clear` cannot say where its answer came from, and returns `True` when
   it knows nothing.** `query/line_of_sight.py:125-180` returns a bare `bool`: no source, no
   tolerance, no record of how many samples were skipped. A sample with no elevation data
