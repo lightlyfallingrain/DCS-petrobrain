@@ -12,10 +12,15 @@ deliberately not asserted here: it is noise in CI, and the measurement that
 justified the change lives in the research note.
 
 `_reference_group_salient_ids` below is the pre-change loop verbatim: the
-`_resolvable` filter plus a `_cohesive(resolvable[i], resolvable[j], ...)`
-call per pair. Both helpers are still live, tested functions -- the loop
-simply stopped calling the second one -- so this really does exercise the
-old path rather than a paraphrase of it.
+resolvability filter plus one cohesion test per pair. **Its gate and its
+predicate are this module's own copies of the pre-change bodies
+(`_reference_resolvable`, `_reference_cohesive`), deliberately not imported
+from `group_salience`.** Importing them made the file tautological: Stage 2
+turned `_resolvable` into a wrapper over `_resolvable_terms` and made
+`_cohesive` delegate to `_cohesive_from_terms`, both of which production's
+own loop uses -- so a change to the gate or the formula moved both sides of
+every equality together and the file still passed. Only the tuning
+constants are shared, because those are calibration rather than mechanism.
 
 Scenes are built deterministically (a fixed-seed `random.Random`) over mixed
 object types and a range spread that straddles
@@ -32,15 +37,17 @@ from collections.abc import Sequence
 
 import pytest
 
+from perception import object_model
 from perception.association import WorldObjectCandidate
-from perception.geometry import GeoPosition
+from perception.clustering import angular_separation_rad, angular_size_rad
+from perception.geometry import GeoPosition, range_m
 from perception.group_salience import (
+    GROUP_COHESION_GAP_UNIT_WIDTHS,
     GROUP_MIN_MEMBERS,
-    _cohesive,
-    _resolvable,
     group_salient_ids,
 )
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
+from perception.visibility import RESOLUTION_ANGULAR_RADIUS_RAD
 
 _OBSERVER = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
 
@@ -52,14 +59,62 @@ _OBSERVER = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
 _OBJECT_TYPES = ("T-72B", "Ural-375", "Infantry AK")
 
 
+def _reference_resolvable(
+    candidate: WorldObjectCandidate, observer: GeoPosition, optic: Optic
+) -> bool:
+    """`group_salience._resolvable`'s pre-Stage-2 body, copied here rather
+    than imported -- the resolvability gate, including the
+    `presence_range_mult` factor.
+
+    **The copy is the point.** Importing `_resolvable` made this file
+    tautological for the gate: Stage 2 turned it into a wrapper over
+    `_resolvable_terms`, so both sides of every equality below went through
+    the *same* gate and a change to it moved them together. Verified by
+    mutation -- dropping `* optic.presence_range_mult` from
+    `group_salience.py` left this file passing 15/15 while the imports were
+    in place, and fails it now."""
+    profile = object_model.profile_for(candidate.object_type)
+    target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
+    slant_range_m = range_m(observer, target)
+    theta_size = angular_size_rad(profile.size_m, slant_range_m)
+    return theta_size * optic.presence_range_mult >= RESOLUTION_ANGULAR_RADIUS_RAD
+
+
+def _reference_cohesive(
+    a: WorldObjectCandidate, b: WorldObjectCandidate, observer: GeoPosition
+) -> bool:
+    """`group_salience._cohesive`'s pre-Stage-2 body, copied here rather
+    than imported -- for the same reason as `_reference_resolvable` above:
+    Stage 2 made `_cohesive` delegate its arithmetic to
+    `_cohesive_from_terms`, which production's own pair loop also calls, so
+    an imported `_cohesive` could not pin the formula.
+
+    The tuning constants (`GROUP_COHESION_GAP_UNIT_WIDTHS` here,
+    `RESOLUTION_ANGULAR_RADIUS_RAD` above, `GROUP_MIN_MEMBERS` below) are
+    still imported on purpose: those are calibration, not mechanism, and a
+    second copy of them would only make this file fail whenever the tuning
+    is legitimately retuned."""
+    target_a = GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m)
+    target_b = GeoPosition(x=b.x, z=b.z, alt_m=b.alt_m)
+    theta_sep = angular_separation_rad(observer, target_a, target_b)
+    profile_a = object_model.profile_for(a.object_type)
+    profile_b = object_model.profile_for(b.object_type)
+    theta_size_a = angular_size_rad(profile_a.size_m, range_m(observer, target_a))
+    theta_size_b = angular_size_rad(profile_b.size_m, range_m(observer, target_b))
+    mean_unit_rad = 0.5 * (theta_size_a + theta_size_b)
+    return theta_sep <= GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad
+
+
 def _reference_group_salient_ids(
     candidates: Sequence[WorldObjectCandidate],
     observer: GeoPosition,
     optic: Optic,
 ) -> frozenset[int]:
-    """The pre-`BL-11`-Stage-2 implementation, verbatim: filter by
-    `_resolvable`, then call `_cohesive` once per pair."""
-    resolvable = [c for c in candidates if _resolvable(c, observer, optic)]
+    """The pre-`BL-11`-Stage-2 implementation, verbatim: filter by the
+    resolvability gate, then apply the cohesion predicate once per pair --
+    both from this module's own copies above, not from the module under
+    test."""
+    resolvable = [c for c in candidates if _reference_resolvable(c, observer, optic)]
     n = len(resolvable)
     parent = list(range(n))
 
@@ -76,7 +131,7 @@ def _reference_group_salient_ids(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if _cohesive(resolvable[i], resolvable[j], observer):
+            if _reference_cohesive(resolvable[i], resolvable[j], observer):
                 union(i, j)
 
     groups: dict[int, list[int]] = {}
@@ -149,7 +204,14 @@ def test_hoisted_loop_matches_reference_across_scenes(seed: int) -> None:
 def test_hoisted_loop_matches_reference_under_a_raised_optic() -> None:
     """`presence_range_mult` only enters the resolvability bound, which the
     hoist moved -- so the non-default optic is the case most likely to
-    diverge if the hoist dropped the multiplier."""
+    diverge if the hoist dropped the multiplier.
+
+    This now holds, which it did not while the reference imported
+    `_resolvable`: dropping `* optic.presence_range_mult` from
+    `group_salience.py`'s gate makes this test fail (production 23 salient
+    ids against the reference's 43), while `UNAIDED_OPTIC`'s own
+    `presence_range_mult` of 1.0 leaves the other tests here passing -- which
+    is exactly why the raised optic earns its own case."""
     candidates = _scene(220, seed=11)
 
     assert group_salient_ids(candidates, _OBSERVER, BINOCULAR_OPTIC) == (
