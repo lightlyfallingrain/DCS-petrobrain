@@ -111,3 +111,34 @@ decision 5 inverts, so rewriting them *is* the decision taking effect rather tha
 `test_contacts.py:132` (`test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`), `:183`
 (reuses its geometry by name), and the `test_callouts.py:489-554` merge-echo fixture built on that
 behaviour. Proceeding; flagged because the rule says to flag it.
+
+### A watched group's range-crossing and motion lines become ONE line for the group
+
+Performance found that `watch group <where>` tagging all N members turns one event stream into N —
+8 members × 2 `describe_contact` calls ≈ **820 ms added to one tick** (1.6 s with motion events),
+reproducible from a single player command on exactly the convoy case the feature exists to serve.
+The fix reuses the suppression rule already applied to contact detections one branch above. It
+needed a product call on the wording, and I took it rather than waking you.
+
+**One line for the group**, not one member's line — because it is a direct application of decision 13
+from the same conversation: *"B. I can also look myself, so a summary is good, I then know where and
+what to look for."* A report aims your eyes; the answer's grain follows the belief's grain. It also
+matches what detections already do for a grouped contact.
+
+So you will hear *"the group is moving"* / *"group at two kilometres"* rather than up to eight
+separate member lines. Say if you want member-level lines back for watched groups specifically.
+
+### `CONTACT_DETECTED` / `CONTACT_REACQUIRED` are now gated by observability too
+
+The masked-hour fix gates **every** callout kind, not just the two that misfired. The Debugger's
+reasoning: the defect's shape *is* a per-kind list that the next kind fails to join. Near-nil in
+practice — both perception channels already respect the mask at founding — but it does mean a
+contact founded ahead and spoken about several seconds later from astern now goes **quiet** instead
+of arriving late. Narrowing it to the two kinds is a one-line change if you would rather hear it late
+than not at all.
+
+Related, and deliberately not decided: **this fix silences, it does not re-time.** Those 17 lines
+become unspoken rather than spoken correctly. The contacts are still believed, still in the debug
+view, still answerable by `report`. Whether some should reach you another way — an "I've lost sight
+of it" marker — is a product question nobody has answered.
+
