@@ -66,7 +66,7 @@ relief, that is the single most useful thing you can bring back.
 
 That path — `CONTACT_ENGAGEMENT_CHANGED` — is **exempt** from the gate and must still speak
 (*"Danger, …"*, and with world enrichment it also speaks the believed hour, range and unit type:
-*"Danger, ZU-23-3, six o'clock, 1.0 km."*). It is the riskiest judgement on the branch.
+*"Danger, ZU-23-3 Sergey, 6 o'clock, 1 kilometre."*). It is the riskiest judgement on the branch.
 
 **Do.** `watch nearest air defence` on a AAA/SAM site. Fly past it and put it behind you — hour 5,
 6 or 7. Then fly in close enough that you are inside its firing envelope.
@@ -74,7 +74,21 @@ That path — `CONTACT_ENGAGEMENT_CHANGED` — is **exempt** from the gate and m
 **Expect.** He speaks. If he goes silent there, the exemption is not working and that is a bug
 worth reporting immediately.
 
-**Why it is exempt, in one line:** an envelope change is a threat cue about something he already saw
+**Narrowed after this card was first written (round 4, 2026-10-06).** The exemption used to cover
+the *whole* kind, and a kind has two transitions — so `"Safe from ZU-23-3, four o'clock,
+2.0 kilometres."` would also have been spoken about a contact behind the mask. A security pass
+pointed out that a close-out call is a *comfort*, not a threat cue the pilot needs in order to
+evade, so it did not meet the bar the exemption was granted on, and one case of the original
+17-line defect survived through it. **Only the entering transition is exempt now**; the leaving one
+is gated like everything else, deferred, and retired if the bearing never comes back.
+
+**So do not expect to hear the call that closes a "Danger" you already heard.** Whether you *want*
+it back is queued as Q8 in `todo/questions.md` — it is a one-line reversal, and the argument for it
+is real: an unclosed warning leaves you believing you are still inside an envelope you have left.
+If flying this makes the missing close-out feel worse than the extra line would have, say so and it
+goes back.
+
+**Why the entering call is exempt, in one line:** an envelope change is a threat cue about something he already saw
 and you already asked him to watch, derived from that belief plus your own position — and because
 the grace window equals the maximum age, gating it would lose the warning *permanently*, not late.
 An astern SAM that starts being able to shoot you would simply go quiet.
@@ -198,7 +212,7 @@ are inside its envelope.
 
 **Record.**
 - [ ] Did he warn you? (Silence here is the single most important failure on this card.)
-- [ ] Hearing a *"Danger, ZU-23-3, six o'clock"* about something he cannot see — does that feel
+- [ ] Hearing a *"Danger, ZU-23-3 Sergey, 6 o'clock"* about something he cannot see — does that feel
   right to you, or does it feel like the same omniscience you asked to be fixed? **This is the
   decision you are being asked to ratify or overrule.**
 
