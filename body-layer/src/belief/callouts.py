@@ -60,15 +60,19 @@ defect) and `CONTACT_DETECTED`/`CONTACT_REACQUIRED` (close to a no-op,
 since both perception channels already constrain founding) -- and the
 other two, `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED`, were
 already gated at emission and are now gated here as well. The sixth,
-`CONTACT_ENGAGEMENT_CHANGED`, is **exempt** (decided in the review loop,
-2026-10-06, on the Reviewer's recommendation, and recorded for the user
-to overrule): it is a threat cue about an already-perceived,
+`CONTACT_ENGAGEMENT_CHANGED`, is **exempt in its entering transition
+only** -- `engaged is True`, the *"Danger, ..."* line (decided in the
+review loop, 2026-10-06, on the Reviewer's recommendation, narrowed to
+the one transition by that day's security deep analysis, and recorded for
+the user to overrule): it is a threat cue about an already-perceived,
 already-watched contact, derived from believed classification plus
 ownship's own position rather than from a fresh look, and gating it would
 silence an astern SAM or ZSU entering its firing envelope *permanently*
-rather than late. The exemption lives in `_OBSERVABILITY_EXEMPT_KINDS`,
-whose docstring carries the whole argument and the bar anything else must
-clear to join it.
+rather than late. Its *leaving* transition (`engaged is False`, the *"Safe
+from ..."* line) is gated like everything else -- nothing is evaded by
+hearing it, so it fails the exemption bar's first property. The exemption
+lives in `_OBSERVABILITY_EXEMPT_KINDS`, whose docstring carries the whole
+argument and the bar anything else must clear to join it.
 
 **This gate is for the *push* path only.** A pilot-initiated `report`
 (`CrewConsole._handle_report`) must never be filtered by it -- belief
@@ -264,7 +268,12 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 )
 
 #: The one kind the observability gate in `CalloutScheduler.tick` does
-#: **not** apply to. Decided in the review loop on 2026-10-06, on the
+#: **not** apply to -- **in its entering transition only**. The gate tests
+#: `event.kind in` this set **and** `event.engaged is True`, so membership
+#: here is necessary but not sufficient: see "The exemption is
+#: per-transition" below for why the leaving transition is gated, and the
+#: gate itself for the reachable scenario that narrowed it.
+#: Decided in the review loop on 2026-10-06, on the
 #: Reviewer's recommendation -- **not** by the user, who was not consulted
 #: on it; it is recorded for them to overrule in `plans/callout-
 #: observability-gate/debug.md` and in `todo/questions.md`'s "Decided
@@ -286,15 +295,21 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: **What the exempt line actually says is broader than its trigger.** It
 #: renders through `_contact_report_text(facts, lead="Danger, ")`, so with
 #: an `EnrichmentContext` present it also speaks the believed clock hour,
-#: the believed range and the believed unit type -- e.g. `"Danger, ZU-23-3,
-#: six o'clock, 1.0 km."`. Every one of those facts is still belief-derived
-#: (`_classification_facts` reads `Contact.classification`, never
-#: `last_class_raw`; the geometry is `relative_geometry` over
-#: `Contact.last_position`) and is word-for-word what the deliberately
-#: ungated *pull* path already discloses on a `report`, so this is not a
-#: leak. It is recorded because a future reader deciding a new kind's
-#: membership on "it only speaks the cue" would be working from a narrower
-#: picture than the code's.
+#: the believed range and the believed unit type -- e.g. `"Danger, ZU-23-3
+#: Sergey, 6 o'clock, 1 kilometre."`. Every one of those facts is still
+#: belief-derived (`_classification_facts` reads `Contact.classification`,
+#: never `last_class_raw`; the geometry is `relative_geometry` over
+#: `Contact.last_position`, which cannot refresh behind the cockpit mask
+#: because both perception channels are mask- or hemisphere-constrained)
+#: and is word-for-word what the deliberately ungated *pull* path already
+#: discloses on a `report`, so this is not a leak. It is recorded because a
+#: future reader deciding a new kind's membership on "it only speaks the
+#: cue" would be working from a narrower picture than the code's.
+#: `test_exempt_line_discloses_only_belief_derived_facts` pins the rendered
+#: string, so this paragraph can no longer drift away from it -- which it
+#: already had: the example here read `"six o'clock, 1.0 km."` until
+#: 2026-10-06, a wording `belief.speech`'s own `_format_range_km` had
+#: since replaced.
 #:
 #: **Why gating it would be worse than asymmetric.** Because `CALLOUT_
 #: OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`, a watched threat
@@ -334,6 +349,29 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #:
 #: Either property alone admits something that should stay gated --
 #: `CONTACT_RANGE_CROSSED` satisfies (2) and fails (1).
+#:
+#: **The exemption is per-transition, not per-kind, and property (1) is
+#: what makes it so** (security deep analysis, 2026-10-06, Finding 1). A
+#: kind is not one line; `CONTACT_ENGAGEMENT_CHANGED` renders two opposite
+#: ones (`belief.speech`), and only one of them is a threat cue the pilot
+#: needs in order to evade:
+#:
+#: - `engaged is True` -> *"Danger, ..."*. Passes (1) and (2). Exempt.
+#: - `engaged is False` -> *"Safe from ..."*. Passes (2) and **fails (1)**
+#:   -- nothing is evaded by hearing it, and its silence costs the pilot
+#:   the chance to *stop* evading, which is a comfort rather than a cue.
+#:   Admitted on (2) alone, which this bar explicitly forbids. **Gated.**
+#:
+#: So a candidate new member must name *which transition* it is claiming
+#: the exemption for, and clear both properties for that transition --
+#: adding a kind here without a matching condition at the gate exempts
+#: every line it can render, which is how the "safe from" direction slipped
+#: through the first time. The user's standing complaint about Petrovich is
+#: report *volume*, so the conservative branch is the default: the leaving
+#: call defers like everything else and is retired by `CALLOUT_MAX_AGE_S`
+#: if the bearing never returns. The counter-argument -- that a pilot who
+#: heard "Danger" is owed the "Safe from" that closes it, seen or not -- is
+#: real, and is queued in `todo/questions.md` for the user to reverse.
 _OBSERVABILITY_EXEMPT_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_ENGAGEMENT_CHANGED}
 )
@@ -956,8 +994,10 @@ class CalloutScheduler:
             # DETECTED`/`CONTACT_REACQUIRED` -- and two, `CONTACT_MOTION_
             # CHANGED` and `CONTACT_RANGE_CROSSED`, were already gated at
             # emission and are gated here too. The sixth, `CONTACT_
-            # ENGAGEMENT_CHANGED`, is exempt (decided in the review loop,
-            # 2026-10-06) -- see `_OBSERVABILITY_EXEMPT_KINDS` for the full
+            # ENGAGEMENT_CHANGED`, is exempt in its *entering* transition
+            # only (`engaged is True`; decided in the review loop,
+            # 2026-10-06, narrowed by the security deep analysis the same
+            # day) -- see `_OBSERVABILITY_EXEMPT_KINDS` for the full
             # reasoning and the bar a further member would have to clear.
             # The gate discriminates on the *contact*, not on the kind, so
             # every templated kind is in scope unless that set says
@@ -981,9 +1021,29 @@ class CalloutScheduler:
             # genuinely cannot see it. One total gate at the one choke
             # point beats a per-kind list that the next new kind silently
             # fails to join, which is the whole shape of this defect.
+            #
+            # **The exemption is per-*transition*, not per-kind** (security
+            # deep analysis, 2026-10-06, Finding 1 -- see `_OBSERVABILITY_
+            # EXEMPT_KINDS`' bar, whose property (1) is what narrows it).
+            # `CONTACT_ENGAGEMENT_CHANGED` renders two opposite lines
+            # (`belief.speech`): `engaged=True` is *"Danger, ..."*, the
+            # threat cue the pilot needs in order to evade, and
+            # `engaged=False` is *"Safe from ..."*, which evades nothing --
+            # its silence costs the pilot the chance to *stop* evading,
+            # which is a comfort, not a threat cue. So the leaving
+            # transition fails property (1) and is gated like everything
+            # else, deferred and retired by `CALLOUT_MAX_AGE_S` if the
+            # bearing never comes back. Reachable, and the reason this is
+            # not hypothetical: a watched ZU-23-3 identified while visible
+            # speaks its danger call, the pilot egresses, the grace window
+            # lapses astern, and range then opens past `ENGAGEMENT_LEAVING_
+            # HYSTERESIS` -- an unprompted classification-and-position line
+            # about something the cockpit mask says he cannot see, i.e. the
+            # very defect this gate exists to fix, surviving in one case.
             contact = store.contact(event.contact_id)
+            exempt = event.kind in _OBSERVABILITY_EXEMPT_KINDS and event.engaged is True
             if (
-                event.kind not in _OBSERVABILITY_EXEMPT_KINDS
+                not exempt
                 and contact is not None
                 and not store.callout_observable(contact, now_sim)
             ):
