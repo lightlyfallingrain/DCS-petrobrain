@@ -109,7 +109,20 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   about the scripting API, which is native (nothing in `Scripts/` defines `land.isVisible`; only
   `ScriptingSystem.lua`'s `class(SceneryObject, Object)`), so it can only be measured live.
 
-  `aircraft-layer/dcs-export/petrobrain-elevation-cost-probe-hook.lua` (deployed) answers all of
+  **FLOWN 2026-10-05 and answered.** Results:
+  `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`. The desert control did its
+  job: the urban-minus-desert gap was 2-of-40 against 0-of-40, which this project then weighed
+  against Finding 12's 52 rays through 52 located buildings (none blocked) and Finding 16/19's
+  direct contradiction pair, and read as **`isVisible` is terrain-only** — so the control fired
+  exactly as designed, and the 9K113 half of this item collapses as it anticipated. Buildings come
+  from `world.searchObjects` + `VolumeType.SEGMENT` instead (Finding 21: 8.7 µs/sightline, sees
+  buildings in 3D, *cheaper* than the terrain-only call), which is what `X-B29` is being built on.
+
+  The probe also killed the premise of live elevation sampling altogether — see `X-B26`, closed the
+  same day: `land.getHeight` works through the bridge and is bit-identical to the mission-editor
+  probe, but with DCS answering LOS directly almost nothing live needs elevation at all.
+
+  Original plan for the probe follows. It (deployed) answers all of
   it on the next sortie, with a **desert control** — the same 40-pair terrain-only-vs-`isVisible`
   comparison run over Mezzeh and over Deir ez-Zor, because terrain-sampling error appears in both
   and subtracts out while buildings and trees do not. A near-zero urban-minus-desert gap means
@@ -739,7 +752,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `ACT_FLOOR_CANCEL` split — the mechanism is already there and precedented, which is part of why
   accepting now costs little.
 
-- [ ] **X-B26 — Can DCS terrain elevation be read from its own files during flight, rather than
+- [x] **X-B26 — Can DCS terrain elevation be read from its own files during flight, rather than
   probed?** User question, 2026-09-29: *"can we sample directly from DCS terrain grid files
   dynamically during flight, or do we need to live probe DCS."* This gates the whole live-terrain
   sampling design (`plans/live-terrain-sampling/design-input.md`) and the two routes are materially
@@ -767,6 +780,45 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Recommend closing as "probe", with `.surface5` parked as a known-good fallback** should the
   elevation-cost probe (deployed, awaiting a sortie) come back expensive. Leaving `[ ]` pending
   that probe's number and the user's call.
+
+  ### CLOSED 2026-10-05 — neither route. **No live elevation polling at all.**
+
+  **User decision**, after the elevation-cost probe flew and after an audit of who actually reads
+  the elevation grid: *"I'd rather use coarse grid calculated from ridge/valley data and not poll
+  elevation data in DCS, unless another reason comes up that requires it in live missions. Reject
+  elevation probing from live missions with the caveat that something later might require it,
+  build it if that happens."*
+
+  **This closes the question the item asks by rejecting its premise.** Both routes were about
+  getting *better* elevation into a live mission. The audit found almost nothing live needs it:
+
+  - The grid's one real production consumer is `world-model/src/query/line_of_sight.py`, reached
+    from `perception/visibility.py`'s naked-eye terrain gate. `X-B29` moves the **live** LOS answer
+    to DCS, which leaves that primitive serving the offline and test path only — and a test oracle
+    needs to be *deterministic*, not accurate.
+  - `describe_position`'s `elevation.dcs_m` is exposed and has **zero production callers**: its
+    only non-test caller is `perception/geometry.elevation_at`, which nothing in `src` calls.
+  - Geomorphons reads SRTM `.hgt` directly and never touches the stored grid; `query/divides.py`
+    samples no elevation by design; contact enrichment uses the features' own
+    `elevation_range_m` tags; mission-interpreter has no `elevation` reference in `src` at all.
+  - Measured on the 2026-10-04 `syria-full` rebuild: `grid_sample` is **46 MB of a 704 MB store
+    (6.5%)**, 2,365,517 samples, and `elevation` is the only grid kind ever built. So this was
+    never a disk argument.
+
+  **The caveat is part of the decision, not a hedge**: if something later genuinely needs live
+  elevation, build it then. Everything needed to do so is now measured and written down rather
+  than guessed — `land.getHeight` works through the bridge and is bit-identical to the
+  mission-editor probe at eight theatre-spread points; cost is ~215 points per call at a 2 ms
+  budget, budgeting against the **cold** peak (9.2 µs/item) rather than the warm median; and a
+  2601-point batch visibly stutters the frame. See
+  `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`.
+
+  **`.surface5` stays parked, and this makes it less likely to ever be needed** — the fortnight's
+  decode was always justified by live sampling, which is now rejected.
+
+  Replacement work: `WM-B7` in `world-model/ROADMAP.md` (a coarse grid derived from ridge/valley
+  data, as the deterministic test oracle). Low priority, gated on `X-B29` landing first, and
+  explicitly not a live-accuracy project.
 
 - [>] **X-B27 — Topology: body-layer and world-model stay together, on the Mac for now, Windows
   eventually. DECIDED 2026-09-29, deferred as work.** User: *"I will keep body and world layers on
@@ -870,7 +922,68 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Sequence, when work resumes: wire LOS probe-first (Mac side, per X-B27), then build probing. Not
   the reverse — the probe store filling up changes nothing until LOS reads it.
 
-- [ ] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS.** User idea,
+- [x] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS. DOD PASSED
+  2026-10-05, Stages 1-3 (`feature/dcs-driven-los`, tip `4352008`), not yet merged. Stage 4 (live
+  sortie) is acceptance debt, tracked in `world-model/ROADMAP.md`'s "Live acceptance debt" list, not
+  a blocker here.** Shipped: the cone-scoped Hook script (`aircraft-layer/dcs-export/
+  petrobrain-line-of-sight-hook.lua`) computing both building and terrain LOS per unit in the gaze
+  wedge, a new look-direction command channel so the Hook knows where to scope its cone, collector/
+  API/client plumbing, and body-layer's gate-4 join (`candidate.live_los_clear`, live-first with the
+  world-model offline primitive as fallback only). `X-B30` (building occlusion) folded in rather than
+  left as a follow-on — see its own entry below, now also closed. Full record: `plans/dcs-driven-los/
+  {plan.md, security-plan-review.md, implementation.md, review.md, security-deep-analysis.md,
+  performance.md, dod-check.md}`. Acceptance card: `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`.
+  **Consequence for other backlog items**: `WM-B8` (world-model) is now unblocked — the gate it
+  inherited from the rejected `WM-B7` ("do not start before `X-B29` lands") is clear. The original
+  entry below is kept verbatim as the design record; read it as superseded by the above, not as the
+  current state.
+
+  **MEASURED LIVE 2026-10-05 — the approach holds, and the binding constraint turned out to be
+  batch size, not call frequency.** The user flew the elevation-cost probe and reported *"a small
+  but annoying stutter every few seconds"*; the log agrees and says why. Full numbers:
+  `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`. What this entry must be
+  built against, replacing the extrapolated figures quoted further down:
+
+  - **`land.getHeight` works through the bridge, exactly** — eight theatre-spread points
+    bit-identical to the 2026-09-06 mission-editor probe's recorded heights.
+  - **No meaningful fixed overhead**: the null call measured 0.00 ms. Cost is per item.
+  - **Budget against the *peak*, not the median, and against *cold*, not warm.** A 2601-point
+    `getHeight` batch is 4.5 ms steady but **24 ms peak** on first touch of a region (9.2 µs/item
+    cold against 2.3 µs warm). The worst case is correlated with flying somewhere new, which is
+    exactly when it matters.
+  - **`isVisible` costs ~7x `getHeight` per item** (10 µs vs 1.3 µs steady). They are not
+    interchangeable in a budget.
+  - **At a ≤2 ms per-call budget: ~215 `getHeight` points or ~130 `isVisible` rays.** Comfortably
+    above what a 10 km bubble needs; the probe's 2601-point batch was ~12x the real requirement
+    and was sized to find the ceiling.
+  - **Cap the batch, not just the rate.** The probe already throttled to one call per 250 ms and
+    the stutter happened anyway — spreading calls bounds the duty cycle, never the single-call
+    cost.
+
+  Still unmeasured: whether a 2 ms version is actually imperceptible. The arithmetic says it
+  vanishes; nobody has flown it.
+
+  **Two scope decisions, user, 2026-10-05:**
+
+  - **World-model's own LOS primitive stays as the offline and test path** — *"yes, there's no
+    other way."* body-layer's hard requirement is that everything runs with no live DCS and no
+    collector, so `query/line_of_sight.py` is not replaced by this work, it is demoted to the
+    path tests and offline tools take. **What it reads changes, though**: per the same day's
+    decision to reject live elevation polling (`X-B26`), that primitive's elevation source becomes
+    the coarse ridge/valley-derived grid of `WM-B7`, not the 2.3 M-sample SRTM grid. So `WM-B7`
+    stops being an optional cleanup and becomes the stated plan for what the offline path stands
+    on — still sequenced *after* this item lands, because until the live answer actually moves to
+    DCS the existing grid is still answering a live question.
+  - **Building occlusion is in scope for this slice**, not a follow-on — *"yes please."* See
+    `X-B30`: `isVisible` demonstrably sees buildings (2 of 40 urban pairs terrain-clear but
+    vision-blocked, 0 of 40 in desert) at ~10 µs a ray, and nothing occludes behind a building in
+    either current path, so this is additive capability that cannot regress what works. Carry
+    `X-B30`'s own caveat into the design: the *aimed* `through_buildings` checks came back 6/6
+    clear while the positives came from the broader sweep, and whether that is geometry or a
+    difference between the two call shapes is **not established** — settle it before relying on a
+    particular call shape.
+
+  Original entry follows. User idea,
   2026-09-29: *"could aircraft layer fire LOS calc for every known unit inside player bubble and
   within the 130 degree visibility cone? What would that cost? Maybe not every tick?"*
 
@@ -916,12 +1029,41 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     precedent that this is not a new kind of thing, but the boundary shift should be argued, not
     assumed.
 
-- [ ] **X-B30 — Building occlusion is NOT gated on the Windows move.** User direction, 2026-09-29,
+- [x] **X-B30 — Building occlusion is NOT gated on the Windows move. CLOSED 2026-10-05, folded into
+  `X-B29`'s Stages 1-3 rather than built separately** — the batched Hook script computes
+  `building_clear` alongside `terrain_clear` in the same `world.searchObjects`/`SEGMENT` sweep, Mac-
+  side, no Windows-move dependency, exactly as this entry asked. Live confirmation that a building
+  actually occludes in the running game is Stage 4's job (acceptance card:
+  `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`), not closed by this entry alone. The
+  `through_buildings`-vs-broader-sweep call-shape discrepancy this entry flagged as unresolved
+  remains unresolved — carried into `plans/dcs-driven-los/plan.md` and `implementation.md`'s own
+  "Notable Discoveries," not silently dropped.
+
+  Original entry follows. User direction, 2026-09-29,
   correcting an earlier read of mine: *"Do not gate buildings on the Windows move. While that may be
   the eventual setup, development is easier on my mac. The LAN delay penalty is acceptable during
   development."* So the buildings half of the occluder work proceeds Mac-side now, paying the LAN
   round trip, rather than waiting on X-B27's eventual topology. X-B29 above may make the point moot
   by batching the call anyway.
+
+  **Positive evidence arrived 2026-10-05, unplanned, from the elevation-cost probe.**
+  `occlusion_urban` reported **2 of 40 pairs where terrain alone was clear but `land.isVisible`
+  said blocked**, against **0 of 40** in open desert, with `scenery_search` resolving real building
+  objects (`BUNKERHILL`, `TAXI_OMNI_BLUE`) at the same place. So the scenery half of
+  `isVisible` demonstrably fires on real geometry, at ~10 µs a ray.
+
+  This **refines rather than contradicts** `aircraft-layer/research/2026-09-29-tree-los-probe-results.md`:
+  that note concluded no DCS call sees *trees*, and its own wording was "terrain and scenery only"
+  — buildings are scenery. The tree probe could not have shown this because it was looking for the
+  half that does not exist.
+
+  **One caveat, stated because it would be easy to over-read the result**: the directly targeted
+  `through_buildings` and `through_buildings_wide` checks both returned 6/6 clear, 0 blocked, so
+  the two positives came from the broader sweep rather than the aimed test. Whether that is
+  geometry (the aimed pairs happened not to cross a building) or a real difference between the two
+  call shapes is **not established**, and should not be assumed either way before building on it.
+
+  See `aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`.
 
 - [>] **X-B32 — DCS's per-tree placement is in `Syria.surface5`, behind the payload-addressing wall.
   DEFERRED 2026-10-01, same day it was opened.** Investigated on the Windows box in answer to the

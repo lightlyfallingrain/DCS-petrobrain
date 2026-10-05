@@ -32,6 +32,23 @@ opened and run on its own background thread the same way, feeding a
 `UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the second
 channel running the Hook-to-collector direction (after the F10 one above).
 
+A `LineOfSightReceiver` (`plans/dcs-driven-los/plan.md`, X-B29) is opened and
+run on its own background thread the same way as `unit_velocity_receiver`,
+feeding a `LineOfSightCache` that `GET /line_of_sight/latest` reads -- the
+third channel running the Hook-to-collector direction. A `LookDirectionSender`
+is constructed the same way as `command_sender` for `POST /command/
+look_direction`, this pipeline's fifth inbound/write path -- unlike
+`command_sender` (which targets `Export.lua`'s inbound listener), this one
+targets the LOS Hook script's own inbound listener (`land.*`/`world.*` are
+only reachable from the mission-scripting state, not Export's).
+
+A `Spu8Cache` (`plans/spu8-intercom/plan.md`) is constructed the same way
+as `ptt_cache` -- fed by `CollectorServer` from Export.lua's "net1" lines,
+served by `GET /spu8/state`, and consumed by `_handle_ptt_state` to gate
+`/ptt/state`'s own `"intercom"` field (Stage 2). Its `gate_state` method is
+also handed to `AudioPlaybackSender` as the gate/volume provider consulted
+before each queued line plays (Stage 3).
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
@@ -53,19 +70,29 @@ from api.server import TelemetryAPIServer
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
+    LineOfSightCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
     WorldObjectsCache,
 )
 from collector.command_sender import DEFAULT_HOST as COMMAND_DEFAULT_HOST
 from collector.command_sender import DEFAULT_PORT as COMMAND_DEFAULT_PORT
-from collector.command_sender import CommandSender
+from collector.command_sender import (
+    LOOK_DIRECTION_DEFAULT_HOST,
+    LOOK_DIRECTION_DEFAULT_PORT,
+    CommandSender,
+    LookDirectionSender,
+)
 from collector.f10_command_receiver import DEFAULT_HOST as F10_DEFAULT_HOST
 from collector.f10_command_receiver import DEFAULT_PORT as F10_DEFAULT_PORT
 from collector.f10_command_receiver import F10CommandReceiver
+from collector.line_of_sight_receiver import DEFAULT_HOST as LOS_DEFAULT_HOST
+from collector.line_of_sight_receiver import DEFAULT_PORT as LOS_DEFAULT_PORT
+from collector.line_of_sight_receiver import LineOfSightReceiver
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
 from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
@@ -134,6 +161,28 @@ def main() -> None:
         help="mission-telemetry Hook script's UDP sender port",
     )
     parser.add_argument(
+        "--line-of-sight-host",
+        default=LOS_DEFAULT_HOST,
+        help="line-of-sight Hook script's UDP sender host (loopback)",
+    )
+    parser.add_argument(
+        "--line-of-sight-port",
+        type=int,
+        default=LOS_DEFAULT_PORT,
+        help="line-of-sight Hook script's UDP sender port",
+    )
+    parser.add_argument(
+        "--look-direction-host",
+        default=LOOK_DIRECTION_DEFAULT_HOST,
+        help="line-of-sight Hook script's inbound command listener host (loopback)",
+    )
+    parser.add_argument(
+        "--look-direction-port",
+        type=int,
+        default=LOOK_DIRECTION_DEFAULT_PORT,
+        help="line-of-sight Hook script's inbound command listener port",
+    )
+    parser.add_argument(
         "--dump-interval",
         type=float,
         default=1.0,
@@ -171,8 +220,6 @@ def main() -> None:
         target=f10_command_receiver.serve_forever, daemon=True
     )
     f10_command_receiver_thread.start()
-    audio_sender = AudioPlaybackSender()
-    audio_sender.open()
     unit_velocity_cache = UnitVelocityCache()
     unit_velocity_receiver = UnitVelocityReceiver(
         unit_velocity_cache, host=args.unit_velocity_host, port=args.unit_velocity_port
@@ -182,10 +229,35 @@ def main() -> None:
         target=unit_velocity_receiver.serve_forever, daemon=True
     )
     unit_velocity_receiver_thread.start()
+    line_of_sight_cache = LineOfSightCache()
+    line_of_sight_receiver = LineOfSightReceiver(
+        line_of_sight_cache,
+        host=args.line_of_sight_host,
+        port=args.line_of_sight_port,
+    )
+    line_of_sight_receiver.open()
+    line_of_sight_receiver_thread = threading.Thread(
+        target=line_of_sight_receiver.serve_forever, daemon=True
+    )
+    line_of_sight_receiver_thread.start()
+    look_direction_sender = LookDirectionSender(
+        host=args.look_direction_host, port=args.look_direction_port
+    )
+    look_direction_sender.open()
 
     # One cache, handed to both halves: the collector fills it from
     # Export.lua's ptt lines and the API serves it to the capture process.
     ptt_cache = PttCache()
+
+    # Same shape as ptt_cache above, plus `AudioPlaybackSender`'s gate/
+    # volume provider (`plans/spu8-intercom/plan.md` Stage 3) -- real
+    # wiring passes `spu8_cache.gate_state` (fail-safe-closed when no SPU-8
+    # sample has arrived yet, matching Stage 2's capture-gating default),
+    # unlike `AudioPlaybackSender`'s own constructor default (`_always_open`)
+    # which exists only for pre-existing call sites/tests.
+    spu8_cache = Spu8Cache()
+    audio_sender = AudioPlaybackSender(gate_state=spu8_cache.gate_state)
+    audio_sender.open()
 
     collector = CollectorServer(
         cache,
@@ -193,6 +265,7 @@ def main() -> None:
         petrovich_indication_cache,
         petrovich_wheel_cache,
         ptt_cache=ptt_cache,
+        spu8_cache=spu8_cache,
         host=args.host,
         port=args.port,
     )
@@ -213,6 +286,9 @@ def main() -> None:
         audio_sender=audio_sender,
         unit_velocity_cache=unit_velocity_cache,
         ptt_cache=ptt_cache,
+        spu8_cache=spu8_cache,
+        line_of_sight_cache=line_of_sight_cache,
+        look_direction_sender=look_direction_sender,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -233,6 +309,8 @@ def main() -> None:
         f10_command_receiver.close()
         audio_sender.close()
         unit_velocity_receiver.close()
+        line_of_sight_receiver.close()
+        look_direction_sender.close()
 
 
 if __name__ == "__main__":

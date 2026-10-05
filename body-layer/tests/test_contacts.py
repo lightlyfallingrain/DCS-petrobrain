@@ -56,6 +56,7 @@ def _observation(
     classification_level: int = 2,
     continues_observation_id: str | None = None,
     position_uncertainty: PositionUncertainty | None = None,
+    live_los_clear: bool | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -74,6 +75,7 @@ def _observation(
         classification_level=classification_level,
         continues_observation_id=continues_observation_id,
         position_uncertainty=position_uncertainty,
+        live_los_clear=live_los_clear,
     )
 
 
@@ -90,6 +92,31 @@ def test_same_object_observed_twice_nearby_produces_one_contact() -> None:
     assert contact.contributing_observation_ids == ["OBS_1", "OBS_2"]
     assert contact.first_seen_sim == 0.0
     assert contact.last_seen_sim == 1.0
+
+
+def test_live_los_clear_is_overwritten_not_folded_on_each_record() -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29): `Contact.live_los_clear` is
+    the most recent look's own raw value -- an overwrite, same semantics
+    as `last_class_raw`, never a fold with any ordering/specificity
+    relation (there is none between "clear" and "masked")."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, live_los_clear=True)], now_sim=0.0
+    )
+    assert store.contacts[0].live_los_clear is True
+
+    store.ingest(
+        [_observation(obs_id="OBS_2", t_sim=1.0, live_los_clear=False)], now_sim=1.0
+    )
+    assert store.contacts[0].live_los_clear is False
+
+    # A later look carrying no live verdict at all overwrites back to
+    # `None` too -- it is the most recent look's value, not a
+    # once-ever-set flag.
+    store.ingest(
+        [_observation(obs_id="OBS_3", t_sim=2.0, live_los_clear=None)], now_sim=2.0
+    )
+    assert store.contacts[0].live_los_clear is None
 
 
 def test_two_well_separated_objects_produce_two_contacts() -> None:
@@ -1634,26 +1661,39 @@ def test_engagement_respects_the_altitude_floor() -> None:
     assert store.contacts[0].last_emitted_engagement is True
 
 
+def _look(store: ContactStore, now_sim: float, *, live_los_clear: bool | None) -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29): the engagement term no
+    longer takes a `los_clear` callable -- it reads `Contact.
+    live_los_clear`, set from a naked-eye `Percept` in `record()`. Tests
+    simulate "Petrovich looked at this contact again this poll, with this
+    DCS-driven verdict" directly, rather than through a fake callable:
+    both `live_los_clear` and `last_seen_sim` move together, exactly as a
+    real `record()` call would move them, since the engagement term reads
+    `live_los_clear` as meaningful only within `OBSERVED_WINDOW_S` of
+    `last_seen_sim` (see that block's own comments in `contacts.py`)."""
+    store.contacts[0].live_los_clear = live_los_clear
+    store.contacts[0].last_seen_sim = now_sim
+    store.tick(now_sim=now_sim, ownship=_ownship())
+
+
 def test_engagement_los_masked_needs_the_full_dwell_to_clear() -> None:
     """Decision 5a-ii: a masked verdict may only clear a danger state
     after holding continuously for `LOS_MASK_CONFIRM_S` (5.0) -- a clear
     verdict takes effect immediately, in the other direction."""
     store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
-    always_clear = lambda observer, target: True
-    always_masked = lambda observer, target: False
 
-    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_clear)
+    _look(store, 0.0, live_los_clear=True)
     assert store.contacts[0].last_emitted_engagement is True
 
     # Masked starting at t=16 (past EVENT_COOLDOWN_S from the entering
     # event, so the eventual "leaving" event below is not itself
     # cooldown-suppressed), but not yet for the full LOS_MASK_CONFIRM_S
     # dwell -- must still read engaged.
-    store.tick(now_sim=16.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 16.0, live_los_clear=False)
     assert store.contacts[0].last_emitted_engagement is True
 
     # Masked continuously past the dwell -- now clears.
-    store.tick(now_sim=21.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 21.0, live_los_clear=False)
     assert store.contacts[0].last_emitted_engagement is False
     engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
     assert len(engaged_events) == 2
@@ -1662,44 +1702,31 @@ def test_engagement_los_masked_needs_the_full_dwell_to_clear() -> None:
 
 def test_engagement_los_dwell_resets_on_an_intervening_clear_sample() -> None:
     store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
-    always_clear = lambda observer, target: True
-    always_masked = lambda observer, target: False
 
-    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_clear)
-    store.tick(now_sim=1.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 0.0, live_los_clear=True)
+    _look(store, 1.0, live_los_clear=False)
     # A clear sample resets the countdown.
-    store.tick(now_sim=2.0, ownship=_ownship(), los_clear=always_clear)
+    _look(store, 2.0, live_los_clear=True)
     assert store.contacts[0].los_masked_since_sim is None
-    store.tick(now_sim=3.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 3.0, live_los_clear=False)
     # Only 3 seconds masked since the reset (t=3) at t=1.0+... -- must
     # still be engaged, since less than LOS_MASK_CONFIRM_S has elapsed
     # since the *reset* mask began (at t=3.0).
-    store.tick(now_sim=6.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 6.0, live_los_clear=False)
     assert store.contacts[0].last_emitted_engagement is True
 
 
-def test_engagement_skips_the_los_call_when_out_of_range() -> None:
-    """LOS is the most expensive primitive `belief/` can reach, and this
-    block runs once per watched contact on every poll of the live loop. A
-    contact outside its own envelope's range cannot be engaging us whatever
-    the terrain says, so asking is pure cost.
-
-    Counts calls rather than asserting on behaviour, because behaviour
-    cannot see this: `current_engaged` is `False` either way. The
-    performance review measured 20 LOS calls per tick for 20 watched
-    contacts 20 km out against a 2,408 m envelope -- every one of them
-    answering a question range had already settled."""
+def test_engagement_skips_the_los_term_when_out_of_range() -> None:
+    """A contact outside its own envelope's range cannot be engaging us
+    whatever LOS says -- `range_ok and alt_ok` short-circuits before
+    `live_los_clear` is even consulted, so a masked verdict at this range
+    changes nothing about the outcome or the masking bookkeeping."""
     store, _ = _watched_threat_contact(_AAA_TYPE, range_m=20000.0)
-    calls: list[tuple[object, object]] = []
 
-    def counting_los(observer: object, target: object) -> bool:
-        calls.append((observer, target))
-        return True
+    _look(store, 0.0, live_los_clear=False)
 
-    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=counting_los)
-
-    assert calls == []
     assert store.contacts[0].last_emitted_engagement is False
+    assert store.contacts[0].los_masked_since_sim is None
 
 
 def test_engagement_out_of_range_leaves_a_fresh_dwell_for_re_entry() -> None:
@@ -1714,23 +1741,58 @@ def test_engagement_out_of_range_leaves_a_fresh_dwell_for_re_entry() -> None:
     masking dwell accumulated while the threat could not reach us at all
     measures nothing worth carrying across."""
     store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
-    always_masked = lambda observer, target: False
-    always_clear = lambda observer, target: True
 
     # In range and masked -- the dwell starts.
-    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 0.0, live_los_clear=False)
     assert store.contacts[0].los_masked_since_sim == 0.0
 
-    # Out of range: the call is skipped and the dwell is discarded.
+    # Out of range: the term is skipped and the dwell is discarded.
     _place_contact_at_range(store.contacts[0], 20000.0)
-    store.tick(now_sim=10.0, ownship=_ownship(), los_clear=always_masked)
+    _look(store, 10.0, live_los_clear=False)
     assert store.contacts[0].los_masked_since_sim is None
 
     # Back in range with a clear sample -- engaged again immediately,
     # rather than starting life behind a dwell it never earned.
     _place_contact_at_range(store.contacts[0], 1000.0)
-    store.tick(now_sim=20.0, ownship=_ownship(), los_clear=always_clear)
+    _look(store, 20.0, live_los_clear=True)
     assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_fails_open_with_no_fresh_live_los_verdict() -> None:
+    """`plans/dcs-driven-los/plan.md` (X-B29): a contact that has never
+    been looked at by the naked-eye channel (`live_los_clear is None`)
+    reads as engaged, not masked -- the same fail-open posture as "no
+    world-model connection" under the pre-X-B29 design. A watch is a
+    standing instruction to keep looking, not a subscription to continuous
+    truth (plan SS11a) -- with no fresh look there is nothing to clear a
+    danger state on."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    # Founding `ingest` never set `live_los_clear` (the scope/hybrid
+    # percept carries none) -- it is `None` from the start.
+    assert store.contacts[0].live_los_clear is None
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_emitted_engagement is True
+    assert store.contacts[0].los_masked_since_sim is None
+
+
+def test_engagement_fails_open_once_the_live_look_goes_stale() -> None:
+    """A live verdict older than `OBSERVED_WINDOW_S` relative to the
+    contact's own `last_seen_sim` is treated as no verdict at all, even
+    though `live_los_clear` itself still reads `False` -- staleness, not
+    the stored boolean, is what the engagement term actually gates on."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+
+    # A masked look at t=0 would normally start the masking dwell...
+    _look(store, 0.0, live_los_clear=False)
+    assert store.contacts[0].los_masked_since_sim == 0.0
+
+    # ...but if the contact is never looked at again, `last_seen_sim`
+    # stays at 0.0 while `now_sim` advances past `OBSERVED_WINDOW_S`
+    # (16.0) -- the stored `live_los_clear=False` is now stale, and the
+    # term must fail open rather than trust it.
+    store.tick(now_sim=20.0, ownship=_ownship())
+    assert store.contacts[0].last_emitted_engagement is True
+    assert store.contacts[0].los_masked_since_sim is None
 
 
 def test_engagement_clears_bookkeeping_on_unwatch() -> None:

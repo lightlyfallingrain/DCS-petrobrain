@@ -779,3 +779,51 @@ two functions that must agree (2026-09-19).
   occurs when every member independently qualifies. Confirmed by a dedicated composition test, not
   inferred from the two mechanisms each being individually correct
   (`plans/redundant-group-disclosure/security-review.md`).
+- **A plan's own design can go stale underneath it when an earlier-stage mechanism it depends on is
+  later replaced — re-check the dependency's current shape before resuming a parked later stage,
+  not just whether the stage itself was ever built.** `terrain-feature-probing`'s original Stages
+  3-5 design assumed basin adjacency "comes free" from Stage 1-2's marker-controlled watershed
+  detector; that detector was abandoned for geomorphons before Stages 3-5 were ever built, and
+  geomorphons produces traced lines, not basins. Revision 3 replaced the whole adjacency design
+  with a query-time divide counter (count ridge-crossings on the straight observer-target segment,
+  dedup within 400 m) rather than re-deriving a basin-like structure solely to keep the original
+  design's shape. Worth checking for on any plan that sat parked across an earlier stage's own
+  redesign (`plans/terrain-feature-probing/plan.md`, Revision 3 preamble).
+- **`audioop` is removed outright in Python 3.13 (deprecated since 3.11), and a `requires-python
+  = ">=3.11"` bound does not exclude 3.13** — any PCM volume/format manipulation in this repo must
+  use stdlib `wave` + `array` instead, never `audioop`, or a 3.13 interpreter fails at import time
+  with no fallback. Caught before it shipped only because the main-loop amendment to
+  `spu8-intercom`'s plan named the Python version explicitly rather than assuming "stdlib audio
+  module" meant `audioop` as it would have on an older interpreter (`plans/spu8-intercom/plan.md`
+  Stage 3).
+- **Python's `wave.Wave_read.readframes` does not raise when a WAV's declared `nframes` header
+  value exceeds the file's actual data — it silently returns however many bytes are really
+  present**, which can be an odd byte count for 16-bit PCM. Any code that reads a `wave`-opened
+  file's frames and immediately does fixed-width sample arithmetic on the result (e.g.
+  `array("h").frombytes(...)`) needs its own guard against that odd-length case; `wave.open`'s own
+  header validation does not cover it. This was the exact unguarded path Security found in
+  `scale_wav_volume` (`plans/spu8-intercom/security-deep-analysis.md`) — reproduced with a WAV
+  whose data chunk was truncated to an odd length while its header's `nframes` stayed stale.
+- **A branch handed over from another machine/session with zero gate having run on it is a real
+  risk, not a formality** — `spu8-intercom`'s Architect and Implementer both ran cross-machine, and
+  the first gate run anywhere on the branch found the implementer had never run the test suite at
+  all: a shadowed test helper (reusing a name already bound elsewhere in the test file) was
+  breaking 80 pre-existing, unrelated tests. Worth treating "this branch has never had any
+  check run on it" as its own flag when picking up cross-machine/cross-session handoff work, rather
+  than assuming a clean-looking diff implies the suite was ever green (`plans/spu8-intercom/
+  implementation.md`).
+- **A constant shared between an outer Hook-script Lua local and a `dostring_in` string-literal
+  snippet it dispatches cannot be a single source of truth — the snippet must be a fixed string
+  literal (per this project's own `dostring_in` safety rule) and so cannot interpolate an outer
+  Lua variable.** `MAX_SIGHTLINES_PER_CALL = 128` exists as two independent literals in
+  `petrobrain-line-of-sight-hook.lua` for exactly this reason, with no mechanical guard against them
+  drifting apart (unlike the project's own `%d`-count static test for the look-direction splice).
+  Worth a similar static test if either copy is ever revisited (`plans/dcs-driven-los/
+  implementation.md`, review.md's "Optional Refinements").
+- **Gate 4's live-first/offline-fallback join pattern (`candidate.live_los_clear is not None`
+  short-circuits the world-model primitive) silently narrows an existing live-acceptance-debt
+  entry's scope rather than clearing it** — `fix/los-elevation-tolerance`'s 12 m tolerance stopped
+  being consulted for any unit the live DCS feed covers, but the debt entry describing it still read
+  as if the tolerance were the only LOS answer. When a new mechanism supersedes part of what an old
+  debt item was tracking, the debt entry needs re-reading and re-scoping, not just a new entry
+  alongside it (`plans/dcs-driven-los/plan.md`; `world-model/ROADMAP.md`'s "Live acceptance debt").

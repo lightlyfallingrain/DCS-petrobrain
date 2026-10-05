@@ -90,6 +90,15 @@ def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
         "project_terrain_aware",
         lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
     )
+    # `terrain_divide_qualifier` (`plans/terrain-feature-probing/plan.md`
+    # Revision 3) queries `store.reader.features_in_bbox` directly rather
+    # than through `describe_position` -- `_FAKE_CONN` has no `feature_
+    # bbox` table, so stub the divide count to 0.
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
+    )
     return EnrichmentContext(
         conn=_FAKE_CONN,
         theatre="Syria",
@@ -403,6 +412,40 @@ def test_describe_contact_with_enrichment_adds_the_four_bl3_fields(
     # A single contributing observation -- too little history for a
     # direction, so the key must be absent, not None.
     assert "motion_when_seen" not in facts
+
+    # `_enrichment_context`'s default stub (`divides_between` -> 0) means no
+    # divide was crossed -- the key must be absent, not None (Review:
+    # terrain-feature-probing Rev3, Required Fix).
+    assert "terrain_qualifier" not in facts
+
+
+def test_describe_contact_with_enrichment_sets_terrain_qualifier_when_one_divide_crossed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_add_enrichment_facts` must actually write `terrain_divide_
+    qualifier`'s result into `facts["terrain_qualifier"]` -- the half of
+    the Stage 5 wiring Review: terrain-feature-probing Rev3 found
+    untested. `_enrichment_context`'s own stub always returns 0 divides, so
+    this overrides it to 1 plus a valley-dominant `nearest_feature`, the
+    same pattern `test_enrichment.py`'s `_patch_divides` uses."""
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    context = _enrichment_context(monkeypatch)
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 1,
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "nearest_feature",
+        lambda conn, kinds, x, z: (object(), 100.0) if kinds == ["valley"] else None,
+    )
+
+    result = describe_contact(store, contact.id, now_sim=0.0, enrichment=context)
+
+    assert result is not None
+    assert result["facts"]["terrain_qualifier"] == "next valley"
 
 
 def test_get_contacts_threads_enrichment_through_every_result(

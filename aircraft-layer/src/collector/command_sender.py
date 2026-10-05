@@ -107,3 +107,93 @@ class CommandSender:
                 "petrovich-search command send failed: mode=%r", mode, exc_info=True
             )
             raise CommandSendError(f"failed to send command {mode!r}: {exc}") from exc
+
+
+#: Loopback only -- `petrobrain-line-of-sight-hook.lua`'s own inbound
+#: listener runs inside the same DCS process tree as the collector's UDP
+#: peer, same reasoning as `DEFAULT_HOST`/`DEFAULT_PORT` above. **Not**
+#: `Export.lua`'s command listener (`DEFAULT_PORT` above) -- this directive
+#: has to land in the mission-scripting state (`land.*`/`world.*` live
+#: there, not in the Export state Export.lua runs in), so it is a
+#: Hook-script-owned socket, structurally like `petrobrain-overlay-hook.
+#: lua`'s inbound listener, not Export.lua's (`plans/dcs-driven-los/
+#: plan.md` SS9a). A seventh, distinct loopback port: `collector.server.
+#: DEFAULT_PORT` (7790), `text_sender.DEFAULT_PORT` (7792), this module's
+#: own `DEFAULT_PORT` (7793), `f10_command_receiver.DEFAULT_PORT` (7794),
+#: `unit_velocity_receiver.DEFAULT_PORT` (7795),
+#: `line_of_sight_receiver.DEFAULT_PORT` (7796), and this one (7797).
+LOOK_DIRECTION_DEFAULT_HOST = "127.0.0.1"
+LOOK_DIRECTION_DEFAULT_PORT = 7797
+
+
+class LookDirectionSender:
+    """Sends short JSON look-direction command datagrams to the LOS Hook
+    script's inbound listener over UDP (`plans/dcs-driven-los/plan.md`
+    SS9b). Structurally mirrors `CommandSender`'s open-once/
+    close-on-shutdown lifecycle and its raise-on-failure posture -- a
+    dropped look-direction push is a real coverage gap (the cone can go
+    stale, plan SS9c), not an opaque display string to swallow silently.
+
+    **No validation happens here** -- `api.server`'s `POST /command/
+    look_direction` handler validates `hour`/`fov_half_deg` before this
+    method is ever called, and the Hook script itself validates and clamps
+    a third time (defense in depth, the Security plan review's Finding 4).
+    This sender's only job is putting already-validated integers on the
+    wire."""
+
+    def __init__(
+        self,
+        host: str = LOOK_DIRECTION_DEFAULT_HOST,
+        port: int = LOOK_DIRECTION_DEFAULT_PORT,
+    ) -> None:
+        self._host = host
+        self._port = port
+        self._socket: socket.socket | None = None
+
+    def __enter__(self) -> Self:
+        self.open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def open(self) -> None:
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def close(self) -> None:
+        if self._socket is not None:
+            self._socket.close()
+            self._socket = None
+
+    def send_look_direction(self, hour: int, fov_half_deg: int) -> None:
+        """Send `{"op": "look_direction", "hour": hour, "fov_half_deg":
+        fov_half_deg}` to the LOS Hook script's inbound listener. Raises
+        `CommandSendError` if the underlying socket send fails -- see this
+        class's own docstring for why this does not swallow that failure
+        the way `TextOverlaySender.send_line` does."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {"op": "look_direction", "hour": hour, "fov_half_deg": fov_half_deg}
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "look-direction command send failed: hour=%r fov_half_deg=%r",
+                hour,
+                fov_half_deg,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send look direction hour={hour!r} "
+                f"fov_half_deg={fov_half_deg!r}: {exc}"
+            ) from exc

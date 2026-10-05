@@ -27,17 +27,27 @@ menu picks) in a way it isn't for continuously-refreshed telemetry. Fed by
 `GET /f10_commands/poll` (`api.server`), which -- unlike every `/latest`
 endpoint -- mutates this queue's state on every call (drain-on-GET,
 at-most-once delivery; see that endpoint's own docstring).
+
+`Spu8Cache` (`plans/spu8-intercom/plan.md` Stage 1) is the same "latest of
+one" shape as `PttCache`, for the SPU-8 intercom panel (pilot NET-1,
+co-pilot ICS power, volume). Unlike every cache above, it also exposes
+`gate_state()` -- a derived `Spu8GateState(gate_open, volume)` that
+`collector.audio_sender.AudioPlaybackSender`'s real wiring consults once
+per queued item, fail-safe-closed when no sample has arrived yet.
 """
 
 from __future__ import annotations
 
 from collections import deque
+from typing import NamedTuple
 
 from schema import (
     F10CommandEvent,
+    LineOfSightSnapshot,
     PetrovichIndicationSample,
     PetrovichWheelSample,
     PttSample,
+    Spu8Sample,
     TelemetrySample,
     UnitVelocitySnapshot,
     WorldObjectsSnapshot,
@@ -148,6 +158,56 @@ class PttCache:
         return self._latest
 
 
+class Spu8GateState(NamedTuple):
+    """Snapshot `collector.audio_sender.AudioPlaybackSender` consults once
+    per queued item, immediately before playback -- see that module's own
+    docstring for why this is the single point gating/volume are checked.
+    `Spu8Cache.gate_state()` is the only place this is constructed; kept
+    here (not in `audio_sender.py`) since the cache is what actually knows
+    the current SPU-8 state and `audio_sender.py` only consumes it."""
+
+    gate_open: bool
+    volume: float
+
+
+class Spu8Cache:
+    """Holds the latest SPU-8 intercom-panel sample (`plans/spu8-intercom/
+    plan.md` Stage 1) -- pilot NET-1 (arg 377), co-pilot ICS power (arg
+    664), and SPU-8 volume (arg 457). Same "latest of one" shape/reasoning
+    as `PttCache`: `Export.lua` sends a line only on change, and the one
+    question a consumer asks is "is the channel open right now, and how
+    loud" -- not a history of switch flips.
+    """
+
+    def __init__(self) -> None:
+        self._latest: Spu8Sample | None = None
+
+    def push(self, sample: Spu8Sample) -> None:
+        """Record a newly-received sample as the current panel state."""
+        self._latest = sample
+
+    def latest(self) -> Spu8Sample | None:
+        """Return the most recently pushed sample, or `None` if no SPU-8
+        line has arrived yet this session (the normal state at startup,
+        same as `PttCache.latest`)."""
+        return self._latest
+
+    def gate_state(self) -> Spu8GateState:
+        """`AudioPlaybackSender`'s real wiring (`__main__.py`) passes this
+        method, unbound, as its `gate_state` provider.
+
+        **Fail-safe-closed when no SPU-8 sample has arrived yet** (plan
+        Decision 3) -- an unknown intercom state should not let anything
+        through, in either direction. This is the production-path default;
+        it differs deliberately from `AudioPlaybackSender`'s own
+        constructor default (always-open), which exists only for call
+        sites/tests that predate this feature and never wire a provider."""
+        sample = self._latest
+        if sample is None:
+            return Spu8GateState(gate_open=False, volume=1.0)
+        return Spu8GateState(gate_open=sample.gate_open, volume=sample.vol)
+
+
 class UnitVelocityCache:
     """Holds the latest `UnitVelocitySnapshot` (`plans/movement-detection/
     plan.md` Stage 1). Same "latest of one" shape as `WorldObjectsCache`,
@@ -164,6 +224,25 @@ class UnitVelocityCache:
         self._latest = snapshot
 
     def latest(self) -> UnitVelocitySnapshot | None:
+        """Return the most recently pushed snapshot, or `None` if empty."""
+        return self._latest
+
+
+class LineOfSightCache:
+    """Holds the latest `LineOfSightSnapshot` (`plans/dcs-driven-los/
+    plan.md`, X-B29). Same "latest of one" shape as `UnitVelocityCache`,
+    kept as its own small concrete class for the same reason that one is --
+    one class per feed is clearer at `line_of_sight_receiver`'s own call
+    site than a generic "latest of anything" cache."""
+
+    def __init__(self) -> None:
+        self._latest: LineOfSightSnapshot | None = None
+
+    def push(self, snapshot: LineOfSightSnapshot) -> None:
+        """Record a newly-received snapshot as the current latest state."""
+        self._latest = snapshot
+
+    def latest(self) -> LineOfSightSnapshot | None:
         """Return the most recently pushed snapshot, or `None` if empty."""
         return self._latest
 

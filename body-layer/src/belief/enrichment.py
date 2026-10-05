@@ -51,18 +51,34 @@ asserting "over the sea" once far enough out that the position uncertainty
 itself can't explain the `side` reading).
 
 **Contact report fine tuning -- the cheap `enrichment.py` items** (`ROADMAP.
-md`, opened 2026-09-18, this pass 2026-09-19). `semantic_facts_for`'s five
-`"near {label} ({distance}m)"` fact constructions (settlement/road/water/
-ridge/valley) now go through a shared `_proximity_text(label, distance_m)`
+md`, opened 2026-09-18, this pass 2026-09-19). `semantic_facts_for`'s
+`"near {label} ({distance}m)"` fact constructions (settlement/road/water)
+now go through a shared `_proximity_text(label, distance_m)`
 helper: under `_ON_FEATURE_MAX_M` (10 m), `"on {label}"`, no figure; in the
 `_NEXT_TO_MIN_M`..`_NEXT_TO_MAX_M` band (10-100 m), `"next to {label}"`, also
 no figure. The three bands tile with no gap
 -- both replace the bare-distance shape entirely at the range where the fact
 of proximity matters more than the number, per the roadmap item. Generic
-over `label` (a proper name, or a generic noun phrase like `"a road"`/`"a
-ridge line"`) rather than road-specific, since the item asks for this
-wording for any feature reference. `speech.py`'s own module docstring has
-the matching `speech.py`-side items (spelled-out units, acronym respelling).
+over `label` (a proper name, or a generic noun phrase like `"a road"`)
+rather than road-specific, since the item asks for this wording for any
+feature reference. `speech.py`'s own module docstring has the matching
+`speech.py`-side items (spelled-out units, acronym respelling).
+
+**`plans/terrain-feature-probing/plan.md` Revision 3, Stage 3a (2026-10-05)
+-- the position-qualifier dominance rule.** Ridge/valley no longer go
+through `_proximity_text`/`NEAR_FACT_RADIUS_M` at all: against the real
+geomorphons output (234,799 lines theatre-wide, ~0.8 ridge lines/km2 at
+Baalbek density), *something* of one kind or the other is within any
+sensible "near" radius almost everywhere, so a plain nearest-of-each-kind
+gate admits essentially always. `_dominant_terrain_kind` (fed from
+`PositionDescription.nearby_ridges`/`nearby_valleys`) instead emits **at
+most one** of `"on a ridge"`/`"in a valley"`, and only when the nearer kind
+is within `TERRAIN_QUALIFIER_MAX_M` **and** nearer than the other kind by at
+least `TERRAIN_DOMINANCE_FACTOR` -- Decision 3's rule, verbatim. The default
+answer is to name nothing: a contact near both kinds, or far from both,
+gets no terrain-position fact at all. See `terrain_divide_qualifier` below
+for the separate, ownship-relative *"next valley"*/*"beyond the ridge"*
+form (Decision 2/5), which is never computed here.
 """
 
 from __future__ import annotations
@@ -82,7 +98,9 @@ from perception.geometry import (
     range_m,
 )
 from perception.source import OwnshipState
-from query.describe import describe_position
+from query.describe import TerrainLineInfo, describe_position
+from query.divides import divides_between
+from store.reader import nearest_feature
 
 #: The width of naked-eye's own clock-position reporting vocabulary, 30
 #: degrees per hour -- moved here from `belief.association_over_time` by
@@ -181,8 +199,6 @@ NEAR_FACT_RADIUS_M: Final[dict[str, float]] = {
     "settlement": 1000.0,
     "road": 1000.0,
     "water": 1000.0,
-    "ridge": 1000.0,
-    "valley": 1000.0,
 }
 
 
@@ -192,6 +208,70 @@ def _within_near_radius(kind: str, distance_m: float) -> bool:
     table entry should degrade to today's ungated behaviour, not silently
     mute a whole class of fact."""
     return distance_m <= NEAR_FACT_RADIUS_M.get(kind, float("inf"))
+
+
+#: Decision 3 (`plans/terrain-feature-probing/plan.md` Revision 3) -- the
+#: nearer of {nearest ridge, nearest valley} must be within this distance
+#: for a position qualifier to be worth saying at all. First guess, "under a
+#: third of the median line length" (~1 km at theatre average): beyond this,
+#: at the real geomorphons line density, the nearest line is noise rather
+#: than a feature the contact is meaningfully next to. Tune by flying, same
+#: status as `DIVIDE_MERGE_M` in `query.divides`.
+TERRAIN_QUALIFIER_MAX_M: Final[float] = 300.0
+
+#: Decision 3 -- the nearer kind must beat the other kind by at least this
+#: factor (nearer-kind distance * this <= other-kind distance) or neither is
+#: named. Without this, a contact sitting between a ridge and a valley at
+#: similar distances would arbitrarily pick whichever is a metre closer.
+#: First guess, tune by flying.
+TERRAIN_DOMINANCE_FACTOR: Final[float] = 2.0
+
+#: Decision 5's fixed phrasing for the position-qualifier fact -- no
+#: trailing distance figure (unlike `_proximity_text`'s "near X (Nm)"
+#: shape): once `_dominant_terrain_kind` has fired, the exact distance adds
+#: nothing a pilot would want read back.
+_TERRAIN_POSITION_TEXT: Final[dict[str, str]] = {
+    "ridge": "on a ridge",
+    "valley": "in a valley",
+}
+
+
+def _dominant_terrain_kind_from_distances(
+    ridge_distance_m: float | None, valley_distance_m: float | None
+) -> str | None:
+    """Decision 3's dominance rule, operating on bare distances so both
+    `_dominant_terrain_kind` below (fed `TerrainLineInfo.distance_m` from a
+    `describe_position` call already made) and `terrain_divide_qualifier`
+    (fed a direct `nearest_feature` distance, to avoid a second full
+    `describe_position` call at the target) can share one rule. A missing
+    kind (`None`) is treated as infinitely far, not excluded from the
+    comparison -- a lone nearby ridge with no valley feature in range still
+    needs to clear the distance gate, which it does trivially since nothing
+    closer exists to contest it."""
+    if ridge_distance_m is None and valley_distance_m is None:
+        return None
+    near_kind, near_d = min(
+        (("ridge", ridge_distance_m), ("valley", valley_distance_m)),
+        key=lambda c: c[1] if c[1] is not None else float("inf"),
+    )
+    other_d = valley_distance_m if near_kind == "ridge" else ridge_distance_m
+    if near_d is None or near_d > TERRAIN_QUALIFIER_MAX_M:
+        return None
+    if other_d is not None and other_d < near_d * TERRAIN_DOMINANCE_FACTOR:
+        return None
+    return near_kind
+
+
+def _dominant_terrain_kind(
+    ridge: TerrainLineInfo | None, valley: TerrainLineInfo | None
+) -> str | None:
+    """`description.nearby_ridges`/`nearby_valleys` -> the one dominant kind
+    worth a position-qualifier fact, or `None` -- see
+    `_dominant_terrain_kind_from_distances` for the rule itself."""
+    return _dominant_terrain_kind_from_distances(
+        ridge.distance_m if ridge is not None else None,
+        valley.distance_m if valley is not None else None,
+    )
 
 
 #: At or below this distance, a feature reference reads as "on {label}"
@@ -220,15 +300,18 @@ _NEXT_TO_MAX_M: Final[float] = 100.0
 
 def _proximity_text(label: str, distance_m: float) -> str:
     """Distance-based feature-reference wording, shared by every "near X"
-    fact `semantic_facts_for` builds (settlement/road/water/ridge/valley) --
-    generic over `label` rather than road-specific, since the roadmap item
-    asks for "on"/"next to" wording for any feature reference, not just
-    roads. `label` is the same string each call site already built for the
-    pre-existing "near {label} (Nm)" shape (a proper name, or a generic
-    noun phrase like `"a road"`/`"a ridge line"`), so `"on a road"`/`"next
-    to a road"` is what an unnamed feature gets -- grammar polish beyond
-    that (swapping the article for "the") is exactly the class of fine
-    tuning `speech.py`'s 2026-09-19 standing rule keeps out of scope.
+    fact `semantic_facts_for` builds (settlement/road/water -- ridge/valley
+    moved off this helper entirely in `plans/terrain-feature-probing/
+    plan.md` Revision 3, Stage 3a, onto the fixed `_TERRAIN_POSITION_TEXT`
+    phrasing below instead) -- generic over `label` rather than
+    road-specific, since the roadmap item asks for "on"/"next to" wording
+    for any feature reference, not just roads. `label` is the same string
+    each call site already built for the pre-existing "near {label} (Nm)"
+    shape (a proper name, or a generic noun phrase like `"a road"`), so
+    `"on a road"`/`"next to a road"` is what an unnamed feature gets --
+    grammar polish beyond that (swapping the article for "the") is exactly
+    the class of fine tuning `speech.py`'s 2026-09-19 standing rule keeps
+    out of scope.
 
     Below `_ON_FEATURE_MAX_M`: `"on {label}"`, no distance figure (there is
     nothing left to measure). Within the `_NEXT_TO_MIN_M`.._NEXT_TO_MAX_M
@@ -395,25 +478,22 @@ def semantic_facts_for(
             )
         )
 
-    ridge = description.nearby_ridges
-    if ridge is not None and _within_near_radius("ridge", ridge.distance_m):
-        facts.append(
-            SemanticFact(
-                text=_proximity_text("a ridge line", ridge.distance_m),
-                confidence=_combined_confidence(ridge.confidence, position_conf),
-                provenance=ridge.provenance,
-                feature_id=f"ridge:{round(ridge.distance_m / 100.0) * 100}",
-            )
+    dominant_terrain = _dominant_terrain_kind(
+        description.nearby_ridges, description.nearby_valleys
+    )
+    if dominant_terrain is not None:
+        terrain_info = (
+            description.nearby_ridges
+            if dominant_terrain == "ridge"
+            else description.nearby_valleys
         )
-
-    valley = description.nearby_valleys
-    if valley is not None and _within_near_radius("valley", valley.distance_m):
+        assert terrain_info is not None
         facts.append(
             SemanticFact(
-                text=_proximity_text("a valley line", valley.distance_m),
-                confidence=_combined_confidence(valley.confidence, position_conf),
-                provenance=valley.provenance,
-                feature_id=f"valley:{round(valley.distance_m / 100.0) * 100}",
+                text=_TERRAIN_POSITION_TEXT[dominant_terrain],
+                confidence=_combined_confidence(terrain_info.confidence, position_conf),
+                provenance=terrain_info.provenance,
+                feature_id=f"{dominant_terrain}:{round(terrain_info.distance_m / 100.0) * 100}",
             )
         )
 
@@ -595,6 +675,54 @@ def relative_geometry(ownship: OwnshipState, target: GeoPosition) -> dict[str, o
         "clock_position": _clock_position(relative_bearing_deg),
         "relative_alt_m": target.alt_m - ownship.alt_m,
     }
+
+
+def terrain_divide_qualifier(
+    conn: sqlite3.Connection,
+    theatre: str,
+    ownship: OwnshipState,
+    target: GeoPosition,
+) -> str | None:
+    """Decision 2/5's divide-relative qualifier (`plans/
+    terrain-feature-probing/plan.md` Revision 3) -- *"next valley"*/
+    *"beyond the ridge"*, or `None` when the pilot's phrase would not mean
+    anything (0 or >=2 ridge crossings between `ownship` and `target`).
+
+    **Ownship-relative, so never cached in `WorldEnrichmentCache`**
+    (Decision 1) -- call this directly from the uncached contact-report
+    build path (`belief.tools._add_enrichment_facts`), the exact place
+    `relative_geometry` above already lives and for the identical reason:
+    `ownship` moves every poll even when the target's believed position
+    does not, so a cached divide count would go stale mid-flight and
+    produce a confidently wrong "next valley".
+
+    When exactly one divide fires, the wording is picked by whether the
+    *target* itself sits in a dominant valley (`_dominant_terrain_kind_
+    from_distances`, Decision 3's rule, evaluated at the target): valley
+    dominant -> `"next valley"`; anything else (ridge dominant, or no
+    dominant form at all) -> the generic `"beyond the ridge"`, since
+    "next valley" would overclaim exactly where the contact is relative to
+    the ridge it crossed.
+
+    Deliberately queries `store.reader.nearest_feature` directly for
+    `["ridge"]`/`["valley"]` at the target, rather than a second full
+    `query.describe.describe_position` call -- the dominance test only
+    needs the two distances, and a full `describe_position` call also
+    joins settlement/road/water/etc. this caller has no use for (see
+    `query.describe`'s own module docstring on why `query.line_of_sight`
+    avoids `describe_position` for the same reason)."""
+    divide_count = divides_between(
+        conn, theatre, (ownship.x, ownship.z), (target.x, target.z)
+    )
+    if divide_count != 1:
+        return None
+    ridge_match = nearest_feature(conn, ["ridge"], target.x, target.z)
+    valley_match = nearest_feature(conn, ["valley"], target.x, target.z)
+    dominant = _dominant_terrain_kind_from_distances(
+        ridge_match[1] if ridge_match is not None else None,
+        valley_match[1] if valley_match is not None else None,
+    )
+    return "next valley" if dominant == "valley" else "beyond the ridge"
 
 
 def motion_when_seen(store: ContactStore, contact: Contact) -> dict[str, object] | None:

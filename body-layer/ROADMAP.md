@@ -15,6 +15,32 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **`feature/dcs-driven-los` (`X-B29`/`X-B30`) — merged 2026-10-05, not yet flown.** Touches
+  this subproject's gate 4 (`perception/visibility.py`, `perception/naked_eye_source.py`,
+  `belief/contacts.py`'s engagement term), but the entry itself and its own acceptance card live in
+  `world-model/ROADMAP.md`'s "Live acceptance debt" list (the milestone's owning backlog item,
+  `X-B29`, is a cross-cutting `todo/backlog.md` entry spanning aircraft-layer/body-layer/
+  world-model, and the fallback primitive it demotes is world-model's). Pointer kept here so a
+  reader of this file's own debt list doesn't miss it.
+
+- [x] **`feature/spu8-intercom` (audio-adapter Slice 2) — CLEARED 2026-10-05. Flown and accepted**
+  (user: *"SPU-8 feature works, tested and accepted."*), merged `be12734`.** Gates Petrovich's capture and playback both ways on the cockpit's real
+  SPU-8 intercom switches (pilot NET-1, arg 377, AND co-pilot ICS power, arg 664) and scales his
+  playback volume by the SPU-8 knob (arg 457); two automatic defaults ride along (co-pilot ICS
+  switches on 5s after mission start, silence on the ground until the first command). **This one
+  stands alone rather than batching with the sorties below** — it changes whether he can be heard
+  at all, so flying it alongside another speech-content change would make a gating bug
+  indistinguishable from a content bug. Reviewer APPROVED (two rounds — round 2 re-verified a
+  Security-requested fix); Security deep analysis initially NEEDS FIXES (unguarded `ValueError`
+  that could permanently kill the audio worker thread while the LAN API kept reporting success —
+  fixed, re-approved); Performance APPROVED — MONITOR (one unmeasurable item: three added
+  per-frame cockpit reads, same cost class as the existing PTT read, needs a sortie to confirm no
+  stutter). Two constants shipped as uncalibrated guesses: `ON_GROUND_AGL_THRESHOLD_M = 10.0`,
+  `MISSION_START_ICS_DELAY_S = 5.0`. Acceptance card:
+  `docs/acceptance/2026-10-05-spu8-intercom-sortie.md`. Full record:
+  `plans/spu8-intercom/{plan.md, implementation.md, review.md, security-deep-analysis.md,
+  performance.md, dod-check.md}`; roadmap entry: `audio-adapter/ROADMAP.md`'s Slice 2.
+
 - [ ] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`), not yet flown
   (2026-10-05).** Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
   when an existing, not-yet-`lost` contact is spatially/class-plausibly the same real thing — the
@@ -48,6 +74,22 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   over-suppression risk direction both fixes share). Acceptance card published alongside DoD
   sign-off; add its ask to the already-pending contact-report-flood sortie rather than scheduling
   a second one.
+
+- [ ] **`feature/terrain-callout-stages-345` — DoD mechanical checks PASSED 2026-10-05, not yet
+  merged, unflown.** `world-model/query/divides.py`'s query-time divide counter plus the Stage 5
+  wiring that lets a terrain qualifier ("next valley"/"beyond the ridge") **displace** the generic
+  "near X" fragment on a contact report. Reviewer (round 2), Security deep analysis and
+  Performance (APPROVED — MONITOR) all signed off; see `plans/terrain-feature-probing/`. **Rides
+  the already-pending `fix/contact-report-flood`/`fix/redundant-group-disclosure` sortie
+  (card https://claude.ai/artifact/VJZnmdF3aqxhVGZea3iKN4) rather than needing its own flight** —
+  all three change what the pilot hears about the same contact stream, in the same cockpit. What
+  only a real flight settles: whether the qualifier fires where the pilot would say it and stays
+  silent where they wouldn't (the real-store check at Baalbek reads 1 divide across the flank at
+  8 km, 0 along the valley floor to 16-20 km); whether it ever displaces something more useful
+  than itself (the risk direction, since it now wins over the road fragment); and whether the four
+  shipped-to-be-flown constants (300 m qualifier ceiling, 2x dominance factor, 400 m divide-merge
+  distance, >=2-divides-means-silence) need retuning. See `docs/acceptance/
+  2026-10-05-terrain-callout-sortie.md`.
 
 - [ ] **`fix/confirm-band-affirmatives` — the confirm band was unanswerable in the air; fixed and
   merged 2026-09-28 (`583d786`), unflown.** **Merged before its acceptance flight at user

@@ -211,6 +211,22 @@ Each `poll()`:
    `self.scan_plan` defaults to `perception.gaze.FREE_SCAN_PLAN` (the
    o'clock scan loop, not "no restriction" -- 2C has no unrestricted
    `ScanPlan` any more), `peripheral_stimulus_ids` to a true no-op (empty).
+8. **DCS-driven line of sight is resolved per candidate, before the gate
+   loop, the same shape as movement** (`plans/dcs-driven-los/plan.md`,
+   X-B29). `_resolve_los_by_unit_name` joins this poll's `GET
+   /line_of_sight/latest` snapshot onto the raw world-objects dicts by
+   `unit_name`, subject to `LOS_MAX_AGE_S` and the same same-poll
+   uniqueness check `_resolve_velocity_by_object_id` already established.
+   The joined `building_clear and terrain_clear` verdict lands on
+   `WorldObjectCandidate.live_los_clear` via `from_dict`'s
+   `live_los_clear=` keyword, then `visibility.check_visibility`'s gate 4
+   reads it first, falling back to world-model's offline primitive only
+   when it is `None`. Every candidate's trace row (whichever gate decided
+   its fate) is annotated via `annotate_los`, inside the same per-
+   candidate loop that calls `check_visibility` -- unlike `annotate_motion`
+   (which only ever runs on already-admitted candidates), this one covers
+   a `TERRAIN_LOS`-outcome row too, which is the row a "why wasn't that
+   seen" debrief actually wants to read.
 """
 
 from __future__ import annotations
@@ -314,6 +330,16 @@ NAKED_EYE_MAX_NEW_GROUPS_PER_POLL: Final[int] = 5
 #: scan cycle, or a flank object the cone has swept off of ages out before
 #: the cone sweeps back to it.
 _ACQUISITION_RETENTION_WINDOW_S: Final[float] = SCAN_CYCLE_PERIOD_S
+
+#: `plans/dcs-driven-los/plan.md` (X-B29) -- the maximum age, in sim
+#: seconds, a `GET /line_of_sight/latest` snapshot may be before its join
+#: onto this poll's world-objects snapshot is discarded (same shape as
+#: `MOTION_VELOCITY_MAX_SKEW_S` for the velocity feed). Proposed, unmeasured
+#: (same debt class as `BRAIN_REPLY_MAX_AGE_S`/`STAND_BY_AFTER_S`), settled
+#: by the user at 3.0 s -- three poll cycles at the LOS feed's own 1 Hz
+#: rate: at 83 m/s the aircraft covers ~250 m in 3 s, the shape of error to
+#: listen for if a stale verdict ever produces a visibly wrong call.
+LOS_MAX_AGE_S: Final[float] = 3.0
 
 #: Reads differently from Hybrid's `"petrovich_indication+world_objects"` --
 #: a filter pass here is structurally weaker evidence than a real HelperAI
@@ -447,12 +473,35 @@ class NakedEyePerceptionSource:
         velocity_by_object_id, motion_skew_s = _resolve_velocity_by_object_id(
             raw_objects, world_objects.get("dcs_model_time_s"), unit_velocity
         )
+        # `plans/dcs-driven-los/plan.md` (X-B29) -- same independently-
+        # degradable-feed posture as the velocity join immediately above:
+        # an aircraft-layer instance predating this endpoint (or whose LOS
+        # Hook script hasn't started) has no `/line_of_sight/latest` route
+        # at all, a transport-level `AircraftLayerError`, not the `None`-
+        # on-empty-cache case `get_world_objects_latest` handles on its
+        # own. Falling back to `None` reproduces "no live LOS verdict
+        # anywhere" rather than taking this whole poll down with it.
+        try:
+            line_of_sight = self.aircraft_client.get_line_of_sight_latest()
+        except AircraftLayerError:
+            line_of_sight = None
+        los_by_object_id, los_skew_s, los_hour_used, los_fov_half_deg_used = (
+            _resolve_los_by_unit_name(
+                raw_objects, world_objects.get("dcs_model_time_s"), line_of_sight
+            )
+        )
         all_candidates = filter_ownship(
             [
                 WorldObjectCandidate.from_dict(
                     obj,
                     theatre=self.theatre,
                     velocity=velocity_by_object_id.get(obj.get("object_id")),
+                    live_los_clear=(
+                        resolved.live_los_clear
+                        if (resolved := los_by_object_id.get(obj.get("object_id")))
+                        is not None
+                        else None
+                    ),
                 )
                 for obj in raw_objects
             ]
@@ -527,6 +576,23 @@ class NakedEyePerceptionSource:
                 trace=self.trace_sink,
                 group_salient=candidate.object_id in salient_ids,
             )
+            if self.trace_sink is not None:
+                resolved_los = los_by_object_id.get(candidate.object_id)
+                self.trace_sink.annotate_los(
+                    candidate.object_id,
+                    building_clear=(
+                        resolved_los.building_clear
+                        if resolved_los is not None
+                        else None
+                    ),
+                    terrain_clear=(
+                        resolved_los.terrain_clear if resolved_los is not None else None
+                    ),
+                    live_los_clear=candidate.live_los_clear,
+                    skew_s=los_skew_s,
+                    hour_used=los_hour_used,
+                    fov_half_deg_used=los_fov_half_deg_used,
+                )
             if result is not None:
                 visible.append((candidate, result))
 
@@ -581,12 +647,21 @@ class NakedEyePerceptionSource:
         else:
             to_emit = self._acquire_on_change(now_sim, clusters, currently_visible_ids)
 
+        # `plans/dcs-driven-los/plan.md` (X-B29) -- one more per-candidate
+        # verdict carried alongside motion into the cluster-level fold,
+        # same shape/timing as `motion_by_object_id` above.
+        live_los_clear_by_object_id: dict[int, bool | None] = {
+            candidate.object_id: candidate.live_los_clear
+            for candidate, _result in visible
+        }
+
         observations = self._build_observations(
             now_sim,
             ownship_state,
             to_emit,
             confidence_by_object_id,
             motion_by_object_id,
+            live_los_clear_by_object_id,
         )
         if self.trace_sink is not None:
             for cluster, observation in zip(to_emit, observations):
@@ -604,6 +679,7 @@ class NakedEyePerceptionSource:
         clusters: list[Cluster],
         confidence_by_object_id: dict[int, float],
         motion_by_object_id: dict[int, bool | None],
+        live_los_clear_by_object_id: dict[int, bool | None],
     ) -> list[Observation]:
         """One `Observation` per `clusters` entry, resolving majority-overlap
         continuity (module docstring point 6) across the *whole* batch before
@@ -658,6 +734,7 @@ class NakedEyePerceptionSource:
                     cluster,
                     confidence_by_object_id,
                     motion_by_object_id,
+                    live_los_clear_by_object_id,
                     continues_observation_id,
                 )
             )
@@ -808,6 +885,7 @@ class NakedEyePerceptionSource:
         cluster: Cluster,
         confidence_by_object_id: dict[int, float],
         motion_by_object_id: dict[int, bool | None],
+        live_los_clear_by_object_id: dict[int, bool | None],
         continues_observation_id: str | None,
     ) -> Observation:
         """One `Observation` for `cluster` -- `plans/group-contact-model/
@@ -835,7 +913,12 @@ class NakedEyePerceptionSource:
         docstring point 1b) is the cluster's members' shared movement
         verdict when they all agree (including all-`None`), else `None` --
         `Cluster.classification_raw`'s own "identical keeps, disagreement
-        degrades" rule, generalised to a tri-state boolean."""
+        degrades" rule, generalised to a tri-state boolean.
+
+        `live_los_clear` (`plans/dcs-driven-los/plan.md`, module docstring
+        point 8) follows the exact same rule, for the exact same reason:
+        a cluster is one crew-facing report, so its LOS verdict is "clear"
+        only when every member's own DCS-driven verdict agrees it is."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -869,6 +952,11 @@ class NakedEyePerceptionSource:
         apparent_motion = (
             next(iter(member_motions)) if len(member_motions) == 1 else None
         )
+        member_los = {
+            live_los_clear_by_object_id.get(member.object_id)
+            for member in cluster.members
+        }
+        live_los_clear = next(iter(member_los)) if len(member_los) == 1 else None
         return Observation(
             id=observation_id,
             contact_id=None,
@@ -893,6 +981,7 @@ class NakedEyePerceptionSource:
                 sigma_cross_m=sigma_cross_m, sigma_down_m=sigma_down_m
             ),
             apparent_motion=apparent_motion,
+            live_los_clear=live_los_clear,
         )
 
 
@@ -958,6 +1047,89 @@ def _resolve_velocity_by_object_id(
         if isinstance(sample, dict):
             resolved[object_id] = sample
     return resolved, skew_s
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedLos:
+    """One object's joined LOS verdict for one poll -- both published
+    fields plus the combined verdict `visibility.check_visibility`'s gate
+    4 actually consumes (`plans/dcs-driven-los/plan.md`, X-B29)."""
+
+    building_clear: bool
+    terrain_clear: bool
+
+    @property
+    def live_los_clear(self) -> bool:
+        return self.building_clear and self.terrain_clear
+
+
+def _resolve_los_by_unit_name(
+    objects: list[dict[str, Any]],
+    world_objects_t_sim: Any,
+    line_of_sight: dict[str, Any] | None,
+) -> tuple[dict[int, _ResolvedLos], float | None, int | None, int | None]:
+    """Join this poll's `GET /line_of_sight/latest` snapshot onto `objects`
+    (raw `GET /world_objects/latest` object dicts, `unit_name` field
+    included) by `unit_name` -- the same join key, same skew check, and
+    the same non-unique-`unit_name`-drops-to-unresolved handling as
+    `_resolve_velocity_by_object_id` above (`plans/dcs-driven-los/plan.md`,
+    reusing `plans/movement-detection/plan.md` Decision 1's precedent
+    rather than inventing a second one).
+
+    Returns `(los_by_object_id, skew_s, hour_used, fov_half_deg_used)`:
+    the first only ever contains entries that actually resolved (a unit
+    outside the queried wedge, or a corrupted/malformed verdict for an
+    otherwise-resolved unit, is simply absent -- `.get(object_id)`
+    returning `None` covers every "no live verdict" case uniformly, same
+    posture as the velocity join); `skew_s`/`hour_used`/`fov_half_deg_used`
+    are `None` on every failure path (no snapshot, stale skew), or the
+    actual values otherwise, for the detection trace (`annotate_los`)."""
+    if line_of_sight is None:
+        return {}, None, None, None
+    try:
+        skew_s = abs(
+            float(world_objects_t_sim) - float(line_of_sight["dcs_model_time_s"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return {}, None, None, None
+
+    hour_used_raw = line_of_sight.get("hour_used")
+    fov_half_deg_used_raw = line_of_sight.get("fov_half_deg_used")
+    hour_used = hour_used_raw if isinstance(hour_used_raw, int) else None
+    fov_half_deg_used = (
+        fov_half_deg_used_raw if isinstance(fov_half_deg_used_raw, int) else None
+    )
+
+    if skew_s > LOS_MAX_AGE_S:
+        return {}, skew_s, hour_used, fov_half_deg_used
+
+    verdicts = line_of_sight.get("verdicts")
+    if not isinstance(verdicts, dict):
+        return {}, skew_s, hour_used, fov_half_deg_used
+
+    name_counts: Counter[str] = Counter(
+        name for obj in objects if isinstance(name := obj.get("unit_name"), str)
+    )
+
+    resolved: dict[int, _ResolvedLos] = {}
+    for obj in objects:
+        name = obj.get("unit_name")
+        object_id = obj.get("object_id")
+        if not isinstance(name, str) or not isinstance(object_id, int):
+            continue
+        if name_counts[name] > 1:
+            continue
+        verdict = verdicts.get(name)
+        if not isinstance(verdict, dict):
+            continue
+        building_clear = verdict.get("building_clear")
+        terrain_clear = verdict.get("terrain_clear")
+        if not isinstance(building_clear, bool) or not isinstance(terrain_clear, bool):
+            continue
+        resolved[object_id] = _ResolvedLos(
+            building_clear=building_clear, terrain_clear=terrain_clear
+        )
+    return resolved, skew_s, hour_used, fov_half_deg_used
 
 
 def _classification_for_tier(

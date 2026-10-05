@@ -250,3 +250,7 @@ Rebuilt 2026-09-21 from the files themselves.
 - [Landform relief gate review](project_landform_relief_gate_review.md) — APPROVED; ROADMAP bug direction was backwards.
 - [Multi theatre afghanistan review](project_multi_theatre_afghanistan_review.md) — APPROVED; crossing measurement separated authoring from a defect.
 - [MTA security fix test gap](project_mta_security_fix_test_gap.md) — NEEDS REVISION; required-fix test passed even with required fix alone removed.
+- [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam, confirmed by disabling it.
+- [Terrain callout stage5 wiring round2 approved](project_terrain_callout_stage5_wiring_round2_approved.md) - APPROVED; silence-path check doesn't need a redundant test for an already-collapsed input.
+- [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; cross-machine zero-prior-gate branch, 4-mechanism disable-and-rerun check.
+- [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp empirically re-run under a standalone Lua interpreter, not just read.

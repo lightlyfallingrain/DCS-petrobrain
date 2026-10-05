@@ -264,7 +264,8 @@
     <div class="eyebrow">Checkout before you fly</div>
     <div><span class="branch-name">fix/contact-report-flood</span> <span class="branch-note">— not merged yet; Reviewer and Security have both approved, your acceptance call is what's left</span></div>
     <pre class="cmd">git checkout fix/contact-report-flood &amp;&amp; git pull</pre>
-    <div class="branch-note"><strong>Added 2026-10-05:</strong> <span class="branch-name">fix/redundant-group-disclosure</span> rides this same sortie (DoD passed, not yet merged) — a group's first disclosure now stays quiet about anything you already heard individually. One flight covers both. If both have merged by the time you fly, check out <span class="branch-name">main</span> instead.</div>
+    <div class="branch-note"><strong>Added 2026-10-05:</strong> <span class="branch-name">fix/redundant-group-disclosure</span> rides this same sortie (DoD passed, not yet merged) — a group's first disclosure now stays quiet about anything you already heard individually. One flight covers both.</div>
+    <div class="branch-note"><strong>Added 2026-10-05:</strong> <span class="branch-name">feature/terrain-callout-stages-345</span> also rides this sortie (DoD mechanical checks passed, not yet merged) — contact reports can now carry a relative terrain reference, e.g. "next valley". It changes the same spoken line the other two are tuning, so it belongs on the same flight. If flying this branch specifically (it already carries the other two, since it branched after them): <pre class="cmd">git checkout feature/terrain-callout-stages-345 &amp;&amp; git pull</pre> If all have merged by the time you fly, check out <span class="branch-name">main</span> instead.</div>
   </div>
 
   <h1 class="title">Contact-Report Flood Sortie</h1>
@@ -449,11 +450,56 @@
     </div>
   </section>
 
+  <section class="block">
+    <h2><span class="num">6</span>A terrain reference shows up where it would make sense</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Listen to contact reports near real terrain relief — a ridgeline, a valley. Baalbek's
+        Anti-Lebanon flank is the one already checked against the real store: a report across the
+        flank should pick up a terrain qualifier, one along the Bekaa valley floor shouldn't.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>Occasionally a report gains a trailing qualifier — "...next valley" or "...beyond the
+        ridge" — when the line to the contact crosses one ridgeline, silent when it crosses none
+        or more than one. This <strong>replaces</strong> the generic "near &lt;place&gt;" fragment
+        when both would apply — never adds on top.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c8" data-k="c8"><label for="c8">A terrain qualifier fired when I'd say it out loud myself.</label></div>
+      <div class="check"><input type="checkbox" id="c9" data-k="c9"><label for="c9">It stayed silent or spoke somewhere that didn't match expectation.</label></div>
+    </div>
+    <div class="row record">
+      <div class="row-label">Watch for specifically</div>
+      <p>Did a terrain qualifier ever replace something more useful — a landmark, road, or
+        settlement name — that would have helped more than "next valley" did?</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">7</span>The four shipped-to-be-flown constants</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Nothing extra — notice across the flight whether terrain qualifiers feel too eager, too
+        rare, or about right.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>First guesses, not swept: 300&nbsp;m ceiling on how close a landform must be to get named
+        at all, 2x dominance factor one landform needs over the next-nearest to win the naming,
+        400&nbsp;m merge distance for counting two nearby ridge crossings as one divide, and
+        2-or-more divides on the line of sight means stay silent.</p>
+    </div>
+    <div class="checks">
+      <div class="check"><input type="checkbox" id="c10" data-k="c10"><label for="c10">Across the flight, terrain qualifiers felt roughly right / too frequent / too rare.</label></div>
+    </div>
+  </section>
+
   <section class="block pass">
     <h2>Pass criteria</h2>
     <p>Busy-area chatter is noticeably reduced, genuinely simultaneous sightings and true
-      reacquisitions are unaffected, and any missed-split cases you notice feel occasional rather
-      than routine.</p>
+      reacquisitions are unaffected, any missed-split cases you notice feel occasional rather
+      than routine, and a terrain qualifier never crowds out something more useful than itself.</p>
   </section>
 
   <div class="bringback">
@@ -468,6 +514,12 @@
         count can be measured against the 17/34 estimate.</li>
       <li>Did a group's opening line ever repeat something already heard individually, or go
         silent when you expected at least a partial line (item 5a)?</li>
+      <li>Did a terrain qualifier ever fire or stay silent in a way that didn't match what you'd
+        say out loud yourself?</li>
+      <li>Did a terrain qualifier ever displace something more useful — a landmark, road, or
+        settlement name?</li>
+      <li>Overall across the flight: did terrain qualifiers feel about right, too eager, or too
+        rare?</li>
     </ol>
     <div class="invite">Anything that surprises you is worth more than anything on this list.</div>
   </div>

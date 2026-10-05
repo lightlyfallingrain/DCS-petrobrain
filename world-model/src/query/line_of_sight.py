@@ -44,6 +44,28 @@ from store.reader import sample_grid
 #: terrain in the way" checks).
 _DEFAULT_LOS_SAMPLES = 20
 
+#: **This primitive, and therefore this tolerance, is now test-path-only --
+#: never a live-detection input.** As of `plans/dcs-driven-los/plan.md`
+#: (X-B29, user direction 2026-10-05): *"With DCS LOS, the item '12 m LOS
+#: tolerance' becomes obsolete and incorrect. It may be used in test code
+#: when LOS is simulated offline, but must not be used in actual code."*
+#: The reasoning below (sized to world-model's own SRTM-vs-DCS error) is a
+#: compensation for a grid that is wrong in a way DCS's own terrain is not
+#: -- once a live caller asks DCS directly (`visibility.check_visibility`'s
+#: gate 4, when `WorldObjectCandidate.live_los_clear is not None`), that
+#: error no longer exists on that path, so loosening its verdict by this
+#: margin would not be a safety allowance, it would be a bug: slack
+#: compensating for an error the live answer never had. This function
+#: remains correct and necessary for its one remaining live use --
+#: `check_visibility`'s own *fallback*, when no live DCS verdict exists
+#: this poll (feed absent, unit outside the queried wedge, or too stale)
+#: -- which is still a real, permanent use, not a test-only path; the
+#: constant is test-path-only in the sense that *fidelity to a real
+#: sortie* is no longer its job (plan SS3a's own non-goal), not in the
+#: sense that this function is unreachable outside tests. The remaining
+#: reasoning below (why 12 m, why it is airframe-specific) stands
+#: unchanged for exactly that fallback and for fixtures.
+#:
 #: Terrain is only treated as blocking once it exceeds the sightline
 #: altitude by more than this many metres, rather than by any amount at
 #: all -- world-model's elevation grid is a sampled estimate, not ground

@@ -1,0 +1,524 @@
+<title>SPU-8 Intercom Sortie</title>
+<style>
+  :root {
+    --ground: #12161a;
+    --panel: #1b2126;
+    --panel-raised: #222a30;
+    --hairline: #323c42;
+    --ink: #e9e8e2;
+    --ink-dim: #9aa5a9;
+    --amber: #e3a23c;
+    --amber-dim: #a97a2e;
+    --teal: #5fa392;
+    --red: #c25450;
+    --red-dim: #3a2422;
+    --mono-bg: #0c0f12;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --ground: #f3f1ea;
+      --panel: #ffffff;
+      --panel-raised: #ece8dd;
+      --hairline: #d8d2c3;
+      --ink: #20241f;
+      --ink-dim: #5c6660;
+      --amber: #a9661a;
+      --amber-dim: #c98a3a;
+      --teal: #2f7566;
+      --red: #a23834;
+      --red-dim: #f3dcd9;
+      --mono-bg: #e8e3d5;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f3f1ea;
+    --panel: #ffffff;
+    --panel-raised: #ece8dd;
+    --hairline: #d8d2c3;
+    --ink: #20241f;
+    --ink-dim: #5c6660;
+    --amber: #a9661a;
+    --amber-dim: #c98a3a;
+    --teal: #2f7566;
+    --red: #a23834;
+    --red-dim: #f3dcd9;
+    --mono-bg: #e8e3d5;
+  }
+  :root[data-theme="dark"] {
+    --ground: #12161a;
+    --panel: #1b2126;
+    --panel-raised: #222a30;
+    --hairline: #323c42;
+    --ink: #e9e8e2;
+    --ink-dim: #9aa5a9;
+    --amber: #e3a23c;
+    --amber-dim: #a97a2e;
+    --teal: #5fa392;
+    --red: #c25450;
+    --red-dim: #3a2422;
+    --mono-bg: #0c0f12;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    padding: 0 16px;
+    padding-block: 20px 60px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; }
+
+  h1, h2, h3 { font-family: "Barlow Condensed", "Oswald", sans-serif; text-wrap: balance; }
+
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 2px solid var(--amber);
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+  .masthead .tag {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+  }
+  h1 {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    margin: 0 0 2px 0;
+    color: var(--amber);
+  }
+  .subtitle { color: var(--ink-dim); font-size: 14px; margin: 0 0 18px 0; }
+
+  .branch-box {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-left: 4px solid var(--amber);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .branch-box .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--amber);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  code, pre, .cmd {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+  }
+  pre.cmd {
+    background: var(--mono-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    margin: 6px 0 0 0;
+    color: var(--ink);
+  }
+  .branch-box .note { font-size: 13px; color: var(--ink-dim); margin-top: 8px; }
+
+  .alone-box {
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .alone-box .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--red);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .alone-box p { margin: 0; font-size: 14px; }
+
+  .why {
+    font-size: 14.5px;
+    color: var(--ink);
+    margin-bottom: 20px;
+  }
+  .why strong { color: var(--amber); }
+
+  .section-label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin: 28px 0 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--hairline);
+  }
+
+  .block-item {
+    counter-increment: blocks;
+    background: var(--panel-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .block-item .num {
+    font-family: "JetBrains Mono", monospace;
+    color: var(--red);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .block-item h3 { margin: 0 0 8px 0; font-size: 17px; color: var(--ink); }
+
+  .guess-box {
+    background: var(--panel-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 13.5px;
+  }
+  .guess-box .val {
+    font-family: "JetBrains Mono", monospace;
+    color: var(--amber);
+    background: var(--mono-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .test-card {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .test-card .test-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--amber);
+    color: var(--ground);
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 13px;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  .test-card .test-title-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .test-card h3 { margin: 0; font-size: 18px; }
+  .test-card .row { margin: 8px 0; font-size: 14.5px; }
+  .test-card .row .k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--teal);
+    display: block;
+    margin-bottom: 3px;
+  }
+  .record-list {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--hairline);
+  }
+  .record-list label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 14px;
+    margin-bottom: 7px;
+    cursor: pointer;
+  }
+  .record-list input[type="checkbox"] {
+    margin-top: 3px;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--amber);
+    flex-shrink: 0;
+  }
+
+  .pass-box {
+    background: var(--panel-raised);
+    border: 1px solid var(--teal);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin: 24px 0;
+    font-size: 14.5px;
+  }
+  .pass-box .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--teal);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .bringback {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-top: 10px;
+  }
+  .bringback h2 { margin: 0 0 10px 0; font-size: 20px; color: var(--amber); }
+  .bringback ol { margin: 0; padding-left: 22px; font-size: 14.5px; }
+  .bringback li { margin-bottom: 7px; }
+  .bringback .surprise {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--hairline);
+    font-size: 14px;
+    color: var(--amber-dim);
+    font-style: italic;
+  }
+
+  footer {
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 12px;
+    margin-top: 30px;
+  }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <h1>SPU-8 Intercom Sortie</h1>
+      <p class="subtitle">Acceptance flight — does the cockpit intercom panel actually gate Petrovich?</p>
+    </div>
+    <div class="tag">DoD · 2026-10-05</div>
+  </div>
+
+  <div class="branch-box">
+    <div class="label">Check out this branch first</div>
+    <pre class="cmd">git checkout feature/spu8-intercom &amp;&amp; git pull</pre>
+    <p class="note">DoD mechanical checks PASSED, Reviewer / Security / Performance all APPROVED.
+      Not merged yet. If you're flying after it has merged, check out <code>main</code> instead —
+      same setup and test items apply.</p>
+  </div>
+
+  <div class="alone-box">
+    <div class="label">Fly this one alone</div>
+    <p>This changes whether Petrovich can be heard at all. Don't combine it with the
+      contact-report sortie — if gating or volume is wrong here, you won't be able to tell
+      "he didn't say it because the fix suppressed it" from "he didn't say it because the
+      intercom was closed." Settle this flight first.</p>
+  </div>
+
+  <p class="why">
+    Right now Petrovich's audio has no real gate — he can always be heard and you can always be
+    captured, disconnected from the cockpit's own intercom panel. This slice wires it up:
+    <strong>pilot NET-1 (arg 377) AND co-pilot ICS power (arg 664)</strong> gate capture and
+    playback both ways, and the <strong>SPU-8 volume knob (arg 457)</strong> scales his loudness.
+    Two automatic defaults ride along: co-pilot ICS switches on by itself 5&nbsp;seconds after
+    spawn, and he starts silent on the ground.
+  </p>
+
+  <div class="section-label">Before you can fly at all</div>
+
+  <div class="block-item">
+    <h3><span class="num">1</span>Redeploy Export.lua</h3>
+    <p style="margin:0 0 8px 0; font-size:14px;">This branch bumps the export version to
+      <code>2026-10-05</code> and adds the three new SPU-8 telemetry fields. A stale deployed copy
+      gets refused (version-mismatch warning, not a crash) — the new fields just won't be there.</p>
+    <pre class="cmd">copy aircraft-layer\dcs-export\Export.lua "Saved Games\DCS\Scripts\Export.lua"</pre>
+  </div>
+
+  <div class="block-item">
+    <h3><span class="num">2</span>Start the usual three processes</h3>
+    <p style="margin:0 0 8px 0; font-size:14px;">Mac side, from <code>run-scripts/</code>, Windows
+      collector already running with the redeployed <code>Export.lua</code>.</p>
+    <pre class="cmd">cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text-debug-view.sh</pre>
+  </div>
+
+  <div class="block-item">
+    <h3><span class="num">3</span>Confirm new telemetry is flowing</h3>
+    <p style="margin:0 0 8px 0; font-size:14px;">From the Mac, once the collector is up (swap in
+      your own <code>$DCS_COLLECTOR_IP</code> from <code>petrobrain.env</code>):</p>
+    <pre class="cmd">curl http://$DCS_COLLECTOR_IP:7791/spu8/state</pre>
+    <p style="margin:8px 0 0 0; font-size:13.5px; color:var(--ink-dim);">Expect <code>null</code>
+      before you've touched the cockpit, then a JSON object with <code>net1</code>,
+      <code>ics_power</code>, <code>vol</code> plus <code>net1_on</code> / <code>ics_power_on</code>
+      / <code>gate_open</code> once DCS is exporting. <strong style="color:var(--red);">This exact
+      command was not run against a live DCS session from here</strong> — check it first, don't
+      assume it.</p>
+  </div>
+
+  <div class="guess-box">
+    <strong style="color:var(--amber);">Two numbers shipped as guesses, not measurements:</strong>
+    <span class="val">ON_GROUND_AGL_THRESHOLD_M = 10.0</span> and
+    <span class="val">MISSION_START_ICS_DELAY_S = 5.0</span>. This flight is what calibrates them.
+  </div>
+
+  <div class="section-label">What to test</div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">1</span><h3>Gate — NET-1 off</h3></div>
+    <div class="row"><span class="k">Do</span>On the ground, turn the pilot's NET-1 switch OFF
+      (arg 377). Key the ICS PTT and speak.</div>
+    <div class="row"><span class="k">Expect</span>No capture at all — collector/debug log shows no
+      change. A queued line from Petrovich goes silent, not queued for later.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t1a">With NET-1 off, did keying ICS PTT and speaking produce no capture?</label>
+      <label><input type="checkbox" data-k="t1b">Did a line that would've spoken with NET-1 off just never come, with no catch-up later?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">2</span><h3>Gate — co-pilot ICS off</h3></div>
+    <div class="row"><span class="k">Do</span>NET-1 back ON. Turn the co-pilot ICS power switch
+      OFF (operator panel, or catch it after the mission-start auto-write and flip it off).</div>
+    <div class="row"><span class="k">Expect</span>Same closed-both-ways result as test 1 — either
+      switch alone closes the channel.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t2a">With NET-1 on but co-pilot ICS off, was the channel still closed both ways?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">3</span><h3>Gate — both on</h3></div>
+    <div class="row"><span class="k">Do</span>Turn both NET-1 and co-pilot ICS ON.</div>
+    <div class="row"><span class="k">Expect</span>Capture and playback both work normally.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t3a">With both switches on, did capture and playback both work as expected?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">4</span><h3>Volume knob</h3></div>
+    <div class="row"><span class="k">Do</span>Gate open. Turn the SPU-8 volume knob between two of
+      Petrovich's callouts.</div>
+    <div class="row"><span class="k">Expect</span>An audible loudness change. The new volume
+      applies from the <em>next</em> line, not ramped into the current one — confirm that's not
+      jarring in practice.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t4a">Did the knob actually change how loud he is?</label>
+      <label><input type="checkbox" data-k="t4b">Did "next line, not current" feel acceptable, or like a bug?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">5</span><h3>Mission-start auto co-pilot ICS</h3></div>
+    <div class="row"><span class="k">Do</span>Spawn in, watch the co-pilot ICS switch (or poll
+      <code>GET /spu8/state</code>) for the first 10 seconds. Don't touch it yourself.</div>
+    <div class="row"><span class="k">Expect</span>It moves to ON on its own, ~5 seconds after
+      spawn.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t5a">Did the co-pilot ICS switch turn on by itself around 5s in?</label>
+      <label><input type="checkbox" data-k="t5b">Does 5s feel about right, or would a different delay feel more natural?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">6</span><h3>On-ground silent start</h3></div>
+    <div class="row"><span class="k">Do</span>Start on the ground, gate open. Give no command yet
+      — just watch/listen if contacts are nearby. Then give any command (e.g. "report").</div>
+    <div class="row"><span class="k">Expect</span>Silent before the command, even with contacts
+      detected and the overlay/text still updating. Speech resumes after the command and stays
+      resumed even after a later touch-down this sortie (one-shot, not re-armed by landing again).</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t6a">Was he actually silent on the ramp before any command, even with contacts around?</label>
+      <label><input type="checkbox" data-k="t6b">Did the first command you gave end the silence?</label>
+      <label><input type="checkbox" data-k="t6c">Did takeoff alone (no command) leave him silent, as intended?</label>
+      <label><input type="checkbox" data-k="t6d">After a later touch-down, did he stay talking (silence didn't re-trigger)?</label>
+      <label><input type="checkbox" data-k="t6e">Did the 10m AGL threshold read as "on the ground" correctly — any false trigger during a low hover, or failure to trigger while parked?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">7</span><h3>Stutter check</h3></div>
+    <div class="row"><span class="k">Do</span>Just fly normally for a few minutes with this
+      branch's <code>Export.lua</code> running.</div>
+    <div class="row"><span class="k">Expect</span>No new stutter. Three extra unthrottled
+      per-frame cockpit reads were added — reasoned as the same cost class as the existing PTT
+      read, but there's no profiler for this. Only you can answer it.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t7a">Any added stutter versus a normal sortie, however slight?</label>
+    </div>
+  </div>
+
+  <div class="test-card">
+    <div class="test-title-row"><span class="test-num">8</span><h3>Mission restart (optional, rides free)</h3></div>
+    <div class="row"><span class="k">Do</span>If convenient, restart the mission once this sortie.</div>
+    <div class="row"><span class="k">Expect</span>This branch also fixes a pre-existing bug where
+      a restart silently stopped telemetry. Confirm <code>/spu8/state</code> (or any telemetry)
+      still updates after a restart.</div>
+    <div class="record-list">
+      <label><input type="checkbox" data-k="t8a">After a mission restart, did telemetry keep flowing normally?</label>
+    </div>
+  </div>
+
+  <div class="pass-box">
+    <div class="label">Pass criteria</div>
+    Both gate directions work independently and together, the volume knob is audible with
+    next-line timing that doesn't feel broken, the mission-start ICS write and on-ground silence
+    each fire correctly and only once, and there's no noticeable stutter.
+  </div>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ol>
+      <li>Did both switches independently close the channel, and did both-on restore it?</li>
+      <li>Did the volume knob work, and did next-line-not-current feel right?</li>
+      <li>Did the mission-start ICS write happen on its own around 5s?</li>
+      <li>Was he silent on the ramp, and did the first command end it? Did takeoff alone leave him silent?</li>
+      <li>Did the 10m ground threshold feel right, or should it be bigger/smaller?</li>
+      <li>Any stutter, however slight?</li>
+      <li>Did telemetry survive a mission restart, if you tried one?</li>
+    </ol>
+    <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>Source: <code>docs/acceptance/2026-10-05-spu8-intercom-sortie.md</code></footer>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'spu8-intercom-sortie';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+})();
+</script>

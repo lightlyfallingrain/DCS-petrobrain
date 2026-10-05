@@ -31,6 +31,27 @@ backing temp `.wav` files on disk) without limit. Oldest-dropped, not
 newest-rejected, because a stale queued callout is worth less than a fresh
 one -- see `_enqueue`.
 
+**SPU-8 gating and volume (`plans/spu8-intercom/plan.md` Stage 3)** are
+both consulted at one point: immediately before `self._player.play(path)`,
+in the worker thread (`_run`), via an injected
+`gate_state: Callable[[], Spu8GateState]` provider -- not at `play_audio`/
+enqueue time (plan Decision 2). A line sitting briefly behind another in
+the FIFO is re-checked against current switch/volume state right before it
+actually plays. If the gate is closed, the queued line is dropped silently
+(logged, temp file cleaned up, `play()` never called) with no special-
+casing for `urgent` -- an off switch means off, unconditionally. If open,
+the WAV's 16-bit PCM samples are scaled by the current volume (0..1
+linear) with stdlib `wave` + `array` before playback -- **not `audioop`**
+(main-loop amendment 2026-10-05): it was deprecated in Python 3.11 and
+removed in 3.13, and this project's `requires-python = ">=3.11"` does not
+pin below 3.13, so `import audioop` would fail outright on a 3.13 Windows
+interpreter. A WAV that is not 16-bit PCM plays unscaled (logged once)
+rather than guessing at its format. The real production wiring
+(`collector/__main__.py`) passes `Spu8Cache.gate_state`, fail-safe-closed
+when no SPU-8 sample has arrived yet (plan Decision 3); the constructor
+default below (`_always_open`) is a backward-compatibility value only, for
+every pre-existing call site/test that doesn't care about gating.
+
 **`winsound` is Windows-only stdlib -- the first Windows-only import this
 codebase has needed.** Guarded with a static `sys.platform == "win32"`
 check (not a runtime `try`/`except ImportError`): mypy specially recognizes
@@ -61,9 +82,29 @@ import sys
 import tempfile
 import threading
 import wave
+from array import array
+from collections.abc import Callable
 from typing import Protocol
 
+from collector.cache import Spu8GateState
+
 logger = logging.getLogger(__name__)
+
+#: 16-bit PCM signed sample bounds -- `_scale_volume` clamps to these after
+#: multiplying, since `volume` is nominally 0..1 but a defensive clamp costs
+#: nothing and the real cockpit value is never verified by this code.
+_INT16_MIN = -32768
+_INT16_MAX = 32767
+
+
+#: `AudioPlaybackSender`'s own constructor default (plan Decision 3) -- a
+#: backward-compatibility value for every pre-existing call site/test that
+#: never wires a real gate/volume provider, not a production path. The real
+#: wiring (`collector/__main__.py`) passes `Spu8Cache.gate_state`, which is
+#: fail-safe-closed instead.
+def _always_open() -> Spu8GateState:
+    return Spu8GateState(gate_open=True, volume=1.0)
+
 
 #: Sentinel put on the queue by `close()` to unblock the worker thread's
 #: blocking `queue.get()` call.
@@ -122,6 +163,78 @@ def wav_duration_s(path: str) -> float | None:
             return w.getnframes() / float(rate)
     except (wave.Error, OSError, EOFError):
         return None
+
+
+def scale_wav_volume(path: str, volume: float) -> None:
+    """Scale the WAV at `path` by `volume` (0..1 linear) in place --
+    `plans/spu8-intercom/plan.md` Stage 3's playback-volume mechanism.
+
+    A no-op for `volume == 1.0` (the common case: gate open, knob at full,
+    or the constructor's `_always_open` default) -- skipping both the
+    `wave` round-trip and, just as importantly, leaving any non-WAV file a
+    test double hands this module untouched, since nothing needs scaling.
+
+    Only 16-bit PCM is scaled. A WAV that is not 16-bit PCM (or cannot be
+    read as a WAV at all) is left exactly as it was and logged once --
+    "play it unscaled rather than guess" (plan Stage 3) -- the caller then
+    plays the original file. Samples are read via stdlib `array('h')`
+    (**not `audioop`**, removed in Python 3.13 -- main-loop amendment
+    2026-10-05), byteswapped on a big-endian host since a WAV's own PCM
+    data is always little-endian, multiplied by `volume`, clamped to the
+    16-bit signed range, and written back to the same file."""
+    if volume == 1.0:
+        return
+
+    try:
+        with wave.open(path, "rb") as reader:
+            params = reader.getparams()
+            if params.sampwidth != 2:
+                logger.warning(
+                    "SPU-8 volume: %s is not 16-bit PCM (sampwidth=%d) -- "
+                    "playing unscaled",
+                    path,
+                    params.sampwidth,
+                )
+                return
+            raw_frames = reader.readframes(params.nframes)
+
+        samples = array("h")
+        samples.frombytes(raw_frames)
+    except (wave.Error, OSError, EOFError, ValueError):
+        # ValueError covers a WAV whose declared `nframes` exceeds the
+        # file's real size: `readframes` does not raise on a truncated
+        # `data` chunk -- it just returns however many bytes are actually
+        # there -- and if that byte count is odd, `array("h").frombytes()`
+        # raises. Same posture as this function's other malformed-input
+        # cases: play it unscaled rather than guess (Security deep
+        # analysis, SPU-8 intercom, 2026-10-05).
+        logger.warning(
+            "SPU-8 volume: %s could not be read as a WAV -- playing unscaled",
+            path,
+            exc_info=True,
+        )
+        return
+
+    if sys.byteorder == "big":
+        samples.byteswap()
+
+    for i, sample in enumerate(samples):
+        scaled = int(sample * volume)
+        if scaled > _INT16_MAX:
+            scaled = _INT16_MAX
+        elif scaled < _INT16_MIN:
+            scaled = _INT16_MIN
+        samples[i] = scaled
+
+    if sys.byteorder == "big":
+        samples.byteswap()
+
+    try:
+        with wave.open(path, "wb") as writer:
+            writer.setparams(params)
+            writer.writeframes(samples.tobytes())
+    except (wave.Error, OSError) as exc:
+        logger.warning("SPU-8 volume: failed to write scaled %s: %s", path, exc)
 
 
 if sys.platform == "win32":
@@ -190,8 +303,13 @@ class AudioPlaybackSender:
     `TextOverlaySender`/`CommandSender`'s open()/close() lifecycle shape,
     though the underlying resource here is a thread, not a socket."""
 
-    def __init__(self, player: WavPlayer | None = None) -> None:
+    def __init__(
+        self,
+        player: WavPlayer | None = None,
+        gate_state: Callable[[], Spu8GateState] = _always_open,
+    ) -> None:
         self._player: WavPlayer = player if player is not None else _WinsoundPlayer()
+        self._gate_state = gate_state
         self._queue: queue.Queue[str | None] = queue.Queue(maxsize=_MAX_QUEUE_LEN)
         self._worker: threading.Thread | None = None
 
@@ -300,6 +418,33 @@ class AudioPlaybackSender:
             path = self._queue.get()
             if path is None:
                 return
+
+            # SPU-8 gate/volume, consulted once per item, right here --
+            # "next-utterance granularity" per the plan: whatever is
+            # current when this item reaches the front of the queue, not
+            # re-checked mid-playback.
+            state = self._gate_state()
+            if not state.gate_open:
+                logger.debug(
+                    "SPU-8 gate closed -- dropping queued line %s without playing",
+                    path,
+                )
+                self._cleanup(path)
+                continue
+
+            try:
+                scale_wav_volume(path, state.volume)
+            except Exception:
+                # Defense in depth, independent of scale_wav_volume's own
+                # guard: a future unguarded parse path in there must not
+                # be able to kill this worker thread for the rest of the
+                # sortie (Security deep analysis, SPU-8 intercom,
+                # 2026-10-05). Play the file unscaled rather than skip it.
+                logger.warning(
+                    "SPU-8 volume scaling failed for %s (playing unscaled)",
+                    path,
+                    exc_info=True,
+                )
             try:
                 self._player.play(path)
             except Exception:
