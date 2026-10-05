@@ -48,7 +48,12 @@ from belief.classification import (
 from belief.contacts import ContactStore
 from belief.decay import CALLOUT_OBSERVABILITY_GRACE_S, LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
-from belief.events import CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, Event
+from belief.events import (
+    CONTACT_ENGAGEMENT_CHANGED,
+    CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
+    Event,
+)
 from belief.speech import render_group_report
 from belief.tasks import TaskStore
 from belief.tools import scan_area, set_attention
@@ -1916,9 +1921,12 @@ def test_ungrouped_singleton_output_is_byte_identical() -> None:
 # line, neither of which passes through either gated block. (20
 # masked-hour lines in all; the other 3 answered a `report` and are the
 # pull path, deliberately not gated -- `plans/post-review-fixes/
-# explore-notes.md` §9.) These tests cover the two newly-gated paths plus
-# the two directions this fix must *not* break (grace window, and deferral
-# rather than loss).
+# explore-notes.md` §9.) These tests cover the two newly-gated paths; the
+# three directions this fix must *not* break (grace window, deferral rather
+# than loss, and no-op when `tick` is never given an `ownship`); the
+# bounded-deferral property the gate's *placement* rests on; and the one
+# kind deliberately **exempt** from the gate, `CONTACT_ENGAGEMENT_CHANGED`
+# (`callouts._OBSERVABILITY_EXEMPT_KINDS`, user decision 2026-10-06).
 #
 # Geometry: `_observation`'s fixed `bearing_deg=0.0`/`range_m=1000.0` put
 # every contact in this file at `(1000.0, 0.0, alt 500.0)`, so ownship at
@@ -2106,3 +2114,112 @@ def test_observability_gate_is_a_no_op_for_a_store_never_ticked_with_ownship() -
     assert contact.last_observable_sim is None
     assert store.callout_observable(contact, now_sim=0.0)
     assert CalloutScheduler().tick(store, now_sim=0.0) == ["Group."]
+
+
+def test_masked_event_is_retired_once_it_outlives_the_candidate_max_age() -> None:
+    """The property the gate's *placement* rests on, pinned rather than
+    merely argued: skipping without consuming is only safe because
+    `CALLOUT_MAX_AGE_S` still retires a candidate that never becomes
+    observable. A contact that stays astern past that age must be silent
+    *forever*, not merely silent until the bearing returns -- otherwise
+    "deferred, not lost" would mean a candidate rescanned for the rest of
+    the sortie, speaking a stale identification minutes later. Placing the
+    gate *ahead* of the age check is exactly what would produce that."""
+    store = _store_with_one_presence_contact()
+    store.tick(now_sim=0.0, ownship=_ownship_heading(_HEADING_CONTACT_AHEAD))
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == ["ground."]
+
+    masked_at = 2.0 * CALLOUT_OBSERVABILITY_GRACE_S
+    _refine_classification(store, t_sim=masked_at)
+    store.tick(
+        now_sim=masked_at,
+        ownship=_ownship_heading(_HEADING_CONTACT_ASTERN, t_sim=masked_at),
+    )
+    assert scheduler.tick(store, now_sim=masked_at) == []
+
+    # Still astern, now past `CALLOUT_MAX_AGE_S` -- this is the tick that
+    # retires it.
+    aged_out = masked_at + CALLOUT_MAX_AGE_S + 1.0
+    store.tick(
+        now_sim=aged_out,
+        ownship=_ownship_heading(_HEADING_CONTACT_ASTERN, t_sim=aged_out),
+    )
+    assert scheduler.tick(store, now_sim=aged_out) == []
+
+    back_in_view = aged_out + 1.0
+    store.tick(
+        now_sim=back_in_view,
+        ownship=_ownship_heading(_HEADING_CONTACT_AHEAD, t_sim=back_in_view),
+    )
+
+    assert scheduler.tick(store, now_sim=back_in_view) == []
+
+
+def _threat_ownship(x: float, heading_true_deg: float, t_sim: float) -> OwnshipState:
+    """`_ownship` with a heading and a sim stamp -- the engagement block
+    needs ownship *range* to vary (hence `x`) while the cockpit mask needs
+    the *heading* to vary, and `_ownship` fixes the latter at 0."""
+    return OwnshipState(
+        t_sim=t_sim, x=x, z=0.0, alt_m=500.0, heading_true_deg=heading_true_deg
+    )
+
+
+def test_engagement_change_speaks_about_a_cockpit_masked_bearing() -> None:
+    """`_OBSERVABILITY_EXEMPT_KINDS` -- the one kind the gate does not
+    apply to (user decision, 2026-10-06). A watched AAA contact that has
+    been astern long enough for `CALLOUT_OBSERVABILITY_GRACE_S` to lapse
+    still gets its danger call when ownship enters its firing envelope: an
+    engagement change is a threat cue about an already-perceived contact,
+    derived from believed classification plus ownship position, not an
+    identification Petrovich would need eyes on. Gating it would silence
+    an astern ZSU *permanently*, since the grace window equals `CALLOUT_
+    MAX_AGE_S`.
+
+    The contrast with `test_classification_change_is_silent_about_a_
+    cockpit_masked_bearing` is the whole point: same contact geometry, same
+    lapsed grace, opposite outcome, decided by kind alone."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",  # AAA, range_max_m=2408
+                classification_level=3,
+                dwp_x=1000.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    scheduler = CalloutScheduler()
+
+    # Astern from the first tick, so `last_observable_sim` is never
+    # stamped at all -- the gate's strictest state, not merely a lapsed
+    # grace window.
+    store.tick(
+        now_sim=0.0,
+        ownship=_threat_ownship(x=-50000.0, heading_true_deg=180.0, t_sim=0.0),
+    )
+    assert scheduler.tick(store, now_sim=0.0) == []  # CONTACT_DETECTED, gated
+
+    contact = store.contacts[0]
+    assert contact.last_observable_sim is None
+
+    # Well past `CALLOUT_MAX_AGE_S`, so the gated `CONTACT_DETECTED` is
+    # retired rather than competing; ownship is now inside the envelope
+    # (range 1000 < 2408) and still pointed away from the contact.
+    engaged_at = 2.0 * CALLOUT_MAX_AGE_S
+    store.tick(
+        now_sim=engaged_at,
+        ownship=_threat_ownship(x=0.0, heading_true_deg=180.0, t_sim=engaged_at),
+    )
+
+    assert any(
+        event.kind == CONTACT_ENGAGEMENT_CHANGED
+        for event in store.unacknowledged_events
+    )
+    assert scheduler.tick(store, now_sim=engaged_at) == ["Danger, ZU-23-3 Sergey."]

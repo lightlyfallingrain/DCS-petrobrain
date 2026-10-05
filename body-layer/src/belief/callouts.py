@@ -51,6 +51,21 @@ disclosure mints no `Event` at all, so no emission-site gate could ever
 have covered it, and a per-kind list at emission is a list the next new
 kind silently fails to join.
 
+**The breadth is four kinds plus group disclosure, and one deliberate
+exemption.** Because the gate discriminates on the *contact* and not on
+the kind, it covers every member of `_TEMPLATED_KINDS` that reaches it:
+`CONTACT_CLASSIFICATION_CHANGED` (the measured defect),
+`CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED` (which were already
+gated at emission), and `CONTACT_DETECTED`/`CONTACT_REACQUIRED` (close to
+a no-op, since both perception channels already constrain founding).
+`CONTACT_ENGAGEMENT_CHANGED` is **exempt** by user decision, 2026-10-06:
+it is a threat cue about an already-perceived, already-watched contact,
+derived from believed classification plus ownship's own position rather
+than from a fresh look, and gating it would silence an astern SAM or ZSU
+entering its firing envelope *permanently* rather than late. The
+exemption lives in `_OBSERVABILITY_EXEMPT_KINDS`, whose docstring carries
+the whole argument and the bar anything else must clear to join it.
+
 **This gate is for the *push* path only.** A pilot-initiated `report`
 (`CrewConsole._handle_report`) must never be filtered by it -- belief
 survives the aircraft turning away, and the pilot *asked*. That path
@@ -242,6 +257,41 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
         CONTACT_RANGE_CROSSED,
         CONTACT_ENGAGEMENT_CHANGED,
     }
+)
+
+#: The one kind the observability gate in `CalloutScheduler.tick` does
+#: **not** apply to (user decision, 2026-10-06 -- recorded in `plans/
+#: callout-observability-gate/debug.md` and `todo/questions.md`'s "Decided
+#: without you").
+#:
+#: **Why an exemption exists at all.** The gate stops Petrovich
+#: *identifying* something he cannot see. A `CONTACT_ENGAGEMENT_CHANGED` is
+#: not an identification: it is a threat cue about a contact **already
+#: perceived and already watched** (`_WATCHED_ONLY_KINDS` holds it too), and
+#: it is derived from that contact's *believed* classification plus
+#: ownship's own position (`belief.threat.envelope_for`, `ContactStore.
+#: tick`'s seventh block) -- never from a fresh look. A real co-pilot who
+#: saw a SAM twenty seconds ago would say "we're inside its range now"
+#: without needing eyes on it, and saying so invents no knowledge.
+#:
+#: **Why gating it would be worse than asymmetric.** Because `CALLOUT_
+#: OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`, a watched threat
+#: masked for more than ten seconds loses the callout **permanently, not
+#: late** -- a SAM or ZSU astern that starts being able to shoot simply goes
+#: silent. That reads directly against *"Petrovich helps the pilot evade
+#: dangerous units and align for attack runs"* (root `CLAUDE.md`) and
+#: against `plans/post-review-fixes/explore-notes.md` decision 6, which
+#: singles air defence out for special handling for precisely this reason.
+#:
+#: **Why it is a named set rather than an inline `!=`.** This whole fix
+#: exists because a per-kind list at emission was a list the next new kind
+#: silently failed to join. An exemption list has the same failure shape in
+#: reverse -- a kind added here, or added to `_TEMPLATED_KINDS` under a
+#: mistaken reading of this one, exempts itself quietly. Anything added here
+#: must be a cue derivable from already-held belief plus ownship state, and
+#: never a claim about what Petrovich can see *right now*.
+_OBSERVABILITY_EXEMPT_KINDS: Final[frozenset[EventKind]] = frozenset(
+    {CONTACT_ENGAGEMENT_CHANGED}
 )
 
 #: `plans/watch-reporting/plan.md` Decision 1 -- report kinds that only ever
@@ -856,18 +906,40 @@ class CalloutScheduler:
             # check for exactly that reason -- ahead of it, a permanently
             # astern contact's event would never be consumed at all.
             #
-            # Deliberately gates every kind including `CONTACT_DETECTED`/
-            # `CONTACT_REACQUIRED`, which this is close to a no-op for
-            # (both perception channels already respect the mask at
-            # founding time -- `naked_eye_source` via `check_visibility`,
-            # `hybrid_source` via `association.FORWARD_HEMISPHERE_HALF_
-            # WIDTH_DEG`'s narrower 90 degrees -- and `CALLOUT_OBSERVABILITY_
-            # GRACE_S` equals `CALLOUT_MAX_AGE_S`). One total gate at the
-            # one choke point beats a per-kind list that the next new kind
-            # silently fails to join, which is the whole shape of this
-            # defect.
+            # **Breadth: this gates four of `_TEMPLATED_KINDS`' six kinds**
+            # -- `CONTACT_CLASSIFICATION_CHANGED` (the measured defect),
+            # `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED` (already
+            # gated at emission, now gated here too), and `CONTACT_
+            # DETECTED`/`CONTACT_REACQUIRED`. `CONTACT_ENGAGEMENT_CHANGED`
+            # is exempt by user decision -- see `_OBSERVABILITY_EXEMPT_
+            # KINDS` for the full reasoning. The gate discriminates on the
+            # *contact*, not on the kind, so every templated kind is in
+            # scope unless that set says otherwise.
+            #
+            # For `CONTACT_DETECTED`/`CONTACT_REACQUIRED` this is close to
+            # a no-op, because both perception channels already constrain
+            # founding: `naked_eye_source` applies the mask itself via
+            # `check_visibility`, and `hybrid_source` is confined to
+            # `association.FORWARD_HEMISPHERE_HALF_WIDTH_DEG`'s 90 degrees.
+            # **Those two 90/130 numbers are not in the same frame** --
+            # `FORWARD_HEMISPHERE_HALF_WIDTH_DEG` is measured against
+            # ownship's *true heading* (yaw only), while `_CO_PILOT_MASK.
+            # rear_cutoff_deg`'s 130 is a *body-relative* azimuth that
+            # includes pitch and bank. Dead astern is 180 in both, so a
+            # hybrid-founded contact can never be founded dead astern; but
+            # in a hard bank a contact inside +/-90 of heading can sit past
+            # 130 of body azimuth, so "90 is narrower than 130" is not a
+            # frame-matched comparison and this is not *quite* a no-op for
+            # those two kinds. The behaviour is right either way -- he
+            # genuinely cannot see it. One total gate at the one choke
+            # point beats a per-kind list that the next new kind silently
+            # fails to join, which is the whole shape of this defect.
             contact = store.contact(event.contact_id)
-            if contact is not None and not store.callout_observable(contact, now_sim):
+            if (
+                event.kind not in _OBSERVABILITY_EXEMPT_KINDS
+                and contact is not None
+                and not store.callout_observable(contact, now_sim)
+            ):
                 continue
             live.append(event)
 
