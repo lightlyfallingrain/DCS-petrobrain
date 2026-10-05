@@ -86,6 +86,7 @@ has had its turn."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from dataclasses import asdict, dataclass
@@ -398,8 +399,14 @@ class BeliefTruthLogWriter:
         self._polls_since_flush = 0
 
     def close(self) -> None:
+        """Flush and close, never raising -- the same `BL-11` Stage 5
+        reasoning as `detection_trace_writer.DetectionTraceWriter.close`:
+        `flush` early-returns once disabled, so unwritable buffered data
+        comes out of `close()`, which the poll loop calls from a `finally:`
+        block."""
         self.flush()
-        self._file.close()
+        with contextlib.suppress(OSError):
+            self._file.close()
 
     def _fail(self, exc: OSError) -> None:
         """Report one write failure, then stop writing for the rest of the
