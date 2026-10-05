@@ -100,3 +100,89 @@ this snapshot; this is a read-only query against the user's own build artifact, 
 reported numbers are internally consistent with the plan's own predicted check). Knowledge graph was
 not queried — `graphify-out/` does not exist in this worktree, consistent with the plan's own note
 that the main checkout's graph is stale for this topic.
+
+---
+
+## Round 2: the fix for the Required Fix above
+
+Branch `feature/terrain-callout-stages-345`, verified tip **`c586b3e`** (parent `a806b1e`, which is
+this review's own `NEEDS REVISION` commit via the implementer's agent-memory writeup
+`4da9758`→`a806b1e`). This worktree landed on `worktree-agent-a93f80388260649dd` (based on `main`,
+expected) — reviewed via an isolated snapshot: `git archive feature/terrain-callout-stages-345 |
+tar -x -C <scratch>/rev2-snapshot`, with every command run from `cwd` inside
+`<scratch>/rev2-snapshot/body-layer`, using the main checkout's own
+`body-layer/.venv/bin/{ruff,mypy,pytest}`.
+
+Commit `c586b3e` is tests-only, confirmed mechanically: `git diff --stat a806b1e..c586b3e` touches
+only `body-layer/tests/test_speech.py`, `body-layer/tests/test_tools.py`,
+`.claude/agent-memory/implementer/MEMORY.md`, an implementer agent-memory file, and
+`plans/terrain-feature-probing/implementation-rev3.md`. `git diff a806b1e..c586b3e -- body-layer/src
+world-model/src` is empty — zero production-code lines changed.
+
+**Non-decorativeness re-verified empirically, not taken on the implementer's report.** Disabled each
+half of the Stage 5 wire-up in the snapshot in turn (via the `if False and ...` pattern used in round
+1), reran the full suite, reverted, confirmed the suite returns to 1434/4 clean:
+
+- `tools.py`'s `facts["terrain_qualifier"] = terrain_qualifier` disabled → **2 failures**:
+  `test_tools.py::test_describe_contact_with_enrichment_sets_terrain_qualifier_when_one_divide_crossed`
+  (direct) and `test_speech.py::test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic`
+  (the end-to-end test, which depends on the write happening before it can observe the read). Both
+  specifically named, not a broad unrelated breakage.
+- `speech.py`'s `if isinstance(terrain_qualifier, str):` branch disabled → **2 different failures**:
+  `test_speech.py::test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic` and
+  `test_speech.py::test_contact_report_text_terrain_qualifier_replaces_semantic_fragment`. Confirms
+  the read side has its own dedicated unit-level pin (`_contact_report_text` called directly with a
+  hand-built `facts` dict), not just the shared end-to-end test.
+
+Each half fails a distinct, specific pair when disabled — this is a real pin on both the write and
+the read sides of the wire, not a test that happens to pass either way.
+
+**Displacement, not mere presence, is what's asserted.** Both new assertions check the qualifier
+text is present *and* the displaced fragment is absent in the same string:
+`test_contact_report_text_terrain_qualifier_replaces_semantic_fragment` asserts `"next valley" in
+text` and `"road" not in text` against a `facts` dict carrying both `semantic` and
+`terrain_qualifier`; the end-to-end `test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic`
+asserts `"next valley" in speech.text` and `"Jableh" not in speech.text` driving the real pipeline
+with `divides_between` → 1 and `nearest_feature` → valley-dominant. This is the user's own
+displacement rule (`"armor, 10 o'clock, 2 km, next valley"`, road suppressed), not a weaker
+presence-only check.
+
+**Silence path:** the extended assertion on the pre-existing
+`test_describe_contact_with_enrichment_adds_the_four_bl3_fields` test pins the 0-divide case
+(`_enrichment_context`'s default stub) — `"terrain_qualifier" not in facts`. There is no separate
+≥2-divide test at the wiring level, but that is not a gap: `terrain_divide_qualifier` itself (tested
+directly in `test_enrichment.py`, round 1's approved scope) returns `None` uniformly for both 0 and
+≥2 crossings, and `_add_enrichment_facts`'s wiring is `if terrain_qualifier is not None: ...` — one
+branch, fed by an already-unit-tested function that collapses both silence cases to the same `None`.
+A second wiring-level test for ≥2 divides would exercise the identical code path the 0-divide test
+already does; it would not catch anything the 0-divide test couldn't. Confirmed by reading
+`terrain_divide_qualifier`'s docstring and branching in `enrichment.py` directly, not inferred.
+
+**New fixture-reuse pattern checked for correctness, not just presence:** both new tests patch
+`enrichment_module.divides_between` and `enrichment_module.nearest_feature` the same way
+`test_enrichment.py`'s own `_patch_divides` does (confirmed by reading that helper) — a real reuse of
+an established pattern, not an ad hoc stub that happens to work.
+
+### Mechanical checks (re-run against the isolated snapshot, not trusted from the report)
+
+- `ruff format --check src tests` — 114 files already formatted.
+- `ruff check src tests` — all checks passed.
+- `mypy src` — success, no issues found in 53 source files.
+- `pytest tests -q` — **1434 passed, 4 xfailed**, matching the implementer's reported delta over the
+  1430/4 round-1 baseline exactly.
+- world-model: not re-run. `git diff --stat a806b1e..c586b3e -- world-model` is empty — this fix
+  does not touch world-model at all, so its suite has nothing new to verify.
+
+### Verdict
+
+**APPROVED.** The Required Fix from round 1 is closed: both halves of the Stage 5 wire-up are now
+pinned by tests that fail specifically and individually when either half is disabled, the
+displacement rule (not just presence) is what's asserted, the silence path is covered at the level
+that matters, and no production code changed. Proceed to Security deep analysis, then DoD.
+
+### Review Confidence
+
+Full read of the round-2 diff (`a806b1e..c586b3e`, 5 files, tests-only). Empirically re-verified both
+halves of the wiring are non-decorative via independent disablement, re-running the full suite each
+time rather than trusting the implementer's own disablement report. Mechanical checks reproduced
+directly against an isolated snapshot at the verified tip sha, not inferred from the branch history.
