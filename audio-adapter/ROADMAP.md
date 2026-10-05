@@ -104,15 +104,65 @@ body-side view and the slice numbering both files share.
   whenever the collector next runs with `--debug`: count `GET /ptt/state` lines over a fixed
   window, expect ~30/s rather than ~60/s.
 
-- [>] **Slice 2 — cockpit state drives the audio. DEFERRED 2026-09-20** (user: *"Defer the SPU-8
-  for now, let's come back to it later."*). Replaces the original SRS ICS injection, which is
-  cancelled with the SRS dependency itself.
+- [ ] **Slice 2 — cockpit state drives the audio. Un-deferred 2026-10-05** (the user wrote the
+  behaviour out in full; it was `todo/SPUU-8.md`, folded in here and the loose file deleted).
+  Replaces the original SRS ICS injection, which is cancelled with the SRS dependency itself.
 
   **What it would do.** The intercom switch gates the crew channel in **both directions** — off
   means he cannot hear you and you cannot hear him, which is what the real switch does — and the
   SPU-8 volume knob sets how loud he is. One physical control turning Petrovich on and off, which
   is the cockpit-adjustable volume the SRS route was wanted for, reached by reading the controls
   instead of adding a dependency.
+
+  ### The behaviour, in the user's own terms (2026-10-05)
+
+  **Gating — both switches, either one closes the channel.**
+
+  > *"When pilot intercom 1 switch is OFF **OR** co-pilot ICS switch is OFF -> no audio in either
+  > direction. If player keys the ICS PTT, no audio capture. If Petrovich speaks (audio stream from
+  > another layer), no playback, just silent ignore."*
+
+  Note the shape of the second half: a line that arrives with the intercom off is **dropped
+  silently, not queued**. It is not deferred speech waiting for the switch — the crew member simply
+  was not on the channel when it was said. Do not add a replay buffer.
+
+  This also resolves the operator-panel problem recorded below: the gate is the **conjunction** of
+  the pilot's own switch and the co-pilot's, so arg 664 (operator intercom power, unreachable to a
+  player flying as pilot) is read, not set by the player — and the automatic behaviour below is
+  what puts it in the right state.
+
+  **Volume — at playback, and nowhere else.**
+
+  > *"SPUU-8 intercom volume control sets Petrovich audio playback volume. This should be done at
+  > audio playback, no other layer needs to know volume setting. Either set playback volume, if
+  > supported, or modify the audio waveform for volume. Volume affecting the next playback is
+  > acceptable tradeoff, if volume for current playback is challenging."*
+
+  That last sentence is a real scope reduction worth taking: a knob turned mid-utterance may apply
+  from the next line rather than ramping the one in flight. It removes any need to stream or
+  re-chunk audio already handed to the sink.
+
+  **Automatic behaviour — two defaults, both about not having to fiddle with switches.**
+
+  > *"When mission starts, wait 5 s, then set co-pilot ICS switch ON. If on ground, default to
+  > 'silent mode'. (Contact reports not needed when not even airborne yet, let's just use the
+  > silent mode to suppress them for now.)"*
+
+  - **Setting the co-pilot ICS switch is a cockpit *write*, which this project has never done.**
+    Everything the aircraft layer writes today is an overlay line, an F10 menu entry or an audio
+    buffer — never a clickable cockpit control. Whether `get_argument_value`'s counterpart can set
+    an argument from a Hook or Export context, for a seat the player is not in, is **unverified**
+    and is the first thing to establish; if it cannot, the fallback is to treat 664 as a read-only
+    precondition and tell the player to flip it. Do not plan the rest around the write succeeding.
+  - **On-ground silent mode reuses the shipped `silence` command** (`crew_console.silenced`), not a
+    new suppression path. It is absolute silence including urgent calls, per the same user
+    direction that built it, and **any subsequent command ends it** — so a player who wants him
+    talking on the ramp just says something. Worth confirming by ear that automatic entry does not
+    make him feel broken at mission start.
+
+  **Still open in this slice, and needing the user rather than code:** whether leaving the ground
+  should automatically *end* silent mode, or whether the existing any-command-ends-it rule is
+  enough. The quoted direction says only how it starts.
 
   **Two design notes worth keeping, so they are not re-derived:**
   - **`winsound` has no volume control.** `PlaySound` cannot attenuate, so the knob cannot be
@@ -126,8 +176,9 @@ body-side view and the slice numbering both files share.
   ~~**Blocked on nothing but a decision to resume** — it needs device argument numbers for the
   switch and the knob, the same way push-to-talk needed arg 738, which is an investigator pass plus
   a probe on the Windows box.~~ **The investigator pass is done (2026-09-20, read from
-  `clickabledata.lua` on the Windows box). The slice stays deferred; only its prerequisite is
-  gone.**
+  `clickabledata.lua` on the Windows box), and the slice is no longer deferred (2026-10-05).** What
+  remains before implementation is the live probe named at the end of this entry, plus the
+  can-we-write-a-cockpit-argument question above.
 
   | Arg | Control | Seat |
   |---|---|---|
