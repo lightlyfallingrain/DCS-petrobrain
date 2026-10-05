@@ -1900,9 +1900,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   his own example `"report 2 o'clock close"` has no *what*. *what* is `group` or a classification;
   *where* is typically a clock hour but also cardinal (`north`) or landmark-relative (`south of
   <village>`); *how far* is `near` < 2 km / `medium distance` 2–5 km / `far` 5 km+. The
-  landmark-relative slot needs world-model place names and so inherits `WM-B1`'s Latin-script
-  problem (DCS cannot render non-Latin-1, so Arabic names arrive as blanks) — `WM-B1` is already
-  open and already forcing a rebuild, so it rides along.
+  landmark-relative slot is **not** blocked on place names, which was an error in this entry's first
+  version: `WM-B1` is `[x]` done (`fix/latin-place-names`, 2026-10-02, needing only a rebuild) and
+  `query.search.find_place_by_name` already exists. The real blocker is **open-vocabulary
+  recognition** — `audio-adapter`'s `vocabulary.py` has a standing rule against enumerating open
+  vocabularies into a closed grammar ("belongs to free speech once the brain layer exists"), so the
+  landmark slot is gated on the **brain layer**, not on a theatre rebuild. The plan lands it on the
+  typed console path first (already free text) resolving into the same `sector`-shaped filter, so
+  wiring it to voice later adds a parser rather than forcing a redesign; meanwhile a spoken
+  `"report south of Gemerek"` degrades to a bare report rather than a `say_again`.
 
   **The answer shape** (decision 13), settled by putting two mock answers side by side and taking
   the user's choice: **summaries, not enumerations.** *"B. I can also look myself, so a summary is
