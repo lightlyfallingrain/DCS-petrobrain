@@ -1552,3 +1552,47 @@ withdrawn design; and the preset-vs-arbitrary-FOV interface — *"accept arbitra
    still covers the gaze. 30° is 3× cheaper and would drop coverage on roughly half the polls at 1 Hz
    against a 2 s dwell. **Recommendation: 90°** — the cost it saves is already negligible, and the
    thing it buys is not having to reason about timing at all.
+
+---
+
+## §17 — The two open decisions, settled (user, 2026-10-05)
+
+**1. FOV crosses the seam as one validated `string.format` splice, not digit dispatch.**
+
+The architect recommended digit dispatch — 42 hand-authored one-line literals, selected by index,
+never concatenated — on the grounds that it keeps "no Lua is composed from runtime bytes"
+*structurally* true rather than true-because-a-validator-is-correct. The user chose the simpler
+route after having the mechanism explained:
+
+```lua
+local fov = clamp(requested, FOV_MIN_DEG, FOV_MAX_DEG)   -- 5..180, default 45
+snippet = string.format(FIXED_TEMPLATE, fov)
+```
+
+**What the implementer owes this decision**, since the structural guarantee is being traded for a
+validated one:
+
+- The clamp is the whole safety property. It must be **total** — a non-number, a NaN, a negative,
+  an absurd value and a missing field all have to come out as a legal integer in `[5, 180]`, never
+  as a pass-through and never as an exception that leaves the previous value in place silently.
+- Format with an **integer** conversion (`%d`) against an **already-integerised** value. Do not
+  format a float.
+- The template is a module-level constant with exactly one substitution point. One `%d`, nothing
+  else interpolated, ever — adding a second substitution later is the change that would make this
+  genuinely unsafe, so say so at the definition site.
+- Test the clamp directly, including the hostile inputs above, and assert the produced snippet
+  against an expected string rather than only checking it parses.
+
+Recorded plainly because it reverses the role's own recommendation: the digit-dispatch design is
+kept in §13 for the reader who later asks why this is a splice.
+
+**2. The LOS query cone is 90°, against a 30° focus cone.**
+
+Three times the focus cone. The saving from tightening to 30° is negligible (only ~10 units per
+poll reach the LOS gate at all), and the 30° margin on either side means **command lag between
+body-layer moving the gaze and the Lua side being told never has to be reasoned about** — a unit he
+is actually looking at cannot fall outside the query cone because the directive arrived a tick
+late. Geometry instead of timing.
+
+`FOV_DEFAULT_DEG = 45` remains the Lua-side default for the case where no directive has arrived
+yet; 90 is what body-layer sends for an ordinary naked-eye scan.
