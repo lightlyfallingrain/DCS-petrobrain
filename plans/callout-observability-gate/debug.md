@@ -12,8 +12,10 @@ classification attached — a direct no-omniscience violation
 (`body-layer/CLAUDE.md`, "No omniscience is structural, not a convention").
 
 From the 2026-10-05 sortie speech log (`~/dcs-belief-truth.jsonl`, `kind == "speech"`),
-**20 of 357 spoken lines** were about masked hours — of which **17 are this defect** and 3 are a
-documented pull-path decision (see "Size of the defect: 17, not 20" below):
+**17 of 357 spoken lines are this defect**: unprompted (push-path) lines about hours the mask
+declares unviewable. The log holds **20** masked-hour lines in total; the other **3** were answers
+to a pilot `report` within 4.4 s and are a documented pull-path decision, not this defect (see
+"Size of the defect: 17, not 20" below). **Quote 17, not 20.**
 
 | hour | lines | body azimuth | `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` says |
 |---|---|---|---|
@@ -22,6 +24,9 @@ documented pull-path decision (see "Size of the defect: 17, not 20" below):
 | **6** | **4** | 180° | **masked** |
 | **7** | **11** | 150° | **masked** |
 | 8 | 11 | 120° | visible |
+
+The three bold rows sum to the 20 masked-hour lines; subtracting the 3 pull-path answers leaves
+the **17** this fix addresses.
 
 Real examples, with the gaze label from the same row:
 
@@ -110,9 +115,19 @@ emission site to gate.
 two kinds.** Both perception channels already respect the mask when a contact is founded:
 `naked_eye_source` calls `check_visibility`, whose Gate 0/1 chain includes
 `cockpit_mask.is_visible` (`visibility.py:750-760`); `hybrid_source` never checks the mask but
-is confined by `association.FORWARD_HEMISPHERE_HALF_WIDTH_DEG = 90.0`, which is *narrower* than
-the 130° rear cutoff. So `CONTACT_DETECTED`/`CONTACT_REACQUIRED` cannot found a contact dead
-astern, and the sortie's violating lines are accordingly all post-founding kinds.
+is confined by `association.FORWARD_HEMISPHERE_HALF_WIDTH_DEG = 90.0`. So
+`CONTACT_DETECTED`/`CONTACT_REACQUIRED` cannot found a contact dead astern, and the sortie's
+violating lines are accordingly all post-founding kinds.
+
+**The 90° and 130° are not in the same frame, and this report's first version implied they
+were** (Reviewer, 2026-10-06). `FORWARD_HEMISPHERE_HALF_WIDTH_DEG` is measured against ownship's
+**true heading** — yaw only. `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` is a **body-relative**
+azimuth that includes pitch and bank. Dead astern is 180° in both frames, so the load-bearing
+conclusion above (nothing can be *founded* dead astern) is unaffected. But "90 is narrower than
+130" is not a frame-matched comparison: in a hard bank a hybrid-founded contact within ±90° of
+heading can sit past 130° of body azimuth, so gating
+`CONTACT_DETECTED`/`CONTACT_REACQUIRED` is not *quite* the no-op it reads as. The behaviour is
+right either way — he genuinely cannot see it. The comment at the gate now says this.
 
 **5. The prior pass on this mechanism was read first** (`plans/callout-outside-gaze/debug.md`,
 2026-09-26) and is **not** superseded by this one. It diagnosed the *wording* of
@@ -154,10 +169,48 @@ astern, past the rear cutoff at any elevation).
   disclosure line renders its position from the nearest member rather than per-member.
 
 **Why the gate is total rather than a per-kind list.** The defect's whole shape is a per-kind
-list that a new kind silently fails to join. `CONTACT_DETECTED`/`CONTACT_REACQUIRED` are now
-gated too, which is close to a no-op in practice (see Evidence 4, and
-`CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`) but closes the overflight case
-where a contact founded ahead is spoken about several seconds later from astern.
+list that a new kind silently fails to join. The gate therefore discriminates on the **contact**,
+not on the kind, and covers **four** of `_TEMPLATED_KINDS`' six kinds plus group disclosure:
+
+| kind | before this fix | now |
+|---|---|---|
+| `CONTACT_CLASSIFICATION_CHANGED` | ungated — **the measured defect** | gated |
+| group disclosure (no `Event` minted) | ungated — **the measured defect** | gated |
+| `CONTACT_MOTION_CHANGED` | gated at emission (`contacts.py:1237`) | gated here too |
+| `CONTACT_RANGE_CROSSED` | gated at emission (`contacts.py:1349`) | gated here too |
+| `CONTACT_DETECTED` / `CONTACT_REACQUIRED` | ungated | gated (near no-op, see Evidence 4) |
+| `CONTACT_ENGAGEMENT_CHANGED` | ungated | **exempt — user decision, below** |
+
+`CONTACT_DETECTED`/`CONTACT_REACQUIRED` being gated is close to a no-op in practice (see
+Evidence 4, and `CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`) but closes the
+overflight case where a contact founded ahead is spoken about several seconds later from astern.
+
+**`CONTACT_ENGAGEMENT_CHANGED` is excluded from the gate — user decision, 2026-10-06.** The
+Reviewer found the seventh block (`contacts.py:1456`) mints it, that it is in `_TEMPLATED_KINDS`,
+and that a contact-discriminating gate therefore swept it in silently. The user took the
+Reviewer's recommendation and excluded it. Also recorded in `todo/questions.md`'s "Decided
+without you" section.
+
+The reasoning, in the user's own terms: the gate exists to stop Petrovich *identifying* things he
+cannot see. An engagement-envelope change is not an identification — it is a threat cue about a
+contact **already perceived and already watched**, derived from that contact's believed
+classification plus ownship's own position. A real co-pilot who saw a SAM twenty seconds ago
+would say *"we're inside its range now"* without needing eyes on it, and saying so invents no
+knowledge.
+
+Against that, the cost of gating it is severe and asymmetric: because
+`CALLOUT_OBSERVABILITY_GRACE_S == CALLOUT_MAX_AGE_S == 10.0`, a watched threat masked for more
+than ten seconds loses the callout **permanently, not late** — a SAM or ZSU astern that starts
+being able to shoot goes silent. That reads directly against *"Petrovich helps the pilot evade
+dangerous units and align for attack runs"* (root `CLAUDE.md`) and against
+`plans/post-review-fixes/explore-notes.md` decision 6, which singles air defence out for special
+handling precisely because `belief/threat.py` keys envelope warnings on believed classification.
+
+It is implemented as a **named, documented exclusion** (`callouts._OBSERVABILITY_EXEMPT_KINDS`),
+not an `if kind != ...` buried in the condition — because an exclusion list has the same failure
+shape as the per-kind list this fix removes, only in reverse: a kind that joins it quietly
+exempts itself. Its docstring states the bar anything else must clear (a cue derivable from
+already-held belief plus ownship state, never a claim about what Petrovich can see right now).
 
 **The task's caveat is honoured by construction.** The gate is on *observability*, never on the
 rendered hour: `CALLOUT_OBSERVABILITY_GRACE_S` (10 s, measured from the last *confirmed*
@@ -215,9 +268,9 @@ All four `body-layer` checks, run from `body-layer/` with its own venv:
 | `ruff format --check src tests` | 115 files already formatted |
 | `ruff check src tests` | All checks passed |
 | `mypy src` (CWD-only discovery, run from `body-layer/`) | Success: no issues found in 53 source files |
-| `pytest -q` | **1473 passed, 4 xfailed** (baseline on `dce2534`: 1466 passed, 4 xfailed) |
+| `pytest -q` | **1475 passed, 4 xfailed** (1473 before the review-fix pass; baseline on `dce2534`: 1466 passed, 4 xfailed) |
 
-**Seven new tests in `body-layer/tests/test_callouts.py`, and the three that cover the fixed
+**Nine new tests in `body-layer/tests/test_callouts.py`, and the three that cover the fixed
 paths were confirmed to fail before the fix** (gate temporarily neutralised to a bare
 `return True`, then reverted):
 
@@ -234,6 +287,19 @@ paths were confirmed to fail before the fix** (gate temporarily neutralised to a
 That split is the intended shape: the three defect tests fail without the gate, the four guards
 pass either way because they assert behaviour the fix must *not* change.
 
+**Two more added in the review-fix pass (2026-10-06)**, each verified by the counterfactual it
+claims to pin rather than by reading:
+
+| test | counterfactual | result |
+|---|---|---|
+| `test_engagement_change_speaks_about_a_cockpit_masked_bearing` | `_OBSERVABILITY_EXEMPT_KINDS` emptied | **FAIL** — it pins the exclusion, not just current behaviour |
+| `test_masked_event_is_retired_once_it_outlives_the_candidate_max_age` | `CALLOUT_MAX_AGE_S` raised to 1e9 | **FAIL** — it pins bounded deferral, the property the gate's *placement* rests on |
+
+The second closes the Reviewer's optional gap: the existing deferral test proved "not consumed,
+speaks when the bearing returns", and nothing asserted that a *permanently* astern event is
+eventually retired. It now ticks astern past `CALLOUT_MAX_AGE_S` and asserts silence even after
+the bearing comes back.
+
 No debug instrumentation remains (`grep TEMP-PREFIX-PROBE src` is empty; the probe was a
 reversible edit, reverted).
 
@@ -241,12 +307,20 @@ reversible edit, reverted).
 
 ### For the user — queued, nothing blocking
 
-1. **The one judgement call worth your eye: `CONTACT_DETECTED`/`CONTACT_REACQUIRED` are now
-   gated too**, not just the two kinds that actually misfired. In practice this is near-nil
-   (both channels respect the mask at founding, and the grace window equals the candidate max
-   age), but it does mean a contact founded ahead and spoken about several seconds later from
-   astern now goes quiet instead. That is the invariant applied consistently; if you would
-   rather hear it late than not at all, say so and it narrows to two kinds in one line.
+1. **Breadth — settled, no longer a question.** The gate discriminates on the contact, not the
+   kind, so it reaches **three** kinds that were never gated before, not two:
+   `CONTACT_DETECTED`, `CONTACT_REACQUIRED` **and `CONTACT_ENGAGEMENT_CHANGED`** (the seventh
+   block at `contacts.py:1456`; the Reviewer found this one, which the first version of this
+   report missed). The first two are near-nil in practice — both channels respect the mask at
+   founding, and the grace window equals the candidate max age — and they stay gated; a contact
+   founded ahead and spoken about several seconds later from astern now goes quiet.
+
+   `CONTACT_ENGAGEMENT_CHANGED` was the only safety-relevant member, because gating it is a
+   *missed threat cue* rather than a missed identification, and because the grace window equals
+   `CALLOUT_MAX_AGE_S` it would be missed **permanently rather than late**. **You excluded it
+   (2026-10-06)**, and the reasoning is in "Fix Applied" above and in
+   `callouts._OBSERVABILITY_EXEMPT_KINDS`'s own docstring. Also recorded in
+   `todo/questions.md`'s "Decided without you" section.
 2. **This silences, it does not re-time.** The 17 unprompted masked-hour lines are now unspoken rather
    than spoken correctly — the contacts are still believed, still in the debug view, still
    answerable by a `report`. Whether some of them *should* reach you another way (an "I lost
