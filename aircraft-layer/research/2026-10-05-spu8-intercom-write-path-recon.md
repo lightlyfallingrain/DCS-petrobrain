@@ -190,10 +190,17 @@ Raw log: `2026-10-05-spu8-probe-raw.log` (`Export.probe-spu8.lua`, copied from
 - **376 (network switch 2): 0.000 throughout** — not moved during the flight.
 - **664 (operator ICS power): 0.000 at mission start** in this mission (cold intercom on the
   operator side), 0/1 as above.
-- **456 (pilot Radio/ICS switch): 0.000 throughout, never changed.** Open — either the switch was
-  not clicked, or what was clicked is not arg 456. To be resolved with the user before Slice 2
-  relies on 456 (see the roadmap's conjunction gate). Note the only other toggle seen in the
-  read-only window was 377.
+- **456 (pilot Radio/ICS switch): 0.000 throughout — not clicked** (user, 2026-10-05). Its read
+  behaviour is unmeasured, but it is not part of the Slice 2 gate (below).
+
+**3. "Pilot intercom 1 switch" in the spec is arg 377.** — **evidence: reproduced-live + user**
+- The user clicked the cockpit's Intercom 1 switch and arg 377 (`CMD_SPU8_NETWORK_1`, NET-1
+  ON/OFF) toggled 0 → 1 → 0. The user confirms this is the switch the spec calls the pilot's
+  intercom ON/OFF. So the spec's gate is **377 AND 664**, not 456 + 376/377 as the roadmap's
+  argument-table note speculates ("the pilot's equivalent gating is 456 ... plus the 376/377
+  network switches") — that sentence should be narrowed to 377 when Slice 2 is next touched.
+- The user also **saw the co-pilot ICS switch move** in the cockpit when the probe wrote 664, so
+  the write is confirmed visually, not only by the argument read-back.
 
 **Consequence for Slice 2:** the "mission start, wait 5 s, set the co-pilot ICS switch ON" step is
 buildable as specified, with the same mechanism the BL-6 wheel effector ships. Readers of these
