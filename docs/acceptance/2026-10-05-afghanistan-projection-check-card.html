@@ -1,0 +1,426 @@
+<title>Afghanistan Projection Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout concept: a single scrolling flight card, one numbered block per
+   screen-height-ish section, amber instrument accent on a dark cockpit
+   ground, a distinct teal rail marking anything that must be brought back. */
+:root {
+  --bg: #15181c;
+  --panel: #1d2127;
+  --panel-edge: #2b3039;
+  --fg: #e8e6e0;
+  --fg-dim: #9aa0a8;
+  --amber: #e8a33d;
+  --amber-dim: #8a6a30;
+  --record: #4fb3a9;
+  --record-bg: #16302c;
+  --danger: #d9684a;
+  --good: #6fae6a;
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f1ea;
+    --panel: #ffffff;
+    --panel-edge: #ddd6c7;
+    --fg: #23201c;
+    --fg-dim: #6b6456;
+    --amber: #a2680f;
+    --amber-dim: #cdb48a;
+    --record: #1f7a6e;
+    --record-bg: #e3f2ee;
+    --danger: #b23f24;
+    --good: #3f7a3b;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f1ea;
+  --panel: #ffffff;
+  --panel-edge: #ddd6c7;
+  --fg: #23201c;
+  --fg-dim: #6b6456;
+  --amber: #a2680f;
+  --amber-dim: #cdb48a;
+  --record: #1f7a6e;
+  --record-bg: #e3f2ee;
+  --danger: #b23f24;
+  --good: #3f7a3b;
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  line-height: 1.5;
+  padding-inline: 16px;
+  padding-block: 20px;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(1.8rem, 6vw, 2.6rem); letter-spacing: 0.01em; }
+h2 { font-size: clamp(1.3rem, 4.5vw, 1.7rem); color: var(--amber); }
+h3 { font-size: 1.05rem; font-weight: 600; color: var(--fg); }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+p { margin: 0; }
+.dim { color: var(--fg-dim); }
+
+a { color: var(--amber); text-decoration-color: var(--amber-dim); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alert {
+  border-left: 4px solid var(--danger);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.alert .tag { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.1em; color: var(--danger); text-transform: uppercase; }
+
+code, pre {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+pre {
+  background: #0c0e11;
+  color: #d8e4d0;
+  padding: 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0;
+  border: 1px solid var(--panel-edge);
+  max-width: 100%;
+}
+:root[data-theme="light"] pre, :root:not([data-theme="dark"]) pre {
+  /* keep terminal look readable in light mode too */
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="light"]) pre { background: #0c0e11; color: #d8e4d0; }
+}
+code.inline {
+  background: var(--panel-edge);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--fg);
+}
+
+.step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.step .num {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--amber);
+  min-width: 1.6em;
+}
+.step .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.label.expect { color: var(--good); }
+.label.pass { color: var(--good); }
+.label.unverified { color: var(--danger); }
+
+.block-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.badge {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--amber-dim);
+  color: var(--amber);
+  white-space: nowrap;
+}
+.badge.optional { border-color: var(--record); color: var(--record); }
+
+.record-rail {
+  border: 1px solid var(--record);
+  background: var(--record-bg);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.record-rail .label { color: var(--record); }
+
+ul.plain { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+
+.bring-back { display: flex; flex-direction: column; gap: 10px; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; }
+.check-row input[type="checkbox"] {
+  margin-top: 4px;
+  width: 18px; height: 18px;
+  accent-color: var(--record);
+  flex-shrink: 0;
+}
+.check-row label { min-width: 0; }
+
+.prize {
+  border: 1px solid var(--amber);
+  box-shadow: 0 0 0 1px var(--amber) inset;
+}
+.prize .block-header h2 { color: var(--amber); }
+
+footer { color: var(--fg-dim); font-size: 0.8rem; padding-block: 8px 24px; }
+</style>
+
+<div class="wrap">
+
+  <header style="display:flex; flex-direction:column; gap:10px;">
+    <span class="eyebrow">Acceptance card — DoD, multi-theatre-afghanistan</span>
+    <h1>Afghanistan Projection Check</h1>
+    <p class="dim">Desk task on your Windows DCS box (Block 1, required), plus one optional sortie
+      (Block 2). Full source: <code class="inline">docs/acceptance/2026-10-05-afghanistan-projection-check.md</code>.</p>
+  </header>
+
+  <div class="alert">
+    <span class="tag">Check before you check out</span>
+    <p><strong>Branch:</strong> <code class="inline">feature/multi-theatre-afghanistan</code></p>
+    <pre>git checkout feature/multi-theatre-afghanistan
+git log --oneline -3</pre>
+    <p>Tip should read <code class="inline">0690a74</code> /
+      "Reviewer: re-review tests-only fix (91fd8a1)…". If it instead shows
+      <code class="inline">381f828</code> / "implementer agent-memory…", the review, security
+      fix, and test tightening haven't been fast-forwarded onto this branch yet — ask for that
+      first. This card assumes the newer tip.</p>
+  </div>
+
+  <section class="panel">
+    <h2>Why this card exists</h2>
+    <p><code class="inline">THEATRE_PROJECTIONS["Afghanistan"]</code> — the DCS x/z ↔ lat/lon
+      transform everything else rests on — is still <code class="inline">confidence="provisional"</code>.
+      It was fitted from <code class="inline">beacons.lua</code>, never checked against DCS's own
+      live <code class="inline">coord.LOtoLL</code>. Block 1 is that check — the same procedure
+      that already confirmed Syria's own projection to 0.00–0.03&nbsp;m back in M1.</p>
+  </section>
+
+  <section class="panel prize">
+    <div class="block-header">
+      <h2>Block 1 — live coord.LOtoLL check</h2>
+      <span class="badge">required · the prize</span>
+    </div>
+    <p class="dim">No flight. Mission Editor + a 10-second mission run, on your Windows DCS box.</p>
+
+    <div class="step">
+      <span class="num">1</span>
+      <div class="body">
+        <p>New throwaway mission, <strong>Afghanistan terrain</strong>. Any aircraft, any airfield
+          start — content doesn't matter, only that it loads Afghanistan.</p>
+      </div>
+    </div>
+    <div class="step">
+      <span class="num">2</span>
+      <div class="body">
+        <p>Trigger: type <strong>ONCE</strong>, condition <strong>TIME MORE 5</strong>, action
+          <strong>DO SCRIPT FILE</strong> →
+          <code class="inline">world-model/tools/dcs-mission-probe/coord_probe.lua</code>
+          (unmodified — same script Syria's M1 used, no theatre-specific code in it).</p>
+      </div>
+    </div>
+    <div class="step">
+      <span class="num">3</span>
+      <div class="body">
+        <p><strong>Before running:</strong> check <code class="inline">Scripts/MissionScripting.lua</code>
+          still has <code class="inline">io</code>/<code class="inline">lfs</code> re-exposed (the
+          M1/M4-era edit). If it's been reverted, either redo it, or fall back to the script's own
+          documented <code class="inline">trigger.action.outText(...)</code> path and transcribe
+          the JSON from the in-game log by hand.</p>
+      </div>
+    </div>
+    <div class="step">
+      <span class="num">4</span>
+      <div class="body">
+        <p>Run ~10 s, exit. Output: <code class="inline">Saved Games/DCS/Logs/coord_probe_output.json</code>.
+          Copy it into <code class="inline">world-model/data/raw/dcs/&lt;today&gt;/coord_probe_output.json</code>.</p>
+      </div>
+    </div>
+
+    <h3>Check the residual</h3>
+    <p class="dim">Run from <code class="inline">world-model/</code>, venv active. Verified this
+      session against a synthetic file with the exact JSON shape the probe writes — only the real
+      live numbers are unverified, since those need your flight.</p>
+    <pre>cd world-model
+.venv/bin/python -c "
+import json, math, sys
+sys.path.insert(0, 'src')
+from coordinates import dcs_to_wgs84
+
+def haversine_m(lat1, lon1, lat2, lon2):
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dlmb/2)**2
+    return 2 * r * math.asin(math.sqrt(a))
+
+data = json.load(open('data/raw/dcs/&lt;today&gt;/coord_probe_output.json'))
+points = [{'name': 'origin', **data['origin']}, *data['airbases']]
+worst = 0.0
+for p in points:
+    pred_lat, pred_lon = dcs_to_wgs84('Afghanistan', p['x'], p['z'])
+    residual = haversine_m(p['lat'], p['lon'], pred_lat, pred_lon)
+    worst = max(worst, residual)
+    print(f"{p['name']:30s} residual_m={residual:.3f}")
+print(f'worst residual across {len(points)} points: {worst:.3f} m')
+"</pre>
+
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <span class="label pass">Pass criterion</span>
+      <p>Worst residual ≤ ~0.1&nbsp;m (Syria's M1 floor was 0.00–0.03&nbsp;m). If every point
+        clears it, flip <code class="inline">confidence</code> to
+        <code class="inline">"confirmed"</code> in
+        <code class="inline">world-model/src/coordinates/projections.py</code> and cite the new
+        research note.</p>
+      <p class="dim">A residual in the <em>metres</em>, not sub-metre, at any point means the fit
+        is wrong — don't flip confidence; write up the real numbers instead.</p>
+    </div>
+
+    <div class="record-rail">
+      <span class="label">Don't discard</span>
+      <p><code class="inline">coord_probe_output.json</code>'s <code class="inline">airbases</code>
+        array comes from <code class="inline">world.getAirbases()</code> — DCS's real registry,
+        independent of <code class="inline">beacons.lua</code>. Right now this project only knows
+        7 of Afghanistan's ~26 airfields (the navaid-equipped ones). This file is the seed for
+        the rest. Keep it.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="block-header">
+      <h2>Block 2 — a real sortie</h2>
+      <span class="badge optional">optional</span>
+    </div>
+    <p>Mission: <strong>"Mi-24P – The Dawn of the Soviet Afghan War", Mission 02-Bagram</strong>
+      (confirmed present in your campaign folder).</p>
+    <p class="dim">Your <code class="inline">run-scripts/run-crew-text.sh</code> is hardcoded to
+      Syria — don't edit it in place. Run the equivalent directly from
+      <code class="inline">body-layer/</code>, swapping theatre and store only:</p>
+    <pre>cd body-layer
+PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
+    --aircraft-layer-url http://&lt;your-collector-ip&gt;:7791 \
+    --theatre Afghanistan \
+    --world-model-db ../world-model/data/world-model/afghanistan-full.sqlite \
+    --speech-audio --speech-input --crew-text --f10-commands \
+    --audio-adapter-url http://127.0.0.1:7795 \
+    --brain-client http --brain-url http://127.0.0.1:7796 \
+    --speech-log ~/dcs-speech.jsonl</pre>
+    <p class="dim"><strong>Verified this session</strong> (no live DCS/aircraft-layer here): this
+      exact theatre/store pair resolves and clears the mismatch guard against the real built
+      store — confirmed by running it with an unreachable collector URL and watching it fail only
+      once it tries to poll aircraft-layer, never on theatre/store resolution. Also confirmed the
+      guard rejects a wrong pairing (<code class="inline">--theatre Syria</code> against this same
+      store errors immediately). <strong>Unverified:</strong> the rest of the pipeline against a
+      live DCS session on Mission 02-Bagram itself.</p>
+    <p>Bagram airfield (x=125892.4, z=272874.7) resolves to SRTM elevation ≈1478&nbsp;m in the
+      built store — real Bagram sits around 1497&nbsp;m, the right range, not pinned to the
+      metre. That elevation data is exactly what feeds the naked-eye terrain line-of-sight gate
+      near Bagram/Kabul.</p>
+    <p class="dim">Don't expect any wording change in what Petrovich says — this plan touches no
+      speech/callout text. Airfield call-outs only exist for the 7 beacon-derived airfields;
+      Bagram and Kabul are both in that 7, so this specific sortie isn't blocked by the gap.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Not yet true — read before flying anything else on Afghanistan</h2>
+    <ul class="plain">
+      <li><strong>The projection is provisional until Block 1 passes.</strong> Every Afghanistan
+        position Petrovich reports rests on it.</li>
+      <li>Raster chart (F10 map) registration is out of scope — nothing a pilot would notice;
+        only two diagnostic tools are affected.</li>
+      <li>Road junctions are real but sparse (196 for all of Afghanistan vs. Syria's 8,732) — a
+        known detector/data-authoring limitation, not a defect this sortie will surface.</li>
+    </ul>
+  </section>
+
+  <section class="panel bring-back">
+    <h2>Bring back</h2>
+    <div class="check-row">
+      <input type="checkbox" data-k="residual">
+      <label>Block 1's worst residual, in metres — and whether confidence got flipped to
+        "confirmed"</label>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" data-k="keepfile">
+      <label>Confirmed you kept <code class="inline">coord_probe_output.json</code> somewhere
+        findable</label>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" data-k="sortie">
+      <label>If Block 2 flown: did Bagram/Kabul-area terrain masking look geographically sensible</label>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" data-k="surprise">
+      <label>Anything that surprised you — worth more than anything else on this list</label>
+    </div>
+  </section>
+
+  <footer>Source of truth: <code class="inline">docs/acceptance/2026-10-05-afghanistan-projection-check.md</code>.
+    This card is a view of it, generated for cockpit reading — checkboxes are a place-keeper only
+    and are not read back; say your answers in conversation afterwards.</footer>
+
+</div>
+
+<script>
+(function () {
+  try {
+    const KEY = 'afghanistan-projection-check';
+    const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+})();
+</script>

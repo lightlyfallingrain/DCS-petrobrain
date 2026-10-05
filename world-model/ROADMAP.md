@@ -103,6 +103,30 @@ sortie actually exercises it, and say which one.
   changes from this. Follow-up queued as `WM-B4` (curve-smooth the polylines, user direction the
   same day after seeing the staircase in a real render).
 
+- [ ] **`feature/multi-theatre-afghanistan` — `THEATRE_PROJECTIONS["Afghanistan"]` registered
+  `confidence="provisional"`, DoD-passed 2026-10-05 (checks, Reviewer, Security, Performance all
+  clean), live `coord.LOtoLL` projection check unflown.** Plan Stage 4: the beacon-fitted `tmerc`
+  params (`central_meridian=63, scale_factor=0.9996, false_easting=-300149.9912,
+  false_northing=-3759656.9499`) have never been checked against DCS's own live `coord.LOtoLL`
+  the way Syria's M1 was (0.00–0.03 m floor). `afghanistan-full.sqlite` is built and spot-checked
+  geographically coherent (Kabul SRTM elevation 1792.2 m vs. real ~1791 m), but every position it
+  reports still rests on an unconfirmed projection. Card:
+  `docs/acceptance/2026-10-05-afghanistan-projection-check.md` /
+  https://claude.ai/artifact/YBRPNY1LcAb37u6GMBB1Vu — run the Afghanistan-terrain `coord_probe.lua`
+  mission, compare residuals, flip `confidence` to `"confirmed"` if every point clears ~0.1 m.
+  Same card's Block 2 (optional) also seeds the full ~26-airfield list via
+  `world.getAirbases()` — only 7 of 26 are known today (beacon-derived, navaid-equipped only).
+
+  **Performance Reviewer finding, relevant to Kola before Afghanistan's own acceptance clears
+  it:** the terrain-semantics (ridge/valley) build stage processes every `.hgt` tile physically
+  staged in `--srtm-dir` rather than clipping to the region's own padded bbox — pre-existing,
+  not introduced here, but measured concretely for the first time on this build (288 staged tiles,
+  only 158 actually needed by the SRTM elevation grid; the stage cost 44.0 min of this build's 82
+  min total). Kola's elongated footprint is exactly the shape rectangular half-extents were built
+  to stop wasting compute on, and this stage never got that fix — whoever stages Kola's DEM tiles
+  should either stage only bbox-overlapping tiles or filter `ingest_terrain`'s tile list before a
+  Kola build is attempted. See `plans/multi-theatre-afghanistan/performance.md` finding #3.
+
 - [x] **M0 — Repo + research notebook.** Scaffold done. DCS version + Syria theatre presence recorded in `research/`.
 - [x] **M1 — One coordinate.** Prove DCS x/z ↔ lat/lon for Syria against a known real-world control point. Measure error. Done: `src/coordinates/` (pyproj-based, theatre-agnostic), three real-world ARP control points (Damascus, Latakia, Beirut), measured residual ~1.0-1.3km (DCS terrain-art placement error, not transform error). See `research/2026-09-03-m1-coordinate-transform-verification.md`.
 - [x] **M2 — Raster understanding.** Read Syria's `RasterCharts`: tile hierarchy, dimensions, scales, registration. Render a known DCS coordinate onto the raster. Done: `src/raster/` (Pillow-based DDS loader + empirical x/z-arithmetic registration, `confidence="provisional"`), `tools/inspect_raster.py` (`scan`/`mark` diagnostic CLI), control-point + held-out-point tests. Registration fitted against Sivas/Kahramanmaras/Hama/Erzincan; independently validated against held-out Gemerek (~129m x-axis, ~5.5km z-axis residual). Scope note: this raster is scanned real-world cartography (Turkish JOG-A-class chart), not DCS-rendered geometry — feeds only the F10 paper-map mode; provenance-taxonomy follow-up still open, see `plans/m2-raster-understanding/plan.md` "Decisions Requiring User Input". `level` tile-suffix semantics (`-2`/`-1`/`00`/`01`) remain unresolved, no sample beyond `"00"`. See `research/2026-09-03-m2-rastercharts-recon.md`.
