@@ -305,9 +305,28 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "cancel follow",
         "stop following",
     ),
-    # Voice-only. `report` carries three phrasings because it is the
+    # Voice-only. `report` carries five phrasings because it is the
     # command most likely to be said casually and differently each time.
-    "report_all": ("report", "report contacts", "what do you see"),
+    # "describe"/"describe contacts" added 2026-10-05 (sortie debrief,
+    # `plans/sortie-2026-10-05-refinements/plan.md` Item 2): "describe" is
+    # six letters and phonetically distinct from every existing anchor
+    # verb (`scan`, `watch`, `follow`, `report`, `cancel`, `stop`,
+    # `silence`), unlike bare "quiet" (rejected above) which sat a 0.889
+    # `SequenceMatcher` ratio from the ordinary word "quite" and would
+    # have falsely anchored on "quite a nice day for flying today".
+    # Measured directly against `command_matcher.match_transcript` with
+    # this phrasing wired in: no collision against any other verb anchor
+    # word, and adversarial sentences ("describe the mission to me",
+    # "describing the situation", "the scribe wrote it down") all come
+    # back `token=None` -- none of them resembles a known phrase's word
+    # sequence, the real defence per that module's docstring.
+    "report_all": (
+        "report",
+        "report contacts",
+        "what do you see",
+        "describe",
+        "describe contacts",
+    ),
     # **Exactly one phrasing, and it counts only when it is the entire
     # transmission** (user direction, 2026-09-19: "Let's just use 'stop'
     # for this purpose. It's simple."). A "stop" inside a sentence --
