@@ -130,3 +130,4 @@ removed; read the linked file for full detail.
 - [Contact report flood review](project_contact_report_flood_review.md) - verify "always later-founded" by tracing the state machine.
 - [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - an early-return branch's test can pass disabled if a fallback degenerates to the same result.
 - [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; shared merge-echo predicate verified equivalent to both old copies by argument-level read.
+- [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam, confirmed by disabling it.
