@@ -146,3 +146,5 @@ and blowing the cap again; this pass merged them into one list.
 - [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
 - [Equivalence test must not import the code it pins](feedback_equivalence_test_must_not_import_the_code_it_pins.md) - a shared helper makes both sides of `==` the new path; mutate to find out.
 - [BL-11 tick cost review](project_bl11_tick_cost_review.md) - APPROVED W/ REQUIRED FIXES; the task's disk-full premise was backwards.
+- [Healthy-case guard test needs buffered state](feedback_healthy_case_guard_test_needs_buffered_state.md) - 4 close() tests passed with close() deleted entirely.
+- [BL-11 tick cost round 2 review](project_bl11_tick_cost_round2_review.md) - ruled to delete dead fns a round-1 approval's own premise created.
