@@ -129,6 +129,22 @@ attention is elsewhere will keep being broken. This one is structural instead.
      documents in the prompt, and have the agent verify they exist rather than trusting a clean
      `git diff --stat`.
 
+   **What to do about it, since three agents hit this in one night and each handled it
+   differently** (one read its inputs through `git show <tip>:<path>`, two fast-forwarded):
+
+   - **Report it first, always.** That part of the rule is what caught it all three times.
+   - **Then, if and only if the worktree's HEAD is a strict *ancestor* of the named tip and the tree
+     is clean, `git merge --ff-only <tip>` and say so in the report.** That is a correction, not a
+     workaround: it cannot lose work, it cannot pick up anything the dispatcher did not name, and it
+     puts the agent on exactly the commit it was asked about. Stopping dead instead wastes a whole
+     run on a condition that is trivially and safely correctable — especially overnight, when nobody
+     is awake to re-dispatch.
+   - **Anything else — a diverged HEAD, unique commits, a dirty tree — stops.** There the mismatch
+     means something unknown is going on, which is the case this rule was written for.
+   - `git reset --hard` is denied by this project's permissions, so `--ff-only` is the move; and
+     `git show <tip>:<path>` remains the way to read a *document* from the target tip when even
+     that is unavailable.
+
 ### The main checkout's branch is a contract with the user
 
 **The user tests on the main checkout. They do not operate in worktrees.** So the branch checked out
