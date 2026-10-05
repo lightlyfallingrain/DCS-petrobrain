@@ -105,6 +105,14 @@ body-layer/ (the only subproject touched):
   *unknown*, not *never admitted*. Resolved by narrowing the omission to exempt
   them rather than by editing the test, which also keeps nearly all the byte
   saving (the motion and LOS annotations are 13 of the ~13 `None` fields).
+
+  **Corrected after review: the exemption is defensible but not load-bearing,
+  and this entry overstated it.** No consumer distinguishes omitted from
+  `null` — all three read `contact_id` through `.get` with a truthiness guard
+  (`triage.py:82`, `:98`), so the two cases are indistinguishable downstream.
+  What the exemption actually serves is a human reading the JSONL by eye, plus
+  the existing test. Kept on those grounds, not on a dependency that does not
+  exist.
   Checked the other direction too — no other test asserts a null annotation
   field, and `tools/summarize_detection_trace.py`,
   `tools/eyesight_replay.py` and `.claude/skills/sortie-log-triage/scripts/triage.py`
@@ -130,3 +138,105 @@ body-layer/ (the only subproject touched):
   to be the worktree (`pythonpath` resolves against rootdir, not `PYTHONPATH`).
 - The scratchpad directory is shared with other concurrent sessions — a file
   written there was overwritten mid-task by another session.
+
+---
+
+## Post-review fixes (second implementer pass, from `plans/bl11-tick-cost/review.md`)
+
+Four commits on `worktree-agent-a065c125d8d9644f9`, fast-forwarded from
+`580a4bd`. Both required fixes plus all four optional refinements.
+
+### Files Changed
+
+- `body-layer/tests/test_group_salience_equivalence.py` — **required fix 1.**
+  `_cohesive` and `_resolvable` imports replaced by local `_reference_cohesive`
+  / `_reference_resolvable` copies of the pre-Stage-2 bodies
+  (`4166fc0^`). Constants still imported. Module docstring and
+  `test_hoisted_loop_matches_reference_under_a_raised_optic`'s docstring
+  rewritten — the latter asserted a guarantee the file did not provide.
+- `body-layer/src/perception/group_salience.py` — docstring-only consequence of
+  the above: `_cohesive` and `_resolvable` now have **no caller at all**, so
+  "kept as a named, tested function" was false. Corrected in place.
+- `run-scripts/run-crew-text.sh`, `run-scripts/run-crew-text-debug-view.sh` —
+  **required fix 2.** Four `~/dcs-*.jsonl` paths → `logs/dcs-*.jsonl`; both
+  scripts `pushd ../body-layer/`, so the files land in `body-layer/logs/`.
+- `body-layer/src/logger.py` — `_per_run_log_paths` now creates each resolved
+  path's parent, degrading one log to `None` with a stderr line if it cannot.
+  Plus the Stage 1 overrun docstring (optional item 2).
+- `body-layer/src/run_log_paths.py`, `body-layer/RUN.md` — made to describe what
+  now happens (`RUN.md`'s "the directory is untouched" became false).
+- `body-layer/src/detection_trace_writer.py`,
+  `body-layer/src/belief_truth_log.py` — `contextlib.suppress(OSError)` around
+  `close()` (optional item 1).
+- `body-layer/src/belief/enrichment.py` — cell-diagonal bound and the two
+  unnamed consumers, on `ENRICHMENT_CACHE_POSITION_GRID_M` and
+  `terrain_divide_qualifier` (optional item 3).
+
+### Tests Added
+
+- `test_the_resolved_parent_directory_is_created` — the `FileNotFoundError`-at-
+  startup case; asserts the directory exists *and* that all three paths open in
+  append mode, since the directory existing is the means, not the claim.
+- `test_an_uncreatable_directory_disables_only_that_log` — `OSError` degrades
+  one log, the others resolve normally, stderr names the flag.
+- `test_close_does_not_raise_when_the_disk_is_full` ×2 (both writers).
+- `test_close_does_not_raise_on_a_healthy_writer` ×2 — the pair that would
+  catch the suppression hiding an ordinary-path failure rather than only the
+  intended one.
+
+### Tests Modified (flagged, not silent)
+
+`test_all_three_logs_share_one_stamp` and
+`test_a_single_configured_log_rolls_without_inventing_the_others` were rerooted
+onto `tmp_path`. They passed bare relative `logs/trace.jsonl`, which with the
+new `mkdir` would have made the suite deposit an **untracked `logs/`** wherever
+pytest was started — and the documented command is `pytest body-layer/tests -q`
+from the repo root, whose `.gitignore` does not cover `logs/`, which would also
+make `git worktree remove` refuse. Assertions unchanged in meaning. Both tests
+were added by this same branch two commits earlier, so this is the stage's own
+work rather than a pre-existing contract.
+
+### Checks (body-layer/ only — nothing else touched outside `run-scripts/`)
+
+- `ruff format --check src tests`: pass (118 files)
+- `ruff check src tests`: pass
+- `mypy src`: pass (54 files)
+- `pytest tests -q`: **1512 passed, 4 xfailed** (baseline 1506/4; +6 new tests,
+  the equivalence file still 15)
+
+### Notable Discoveries
+
+- **The counterfactual is the only thing that made fix 1 verifiable, and it
+  cuts both ways.** Mutating the gate at `group_salience.py:112` left the file
+  passing 15/15 before the fix and fails exactly the raised-optic test after
+  (production 23 salient ids vs the reference's 43), with the fourteen
+  `UNAIDED_OPTIC` cases still passing — that optic's `presence_range_mult` is
+  1.0, so those cases *cannot* detect the mutation, which is precisely why the
+  raised optic earns its own case. Production restored byte-identical,
+  `shasum d6faaa93` before and after.
+- **The `logs/` convention was already half-built and that was the trap.**
+  `logger.py:1629` has had `DEFAULT_SPEECH_LOG_PATH = Path("logs/speech.jsonl")`
+  with its own `mkdir` and its own degrade-to-`None` since before this branch —
+  but only on the *default* speech-log path. Explicit `--detection-trace` /
+  `--belief-truth-log` paths got no `mkdir`, so pointing the run scripts at
+  `logs/` without one is a startup `FileNotFoundError` raised before Stage 5's
+  write-failure reporting can fire. The new code deliberately mirrors that
+  existing handling rather than inventing a second policy.
+- **A `mkdir` in a helper turns relative paths in tests into repo pollution.**
+  Two passing tests became a source of untracked directories without changing
+  one assertion — a failure that no check would have reported, and that would
+  have surfaced as `git worktree remove` refusing for an unrelated agent.
+- **Fix 1's side effect is dead code the review's ruling did not anticipate.**
+  The review approved keeping `_cohesive`/`_resolvable` as "the reference
+  implementation"; the fix is precisely to stop the reference using them, so
+  that justification no longer holds and both are now uncalled. Left in place
+  with corrected docstrings rather than deleted — deleting production functions
+  is outside what was asked. **Open for the next reviewer:** delete both, or
+  give them a test of their own.
+- **Stage 1's overrun floor was left unfloored, deliberately.** A ~50 ms floor
+  would extend every realised period in exactly the regime where the loop is
+  already behind — a smaller version of the `work + interval` bug Stage 1
+  exists to remove. The consequence the review asked to be named (no voluntary
+  yield under sustained overrun, on a Mac also hosting Ollama) is now in the
+  docstring, with `--poll-interval-s` named as the knob that already means
+  this.

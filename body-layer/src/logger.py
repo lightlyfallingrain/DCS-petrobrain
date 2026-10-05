@@ -1024,7 +1024,23 @@ def _wait_for_next_tick(
     sleep at all for as long as it takes to repay it, which is the worst
     possible behaviour on a thread that is already behind. There is nothing
     to catch up on in any case: each poll reads the *latest* telemetry, so
-    a skipped tick has no backlog, only a gap."""
+    a skipped tick has no backlog, only a gap.
+
+    **The cost that statement does not cover: sustained overrun means zero
+    voluntary yield.** "Exactly the ticks it overran and nothing afterwards"
+    is about tick debt. While the work keeps exceeding `poll_interval_s`,
+    `stop_event.wait` is never called at all and this thread runs
+    back-to-back, pinning a core on a Mac that also hosts Ollama and the
+    brain layer -- the old `wait(poll_interval_s)` tail was an accidental
+    1.0 s floor that hid this. Deliberately left as a bare clamp rather
+    than floored at ~50 ms: each iteration does real interval-scale work
+    (this is not a busy-spin), shutdown stays prompt because
+    `stop_event.is_set()` is checked at the top of every iteration, and a
+    floor would silently extend every realised period in the one regime
+    where the loop is already behind -- reintroducing a smaller version of
+    the `work + interval` bug this stage exists to remove. If core pressure
+    is ever observed in flight, the fix is a longer `--poll-interval-s`,
+    which is the knob that already means this."""
     remaining = deadline - time.monotonic()
     if remaining > 0.0:
         stop_event.wait(remaining)
