@@ -703,11 +703,16 @@ class ContactStore:
         gated.** `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 wired the
         observability gate into `tick`'s fifth and sixth blocks
         (`CONTACT_MOTION_CHANGED`, `CONTACT_RANGE_CROSSED`) only. The
-        2026-10-05 sortie then spoke 20 lines about clock hours this very
-        mask declares unviewable -- 5, 6 and 7 o'clock, at body azimuths
-        150/180/150 degrees against a 130-degree `rear_cutoff_deg` -- all
-        of them `CONTACT_CLASSIFICATION_CHANGED` lines or group-disclosure
-        lines, neither of which passes through either gated block. See
+        2026-10-05 sortie then spoke 17 *unprompted* lines about clock
+        hours this very mask declares unviewable -- 5, 6 and 7 o'clock, at
+        body azimuths 150/180/150 degrees against a 130-degree
+        `rear_cutoff_deg` -- all of them `CONTACT_CLASSIFICATION_CHANGED`
+        lines or group-disclosure lines, neither of which passes through
+        either gated block. (20 masked-hour lines in all; the other 3 were
+        `CrewConsole._handle_report` answering a `report` command, which is
+        a documented decision and deliberately not gated -- see
+        `belief.callouts`' module docstring and `plans/post-review-fixes/
+        explore-notes.md` §9.) See
         `plans/callout-observability-gate/debug.md`.
 
         Returns `True` when the bookkeeping has never run (see

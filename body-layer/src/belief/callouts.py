@@ -41,9 +41,12 @@ and a classification for something his own cockpit mask puts out of sight.
 `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 placed that gate at
 *emission* instead, inside `ContactStore.tick`'s fifth and sixth blocks,
 which reached `CONTACT_MOTION_CHANGED` and `CONTACT_RANGE_CROSSED` and
-nothing else -- so the 2026-10-05 sortie spoke 20 lines about 5, 6 and 7
-o'clock, all of them `CONTACT_CLASSIFICATION_CHANGED` or group-disclosure
-lines. Gating here instead of there is what makes it total: group
+nothing else -- so the 2026-10-05 sortie spoke 17 unprompted lines about
+5, 6 and 7 o'clock, all of them `CONTACT_CLASSIFICATION_CHANGED` or
+group-disclosure lines. (20 masked-hour lines in all; the other 3 were
+answers to a `report` and belong to the pull path below, which is correct
+as it stands -- the split is `plans/post-review-fixes/explore-notes.md`
+§9.) Gating here instead of there is what makes it total: group
 disclosure mints no `Event` at all, so no emission-site gate could ever
 have covered it, and a per-kind list at emission is a list the next new
 kind silently fails to join.
@@ -55,6 +58,10 @@ renders straight through `belief.speech` and never reaches `tick`, which
 is what keeps the two answers separate; where no-omniscience bites on the
 pull path it does so as an absence claim (`render_no_view`) or as
 freshness phrasing, not as silence. See `plans/crew-query-path/plan.md`.
+**`_handle_report` does legitimately answer about a masked hour** (3 of
+the 2026-10-05 sortie's 20 such lines were exactly that, within 4.4 s of
+a `report` command) and that is not a defect to fix here -- do not
+"complete" this gate by wiring it to the pull path.
 
 **Priority is an explicitly disposable placeholder.** `callout_priority`'s
 first tuple element, `threat_band`, is a constant (`_DEFAULT_THREAT_BAND`)

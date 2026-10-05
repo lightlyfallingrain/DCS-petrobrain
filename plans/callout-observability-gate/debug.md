@@ -12,7 +12,8 @@ classification attached — a direct no-omniscience violation
 (`body-layer/CLAUDE.md`, "No omniscience is structural, not a convention").
 
 From the 2026-10-05 sortie speech log (`~/dcs-belief-truth.jsonl`, `kind == "speech"`),
-**20 of 357 spoken lines** were about masked hours:
+**20 of 357 spoken lines** were about masked hours — of which **17 are this defect** and 3 are a
+documented pull-path decision (see "Size of the defect: 17, not 20" below):
 
 | hour | lines | body azimuth | `_CO_PILOT_MASK.rear_cutoff_deg = 130.0` says |
 |---|---|---|---|
@@ -32,6 +33,35 @@ Real examples, with the gaze label from the same row:
 The pilot reported this as lateness (*"unit 7 o'clock, which is late by definition because
 Petrovich can't even see 7 o'clock"*). It is not latency; it is a correctness defect.
 Context: `plans/post-review-fixes/explore-notes.md` §6 and decision 11.
+
+---
+
+### Size of the defect: 17, not 20 — and there is a *third* site, which is correct as it stands
+
+The 20 masked-hour lines were correlated against the sortie's own `acted_token` history
+(`~/dcs-speech.jsonl`, by `now_sim`); there were only seven report-family commands in the whole
+sortie. Recorded as §9 of `plans/post-review-fixes/explore-notes.md` (`main` @ `5a656ad`), with a
+security pass reaching the same conclusion independently.
+
+| | lines |
+|---|---|
+| **no report-family command within 30 s — unprompted, the push path, this defect** | **17** |
+| spoken 0.0–4.4 s after a report command — a pull-path answer | 3 |
+
+The three pull-path lines are at `t_sim` 1601.0, 1734.3 and 2966.2.
+
+**So `CrewConsole._handle_report` (`crew_console.py:1639`) is a third site that produces 5/6/7
+o'clock output, and it is a deliberate decision rather than an oversight** — its own docstring:
+*"belief survives the aircraft turning away; only the absence claim is withheld."* Its behaviour is
+**left exactly as it was**, and its 3 lines are not part of this defect's count.
+
+This fix cannot have touched it, by construction rather than by care: `_handle_report` calls
+`render_group_full_disclosure`/`group_facts` directly and never reaches `scheduler.tick` or
+`callout_observable`. Its own inline comment already says so — *"A report is pull-based, so it
+always speaks fresh ... that exists only to throttle the push (`CalloutScheduler`) path."*
+
+**Use 17, not 20**, wherever this defect's size is quoted (`BL-11` Stage 0 and `BL-B30`'s entry
+both carry 20 and are being corrected from this report).
 
 ---
 
@@ -217,7 +247,7 @@ reversible edit, reverted).
    age), but it does mean a contact founded ahead and spoken about several seconds later from
    astern now goes quiet instead. That is the invariant applied consistently; if you would
    rather hear it late than not at all, say so and it narrows to two kinds in one line.
-2. **This silences, it does not re-time.** The 20 masked-hour lines are now unspoken rather
+2. **This silences, it does not re-time.** The 17 unprompted masked-hour lines are now unspoken rather
    than spoken correctly — the contacts are still believed, still in the debug view, still
    answerable by a `report`. Whether some of them *should* reach you another way (an "I lost
    sight of it" marker, say) is a product question this pass deliberately did not decide.
