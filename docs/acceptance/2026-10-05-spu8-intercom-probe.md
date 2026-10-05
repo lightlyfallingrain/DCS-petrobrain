@@ -22,51 +22,34 @@ flip it by hand.
 
 ## Setup
 
-1. Back up your deployed `Saved Games\DCS\Scripts\Export.lua` (copy it somewhere safe).
-2. You'll be adding a few lines to a copy of `Export.lua` — see "The probe" below for exactly what
-   to add. This runs standalone; the collector does not need to be running.
-3. Fly any Mi-24P mission, in the **pilot** seat.
+No hand-editing: the probe is a ready-made script,
+`aircraft-layer/dcs-export/Export.probe-spu8.lua` on branch `investigate/spu8-intercom-write-path`.
+It runs on its own; the collector does not need to be running.
 
-## The probe
+1. Copy `aircraft-layer/dcs-export/Export.probe-spu8.lua` to `Saved Games\DCS\Scripts\Export.lua`
+   (replacing the deployed one for this flight).
+2. Delete any old `Saved Games\DCS\Logs\aircraft_layer_probe_spu8.log`.
+3. Fly any Mi-24P mission, **pilot seat**, on the ground is fine.
 
-Add this inside your `Export.lua`'s `LuaExportAfterNextFrame` (or any function that already runs
-every frame/second — the existing throttle in that function is fine, this doesn't need to run at
-5 Hz):
+## What to do — about one minute, the script keeps time
 
-```lua
-local function probe_spu8()
-    local dev0 = GetDevice(0)
-    local function read(arg)
-        local ok, v = pcall(function() return dev0:get_argument_value(arg) end)
-        return ok and tostring(v) or "ERROR:" .. tostring(v)
-    end
+| time from mission start | you | the script |
+|---|---|---|
+| 0–30 s | Click the **pilot's Radio/ICS switch (456)** both ways, and turn the **SPU-8 volume knob (457)** end to end and back. Optionally flip the two network switches (376/377). | Logs every value change. |
+| 30 s | **Hands off the intercom panel.** | Flips the **operator's intercom power (664)** to the opposite of where it is. |
+| 50 s | Hands off. | Flips 664 back. |
+| 60 s | Exit whenever (log says `PROBE DONE`). | — |
 
-    log.write("SPU8_PROBE", log.INFO, string.format(
-        "456(P-ICS)=%s 457(P-VOL)=%s 376(NET2)=%s 377(NET1)=%s 664(OP-ICS)=%s",
-        read(456), read(457), read(376), read(377), read(664)))
-end
-```
+Optional, if the mission lets you change seats: after 30 s, jump to the operator seat and look at
+the intercom switch on his panel. Seeing it move confirms the write in the cockpit, not just in the
+number.
 
-Call `probe_spu8()` once per second from your export loop and let it log for ~15 seconds while you:
+Afterwards **re-copy the production `aircraft-layer/dcs-export/Export.lua` from the repository**
+to `Scripts\Export.lua`. Do not restore a backup (see `aircraft-layer/WORKFLOW.md`).
 
-- **Move the pilot's own ICS switch (physically click it in the cockpit)** and the volume knob —
-  confirms 456/457 read sensibly and that you've found the right controls before trusting 664.
-- Leave 664 alone for this pass — just read it.
-
-Then, **once**, add this write attempt (fire it once, e.g. gated on a frame-count check, not every
-frame):
-
-```lua
-local ok, err = pcall(function()
-    GetDevice(55):performClickableAction(3015, 1)   -- CMD_SPU8_O_ICS, arg 664
-end)
-log.write("SPU8_PROBE", log.INFO, "write attempt ok=" .. tostring(ok) .. " err=" .. tostring(err))
-```
-
-Then keep logging the five reads above for another ~10 seconds to see if 664 changed and held.
-
-4. Read `Saved Games\DCS\Logs\dcs.log`, search for `SPU8_PROBE`.
-5. Restore your real `Export.lua` afterward.
+The script's logic was run in this session under a stubbed DCS harness (Lua 5.1, fake devices):
+the timeline, change logging and both writes behave as described. Whether DCS honours the write is
+exactly what this flight measures.
 
 ## Pass criteria
 
@@ -76,14 +59,7 @@ some other system)?
 
 ## Bring back
 
-1. **The five `get_argument_value` readings** — 456, 457, 376, 377, 664 — before any write, in
-   whatever position each switch happened to be in (and note what position, if you remember moving
-   one).
-2. **456 and 457 across knob/switch travel** — flip 456, turn 457 through its range, read back
-   between moves. Confirms the read channel works at all before trusting a negative result on 664.
-3. **A single yes/no: did `GetDevice(55):performClickableAction(3015, 1)` move arg 664?** Quote the
-   `before`/`after` values from the log, and whether it held for the following ~10 s rather than
-   snapping back.
-4. If the write failed (`ok=false`) rather than just not-moving: the `err` value from the log.
-5. Anything that surprised you — including if the pilot's own 456/457 behaved unexpectedly, since
-   that would undercut the whole premise of this probe.
+The file `Saved Games\DCS\Logs\aircraft_layer_probe_spu8.log`. That alone answers everything:
+the read values across each control's travel, and lines `WRITE 1` / `CHECK after write 1 +1s` /
+`+5s` (and the same for write 2) showing whether 664 moved and held. If you looked from the
+operator seat, add a sentence on what you saw.
