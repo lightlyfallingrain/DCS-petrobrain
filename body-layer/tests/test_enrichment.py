@@ -836,16 +836,18 @@ def test_settlement_just_inside_the_radius_still_counts() -> None:
 
 
 def test_every_gated_kind_shares_todays_placeholder_radius() -> None:
-    """All kinds sit at 1000 m deliberately -- one honest placeholder rather
-    than five invented numbers. This test exists so that differentiating them
-    later is a conscious edit with a visible diff, not an accident."""
-    assert set(NEAR_FACT_RADIUS_M) == {
-        "settlement",
-        "road",
-        "water",
-        "ridge",
-        "valley",
-    }
+    """The remaining kinds sit at 1000 m deliberately -- one honest
+    placeholder rather than several invented numbers. This test exists so
+    that differentiating them later is a conscious edit with a visible
+    diff, not an accident.
+
+    `ridge`/`valley` no longer appear here (`plans/terrain-feature-probing/
+    plan.md` Revision 3, Stage 3a calibration): the plain near-radius gate
+    they used to share with settlement/road/water is retired for those two
+    kinds, superseded entirely by `TERRAIN_QUALIFIER_MAX_M`/`TERRAIN_
+    DOMINANCE_FACTOR`'s dominance rule -- see `test_dominant_terrain_kind_*`
+    above."""
+    assert set(NEAR_FACT_RADIUS_M) == {"settlement", "road", "water"}
     assert set(NEAR_FACT_RADIUS_M.values()) == {1000.0}
 
 

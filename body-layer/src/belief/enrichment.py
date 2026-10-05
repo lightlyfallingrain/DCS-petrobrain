@@ -197,8 +197,6 @@ NEAR_FACT_RADIUS_M: Final[dict[str, float]] = {
     "settlement": 1000.0,
     "road": 1000.0,
     "water": 1000.0,
-    "ridge": 1000.0,
-    "valley": 1000.0,
 }
 
 
