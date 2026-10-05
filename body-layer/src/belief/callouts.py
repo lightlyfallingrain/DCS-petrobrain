@@ -189,6 +189,7 @@ from belief.speech import (
     _format_range_km,
     _group_member_facts,
     _unit_type_display,
+    group_callout_member_id,
     group_membership_state,
     render_contact_report,
     render_group_disclosure,
@@ -226,6 +227,17 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: affixes (`belief.speech`), which `render_group_report`/`render_group_
 #: disclosure` have no concept of, so folding one into a group's own line
 #: would silently drop the very fact the event exists to report.
+#:
+#: **One line per group, still one member's wording** (performance review
+#: 2026-10-05, finding 1). `tick` now suppresses these kinds for every
+#: member of a group but one, exactly as it already does for `CONTACT_
+#: DETECTED`/`CONTACT_REACQUIRED` -- but the surviving line is the *leading
+#: member's*, affix and all, not a group-level "the group is moving". That
+#: is the paragraph above, unchanged: there is no group-level rendering of
+#: these kinds to fold into, and inventing one would drop the affix, which
+#: is the fact the event exists to report. The suppression fixes the
+#: cardinality (N lines about one group becomes one); the wording still
+#: names one member.
 _WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
 )
@@ -769,6 +781,10 @@ class CalloutScheduler:
             return []
 
         live: list[Event] = []
+        #: Per-tick memo of `group_callout_member_id` -- one lookup per
+        #: *group*, not per event, so the suppression below costs O(members)
+        #: once rather than O(events x members).
+        group_keeper: dict[str, str | None] = {}
         for event in store.unacknowledged_events:
             if event.kind not in _TEMPLATED_KINDS or event.id in self._consumed:
                 continue
@@ -786,6 +802,40 @@ class CalloutScheduler:
                 # (Stage 4 design, section 1).
                 continue
             if event.kind in _WATCHED_ONLY_KINDS:
+                belief_group = store.group_for_contact(event.contact_id)
+                if belief_group is not None:
+                    if belief_group.id not in group_keeper:
+                        group_keeper[belief_group.id] = group_callout_member_id(
+                            store, belief_group
+                        )
+                    keeper_id = group_keeper[belief_group.id]
+                    if keeper_id is not None and keeper_id != event.contact_id:
+                        # One line for the group, not one per member --
+                        # the same rule the `CONTACT_DETECTED`/`CONTACT_
+                        # REACQUIRED` branch above already applies to a
+                        # grouped contact, extended to the watched-only
+                        # kinds (performance review 2026-10-05, finding 1).
+                        # Group members are co-located *by definition*, so
+                        # they cross the same whole-kilometre mark and
+                        # change motion state in the same poll; before
+                        # this, watching a group turned one event stream
+                        # into N, each costing two `describe_contact`
+                        # calls per tick (~51 ms of `describe_position`
+                        # apiece, cache-missing by construction for a
+                        # re-observed contact) and each re-described every
+                        # non-busy tick for up to `CALLOUT_MAX_AGE_S`,
+                        # because `tick` speaks one candidate without
+                        # consuming the losers. Measured at 8 members:
+                        # ~820 ms added to one tick against a 330 ms
+                        # median poll.
+                        #
+                        # `_consumed`, not a bare `continue`: **lost, not
+                        # deferred**, the same treatment `WATCH_REPORT_
+                        # MIN_GAP_S` below gives a suppressed watched-only
+                        # event. Deferring would re-offer the peer event
+                        # every tick, which is the cost this removes.
+                        self._consumed.add(event.id)
+                        continue
                 result = describe_contact(
                     store, event.contact_id, now_sim, enrichment=enrichment
                 )
