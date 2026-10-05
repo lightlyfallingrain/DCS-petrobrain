@@ -249,3 +249,4 @@ Rebuilt 2026-09-21 from the files themselves.
 - [Silence command approved](project_silence_command_approved.md) — APPROVED; choke-point claims re-verified by grep.
 - [Landform relief gate review](project_landform_relief_gate_review.md) — APPROVED; ROADMAP bug direction was backwards.
 - [Multi theatre afghanistan review](project_multi_theatre_afghanistan_review.md) — APPROVED; crossing measurement separated authoring from a defect.
+- [MTA security fix test gap](project_mta_security_fix_test_gap.md) — NEEDS REVISION; required-fix test passed even with required fix alone removed.
