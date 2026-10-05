@@ -365,3 +365,39 @@ evidence for raising the rate evaporated, and 0.2 s would multiply speaking oppo
 against a pilot whose standing complaint has been report volume. `BL-11` Stage 1 therefore reduces
 to fixing the loop shape (sleep to a deadline, not after the work) and correcting the stale
 docstrings. Revisit if a future sortie produces lateness that is not an observability defect.
+
+---
+
+## 9. The masked-hour lines split 17/3, and the split decides the fix (measured 2026-10-06)
+
+Correlating the 20 masked-hour spoken lines against the speech log's own `acted_token` history:
+
+| | lines |
+|---|---|
+| **no report-family command within 30 s — unprompted** | **17** |
+| spoken 0.0–4.4 s after a report command — a pull-path answer | 3 |
+
+**So §6's fix is right for 17 of 20, and the other 3 are working as designed.** `_handle_report`
+(`crew_console.py:1639`) iterates every contact with `certainty != "lost"` and deliberately applies
+no observability test — its docstring states the rule: *"belief survives the aircraft turning away;
+only the absence claim is withheld."* Two independent agents converged on that same conclusion from
+different directions (the crew-query-path Architect and the security pass), and it matches decision
+13's logic: the pilot asked.
+
+**Consequence for the pilot, worth saying out loud**: after this fix, an unprompted callout will
+never name a hour Petrovich cannot see, but `report` *will* still answer about the rear hemisphere.
+That is intended, and it is the behaviour the user implicitly asked for by wanting a summary he can
+act on.
+
+### Q6 is answered by the log, not needed from the user
+
+The queued question was whether the pilot recalled the confirm prompt saying *"report east"*. The
+speech log answers it directly — at `t_sim 1585.1`, transcript `'report left.'`, **`acted_token:
+report_bearing_e`**. The diagnosis holds on the **live path**, not merely in the matcher in
+isolation. Removed from the queue.
+
+The same seven report-family commands contain a second instance of the single-word false-positive
+class: `'Report, fellow clock.'` → **`report_clock_8`**, a garbled transcript accepted as a
+confident direction. That is the same defect shape as `"report left"` → east and belongs with
+`BL-13` Stage 1 rather than being filed separately.
+
