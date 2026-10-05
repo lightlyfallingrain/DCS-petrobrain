@@ -74,12 +74,11 @@ Derived from **your own chosen mock B** (24 words ≈ 10.2 s at `speech_duration
 you read that mock on the ground. It may be too long in a hover under fire, and the honest answer is
 that only flying it will say.
 
-### Q6 — Do you recall the confirm prompt saying "report east, confirm?"
+### ~~Q6 — Do you recall the confirm prompt saying "report east, confirm?"~~ ANSWERED BY THE LOG
 
-The `confirm` you heard ~40 s before the `report right` → `say_again` was, per the matcher,
-Petrovich offering to **report east** — `"report left"` fuzzy-matches `"report east"` at 0.75. If you
-remember the words, it pins the diagnosis to the live path rather than the matcher in isolation.
-Costs you one sentence and settles it.
+Withdrawn 2026-10-06 — you do not need to remember it. `~/dcs-speech.jsonl` records it directly: at
+`t_sim 1585.1`, transcript `'report left.'`, **`acted_token: report_bearing_e`**. The diagnosis holds
+on the live path, not just in the matcher. Recorded in `plans/post-review-fixes/explore-notes.md` §9.
 
 ---
 
