@@ -148,12 +148,24 @@ body-side view and the slice numbering both files share.
   > 'silent mode'. (Contact reports not needed when not even airborne yet, let's just use the
   > silent mode to suppress them for now.)"*
 
-  - **Setting the co-pilot ICS switch is a cockpit *write*, which this project has never done.**
-    Everything the aircraft layer writes today is an overlay line, an F10 menu entry or an audio
-    buffer — never a clickable cockpit control. Whether `get_argument_value`'s counterpart can set
-    an argument from a Hook or Export context, for a seat the player is not in, is **unverified**
-    and is the first thing to establish; if it cannot, the fallback is to treat 664 as a read-only
-    precondition and tell the player to flip it. Do not plan the rest around the write succeeding.
+  - **Setting the co-pilot ICS switch is a cockpit write, and the mechanism for that is already
+    shipping — only the cross-seat case is open.** An earlier draft of this entry claimed the
+    project had never written a clickable cockpit control; that was wrong, and is corrected here
+    rather than quietly edited away. `aircraft-layer/dcs-export/Export.lua` has driven Petrovich's
+    AI wheel with `GetDevice(30):performClickableAction(cmd, value)` since BL-6 (lines 519-530),
+    and early Petrobrain moved the ASP-17 the same way. So the question is **not** whether a write
+    is possible.
+
+    What *is* open: **SPU-8 is device 55, arg 664 is `CMD_SPU8_O_ICS` (cmd 3015), and 664 carries
+    `crew_member_access = {1}` — the operator's seat, not the pilot's.** Static evidence suggests
+    that flag gates mouse clickspots rather than dispatched commands, which would mean a
+    `performClickableAction` from Export reaches it regardless of which seat the player occupies —
+    but that is **inferred, not demonstrated**, and it is the one yes/no the probe exists to
+    answer. If it turns out the flag does gate dispatched commands too, the fallback is to treat
+    664 as a read-only precondition and have the player flip it.
+
+    Recon and the probe card: `aircraft-layer/research/2026-10-05-spu8-intercom-write-path-recon.md`
+    and `docs/acceptance/2026-10-05-spu8-intercom-probe.md`.
   - **On-ground silent mode reuses the shipped `silence` command** (`crew_console.silenced`), not a
     new suppression path. It is absolute silence including urgent calls, per the same user
     direction that built it, and **any subsequent command ends it** — so a player who wants him
