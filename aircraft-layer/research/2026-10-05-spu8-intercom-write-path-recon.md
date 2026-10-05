@@ -162,3 +162,39 @@ strings -t d -n 4 "$DCS_INSTALL_PATH/bin/CockpitBase.dll" | grep -n -B15 -A5 cre
   not met" — same method fault the 2026-09-11 probe runs hit repeatedly with the 9K113 sight (gyro
   spin-up, sight doors). The probe card asks for 456/457/376/377 readback across travel specifically
   so a 664 failure isn't read in isolation.
+
+
+---
+
+## Live result, 2026-10-05 (user's flight, pilot seat, on the ground)
+
+Raw log: `2026-10-05-spu8-probe-raw.log` (`Export.probe-spu8.lua`, copied from
+`Saved Games/DCS/Logs/aircraft_layer_probe_spu8.log`).
+
+**1. The cross-seat write works.** — **evidence: reproduced-live**
+- t=30 s: 664 read 0.000; `GetDevice(55):performClickableAction(3015, 1)` returned ok; 664 then
+  animated 0.32 → 0.64 → 1.00 within 0.1 s, read 1.000 at +1 s and +5 s, and held for 20 s.
+- t=50 s: writing 0 animated it back 0.68 → 0.36 → 0.00 and it held to the end of the log (30 s).
+- Two writes in opposite directions, each followed at once by the matching change, nothing else on
+  the panel moving: the write caused it. `crew_member_access = {1}` does **not** stop a dispatched
+  command from the pilot seat — the inference in Q2 above holds. The fallback (player flips 664
+  by hand) is not needed.
+
+**2. Read values.** — **evidence: reproduced-live**
+- **457 (pilot SPU-8 volume): continuous 0..1**, started at 0.500, swept to 1.000 and down to
+  0.143 (lowest reached; the knob's end may be lower), left at 0.857. Fine-grained — usable as a
+  real volume.
+- **377 (network switch 1): two-position 0/1**, toggled 0 → 1 → 0 at t=4–5.5 s; switch animation
+  shows as intermediate 0.32/0.64/0.68/0.36 samples for ~0.1 s, so a reader must threshold (≥0.5)
+  or wait for 0/1, not test equality.
+- **376 (network switch 2): 0.000 throughout** — not moved during the flight.
+- **664 (operator ICS power): 0.000 at mission start** in this mission (cold intercom on the
+  operator side), 0/1 as above.
+- **456 (pilot Radio/ICS switch): 0.000 throughout, never changed.** Open — either the switch was
+  not clicked, or what was clicked is not arg 456. To be resolved with the user before Slice 2
+  relies on 456 (see the roadmap's conjunction gate). Note the only other toggle seen in the
+  read-only window was 377.
+
+**Consequence for Slice 2:** the "mission start, wait 5 s, set the co-pilot ICS switch ON" step is
+buildable as specified, with the same mechanism the BL-6 wheel effector ships. Readers of these
+args must allow for the ~0.1 s switch animation.
