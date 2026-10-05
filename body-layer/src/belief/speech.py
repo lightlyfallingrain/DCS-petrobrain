@@ -198,7 +198,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from belief.attention import Attention
+from belief.attention import Attention, effective_attention
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -1393,14 +1393,52 @@ def group_membership_state(
     return member_ids, leading_contact_id, differentiated
 
 
+def may_be_callout_keeper(store: ContactStore, contact: Contact) -> bool:
+    """**The single place keeper eligibility is decided** for `group_callout_
+    member_id` below -- whether `contact` is allowed to be the one member
+    whose `belief.callouts._WATCHED_ONLY_KINDS` event survives its group's
+    suppression.
+
+    A member is eligible when its *effective* attention is `("watch",
+    "priority")`, which is the identical expression `belief.callouts.tick`
+    itself gates these kinds on, via `describe_contact`'s
+    `facts["attention"]` (`belief.tools`, which derives it from this same
+    `belief.attention.effective_attention` call). So the filter's gate and
+    the keeper election agree **by construction** rather than by
+    coincidence -- and that is the whole reason this predicate exists.
+    Electing an *ineligible* keeper is not a worse-leader bug, it is total
+    silence: the filter drops the keeper's own event with a bare
+    `continue` while every peer has already been `_consumed`, so nothing
+    speaks for the group at all (review round 2, 2026-10-05, required fix
+    1 -- reproduced at two lines before, zero after, with an unwatched
+    keeper and two watched peers). Mixed-watched groups are not exotic:
+    Item 3's settled scope is "tag once, static" while `GroupStore.
+    reconcile` rebuilds `member_contact_ids` on every call, so a watched
+    group routinely gains unwatched members.
+
+    **Extend this predicate rather than adding a second gate beside it.**
+    Any further reason the filter can drop an event -- an observability
+    gate being the one already in flight (`fix/callout-observability-
+    gate`) -- reproduces the identical silence mode with a new trigger,
+    and the fix is `and <the new condition>` here, in one place, not a
+    second special case at the call site. Cheap by design: pure
+    arithmetic over `store.areas`, no `describe_contact`, so the
+    suppression's measured 2N-describes-to-2 result is untouched."""
+    effective, _ = effective_attention(
+        contact.attention, contact.last_position, store.areas
+    )
+    return effective in ("watch", "priority")
+
+
 def group_callout_member_id(store: ContactStore, group: Group) -> str | None:
     """The one member of `group` whose own `belief.callouts.
     _WATCHED_ONLY_KINDS` callout survives that module's grouped-contact
     suppression -- `None` when the group has nothing coherent left to
-    suppress on behalf of (fewer than two members still resolve, the same
-    guard `_group_member_facts`/`render_group_disclosure` enforce), in
-    which case the caller suppresses nothing and the per-member callouts
-    stand.
+    suppress on behalf of, in which case the caller suppresses nothing and
+    the per-member callouts stand. Two ways that happens: fewer than two
+    members still resolve (the same guard `_group_member_facts`/`render_
+    group_disclosure` enforce), or no still-resolving member is eligible to
+    be keeper at all (`may_be_callout_keeper` above).
 
     **Deliberately computes the leader without a single `describe_contact`
     call**, which is the whole point of the function: it is called from
@@ -1414,13 +1452,20 @@ def group_callout_member_id(store: ContactStore, group: Group) -> str | None:
     longer resolves), so this resolves the same member set
     `group_membership_state` would, by the same ordering, for free.
 
-    Falls back to the first still-resolving member when no member has a
-    resolvable `belief.threat.envelope_for` envelope -- unlike
+    Falls back to the first eligible member in id order when no eligible
+    member has a resolvable `belief.threat.envelope_for` envelope -- unlike
     `group_membership_state`'s `leading_contact_id`, which answers "who
     leads this group's disclosure line" and is legitimately `None` there,
     this answers "which single event survives" and must always name one
-    once there is a group at all, or suppression would silence the whole
-    group."""
+    once there is an eligible member at all, or suppression would silence
+    the whole group.
+
+    The "fewer than two" guard counts **every** still-resolving member,
+    not only the eligible ones: it is a question about the group's own
+    coherence (is there still a cluster to speak for?), which eligibility
+    has no bearing on. The leader is then chosen *within* the eligible
+    subset, so an ineligible member can neither become keeper nor shift
+    which eligible member does."""
     member_contacts: list[Contact] = []
     for member_id in sorted(group.member_contact_ids):
         contact = store.contact(member_id)
@@ -1429,10 +1474,15 @@ def group_callout_member_id(store: ContactStore, group: Group) -> str | None:
         member_contacts.append(contact)
     if len(member_contacts) < 2:
         return None
-    leading_index = _leading_index(member_contacts)
+    eligible = [
+        contact for contact in member_contacts if may_be_callout_keeper(store, contact)
+    ]
+    if not eligible:
+        return None
+    leading_index = _leading_index(eligible)
     if leading_index is None:
-        return member_contacts[0].id
-    return member_contacts[leading_index].id
+        return eligible[0].id
+    return eligible[leading_index].id
 
 
 def _render_full_group_composition(
