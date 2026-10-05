@@ -935,6 +935,26 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Still unmeasured: whether a 2 ms version is actually imperceptible. The arithmetic says it
   vanishes; nobody has flown it.
 
+  **Two scope decisions, user, 2026-10-05:**
+
+  - **World-model's own LOS primitive stays as the offline and test path** — *"yes, there's no
+    other way."* body-layer's hard requirement is that everything runs with no live DCS and no
+    collector, so `query/line_of_sight.py` is not replaced by this work, it is demoted to the
+    path tests and offline tools take. **What it reads changes, though**: per the same day's
+    decision to reject live elevation polling (`X-B26`), that primitive's elevation source becomes
+    the coarse ridge/valley-derived grid of `WM-B7`, not the 2.3 M-sample SRTM grid. So `WM-B7`
+    stops being an optional cleanup and becomes the stated plan for what the offline path stands
+    on — still sequenced *after* this item lands, because until the live answer actually moves to
+    DCS the existing grid is still answering a live question.
+  - **Building occlusion is in scope for this slice**, not a follow-on — *"yes please."* See
+    `X-B30`: `isVisible` demonstrably sees buildings (2 of 40 urban pairs terrain-clear but
+    vision-blocked, 0 of 40 in desert) at ~10 µs a ray, and nothing occludes behind a building in
+    either current path, so this is additive capability that cannot regress what works. Carry
+    `X-B30`'s own caveat into the design: the *aimed* `through_buildings` checks came back 6/6
+    clear while the positives came from the broader sweep, and whether that is geometry or a
+    difference between the two call shapes is **not established** — settle it before relying on a
+    particular call shape.
+
   Original entry follows. User idea,
   2026-09-29: *"could aircraft layer fire LOS calc for every known unit inside player bubble and
   within the 130 degree visibility cone? What would that cost? Maybe not every tick?"*
