@@ -827,3 +827,41 @@ two functions that must agree (2026-09-19).
   as if the tolerance were the only LOS answer. When a new mechanism supersedes part of what an old
   debt item was tracking, the debt entry needs re-reading and re-scoping, not just a new entry
   alongside it (`plans/dcs-driven-los/plan.md`; `world-model/ROADMAP.md`'s "Live acceptance debt").
+- **A counterfactual that perturbs a constant the test itself imports fails *open*: it reports the
+  property as pinned either way, which is worse than having no counterfactual at all.** The
+  bounded-deferral test for the callout observability gate derives its own clock from the constant
+  under test (`aged_out = masked_at + CALLOUT_MAX_AGE_S + 1.0`), so raising `CALLOUT_MAX_AGE_S` to
+  `1e9` moves the test's entire timeline with it and the deferral still ends just past the budget —
+  the recorded counterfactual read "FAIL" and the re-run said PASS. Perturb the **code path**
+  (`if now_sim - event.t_sim > CALLOUT_MAX_AGE_S:` → `if False and …`) or a constant the test does
+  not read. Deriving thresholds from the constants they exercise is good practice *for the test* and
+  a trap for its counterfactual, and several tests in `body-layer` do it. Sharper than the
+  pre-fix-revert rule above: there the test didn't discriminate, here the *probe* didn't
+  (`plans/callout-observability-gate/{debug.md, implementation.md}` round 3, `304a367`).
+- **A gate placed at event emission can be structurally incompletable, not merely under-wired — and
+  the difference decides whether "finish wiring it up" is even a valid fix.** The 2026-09-27
+  observability gate sat inside `ContactStore.tick`'s per-contact loop and so could only ever reach
+  kinds that mint an `Event`. Group disclosure mints none by design (`CalloutScheduler.tick` reads
+  `store.groups` as a second candidate source), so no amount of wiring at emission sites could have
+  covered it. Before concluding a gate is "correct but under-applied", enumerate the *paths* that
+  reach the behaviour, not the call sites of the gate — a path with no event has no emission site to
+  gate, and will be invisible to that whole class of search.
+- **Moving a gate to discriminate on the *subject* instead of the *kind* is usually the right call
+  and it relocates the gate's breadth into a set declared somewhere else, so enumerating its call
+  sites can no longer find its real scope.** The observability gate's two call sites in
+  `callouts.py` now cover six kinds, because the set that decides membership (`_TEMPLATED_KINDS`) is
+  declared ~600 lines away and maintained for an unrelated reason (which kinds `route_event` can
+  render). `grep` on the gate showed two; reading `_TEMPLATED_KINDS` showed six, and the third
+  newly-covered kind was found by a reviewer rather than by the author. The safe direction is
+  automatic (a new kind joins the gate), so what needs a documented admission bar is the
+  **exemption** set — an exemption list has the per-kind list's failure shape inverted, and a kind
+  joining it leaves the gate silently.
+- **Before sizing a push-path reporting defect from a speech log, split the lines by proximity to
+  the `acted_token` history — or the count includes pull-path answers and the "fix" targets a
+  documented decision.** 20 masked-hour lines in the 2026-10-05 sortie were 17 unprompted callouts
+  (the defect) plus 3 answers to a pilot `report` within 4.4 s, which
+  `CrewConsole._handle_report` produces deliberately (*"belief survives the aircraft turning away;
+  only the absence claim is withheld"*). The wrong figure had already propagated into a roadmap
+  milestone and a backlog item before the split was measured. The two paths are
+  indistinguishable in the speech log itself; `~/dcs-speech.jsonl`'s command history joined on
+  `now_sim` is what separates them (`plans/post-review-fixes/explore-notes.md` §9).
