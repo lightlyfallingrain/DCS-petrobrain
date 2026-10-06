@@ -23,13 +23,31 @@
 # The page is DERIVED. If it disagrees with a ROADMAP.md, the page is wrong.
 # Regenerating is optional by design (see docs/status/README.md): a stale page
 # is cosmetic, a stale roadmap is a correctness problem, so nothing here is
-# allowed to fail in a way that blocks anything.
+# allowed to fail in a way that blocks anything -- EXCEPT the mechanical check
+# below, which is the one failure this script must never publish or commit
+# through (see plans/obsidian-links-and-tags/review.md, R1).
+#
+# Generation is split into two `claude -p` calls either side of that check,
+# rather than one call that generates-and-publishes:
+#   Phase 1 generates docs/status/petrobrain-status.html on disk and stops --
+#     no Artifact publish, no commit, no push.
+#   The mechanical check greps the real file on disk for the forward-only map's
+#     node count. This replaces relying on prose inside the generation prompt
+#     ("assert a non-zero forward-item count before publishing") as the only
+#     safeguard against the dominant failure mode: a subproject's split
+#     ROADMAP.md pointer read as though it were the full roadmap, which
+#     regenerates a well-formed but empty page and would otherwise exit clean.
+#     A prompt instruction is exactly as reliable as that run's instruction-
+#     following; a grep over the file the run actually produced is not.
+#   Phase 2 only runs if the check passes, and does the Artifact publish,
+#     commit, and push.
 
 set -uo pipefail
 
 REPO="${PETROBRAIN_REPO:-$HOME/Code/DCS-petrobrain}"
 LOG="${PETROBRAIN_STATUS_LOG:-$HOME/Library/Logs/petrobrain-status-page.log}"
 CLAUDE_BIN="${CLAUDE_BIN:-/opt/homebrew/bin/claude}"
+PAGE="docs/status/petrobrain-status.html"
 
 mkdir -p "$(dirname "$LOG")"
 say() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$LOG"; }
@@ -58,7 +76,13 @@ fi
 
 say "$COMMITS commit(s) in the last 24h -- regenerating"
 
-PROMPT='Regenerate the project status page, following .claude/skills/status-page/SKILL.md exactly.
+# --- Phase 1: generate only. Must not publish, commit, or push -- the mechanical
+# check below has to run against real, uncommitted output.
+GEN_PROMPT='Regenerate the project status page CONTENT ONLY, following
+.claude/skills/status-page/SKILL.md, with one exception: do NOT publish with
+the Artifact tool and do NOT commit or push anything. Only update
+docs/status/petrobrain-status.html on disk, then stop. Publishing and
+committing happen later, in a separate step, after a mechanical check.
 
 Read the roadmap files FIRST, before opening the page: root ROADMAP.md, every
 subproject ROADMAP.md (world-model, aircraft-layer, body-layer,
@@ -68,11 +92,7 @@ changed.
 
 If a subproject ROADMAP.md carries the sentinel "<!-- split-roadmap: see
 ROADMAP/ -->", it is a 4-line pointer, not the source -- read its
-ROADMAP/<subproject>-roadmap.md index instead. Before publishing, assert that
-the forward-only map and every subsystem card have at least one open item: a
-zero-item result most likely means a pointer was read as though it were the
-full roadmap, which regenerates an empty-but-well-formed page and would
-otherwise exit clean. Stop and say so rather than publish in that case.
+ROADMAP/<subproject>-roadmap.md index instead.
 
 Then update docs/status/petrobrain-status.html: the five counters (recount the
 checkbox states), the subsystem cards, the mermaid dependency graph, the
@@ -86,26 +106,60 @@ constraint exists, what an earlier pass got wrong. That is the whole reason
 this format was chosen over a kanban board; do not reduce entries to restated
 status.
 
-Then publish with the Artifact tool, passing url =
+Do not change any ROADMAP.md, any source file, or anything outside
+docs/status/. If a roadmap looks wrong, say so in your output and leave it
+alone -- this job renders, it does not decide.'
+
+GEN_OUT=$("$CLAUDE_BIN" -p "$GEN_PROMPT" --permission-mode acceptEdits 2>&1)
+GEN_STATUS=$?
+printf '%s\n' "$GEN_OUT" >>"$LOG"
+
+if [ $GEN_STATUS -ne 0 ]; then
+    say "--- FAILED generation (exit $GEN_STATUS) ---"
+    exit 0
+fi
+
+if [ ! -f "$PAGE" ]; then
+    say "--- FAILED: $PAGE missing after generation ---"
+    exit 0
+fi
+
+# --- Mechanical check (R1's real mitigation). The forward-only map
+# (#graph-upcoming) must contain at least one open/active/hold/block node --
+# "nothing done appears" there by design (SKILL.md), so zero nodes is never a
+# correct render, only a stub read as the full roadmap. Strip classDef lines
+# (they declare the five classes, not nodes) before counting "::: " markers.
+FORWARD_COUNT=$(awk '/id="graph-upcoming"/,/<\/pre>/' "$PAGE" \
+    | grep -v '^[[:space:]]*classDef' | grep -c ':::' || true)
+
+if [ "$FORWARD_COUNT" -eq 0 ]; then
+    say "--- FAILED: forward-only map has zero items -- likely a split-ROADMAP pointer read as the full roadmap. NOT publishing or committing. ---"
+    exit 1
+fi
+
+say "forward-only map has $FORWARD_COUNT item(s) -- proceeding to publish"
+
+# --- Phase 2: publish and commit, now that the mechanical check passed.
+PUB_PROMPT='docs/status/petrobrain-status.html has just been regenerated and
+already passed a mechanical check confirming the forward-only map is
+non-empty. Publish it with the Artifact tool, passing url =
 https://claude.ai/code/artifact/922779a3-b18d-46be-bb14-6706c421e9e7
 ALWAYS pass that url explicitly. Artifact identity follows the file path, and
 publishing without it creates a second artifact and leaves the existing link
 stale.
 
-Finally commit docs/status/petrobrain-status.html on main with a message saying
+Then commit docs/status/petrobrain-status.html on main with a message saying
 what changed in the PROJECT, not that the page was regenerated, and push.
 
-Do not change any ROADMAP.md, any source file, or anything outside
-docs/status/. If a roadmap looks wrong, say so in your output and leave it
-alone -- this job renders, it does not decide.'
+Do not change any other file.'
 
-OUT=$("$CLAUDE_BIN" -p "$PROMPT" --permission-mode acceptEdits 2>&1)
-STATUS=$?
+PUB_OUT=$("$CLAUDE_BIN" -p "$PUB_PROMPT" --permission-mode acceptEdits 2>&1)
+PUB_STATUS=$?
+printf '%s\n' "$PUB_OUT" >>"$LOG"
 
-printf '%s\n' "$OUT" >>"$LOG"
-if [ $STATUS -eq 0 ]; then
+if [ $PUB_STATUS -eq 0 ]; then
     say "--- done (exit 0) ---"
 else
-    say "--- FAILED (exit $STATUS) ---"
+    say "--- FAILED publish/commit (exit $PUB_STATUS) ---"
 fi
 exit 0
