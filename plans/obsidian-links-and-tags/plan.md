@@ -70,7 +70,7 @@ Recorded with the user's own words, because the wording carries the reasoning.
 It's allright if they go stale later, that's backlog grooming work then. IDs allow tracking items
 and dependencies, I'd rather use them."* → The branch-name filename alternative is dead. 57 new
 IDs minted (not ~72 — see "The ID scheme" below for why the number dropped). Dependency tracking
-is the stated purpose, which is what makes the `[[…\|ID]]` links load-bearing rather than
+is the stated purpose, which is what makes the `[[<ID>]]` links load-bearing rather than
 decorative.
 
 **D-2 — Repo-wide, every subproject.** *"graph benefit and limited sub-systems - true for you and
@@ -80,10 +80,13 @@ six subprojects is not browsable. The agent-token figures below stay as the hone
 benefit; they are not the argument.
 
 **D-3 — Not bound by the spike's structure.** *"spike was a test - we do not have to follow it
-strictly, we can use a better structure if there's one"* → Three structural changes below
-(filename case, tag spelling, index-per-file), each with the spike's cost named. Four spike choices
-kept with a stated reason — one of them, the link form, kept because the better structure was
-tested on 2026-10-06 and Obsidian would not resolve it ("Tested and rejected" below).
+strictly, we can use a better structure if there's one"* → Four structural changes below
+(ID-only filenames, bare-ID links, tag spelling, index-per-file), each with the spike's cost named.
+Four spike choices kept, also with reasons. The biggest change — filenames and links — was settled
+by **two tests on the user's own install**, 2026-10-06, rather than by argument: frontmatter aliases
+do not resolve here, but ID-only filenames plus the Front Matter Title plugin give the clean
+`[[AA-4.7]]` link *and* a readable sidebar. Both tests are recorded below, including the one that
+failed.
 
 **D-4 — `.obsidian` gitignored everywhere.** *".obsidian needs to be gitignored, in all folders"*
 → Unanchored pattern, and the spike's five tracked files removed in the same change.
@@ -340,36 +343,36 @@ provenance. Re-measure after Stage 2 against the 185/264 baseline.
 
 ### Changed from the spike
 
-1. **Filename: `<ID>-<kebab-title>.md`**, not `<ID>-<Title_with_underscores>.md`. The repo has one
-   case convention everywhere else — branches (`feature/dcs-driven-los`), plan directories
-   (`plans/obsidian-links-and-tags/`), research notes. The spike's mixed hyphen-then-underscore form
-   costs nothing concrete, but it is a second convention in a repo that has one. This matters more
-   than it would have under the alias form (see "Tested and rejected" below), because the filename
-   now appears inside every link's raw text.
-2. **Tags: inline `#tag` only, nowhere else.** The spike puts topics in frontmatter (no `#`) and
+1. **Filename is the ID alone — `AA-4.7.md`** — not `AA-4.7-Press_to_readback_latency.md`. The
+   entry's title lives in its H1 (`# AA-4.7 — Press-to-readback latency`) and nowhere else. This
+   follows from the link form below and from a plugin test (see "Tested and settled"); it is the
+   single change the rest of the structure hangs on.
+2. **Link form: the bare ID, `[[AA-4.7]]`** — not the spike's
+   `[[AA-4.7-Press_to_readback_latency\|AA-4.7]]`. With an ID-only filename this is a *plain
+   filename link*, which needs no plugin, no alias and no frontmatter. What it buys over the spike's
+   form, each of which was a named cost:
+   - **One spelling.** No `\|`, so the in-table and out-of-table forms are identical and the
+     two-spellings trap — the same class as the `#`-in-frontmatter trap the spike itself hit —
+     does not exist.
+   - **9 characters, not ~56**, in the text an agent reads. The spike's form spent back part of the
+     split's own token saving.
+   - **Identical to the 441 historical prose mentions**, so one `grep -rn 'AA-4\.7'` finds links and
+     prose together rather than needing two patterns.
+   - **A retitle edits one H1 line** and touches no referring file, because no referrer carries the
+     title. The spike's form made every referrer carry it.
+3. **Tags: inline `#tag` only, nowhere else.** The spike puts topics in frontmatter (no `#`) and
    `#status/...` inline — the two-spellings trap its own `docs/TAGS.md` warns about, in the file
    that warns about it. Keep the *better* half: `docs/TAGS.md` Rule 2's argument is sound (status
    lives next to its checkbox marker so the two cannot diverge unnoticed), so put **every** tag
    there: `- [x] **AA-4.5 — Stage 5 …** #status/done #topic/ptt #topic/cockpit-io`. One spelling,
    one location, every `grep` recipe identical, Obsidian's tag pane works on inline tags.
-3. **One index per source file, not per directory.** `body-layer/ROADMAP/` holds both roadmap and
+4. **One index per source file, not per directory.** `body-layer/ROADMAP/` holds both roadmap and
    backlog entries but gets two indexes (`body-layer-roadmap.md`, `body-layer-backlog.md`) so each
    pointer file has exactly one destination and the 441 historical mentions of
    `body-layer/BACKLOG.md` resolve to the right list.
 
 ### Kept from the spike, with reasons
 
-- **The escaped-pipe link form, `[[aa-4.7-press-to-readback-latency\|AA-4.7]]`** — kept because the
-  bare-ID alternative was tested on the user's own install and failed (see "Tested and rejected"
-  immediately below). Its costs are real and are now accepted costs, not unnoticed ones: ~56
-  characters to express "AA-4.7" in the text an agent reads, which spends back part of the split's
-  token saving; `\|` required inside a markdown table and wrong outside it, so **one link has two
-  spellings**; and a retitle touches every referring file. Two of those three are mitigable and the
-  plan mitigates them — Obsidian's own rename updates referrers mechanically (user's judgement,
-  2026-10-06: *"I think file renaming is rare"*), and the link gate (R5) checks every `[[link]]`
-  resolves, which catches a hand-written link the rename missed. The two-spellings trap is **not**
-  mitigable and is the one to watch: the spike recommends escaping everywhere so there is one rule,
-  and that stands.
 - **`<subproject>/ROADMAP/` per subproject** — not a flat repo-wide `docs/roadmap/`. A flat
   directory would break root `CLAUDE.md`'s "each subproject's `ROADMAP.md` is that subproject's own
   source of truth", break per-subproject `grep`, make `graph-corpus-files.sh`'s
@@ -388,7 +391,8 @@ provenance. Re-measure after Stage 2 against the 185/264 baseline.
   reading four lines and reporting success.
 - **Dotted sub-IDs (`AA-4.7`)**, not `AA-4-7`. Hundreds of prose mentions across `plans/`,
   `audits/` and research notes use the dotted form; changing the separator makes every one of them
-  un-greppable, for readability in a filename the link alias hides anyway.
+  un-greppable — and the ID is now the filename *and* the link text, so the separator is load-bearing
+  in a way it was not under the spike's form.
 - **Hand-kept indexes plus a mechanical consistency gate**, not a generator — even at seven
   indexes. A generator is a build step in a repo that deliberately has almost none, and it would
   have to preserve each index's irreplaceable prose preamble. The ~15-line pre-commit gate catches
@@ -419,13 +423,59 @@ metadata-cache lag from a branch switch — the explanation that best fit the sy
 diagnosed further: an unavailable mechanism does not need a root cause to be unavailable, and the
 fallback was already specified.
 
-The other candidate considered and rejected: **filename *is* the ID** (`AA-4.7.md`, title as the
-H1). That makes `[[AA-4.7]]` a plain filename link, so it works today with one spelling and no
-escaping — but Obsidian labels both the file explorer and the graph view by filename, so the
-sidebar becomes a column of bare IDs. That is a direct hit on the human-browsability benefit that
-drove D-2, and the trade runs the wrong way: the link text is read mostly by an agent, the sidebar
-mostly by the human whose benefit is the point. Revisit only if the pipe form's two-spellings trap
-actually bites in practice.
+**What this ruled out, and what it then opened.** Filename-is-the-ID was initially rejected with it,
+on the grounds that Obsidian labels the explorer and graph by filename, so a sidebar of `AA-4.7.md`
+would be a column of bare IDs — a direct hit on the human-browsability benefit behind D-2. That
+objection was correct about stock Obsidian and is answered by the plugin below.
+
+### Tested and settled: ID-only filenames with Front Matter Title
+
+**Measured on the user's own install, 2026-10-06. Obsidian 1.14.4, Front Matter Title 4.2.1
+(`snezhig/obsidian-front-matter-title`, 75k downloads, updated within the month).** The plugin
+*"shows a friendly title from your note's frontmatter everywhere in the app — without renaming the
+file"*: explorer, search, quick switcher, bookmarks, backlinks, tabs, note header, inline title,
+graph and canvas.
+
+The decisive setting is **Common main template = `#heading`** with **Common fallback template =
+`_basename`**. `#heading` is a documented reserved word meaning "first heading in the file", so the
+displayed title comes from the entry's own H1 and **no frontmatter is needed at all**.
+
+Four notes, each a different shape:
+
+| note | file contents | displayed as |
+|---|---|---|
+| `AA-9.1` | frontmatter `title:` **and** an H1 | **"AA-9.1 — Press-to-readback latency"** — the H1 wins under `#heading` |
+| `AA-9.2` | frontmatter `title:`, **no H1** | **"AA-9.2"** — `_basename` fallback, as designed |
+| `AA-9.3` | an H1, **no frontmatter at all** | **"AA-9.3 — a heading but no frontma…"** — this is the one that matters |
+| `AA-9.4` | H1 with an em dash and a comma | **"AA-9.4 — Stage 5, real PTT through…"** — punctuation fine |
+
+**So the frontmatter `title:` field is dead, and with it the duplicate-title problem** that the
+earlier Option C carried: there is one copy of the title, in the H1, and no gate is needed to keep
+two in sync. An entry file is `AA-4.7.md` containing `# AA-4.7 — Press-to-readback latency`.
+
+**Link text is not replaced.** The plugin's link feature was enabled and rendered links still read
+`AA-4.7`. Accepted by the user (*"I can live with that"*), and the cost is small: the raw text says
+`AA-4.7` anyway, and so do all 441 historical prose mentions. Navigation — the thing D-2 is about —
+is fixed in every other surface.
+
+**Two consequences the user has to act on once, by hand:**
+
+- **Turn off Settings → Appearance → "Show inline title"**, or every entry renders its title twice
+  (once as the plugin's inline title, once as the literal H1). Observed in the test.
+- **The explorer truncates.** A leading ID in the H1 spends ~10 characters of sidebar width before
+  the title starts ("AA-9.4 — Stage 5, real PTT through…"). The alternative — `# Press-to-readback
+  latency`, ID only in the filename — reads cleaner but makes the ID invisible in every surface the
+  plugin touches, and the ID is what carries the dependency tracking D-1 asked for. **Recommend
+  keeping the ID in the H1 and accepting truncation**; it is the user's reading surface, so it is
+  his to overrule.
+
+**What now depends on a third-party plugin, and what does not.** This is the right split and is why
+the dependency is acceptable: the **links** depend on nothing — `[[AA-4.7]]` is a plain filename
+link that resolves in stock Obsidian, in `grep`, and in the knowledge graph. Only the **display**
+depends on the plugin, and its absence degrades to bare IDs rather than breaking anything. A fresh
+clone of a public repo gets working links and an ugly sidebar until the reader installs one plugin
+and sets two fields — which is what `docs/DOC_CONVENTIONS.md` has to say in prose, since `.obsidian`
+is gitignored (R7).
 
 ---
 
@@ -455,18 +505,30 @@ Ordered by how silent each is, because silence is the whole problem.
 - **R4 — the push and commit gates block or warn spuriously.** Both regexes stop matching. Loud,
   failing in the safe direction. Fix in Stage 0 anyway: a gate that cries wolf gets bypassed.
 - **R5 — dangling wikilinks, now across ~300+ conversions.** Obsidian colours an unresolved
-  `[[link]]`; `grep` does not, and no gate does. The pipe form makes this risk **worse** than the
-  rejected alias form would have — a link carries the target's full filename, so a retitle breaks
-  every referrer rather than none, and the alias form's mechanically-checkable "alias matches
-  filename prefix" invariant does not exist. The Stage 1 gate therefore has to carry the weight:
-  every `[[target]]` resolves to an existing entry file, every alias text after the `\|` equals that
-  file's ID prefix (so the displayed ID cannot drift from the file it points at), every `|` inside a
-  link is escaped, and every entry appears in exactly one index.
+  `[[link]]`; `grep` does not, and no gate does. The bare-ID form makes this **much smaller** than
+  either alternative would have: a link carries only the ID, so there is no title inside it to go
+  stale, and a retitle cannot break a referrer at all. What remains is a link to an ID that does not
+  exist — a typo, or an entry deleted rather than closed. The Stage 1 gate checks: every `[[target]]`
+  resolves to an existing entry file, every entry file's name matches `<ID>.md` with an H1 whose
+  first token is that same ID (so the displayed title cannot drift from the file it names), and
+  every entry appears in exactly one index.
 - **R6 — committed editor state.** The spike commits five `audio-adapter/.obsidian/` files, 276
   lines, including 220 lines of `workspace.json` pane geometry that rewrites on every pane move.
   Resolved by decision 4; see Stage 1 for the exact pattern and removal.
-- **R7 — vault configuration is now unrecorded.** Covered under "new costs" above. Decisions 2 and
-  4 pull in opposite directions here and prose is the only bridge.
+- **R7 — vault configuration is now unrecorded, and it grew.** Covered under "new costs" above;
+  decisions 2 and 4 pull in opposite directions and prose is the only bridge. The structure test
+  added to it: the readable sidebar now needs the **Front Matter Title** plugin installed, with
+  main template `#heading`, fallback `_basename`, and Obsidian's own "Show inline title" turned
+  off. None of that can live in the repo. **It degrades safely** — without the plugin every link
+  still resolves and every file still reads; only the explorer and graph show bare IDs. So this is
+  a first-run instruction in `docs/DOC_CONVENTIONS.md`, not a dependency, and it must say what the
+  repo looks like *without* the plugin so a public cloner is not left thinking it is broken.
+- **R7b — a display plugin is a single-maintainer third-party component.** Front Matter Title 4.2.1,
+  one author, 75k downloads, last updated within the month. If it is abandoned or broken by an
+  Obsidian update, the sidebar reverts to bare IDs and nothing else changes — no data loss, no
+  broken link, no migration. That is the whole reason the *links* were kept plugin-independent
+  rather than routed through the plugin's own link-rewriting feature (which does not work here
+  anyway).
 - **R8 — this touches the config surface the project has been burned by twice** (stale subproject
   lists producing silent PASS). Mitigation is the repo's own: **never write a list of which
   subprojects are converted.** `ls */ROADMAP/ 2>/dev/null` answers it and cannot go stale.
@@ -531,25 +593,40 @@ re-derives it.
      `docs/DOC_CONVENTIONS.md` is the only record that will exist.
    - Adjacent and free, flagged not assumed: `.DS_Store` is also untracked and showing in
      `git status`. Outside decision 4's wording — add it only if the user says so.
-2. ~~Verify the `aliases:` link form in Obsidian.~~ **Already done, 2026-10-06 — aliases do not
-   resolve on this install, so the escaped-pipe form stands.** See "Tested and rejected" above. No
-   work left in this step; it is kept numbered so the stage's shape matches the record.
+2. ~~Verify the link form in Obsidian.~~ **Done, 2026-10-06, and it settled the structure.**
+   Frontmatter aliases do not resolve here; ID-only filenames plus Front Matter Title with
+   `#heading` do. See "Tested and rejected" and "Tested and settled" above. No work left in this
+   step; it is kept numbered so the stage's shape matches the record. **The user's one-time Obsidian
+   setup** (install the plugin, main template `#heading`, fallback `_basename`, "Show inline title"
+   off) belongs in step 5's prose, not here — it is a reader instruction, not a migration step.
 3. **Resolve `AA-3`** with the user (open decision 1 below) — a correctness question, not a
    convention one.
-4. **Re-form the merged spike to the revised structure:** kebab filenames, escaped-pipe links,
-   inline-only tags, the `AA-*` IDs unchanged. The spike's own link text already uses the pipe form,
-   so this is a filename-case and tag-spelling pass, not a relink.
+4. **Re-form the merged spike to the revised structure:** rename its 22 entry files to `<ID>.md`,
+   move each title into an H1 of the form `# <ID> — <Title>`, rewrite its escaped-pipe links to bare
+   `[[<ID>]]`, inline-only tags, `AA-*` IDs unchanged. This is now a real conversion of the spike
+   rather than a cosmetic pass — the spike's filenames and link form are both superseded. It is also
+   the cheapest place to find out whether the convention is actually pleasant to write, on 22 files
+   instead of 204.
 5. **Write `docs/DOC_CONVENTIONS.md`** — the directory layout, the `<prefix>-W<n>` scheme and its
-   four assignment rules, the grooming rule, the escaped-pipe link form and why the bare-ID form was rejected by test, the pointer sentinel, the
-   index's no-status rule, the repo-root vault and its hand-configuration, world-model's `M<n>`
+   four assignment rules, the grooming rule, the `<ID>.md` filename and `# <ID> — <Title>` H1 rule,
+   the bare `[[<ID>]]` link form, the pointer sentinel, the index's no-status rule, the repo-root
+   vault and the one-time Obsidian setup (Front Matter Title, `#heading`/`_basename`, inline title
+   off) **with a sentence saying what the repo looks like without it**, world-model's `M<n>`
    irregularity, `MI-5b`'s letter suffix. `docs/TAGS.md` stays as the vocabulary and is linked, not
    duplicated. **It must not list which subprojects are converted** (R8).
 6. **One line each** pointing at it from: root `CLAUDE.md` "Backlog Management" (the natural home —
    it already owns the ID scheme, and the `-W<n>` space belongs there), and `docs/PROCESS.md`
    "Keeping the knowledge graph honest" (the corpus now follows `ROADMAP/` directories).
-7. **Add the two gates:** the index/link consistency check (R5), and a vocabulary check that
-   every inline tag in a converted file appears in `docs/TAGS.md` — benefit (d) is conditional on
-   the second one existing.
+7. **Add the two gates:** the index/link/H1 consistency check (R5 — every `[[ID]]` resolves, every
+   entry file is `<ID>.md` with an H1 whose first token is that ID, every entry in exactly one
+   index), and a vocabulary check that every inline tag in a converted file appears in
+   `docs/TAGS.md` — benefit (d) is conditional on the second one existing.
+8. **Write the TOC helper** (user direction, 2026-10-06: *"you can create a tool that using standard
+   bash tools combines filename and title into a TOC"*). ID-only filenames mean `ls ROADMAP/` is a
+   column of IDs rather than the ~200-token table of contents the spike measured, which costs a
+   *reader of the directory* — me — one extra read. A few lines of `awk` over each file's first H1
+   restores it: `<ID>  <title>  <status tags>`, one line per entry, no index read needed. Cheap, and
+   it removes the only cost the ID-only filename introduced.
 8. **Update the ~22 prose lines** across the six agent role files, `merge`/`integrity-audit`/`retro`
    skills, `dod.md`, root `CLAUDE.md` and the four subproject `CLAUDE.md`s.
 9. **Raise the corpus ceiling** by the measured amount, then `/graph-refresh` — **documents first,
