@@ -86,7 +86,10 @@ for.
 A queryable graph over the current-state design documentation lives in `graphify-out/`, built from
 a curated corpus (`.claude/scripts/graph-corpus-files.sh` — a **file list, never a copied mirror**;
 a mirror silently breaks cache keying and leaks its own name into node ids) — every `ROADMAP.md` and `CLAUDE.md`, `docs/`, `AGENTS.md`, `NOTES.md`, `todo/`,
-all `*/research/`, and the active plan. It exists because this project's recurring failure is not
+all `*/research/`, and the active plan. **A split roadmap's `ROADMAP/` entry files follow the
+directory, not the filename** (`docs/DOC_CONVENTIONS.md`), so the corpus keeps covering a
+subproject's milestone content after it splits rather than silently dropping it the moment
+`ROADMAP.md` becomes a 4-line pointer. It exists because this project's recurring failure is not
 missing documentation but **failing to find documentation that already exists**, and occasionally
 finding a superseded version of it instead.
 
