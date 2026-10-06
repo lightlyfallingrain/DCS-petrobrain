@@ -23,6 +23,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   speak — a watched air-defence contact going astern while its engagement envelope starts covering
   the aircraft, which is **exempt** from the gate and must still say *"Danger, …"*. That exemption
   is the riskiest judgement on the branch and was decided in the review loop, not by the user.
+  **Narrowed to the entering transition only** after the security pass (see the `BL-11` Stage 0
+  entry): the close-out *"Safe from …"* line is gated like everything else, so do not expect to
+  hear the call that closes a `"Danger"` already heard — `todo/questions.md`'s Q8 is the reversal.
   Acceptance card: `docs/acceptance/2026-10-06-callout-observability-sortie.md`, published at
   https://claude.ai/artifact/N4CGoNx5xaMdXW8QD3PwMw. **Batches with the
   two entries below** — all three change what is spoken about the same contact stream, so one
@@ -1759,7 +1762,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   consumed**, placed after the `CALLOUT_MAX_AGE_S` check so a permanently-astern event is still
   retired: deferred, not lost.
 
-  **`CONTACT_ENGAGEMENT_CHANGED` is exempt (`callouts._OBSERVABILITY_EXEMPT_KINDS`) — decided in
+  **`CONTACT_ENGAGEMENT_CHANGED` is exempt (`callouts._OBSERVABILITY_EXEMPT_KINDS`) *on its
+  entering transition only* — `event.kind in` the set **and** `event.engaged is True` — decided in
   the review loop, 2026-10-06, on the Reviewer's recommendation. The user was not consulted and
   has not ruled on it.** Recorded for them to overrule in `todo/questions.md`'s "Decided without
   you" section (commit `156f965`). Reasoning: an engagement-envelope change is a *threat cue* about
@@ -1773,6 +1777,18 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   bar any further member must clear (silence costs a *threat cue needed to evade*, **and** gating
   costs the callout permanently rather than late; `CONTACT_RANGE_CROSSED` satisfies the second and
   fails the first).
+
+  **The per-transition narrowing came from the security deep analysis, and it is the one place the
+  original defect survived this fix.** Exempting a *kind* exempts both its transitions, and the
+  leaving one renders as `"Safe from ZU-23-3, four o'clock, 2.0 kilometres."` — a comfort, not a
+  threat cue the pilot needs in order to evade, so it fails the bar's first property. Reachable:
+  a watched AAA identified while visible, `"Danger"` spoken, the pilot egresses, the contact goes
+  astern, the grace window lapses, and range opens past the hysteresis — an unprompted
+  classification-and-position line about something the mask says he cannot see. The disclosure
+  itself was traced clean on the omniscience axis (`Contact.last_position` cannot refresh behind
+  the mask, the clock hour is dead reckoning over a remembered position, the type is folded
+  belief, `envelope_for` is belief-keyed with no fallback), which is why narrowing rather than
+  removing was the answer. `plans/callout-observability-gate/security-review.md` has the trace.
 
   **This silences; it does not re-time.** The 17 lines become unspoken, not spoken later. The
   contacts stay believed, stay in the debug view and stay answerable by `report`. Whether some
