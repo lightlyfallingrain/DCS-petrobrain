@@ -1683,9 +1683,14 @@ def _resolve_speech_log_path(
     hits.
 
     The `mkdir` here is therefore a strictly earlier report of a condition
-    `_per_run_log_paths` would also catch, kept deliberately: it degrades
-    before the default path is ever returned, so the "writing <path>"
-    startup line is never printed for a location that cannot hold a file.
+    `_per_run_log_paths` would also catch, and what it buys is cosmetic
+    rather than structural: a speech-log-specific message, raised before
+    the generic per-log one. It is **not** what keeps the "writing <path>"
+    startup line honest -- `per_run_log_path` uses `Path.with_name`, so the
+    parent is identical and `_per_run_log_paths`' own `resolve` mkdirs the
+    same directory and returns `None` on `OSError`. Verified by execution
+    2026-10-06: with `logs` occupied by a regular file, `_per_run_log_paths`
+    alone reports the failure and returns `(None, None, None)`.
     """
     if speech_log is not None:
         return speech_log

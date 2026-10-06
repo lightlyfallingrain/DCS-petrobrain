@@ -32,9 +32,13 @@ and a second copy would only make this file fail whenever the tuning moved;
 and four leaf geometry primitives -- `object_model.profile_for`,
 `clustering.angular_separation_rad`, `clustering.angular_size_rad` and
 `geometry.range_m`. Those four are shared on purpose: the pre-change code
-called exactly them, Stage 2 did not touch them, and a private copy of
-trigonometry in a test file would be strictly worse than importing the one
-production uses. **What must never be shared here is `_resolvable_terms`
+called exactly them, and a private copy of trigonometry in a test file would
+be strictly worse than importing the one production uses. (Stage 2 *did*
+touch one of the four -- it put `@cache` on `profile_for`. That cannot make
+an equality here tautological: memoising a pure function of one `str` that
+returns a frozen dataclass changes when the value is computed, never which
+value it is. The safety argument is the leaf-ness, not an untouched-ness
+that is simply not true.) **What must never be shared here is `_resolvable_terms`
 and `_cohesive_from_terms`**, because those two are what Stage 2 changed --
 importing either is what makes an equality in this file compare the hoist
 against itself.
