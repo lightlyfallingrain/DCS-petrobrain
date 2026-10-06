@@ -25,6 +25,8 @@ graphify-out/
 .claude/state/sessions/
 .claude/state/
 
-#Obsidian files
-.obsidian
-
+# Obsidian vault configuration -- per-user, and workspace.json rewrites on every
+# pane move. Unanchored so it matches at any depth: a nested .obsidian/ makes a
+# half-working vault that resolves links within one subproject only. The vault
+# is rooted at the repo root; see docs/DOC_CONVENTIONS.md.
+.obsidian/
