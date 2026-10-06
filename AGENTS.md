@@ -139,6 +139,14 @@ attention is elsewhere will keep being broken. This one is structural instead.
      a worktree borrow the main checkout's graph (`c33af2e`) — and the Architect based at `19143fa`
      still got *"No graph yet"*, because the fix was not in its tree. A fix to agent tooling only
      reaches agents whose base commit contains it, which is not the same thing as "it is on `main`".
+
+     **The same trap catches the main loop, via the checked-out branch.** Hooks run from
+     `$CLAUDE_PROJECT_DIR/.claude/scripts/`, i.e. **whatever the main checkout currently has** — so
+     while the main checkout sits on a feature branch that predates a hook fix, the *old* hook is
+     what fires. Observed 2026-10-06: a sha-gate fix was committed to `main` while the main checkout
+     was parked on `fix/los-hook-statics`, and the pre-fix gate stayed active in that session. If a
+     hook misbehaves right after you fixed it, check which branch the main checkout is on before
+     re-reading the script.
    - **A stale base is harmless for source and dangerous for inputs.** Here
      `git diff 19143fa dce2534 --stat` was docs and agent-memory only, so every `src` file read was
      byte-identical — but those eleven commits included `plans/post-review-fixes/explore-notes.md`,
