@@ -19,18 +19,14 @@ worker thread — fixed and re-approved) and a Performance `APPROVED — MONITOR
 unmeasurable item: three added per-frame cockpit reads in `Export.lua`, reasoned as the same cost
 class as the existing PTT read but needing a live sortie to confirm no stutter). Full record:
 `plans/spu8-intercom/{plan.md, implementation.md, review.md, security-deep-analysis.md,
-performance.md, dod-check.md}`. **Live acceptance is tracked as debt, not waived** — see
-`body-layer/ROADMAP.md`'s "Live acceptance debt" list and the acceptance card,
-`docs/acceptance/2026-10-05-spu8-intercom-sortie.md`. Two constants shipped as guesses pending
-that flight: `ON_GROUND_AGL_THRESHOLD_M = 10.0`, `MISSION_START_ICS_DELAY_S = 5.0`.
-
-**OPEN — unresolved contradiction, carried forward verbatim, not settled by this conversion
-(`plans/obsidian-links-and-tags/plan.md`, "Decisions requiring user input" #1, AA-3):** this entry
-asserts both *"FLOWN, TESTED AND ACCEPTED 2026-10-05"* above and *"Live acceptance is tracked as
-debt, not waived"* immediately below. One of those two sentences has to go. If accepted, the debt
-sentence should be deleted; if debt is real, this entry needs `#needs-flight` and the acceptance
-claim needs qualifying. This is a correctness question about what was actually flown, not a
-convention question, and it needs the user — not quietly resolved here.
+performance.md, dod-check.md}`. **Live acceptance is complete** — flown, tested and accepted
+2026-10-05 (user direction, 2026-10-06: *"AA-3 flown, tested and accepted"*), resolving a
+contradiction this entry carried until the roadmap split made the two sentences visible side by
+side. `body-layer/ROADMAP.md`'s debt list already records it `[x]` **CLEARED 2026-10-05** (user:
+*"SPU-8 feature works, tested and accepted."*), so the debt sentence was the stale half, not the
+acceptance claim. Acceptance card: `docs/acceptance/2026-10-05-spu8-intercom-sortie.md`. Two
+constants shipped as guesses and were not separately re-measured on that flight:
+`ON_GROUND_AGL_THRESHOLD_M = 10.0`, `MISSION_START_ICS_DELAY_S = 5.0`.
 
 **What it would do.** The intercom switch gates the crew channel in **both directions** — off
 means he cannot hear you and you cannot hear him, which is what the real switch does — and the
