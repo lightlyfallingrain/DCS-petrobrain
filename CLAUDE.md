@@ -364,7 +364,7 @@ milestone — `BL-4` is a body-layer milestone, `BL-B4` a body-layer backlog ite
 |---|---|
 | `BL-B<n>` | `body-layer/BACKLOG.md` |
 | `AC-B<n>` | `aircraft-layer/ROADMAP.md` |
-| `AA-B<n>` | `audio-adapter/ROADMAP.md` |
+| `AA-B<n>` | `audio-adapter/ROADMAP/` (split; `audio-adapter/ROADMAP.md` is now a pointer) |
 | `WM-B<n>` | `world-model/ROADMAP.md` |
 | `X-B<n>` | `todo/backlog.md`, cross-cutting / unscoped |
 
@@ -383,3 +383,9 @@ Backlog section yet.
 An item that moves from a subproject's backlog to `todo/backlog.md` (or the reverse) takes a **new** ID
 in its destination and the old entry says where it went — the same reason: an ID belongs to one file's
 sequence, so carrying one across files would make two files' numbering collide.
+
+**A third marker, `<prefix>-W<n>`, is for work items that are neither a milestone nor a backlog
+item** — numbered from 1 per subproject, independent of both other spaces. A subproject's
+`ROADMAP.md` may also be split into one file per entry under `<subproject>/ROADMAP/`, with the
+original left as a 4-line pointer. Full scheme, the ID-only filename, the `[[ID]]` link form and
+the one-time Obsidian setup: `docs/DOC_CONVENTIONS.md`.
