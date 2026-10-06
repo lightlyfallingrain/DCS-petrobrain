@@ -58,6 +58,19 @@ plumbing defect, not a state that needs designing for: fail-closed on a missing 
 correct behaviour *once the join is fixed*, and the order is forced — join first, fallback removal
 second.
 
+### CORRECTION 2026-10-06 — both "mechanisms" below are empty; the cause is enumeration
+
+The probe flew twice (`aircraft-layer/research/2026-10-06-unit-id-join-results.md`). `unit_name` is
+**never null and never duplicated** in either mission, including the sortie's own: units join by
+name 50/50, statics 94/94. So neither mechanism below is what cost the verdicts. The cause is that
+the LOS Hook enumerates `coalition.getGroups()` only and **never sees static objects — 278 of 404,
+68.8 %** — which is the same number as the 323-of-425 measured above, seen from the producer's side.
+
+Decision 3 (DCS ids permitted, bounded) is unaffected and still stands, but is **no longer needed
+for this**: `getObjectID` exists on units and not on statics, so the name join is the one that spans
+both. The two mechanisms below are kept because the reasoning error is instructive — they predicted
+the same range anomaly the real cause does.
+
 ### Two mechanisms in the join, not one
 
 1. **The key is `unit_name`** (`body-layer/src/perception/naked_eye_source.py:1066`, drop at

@@ -2064,22 +2064,37 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   2,602 of 2,621 polls carried *some* verdict. So failing closed today would drop 76 % of objects.
   Join first, fallback removal second.
 
-  1. **Settle the join key.** The cause is not timing: of the no-verdict admitted rows, **4,668 were
-     inside the commanded ±90° wedge against 300 outside** (ownship heading estimated per poll from
-     that poll's own verdict-bearing rows), so these are objects Petrovich was looking straight at.
-     Two mechanisms: `unit_name` is `None` for scenery/statics
-     (`aircraft-layer/src/schema/world_objects.py:109`), and `name_counts[name] > 1`
-     (`perception/naked_eye_source.py:1118`) drops every unit sharing a name. **The user has
-     authorised DCS unit IDs for this** (decision 3), bounded to standing in for what a human could
-     have re-identified anyway — *"this was here a second ago, it's moved 20 m, it's still the same
-     unit"* — never as an oracle across occlusion or long gaps. **Blocked on a probe**:
-     `aircraft-layer/research/2026-09-10-worldobjects-object-id-stability-tacview-confirmation.md`
-     line 139 leaves open whether `LoGetWorldObjects`'s key equals `Unit:getObjectID()`,
-     `Unit:getID()` or neither. Probe written and queued for the user to fly.
-  2. **Statics and scenery are not in the feed at all**, which no join can fix.
+  **ANSWERED AND PARTLY WRONG — the probe flew 2026-10-06, twice.** Full evidence:
+  `aircraft-layer/research/2026-10-06-unit-id-join-results.md`. Steps 1 and 2 as originally written
+  are superseded; the orchestrator's diagnosis was wrong in its mechanism, and the correction is kept
+  visible because of *why* it survived.
+
+  1. ~~Settle the join key.~~ **The join key was never the problem.** Names are unique and non-null
+     on both sides in both missions — **units 50/50, statics 94/94 join by name**, zero nulls, zero
+     duplicates. `Unit:getObjectID()` *does* equal the `LoGetWorldObjects` key (32/32; `getID` does
+     not, excluding outcome B and the MIST respawn risk) — **but it does not exist on
+     `StaticObject`, `<NONE>` in 94/94**, so no integer key spans both populations and an integer
+     join would be units-only for no gain. **Keep the name join.**
+  2. **The real mechanism: the Hook never enumerates statics.**
      `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua:261-263` walks
-     `coalition.getGroups()` → `grp:getUnits()`, so `coalition.getStaticObjects` and scenery never
-     appear in a result. An `outpost` shows up in the no-verdict population. Lua-side change.
+     `coalition.getGroups()` → `grp:getUnits()`, so static objects cannot appear in a result at all —
+     **278 of 404 objects, 68.8 %**, in the sortie's own mission. That is the same fact as the
+     explore's measured 323-of-425 objects never receiving a verdict, and it explains the anomaly the
+     sortie note could not: no-verdict rows sat *closer in* (median 3,820 m vs 6,750 m) because
+     static vehicles are placed around positions as emplacements. **The fix is
+     `coalition.getStaticObjects` in the Hook**, and statics are in scope by user direction
+     2026-10-06 — in this mission they are 112 infantry, 31 T-55, 34 T-72B/B3 and **eight
+     `ZSU-23-4 Shilka`**, not map furniture.
+
+     **Why the wrong mechanism survived three documents**, worth recording: "nameless statics cluster
+     close in" and "static vehicles cluster close in" predict the *same* observable, and the range
+     anomaly was read as evidence for the first. A hypothesis that explains an anomaly is not thereby
+     the mechanism.
+
+  2b. **Re-measure the sightline cap and bridge cost — now unmeasured.** The pre-statics figures were
+     median 43 / max 71 units per result against a 128 cap, `bridge_call_ms` ~1 ms. Adding ~278
+     candidate statics may reach that cap for the first time. Do not carry the old headroom forward.
+
   3. **Then fail closed**: no live verdict means not admitted, and `world-model`'s
      `line_of_sight_clear` is not called from the live path. Keep it for offline tests
      (`WM-B8`'s fixture grid is the intended consumer) — and note that even for that use it has a
