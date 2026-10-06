@@ -139,3 +139,28 @@ type: {{user, feedback, project, reference}}
 Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
 
 Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md.
+
+
+## Measure n before scaling anything by n
+
+**From the 2026-10-06 retro: both of that window's 2×-or-worse errors were a reasoned count, and
+each was one `len()` away from being measured.** A whole-subproject pass scaled every figure by 440
+in-bubble candidates; the real median was **232**. Another inherited "2.2 KB/row" from an assumed
+row count; real rows averaged **622 B**, making a stage's saving 50.3 % rather than ~0 %.
+**A reasoned estimate of a count is the figure most likely to be wrong by 2×.**
+
+## Assert the harness can fail before quoting a number
+
+A benchmark that cannot fail proves nothing, and three tests on one branch in one night passed for
+the wrong reason. Every harness carries its own can-this-fail probe, asserted **before** any timing
+is reported — and say in the report that you ran it.
+
+## A per-file correction is not a correction
+
+This role struck a stale "5 Hz budget" figure in one memory file on 2026-10-05 and left it
+asserted in three others — one of them another role's — where it kept propagating a rate that is
+5× wrong, in a project where that same stale number had already produced an entire wrong backlog
+premise. **When you correct a claim, sweep for its siblings**: use the knowledge graph to find
+where the claim lives and `grep` to prove it is gone (`CLAUDE.md`'s graph/grep split). Note that
+`.claude/agent-memory/` is **deliberately outside the graph corpus**
+(`.claude/scripts/graph-corpus-files.sh:25`), so memory sweeps are `grep`-only.

@@ -154,3 +154,38 @@ Do not save: code structure derivable from reading the repo, git history, or any
 See the graph-query step in your procedure above — it is a numbered step now, not a closing note.
 
 **This section used to carry the whole instruction and sat last in the file, under a heading naming a trigger nothing can observe ("before concluding").** It was followed zero times across 2026-09-26/27, through two whole-subproject audits, a four-finding sortie diagnosis, an architect pass, two review rounds and a DoD gate. The rule was never the problem; its position and its trigger were. A `PreToolUse` hook on `Agent` now injects the same reminder at dispatch, which is an event that actually happens.
+
+
+## A technique any role would use belongs in the subproject's `CLAUDE.md`
+
+**Added from the 2026-10-06 retro, from this role's own finding.** This role discovered that the
+accidental-global / no-hoisting Lua bug class **is** mechanically detectable —
+`luac5.1 -l -p <file> | grep GETGLOBAL` lists every global a chunk reads, and one of the script's own
+helpers appearing there is the bug — and that a `dostring_in`-bridged chunk must be extracted and
+checked separately, because `luac -p` does not look inside string literals.
+
+It recorded that in `.claude/agent-memory/investigator/`, which is **the wrong home**: the people who
+write Hook Lua are the implementer and the debugger, and neither reads investigator memory. The
+subproject doc meanwhile still asserted the bug class was undetectable. (Both are now corrected in
+`aircraft-layer/CLAUDE.md`.)
+
+**Split by audience, not by who found it:** a verification technique, a file-format fact or a
+toolchain gotcha goes in the owning subproject's `CLAUDE.md`; agent memory keeps only what is
+specific to *how you investigate*.
+
+## Label an inference as one all the way to its destination
+
+From `clickabledata.lua` this role named arg **456** as the pilot's intercom gate. The live run and
+the user corrected it to **377**. The research note *did* label it inferred — but the roadmap
+sentence it fed had dropped the label, so a guess arrived downstream as near-fact. **Carry the
+evidence status into every document the finding reaches**, not just the note where it originated.
+
+## State the DCS version and where you read it
+
+A probe note had to carry "DCS version not verified locally" because no install was visible from
+that session. **Record the version and its source (`autoupdate.cfg`, or the `dcs.log` header) as a
+required field of any probe's return**, so a finding cannot end up without version provenance.
+
+**The install's reachability is per-session, not a project fact.** A memory file asserting the DCS
+tree is "directly readable from this env, not Windows-only" was wrong the next session, on a
+different machine. Scope environment claims to the session that observed them.

@@ -147,3 +147,34 @@ type: {{user, feedback, project, reference}}
 Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
 
 Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md.
+
+
+## Enumerate a widened set by import, not from prose
+
+**Added from the 2026-10-06 retro, from this role's own record.** A fix widened an observability
+gate, and three places then described its breadth as "two kinds". The gate's real reach was whatever
+`_TEMPLATED_KINDS` held — **six**, declared 600 lines away and maintained for an unrelated purpose —
+and the unenumerated third kind was the only safety-relevant one. A later correction then said
+"four of six" where it was five.
+
+**When a fix widens a predicate, derive the covered set by importing it (`len(SET)`, print the
+members) and state the count that way.** Nobody enumerating *call sites* could have found the third
+kind; grepping the gate showed two.
+
+## Size a reporting defect by splitting the log, not by counting lines
+
+A diagnosis quoted **20** spoken lines as the defect's size. Three of them were answers to a
+pilot-initiated `report`, which is a *documented* pull-path decision rather than the defect — so the
+real size was **17**, and the figure 20 had already propagated into a roadmap stage and a backlog
+entry. The pull path was a third producer that was never enumerated.
+
+**Before quoting a count for a push-path reporting defect, split the speech log by proximity to an
+`acted_token`** — an unprompted callout and an answer to a command are different claims, and only
+one of them is yours.
+
+## Ask which clock stamps the quantities before calling a constant mis-calibrated
+
+`perception/motion.py`'s *"objects arrive at 5 Hz"* was read as a poll-loop claim **twice** — once
+in a backlog entry's whole premise, once in the backlog item filed to fix it. It is correct: both
+figures are aircraft-layer *producer* rates, and the bound they guard is a difference between two
+producer sim stamps, which the consumer's interval cannot enter.

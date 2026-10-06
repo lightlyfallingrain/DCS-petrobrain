@@ -182,6 +182,34 @@ partly fixed*, finding it eventually by reading plans. One query would have open
 **A miss means "not indexed yet", never "does not exist"** — the semantic layer lags the working
 tree, and `GRAPH_REPORT.md`'s mtime says by how much.
 
+### Graph to find it, `grep` to prove it is gone
+
+**User direction, 2026-10-06, from the retro.** The graph goes first — that rule stands and is what
+the section above is for. But the sentence immediately above decides a second case against it, and
+the distinction is the verb:
+
+| question | instrument | why |
+|---|---|---|
+| *"Where is this discussed? Was this decided?"* | **graph first**, then read the sources | discovery; a hit is authoritative and a miss costs one `grep` |
+| *"Does anywhere **still** assert X?"* | **`grep`**, authoritatively | completeness; needs a trustworthy **negative**, which the graph explicitly does not give |
+
+A correction sweep is the second kind. The graph's negatives are documented unreliable — that is
+the sentence above, in the project's own words — so "the graph found no remaining mention" is not
+evidence the claim is gone. Concretely, on 2026-10-06 the graph had been built 24 hours earlier
+while the intervening run wrote ~80 commits of documents: asking it whether a stale figure had been
+removed would have returned a confident, stale yes.
+
+**And `.claude/agent-memory/` is deliberately outside the corpus** — `graph-corpus-files.sh:25`,
+*"recalled automatically; not reference material"* — so a memory sweep is `grep`-only by
+construction, not by preference. Do not add memory to the corpus to fix this: it would double-index
+content that already arrives by recall and leak memory vocabulary into the graph's own terms, which
+is the same failure as the removed `graphify-corpus/` mirror.
+
+**Why this earns a rule.** The retro found a stale "5 Hz" figure corrected in one memory file and
+left asserted in four others — one of them another role's — propagating a rate that is 5× wrong, in
+a project where that same number had already produced an entire wrong backlog premise. *A per-file
+correction is not a correction.*
+
 ```sh
 .claude/scripts/gq.sh "<question>"   # query, then list the sources to read
 graphify path "<node A>" "<node B>"  # shortest path between two concepts

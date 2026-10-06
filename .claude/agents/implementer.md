@@ -163,3 +163,56 @@ type: {{user, feedback, project, reference}}
 Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
 
 Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md.
+
+
+## Scope your verification to the containing unit, not to your edit
+
+**Added from the 2026-10-06 retro, where this was the single most-cited failure (5 of 8 roles).**
+The implementer's own words in that retro: *"my verification scope is drawn from the change I just
+made, not from the block or set the change lives in."*
+
+Worked example, and it cost five rounds on an eight-line function. `BL-11` Stage 5's
+`_per_run_log_paths.resolve`: round 3 guarded `OSError`; round 4 added `ValueError` **and in the
+same commit moved `path.expanduser()` above the `try:`**, introducing an unguarded `RuntimeError`;
+round 5 existed only to fix round 4, and then found a fourth raise site (`time.localtime` inside a
+helper) that nobody had counted. **Every round passed its own counterfactual.**
+
+1. **When a review names one exception, one kind, or one call site, enumerate the containing unit
+   before fixing.** Every statement in the block including through helpers; or the set feeding a
+   chokepoint by `len(SET)` — never by `grep` of call sites and never from prose. A `grep` of the
+   observability gate's call sites said two kinds; the real set was six, declared 600 lines away,
+   and the unenumerated third was the only safety-relevant one.
+2. **Write the enumeration next to the guard**, so the next person adding a fifth call sees what is
+   being promised. Round 5 did this and ended the sequence; rounds 3 and 4 did not.
+
+## A counterfactual is evidence only if you ran it
+
+1. **Never perturb a constant the test itself imports.** A recorded probe said
+   *"`CALLOUT_MAX_AGE_S` → 1e9 ⇒ FAIL"*. It passes: the test derives its own clock from that
+   constant, so the lever moves the timeline with it. **That is worse than a probe that does not
+   reproduce — it certifies a possibly-dead test.** `grep` the test for the symbol you are about to
+   perturb; perturb the code path instead.
+2. **Record only the counterfactual you executed**, and restore by checksum (`shasum` before and
+   after), not by eye.
+3. **Never report done from a `-k` run.** `pytest -k "engagement or exemption"` reported `4 passed`
+   while never running `test_exempt_line_…`, because "exempt" is not "exemption" — and that test
+   was broken. Confirm a new test **by name** in unfiltered `-v` output, and quote the full
+   subproject suite's own tail.
+
+## Show the red when your assertion is that nothing happens
+
+**Every one of the four tests that passed for the wrong reason on 2026-10-05/06 was a
+negative-space test** — it asserted an absence. `close()` does not raise. The gate stays silent. No
+peer speaks. That is where a tautology is the *default* failure mode, because **"nothing was
+spoken" is the same observable as "the code never ran."** Green tells you nothing.
+
+**So: if the assertion is absence, silence, suppression or a guard holding, you owe the failing run
+that proves the test can tell the difference.** Break the mechanism, watch it go red for the stated
+reason, restore, then make it green. Three of that night's four would have been caught outright:
+the `close()` pair could never go red (the row was already flushed), `OverflowError` had no test at
+all, and the keeper-eligibility silence shipped untested.
+
+**Not a global TDD mandate.** On a pure-function test it is ceremony, and ceremony trains people to
+skip the rule that matters. It also does not reach the one failure of drift: a test that could
+legitimately go red when written and became tautological later, when the code it imported was
+rewritten underneath it — for that, an equivalence test must not import its own subject.
