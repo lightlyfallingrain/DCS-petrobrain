@@ -1,5 +1,8 @@
 # Sortie refinements sortie — `describe`, group watch, sweeping `scan ahead`
 
+**Cockpit card (published):** https://claude.ai/artifact/RueFQ6R3BZB7vZgfEugorQ — the same content,
+laid out for reading in glances. This file stays the source of truth.
+
 Three of the four change requests from your 2026-10-05 debrief
 (`docs/acceptance/2026-10-05-sortie-feedback.md`, items 2, 3 and 4). Item 1 — the location-fragment
 rewrite — is **not** in this and is still its own branch.

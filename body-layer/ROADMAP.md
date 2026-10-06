@@ -103,7 +103,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   need the same redesign. **For debrief triage: the observable is not silence** — the group's own
   disclosure line may still fire for an unrelated reason, so "the group said something" is not
   evidence the movement report survived. Acceptance card:
-  `docs/acceptance/2026-10-06-sortie-refinements-sortie.md`. Full record:
+  `docs/acceptance/2026-10-06-sortie-refinements-sortie.md`, published as
+  https://claude.ai/artifact/RueFQ6R3BZB7vZgfEugorQ. Full record:
   `plans/sortie-2026-10-05-refinements/{plan.md, implementation.md, review.md, review-round2.md,
   review-round3.md, security-review.md, performance-review.md, dod-check.md}`. **Batches onto one
   sortie with the two other 2026-10-06 cards** (`2026-10-06-callout-observability-sortie.md`,
