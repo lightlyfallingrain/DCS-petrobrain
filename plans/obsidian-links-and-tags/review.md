@@ -125,3 +125,238 @@ invoking a live `claude -p` subprocess — flagged as a risk rather than treated
 audio-adapter's own `.venv` (borrowed from the main checkout, per this project's standing worktree
 convention) and reproduced the implementer's reported 222 passed / 1 skipped, clean lint/type
 results.
+
+---
+
+## Review round 2 — the fix (2026-10-06)
+
+Reviewing fix commit `6f1b327` on `feature/doc-conventions-audio-adapter` (tip `6f1b327`, 1 commit
+on `a95913d`), per AGENTS.md's "a change written in response to a review is ordinary new code" —
+this is the review of the Implementer's response to the two required fixes above plus the R1
+upgrade the Optional Refinements section invited.
+
+**Worktree addressing (AGENTS.md rule 4):** this worktree's `HEAD` was `ab18d03` (unrelated `main`
+work, 1-2 commits further along than the previous round's `ab18d03`), not the named tip `6f1b327`
+— the branch was checked out elsewhere, so git could not check it out here either. Tree clean.
+Verified via `git archive 6f1b327 | tar -x` into a scratch directory under the session scratchpad,
+all commands run with `cwd` inside that extracted tree (or, for mypy/ruff/pytest, inside the main
+checkout's `audio-adapter/`, justified below since `audio-adapter/src` and `audio-adapter/tests`
+are byte-identical between the two — confirmed by `diff -rq`, the only differences being
+`ROADMAP.md`/`ROADMAP/` and build caches).
+
+### Scope
+
+Exactly the four files the task named, nothing else in `src`:
+`.claude/scripts/roadmap-entry-consistency-gate.sh`, `roadmap-tag-vocabulary-gate.sh`,
+`roadmap-toc.sh`, `status-page-refresh.sh`, plus `plans/obsidian-links-and-tags/implementation.md`
+and an implementer agent-memory file. `git diff a95913d 6f1b327 --stat` confirms no fifth file.
+
+### Fix 1 — exactly-one-index: verified correct, pushed further than the author's own proof
+
+Re-ran the author's own mutation (second index linking `[[AA-B2]]`) and it reproduces exactly:
+`AA-B2.md is linked from 2 indexes in this directory, expected exactly one`, exit 1; reverted,
+`OK`, exit 0. Then pushed past the author's proof as the task asked:
+
+- **Three indexes linking the same ID** — generalizes correctly: `linked from 3 indexes...`
+  (count is not hardcoded to 2).
+- **An index linking an ID with no entry file** (`[[AA-B99]]`, no `AA-B99.md`) — correctly falls
+  through to check 1's existing dangling-link message, not misreported as a duplicate-index issue.
+- **An entry file with no index at all** — correctly caught by the unchanged zero-count branch
+  ("not linked from any index").
+- **A second index in a *different* directory, linking the same literal ID string** (created
+  `world-model/ROADMAP/world-model-roadmap.md` linking `[[AA-B2]]`, since `world-model/` is a real
+  subproject with a `pyproject.toml`) — the per-directory scoping is correct: this is reported as
+  a dangling link in `world-model/ROADMAP` (no `AA-B2.md` lives there), not conflated with
+  audio-adapter's own `AA-B2.md` as a cross-directory duplicate. The directory-scoped loop
+  (`for dir in $DIRS`, with `ids` and the index search both confined to `"$dir"`) means an ID is a
+  defect-detection unit *per directory*, which is the right shape — IDs are namespaced by
+  subproject prefix in practice, and nothing here lets a same-named entry in two subprojects
+  silently cancel out.
+
+No gaps found in this fix. **Confirmed correct**, including under adversarial generalization.
+
+### Fix 2 — strip code/URL before tag scan: the three named mutations hold, but the strip itself has two new failure modes
+
+Re-ran all three of the author's own mutations against a real entry file
+(`audio-adapter/ROADMAP/AA-B2.md`): inline-code `` `#heading` ``, URL fragment
+`.../docs#section-heading`, and the author's own third discovery (a bare `#tag` on its own line
+inside a fenced block) — all three stripped correctly, `roadmap-tag-vocabulary-gate: OK` / `AA-B2
+#status/open` (no fake tags) from `roadmap-toc.sh`, reverted clean. Confirmed a genuinely unknown
+tag (`#totally-unknown-tag`) is still caught — the fix does not over-strip in the common case.
+Confirmed a tag immediately following an inline code span on the same line
+(`` `inline_code`#totally-unknown-tag ``) is still caught, and a tag following a URL that ends a
+sentence (`https://example.com/foo. #tag`) is still caught — both of the task's named probe cases
+for the strip mechanism itself pass.
+
+Probing further, as the task asked, found two real gaps, of different severity:
+
+- **Required: an unterminated (odd-count) fenced code block silently swallows every line after it
+  for the rest of the file, including a real, unknown tag — in both
+  `roadmap-tag-vocabulary-gate.sh` and `roadmap-toc.sh`.** The shared `awk '/^```/{fence=!fence;
+  next} fence{next} ...'` toggle has no concept of end-of-file; an opening ``` with no matching
+  close leaves `fence` permanently true for every subsequent line, however far past the mistake
+  they are. Confirmed by mutation: a file containing an opening ``` fence with no closing fence,
+  followed later by `#totally-unknown-tag` in plain prose, makes `roadmap-tag-vocabulary-gate.sh`
+  exit 0 (`OK`) and `roadmap-toc.sh` print the entry with no tag at all — the real violation is
+  invisible to both tools, not flagged, not logged, nothing. This is exactly the risk the task
+  named going into this review: *"a gate that now misses a real tag is worse than the false
+  positives it fixed."* It is also a genuinely new failure mode, not a pre-existing one carried
+  forward — the pre-fix gate had no fence-awareness at all, so the worst it could do was
+  over-flag; this fix adds a state machine that can now under-flag silently for an entire file on
+  nothing more than an editing slip (a forgotten closing ```` ``` ````, which this project's own
+  prose is full of). Needs a fix before this is trusted at 204 files: either detect an odd fence
+  count and fail loudly (consistent with how this same diff treats every other new failure mode —
+  check 3's duplicate case and the R1 mechanical check both choose "fail loudly" over "degrade
+  silently"), or scope the fence toggle so it cannot carry state past a point a human would notice.
+- **Optional: the fence-opener regex `/^```/` only matches at column 0, so a fence indented inside
+  a list item is not recognized as a fence at all, and a `#tag`-shaped string inside it leaks
+  through as plain prose — a false positive, the exact class this fix targeted, just a member it
+  missed.** Confirmed by mutation: a 4-space-indented ` ``` ` block inside a list item, containing
+  `#fenced-in-list-tag`, is flagged as an unknown tag by `roadmap-tag-vocabulary-gate.sh` rather
+  than stripped. Lower severity than the item above — it is loud and blocks a real commit, not
+  silent — but it is the same "this class keeps finding new members" pattern the first review
+  round already named once; worth closing with the same pass rather than finding it a third time
+  at 204 files. A one-line `/^[[:space:]]*```/` match (or a leading-whitespace strip before the
+  existing match) would close it.
+
+### Fix 3 (R1 upgrade) — mechanical check in `status-page-refresh.sh`
+
+(a) **Genuinely pure bash, no LLM in the path**, confirmed by reading: `FORWARD_COUNT=$(awk
+'/id="graph-upcoming"/,/<\/pre>/' "$PAGE" | grep -v '^[[:space:]]*classDef' | grep -c ':::' ||
+true)` runs between the two `claude -p` invocations, touching only the file Phase 1 wrote to disk.
+
+(b) **Runs before anything is published or committed** — confirmed by control flow: the `PUB_PROMPT`
+string and the `claude -p "$PUB_PROMPT"` call are both defined textually *after* the `[
+"$FORWARD_COUNT" -eq 0 ] && ... exit 1` branch, so a failing check returns before Phase 2's
+publish/commit code is even reached, let alone run.
+
+(c) **Fails non-zero on an empty forward map** — re-ran the author's exact extraction logic against
+a stubbed copy of the real `docs/status/petrobrain-status.html` with every `:::`-tagged node
+stripped from the `#graph-upcoming` block: `FORWARD_COUNT=0`, reproduces the script's own failure
+message and `exit 1`. Also reproduced the non-failure count (24) against the unmodified real file,
+matching the author's proof exactly.
+
+(d) **The failure path is NOT clean — this is the gap the task said the author's proof did not
+cover, and it is real.** `exit 1` on `FORWARD_COUNT -eq 0` happens with no `git checkout`, no
+revert, nothing — `docs/status/petrobrain-status.html` is left on disk exactly as Phase 1's
+(bad/empty) regeneration wrote it, modified and uncommitted. Reading the script's own guard 2
+(`if [ -n "$(git status --porcelain --untracked-files=no)" ]; then say "SKIP: working tree has
+uncommitted changes..."; exit 0; fi`), which runs at the *top* of every future invocation, shows
+the consequence directly: the very next scheduled run (intended to be launchd at 05:00, per the
+file's own header) will see that leftover modified file, log "SKIP: working tree has uncommitted
+changes," and exit 0 without even attempting to regenerate — silently, every day, forever, until a
+human notices the status page is stale and manually runs `git checkout -- $PAGE`. **A one-time
+mechanical-check failure becomes a permanent silent outage of the whole refresh mechanism.** This
+is worse than the pre-fix state in one specific way: before the split, a single `claude -p` call
+that heeded its own "stop and say so rather than publish" prompt instruction could plausibly leave
+the same kind of dirty file behind too, so this isn't strictly introduced by this fix — but the fix
+had the opportunity to close it (the task's own framing, "that last one is the point of the
+check"), and the author's proof tested only the check's true/false arithmetic, never the
+script's own self-blocking consequence of taking the false branch. Fix: on the `FORWARD_COUNT -eq
+0` branch, before `exit 1`, restore the working tree (`git checkout -- "$PAGE" 2>/dev/null ||
+true`) so the next scheduled run starts clean and can try again rather than being locked out.
+
+### Did the split break the normal path?
+
+No. Phase 1 (generate-only, no publish/commit/push) → mechanical check → Phase 2 (publish, commit,
+push) preserves the prior single-call behavior on the success path; the three pre-existing
+mechanical guards (repo missing, `claude` missing, dirty tree / not-main, no commits in 24h) are
+untouched and still "SKIP, never block." The only behavioral change on the happy path is that
+generation and publish/commit now run as two separate `claude -p` invocations rather than one,
+which loses no state the script itself depends on (every fact Phase 2 needs — the page already
+written, the check already passed — is read from disk or passed by the mechanical check's own
+exit code, not carried in an LLM conversation).
+
+### bash -n and gate re-runs
+
+`bash -n` clean on all four changed scripts. Re-ran all three gates against the real converted
+`audio-adapter/ROADMAP/` tree in the `6f1b327` snapshot (via `CLAUDE_PROJECT_DIR=<snapshot>`, since
+the snapshot has no `.git` for the scripts' own `git rev-parse --show-toplevel` fallback to find):
+`roadmap-entry-consistency-gate.sh` → `OK` (0.36s), `roadmap-tag-vocabulary-gate.sh` → `OK`
+(0.25s), `roadmap-toc.sh audio-adapter/ROADMAP/` → prints all 22 entries with correct tags,
+matching the pre-fix baseline.
+
+### Checks (audio-adapter/)
+
+Re-ran against the main checkout's `audio-adapter/.venv` (justified above — `src`/`tests`
+byte-identical to the snapshot): `ruff format --check .` → 40 files already formatted;
+`ruff check .` → all checks passed; `mypy --strict src` → no issues, 15 source files; `pytest -q`
+→ 222 passed, 1 skipped — matches the implementer's reported baseline exactly, zero diff under
+`audio-adapter/`.
+
+### Will these gates stay fast and quiet at 204 files?
+
+Measured, not estimated: `roadmap-tag-vocabulary-gate.sh` ran in 0.25s and
+`roadmap-entry-consistency-gate.sh` in 0.36s against the 22-file, 1-index audio-adapter tree. Both
+gates' cost is dominated by a fixed per-file subprocess pipeline (one `awk` + two `sed` + one
+`grep` for the tag scan; one `grep`/`awk` pass per file plus an O(ids × indexes) nested loop,
+negligible at 1-2 indexes per directory, for consistency) — no step is quadratic in file count, so
+cost should scale roughly linearly with file count. At 204 files across 7 indexes that extrapolates
+to roughly 2-4 seconds total per gate at commit time, which is cheap enough to stay invisible in a
+normal commit — **performance is not the risk here; the two correctness gaps above (items (d) and
+the unterminated-fence swallow) are.** A silent, hard-to-notice gap that erodes trust in "the gate
+caught it" is the failure mode that gets a check disabled, not a few extra seconds of `bash`.
+
+### Known-open items, not defects
+
+- `AA-3`'s accepted-vs-debt contradiction remains deliberately unresolved, per the task — correctly
+  left untouched by this fix.
+- **Agree with the author's decision to decline the `#` inside a markdown link's quoted title
+  attribute** (`[text](url "title with #not-a-tag")`). Re-verified independently, more broadly
+  than the author's own check: `grep` for that link-with-quoted-title shape across the *entire*
+  repository (not just the 22 converted audio-adapter files) finds exactly one hit — the author's
+  own sentence describing the pattern in `implementation.md` — and a separate check of the three
+  subprojects' not-yet-converted `ROADMAP.md` files (`world-model`, `aircraft-layer`, `body-layer`,
+  the content that will actually flow into entry files next) finds zero occurrences of the
+  `](... "...")` title-attribute shape at all. "Not in the repo today" is as strong an argument as
+  it can be made here, since it holds against the corpus that is actually coming next, not just the
+  corpus already converted — this is a legitimate decline, not a speculative one.
+
+### Required Fixes (this round)
+
+1. **`status-page-refresh.sh`: the mechanical-check failure path does not restore the working
+   tree**, leaving a modified, uncommitted `docs/status/petrobrain-status.html` on disk. The
+   script's own guard 2 then silently skips every subsequent run as "working tree dirty," turning
+   one bad regeneration into a permanent, silent outage of the daily refresh until a human notices
+   and manually reverts the file. Fix: `git checkout -- "$PAGE"` (or equivalent) before `exit 1` on
+   the `FORWARD_COUNT -eq 0` branch.
+2. **`roadmap-tag-vocabulary-gate.sh` / `roadmap-toc.sh`: an unterminated fenced code block
+   silently disables tag scanning for the rest of the file**, including real unknown tags, with no
+   warning and a clean exit. This is a new failure mode introduced by the fence-toggle added in
+   this fix (the pre-fix gate had no fence state to leak), and it is a false negative rather than a
+   false positive — the more dangerous direction, per the task's own framing. Fix: detect an
+   odd/unbalanced fence count per file and fail loudly, rather than leaving `fence` true past the
+   last real close.
+
+### Optional Refinements (this round)
+
+- **The fence-opener regex only matches `` ``` `` at column 0**, so a fence indented inside a list
+  item is not recognized, and a tag-shaped string inside it is flagged as a false positive — the
+  same class this fix targeted, a member it missed. Cheap fix (`/^[[:space:]]*```/` or a
+  leading-whitespace strip), worth doing in the same pass rather than finding it again at scale.
+
+### Verdict
+
+**NEEDS REVISION.** Fix 1 (exactly-one-index) is fully correct under adversarial generalization —
+no further work needed there. Fix 2's three named mutations are solid, but the strip mechanism
+itself introduces one required-severity gap (unterminated fence silently swallows real tags — a
+new false-negative mode, worse in kind than what was fixed) and one optional one (indented fence
+false-positive). The R1 upgrade's mechanical check is correctly placed, pure, and ordered before
+publish/commit, but its failure path leaves the working tree dirty in a way that self-blocks every
+future run — required fix 1 above. None of these require re-doing fixes 1-3's actual logic; each
+is a small, localized addition (a cleanup line, a fence-balance check) to code that is otherwise
+sound.
+
+### Review Confidence
+
+**Full read** of the diff (`git diff a95913d 6f1b327`), `implementation.md`, and all four changed
+scripts in full. **Every claim was re-run, not re-read**: both required fixes from round 1 were
+re-mutated from scratch (not just the author's pasted transcripts), generalized beyond the
+author's own test cases (3-way duplicate, cross-directory duplicate, dangling-link interaction for
+fix 1; fence-adjacent tag placement, list-indented fence, unterminated fence for fix 2), and the
+R1 mechanical check was reproduced against a real stubbed copy of the actual generated HTML file
+rather than trusted from the author's pasted proof. `ruff format --check`, `ruff check`, `mypy
+--strict src`, and `pytest -q` were re-run against audio-adapter's own `.venv` and reproduced the
+implementer's reported 222 passed / 1 skipped, clean lint/type results, with `src`/`tests`
+confirmed byte-identical between the main checkout and the `6f1b327` snapshot before relying on
+that venv. Gate runtimes were measured directly, not estimated, before extrapolating to 204 files.
