@@ -87,24 +87,34 @@ sortie answer it:
   * an `env.info` line from inside the scripting state carries the
     units-vs-statics breakdown, which cannot cross the `dostring_in`
     boundary without changing the wire format (one scalar return).
-    `static_enum_failures` on that line is the guard against the whole
-    statics enumeration failing *silently* -- without it, a broken
-    `coalition.getStaticObjects` would look exactly like the pre-2026-10-06
-    unit-only behaviour.
+    `static_enum_failures` and `unit_enum_failures` on that line are the
+    guard against either enumeration failing *silently* -- without the
+    first, a broken `coalition.getStaticObjects` would look exactly like
+    the pre-2026-10-06 unit-only behaviour; without the second, a broken
+    `coalition.getGroups` would just make the candidate count smaller,
+    which biases `cap_hit` toward 0 and so reads as good news. Every
+    enumeration call in the chunk is `pcall`'d so that a failure degrades
+    to fewer candidates rather than no poll at all; a counter is the price
+    of that choice, not an extra.
 Note the **nearest-first sort is load-bearing now**: `table.sort` by
 `rangeM` before the cap means truncation drops the *far* candidates, which
 is the right failure direction.
 
-**The cap is spliced into the bridged chunk from
-`MAX_SIGHTLINES_PER_CALL`, not re-typed** (a previous performance pass
-flagged the duplicated `128` literal as drift risk; with the population
-tripling it stops being hypothetical). The bridged chunk lives in a
-string literal and therefore cannot see this file's own `local`s, so the
-constant is prepended as a `local MAX_SIGHTLINES = <n>` line via
-`string.format("%d", ...)` at **module load time**. That is not the
-runtime-value splice the `SET_LOOK_TEMPLATE` safety argument below is
-about: the value is a module-level integer constant in this very file,
-never anything inbound, and `%d` can only ever emit `-?[0-9]+` either way.
+**The cap and the bubble radius are spliced into the bridged chunk from
+`MAX_SIGHTLINES_PER_CALL` and `PLAYER_BUBBLE_RADIUS_M`, not re-typed** (a
+previous performance pass flagged the duplicated `128` literal as drift
+risk; with the population tripling it stops being hypothetical, and the
+2026-10-06 review found `PLAYER_BUBBLE_RADIUS_M` had become strictly
+worse -- declared, commented as the bubble, and read by nothing). The
+bridged chunk lives in a string literal and therefore cannot see this
+file's own `local`s, so both are prepended as `local <NAME> = <value>`
+lines at **module load time**. Neither is the runtime-value splice the
+`SET_LOOK_TEMPLATE` safety argument below is about: both values are
+module-level numeric constants in this very file, never anything inbound.
+The conversions differ because the types do -- `%d` for the integer cap,
+`%.17g` for the float radius, which is the shortest width that round-trips
+an IEEE-754 double exactly (`%d` would silently truncate a non-integral
+radius, and `tostring`/`%.14g` are not guaranteed exact).
 
 **The look-direction command channel -- a validated `string.format`
 splice, not digit dispatch (plan SS17, user's informed call after the
@@ -231,7 +241,11 @@ local POLL_INTERVAL_S = 1.0
 
 --: `perception.association.PLAYER_BUBBLE_RADIUS_M` -- the candidate bound
 --: (not the query bound; the wedge filter inside LOS_CODE is what actually
---: scopes the engine work, plan SS8-SS10).
+--: scopes the engine work, plan SS8-SS10). **This is the only definition of
+--: the bubble**: it is spliced into the bridged chunk as `BUBBLE_RADIUS_M`
+--: at module load, the same way the cap is, so editing it here really does
+--: move the bubble. Until 2026-10-06 the chunk re-typed `10000.0` and this
+--: local had zero code readers.
 local PLAYER_BUBBLE_RADIUS_M = 10000.0
 
 --: A blow-up guard, not a policy -- see file header. Sized at the
@@ -295,12 +309,21 @@ local SET_LOOK_TEMPLATE = "PB_LOOK_HOUR=%d\nPB_LOOK_FOV_DEG=%d\nreturn \"ok\""
 --: `Unit:getPosition()`'s forward (`x`) vector via `atan2` -- the standard
 --: DCS Mission Scripting Engine convention; **not independently
 --: live-verified this session** (file header).
---: Load-time splice of this file's own integer constant into the bridged
---: chunk, so the cap has exactly one definition (see the file header's
---: "spliced into the bridged chunk" note for why this is not the
---: `SET_LOOK_TEMPLATE` class of splice).
+--: Load-time splice of this file's own constants into the bridged chunk, so
+--: each has exactly one definition (see the file header's "spliced into the
+--: bridged chunk" note for why this is not the `SET_LOOK_TEMPLATE` class of
+--: splice). Note the two conversions differ on purpose:
+--: `MAX_SIGHTLINES_PER_CALL` is an integer count and `%d` is exact for it,
+--: while `PLAYER_BUBBLE_RADIUS_M` is a **float** -- `%d` on it is wrong (it
+--: would silently truncate the moment anyone writes a non-integral radius),
+--: and `%.14g`/`tostring` are not guaranteed to round-trip an IEEE-754
+--: double. `%.17g` is the shortest width that always does, so the spliced
+--: text is numerically identical to the constant for *any* value assigned
+--: to it, not just for a round 10000.0.
 local LOS_CODE = "local MAX_SIGHTLINES = "
     .. string.format("%d", MAX_SIGHTLINES_PER_CALL)
+    .. "\nlocal BUBBLE_RADIUS_M = "
+    .. string.format("%.17g", PLAYER_BUBBLE_RADIUS_M)
     .. "\n"
     .. [[
 local hour = PB_LOOK_HOUR or 0
@@ -331,9 +354,19 @@ local function wrapSigned180(deg)
 end
 
 -- Ownship exclusion anchors, resolved once. The id is the primary test
--- (what this loop used before); the name is the backstop, because a
--- failed `player:getID()` would otherwise silently let ownship through
--- as a candidate. Statics cannot be ownship, so neither test runs there.
+-- (what this loop used before); the name is the backstop, so a failed
+-- `player:getID()` alone no longer lets ownship through as a candidate.
+-- It is a backstop, not a guarantee: if **both** resolutions fail the unit
+-- loop's id test admits and `considerCandidate`'s name test is a no-op, so
+-- ownship gets a verdict keyed by its own name. That case is reported as
+-- `ownship_unidentified=1` on the scan line below rather than fixed by
+-- returning an error -- an `ERR|` would drop the whole poll for every
+-- object, and body-layer's join is driven by the live object list, so a
+-- self-keyed verdict is near-certainly never consulted. It rides the
+-- existing line rather than logging its own, because the chunk is rebuilt
+-- per poll and so has no way to log "once" without a new mission-state
+-- global; at 1 Hz a dedicated warning would be pure noise.
+-- Statics cannot be ownship, so neither test runs there.
 local playerId = nil
 local okPid, pid = pcall(function() return player:getID() end)
 if okPid then playerId = pid end
@@ -354,6 +387,18 @@ local objectsInWedge = 0
 local staticsInBubble = 0
 local staticsInWedge = 0
 local staticEnumFailures = 0
+-- The unit side's counterpart to `staticEnumFailures`, and required for the
+-- same reason: every enumeration call below is `pcall`'d, so a failure
+-- degrades to *fewer candidates* rather than a lost poll -- but fewer
+-- candidates understates the cap pressure this sortie exists to measure, so
+-- a failure that is not counted reads as good news. The unit side has
+-- exactly four `pcall`'d enumeration sites: `coalition.getGroups` (per
+-- side), `grp:getUnits()` (per group), `unit:isExist()` and `unit:getID()`
+-- (per unit). Only the first is counted here -- it is the one whose failure
+-- loses a whole side, and it is the one granularity that stays comparable
+-- to `staticEnumFailures` (also per side, max 3). A fifth call added below
+-- needs either a bump here or its own counter; do not leave it silent.
+local unitEnumFailures = 0
 
 -- THE single bubble/wedge/name filter, shared by both populations so they
 -- cannot drift apart (BL-11 Stage 4: a static must be treated exactly as
@@ -365,7 +410,7 @@ local function considerCandidate(obj, isStatic)
     if not okUP or up == nil then return end
     local dx, dz = up.x - ox, up.z - oz
     local rangeM = math.sqrt(dx * dx + dz * dz)
-    if rangeM > 10000.0 then return end
+    if rangeM > BUBBLE_RADIUS_M then return end
     local okName, name = pcall(function() return obj:getName() end)
     if not okName or type(name) ~= "string" or name == "" then return end
     if playerName ~= nil and name == playerName then return end
@@ -403,6 +448,8 @@ for _, coa in pairs(sides) do
                 end
             end
         end
+    else
+        unitEnumFailures = unitEnumFailures + 1
     end
 end
 
@@ -469,10 +516,13 @@ end
 -- The units-vs-statics breakdown cannot cross the `dostring_in` boundary
 -- (one scalar return, and the wire format is fixed by
 -- `aircraft-layer/src/schema/line_of_sight.py`), so it goes to `dcs.log`
--- directly from the scripting state instead. `static_enum_failures` is
--- the point of this line: without it, a `coalition.getStaticObjects`
--- that fails on every side looks exactly like the pre-BL-11-Stage-4
--- unit-only behaviour, and nobody would know statics were missing again.
+-- directly from the scripting state instead. The two failure counters are
+-- the point of this line: without `static_enum_failures`, a
+-- `coalition.getStaticObjects` that fails on every side looks exactly like
+-- the pre-BL-11-Stage-4 unit-only behaviour, and nobody would know statics
+-- were missing again; without `unit_enum_failures` a `coalition.getGroups`
+-- failure is invisible in exactly the direction that makes `cap_hit=0` look
+-- like good news. Both are per side, so both top out at 3.
 -- `env` is guarded and the whole call pcall'd -- a logging failure must
 -- never take the poll (or the mission) with it.
 pcall(function()
@@ -486,7 +536,10 @@ pcall(function()
             .. " sightlines_computed=" .. tostring(sightlinesComputed)
             .. " max_sightlines=" .. tostring(MAX_SIGHTLINES)
             .. " cap_hit=" .. ((sightlinesComputed < #candidates) and "1" or "0")
-            .. " static_enum_failures=" .. tostring(staticEnumFailures))
+            .. " static_enum_failures=" .. tostring(staticEnumFailures)
+            .. " unit_enum_failures=" .. tostring(unitEnumFailures)
+            .. " ownship_unidentified="
+            .. ((playerId == nil and playerName == nil) and "1" or "0"))
     end
 end)
 
