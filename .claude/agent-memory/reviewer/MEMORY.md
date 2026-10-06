@@ -3,21 +3,12 @@
 One line per entry, under ~150 chars: `- [Title](file.md) - one-line hook`. Files:
 `feedback_<topic>.md` (corrections/confirmations) or `project_<topic>.md` (project facts).
 
-**APPEND to this file. Never rewrite it wholesale** (beyond compaction passes that only shorten
-existing lines without dropping entries). On 2026-09-20 a single commit replaced this index's 27
-entries with 1, leaving 73 memory files on disk unreachable. Rebuilt 2026-09-21. Compacted
-2026-10-05: removed a full duplicated block (lines had been appended twice with longer text) and
-shortened lines; no entries dropped, read the linked file for full detail.
-lines without dropping entries). 2026-09-20: a commit replaced 27 entries with 1, orphaning 73
-memory files. Rebuilt 2026-09-21. Compacted twice on 2026-10-05 — the first pass appended its
-shortened lines above the old long-form block instead of replacing it, duplicating every entry
-and blowing the cap again; this pass merged them into one list.
 **APPEND. Never rewrite wholesale** — only compaction that shortens lines or drops exact
-duplicates, never entries. 2026-09-20: a commit replaced 27 entries with 1, orphaning 73 files.
-2026-10-05's compaction appended its shortened lines *above* the old block instead of replacing
-it, duplicating every entry; on 2026-10-06 that was still on disk (241 lines, 115 duplicate
-targets) and had pushed the file past its read limit, so the tail was invisible. Deduplicated by
-link target, preferring the untruncated hook of each pair; no entry dropped.
+duplicates, never entries. History, because every incident here was a rewrite: 2026-09-20 a commit
+replaced 27 entries with 1, orphaning 73 files (rebuilt 2026-09-21); 2026-10-05's compaction
+appended its shortened lines *above* the old block instead of replacing it, duplicating every
+entry and blowing the read cap, which was deduplicated by link target on 2026-10-06. This header
+itself carried three stacked copies of that warning until 2026-10-06; merged, no entry touched.
 
 - [Aircraft layer stage1 2 review](aircraft-layer-stage1-2-review.md) - Export.lua + collector review.
 - [Body layer plan review](body-layer-plan-review.md) - invariants held, plan contradicted own provenance claim.
@@ -160,3 +151,4 @@ link target, preferring the untruncated hook of each pair; no entry dropped.
 - [Sortie 1005 round2 keeper eligibility](project_sortie_1005_round2_keeper_eligibility.md) - NEEDS FIXES; a one-per-group representative must be elected from the eligible subset.
 - [Keeper election per-contact vs per-event](project_keeper_election_per_contact_vs_per_event.md) - elect-one-consume-peers goes silent when the survivor has no event; granularity, not predicate.
 - [LOS hook statics review](project_los_hook_statics_review.md) - APPROVED W/ REQUIRED FIXES; a new pcall made a loud failure silent, asymmetric with an existing counter.
+- [LOS hook statics round2 approved](project_los_hook_statics_round2_approved.md) - APPROVED; rank an uncounted pcall by fails-open vs can-the-scope-yield, not by intuition.
