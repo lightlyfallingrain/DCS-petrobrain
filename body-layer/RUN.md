@@ -112,7 +112,10 @@ component whatever it is.)
 
 `~` is expanded, so `--speech-log ~/dcs-speech.jsonl` writes to your home
 directory even from a shell or wrapper script that passes the `~` through
-unexpanded.
+unexpanded. A `~someone` whose home cannot be resolved — a typo in a run
+script is the likely way to meet this — disables that one log with a line on
+stderr, like the other unresolvable paths above, rather than stopping the
+crew from starting.
 
 Where the run scripts put them: `run-scripts/run-crew-text.sh` and
 `run-crew-text-debug-view.sh` both `pushd` into `body-layer/` first and pass
