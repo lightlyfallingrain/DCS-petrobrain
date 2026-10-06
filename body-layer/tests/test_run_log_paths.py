@@ -186,6 +186,34 @@ def test_a_path_with_no_filename_degrades_rather_than_raising(
     assert "detection-trace: could not create log directory" in capsys.readouterr().err
 
 
+def test_an_unresolvable_tilde_user_degrades_rather_than_raising(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`Path.expanduser()` raises `RuntimeError` -- neither `OSError` nor
+    `ValueError` -- when the leading component names a user with no
+    resolvable home, so a mistyped `--detection-trace '~sgotz/trace.jsonl'`
+    for `~sg/` killed `main()` with a traceback before the crew started.
+    That is the same defect as `--detection-trace .`, from the statement
+    added while fixing it.
+
+    The working directory is an empty one so that "and it created nothing
+    on the way out" is checkable rather than dependent on where pytest was
+    started: the expansion raises before the `mkdir`, and a guard that
+    returned `None` only after creating `~sgotz/` would still be wrong."""
+    monkeypatch.chdir(tmp_path)
+
+    trace, truth, speech = logger_module._per_run_log_paths(
+        detection_trace=Path("~nosuchuser12345/trace.jsonl"),
+        belief_truth_log=None,
+        speech_log=None,
+        when=_WHEN,
+    )
+
+    assert (trace, truth, speech) == (None, None, None)
+    assert "detection-trace: could not create log directory" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_a_tilde_path_lands_under_the_home_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
