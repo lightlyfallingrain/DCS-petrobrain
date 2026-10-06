@@ -253,6 +253,13 @@ constraint that removed a planned transport, the screenshot-quality finding that
 merged calibration, the sentence about how recognition actually unfolds that turned a bug fix into
 a belief model. Each was cheap to hear early and expensive to discover late.
 
+**Before the first question, find out what is already known** (user direction, 2026-10-06). The
+graph and a `grep` over `todo/`, `docs/acceptance/` and `.claude/agent-memory/` cost two minutes and
+stop the conversation being spent on something already decided and merely absent from context — the
+2026-10-05 "world-model LOS is testing-only" direction was captured in writing, missed by four
+review reports, and a night went into making a fallback observable that was not allowed to run.
+`.claude/skills/explore/SKILL.md` has the procedure and the graph-versus-`grep` split.
+
 Two things make the conversation work, and both cut against normal habits:
 
 - **Open questions, not `AskUserQuestion` menus.** A menu can only offer what was already thought
