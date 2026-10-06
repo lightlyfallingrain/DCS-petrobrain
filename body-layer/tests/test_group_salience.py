@@ -61,7 +61,8 @@ def _far_unresolvable_candidate(object_id: int) -> WorldObjectCandidate:
     """Same bearing as the group above, but at 9000 m -- `7 / 9000 =
     0.000778 rad`, below `RESOLUTION_ANGULAR_RADIUS_RAD` (0.0013) at
     `UNAIDED_OPTIC.presence_range_mult` (1.0), so this candidate fails
-    `_resolvable` outright and can never be group-salient itself."""
+    `group_salience`'s resolvability gate outright and can never be
+    group-salient itself."""
     range_m = 9000.0
     x = range_m / math.sqrt(2)
     z = range_m / math.sqrt(2)

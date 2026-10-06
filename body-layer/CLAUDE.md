@@ -299,6 +299,7 @@ Surfaces and transports:
 - `src/belief/audio_client.py` — `AudioAdapterClient` (`POST /speak`, `GET /transcripts/poll`).
 - `src/logger.py` — the poll-loop entrypoint and every `--flag` branch. `main()`'s CLI wiring is untested by design; the runners are tested against fakes.
 - `src/detection_trace_writer.py` — the sanctioned ground-truth-plus-belief join. Read-only, one-directional, buffered off the poll loop's critical path.
+- `src/run_log_paths.py` — per-run log filenames (`BL-11` Stage 5). The three JSONL logs roll per run rather than appending across sorties, so **the path passed on the command line is not the path written** — see `RUN.md`.
 - `src/replay.py` — the BL-0 replay harness; drives any `PerceptionSource` over recorded ownship states.
 - `tools/summarize_detection_trace.py`, `tools/speak_samples.py` — post-flight reducer and a dev acceptance aid, not tests.
 - `tests/fixtures/` — committed synthetic fixtures; see `## Testing` on why they are not gitignored.

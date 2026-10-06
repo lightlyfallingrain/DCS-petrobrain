@@ -536,6 +536,30 @@ The entries are in the order they were written, which is roughly perception → 
   untouched. Deliberately sits beside `logger.py`, not inside `perception/` or `belief/` — neither
   package gains an import because of this module. Buffers `DEFAULT_FLUSH_EVERY_N_POLLS` (5) polls'
   worth before flushing, so disk I/O never sits on the poll loop's own critical path.
+
+  **Two `BL-11` Stage 5 changes worth knowing before reading a row.** Rows omit `None`-valued
+  annotation fields (`asdict` emitted all 25, and ~13 are `None` on a rejected candidate —
+  roughly half the bytes of a 290 KB/poll artifact), so **an absent key means `None`**, the same
+  absent-not-null convention `belief/tools.py` uses for its `facts`. `observation_id` and
+  `contact_id` are the deliberate exception and stay present even when null: they are the join
+  keys, and for those two an absent key would read as *unknown* rather than the definite *never
+  admitted* that a `null` states. Narrowing the rule to exempt them was not an aesthetic choice —
+  the blanket version broke `test_writer_leaves_contact_id_null_when_never_admitted`, and that
+  test was right. Second, a write failure (`ENOSPC` is the realistic case) is reported **once** on
+  stderr and then this writer stops for the rest of the run, having previously been swallowed by
+  the poll loop's own broad `except Exception` one traceback per poll with nothing saying the log
+  had gone truncated. A disabled writer still clears the collector, or a lost debug log becomes a
+  memory leak.
+- `src/run_log_paths.py` (`BL-11` Stage 5) — `per_run_log_path`, which stamps the run's start time
+  into a log filename before its suffix (`logs/trace.jsonl` → `logs/trace-20261006-143500.jsonl`).
+  All three JSONL writers used to open with `"a"` and never roll, so one path accumulated every
+  sortie ever flown and the 2026-10-05 analysis had to seek to byte offset 2,448,471,603 to find
+  that flight. **Timestamping rather than truncate-on-open is the decision here**: truncating also
+  removes the seeking and is shorter, but silently destroys the previous flight's log, which the
+  user reads after landing. Applied at the CLI boundary by `logger._per_run_log_paths` (one stamp
+  shared by all three logs, so a sortie's files are recognisable as a set), never inside a writer —
+  a writer handed an exact path still writes exactly there, which is what keeps them testable and
+  lets `tools/` read a named file.
 - `body-layer/tools/summarize_detection_trace.py` (BL-9) — the post-flight reducer, not a test
   (same "dev acceptance aid" posture as `speak_samples.py`): reads a `--detection-trace` JSONL
   file and prints the actual flight-debrief table — per object, the range at which the

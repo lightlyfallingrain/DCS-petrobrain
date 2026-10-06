@@ -86,6 +86,7 @@ has had its turn."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from dataclasses import asdict, dataclass
@@ -258,10 +259,13 @@ class BeliefTruthLogWriter:
         flush_every_n_polls: int = DEFAULT_FLUSH_EVERY_N_POLLS,
         stderr: TextIO = sys.stderr,
     ) -> None:
+        self._path = path
         self._file: TextIO = path.open("a", encoding="utf-8")
         self._flush_every_n_polls = flush_every_n_polls
         self._polls_since_flush = 0
         self._stderr = stderr
+        #: Set by `_fail` after the first write error -- see that method.
+        self._disabled = False
 
     def write_speech(
         self,
@@ -306,12 +310,18 @@ class BeliefTruthLogWriter:
             row["gaze_center_deg"] = gaze_center_deg
         if optic_name is not None:
             row["optic_name"] = optic_name
-        self._file.write(json.dumps(row) + "\n")
-        # Speech is rare (a handful of lines a minute) and is the row most
-        # likely to be the last thing written before something goes wrong,
-        # so it flushes immediately rather than waiting for the poll
-        # buffer -- the same reasoning `--speech-log` already applies.
-        self._file.flush()
+        if self._disabled:
+            return
+        try:
+            self._file.write(json.dumps(row) + "\n")
+            # Speech is rare (a handful of lines a minute) and is the row
+            # most likely to be the last thing written before something
+            # goes wrong, so it flushes immediately rather than waiting for
+            # the poll buffer -- the same reasoning `--speech-log` already
+            # applies.
+            self._file.flush()
+        except OSError as exc:
+            self._fail(exc)
 
     def write_poll(
         self,
@@ -325,6 +335,8 @@ class BeliefTruthLogWriter:
         per matched pair. **Deliberately does not clear `collector.
         records`** -- see module docstring; the poll loop owns that, once
         every reader of this poll's collector has had its turn."""
+        if self._disabled:
+            return
         contacts_by_id = {contact.id: contact for contact in store.contacts}
         obs_to_contact_id = observation_id_to_contact_id(store)
         observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
@@ -356,8 +368,12 @@ class BeliefTruthLogWriter:
                 observer=observer,
                 ground_truth_count=ground_truth_count,
             )
-            self._file.write(json.dumps(asdict(row)))
-            self._file.write("\n")
+            try:
+                self._file.write(json.dumps(asdict(row)))
+                self._file.write("\n")
+            except OSError as exc:
+                self._fail(exc)
+                break
             if row.tripwire:
                 self._stderr.write(
                     f"BELIEF-TRUTH TRIPWIRE t_sim={row.t_sim:.1f} "
@@ -374,9 +390,38 @@ class BeliefTruthLogWriter:
             self.flush()
 
     def flush(self) -> None:
-        self._file.flush()
+        if self._disabled:
+            return
+        try:
+            self._file.flush()
+        except OSError as exc:
+            self._fail(exc)
         self._polls_since_flush = 0
 
     def close(self) -> None:
+        """Flush and close, never raising -- the same `BL-11` Stage 5
+        reasoning as `detection_trace_writer.DetectionTraceWriter.close`:
+        `flush` early-returns once disabled, so unwritable buffered data
+        comes out of `close()`, which the poll loop calls from a `finally:`
+        block."""
         self.flush()
-        self._file.close()
+        with contextlib.suppress(OSError):
+            self._file.close()
+
+    def _fail(self, exc: OSError) -> None:
+        """Report one write failure, then stop writing for the rest of the
+        run -- `BL-11` Stage 5, the same policy and the same reasoning as
+        `detection_trace_writer.DetectionTraceWriter._fail`: a full disk
+        mid-flight was previously swallowed by the poll loop's own broad
+        `except Exception`, one traceback per poll, with nothing saying the
+        log had stopped being useful. Only this writer stops; perception,
+        belief and speech are untouched.
+
+        Reported on this writer's own `self._stderr`, not `sys.stderr`
+        directly, so it lands wherever the tripwire lines already do."""
+        self._disabled = True
+        self._stderr.write(
+            f"belief-truth-log: write to {self._path} failed ({exc}); "
+            f"no further rows will be written this run\n"
+        )
+        self._stderr.flush()

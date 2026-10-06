@@ -560,8 +560,9 @@ def test_infantry_group_admitted_ceiling_predicts_the_1_91km_rejection() -> None
         is None
     )
 
-    # And the full pipeline agrees: infantry fails `_resolvable` at this
-    # range on its own, so a real group pass excludes it from the group
+    # And the full pipeline agrees: infantry fails `group_salience`'s
+    # resolvability gate at this range on its own, so a real group pass
+    # excludes it from the group
     # outright -- it is never even offered the relaxed threshold.
     observer = _observer()
     vehicles = _line_candidates(1910.0, count=11, start_id=6000)

@@ -83,6 +83,7 @@ form (Decision 2/5), which is never computed here.
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Final
@@ -612,25 +613,77 @@ def _terrain_aware_world_position(
     )
 
 
+#: The grid, in metres, that `WorldEnrichmentCache` quantises a contact's
+#: believed position onto before using it as a cache key -- `BL-11` Stage 3b
+#: (`body-layer/research/2026-10-05-performance-review.md` finding 2).
+#:
+#: **Exactness was not intended here, and a later reader should not restore
+#: it.** The key used to be exact structural equality of
+#: `Contact.last_position`, which made the cache miss *by construction* for
+#: precisely the contacts worth caching: a contact re-observed this poll has
+#: a freshly-fused believed position, so the hit rate inside a
+#: callout-bearing tick was measured at 0 % (`distinct_positions ==
+#: describe_calls == cache_misses` in every such tick) and a **1 m nudge
+#: cost the full 42 ms** of `describe_position`.
+#:
+#: 50 m is the tight end of that finding's own 50-100 m suggestion, and the
+#: trade is the one this cache already accepts: `describe_position`'s output
+#: is nearest-feature *names* and coarse distance bands, and the cache's
+#: docstring below already accepts staleness of the same kind in the
+#: confidence numbers. Applied to altitude on the same grain, since a
+#: sub-50 m altitude change moves the terrain-aware projection by less than
+#: the horizontal grain it is paired with.
+#:
+#: **The staleness bound is the cell *diagonal*, not the grain, and
+#: `describe_position` is not the widest consumer.** Two positions sharing a
+#: cell differ by up to ~70.7 m horizontally and ~86.6 m in 3D -- and
+#: floor-based cells do not mean "within 50 m share a result" either: two
+#: points 1 m apart across a boundary still miss. Besides
+#: `describe_position`, the cached `world_position` also feeds
+#: `relative_geometry` (whose `range_m` is rendered at 0.1 km by
+#: `tools._format_range_km`, so a bucket can shift by one) and
+#: `terrain_divide_qualifier` (a binary "beyond the ridge" phrase, which a
+#: contact sitting within ~70 m of a ridge line can flip). Both effects are
+#: real and both are accepted: they are far inside the believed position's
+#: own uncertainty, which is hundreds of metres on the scope and hybrid
+#: channels, and both functions are still recomputed on every call -- only
+#: their position *input* is quantised.
+ENRICHMENT_CACHE_POSITION_GRID_M: Final[float] = 50.0
+
+
+def _cache_position_key(position: GeoPosition) -> tuple[int, int, int]:
+    """`position` snapped to `ENRICHMENT_CACHE_POSITION_GRID_M` -- the cache
+    key's position component. Integer cell indices rather than rounded
+    floats, so the key is exactly comparable and cannot reintroduce the
+    float-equality miss it exists to remove."""
+    grid = ENRICHMENT_CACHE_POSITION_GRID_M
+    return (
+        math.floor(position.x / grid),
+        math.floor(position.z / grid),
+        math.floor(position.alt_m / grid),
+    )
+
+
 @dataclass
 class WorldEnrichmentCache:
-    """Per-contact cache of `(last known Contact.last_position, terrain-aware
-    world position, semantic facts)`, keyed by `contact_id` -- the
+    """Per-contact cache of `(believed-position cell, terrain-aware world
+    position, semantic facts)`, keyed by `contact_id` -- the
     "semantic caching" the milestone brief names. Deliberately lives outside
     `belief.contacts.Contact` (not a new field on it) to keep zero shared
     surface with `feature/classification-refinement`'s in-flight changes to
     that file.
 
-    A cache hit requires `Contact.last_position` (structural equality --
-    `GeoPosition` is a frozen dataclass) to still match what was cached;
-    any change recomputes both the world position and the semantic facts.
-    Note that the *confidence* numbers inside a cached `SemanticFact` list
-    are only as fresh as the last recompute -- they do not re-decay between
-    cache hits, a deliberate perf/staleness tradeoff (see the plan's Risks
-    & Unknowns on cache hit rate)."""
+    A cache hit requires `Contact.last_position` to still fall in the same
+    `ENRICHMENT_CACHE_POSITION_GRID_M` cell as when the entry was stored
+    (see that constant for why this is a cell and not exact equality); a
+    move into another cell recomputes both the world position and the
+    semantic facts. Note that the *confidence* numbers inside a cached
+    `SemanticFact` list are only as fresh as the last recompute -- they do
+    not re-decay between cache hits, a deliberate perf/staleness tradeoff
+    (see the plan's Risks & Unknowns on cache hit rate)."""
 
-    _cache: dict[str, tuple[GeoPosition, GeoPosition, list[SemanticFact]]] = field(
-        default_factory=dict
+    _cache: dict[str, tuple[tuple[int, int, int], GeoPosition, list[SemanticFact]]] = (
+        field(default_factory=dict)
     )
 
     def get_or_compute(
@@ -641,14 +694,15 @@ class WorldEnrichmentCache:
         contact: Contact,
         now_sim: float,
     ) -> tuple[GeoPosition, list[SemanticFact]]:
+        position_key = _cache_position_key(contact.last_position)
         cached = self._cache.get(contact.id)
-        if cached is not None and cached[0] == contact.last_position:
+        if cached is not None and cached[0] == position_key:
             return cached[1], cached[2]
 
         world_position = _terrain_aware_world_position(conn, theatre, store, contact)
         position_conf = position_confidence(contact, now_sim)
         facts = semantic_facts_for(conn, theatre, world_position, position_conf)
-        self._cache[contact.id] = (contact.last_position, world_position, facts)
+        self._cache[contact.id] = (position_key, world_position, facts)
         return world_position, facts
 
 
@@ -695,6 +749,14 @@ def terrain_divide_qualifier(
     `ownship` moves every poll even when the target's believed position
     does not, so a cached divide count would go stale mid-flight and
     produce a confidently wrong "next valley".
+
+    That conclusion still stands but is weaker than it reads since `BL-11`
+    Stage 3b, which put up to ~70 m of staleness into this computation's
+    *target* input: `target` arrives from the cached `world_position`, whose
+    key is quantised onto `ENRICHMENT_CACHE_POSITION_GRID_M`. The argument
+    holds because ownship motion dominates by orders of magnitude -- but the
+    staleness it rules out is no longer zero, and a contact within ~70 m of
+    a ridge line can flip this qualifier. See that constant's own comment.
 
     When exactly one divide fires, the wording is picked by whether the
     *target* itself sits in a dominant valley (`_dominant_terrain_kind_

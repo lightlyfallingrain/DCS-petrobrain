@@ -9,7 +9,7 @@ No live DCS/world-model build required."""
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -731,6 +731,110 @@ def test_cache_picks_iterative_max_iterations_when_watched(
     cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
 
     assert seen_max_iterations == [5]
+
+
+# --- WorldEnrichmentCache: quantised key (BL-11 Stage 3b) ----------------
+
+
+def _counting_cache_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[int]:
+    """Monkeypatch both expensive calls behind `get_or_compute` and return
+    the list that counts recomputes -- one entry per cache miss."""
+    calls: list[int] = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        calls.append(1)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+    return calls
+
+
+def test_cache_position_key_snaps_to_the_grid() -> None:
+    """Two positions in the same `ENRICHMENT_CACHE_POSITION_GRID_M` cell
+    share a key; one cell apart on any single axis does not."""
+    grid = enrichment.ENRICHMENT_CACHE_POSITION_GRID_M
+    base = GeoPosition(x=1000.0, z=2000.0, alt_m=300.0)
+
+    assert enrichment._cache_position_key(base) == enrichment._cache_position_key(
+        GeoPosition(x=base.x + grid * 0.9, z=base.z, alt_m=base.alt_m)
+    )
+    for moved in (
+        GeoPosition(x=base.x + grid, z=base.z, alt_m=base.alt_m),
+        GeoPosition(x=base.x, z=base.z + grid, alt_m=base.alt_m),
+        GeoPosition(x=base.x, z=base.z, alt_m=base.alt_m + grid),
+    ):
+        assert enrichment._cache_position_key(base) != enrichment._cache_position_key(
+            moved
+        )
+
+
+def test_cache_hits_after_a_one_metre_nudge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The finding this stage exists for: with an exact-equality key, a
+    **1 m nudge cost the full `describe_position`** (measured 42 ms), so the
+    cache missed by construction for exactly the re-observed contacts that
+    get spoken about. On the quantised key it hits."""
+    calls = _counting_cache_fakes(monkeypatch)
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+    contact.position = replace(contact.position, x=contact.position.x + 1.0)
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=1.0)
+
+    assert len(calls) == 1
+
+
+def test_cache_recomputes_once_the_contact_leaves_its_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quantising is not the same as never invalidating -- a move of more
+    than one grid cell still recomputes, which is what keeps a contact that
+    genuinely relocates from being described at its old position."""
+    calls = _counting_cache_fakes(monkeypatch)
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+    contact.position = replace(
+        contact.position,
+        x=contact.position.x + 2.0 * enrichment.ENRICHMENT_CACHE_POSITION_GRID_M,
+    )
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=1.0)
+
+    assert len(calls) == 2
+
+
+def test_cache_recomputes_on_an_altitude_change_beyond_the_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Altitude is part of the key on the same grain -- otherwise a contact
+    whose believed altitude moved would keep a terrain-aware projection
+    solved for the old one."""
+    calls = _counting_cache_fakes(monkeypatch)
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+    contact.last_alt_m += 2.0 * enrichment.ENRICHMENT_CACHE_POSITION_GRID_M
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=1.0)
+
+    assert len(calls) == 2
 
 
 # --- relative_geometry ---------------------------------------------------

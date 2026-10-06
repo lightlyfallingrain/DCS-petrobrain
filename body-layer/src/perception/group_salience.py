@@ -86,37 +86,67 @@ GROUP_MIN_MEMBERS: Final[int] = 3
 GROUP_COHESION_GAP_UNIT_WIDTHS: Final[float] = 10.0
 
 
-def _resolvable(
+def _resolvable_terms(
     candidate: WorldObjectCandidate, observer: GeoPosition, optic: Optic
-) -> bool:
-    """Whether `candidate` clears the loosest presence bound any admission
-    path can use (`RESOLUTION_ANGULAR_RADIUS_RAD`) at `optic`'s own
-    `presence_range_mult` -- a candidate that fails even this bound has no
-    mass or cohesion to contribute, and never enters the union-find pass
-    below."""
+) -> tuple[GeoPosition, float] | None:
+    """`candidate`'s `(target position, apparent angular size)` pair if it
+    clears the loosest presence bound any admission path can use
+    (`RESOLUTION_ANGULAR_RADIUS_RAD`) at `optic`'s own
+    `presence_range_mult`, else `None` -- a candidate that fails even this
+    bound has no mass or cohesion to contribute, and never enters the
+    union-find pass below.
+
+    **Returns the two per-candidate terms rather than a bare `bool` so
+    `group_salient_ids`'s pair loop never recomputes them.** Both depend on
+    one candidate only, and the pre-Stage-2 pair loop recomputed both for
+    *each* candidate of *every* pair -- four redundant quantities per pair of an
+    O(n^2) loop, measured at 215 ms of a 440-candidate poll (58 % of a
+    300-poll cProfile) in `body-layer/research/2026-10-05-performance-
+    review.md` finding 1. Hoisting them here, into the pass that already
+    walks the candidate list, is pure recomputation removal: the returned
+    `frozenset` is bit-identical.
+
+    **It measures 5.1x, not the note's predicted 8.1x, and the ratio does
+    not grow with mission size** (`plans/bl11-tick-cost/performance-
+    review.md`, 2026-10-06). It saturates at 5.1x from ~2,500 pairs upward
+    and is still 5.1x at 169,071 pairs -- nearly double the sortie's
+    ~96,000 -- so a flight will come back at 5x and the O(resolvable^2)
+    argument offered for expecting 8x is wrong about the *ratio*, even
+    though it reconciles the *absolute* cost to 3 % (2.24 us/pair in the
+    note against 2.30 us/pair measured).
+
+    The missing 1.6x is located, not mysterious: `clustering.py`'s
+    `angular_separation_rad` rebuilds each candidate's observer-relative
+    difference vector per *pair*, the one per-candidate quantity Stage 2
+    left inside the loop, and hoisting that too measures 8.0x. It was
+    deliberately not taken -- the whole term is 1.1 ms in situ, so 1.6x
+    saves ~0.4 ms of a 12.6 ms poll. `BL-B40` carries the analysis."""
     profile = object_model.profile_for(candidate.object_type)
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
     slant_range_m = range_m(observer, target)
     theta_size = angular_size_rad(profile.size_m, slant_range_m)
-    return theta_size * optic.presence_range_mult >= RESOLUTION_ANGULAR_RADIUS_RAD
+    if theta_size * optic.presence_range_mult < RESOLUTION_ANGULAR_RADIUS_RAD:
+        return None
+    return target, theta_size
 
 
-def _cohesive(
-    a: WorldObjectCandidate, b: WorldObjectCandidate, observer: GeoPosition
+def _cohesive_from_terms(
+    theta_sep: float, theta_size_a: float, theta_size_b: float
 ) -> bool:
-    """Whether `a` and `b` are cohesive at `observer`: angularly separated
-    by no more than `GROUP_COHESION_GAP_UNIT_WIDTHS` of their own mean
-    apparent angular size -- the module docstring's "Cohesion and mass"
-    section. Deliberately a much wider angular scale than `clustering.
-    py`'s own merge predicate (which asks the opposite question: not
-    resolvable, i.e. under ~1 unit width)."""
-    target_a = GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m)
-    target_b = GeoPosition(x=b.x, z=b.z, alt_m=b.alt_m)
-    theta_sep = angular_separation_rad(observer, target_a, target_b)
-    profile_a = object_model.profile_for(a.object_type)
-    profile_b = object_model.profile_for(b.object_type)
-    theta_size_a = angular_size_rad(profile_a.size_m, range_m(observer, target_a))
-    theta_size_b = angular_size_rad(profile_b.size_m, range_m(observer, target_b))
+    """The cohesion predicate itself, as pure arithmetic over terms the
+    caller has already computed: angular separation no greater than
+    `GROUP_COHESION_GAP_UNIT_WIDTHS` of the two candidates' mean apparent
+    angular size.
+
+    **The single definition of the predicate**, and `group_salient_ids`'s
+    pair loop (which carries the per-candidate terms in parallel lists) is
+    its only caller. Kept as a named function rather than inlined into that
+    loop so the predicate reads as one statement: unlike `clustering.py`'s
+    separability predicate -- which asks the *opposite* question on the same
+    axis and must keep its own formula, see that module's entry in
+    `docs/STRUCTURE.md` -- this is the cohesion question itself, and
+    `tests/test_group_salience_equivalence.py` pins it against its own copy
+    of the pre-Stage-2 formula rather than importing this one."""
     mean_unit_rad = 0.5 * (theta_size_a + theta_size_b)
     return theta_sep <= GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad
 
@@ -129,14 +159,30 @@ def group_salient_ids(
     """The `object_id`s of every candidate in `candidates` that belongs to
     a cohesive group of at least `GROUP_MIN_MEMBERS` resolvable members,
     at `observer`'s own position and `optic`'s own `presence_range_mult`
-    (module docstring). Single-link union-find over the `_cohesive`
-    predicate, mirroring `clustering.cluster_candidates`'s own algorithm
-    shape -- O(n^2) over the resolvable subset, the same cost that module
-    already pays on the same candidate list. Candidates that fail
-    `_resolvable` never enter the union-find pass and can never be
-    group-salient themselves, though they also never block a group from
-    forming among the rest."""
-    resolvable = [c for c in candidates if _resolvable(c, observer, optic)]
+    (module docstring). Single-link union-find over
+    `_cohesive_from_terms`, mirroring `clustering.cluster_candidates`'s own
+    algorithm shape -- O(n^2) over the resolvable subset, the same cost that
+    module already pays on the same candidate list. Candidates for which
+    `_resolvable_terms` returns `None` never enter the union-find pass and
+    can never be group-salient themselves, though they also never block a
+    group from forming among the rest.
+
+    The `_resolvable_terms` pass below keeps each surviving candidate's
+    `(target position, apparent angular size)` in parallel lists, so the
+    pair loop is pure arithmetic -- one `angular_separation_rad` call and a
+    comparison -- rather than two `profile_for` lookups and two `range_m`
+    calls per pair. Output-identical; see `_resolvable_terms`."""
+    resolvable: list[WorldObjectCandidate] = []
+    targets: list[GeoPosition] = []
+    theta_sizes: list[float] = []
+    for candidate in candidates:
+        terms = _resolvable_terms(candidate, observer, optic)
+        if terms is None:
+            continue
+        resolvable.append(candidate)
+        targets.append(terms[0])
+        theta_sizes.append(terms[1])
+
     n = len(resolvable)
     parent = list(range(n))
 
@@ -152,8 +198,11 @@ def group_salient_ids(
             parent[root_j] = root_i
 
     for i in range(n):
+        target_i = targets[i]
+        theta_size_i = theta_sizes[i]
         for j in range(i + 1, n):
-            if _cohesive(resolvable[i], resolvable[j], observer):
+            theta_sep = angular_separation_rad(observer, target_i, targets[j])
+            if _cohesive_from_terms(theta_sep, theta_size_i, theta_sizes[j]):
                 union(i, j)
 
     groups: dict[int, list[int]] = {}

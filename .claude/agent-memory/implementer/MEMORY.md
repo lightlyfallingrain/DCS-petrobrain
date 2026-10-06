@@ -136,3 +136,10 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Counterfactuals must not perturb an imported constant](feedback_counterfactual_must_not_perturb_a_constant_the_test_imports.md) — the test's timeline moves with it; it fails open.
 - [Prose is no substitute for the test it replaces](feedback_prose_is_not_a_substitute_for_the_test_it_replaces.md) — a quoted example string in a docstring is an unasserted expectation; it went stale.
 - [pytest -k can silently skip a new test](feedback_pytest_k_substring_skips_new_tests.md) — "exempt" doesn't match "exemption"; 4 passed looked like full coverage.
+- [Guard every statement, not the one that raised](feedback_guard_every_statement_not_the_one_that_raised.md) — enumerate a block's raises; 5 rounds on one 8-line closure.
+- [Degrade-guard exception breadth](project_degrade_guard_exception_breadth.md) — a raise one line above the `try` is invisible when reading the guard; probe degenerate paths.
+- [BL-11 perf Stages 1/2/3b/5](project_bl11_perf_stages.md) — a note's speedup ratio is scene-dependent; null-omission vs. deliberately-null join keys; grep test fails on its own fix.
+- [Equivalence test must own its reference arithmetic](feedback_equivalence_test_must_own_its_reference_arithmetic.md) — importing the predicate made it pass 15/15 under a real mutation.
+- [mkdir in a helper pollutes relative test paths](feedback_mkdir_in_a_helper_makes_relative_test_paths_pollute.md) — passing tests started creating untracked dirs; reroot onto tmp_path.
+- [Healthy-path test needs the guarded call to matter](feedback_healthy_path_test_needs_the_guarded_call_to_matter.md) — gutting close() left all 4 tests passing; assert absence inline.
+- [BL-11 round 3 fixes](project_bl11_round3_fixes.md) — a deletion's prose fallout exceeds the named list; dated vs forward-looking refs get opposite treatment.
