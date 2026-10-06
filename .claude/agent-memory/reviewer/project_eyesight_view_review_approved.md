@@ -31,7 +31,7 @@ shared-collector pattern — see [[feedback_verify_pipeline_wiring_not_just_modu
 
 **Cost claims should be measured, not reasoned, when cheap to do:** rendered
 `eyesight_sample.build_sample_frame()` 500x in an isolated scratch tree — ~0.9ms/frame, negligible
-against the 5 Hz poll budget. Reused the git-archive scratch-tree technique
+against the poll budget (**corrected 2026-10-06**: this said "5 Hz"; the loop is 1.0 s and always has been -- 5 Hz is `Export.lua`'s producer rate). Reused the git-archive scratch-tree technique
 ([[feedback_worktree_main_based_pytest_pythonpath_trap]]) with `world-model/src` added to
 `PYTHONPATH` for body-layer's in-process cross-subproject import.
 
