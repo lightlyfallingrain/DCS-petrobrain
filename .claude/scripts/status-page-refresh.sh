@@ -114,13 +114,24 @@ GEN_OUT=$("$CLAUDE_BIN" -p "$GEN_PROMPT" --permission-mode acceptEdits 2>&1)
 GEN_STATUS=$?
 printf '%s\n' "$GEN_OUT" >>"$LOG"
 
+# Every exit path from here on runs after Phase 1 may have already touched $PAGE on disk, and
+# guard 2 at the top of this script ("working tree dirty -> SKIP") means a leftover modified file
+# turns one bad run into a silent permanent outage (see plans/obsidian-links-and-tags/review.md,
+# round 2, required fix 1). `git checkout -- "$PAGE"` is the revert for all of them: it is a
+# no-op when $PAGE already matches HEAD (nothing to undo), restores a partially-written or
+# emptied file, and restores a file Phase 1 deleted outright -- so it is applied uniformly on
+# every non-success exit below rather than only the one guard that happened to be tested.
+revert_page() { git checkout -- "$PAGE" 2>/dev/null || true; }
+
 if [ $GEN_STATUS -ne 0 ]; then
     say "--- FAILED generation (exit $GEN_STATUS) ---"
+    revert_page
     exit 0
 fi
 
 if [ ! -f "$PAGE" ]; then
     say "--- FAILED: $PAGE missing after generation ---"
+    revert_page
     exit 0
 fi
 
@@ -134,6 +145,7 @@ FORWARD_COUNT=$(awk '/id="graph-upcoming"/,/<\/pre>/' "$PAGE" \
 
 if [ "$FORWARD_COUNT" -eq 0 ]; then
     say "--- FAILED: forward-only map has zero items -- likely a split-ROADMAP pointer read as the full roadmap. NOT publishing or committing. ---"
+    revert_page
     exit 1
 fi
 
@@ -161,5 +173,9 @@ if [ $PUB_STATUS -eq 0 ]; then
     say "--- done (exit 0) ---"
 else
     say "--- FAILED publish/commit (exit $PUB_STATUS) ---"
+    # Phase 2 was supposed to commit $PAGE on success; a non-zero exit here means that may not
+    # have happened, which would leave it modified and uncommitted -- same guard-2 lockout as
+    # above. If it already committed (e.g. the failure was in the push step), this is a no-op.
+    revert_page
 fi
 exit 0

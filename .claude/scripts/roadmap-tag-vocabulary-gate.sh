@@ -14,6 +14,15 @@
 # false-positive class; this stops the rest of the same family rather than adding more one-off
 # exclusions as each new case is found.
 #
+# An unterminated (odd-count) fence is a malformed document, not a case to tolerate: the naive
+# toggle below has no end-of-file concept, so one missing closing ``` would otherwise leave
+# `fence` true for the rest of the file and silently stop scanning everything after it -- a false
+# negative, the direction this gate exists to prevent (round 2 review, 2026-10-06, found it by
+# mutation). So the fence count is checked per file before stripping, and an odd count fails
+# loudly rather than degrading silently. The fence-opener match also tolerates leading
+# whitespace, so a fence indented inside a list item is recognized as a fence rather than leaking
+# its contents through as prose (round 2's optional finding).
+#
 # Run standalone: .claude/scripts/roadmap-tag-vocabulary-gate.sh
 # Exit 0 and silent on success; exit 1 with every offending file/tag named on failure.
 set -uo pipefail
@@ -47,11 +56,21 @@ for dir in $DIRS; do
         base=$(basename "$f" .md)
         # Skip index files (not entries, and not subject to the tag-on-checkbox rule).
         printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
+        # An odd number of fence delimiters means the file has an unclosed fence -- fail loudly
+        # rather than let the fence-stripping below silently swallow the rest of the file (see
+        # header comment). Leading whitespace is allowed so an indented fence still counts.
+        fence_count=$(grep -cE '^[[:space:]]*```' "$f")
+        if [ $((fence_count % 2)) -ne 0 ]; then
+            FAIL=1
+            echo "roadmap-tag-vocabulary-gate: $f -- unbalanced fenced code block ($fence_count delimiter(s)) -- cannot safely scan for tags" >&2
+            continue
+        fi
         # Strip fenced code blocks, inline code spans, and URLs before scanning -- a "#" inside
         # any of those is not a tag (see header comment). A tag starts with a letter -- "#1",
         # "RECOMMENDED #1" etc. are ordinals in prose, not tags, and must not trip this gate
-        # (found live on the first real conversion, 2026-10-06).
-        used=$(awk '/^```/ { fence = !fence; next } fence { next } { print }' "$f" \
+        # (found live on the first real conversion, 2026-10-06). The fence match tolerates
+        # leading whitespace so a fence indented inside a list item is still recognized as one.
+        used=$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } { print }' "$f" \
             | sed -E 's/`[^`]*`//g' \
             | sed -E "s#https?://[^][:space:]\")'>]*##g" \
             | grep -ohE '#[A-Za-z][A-Za-z0-9/_-]*' | sort -u)

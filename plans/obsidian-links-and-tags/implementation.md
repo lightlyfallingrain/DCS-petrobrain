@@ -128,3 +128,144 @@ exit code: 0
   calls — only the new mechanical check itself exits non-zero, per the task's explicit "fail
   loudly and non-zero" instruction. The script otherwise still always exits 0 on paths that were
   already "log and continue" before this change.
+
+### Implementation Summary — Round 2 fix (2026-10-06)
+
+Addressed the two required fixes from `review.md`'s "Review round 2 — the fix" section, both
+defects the previous round's own fix introduced.
+
+### Files Changed
+
+- `.claude/scripts/status-page-refresh.sh` — every non-success exit path *after* Phase 1 may
+  write (or have written) to `$PAGE` on disk, and guard 2 ("working tree dirty → SKIP") turns any
+  leftover modified/missing file into a silent permanent outage of every future run. Added a
+  `revert_page()` helper (`git checkout -- "$PAGE" 2>/dev/null || true`, a no-op when the file
+  already matches HEAD) and called it on **every** exit path after generation, not only the one
+  the review named:
+  - `GEN_STATUS -ne 0` (Phase 1's own `claude -p` failed) — may have left a partial write.
+  - `[ ! -f "$PAGE" ]` (file missing after generation) — `git checkout` recreates a tracked file
+    that was deleted, same lockout risk as a modified one.
+  - `FORWARD_COUNT -eq 0` (the review's named required fix) — the forward-only map read empty.
+  - `PUB_STATUS -ne 0` (Phase 2's publish/commit/push failed) — Phase 2 is supposed to commit on
+    success; a non-zero exit means that may not have happened. If it *did* already commit (e.g.
+    the failure was in the push step), the revert is a no-op since the file already matches HEAD.
+- `.claude/scripts/roadmap-tag-vocabulary-gate.sh` — added a per-file fence-balance check
+  (`grep -cE '^[[:space:]]*```' "$f"`, odd count → `FAIL=1`, loud message to stderr, `continue`)
+  *before* the existing strip-and-scan, so an unclosed fence is a loud failure rather than a
+  silent "scanning stopped here." Also widened the fence-opener match in the strip pipeline from
+  `/^```/` to `/^[[:space:]]*```/` so a fence indented inside a list item is recognized as a fence
+  (the optional finding) rather than leaking its contents through as prose.
+- `.claude/scripts/roadmap-toc.sh` — mirrored both changes: the same fence-balance check (prints
+  `!!UNBALANCED-FENCE!!` in the tags column plus a stderr message, sets an overall `FAIL` the
+  script now exits with — previously this script had no non-usage exit-1 path at all) and the
+  same `/^[[:space:]]*```/` widening in its own strip pipeline.
+- `plans/obsidian-links-and-tags/implementation.md` — this section.
+
+### Tests Added
+
+No new unit tests — these are standalone bash gate scripts with no existing pytest harness (same
+as round 1). Verified by direct mutation against real files, as the task required; see "Mutation
+proofs" below.
+
+### Mutation proofs
+
+**Fix 1 — `status-page-refresh.sh` revert-on-failure**, run against the real
+`docs/status/petrobrain-status.html` (24 forward-map nodes at baseline):
+
+```
+=== baseline git status (expect clean) ===
+(empty)
+=== RUN 1: simulate a bad Phase-1 regeneration (strip all ::: markers) ===
+ docs/status/petrobrain-status.html | 162 ++++++++++++++++++-------------------
+ 1 file changed, 81 insertions(+), 81 deletions(-)
+FORWARD_COUNT=0
+--- FAILED: forward-only map has zero items. NOT publishing or committing. ---
+run_check exit code: 1
+=== after failure: git status --porcelain (expect CLEAN, proving revert worked) ===
+(empty)
+=== RUN 2: second invocation on the now-clean tree ===
+FORWARD_COUNT=24
+forward-only map has 24 item(s) -- proceeding to publish
+run_check exit code: 0  (proceeds normally, not blocked by guard 2)
+=== guard 2 logic re-check ===
+proceed: working tree clean
+```
+
+This exercises the exact `FORWARD_COUNT`/`revert_page` logic now in the script (lifted verbatim
+into a harness, since the script itself shells out to `claude -p`); the real file was mutated in
+place and the real `git checkout` reverted it — not a simulation of git's behavior.
+
+**Fix 2 — unbalanced fence, both scripts**, a temporary probe file
+`audio-adapter/ROADMAP/AA-B98.md` with one opening ``` and no closing one, followed by a real
+unknown tag in plain prose:
+
+```
+$ grep -cE '^[[:space:]]*```' AA-B98.md
+1
+--- gate run ---
+roadmap-tag-vocabulary-gate: audio-adapter/ROADMAP/AA-B98.md -- unbalanced fenced code block (1 delimiter(s)) -- cannot safely scan for tags
+exit=1
+--- toc run ---
+roadmap-toc: audio-adapter/ROADMAP//AA-B98.md -- unbalanced fenced code block (1 delimiter(s)) -- cannot safely scan for tags
+AA-B98     Unterminated-fence mutation probe (temporary, for review proof)        !!UNBALANCED-FENCE!!
+toc overall exit=1
+```
+
+Before this fix, the same file made both scripts exit clean with the real tag never reported —
+confirmed by inspection of the pre-fix `awk` toggle (`/^```/{fence=!fence;next}` has no
+end-of-file check, so `fence` stays true for the rest of the file once set).
+
+**Fix 2 (optional) — indented fence**, probe file with a 5-space-indented fence inside a numbered
+list item containing `#fenced-in-list-tag`, plus a real unknown tag outside any fence:
+
+```
+--- gate run (expect: flags #totally-unknown-tag, NOT #fenced-in-list-tag) ---
+roadmap-tag-vocabulary-gate: audio-adapter/ROADMAP/AA-B98.md -- tag #totally-unknown-tag not listed in docs/TAGS.md
+exit=1
+--- toc run ---
+AA-B98     Indented-fence mutation probe (temporary, for review proof)            #status/open
+```
+
+This is the regression check the task called out as the one that matters: the fenced, indented
+`#fenced-in-list-tag` is correctly stripped (not flagged), while the real unknown tag in ordinary
+prose outside the fence is still caught. Both probe files were removed after proving the fix;
+`git status --porcelain audio-adapter/ROADMAP/` is clean.
+
+### Checks (audio-adapter/, via the main checkout's sibling `.venv`, read-only)
+
+- `ruff format --check .` — 40 files already formatted
+- `ruff check .` — all checks passed
+- `mypy --strict src` — no issues, 15 source files
+- `pytest -q` — 222 passed, 1 skipped
+- `git diff --stat audio-adapter/` (this worktree) — empty; `audio-adapter/` was not touched by
+  this round, only `.claude/scripts/`
+
+### bash -n and gate re-runs (this worktree, real converted `audio-adapter/ROADMAP/`)
+
+- `bash -n` clean on all three changed scripts.
+- `roadmap-entry-consistency-gate.sh` → `OK` (unaffected by this round's changes; ~0.39s,
+  consistent with round 2's 0.36s measurement, within noise).
+- `roadmap-tag-vocabulary-gate.sh` → `OK`, ~0.32–0.33s (up from round 2's 0.25s baseline — the
+  added per-file `grep -cE` fence-count pass is one extra subprocess per file; at 22 files that is
+  the full ~0.07–0.08s difference observed). Extrapolating the same way round 2 did (linear in
+  file count, no quadratic step introduced), 204 files would add roughly another 0.6–0.7s on top
+  of round 2's 2–4s estimate — still comfortably sub-5s and invisible at commit time.
+- `roadmap-toc.sh audio-adapter/ROADMAP/` → prints all 22 entries with correct tags, exit 0,
+  matching the pre-fix baseline (toc.sh's own runtime was not separately measured in round 2 and
+  is not commit-gating).
+- `push-roadmap-gate.sh` and `graphify-dirty-flag.sh` — both unchanged by this round; re-ran with
+  `CLAUDE_PROJECT_DIR` set (unbound without it, unrelated to this fix) and both exit 0 cleanly.
+
+### Notable Discoveries
+
+- The reviewer's framing — "a gate that now misses a real tag is worse than the false positives
+  it fixed" — turned out to generalize past the fence case it was written about: both new checks
+  in this round (unbalanced fence, and the PUB_STATUS-failure revert) are instances of the same
+  shape, "a failure path that degrades silently is worse than one that fails loudly," which is
+  also why `revert_page()` was applied to all four `status-page-refresh.sh` exit paths rather than
+  just the one named — the three unnamed ones share the identical guard-2 lockout mechanism, just
+  reached by a different trigger.
+- `roadmap-toc.sh` had no non-usage exit-1 path before this round (every row printed unconditionally,
+  function always exited 0 past the usage check). Adding the fence-balance failure gives it one for
+  the first time — worth knowing if anything downstream currently assumes this script never fails
+  non-zero past argument validation.

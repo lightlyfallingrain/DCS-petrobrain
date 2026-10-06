@@ -26,3 +26,24 @@ Three review-fix patterns from `feature/doc-conventions-audio-adapter`
 
 See [[verify_full_suite_not_just_new_files]] and [[feedback_implementation_log_append]] for related
 verification habits on this project.
+
+### Round 2 (2026-10-06): the fix for #2 and #3 each introduced a new defect of its own
+
+Both were caught by the Reviewer's own re-mutation, not by re-reading the diff — see
+[[feedback_guard_every_statement_not_the_one_that_raised]], which this is a direct instance of.
+
+4. **A state-machine toggle (the fence `awk` from #2) has no end-of-file concept.** An unclosed
+   fence leaves `fence` true for the rest of the file, silently disabling the scan it was added to
+   protect — a *false negative*, strictly worse than the false positives it replaced, because a
+   clean exit now means "nothing to see" instead of "I looked and found nothing." Fix: count fence
+   delimiters per file (`grep -cE '^[[:space:]]*```'`) before stripping; an odd count fails loudly
+   rather than degrading silently. Apply to every consumer of the shared toggle, not just the one
+   under review (there were two here, a gate and a TOC helper).
+5. **The mechanical check from #3 (the `FORWARD_COUNT` grep) only tested its own true/false
+   arithmetic — never the consequence of the script's own guard on the false branch.** Exiting
+   non-zero after already having written the file left it modified+uncommitted, and the script's
+   *own* "working tree dirty → SKIP" guard then silently skips every future run forever. The lesson
+   generalizes past this one script: when a new guard's failure path leaves a side effect behind,
+   check what the *rest of the same script* does with that side effect before calling the guard
+   done — and enumerate every exit path reachable after the side effect happens, not only the one
+   path a review happened to probe (there were four such paths here; the review found one).
