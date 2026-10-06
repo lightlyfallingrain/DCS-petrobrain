@@ -336,3 +336,68 @@ silently matched nothing for an earlier implementer on this branch.
   still exists as `_resolvable_terms`. Not edited: it belongs to another
   plan, and `ROADMAP.md`/`BACKLOG.md`'s own mentions were out of bounds for
   this task.
+
+---
+
+## Round 4 — Security's two fix-now findings (mechanism `071410f`, docs in the commit that follows it)
+
+Change request from the security deep analysis
+(`plans/bl11-tick-cost/security-review.md` findings 1 and 2), re-entering the
+Implementer loop per `AGENTS.md`. Findings 3 (typo blast radius) and 5
+(`suppress(OSError)` around `close()`) were accepted as correct-as-written by
+the dispatcher and not touched; finding 4 (a disabled log reads as a short one)
+was filed as backlog, not fixed here.
+
+Both findings live in one eight-line closure, `logger._per_run_log_paths.
+resolve`.
+
+### Files Changed
+
+- `body-layer/src/logger.py` — `resolve` now expands `~` before stamping, calls
+  `per_run_log_path` **inside** the `try:` instead of before it, and guards
+  `(OSError, ValueError)` instead of `OSError`. The stderr line reports
+  `expanded.parent` rather than `stamped.parent`: the same directory in every
+  pre-existing case, since `Path.with_name` rewrites only the final component,
+  and defined in the new one, where `stamped` is never bound. Docstring widened
+  (separate commit) to name both exception types and the expansion.
+- `body-layer/src/run_log_paths.py` — module docstring: the CLI boundary is
+  where `~` is expanded as well as where the parent is created.
+- `body-layer/RUN.md` — the degrade paragraph gains the no-filename case and
+  the `~` expansion.
+- `body-layer/tests/test_run_log_paths.py` — four tests added.
+
+### Tests Added
+
+- `test_a_path_with_no_filename_degrades_rather_than_raising[.|/|'']` — the
+  three inputs that reach `with_name` with an empty final component; each
+  degrades to `(None, None, None)` with a stderr line instead of raising.
+  No `tmp_path`: the raise precedes the `mkdir`, so nothing is created.
+- `test_a_tilde_path_lands_under_the_home_directory` — `~/trace.jsonl` resolves
+  under a redirected `HOME`, and an empty redirected cwd is asserted still
+  empty afterwards, which is the actual defect (a directory literally named
+  `~`) rather than a proxy for it.
+
+### Checks (body-layer, the only subproject touched)
+
+- `ruff format --check src tests`: pass (118 files)
+- `ruff check src tests`: pass
+- `mypy src`: pass (54 files)
+- `pytest tests -q`: **1516 passed, 4 xfailed** — baseline 1512/4 plus the four
+  new tests. All four confirmed by name in unfiltered `pytest -v` output, not
+  via `-k`.
+
+### Notable Discoveries
+
+- **Both fixes were verified by counterfactual, and the two are independent.**
+  Narrowing the guard back to `except OSError` fails all three
+  degenerate-input cases and leaves the tilde test passing; replacing
+  `path.expanduser()` with `path` fails only the tilde test. `src/logger.py` is
+  byte-identical after restoring both (`shasum` `84cb2fa0…` before and after).
+- **A trailing slash is *not* a no-filename path, and the first draft of
+  `RUN.md` said it was.** `Path("logs/").name` is `"logs"`, so
+  `--detection-trace logs/` does not degrade — it writes a *file* named
+  `logs-<stamp>` beside `logs/`, because the stamp rewrites the last component
+  whatever it is (probed: `per_run_log_path(Path("logs/"))` → `logs-19700101-
+  020000`). The degrading set is exactly `.`, `/` and `""`. This is the third
+  round on this branch to produce a correct conclusion with an unearned reason
+  attached, caught here before the commit rather than by a reviewer.

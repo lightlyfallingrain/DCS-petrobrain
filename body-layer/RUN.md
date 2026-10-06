@@ -104,7 +104,15 @@ is gitignored and so absent in a fresh clone. Without that, the writers'
 `open(path, "a")` would raise `FileNotFoundError` during startup — before any
 of the write-failure handling below could report it — and the crew would not
 start at all. A directory that cannot be created disables that one log, with a
-line on stderr, rather than taking the sortie down with it.
+line on stderr, rather than taking the sortie down with it. So does a path
+with no filename in it at all — `--detection-trace .` or `/`. (A trailing
+slash is not one of those: `--detection-trace logs/` writes a *file* named
+`logs-<stamp>` beside `logs/`, because the stamp rewrites the last
+component whatever it is.)
+
+`~` is expanded, so `--speech-log ~/dcs-speech.jsonl` writes to your home
+directory even from a shell or wrapper script that passes the `~` through
+unexpanded.
 
 Where the run scripts put them: `run-scripts/run-crew-text.sh` and
 `run-crew-text-debug-view.sh` both `pushd` into `body-layer/` first and pass
