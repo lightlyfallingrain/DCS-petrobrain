@@ -41,7 +41,14 @@ scale (440 objects / 142 contacts / real `syria-full.sqlite`): **median ~330 ms,
 | trace writer | 4.4 ms/poll, 440 rows, 290 KB/poll | volume is the finding, not CPU |
 | 5 aircraft-layer GETs | 3.4 ms loopback floor | but **2.0 s timeout each** = 10 s worst case |
 
-## `group_salient_ids`: the fix is recomputation removal, measured 8.1×
+## `group_salient_ids`: the fix is recomputation removal, measured 8.1× — **but the shipped fix is 5.1×**
+
+> **Updated 2026-10-06, `feature/bl11-tick-cost` @ `8fa2ad6`.** The 8.1× below is this prototype's,
+> not the shipped code's. What shipped measures **5.1×**, and the gap is one more per-candidate
+> quantity left inside the pair loop — see [[group-salience-hoist-residual]] before quoting either
+> number. The table below is still the correct *baseline* measurement (its per-pair unit cost
+> reproduces to within 3 %).
+
 
 `_cohesive` recomputes two `profile_for` lookups and two `range_m` calls **per pair** of an O(n²)
 loop, all four depending on one candidate only. Hoist them into the `_resolvable` pass that already
@@ -65,7 +72,8 @@ contact has a freshly-updated believed position every poll, so it misses every p
 exactly the contacts that get spoken about. Measured: 92 % hit rate overall, but
 `distinct_positions == describe_calls == cache_misses` in **every** callout-bearing tick. A 1 m
 nudge costs the full 42 ms. Fix is to quantise the key (50-100 m), which the function's own output
-coarseness already tolerates.
+coarseness already tolerates. **Shipped 2026-10-06 (Stage 3b) — but it fixes only the across-poll
+axis, not the N-members one; see [[enrichment-cache-axes]].**
 
 `describe_position` on `syria-full.sqlite` is **median 51.6 ms cold-distinct, 41.4 ms warm-repeat**
 — it does not get cheaper on repeat, so it is CPU-bound Python, not cold I/O. Any "add a world-model
