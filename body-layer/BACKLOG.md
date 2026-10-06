@@ -1124,6 +1124,15 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   polls drops below a threshold is probably enough. **It must not become a callout**; the pilot
   cannot act on it mid-flight.
 
+  **SUPERSEDED 2026-10-06 by the unit-id probe — the structural cause below is the wrong one.**
+  `aircraft-layer/research/2026-10-06-unit-id-join-results.md`: `unit_name` is never null and never
+  duplicated in either flown mission (units 50/50, statics 94/94 join by name), so the
+  nameless/duplicate mechanism described below **did not reproduce in the mission it was diagnosed
+  from**. The real cause is that the LOS Hook walks `coalition.getGroups()` only, so **68.8 % of
+  objects are statics it never enumerates** — see `BL-11` Stage 4, rewritten. The paragraph below is
+  kept because the *reasoning error* is the instructive part: it explained the range anomaly
+  correctly and was still wrong about why.
+
   **2026-10-05 security audit — the 77 % has a structural cause, not a timing one, and it is worse
   than "unobserved".** Scheduled as `BL-11` Stage 4.
 
