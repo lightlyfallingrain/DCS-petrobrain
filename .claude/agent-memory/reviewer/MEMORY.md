@@ -148,3 +148,5 @@ and blowing the cap again; this pass merged them into one list.
 - [BL-11 tick cost review](project_bl11_tick_cost_review.md) - APPROVED W/ REQUIRED FIXES; the task's disk-full premise was backwards.
 - [Healthy-case guard test needs buffered state](feedback_healthy_case_guard_test_needs_buffered_state.md) - 4 close() tests passed with close() deleted entirely.
 - [BL-11 tick cost round 2 review](project_bl11_tick_cost_round2_review.md) - ruled to delete dead fns a round-1 approval's own premise created.
+- [Docstring "so" clause: delete the mechanism](feedback_docstring_so_clause_delete_the_mechanism.md) - true conclusion, false reason; 3 rounds running.
+- [BL-11 round 3 deletion review](project_bl11_round3_deletion_review.md) - which stale refs a deletion must sweep: present-tense claim vs dated record.
