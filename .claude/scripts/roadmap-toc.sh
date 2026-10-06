@@ -16,6 +16,7 @@ if [ "$#" -eq 0 ]; then
     exit 1
 fi
 
+FAIL=0
 for dir in "$@"; do
     [ -d "$dir" ] || continue
     for f in "$dir"/*.md; do
@@ -24,13 +25,27 @@ for dir in "$@"; do
         # Skip index files -- they are not entries.
         printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
         title=$(awk '/^# /{sub(/^# [A-Za-z0-9.-]+ — /, ""); print; exit}' "$f")
+        # An odd number of fence delimiters means the file has an unclosed fence -- fail loudly
+        # rather than let the fence-stripping below silently swallow every tag for the rest of
+        # the file (same false-negative risk as roadmap-tag-vocabulary-gate.sh, which this
+        # mirrors; round 2 review, 2026-10-06). Leading whitespace is allowed so an indented
+        # fence still counts.
+        fence_count=$(grep -cE '^[[:space:]]*```' "$f")
+        if [ $((fence_count % 2)) -ne 0 ]; then
+            FAIL=1
+            printf '%-10s %-70s %s\n' "$base" "$title" "!!UNBALANCED-FENCE!!"
+            echo "roadmap-toc: $f -- unbalanced fenced code block ($fence_count delimiter(s)) -- cannot safely scan for tags" >&2
+            continue
+        fi
         # Strip fenced code blocks, inline code spans, and URLs before scanning for tags -- a
         # "#" inside any of those is not a tag (same false-positive family as
-        # roadmap-tag-vocabulary-gate.sh, which this mirrors).
-        tags=$(awk '/^```/ { fence = !fence; next } fence { next } { print }' "$f" \
+        # roadmap-tag-vocabulary-gate.sh, which this mirrors). The fence match tolerates leading
+        # whitespace so a fence indented inside a list item is still recognized as one.
+        tags=$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } { print }' "$f" \
             | sed -E 's/`[^`]*`//g' \
             | sed -E "s#https?://[^][:space:]\")'>]*##g" \
             | grep -om1 -E '#[A-Za-z][A-Za-z0-9/_-]*( #[A-Za-z][A-Za-z0-9/_-]*)*' | head -1)
         printf '%-10s %-70s %s\n' "$base" "$title" "$tags"
     done
 done
+exit "$FAIL"
