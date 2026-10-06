@@ -30,7 +30,7 @@ see [[project_contact_store_never_pruned]] and [[project_group_reporting_cohesio
 related pre-existing group/contact-store cost patterns this compounds with.
 
 Also confirmed: `get_contacts()` (iterates the whole never-pruned `store.contacts`) is NOT on the
-5Hz hot path -- it's only called from `crew_console.py`'s player-triggered F10/speech-command
+per-poll hot path (**not** "5Hz" as this said before 2026-10-06 -- the loop is 1.0 s, see `project_body_layer_poll_loop_diagnosis.md`) -- it's only called from `crew_console.py`'s player-triggered F10/speech-command
 handlers (nearest-contact, follow-target resolver, sector "report"), not from
 `CalloutScheduler.tick`. Worth re-checking this boundary if `tick()` is ever refactored to call
 `get_contacts` directly.

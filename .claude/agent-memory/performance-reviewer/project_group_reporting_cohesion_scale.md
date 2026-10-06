@@ -6,7 +6,7 @@ metadata:
 ---
 
 `belief/groups.py::_cluster_contacts` (feature/group-reporting, reconciled once per `ContactStore.
-tick()`, so on the live 5 Hz poll) does two O(n^2) all-pairs passes: a nearest-neighbour-gap median
+tick()`, so on the live poll -- **corrected 2026-10-06**: this said "5 Hz"; the loop is 1.0 s and always has been, 5 Hz being `Export.lua`'s producer rate, so this cost is paid 5x less often than the entry assumed) does two O(n^2) all-pairs passes: a nearest-neighbour-gap median
 computation, then the union-find cohesion test. Measured directly against the branch's own code
 (uniform random positions, isolated `_cluster_contacts` calls, `body-layer/.venv`):
 
