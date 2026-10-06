@@ -44,7 +44,7 @@ three graphs" is state and does not.
 | Page element | Source |
 |---|---|
 | The five counters (`.count`) | Count `- [x]` / `- [~]` / `- [ ]` / `- [>]` across every roadmap. "Await hardware" is hand-identified: items a roadmap explicitly blocks on the user's own hardware or on a sortie. |
-| Subsystem cards (`.sys`, one per subproject) | That subproject's `ROADMAP.md` — its status line, its next actionable item, and a progress fraction that is a judgement call, not a computed ratio. |
+| Subsystem cards (`.sys`, one per subproject) | That subproject's `ROADMAP.md` — its status line, its next actionable item, and a progress fraction that is a judgement call, not a computed ratio. **Where `ROADMAP.md` carries the sentinel `<!-- split-roadmap: see ROADMAP/ -->`, it is a 4-line pointer, not the source — read its `ROADMAP/<subproject>-roadmap.md` index instead.** Reading the pointer itself yields an empty-but-well-formed page that still exits clean; see the non-zero-item assertion below. |
 | The Mermaid dependency map (`#graph-deps`) | The gating relationships stated in the roadmaps ("gated on", "needs a sortie", "deliberately last"). Node classes are `done`/`active`/`open`/`hold`/`block`. Shows *how the project got here* — it includes done work. |
 | The forward-only map (`#graph-upcoming`) | Every `- [ ]` / `- [~]` / `- [>]` across all roadmaps and backlogs (`*/BACKLOG.md`, `todo/backlog.md`) plus `todo/todo.md`. **Nothing done appears.** See "The forward-only map" below. |
 | "Waiting on you, not on code" (`.callout`) | Items that cannot advance without the user — hardware, a sortie, or a decision. This section is the page's most useful part; keep it honest and short. |
@@ -91,6 +91,11 @@ regeneration reveals nothing new, say less rather than padding.
   wrong, the drawer should say so. That history is why the entries are worth reading.
 - **Keep it selective.** Roughly 25 cards and rows. The page's value is being legible at a glance;
   the roadmaps already hold everything.
+- **Assert a non-zero forward-item count before publishing.** If, after reading all the sources
+  above, the forward-only map or a subsystem card would have zero open/in-progress items, stop and
+  say so rather than publish — that is the signature of a roadmap having been read as its own
+  4-line pointer instead of the `ROADMAP/` index it points to, and a page that regenerates clean
+  from a stub is a silent PASS, not a correct one.
 - **Update the date** in the masthead eyebrow.
 
 ## Design constraints — do not drift from these

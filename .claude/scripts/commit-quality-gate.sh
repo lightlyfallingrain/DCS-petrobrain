@@ -185,7 +185,7 @@ check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a rese
 ROADMAP_WARN=""
 DOD_CHECK_FILES=$(printf '%s\n' "$STAGED" | grep -E '^plans/[^/]+/dod-check\.md$' || true)
 if [ -n "$DOD_CHECK_FILES" ]; then
-    if ! printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP\.md$'; then
+    if ! printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP(\.md|/[^/]+\.md)$'; then
         ROADMAP_WARN="
   - dod-check.md staged, but no ROADMAP.md (root ROADMAP.md, or a subproject's, e.g.
     world-model/ROADMAP.md, aircraft-layer/ROADMAP.md, body-layer/ROADMAP.md) is touched in
