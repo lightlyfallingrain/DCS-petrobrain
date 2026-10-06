@@ -62,17 +62,22 @@ _OBJECT_TYPES = ("T-72B", "Ural-375", "Infantry AK")
 def _reference_resolvable(
     candidate: WorldObjectCandidate, observer: GeoPosition, optic: Optic
 ) -> bool:
-    """`group_salience._resolvable`'s pre-Stage-2 body, copied here rather
-    than imported -- the resolvability gate, including the
+    """`group_salience`'s pre-Stage-2 resolvability gate (then a predicate
+    named `_resolvable`), copied here rather than imported -- including the
     `presence_range_mult` factor.
 
-    **The copy is the point.** Importing `_resolvable` made this file
+    **The copy is the point.** Importing that predicate made this file
     tautological for the gate: Stage 2 turned it into a wrapper over
     `_resolvable_terms`, so both sides of every equality below went through
     the *same* gate and a change to it moved them together. Verified by
     mutation -- dropping `* optic.presence_range_mult` from
     `group_salience.py` left this file passing 15/15 while the imports were
-    in place, and fails it now."""
+    in place, and fails it now.
+
+    The wrapper itself was deleted once this copy replaced its only use
+    (round-2 review ruling), so this body is now the only statement of the
+    pre-change gate anywhere in the tree -- which is why it is spelled out
+    rather than expressed in terms of `_resolvable_terms`."""
     profile = object_model.profile_for(candidate.object_type)
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
     slant_range_m = range_m(observer, target)
@@ -83,11 +88,12 @@ def _reference_resolvable(
 def _reference_cohesive(
     a: WorldObjectCandidate, b: WorldObjectCandidate, observer: GeoPosition
 ) -> bool:
-    """`group_salience._cohesive`'s pre-Stage-2 body, copied here rather
-    than imported -- for the same reason as `_reference_resolvable` above:
-    Stage 2 made `_cohesive` delegate its arithmetic to
-    `_cohesive_from_terms`, which production's own pair loop also calls, so
-    an imported `_cohesive` could not pin the formula.
+    """`group_salience`'s pre-Stage-2 cohesion predicate (then a
+    two-candidate function named `_cohesive`), copied here rather than
+    imported -- for the same reason as `_reference_resolvable` above: Stage
+    2 made it delegate its arithmetic to `_cohesive_from_terms`, which
+    production's own pair loop also calls, so importing it could not pin
+    the formula. It too was deleted once this copy replaced its only use.
 
     The tuning constants (`GROUP_COHESION_GAP_UNIT_WIDTHS` here,
     `RESOLUTION_ANGULAR_RADIUS_RAD` above, `GROUP_MIN_MEMBERS` below) are
@@ -207,7 +213,7 @@ def test_hoisted_loop_matches_reference_under_a_raised_optic() -> None:
     diverge if the hoist dropped the multiplier.
 
     This now holds, which it did not while the reference imported
-    `_resolvable`: dropping `* optic.presence_range_mult` from
+    production's own gate: dropping `* optic.presence_range_mult` from
     `group_salience.py`'s gate makes this test fail (production 23 salient
     ids against the reference's 43), while `UNAIDED_OPTIC`'s own
     `presence_range_mult` of 1.0 leaves the other tests here passing -- which

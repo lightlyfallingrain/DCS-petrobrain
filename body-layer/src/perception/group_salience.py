@@ -98,8 +98,8 @@ def _resolvable_terms(
 
     **Returns the two per-candidate terms rather than a bare `bool` so
     `group_salient_ids`'s pair loop never recomputes them.** Both depend on
-    one candidate only, and `_cohesive` used to recompute both for *each*
-    candidate of *every* pair -- four redundant quantities per pair of an
+    one candidate only, and the pre-Stage-2 pair loop recomputed both for
+    *each* candidate of *every* pair -- four redundant quantities per pair of an
     O(n^2) loop, measured at 215 ms of a 440-candidate poll (58 % of a
     300-poll cProfile) in `body-layer/research/2026-10-05-performance-
     review.md` finding 1. Hoisting them here, into the pass that already
@@ -114,24 +114,6 @@ def _resolvable_terms(
     return target, theta_size
 
 
-def _resolvable(
-    candidate: WorldObjectCandidate, observer: GeoPosition, optic: Optic
-) -> bool:
-    """Whether `candidate` clears the loosest presence bound any admission
-    path can use -- `_resolvable_terms` above reduced to the predicate it
-    used to be, for the one-candidate question. `group_salient_ids` itself
-    calls `_resolvable_terms` so it keeps the terms it has just computed.
-
-    **Currently has no caller.** It was retained for
-    `tests/test_group_salience_equivalence.py`'s reference loop, but that
-    file now keeps its own copy of this body on purpose -- importing this
-    one made the equivalence test tautological for the gate, since Stage 2
-    routed it through `_resolvable_terms`, which production also uses. So
-    this is a named predicate kept for readers and for a future
-    one-candidate caller, not a tested path; do not cite it as covered."""
-    return _resolvable_terms(candidate, observer, optic) is not None
-
-
 def _cohesive_from_terms(
     theta_sep: float, theta_size_a: float, theta_size_b: float
 ) -> bool:
@@ -140,43 +122,17 @@ def _cohesive_from_terms(
     `GROUP_COHESION_GAP_UNIT_WIDTHS` of the two candidates' mean apparent
     angular size.
 
-    **The single definition of the predicate**, called by both `_cohesive`
-    below (the two-candidate question) and `group_salient_ids`'s pair loop
-    (which carries the per-candidate terms in parallel lists). Sharing it
-    here is deliberate: unlike `clustering.py`'s separability predicate --
-    which asks the *opposite* question on the same axis and must keep its
-    own formula, see that module's entry in `docs/STRUCTURE.md` -- these two
-    callers ask the identical question and a second copy could only drift."""
+    **The single definition of the predicate**, and `group_salient_ids`'s
+    pair loop (which carries the per-candidate terms in parallel lists) is
+    its only caller. Kept as a named function rather than inlined into that
+    loop so the predicate reads as one statement: unlike `clustering.py`'s
+    separability predicate -- which asks the *opposite* question on the same
+    axis and must keep its own formula, see that module's entry in
+    `docs/STRUCTURE.md` -- this is the cohesion question itself, and
+    `tests/test_group_salience_equivalence.py` pins it against its own copy
+    of the pre-Stage-2 formula rather than importing this one."""
     mean_unit_rad = 0.5 * (theta_size_a + theta_size_b)
     return theta_sep <= GROUP_COHESION_GAP_UNIT_WIDTHS * mean_unit_rad
-
-
-def _cohesive(
-    a: WorldObjectCandidate, b: WorldObjectCandidate, observer: GeoPosition
-) -> bool:
-    """Whether `a` and `b` are cohesive at `observer`: angularly separated
-    by no more than `GROUP_COHESION_GAP_UNIT_WIDTHS` of their own mean
-    apparent angular size -- the module docstring's "Cohesion and mass"
-    section. Deliberately a much wider angular scale than `clustering.
-    py`'s own merge predicate (which asks the opposite question: not
-    resolvable, i.e. under ~1 unit width).
-
-    `group_salient_ids`'s pair loop no longer calls this -- it carries the
-    per-candidate terms hoisted out of its `_resolvable_terms` pass and
-    calls `_cohesive_from_terms` directly (see `_resolvable_terms` for why).
-    This remains the named entry point for the two-candidate question and
-    computes the same terms the loop hoists, but like `_resolvable` it
-    **currently has no caller**: the equivalence test keeps its own copy of
-    this body rather than importing it, because this one delegates to
-    `_cohesive_from_terms` and so could not pin the formula."""
-    target_a = GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m)
-    target_b = GeoPosition(x=b.x, z=b.z, alt_m=b.alt_m)
-    theta_sep = angular_separation_rad(observer, target_a, target_b)
-    profile_a = object_model.profile_for(a.object_type)
-    profile_b = object_model.profile_for(b.object_type)
-    theta_size_a = angular_size_rad(profile_a.size_m, range_m(observer, target_a))
-    theta_size_b = angular_size_rad(profile_b.size_m, range_m(observer, target_b))
-    return _cohesive_from_terms(theta_sep, theta_size_a, theta_size_b)
 
 
 def group_salient_ids(
@@ -187,13 +143,13 @@ def group_salient_ids(
     """The `object_id`s of every candidate in `candidates` that belongs to
     a cohesive group of at least `GROUP_MIN_MEMBERS` resolvable members,
     at `observer`'s own position and `optic`'s own `presence_range_mult`
-    (module docstring). Single-link union-find over the `_cohesive`
-    predicate, mirroring `clustering.cluster_candidates`'s own algorithm
-    shape -- O(n^2) over the resolvable subset, the same cost that module
-    already pays on the same candidate list. Candidates that fail
-    `_resolvable` never enter the union-find pass and can never be
-    group-salient themselves, though they also never block a group from
-    forming among the rest.
+    (module docstring). Single-link union-find over
+    `_cohesive_from_terms`, mirroring `clustering.cluster_candidates`'s own
+    algorithm shape -- O(n^2) over the resolvable subset, the same cost that
+    module already pays on the same candidate list. Candidates for which
+    `_resolvable_terms` returns `None` never enter the union-find pass and
+    can never be group-salient themselves, though they also never block a
+    group from forming among the rest.
 
     The `_resolvable_terms` pass below keeps each surviving candidate's
     `(target position, apparent angular size)` in parallel lists, so the
