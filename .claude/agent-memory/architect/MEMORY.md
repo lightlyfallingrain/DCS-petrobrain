@@ -72,5 +72,6 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Non-goals must be written down](feedback_non_goals_must_be_written_down.md) — when a relaxation turns a constraint into a non-goal, record the non-goal AND the machinery you dropped.
 - [Crew query path design](project_crew_query_path_design.md) — `report left` silently matched *report east*; the `describe` synonym anchors but doesn't substitute; pull ≠ push observability.
 - [Group contact identity design](project_group_contact_identity_design.md) — churn lives in GroupStore.reconcile not ingest; object-permanence/inflated-rate already existed; D9's road corridor is a world-model milestone in disguise.
-- [Obsidian doc convention verdict](project_obsidian_doc_convention_verdict.md) — benefit is in 2 files not the repo; "every entry has an ID" is false for 45/67 body-layer entries; graph already makes 185 roadmap nodes.
+- [Obsidian doc convention verdict](project_obsidian_doc_convention_verdict.md) — REVISED to repo-wide + IDs for all; `-W<n>` third space; the debt list is a view not items (~6 duplicate records); BACKLOG missing from the dirty-flag regex.
 - [Doc corpus silent dropout](project_doc_corpus_silent_dropout.md) — splitting/moving a .md silently drops it from the graph corpus; happened twice, recorded only in graph-corpus-files.sh's comments.
+- [Scope by the right benefit](feedback_scope_by_the_right_benefit.md) — some benefits only exist at completion; label which benefit a cost/benefit table measures before recommending a stopping point.
