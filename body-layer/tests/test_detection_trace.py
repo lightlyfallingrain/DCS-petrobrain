@@ -748,13 +748,23 @@ def test_close_does_not_raise_when_the_disk_is_full(
 def test_close_does_not_raise_on_a_healthy_writer(tmp_path: Any) -> None:
     """The guard must not be hiding a failure on the ordinary path: a
     writer that never failed still flushes and closes cleanly, and its rows
-    are on disk afterwards."""
+    reach disk *because of* `close()`.
+
+    **`flush_every_n_polls` is 2 and only one poll is written on purpose.**
+    With 1 the row is already flushed before `close()` runs, so the
+    on-disk assertion holds whatever `close()` does -- verified by
+    mutation: gutting `close()` to a bare `return` left the old version of
+    this test passing. One poll short of the flush interval leaves the row
+    in the file object's own buffer, so the empty-then-non-empty pair is
+    what makes `close()` load-bearing here."""
     path = tmp_path / "trace.jsonl"
-    writer = DetectionTraceWriter(path, flush_every_n_polls=1)
+    writer = DetectionTraceWriter(path, flush_every_n_polls=2)
     store = ContactStore()
     trace = DetectionTraceCollector()
     trace.record(_unannotated_entry())
     writer.write_poll(trace, store)
+
+    assert path.read_text() == "", "row flushed before close(); test has no teeth"
 
     writer.close()
 
