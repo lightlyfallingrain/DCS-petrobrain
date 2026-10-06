@@ -1,405 +1,621 @@
-# Obsidian links and tags, repo-wide — verdict, cost/benefit, migration plan
+# Obsidian links and tags, repo-wide — revised verdict, cost at full scope, migration plan
 
-**Plan only.** Nothing was converted and no consumer was edited while writing this.
-Spike under judgement: branch `obsidian-test`, tip `f99617f`, write-up
-`todo/links-and-tags.md`, vocabulary `docs/TAGS.md`, converted subject `audio-adapter/`.
+**Plan only.** Nothing was converted, no consumer was edited, no file was renamed while writing
+this. **Revised 2026-10-06** against four user decisions (below) that override the earlier
+partial-adoption verdict.
+
+Spike under judgement: branch `obsidian-test`, tip `f99617f`, write-up `todo/links-and-tags.md`,
+vocabulary `docs/TAGS.md`, converted subject `audio-adapter/`. The spike is a **throwaway test**,
+not a template — where its structure is kept below, that is a decision with a reason, and where it
+is changed, the change says what the spike's version cost.
 
 ---
 
-## Verdict — adopt partially, in that order, and stop early by default
+## Revised verdict — adopt repo-wide, in staged order, consumers first
 
-**Adopt the convention. Convert three files, not seven. Convert nothing until the six
-consumers are fixed first.**
+**Every roadmap and backlog converts. Every entry gets a unique ID. `.obsidian` is gitignored
+everywhere. Nothing is converted until the consumers are fixed.**
 
-| | file | lines | ~tokens | entries | verdict |
+One earlier recommendation is superseded and does not recur below: filenames named by branch
+instead of by a minted ID (rejected by decision 1 — IDs enable dependency tracking, and stale IDs
+are grooming work the user has accepted).
+
+### Scope — what converts and what does not
+
+| file | entries | ~tokens | → | mint |
+|---|---|---|---|---|
+| `audio-adapter/ROADMAP.md` | 22 | 10.5k | `audio-adapter/ROADMAP/` | 0 — spike already minted `AA-1`…`AA-5` + stages |
+| `aircraft-layer/ROADMAP.md` | 12 | 2.7k | `aircraft-layer/ROADMAP/` | 8 |
+| `mission-interpreter/ROADMAP.md` | 9 | 4.0k | `mission-interpreter/ROADMAP/` | 0 — `MI-0`…`MI-6` complete |
+| `world-model/ROADMAP.md` | 42 → **35** | 29.2k | `world-model/ROADMAP/` | 20 |
+| `body-layer/ROADMAP.md` | 67 → **49** | 46.5k | `body-layer/ROADMAP/` | 27 |
+| `body-layer/BACKLOG.md` | 43 | 24.7k | `body-layer/ROADMAP/` (same dir) | 1 |
+| `todo/backlog.md` | 34 | 20.8k | `todo/backlog/` | 1 |
+| **totals** | **204 entry files** | **138.4k** | **+7 indexes** | **57 new IDs** |
+
+**Must not be split, each for its own reason:**
+
+- **root `ROADMAP.md`** (72 lines, 6.1k tokens, **zero checkbox entries**). 20+ consumers read its
+  status table *by name* for the subproject list — `check`, `test`, `compile`,
+  `test-instructions`, `update-template`, `status-page`, every agent role file. It has nothing to
+  split and splitting it breaks the most while buying the least. It is a cross-subproject index,
+  which is the thing the per-subproject indexes point *up* to.
+- **`todo/todo.md`** (24 entries, 0 IDs, 9.1k tokens). Not a roadmap and not a backlog: root
+  `CLAUDE.md` defines it as "User priority tasks and session-scoped notes", and its entries are
+  flight feedback in the user's own words that is *meant to migrate out* into a subproject's
+  roadmap. Minting 24 permanent IDs for notes designed to leave would also collide with root
+  `CLAUDE.md`'s own rule that an item moving between files **takes a new ID in its destination** —
+  the ID would be born stale. Decision 2 scopes this to roadmaps and backlogs; `todo/todo.md` is
+  neither.
+- **Read-whole configuration documents** — `CLAUDE.md` (root and all six subprojects), `AGENTS.md`,
+  `docs/PROCESS.md`, `docs/AGENT_ROLES.md`, `plans/*/plan.md`. These are loaded in full by design;
+  splitting them converts an always-loaded file into a fan-out of reads nobody performs. Repo-wide
+  means every roadmap and backlog, not every `.md`.
+
+**`todo/backlog.md` converts, and it is the cheapest conversion in the table** — a reversal of the
+earlier "leave it" call, on a measurement rather than a preference. It is entry-shaped, 33 of its
+34 entries already carry `X-B<n>` IDs, it is read on **every** Session Start (root `CLAUDE.md`
+step 2), and it needs **zero consumer changes**: `graph-corpus-files.sh:48` is already
+`find todo -name '*.md'` (recursive, so `todo/backlog/*.md` is picked up for free),
+`graphify-dirty-flag.sh` already matches `^todo/`, and the two `ROADMAP\.md` gate regexes do not
+look at backlogs at all. 20.8k tokens off the common read for one directory and one pointer.
+
+---
+
+## Decisions taken
+
+Recorded with the user's own words, because the wording carries the reasoning.
+
+**D-1 — Mint unique IDs for every item.** *"item IDs - I'd rather have unique IDs for all items.
+It's allright if they go stale later, that's backlog grooming work then. IDs allow tracking items
+and dependencies, I'd rather use them."* → The branch-name filename alternative is dead. 57 new
+IDs minted (not ~72 — see "The ID scheme" below for why the number dropped). Dependency tracking
+is the stated purpose, which is what makes `[[ID]]` links load-bearing rather than decorative.
+
+**D-2 — Repo-wide, every subproject.** *"graph benefit and limited sub-systems - true for you and
+the agents, but a human reader benefits from all sub-systems following this convention and being
+browsable via Obsidian."* → The partial verdict is overridden. A convention followed by three of
+six subprojects is not browsable. The agent-token figures below stay as the honest *secondary*
+benefit; they are not the argument.
+
+**D-3 — Not bound by the spike's structure.** *"spike was a test - we do not have to follow it
+strictly, we can use a better structure if there's one"* → Four structural changes below (link
+form, filename case, tag spelling, index-per-file), each with the spike's cost named. Three
+spike choices kept with a stated reason.
+
+**D-4 — `.obsidian` gitignored everywhere.** *".obsidian needs to be gitignored, in all folders"*
+→ Unanchored pattern, and the spike's five tracked files removed in the same change.
+
+---
+
+## The ID scheme as it has to be extended — the plan's one consequential decision
+
+### What exists (verified, not recalled)
+
+Root `CLAUDE.md` "Backlog Management" defines **`<prefix>-B<n>`** for backlog items and bare
+**`<prefix>-<n>`** for milestones, both under **never-reuse, never-renumber**. Measured on disk:
+
+| space | occupied by |
+|---|---|
+| bare `<prefix>-<n>` | `BL-0`…`BL-11`, `MI-0`…`MI-6` (+ `MI-5b`), `BR-1`/`BR-2`, `PB-0`…`PB-9` (concept doc), `AA-1`…`AA-5` (minted by the spike), and **`M0`…`M11`** — world-model's milestones use the bare prefix `M`, *not* `WM-` |
+| `<prefix>-<n>.<m>` | stages; spike-formalised, prose already said "BL-11 Stage 0" |
+| `<prefix>-B<n>` | `AC-B1`…`B4`, `AA-B1`…`B3`, `WM-B1`…`B6`, `BL-B<n>`, `X-B1`…`X-B33` |
+| `<prefix>-W<n>` | **nothing.** `grep -rnoE '\b[A-Z]+-W[0-9]+' --include='*.md' .` → zero hits |
+
+### The ID-less entries are two different things, and that halves the job
+
+124 entries carry no ID. Split by section, they are not one kind:
+
+| | body-layer | world-model | aircraft-layer | audio-adapter | `todo/backlog.md` |
 |---|---|---|---|---|---|
-| ✅ keep | `audio-adapter/ROADMAP.md` | 577 | 10.5k | 22 | already converted by the spike — merge it |
-| ✅ convert | `body-layer/ROADMAP.md` | 2303 | **46.5k** | 67 | the only file whose read cost is a real project cost |
-| ✅ convert | `body-layer/BACKLOG.md` | 1304 | 24.7k | 43 | second-densest, same ID scheme, same churn |
-| 🟡 optional | `world-model/ROADMAP.md` | 1381 | 29.2k | 42 | worth it, but a mature subproject — low churn, lower urgency |
-| ❌ leave | `todo/backlog.md` | 1126 | 20.8k | 34 | cross-cutting and session-scoped; `X-B<n>` churn is lowest and the file is a working surface, not a reference |
-| ❌ leave | root `ROADMAP.md` | 72 | 6.1k | 0 | **the one file that must not be split.** 20+ consumers read its status table *by name* for the subproject list. It has no checkbox entries to split. Splitting it breaks the most and buys the least |
-| ❌ leave | `aircraft-layer/ROADMAP.md` | 131 | 2.7k | 12 | 12 files for 2.7k tokens is overhead, not navigation |
-| ❌ leave | `mission-interpreter/ROADMAP.md` | 177 | 4.0k | 9 | subproject complete through MI-6; a frozen file does not need splitting |
+| in a **"Live acceptance debt"** list | 17 | 7 | — | — | — |
+| in **Status / Backlog** proper | 27 (+1 in BACKLOG) | 20 | 8 | 19 (spike minted) | 1 |
 
-**The load-bearing step:** the benefit is not spread across the repo, it is concentrated in
-**two files**. `body-layer/ROADMAP.md` + `body-layer/BACKLOG.md` are 71.2k of the 144.7k
-measured roadmap/backlog tokens (49%) and 110 of the 229 entries, and `body-layer/ROADMAP.md`
-alone was touched by **130 commits in the last 30 days** — the highest-churn document in the
-repo. The three small roadmaps together are 9.4k tokens (6.5%) and 33 entries: converting them
-creates 33 files and 3 more indexes that can go stale, and saves a read nobody notices.
-A partial adoption buys ~95% of the measured benefit for ~60% of the files.
+**The debt-list entries are not items. They are a view over items, and today the two disagree.**
+`fix/contact-report-flood` has a debt entry marked `[ ]` *and* a Status entry marked `[x]`
+("Contact-report flood (merge-echo callout suppression)"). The same doubling exists for the
+`silence` command, `fix/redundant-group-disclosure`, the position-belief-runaway fix,
+`feature/dcs-driven-los` and the group-cohesion redesign. Minting an ID per checkbox would mint
+**two permanent IDs for one piece of work**, under a never-reuse rule, and freeze the
+disagreement into two files.
 
-**Why adopt at all, given it is not pilot-facing.** Two reasons survive the Effort/Value check,
-and one does not. It survives because (1) the human who sets this project's direction says
-navigation is materially easier, and his navigation cost *is* a project cost — this is not
-developer ergonomics on a team of strangers; and (2) tags give a trustworthy `grep` **negative**
-over a cross-cutting axis, which root `CLAUDE.md` states the knowledge graph explicitly cannot,
-and the 5 Hz incident is the recorded price of not having one. It does **not** survive on
-agent-token savings alone, which are real (below) but would not justify touching the config
-surface on their own.
+**So: the debt list does not become entry files.** Each merged-but-unflown work item keeps its one
+entry file, carrying `#needs-flight` and its acceptance-card link; the debt list in the index
+becomes four lines of prose plus `grep -rl '#needs-flight' */ROADMAP/ todo/backlog/`. This is
+exactly the hand-kept-prose-list-to-tag replacement `docs/TAGS.md` was written for, it is the one
+place benefit (d) pays for itself, and it removes 24 of the 124 mints and ~6 duplicate records.
+
+### Recommendation — a third marker, `<prefix>-W<n>`
+
+**One recommendation, not options: work items that are not milestones and not backlog take
+`<prefix>-W<n>`, numbered from 1 per subproject, in a number space independent of both others.**
+
+Why not the **milestone** space: `BL-12` is a live, contested resource — `BL-11` just shipped and
+`plans/body-layer/plan.md` §6 is the external document that *defines* what each `BL-x` is. Minting
+`BL-12`…`BL-38` for 27 historical bug fixes would retroactively claim milestone status for them,
+make §6 disagree with the roadmap about what `BL-12` means, and consume the forward sequence. Same
+for `M12` in world-model. This is the decisive argument and it is specific to these two
+subprojects.
+
+Why not the **backlog** space: "backlog" means not-yet-done, and ~90% of these entries are `[x]`.
+`BL-B47 — Binocular optic, done 2026-09-23` is semantically false and makes
+`grep -c 'BL-B'` useless as a measure of open work.
+
+Why `W`: one letter, parallel in shape to `B`, zero collisions anywhere in the repo (verified
+above), and `BL-12` / `BL-W12` coexist unambiguously because the spaces are independent.
+
+**Against never-reuse:** it strengthens the rule rather than straining it. Never-reuse is violated
+by *renumbering*, and a third space means nothing is renumbered: `M0`…`M11` keep their numbers,
+`WM-B1`…`B6` keep theirs, and the 20 world-model work items become `WM-W1`…`WM-W20` without a
+single existing mention changing. The retired/done entries keep their W-numbers forever, which is
+the rule working as intended.
+
+**Where a subproject has no declared milestone series, its Status entries become that series**, and
+`-W` is simply unused there. `aircraft-layer` and `audio-adapter` have no `plans/*/plan.md` §6
+equivalent and no forward series consuming the bare space, so their entries mint into it directly —
+`AC-1`…`AC-8`, and the spike's `AA-1`…`AA-5` stand. That is one rule, stated once; it is not a
+per-subproject exception list.
+
+**World-model's prefix inconsistency is recorded, not fixed.** Its milestones are `M<n>` and its
+backlog is `WM-B<n>`. Work items take `WM-W<n>` (aligning with the backlog prefix, since `M-W1`
+reads as nothing). Renaming `M<n>` → `WM-<n>` would break several hundred bare `M5`/`M7` prose
+mentions across `plans/` and `research/` that `docs/PROCESS.md` forbids rewriting. The convention
+doc states the irregularity in one line. Likewise `MI-5b`'s letter suffix stays; new sub-items use
+`.n`.
+
+### Who assigns, and in what order
+
+The spaces are **per subproject**, so two sessions converting *different* subprojects cannot
+collide at all — `BL-W*` and `WM-W*` are disjoint. Four rules close the remaining windows:
+
+1. **One subproject per branch; one branch per subproject at a time.** A subproject's conversion is
+   a single atomic commit range. No second branch touches the same `ROADMAP/`.
+2. **Numbers are assigned in document order, top to bottom of the file being converted** —
+   deterministic, so a rebase or a redone conversion produces the same numbers. "Whatever order the
+   converter worked in" is how a rebase silently renumbers.
+3. **The next unused number is read, never counted** (root `CLAUDE.md`'s own rule, applied to
+   files): `ls <sub>/ROADMAP/ | grep -oE '^[A-Z]+-W[0-9]+' | sort -t W -k2 -n | tail -1`.
+4. **No W-number is minted outside a conversion.** During the migration window, an un-IDed entry in
+   an unconverted file stays un-IDed — otherwise an interleaved `main` commit takes a number the
+   conversion branch assumed free.
+
+### Grooming — what "goes stale later" means mechanically
+
+The user accepted staleness as grooming work. Concretely, done entries **keep their IDs and their
+files, in place, forever.** Recommended, over an archive directory or deletion:
+
+- **Moving or deleting an entry file breaks every `[[BL-W12]]` link and the 441 historical prose
+  mentions** (measured today; it was 429 this morning and grows). An archive directory is a move,
+  so it is the same breakage unless the corpus script, the link gate and the index all follow it —
+  more machinery, no gain.
+- **The read-cost benefit is already delivered by the split, not by archiving.** A 46.5k file forced
+  you to read its history; 204 separate files do not. A done entry's file is simply never opened,
+  so an agent cannot tell an archive from a `#status/done` tag.
+- **So grooming is narrow and real:** flip the `#status/*` tag, move the row from the index's Open
+  table to its Done table, and fold any debt-list duplicate into the one surviving entry. No file
+  surgery, no ID retirement.
+- **The honest cost:** `<sub>/ROADMAP/` grows monotonically — ~204 files today, perhaps +50/year.
+  `ls` output gets long and the corpus grows (see below). Accepted, stated, not mitigated.
 
 ---
 
-## Cost
+## Cost at full scope
 
-### Files created
+### Files and the corpus ceiling — the one hard new cost
 
-| stage | entry files | index files | running total |
-|---|---|---|---|
-| audio-adapter (done) | 22 | 1 | 23 |
-| body-layer ROADMAP | 67 | 1 | 91 |
-| body-layer BACKLOG | 43 | 1 | 135 |
-| world-model (optional) | 42 | 1 | 178 |
-| *full adoption, not recommended* | *+33* | *+3* | *236* |
+`graph-corpus-files.sh` currently emits **172 files**; `graph-corpus-guard.sh`'s ceiling is
+**200**. Repo-wide conversion adds **204 entry files + 7 indexes = 211**, taking the corpus to
+**~383**. The guard **refuses the rebuild, loudly** — which is the design working, and it must then
+be raised deliberately (to ~450, leaving headroom), not pre-raised in anticipation. Corpus *word*
+count is roughly unchanged: content moves, it does not duplicate.
 
-Measured, not estimated: `grep -cE '^[[:space:]]*- \[[ x~?>]\]'` gives 22 for
-`audio-adapter/ROADMAP.md`, and the spike produced exactly 22 entry files. The count is reliable.
-
-### Consumers to update — the complete sweep
-
-Swept mechanically across `.claude/scripts/*.sh`, `.claude/skills/**/SKILL.md`,
-`.claude/agents/*.md`, `docs/*.md`, root and all six subproject `CLAUDE.md`, and the git hooks.
-**The spike's list is incomplete** — it misses `commit-quality-gate.sh`, `graphify-dirty-flag.sh`
-and `push-roadmap-gate.sh`, which are the three *mechanical* consumers, i.e. the ones that fail
-without a human in the loop.
-
-| consumer | what breaks | failure is | fix |
-|---|---|---|---|
-| `.claude/scripts/graphify-dirty-flag.sh:41` | regex `[^/]+/(CLAUDE\|ROADMAP)\.md` does not match `body-layer/ROADMAP/BL-12-*.md`. **Editing a roadmap entry stops recording that a semantic rebuild is owed** — the graph silently goes stale while reading as current | **SILENT · worst** | one-line regex: add `\|[^/]+/ROADMAP/[^/]+\.md` |
-| `.claude/scripts/graph-corpus-files.sh:74` | corpus is a **file list** over fixed names `ROADMAP CLAUDE BACKLOG`. Entry files are never listed, so the roadmap content leaves the graph | **SILENT** | one line: `find "$sub/ROADMAP" -name '*.md'` |
-| `.claude/scripts/status-page-refresh.sh:63-64` + `.claude/skills/status-page/SKILL.md:47,49,64` | derives subsystem status lines and the forward-only map from each subproject `ROADMAP.md`; reading a 4-line pointer yields an empty-but-plausible page and reports success | **SILENT · dominant** | prose + add an assertion (below) |
-| `.claude/scripts/push-roadmap-gate.sh:59` | `grep -qE '(^\|/)ROADMAP\.md$'` on pushed paths. An entry-file-only roadmap update no longer matches, so the gate **blocks every legitimate feature merge push** | LOUD (safe direction) | one-line regex |
-| `.claude/scripts/commit-quality-gate.sh:188` | same regex, emits a spurious "roadmap not updated alongside dod-check" warning | LOUD (safe direction) | one-line regex |
-| `.claude/scripts/session-start.sh:66` | prose tells the session to read "the `ROADMAP.md` of whichever subproject"; it reads a stub and concludes nothing is next | SEMI-SILENT | prose |
-| `.claude/skills/merge/SKILL.md:42,74` | "the merged branch's subproject `ROADMAP.md` is the source of truth" — now means the entry file + the index | SEMI-SILENT | prose |
-| `.claude/agents/dod.md:105,193` | step 11 instructs the roadmap update in detail | SEMI-SILENT | prose |
-| `.claude/skills/integrity-audit/SKILL.md:28,70`, `.claude/skills/retro/SKILL.md:139,161,187` | read subproject roadmaps as audit inputs | SEMI-SILENT | prose |
-| `.claude/agents/{architect,implementer,debugger,investigator,reviewer,performance-reviewer}.md:37-40` | identical "Where things live" block naming `<subproject>/ROADMAP.md` | SEMI-SILENT | one line × 6, identical edit |
-| root `CLAUDE.md:45-46, 90, 138-139, 365-368` | Session Start, Milestone Completion, the `AA-B<n>`/`WM-B<n>` ID-location table | SEMI-SILENT | prose |
-| `body-layer/CLAUDE.md`, `audio-adapter/CLAUDE.md`, `world-model/CLAUDE.md`, `mission-interpreter/CLAUDE.md` | one roadmap mention each | trivial | prose |
-
-**Not consumers, and this matters:** `check`, `test`, `compile`, `test-instructions`,
-`update-template` and `status-page:14` all read root `ROADMAP.md`'s **status table for the
-subproject list only**. Root `ROADMAP.md` stays whole, so these need no change at all. That
-removes six files from the blast radius the raw grep suggests.
-
-**Do not touch the 429 historical mentions.** `grep -o` finds 429 references to a
-subproject roadmap path, but 390+ are in `plans/*/dod-check.md`, `audits/`, `reviews/` and
-dated research notes — records of what was true then. `docs/PROCESS.md` "Superseding a decision"
-forbids rewriting them. **This is why the pointer file must never be deleted**: a 4-line
-`ROADMAP.md` pointing at the index is what keeps all 429 honest. Deleting it would break every
-one of them at once.
-
-### Mechanical vs judgement
+### Work, by kind
 
 | work | volume | kind |
 |---|---|---|
-| the six consumer regex/list fixes | 6 one-line edits | **mechanical**, do first |
-| prose updates in agents/skills/CLAUDE.md | ~22 lines across ~16 files | mechanical, tedious |
-| splitting entries into files | 110-152 files | **mechanical** — median entry is 20 lines (body-layer) / 12 (world-model), largest *real* entry 79 lines |
-| converting ID cross-references to wikilinks | 139 in body-layer, 87 in its BACKLOG, 69 in world-model | mechanical, but each must resolve (see risk D5) |
-| **minting IDs for entries that have none** | **45 of 67 body-layer entries, 27 of 42 world-model entries** | **judgement, and permanent** |
-| deciding where non-entry trailing sections go | body-layer has a 404-line tail (live-acceptance debt, "Keeping this current"); world-model 455 | judgement, one-off per file |
-| `/graph-refresh`, documents first | 1 run, 60k in / 18k out per `graphify-out/cost.json` | mechanical |
-| re-verify all six gates against the converted tree | 6 checks | mechanical |
+| consumer regex/list fixes (Stage 0) | 7 one-line edits | **mechanical, do first** |
+| prose updates in agents/skills/`CLAUDE.md` | ~22 lines across ~16 files | mechanical, tedious |
+| splitting entries into files | **204** files; median entry 20 lines (body-layer) / 12 (world-model), largest real entry 79 | mechanical |
+| converting ID cross-references to `[[links]]` | 139 (body-layer) + 87 (its BACKLOG) + 69 (world-model) + the smaller files | mechanical, each must resolve (R5) |
+| **minting 57 IDs** | 57 | **judgement, permanent** — but now rule-bound (document order, per-subproject space) rather than per-entry |
+| folding ~6 duplicate debt records into their Status entry | ~6 | **judgement** — two records disagree; one is right |
+| placing non-entry trailing sections | body-layer ~365-line debt preamble + "Keeping this current"; world-model ~160 | judgement, one-off per file |
+| raise the corpus ceiling, `/graph-refresh` | 1 + 1 | mechanical; 60k in / 18k out per `graphify-out/cost.json` |
+| re-verify every gate against the converted tree | 7 | mechanical |
 
-### The cost the spike admits it does not know — and it is not what the spike expected
+### Consumers — the complete sweep, unchanged in substance
 
-The spike names `body-layer` as "the honest stress test" and guesses the problem is
-cross-reference density. **Measured, density is a non-problem** (~2 ID mentions per entry) and
-**structure is a non-problem** (median entry 20 lines, splits cleanly).
+| consumer | what breaks | failure is | fix |
+|---|---|---|---|
+| `.claude/scripts/graphify-dirty-flag.sh:41` | regex `[^/]+/(CLAUDE\|ROADMAP)\.md` misses `body-layer/ROADMAP/BL-12-*.md`. **Editing a roadmap entry stops recording that a semantic rebuild is owed** — the graph goes stale while reading as current | **SILENT · worst** | one line: add `\|[^/]+/ROADMAP/[^/]+\.md`, **and `BACKLOG` — see the pre-existing bug below** |
+| `.claude/scripts/graph-corpus-files.sh:74` | corpus is a file list over fixed names `ROADMAP CLAUDE BACKLOG`; entry files are never listed, so roadmap content leaves the graph | **SILENT** | one line: `find "$sub/ROADMAP" -name '*.md' 2>/dev/null` beside the existing `docs` find. The enclosing loop is `for d in */pyproject.toml` — mechanical, no stale subproject list, so it is correct at full scope |
+| `.claude/scripts/status-page-refresh.sh:63-64` + `.claude/skills/status-page/SKILL.md:47,49,64` | derives subsystem status and the forward-only map from each subproject `ROADMAP.md`; a 4-line pointer yields an empty-but-plausible page and exits 0 | **SILENT · dominant** | prose + a non-zero-item assertion |
+| `.claude/scripts/push-roadmap-gate.sh:59` | `grep -qE '(^\|/)ROADMAP\.md$'` on pushed paths; an entry-only update stops matching and the gate **blocks every legitimate feature merge push** | LOUD (safe direction) | one-line regex |
+| `.claude/scripts/commit-quality-gate.sh:188` | same regex; spurious "roadmap not updated alongside dod-check" warning | LOUD (safe direction) | one-line regex |
+| `.claude/scripts/session-start.sh:66` | prose tells the session to read "the `ROADMAP.md` of whichever subproject"; it reads a stub and concludes nothing is next | SEMI-SILENT | prose |
+| `.claude/skills/merge/SKILL.md:42,74` · `.claude/agents/dod.md:105,193` · `integrity-audit/SKILL.md:28,70` · `retro/SKILL.md:139,161,187` | read subproject roadmaps as the source of truth or as audit inputs | SEMI-SILENT | prose |
+| `.claude/agents/{architect,implementer,debugger,investigator,reviewer,performance-reviewer}.md:37-40` | identical "Where things live" block naming `<subproject>/ROADMAP.md` | SEMI-SILENT | one line × 6, identical edit |
+| root `CLAUDE.md:45-46, 90, 138-139, 365-368` | Session Start, Milestone Completion, the `<prefix>-B<n>` ID table (**now also the home of the `-W<n>` rule**) | SEMI-SILENT | prose |
+| four subproject `CLAUDE.md` | one roadmap mention each | trivial | prose |
 
-The actual problem is that the spike's founding premise — *"every entry has a stable ID"* —
-**is false for body-layer**. Of 67 entries, **45 carry no ID**: they are named by branch
-(`feature/dcs-driven-los`, `fix/contact-report-flood`, `feature/sortie-refinements`) and are
-mostly transient live-acceptance debt. World-model is 27 of 42. So converting the two dense
-files means minting ~72 permanent IDs under root `CLAUDE.md`'s **never-reuse, never-renumber**
-rule — for entries that will mostly be closed and gone within weeks. That is a judgement call
-per entry and it is irreversible.
+**Found while re-measuring, and it is a live bug independent of this plan:**
+`graphify-dirty-flag.sh`'s regex covers `[^/]+/(CLAUDE|ROADMAP)\.md` but **not `BACKLOG`** — so
+editing `body-layer/BACKLOG.md` does **not** flag the graph dirty today, although that file *is* in
+the corpus. Third instance of the `graph-corpus-files.sh` failure class, in its mirror script. Fix
+it in Stage 0 whatever happens to the rest of this plan.
 
-**Recommended answer, which keeps it mechanical:** the filename is the ID *when there is one*,
-and the **branch name** when there is not —
-`body-layer/ROADMAP/fix-contact-report-flood.md`. Branch names are already unique, already
-bash-safe, already what the user and every plan call these items, and already used as the de
-facto address. No permanent IDs are minted for transient debt; `#needs-flight` carries the
-cross-cutting query that the hand-kept debt list carries today. State this in the convention
-doc as an explicit second naming form, not as an exception.
+**Not consumers:** `check`, `test`, `compile`, `test-instructions`, `update-template` and
+`status-page:14` read root `ROADMAP.md`'s status table for the subproject list only. Root stays
+whole, so these need no change — six files out of the blast radius the raw grep suggests.
+
+**Do not touch the 441 historical mentions.** Most are in `plans/*/dod-check.md`, `audits/`,
+`reviews/` and dated research notes — records of what was true then, which `docs/PROCESS.md`
+"Superseding a decision" forbids rewriting. **This is why the pointer file is never deleted:** a
+4-line `ROADMAP.md` pointing at the index keeps all 441 honest.
+
+### New costs that appear only at full scope
+
+- **Vault scope is now a hard requirement, and its configuration became untracked.** `[[AA-4.5]]`
+  resolving from a body-layer entry needs **one vault rooted at the repo root** (Obsidian resolves
+  basenames within a single vault). **Confirmed in fact, not assumed:**
+  `/Users/sg/Code/DCS-petrobrain/.obsidian/` already exists and was written today — the user has
+  already opened the repo root as a vault. But decision 4 makes that config untracked, so **nothing
+  in the repo can record that it was done**, and a fresh clone (including the public-open-source
+  intent) gets a vault that must be configured by hand. This is a genuine tension between decisions
+  2 and 4, and the only mitigation is one prose paragraph in `docs/DOC_CONVENTIONS.md`. The spike's
+  nested `audio-adapter/` vault becomes actively harmful and its config directory should be
+  **deleted, not merely untracked** — it would resolve `[[AA-4.5]]` but not `[[BL-12]]`, producing a
+  half-working vault that looks fine.
+- **Repo-wide basename uniqueness stops being theoretical.** 204 entry files + 7 indexes join every
+  other `.md` in one namespace. `README.md` already exists several times (`docs/status/README.md`,
+  `plans/archive/`), so `[[README]]` is meaningless. Rule: **only IDs are linked; nothing is ever
+  linked by title.** Index filenames stay `<scope>-roadmap.md` (the spike's choice) precisely
+  because seven `index.md` files would collide.
+- **Tag-vocabulary drift across six subprojects.** `docs/TAGS.md` is one closed vocabulary for all
+  of them, and the pressure to add a subproject-local `#topic/*` rises with scope. Two rules:
+  the gate checks every converted file against `docs/TAGS.md`, and **a `#topic/*` tag must cross at
+  least two subprojects** — a tag used in one directory is a search `ls` already answers.
+- **Seven indexes instead of one.** Seven more files that can disagree with what they index. The
+  no-status rule removes the part that drifts, and the gate removes orphans and dangling links; the
+  residual is each index's prose preamble, which can go stale exactly as today.
 
 ---
 
 ## Benefit
 
-### (a) Human navigation — real, primary, unquantifiable
+### (a) Human navigation across all six subprojects — primary, and the reason for decision 2
 
-User, 2026-10-06: *"this makes it a lot easier for me (as human) to read and navigate."* The
-beneficiary is the product owner. Counted as the primary benefit and not discounted. No number
-is available or needed.
+User: *"a human reader benefits from all sub-systems following this convention and being browsable
+via Obsidian."* The beneficiary is the product owner, and his navigation cost is a project cost.
+Not discounted, not quantified, and the thing partial adoption could not deliver — a graph view
+and a tag pane over three of six subprojects shows holes, not structure.
 
-### (b) Agent read cost — measured, and the strongest hard number
+### (b) Agent read cost — measured, and the honest secondary benefit
 
-| | now | after converting body-layer | cut |
+Session Start with body-layer active, `wc -c`/4:
+
+| | now | after | cut |
 |---|---|---|---|
-| Session Start on body-layer: root `ROADMAP.md` | 6.1k | 6.1k | — |
-| + active subproject roadmap | **46.5k** | index ~2k + 3 relevant entries ~2k | **−42.5k** |
-| + `todo/todo.md` + `todo/backlog.md` | ~24k | ~24k | — |
-| **total** | **~77k** | **~34k** | **−56%** |
+| root `ROADMAP.md` | 6.1k | 6.1k | — |
+| `body-layer/ROADMAP.md` | 46.5k | index ~2.5k | |
+| `body-layer/BACKLOG.md` | 24.7k | index ~2.0k | |
+| `todo/backlog.md` | 20.8k | index ~1.5k | |
+| `todo/todo.md` | 9.1k | 9.1k | — |
+| + 2-4 relevant entries | — | ~2k | |
+| **total** | **~107k** | **~23k** | **−78%** |
 
-Converting `body-layer/BACKLOG.md` too takes the common "what is open" read from 24.7k to
-~2k. This is the single most-repeated read in the project — root `CLAUDE.md` makes clearing
-context between tasks a deliberate habit, so every clear pays it again.
+Root `CLAUDE.md` makes clearing context between tasks a deliberate habit, so this read is paid
+again on every clear. `/graph-refresh`'s own `gq.sh` source lists also sharpen: `source_file` points
+at a ~700-token entry instead of a 46.5k file.
 
-### (c) Merge-conflict reduction — real but over-claimed
+### (c) Merge-conflict reduction — real, secondary, still over-claimed if leaned on
 
 `body-layer/ROADMAP.md` took 130 commits in 30 days; per-entry files make same-file collisions
-structurally rare, and that is a genuine win. **But** I did not verify that the 2026-10-05/06
-pass's eight conflicts were in subproject roadmap prose, and the split does **not** help the two
-places the cross-subproject narrative actually collides: the new index file and root
-`ROADMAP.md`'s status table (whose cells run to ~1,500 words each). Treat this as a secondary
-benefit, not a justification.
+structurally rare. It does **not** help the two places the cross-subproject narrative actually
+collides — the index files and root `ROADMAP.md`'s status table.
 
-### (d) Trustworthy `grep` negatives over tags — the one genuinely new capability, and untested
+### (d) Trustworthy `grep` negatives over tags — the one genuinely new capability
 
-This is the benefit nothing else in the repo provides. Root `CLAUDE.md` is explicit that the
-graph's negatives are unreliable and that a completeness sweep must be `grep`. A closed tag
-vocabulary makes `grep -l 'needs-flight' */ROADMAP/*.md` an authoritative answer to "what do I
-owe a sortie" across every subproject — replacing a hand-kept prose list in
-`body-layer/ROADMAP.md` that only discipline keeps current.
+Root `CLAUDE.md` is explicit that the graph's negatives are unreliable and a completeness sweep must
+be `grep`. A closed vocabulary makes `grep -rl 'needs-flight' */ROADMAP/ todo/backlog/` an
+authoritative answer to "what do I owe a sortie" across every subproject at once — replacing two
+hand-kept prose debt lists that only discipline keeps current, and that this plan has just shown
+disagree with their own Status entries in ~6 places. **Conditional on the vocabulary gate existing**
+(Stage 1), because nothing currently enforces `docs/TAGS.md` and one `#topic/speech` beside
+`#topic/stt` destroys the whole benefit.
 
-**Sceptically:** it has been applied to 22 entries of one subproject, the spike's own first
-query of it returned a confident wrong answer (the `#`-in-frontmatter trap), and **nothing
-enforces the closed vocabulary.** `docs/TAGS.md` says adding a tag is an edit to that file, but
-no gate checks it — and the moment `#topic/speech` appears beside `#topic/stt`, the trustworthy
-negative is gone and the whole benefit with it. This benefit is **conditional on a vocabulary
-gate existing**, which is why one is in Stage 1 below rather than left to discipline.
+### (e) Graph quality — modest, narrower than the spike claims
 
-### (e) Graph quality — modest, and the spike's framing is wrong
+Measured against the live graph (9,487 nodes, built 2026-10-05): the roadmap and backlog files
+**already** produce **185 nodes / 264 edges**, including per-entry nodes (`AC-B3 — Split The Export
+Throttle`). "One node per entry instead of one giant node" is already true. Real gains: closes a
+13-entry extraction gap in body-layer (54 nodes from 67 entries) and sharpens `source_file`
+provenance. Re-measure after Stage 2 against the 185/264 baseline.
 
-Measured against the live graph (`graphify-out/graph.json`, 9,487 nodes, built 2026-10-05): the
-roadmap and backlog files **already** produce **185 nodes and 264 edges**, including per-entry
-nodes such as `AC-B3 — Split The Export Throttle` and
-`WM-B5 - valley boundary extraction`. The spike's "one node per entry instead of one giant
-roadmap node" is not what the extractor does today.
+---
 
-The real gain is two things, both narrower: (1) it closes an extraction gap —
-`body-layer/ROADMAP.md` yields only 54 nodes from 67 entries, so 13 entries are currently
-invisible; and (2) `source_file` would point at a ~700-token entry instead of a 46.5k-token
-file, which is what `gq.sh`'s "read these sources" list hands an agent. Provenance precision,
-not size. Worth having; not a reason on its own.
+## Structure — re-examined, not inherited
+
+### Changed from the spike
+
+1. **Link form: `[[<ID>]]`, resolved by a frontmatter `aliases:` entry** — replacing
+   `[[AA-1.1-Stage_1_synthesis_and_local_playback\|AA-1.1]]`. **What the spike's form costs:** 56
+   characters to express "AA-1.1", in the text an *agent* reads (spending back part of the split's
+   token saving); every referring file must be re-edited when a title is reworded; and the `\|`
+   escape is required inside a markdown table but wrong outside it — **two spellings of one link**,
+   which is the same class of trap as the `#`-in-frontmatter one the spike already hit. With an
+   alias the link is the bare ID, *identical to the 441 historical prose mentions*, so
+   `grep -rn 'AA-1\.1'` finds links and prose together. Frontmatter carries `aliases: ["AA-1.1"]`
+   and nothing else; the gate checks the alias equals the filename's ID prefix, so it is derivable
+   and cannot drift. **This is a claim about third-party software** — Obsidian resolving `[[alias]]`
+   is documented core behaviour but unverified *here*, so it is a one-minute user check at Stage 1
+   with the spike's pipe form as the stated fallback. Not encoded as fact.
+2. **Filename: `<ID>-<kebab-title>.md`**, not `<ID>-<Title_with_underscores>.md`. The repo has one
+   case convention everywhere else — branches (`feature/dcs-driven-los`), plan directories
+   (`plans/obsidian-links-and-tags/`), research notes. The spike's mixed hyphen-then-underscore form
+   costs nothing concrete, but it is a second convention in a repo that has one, and with aliases
+   the filename never appears inside a link anyway.
+3. **Tags: inline `#tag` only, nowhere else.** The spike puts topics in frontmatter (no `#`) and
+   `#status/...` inline — the two-spellings trap its own `docs/TAGS.md` warns about, in the file
+   that warns about it. Keep the *better* half: `docs/TAGS.md` Rule 2's argument is sound (status
+   lives next to its checkbox marker so the two cannot diverge unnoticed), so put **every** tag
+   there: `- [x] **AA-4.5 — Stage 5 …** #status/done #topic/ptt #topic/cockpit-io`. One spelling,
+   one location, every `grep` recipe identical, Obsidian's tag pane works on inline tags.
+4. **One index per source file, not per directory.** `body-layer/ROADMAP/` holds both roadmap and
+   backlog entries but gets two indexes (`body-layer-roadmap.md`, `body-layer-backlog.md`) so each
+   pointer file has exactly one destination and the 441 historical mentions of
+   `body-layer/BACKLOG.md` resolve to the right list.
+
+### Kept from the spike, with reasons
+
+- **`<subproject>/ROADMAP/` per subproject** — not a flat repo-wide `docs/roadmap/`. A flat
+  directory would break root `CLAUDE.md`'s "each subproject's `ROADMAP.md` is that subproject's own
+  source of truth", break per-subproject `grep`, make `graph-corpus-files.sh`'s
+  `for d in */pyproject.toml` loop the wrong shape, and break `ls */ROADMAP/` — which is the
+  mechanical answer to "which subprojects are converted" that keeps a stale list out of the config
+  (R8). Per-subproject is *more* right at repo-wide scope, not less.
+- **Backlog entries share the `ROADMAP/` directory** rather than getting a `BACKLOG/`. The ID
+  distinguishes kind (`BL-B4` vs `BL-12`), the indexes are already separate, and a second directory
+  doubles the corpus-script and link-gate surface for nothing. The directory name is mildly a lie
+  for backlog entries; renaming it to `entries/` would break the `*/ROADMAP/*` regex fixes and every
+  historical mention, which is a much worse trade. (`todo/backlog/` is the exception, because there
+  is no `todo/ROADMAP.md`.)
+- **The 4-line pointer `ROADMAP.md`, with a machine-checkable sentinel**
+  (`<!-- split-roadmap: see ROADMAP/ -->`). 441 historical mentions depend on the path existing;
+  the sentinel is what lets a consumer tell a pointer from a real roadmap instead of silently
+  reading four lines and reporting success.
+- **Dotted sub-IDs (`AA-4.7`)**, not `AA-4-7`. Hundreds of prose mentions across `plans/`,
+  `audits/` and research notes use the dotted form; changing the separator makes every one of them
+  un-greppable for readability in a filename the alias form hides.
+- **Hand-kept indexes plus a mechanical consistency gate**, not a generator — even at seven
+  indexes. A generator is a build step in a repo that deliberately has almost none, and it would
+  have to preserve each index's irreplaceable prose preamble. The ~15-line pre-commit gate catches
+  the two failures a generator would not: a dangling `[[link]]`, and an entry file absent from its
+  index. Its cost rises linearly with indexes, which is fine.
 
 ---
 
 ## Risks & failure modes
 
-Ordered by how silent each one is, because silence is the whole problem.
+Ordered by how silent each is, because silence is the whole problem.
 
-- **D1 — a consumer reads a stub and reports PASS (dominant).** The status page is derived from
-  subproject roadmaps; pointed at a 4-line pointer it regenerates an empty-but-well-formed page
-  and exits 0. `integrity-audit`, `retro` and `dod-check` have the same shape. *Caps the damage:*
-  `status-page-refresh.sh`'s own header records (verified 2026-09-27) that the launchd job is
-  **not installed**, so today it runs only by hand. That is luck, not a safeguard — the plist is
-  committed and ready. **Make it detectable:** the pointer file must carry a machine-checkable
-  sentinel line (`<!-- split-roadmap: see ROADMAP/ -->`) and the status-page skill must assert a
-  non-zero item count before publishing. An assertion that fires is the difference between a
-  wrong page and a refusal.
-- **D2 — content silently leaves the graph corpus.** `graph-corpus-files.sh` is a curated file
-  list, and **this exact failure has already happened twice**, documented in that script's own
-  comments: the 2026-09-27 `BACKLOG.md` split "silently dropped 8,200 words of open items out of
-  the corpus", and `body-layer/docs/STRUCTURE.md` "would have dropped 84KB of design rationale
-  out of the corpus silently." A roadmap split is the third instance of a failure class the
-  repo has already written down twice. *Detectable, and almost for free:* `graph-corpus-guard.sh`
-  refuses a rebuild whose corpus exceeds a file ceiling — adding 110-152 files **trips that
-  ceiling loudly**, forcing a conscious decision at exactly the right moment. Do not pre-raise
-  the ceiling; let it fire.
-- **D3 — the dirty flag stops firing.** `graphify-dirty-flag.sh`'s regex misses
-  `*/ROADMAP/*.md`, so entry edits no longer record that a rebuild is owed. The graph then
-  launders staleness rather than lagging it — precisely the failure `docs/PROCESS.md`
-  "Documents before the graph" is about. Silent; detectable only by noticing
-  `GRAPH_REPORT.md`'s mtime. One-line fix, and it is the single highest-value line in this plan.
-- **D4 — the push and commit gates block or warn spuriously.** Both regexes stop matching.
-  **Loud, and failing in the safe direction** — the push is refused rather than waved through.
-  Fix in Stage 0 anyway; a gate that cries wolf gets bypassed.
-- **D5 — dangling wikilinks.** Obsidian colours an unresolved `[[link]]`; `grep` does not, and
-  neither does any gate. With 295 cross-references to convert across the three files, some will
-  be wrong. *Make detectable:* a ~15-line pre-commit check that every `[[target]]` resolves to
-  an existing basename and every `ROADMAP/*.md` appears in its index. This is also the answer to
-  the generated-vs-hand-kept index question (below).
-- **D6 — committed editor state.** The spike commits `audio-adapter/.obsidian/` — 276 lines
-  including `workspace.json` (220 lines of pane geometry) that rewrites on every pane move.
-  Per-user, high-churn, conflict-prone, and `.gitignore` currently has no `.obsidian` entry
-  (root `.obsidian/` is untracked and showing in `git status` today). **Add `.obsidian/` to
-  `.gitignore` and drop those five files from the spike before merging.**
-- **D7 — vault scope, which the write-up does not raise.** The spike made `audio-adapter/` the
-  vault. A repo-wide convention needs `[[AA-4.5]]` to resolve from a `body-layer` entry, and
-  Obsidian resolves basenames **within one vault** — so the vault root must be the **repo root**,
-  not per-subproject. Per-subproject vaults would break the cross-subproject `#topic/*` axis that
-  is the tags' stated reason to exist. Decide before Stage 2; the repo-wide-unique-basename rule
-  (spike rule 3) already assumes repo-root scope without saying so.
-- **D8 — this touches the config surface the project has been burned by twice** (stale
-  subproject lists producing silent PASS, root `CLAUDE.md`'s own warning). Mitigation is the
-  same one the repo already uses: **never write a list of which subprojects are converted.**
-  `ls */ROADMAP/ 2>/dev/null` answers it mechanically and cannot go stale.
-- **D9 — it competes with brain/memory milestones.** Honest statement, no mitigation offered:
-  this is documentation work during the phase where the brain layer is the named bottleneck. The
-  staged plan below exists so it can be abandoned after any stage without leaving the repo
-  half-broken, which is the only real answer to this.
-
----
-
-## The spike's open questions — recommendations
-
-1. **Generated or hand-kept index? → Hand-kept, plus a mechanical consistency gate.**
-   A generator is a build step in a repo that deliberately has almost none, and the no-status
-   rule already removes the only part that drifts. But "hand-kept" fails the way this project
-   always fails — by being forgotten — so pair it with the ~15-line pre-commit check from D5:
-   every entry file appears in its index, every `[[link]]` resolves. Cheaper than a generator,
-   and it catches the two failures a generator would not (dangling links, orphan files).
-2. **`AA-4.1` or `AA-4-1`? → Keep the dot.** Root `CLAUDE.md` already defines the dotted form,
-   and 400+ existing prose mentions across `plans/`, `audits/` and research notes use it.
-   Changing the separator makes every historical mention un-greppable for the sake of
-   readability in a filename the alias form hides anyway. Dots are fine for bash and Obsidian;
-   the spike verified that.
-3. **Does `body-layer` survive it? → Yes, but not for the reason asked.** Measured: structure
-   splits cleanly (median entry 20 lines) and cross-reference density is low (~2 per entry).
-   What does *not* survive is the premise that every entry has an ID — 45 of 67 do not. Adopt
-   the branch-name filename form above and body-layer converts mechanically. Without that
-   decision, converting body-layer means minting 45 permanent IDs for transient debt, and I
-   would recommend against it.
-4. **Does the graph get better or just bigger? → Better, narrowly; not bigger.** Measured above:
-   185 roadmap/backlog nodes already exist. The split closes a 13-entry extraction gap in
-   body-layer and sharpens `source_file` from a 46.5k-token file to a 700-token entry. Real,
-   provenance-shaped, and smaller than the spike claims. Re-measure after Stage 2 — it is one
-   `/graph-refresh` and a node count, which is the test the spike itself proposed.
-5. **`AA-3`'s accepted-versus-debt contradiction → the user's call, flagged not decided.**
-   `AA-3` asserts both *"FLOWN, TESTED AND ACCEPTED 2026-10-05"* and *"Live acceptance is tracked
-   as debt, not waived."* One of those sentences has to go. If accepted, delete the debt
-   sentence; if debt is real, `#needs-flight` belongs on `AA-3` and the acceptance claim needs
-   qualifying. **Resolve this before merging the spike** — it is a correctness question about
-   what has actually been flown, not a convention question, and it will be read as fact by the
-   next session either way.
+- **R1 — a consumer reads a stub and reports PASS (dominant).** The status page is derived from
+  subproject roadmaps; pointed at a pointer it regenerates an empty-but-well-formed page and exits
+  0. `integrity-audit`, `retro` and `dod-check` have the same shape. *Capping the damage is luck,
+  not design:* `status-page-refresh.sh`'s header records (2026-09-27) that the launchd job is not
+  installed, so it runs only by hand — but the plist is committed and ready. **Make it detectable:**
+  the sentinel line, plus a non-zero-item assertion before publishing. An assertion that fires is
+  the difference between a wrong page and a refusal.
+- **R2 — content silently leaves the graph corpus.** `graph-corpus-files.sh` is a curated file list,
+  and **this has already happened twice**, recorded in that script's own comments: the 2026-09-27
+  `BACKLOG.md` split "silently dropped 8,200 words of open items out of the corpus", and
+  `body-layer/docs/STRUCTURE.md` "would have dropped 84KB of design rationale out of the corpus
+  silently". A roadmap split is the third instance. *Almost free to detect:* the corpus guard's
+  200-file ceiling **trips loudly** at ~383, forcing a conscious decision at exactly the right
+  moment. Do not pre-raise it.
+- **R3 — the dirty flag stops firing.** `graphify-dirty-flag.sh`'s regex misses `*/ROADMAP/*.md`,
+  so entry edits stop recording that a rebuild is owed and the graph *launders* staleness instead of
+  lagging it (`docs/PROCESS.md`, "Documents before the graph"). Detectable only by noticing
+  `GRAPH_REPORT.md`'s mtime. One line, and **the same regex already has the `BACKLOG` hole today** —
+  the single highest-value line in this plan.
+- **R4 — the push and commit gates block or warn spuriously.** Both regexes stop matching. Loud,
+  failing in the safe direction. Fix in Stage 0 anyway: a gate that cries wolf gets bypassed.
+- **R5 — dangling wikilinks, now across ~300+ conversions.** Obsidian colours an unresolved
+  `[[link]]`; `grep` does not, and no gate does. With the alias form the failure mode shifts from
+  "wrong title in the link text" to "alias missing from the target's frontmatter", which is
+  *mechanically checkable* — a strict improvement. The Stage 1 gate checks: every `[[target]]`
+  resolves to a known ID, every entry file's alias matches its filename prefix, every entry appears
+  in exactly one index.
+- **R6 — committed editor state.** The spike commits five `audio-adapter/.obsidian/` files, 276
+  lines, including 220 lines of `workspace.json` pane geometry that rewrites on every pane move.
+  Resolved by decision 4; see Stage 1 for the exact pattern and removal.
+- **R7 — vault configuration is now unrecorded.** Covered under "new costs" above. Decisions 2 and
+  4 pull in opposite directions here and prose is the only bridge.
+- **R8 — this touches the config surface the project has been burned by twice** (stale subproject
+  lists producing silent PASS). Mitigation is the repo's own: **never write a list of which
+  subprojects are converted.** `ls */ROADMAP/ 2>/dev/null` answers it and cannot go stale.
+- **R9 — it competes with brain/memory milestones.** Stated without mitigation: this is
+  documentation work while the brain layer is the named bottleneck, and decision 2 made it roughly
+  2.5× the earlier scope. The staged shape below is the only real answer — every stage is
+  abandonable.
 
 ---
 
 ## Staged migration plan
 
-Every stage ends at a state where the repo is fully working and the convention is coherent, so
-the whole thing is abandonable after any stage. Nothing is converted before Stage 0.
+Every stage ends with the repo fully working and the convention coherent, so the work is
+abandonable after any stage. **The intent is to finish; the abandonable property is kept anyway**,
+because a stage that cannot be stopped at is a stage that must be rushed. Nothing is converted
+before Stage 0.
 
-### Stage 0 — fix the consumers first, on `main`, with nothing converted
+### Stage 0 — fix the consumers, on `main`, with nothing converted
 
-Six edits, all one-line, all safe while only `audio-adapter` is converted (a `find` over a
-directory that does not exist yet returns nothing; a widened regex still matches
-`ROADMAP.md`):
+Seven one-line edits, all safe while nothing is split (a `find` over a directory that does not
+exist returns nothing; a widened regex still matches `ROADMAP.md`):
 
-1. `graphify-dirty-flag.sh:41` — add `*/ROADMAP/*.md` to the dirty-flag regex.
-2. `graph-corpus-files.sh:74` — `find "$sub/ROADMAP" -name '*.md'` inside the existing loop.
+1. `graphify-dirty-flag.sh:41` — add `*/ROADMAP/*.md` **and the missing `BACKLOG`** to the regex.
+2. `graph-corpus-files.sh:74` — `find "$sub/ROADMAP" -name '*.md' 2>/dev/null` inside the existing
+   `*/pyproject.toml` loop.
 3. `push-roadmap-gate.sh:59` — widen to `(^|/)ROADMAP(\.md|/[^/]+\.md)$`.
 4. `commit-quality-gate.sh:188` — same widening.
-5. `status-page/SKILL.md` + `status-page-refresh.sh` — read the index when a pointer sentinel is
-   present, and **assert a non-zero forward-item count before publishing**.
+5. `status-page/SKILL.md` + `status-page-refresh.sh` — read the index when the sentinel is present,
+   and **assert a non-zero forward-item count before publishing**.
 6. `session-start.sh:66` — "the subproject's roadmap (`ROADMAP.md`, or its `ROADMAP/` index where
    split)".
+7. Add `.obsidian/` to root `.gitignore` (decision 4) — see Stage 1 step 1 for the untracking.
 
-**Gate:** make a trivial commit touching `audio-adapter/ROADMAP.md` and confirm the dirty flag
-fires and the push gate passes; run `graph-corpus-files.sh | wc -l` before and after and confirm
-the count is unchanged. **Stop point:** repo working, spike unmerged, zero conversions. This
-stage is worth doing even if everything below is dropped — fixes 3 and 4 are latent bugs the
-moment anyone splits anything, and fix 1 is one line against a documented failure class.
+**Gate:** commit a trivial touch to `audio-adapter/ROADMAP.md` and to `body-layer/BACKLOG.md`,
+confirm the dirty flag fires for both and the push gate passes; `graph-corpus-files.sh | wc -l`
+unchanged at 172. **Stop point:** repo working, spike unmerged, zero conversions — and fix 1 is a
+one-line repair of a *live* bug independent of everything else here.
 
-### Stage 1 — merge the spike as the reference conversion, and write the convention down
+### Stage 1 — decision 4, then the reference conversion and the written convention
 
-Order matters: the convention must exist before the second subproject is converted, or the
-second converter re-derives it.
+The convention must exist before a second subproject is converted, or the second converter
+re-derives it.
 
-1. Add `.obsidian/` to `.gitignore`; drop `audio-adapter/.obsidian/` from the spike (D6).
-2. Resolve `AA-3` with the user (open question 5).
-3. Write **`docs/DOC_CONVENTIONS.md`** — per-entry file layout, the two filename forms (ID, or
-   branch name for un-IDed debt), the escaped-pipe alias link form, the pointer-file sentinel,
-   the index's no-status rule, the repo-root vault decision (D7). `docs/TAGS.md` stays as the
-   tag vocabulary and is linked, not duplicated. **It must not list which subprojects are
-   converted** (D8) — `ls */ROADMAP/` answers that.
-4. One line each pointing at it: root `CLAUDE.md` "Backlog Management" (which already owns the ID
-   scheme — this is its natural home), and one sentence in `docs/PROCESS.md` "Keeping the
-   knowledge graph honest" recording that the corpus script follows `ROADMAP/` directories.
-5. Add the index/link consistency pre-commit check (D5) **and** a vocabulary check that every
-   `#topic/*` or frontmatter tag in a converted file appears in `docs/TAGS.md` (benefit (d) is
-   conditional on this).
-6. Update the ~22 prose lines in the six agent role files, `merge`/`integrity-audit`/`retro`
+1. **`.obsidian` everywhere (decision 4), exactly:**
+   - Pattern in root `.gitignore` — unanchored, directory-only, matches at any depth:
+     ```gitignore
+     # Obsidian vault configuration — per-user, and workspace.json rewrites on
+     # every pane move. The vault is rooted at the repo root; see docs/DOC_CONVENTIONS.md.
+     .obsidian/
+     ```
+     Not `/.obsidian/`, which would anchor to the repo root and leave
+     `audio-adapter/.obsidian/` tracked.
+   - Removal from tracking, in the same change (on `obsidian-test` before merging, so the spike
+     never lands them): `git rm -r --cached audio-adapter/.obsidian` then commit. Five files:
+     `app.json`, `appearance.json`, `core-plugins.json`, `graph.json`, `workspace.json`.
+   - **Then delete `audio-adapter/.obsidian/` from disk**, not just from the index — a nested vault
+     resolves `[[AA-4.5]]` but not `[[BL-12]]`, which is a half-working vault that looks fine (R7).
+   - **Vault scope, confirmed:** the single vault is the **repo root**, and
+     `/Users/sg/Code/DCS-petrobrain/.obsidian/` already exists, so the user has already configured
+     it. Nothing to do now; the one thing he must do *by hand* is re-add the repo root as a vault
+     after any fresh clone, since the config is untracked from here on. One paragraph in
+     `docs/DOC_CONVENTIONS.md` is the only record that will exist.
+   - Adjacent and free, flagged not assumed: `.DS_Store` is also untracked and showing in
+     `git status`. Outside decision 4's wording — add it only if the user says so.
+2. **Verify the `aliases:` link form in Obsidian** (one minute, user): does `[[AA-1.1]]` resolve to
+   a file whose frontmatter declares `aliases: ["AA-1.1"]`? Yes → the clean form. No → fall back to
+   the spike's escaped-pipe form and say so in the convention doc. **This gates structural change 1
+   and nothing else.**
+3. **Resolve `AA-3`** with the user (open decision 1 below) — a correctness question, not a
+   convention one.
+4. **Re-form the merged spike to the revised structure:** kebab filenames, `aliases:` frontmatter,
+   inline-only tags, the `AA-*` IDs unchanged.
+5. **Write `docs/DOC_CONVENTIONS.md`** — the directory layout, the `<prefix>-W<n>` scheme and its
+   four assignment rules, the grooming rule, the `[[ID]]` link form, the pointer sentinel, the
+   index's no-status rule, the repo-root vault and its hand-configuration, world-model's `M<n>`
+   irregularity, `MI-5b`'s letter suffix. `docs/TAGS.md` stays as the vocabulary and is linked, not
+   duplicated. **It must not list which subprojects are converted** (R8).
+6. **One line each** pointing at it from: root `CLAUDE.md` "Backlog Management" (the natural home —
+   it already owns the ID scheme, and the `-W<n>` space belongs there), and `docs/PROCESS.md`
+   "Keeping the knowledge graph honest" (the corpus now follows `ROADMAP/` directories).
+7. **Add the two gates:** the index/link/alias consistency check (R5), and a vocabulary check that
+   every inline tag in a converted file appears in `docs/TAGS.md` — benefit (d) is conditional on
+   the second one existing.
+8. **Update the ~22 prose lines** across the six agent role files, `merge`/`integrity-audit`/`retro`
    skills, `dod.md`, root `CLAUDE.md` and the four subproject `CLAUDE.md`s.
-7. `/graph-refresh`, **documents first, graph second** (`docs/PROCESS.md`).
+9. **Raise the corpus ceiling** by the measured amount, then `/graph-refresh` — **documents first,
+   graph second** (`docs/PROCESS.md`).
 
-**Gate:** all six Stage 0 consumers re-verified against the converted `audio-adapter/`; the
-corpus guard fires on the file-count rise and is raised deliberately; a fresh Session Start run
-reads `audio-adapter`'s index and finds the next actionable item. **Stop point:** one subproject
-converted, convention documented and gated, 429 historical references still valid via the
-pointer. A perfectly coherent end state — this is the honest "keep as audio-adapter-only"
-outcome, reached deliberately rather than by abandonment.
+**Gate:** all Stage 0 consumers re-verified against the converted `audio-adapter/`; the corpus guard
+fires and is raised deliberately; a fresh Session Start reads the index and finds the next
+actionable item. **Stop point:** one subproject converted, convention written and gated, 441
+historical references still valid through the pointer.
 
-### Stage 2 — `body-layer/ROADMAP.md` (why this one first)
+### Stage 2 — `body-layer/ROADMAP.md`, the stress test and the whole of the measured cost
 
-It is first among the unconverted because it is the only file where the cost is measurable:
-46.5k tokens, 67 entries, 130 commits in 30 days, and it is the file Session Start reads on
-almost every session. `world-model` is bigger-than-average but its subproject is mature and
-read far less often; converting it first would be converting the easier file, not the expensive
-one, and would leave the stress test unproven.
+First among the unconverted because it is where the cost is: 46.5k tokens, 67 entries, 130 commits
+in 30 days, read on almost every session.
 
-1. Decide the un-IDed-entry naming (open question 3) and record it in `docs/DOC_CONVENTIONS.md`
-   before splitting a single file.
-2. Split 67 entries; the 404-line trailing block (live-acceptance debt, "Keeping this current")
-   goes to the **index**, not to an entry.
-3. Decide where `BR-1` entries live — body-layer's roadmap currently hosts brain-layer's two
-   milestones and `brain-layer/` has no `ROADMAP.md` at all. Either keep them in
-   `body-layer/ROADMAP/` (status quo, one line in the index saying so) or give brain-layer its
-   own file. **Recommend status quo**: creating a roadmap for a subproject mid-migration is
-   scope creep, and root `ROADMAP.md`'s status table already documents the arrangement.
-4. Convert 139 cross-references; tag; `/graph-refresh`; re-measure the node count against the
-   185/264 baseline in this plan to answer open question 4 with a number.
+1. **Fold the 18 debt entries into their Status entries** before splitting anything. ~6 are genuine
+   duplicates and two of those disagree with each other about whether the work is done — each needs
+   a one-line judgement about which record is right. The rest become `#needs-flight` on their
+   entry. The ~365-line debt preamble becomes four lines of prose plus the `grep` recipe, in the
+   index.
+2. **Mint `BL-W1`…`BL-W27`** in document order, top to bottom (assignment rule 2).
+3. Split 49 entries; "Keeping this current" goes to the **index**, not an entry.
+4. Decide where `BR-1`/`BR-2` live — body-layer's roadmap currently hosts brain-layer's two
+   milestones and `brain-layer/` has no `ROADMAP.md` at all. **Recommend status quo**: keep them in
+   `body-layer/ROADMAP/` with one line in the index saying so. Creating a roadmap for a subproject
+   mid-migration is scope creep, and root `ROADMAP.md`'s status table already documents the
+   arrangement. (At repo-wide scope this is now a visible oddity — `ls */ROADMAP/` shows five, not
+   six — hence the index line.)
+5. Convert 139 cross-references; tag; `/graph-refresh`; re-measure node count against the 185/264
+   baseline to answer the spike's open question 4 with a number.
 
-**Gate:** the link/index check passes; a Session Start run on body-layer is measurably cheaper;
-graph node count for body-layer rises from 54 toward 67. **Stop point:** two subprojects
-converted, which is where 49% of the token cost and the entire human-navigation complaint lives.
-**This is the recommended place to stop by default.**
+**Gate:** the link/alias/index check passes; a Session Start on body-layer is measurably cheaper;
+body-layer's graph node count rises from 54 toward 49+. **Stop point:** two subprojects converted —
+49% of the token cost and the whole of the stress test.
 
-### Stage 3 — optional: `body-layer/BACKLOG.md`, then `world-model/ROADMAP.md`
+### Stage 3 — `body-layer/BACKLOG.md` and `todo/backlog.md`
 
-Same procedure, no new decisions, 85 more entry files. Do it only if Stage 2 demonstrably paid
-off in practice — specifically if the pilot says navigation improved *and* the index did not go
-stale over a few weeks of real merges.
+The two cheapest remaining wins, 77 entry files, **two new IDs total** (`BL-B<next>`, `X-B34`), and
+`todo/backlog.md` needs **zero consumer changes** (its corpus and dirty-flag coverage are already
+recursive). Together they take another 45.5k tokens off the common read. No new decisions.
 
-### Stage 4 — do not do
+**Stop point:** every high-churn, high-token surface converted.
 
-`aircraft-layer`, `mission-interpreter`, `todo/backlog.md`, root `ROADMAP.md`. If a later session
-proposes completing the set for consistency, the reason not to is in the verdict table: 33 files
-and 3 indexes for 6.5% of the tokens, and root `ROADMAP.md`'s status table is load-bearing to
-20+ consumers that currently need no change at all.
+### Stage 4 — `world-model/ROADMAP.md`
+
+35 entries, 20 mints (`WM-W1`…`WM-W20`), 7 debt entries folded, 69 cross-references, ~160-line tail
+to the index. One judgement carried from Stage 2's pattern: world-model's debt list also duplicates
+Status entries (`fix/los-elevation-tolerance`, `feature/dcs-driven-los`). Mature subproject, low
+churn — last among the dense files, not first.
+
+### Stage 5 — `aircraft-layer/ROADMAP.md` and `mission-interpreter/ROADMAP.md`
+
+21 entry files, 2 indexes, 8 mints (`AC-1`…`AC-8`; mission-interpreter needs none), 6.7k tokens.
+**The token case for these two is weak and this stage is here on decision 2's browsability ground
+alone** — stated plainly so a later session does not re-derive the earlier "leave them" verdict and
+think it found something. `mission-interpreter` is complete through `MI-6`, so its conversion is
+pure navigation. Finishing the set is the point: a graph view with two holes in it is the thing
+decision 2 rejected.
+
+**Stop point:** complete. `ls */ROADMAP/` shows five subprojects plus `todo/backlog/`, and no file
+anywhere lists which.
 
 ---
 
 ## Second-order effect
 
-Converting `body-layer/ROADMAP.md` makes the forward-looking debt list a `grep` over tags instead
-of hand-kept prose, which directly helps the live-acceptance backlog that currently spans ten-plus
-unflown features across three subprojects — the project's largest accumulated bookkeeping load.
-It also narrows a future choice: once `ROADMAP/` directories exist, `graph-corpus-files.sh`
-follows directories rather than filenames, which makes any *further* document split (the spike's
-"maybe later: `NOTES.md` per insight") cheap rather than another third-instance-of-a-known-failure.
-Against that, it adds a permanent naming contract that every future roadmap entry must satisfy,
-in a repo whose recurring failure is exactly a convention outliving the file that records it —
-which is why Stage 1's convention doc and gates are not optional and come before Stage 2.
+Repo-wide adoption turns the two hand-kept live-acceptance debt lists into one `grep` over tags,
+which directly serves the project's largest accumulated bookkeeping load — ten-plus unflown
+features across three subprojects — and this plan has already shown those lists disagree with their
+own Status entries in ~6 places, so the conversion *fixes* a correctness problem rather than only
+reorganising one. It also narrows a future choice: once `graph-corpus-files.sh` follows
+directories rather than filenames, any further document split (the spike's "maybe later: `NOTES.md`
+per insight") becomes cheap instead of a fourth instance of a known silent-dropout failure.
+Against that, it adds a permanent naming contract — a `-W<n>` space, 204 files, 7 indexes, 2 gates —
+that every future roadmap entry in the repo must satisfy, in a project whose recurring failure is a
+convention outliving the file that records it. That is why Stage 1's convention doc and both gates
+are not optional and come before Stage 2, and why `docs/DOC_CONVENTIONS.md` is forbidden from
+listing what is converted.
 
 ---
 
 ## Decisions requiring user input
 
-1. **`AA-3` — flown-and-accepted, or live-acceptance debt?** Not a convention question. One of
-   the two sentences is wrong about what has actually been flown.
-2. **How far to go: Stage 1, Stage 2, or Stage 3?** The recommendation is Stage 2 (audio-adapter
-   + body-layer's roadmap) with Stage 3 conditional. Stage 0 should happen regardless.
-3. **Minting IDs for the 45 un-IDed body-layer entries, or the branch-name filename form?** The
-   recommendation is branch names, because the never-reuse rule makes minted IDs permanent and
-   these entries are transient — but it introduces a second filename form into the convention,
-   which is a real cost and the user may prefer uniformity.
-4. **Is documentation-convention work worth a slot now, with brain/memory named as the
-   bottleneck?** Stage 0 is ~30 minutes and fixes latent bugs. Stage 2 is a working session.
-   Flagged under the Effort/Value check because it is not pilot-facing; the staged shape exists
-   so the answer can be "Stage 0 only, for now."
+1. **`AA-3` — flown-and-accepted, or live-acceptance debt?** Carried forward undecided. The entry
+   asserts both *"FLOWN, TESTED AND ACCEPTED 2026-10-05"* and *"Live acceptance is tracked as debt,
+   not waived."* One of those sentences has to go. If accepted, delete the debt sentence; if debt is
+   real, `#needs-flight` belongs on `AA-3` and the acceptance claim needs qualifying. **Not a
+   convention question** — it is about what has actually been flown, and the next session will read
+   whichever survives as fact. Resolve before merging the spike.
+2. **The debt list stops being a list.** This plan replaces the two "Live acceptance debt" prose
+   lists with `#needs-flight` tags plus a `grep`, because keeping them as entry files would mint two
+   permanent IDs per item and freeze ~6 existing disagreements. But that list is a surface *you*
+   read to decide what to fly next, and a `grep` recipe in an index is not the same reading
+   experience as a hand-written list with a paragraph of context per item. If you want the narrative
+   list kept, say so — it then stays as prose in the index (not as entry files), and the ~6
+   duplicates still have to be reconciled either way.
+3. **World-model's `M<n>` milestone prefix stays irregular.** Its milestones are `M0`…`M11` while
+   its backlog is `WM-B<n>` and its work items would be `WM-W<n>` — three shapes in one subproject.
+   Fixing it means renaming `M5` → `WM-5` across several hundred prose mentions in `plans/` and
+   `research/`, which never-renumber and `docs/PROCESS.md` both forbid. Recommendation: accept the
+   irregularity and record it. Confirm, because it is permanent.
+4. **Scheduling.** Stage 0 is ~30 minutes and repairs a live bug (`BACKLOG` missing from the
+   dirty-flag regex) regardless of everything else. Stages 1-5 are roughly 2.5× the earlier scope —
+   several working sessions — while the brain layer is the named bottleneck. The staged shape means
+   the answer can be "Stage 0 and 1 now, the rest later" without leaving anything half-broken.

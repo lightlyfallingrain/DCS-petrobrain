@@ -1,41 +1,83 @@
 ---
 name: obsidian-doc-convention-verdict
-description: The per-entry-roadmap/wikilink/tag spike verdict (2026-10-06) — the three measurements that decided it, and the premise that turned out false
+description: The per-entry-roadmap/wikilink/tag conversion — REVISED 2026-10-06 to repo-wide adoption with IDs for every item; the ID-space design and the duplicate-entry finding that halved the minting job
 metadata:
   type: project
 ---
 
-Verdict on the `obsidian-test` spike (per-entry roadmap files, `[[wikilinks]]`, `docs/TAGS.md`):
-**adopt partially — audio-adapter + `body-layer/ROADMAP.md` + its BACKLOG; leave root
-`ROADMAP.md`, aircraft-layer, mission-interpreter and `todo/backlog.md` alone.** Plan at
-`plans/obsidian-links-and-tags/plan.md`.
+Verdict on the `obsidian-test` spike (per-entry roadmap files, `[[wikilinks]]`, `docs/TAGS.md`).
+Plan: `plans/obsidian-links-and-tags/plan.md`.
 
-**Why:** Three measurements, all cheap, all of which changed the shape of the answer — and two of
-which contradicted the spike's own write-up.
+**REVISED 2026-10-06 by four user decisions.** My first pass recommended partial adoption
+(audio-adapter + body-layer only) and branch-name filenames instead of minted IDs. **Both were
+overridden.** The user's reasons, in his words: *"a human reader benefits from all sub-systems
+following this convention and being browsable via Obsidian"* (partial adoption is not browsable —
+a graph view with holes is what he rejected), and *"IDs allow tracking items and dependencies, I'd
+rather use them"* with staleness accepted as grooming work. Also: the spike is *"a test — we do not
+have to follow it strictly"*, and `.obsidian` gitignored in all folders.
 
-- **The benefit is in two files, not the repo.** Measured tokens: `body-layer/ROADMAP.md` 46.5k
-  (67 entries, **130 commits in 30 days** — highest-churn doc in the repo), its BACKLOG 24.7k,
-  world-model 29.2k. The three *small* roadmaps together are 9.4k (6.5%) / 33 entries. Converting
-  them creates files and indexes that can go stale and saves a read nobody notices.
-- **The spike's founding premise is false for body-layer.** *"Every entry has a stable ID"* —
-  **45 of 67** body-layer entries have no ID; they are named by branch
-  (`fix/contact-report-flood`) and are mostly transient live-acceptance debt. World-model: 27 of
-  42. Converting means minting ~72 permanent IDs under the never-renumber rule, for items that
-  will be gone in weeks. Recommended out: filename = ID when there is one, **branch name** when
-  there is not.
-- **The graph benefit is already delivered.** The extractor **already** makes 185 nodes / 264
-  edges from the roadmap+backlog files, including per-entry nodes (`AC-B3 — Split The Export
-  Throttle`). "One node per entry instead of one giant node" is wrong. Real gain is narrower:
-  closes a 13-entry gap in body-layer (54 nodes from 67 entries) and points `source_file` at a
-  700-token entry instead of a 46.5k file, which is what `gq.sh`'s source list hands an agent.
+**The lesson about my own reasoning:** I argued scope down on a token-cost measurement, when the
+stated benefit was human navigation — for which *partial* coverage is close to worthless, not
+proportionally valuable. A benefit that only exists when complete cannot be scoped by measuring
+the per-file share of a *different* benefit. Check which benefit a cost/benefit table is actually
+about before recommending a stopping point.
 
-**How to apply:** when a document-layout or convention change is proposed, the cost is not the
-split — it is the consumers. Sweep `.claude/scripts/`, `.claude/skills/`, `.claude/agents/`,
-root + subproject `CLAUDE.md`. Classify each hit by **whether its failure is loud or silent**,
-not by whether the fix is hard. Here: `graphify-dirty-flag.sh` and `graph-corpus-files.sh` fail
-**silently** (one-line fixes, highest value); `push-roadmap-gate.sh` and `commit-quality-gate.sh`
-fail **loudly in the safe direction**. And six skills that mention `ROADMAP.md` were **not**
-consumers at all — they read root `ROADMAP.md`'s status table for the subproject list only, and
-root stays whole.
+**The finding that made "IDs for every item" cheap instead of expensive.** 124 entries have no ID,
+but they are two different things, and the measurement is what showed it:
 
-See [[verify-state-not-the-account-of-it]], [[find-n-in-the-repo-before-accepting-n-is-more-than-we-need]].
+- **~100 are real work items** in Status/Backlog sections (27 body-layer, 20 world-model, 8
+  aircraft-layer, 19 audio-adapter already minted by the spike, 2 elsewhere) → mint.
+- **24 are "Live acceptance debt" list entries** (18 body-layer, 7 world-model), branch-named — and
+  **~6 of them are a second checkbox for a work item that already has its own Status entry.**
+  `fix/contact-report-flood` is `[ ]` in the debt list and `[x]` in Status. Same for the `silence`
+  command, `fix/redundant-group-disclosure`, position-belief-runaway, `feature/dcs-driven-los`,
+  group-cohesion. **The debt list is a view over items, not a set of items** — so it becomes a
+  `#needs-flight` tag plus a `grep`, never entry files. Minting per checkbox would have created two
+  permanent IDs for one piece of work and frozen the disagreement.
+
+**The ID-space design (the plan's load-bearing decision).** A third marker, `<prefix>-W<n>`, for
+work items that are neither milestones nor backlog. Zero `-W<n>` collisions in the repo (verified).
+
+- **Not the milestone space**, and this is the decisive argument: `BL-12` is a *live forward*
+  resource and `plans/body-layer/plan.md` §6 is an external document that *defines* what each
+  `BL-x` is. Minting 27 historical bug fixes into it would make §6 disagree with the roadmap.
+- **Not the backlog space**: ~90% of these entries are `[x]` done; `BL-B47 — done` is false and
+  breaks `grep -c 'BL-B'` as a measure of open work.
+- **Where a subproject has no declared milestone series, its Status entries become that series** —
+  aircraft-layer and audio-adapter have no §6 and no forward sequence, so `AC-1`…`AC-8` and the
+  spike's `AA-1`…`AA-5` mint into the bare space. One rule, not a per-subproject exception list.
+- Collision-proofing across sessions: spaces are per-subproject (disjoint by construction), one
+  subproject per branch, **numbers assigned in document order** (so a rebase cannot renumber), next
+  number *read* from `ls` not counted, and no W-number minted outside a conversion.
+
+**Measurements worth not re-deriving** (`wc -c`/4 for tokens, `grep -cE '^[[:space:]]*- \[[ x~?>]\]'`
+for entries):
+
+- 204 entry files + 7 indexes repo-wide; 138.4k tokens across the 7 convertible files.
+- **Corpus guard: 172 files today, ceiling 200, conversion takes it to ~383.** It refuses the
+  rebuild loudly — by design. Do not pre-raise it.
+- Session Start on body-layer: ~107k → ~23k (−78%).
+- **441** historical `<sub>/(ROADMAP|BACKLOG).md` mentions (429 that morning — it grows). This is
+  why the 4-line pointer file is never deleted.
+- The graph **already** makes 185 nodes / 264 edges from these files; "one node per entry instead of
+  one giant node" was always wrong.
+
+**Two things to leave whole, with reasons that are not convenience:** root `ROADMAP.md` (zero
+checkbox entries, 20+ consumers read its status table by name) and `todo/todo.md` (session-scoped
+notes *meant to migrate out*, and root `CLAUDE.md`'s own rule says an item moving files takes a new
+ID in its destination — so the ID would be born stale). Conversely `todo/backlog.md` **converts and
+is the cheapest of all**: `graph-corpus-files.sh:48` is already `find todo -name '*.md'` (recursive)
+and the dirty flag already matches `^todo/`, so it needs **zero** consumer changes.
+
+**Live bug found while re-measuring, independent of this plan:** `graphify-dirty-flag.sh`'s regex is
+`[^/]+/(CLAUDE|ROADMAP)\.md` — **no `BACKLOG`**. Editing `body-layer/BACKLOG.md` does not flag the
+graph dirty today, although that file is in the corpus. Third instance of the
+[[doc-corpus-silent-dropout]] class, in its mirror script.
+
+**How to apply:** when a document-layout change is proposed, the cost is not the split — it is the
+consumers, and the classifier is **loud vs silent failure**, not easy vs hard fix. Also: before
+accepting a plan's framing of what is missing, count it. Both of this plan's shape-changing findings
+(the debt-list duplication, the `BACKLOG` regex hole) came from one `grep -c` each.
+
+See [[doc-corpus-silent-dropout]], [[verify-state-not-the-account-of-it]],
+[[find-n-in-the-repo-before-accepting-n-is-more-than-we-need]].
