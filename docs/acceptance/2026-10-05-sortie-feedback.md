@@ -128,3 +128,29 @@ path that should be 0 % is measuring the wrong thing.
 
 Explored with the user immediately after (see the `/explore` session that follows this entry).
 
+---
+
+## Unit-id join probe flown, 2026-10-06 — and the direction it produced
+
+The probe (`aircraft-layer/research/2026-10-06-unit-id-join-probe.md`) was flown twice. Reading the
+second reduction, the user first said:
+
+> *"Um. Static objects are typically scenery elements. Their importance is low. At this stage we can
+> simply ignore all static elements. If we ever need them, we can come back to this finding."*
+
+That premise was put back to them with the mission's actual static inventory — 278 static objects, of
+which **112 `Soldier M4 GRG`, 31 `T-55`, 24 `Tigr`, 23 `BTR-80`, 22 `BMP-2`, 34 `T-72B/B3` and eight
+`ZSU-23-4 Shilka`**, and not one building. They reversed it:
+
+> *"So there's different static units then. I was under the impression they are non-interactive.
+> Disregard that then. --> do take static objects into account"*
+
+**Recorded because the reversal is the valuable part.** "Static" in DCS means *placed without AI or
+waypoints*, not *decorative*: a static T-55 is a killable target and a static ZSU-23-4 is AAA that
+will shoot the aircraft. Ignoring the class would have silenced **69 % of that mission's objects**,
+including every tank and every Shilka — against root `CLAUDE.md`'s own test, *does this help the
+pilot evade dangerous units*.
+
+It also means the phrase "scenery" needs care in this project: `coalition.getStaticObjects` and
+`world.searchObjects(Object.Category.SCENERY)` are different populations, and only the second is
+map furniture.
