@@ -22,6 +22,34 @@ Confirmed terrain-only, not building-aware (`aircraft-layer/research/
 by the plan's SS4). Keeping the two fields separable means a live
 misbehaviour is attributable to one half, not "LOS was wrong" in general.
 
+**Both AI units AND static objects are enumerated** (`BL-11` Stage 4;
+evidence `aircraft-layer/research/2026-10-06-unit-id-join-results.md`).
+Until 2026-10-06 this script walked `coalition.getGroups()` ->
+`grp:getUnits()` only, so **static objects could never appear in a LOS
+result and never received a verdict at all -- 278 of 404 objects (68.8%)
+in the measured sortie's own mission**. "Static" in DCS means placed
+without AI or waypoints, *not* decorative: in that mission the statics
+were 112 infantry, 31 T-55, 34 T-72B/B3 and eight `ZSU-23-4 Shilka` --
+killable, and in the Shilka's case shooting. `coalition.getStaticObjects`
+is now walked for the same three coalition sides, with the *same*
+alive/bubble/wedge/not-ownship filters applied through one shared
+`considerCandidate` helper (one filter implementation, so the two
+populations cannot drift), and statics are fed into the *same*
+`candidates` list. **A static is indistinguishable from a unit on the
+wire** -- same `<unit_name>:<building01>:<terrain01>` entry shape, same
+join key -- so the body-layer side needs no change.
+
+**The join key stays `getName()`, deliberately** (same research note):
+names are unique and non-null on both sides (units 50/50, statics 94/94),
+and `Unit:getObjectID()` -- which does match the `LoGetWorldObjects` key
+-- **does not exist on `StaticObject`** (`<NONE>`, 94/94). There is no
+integer key spanning both populations, so there is nothing to switch to.
+
+**`units_in_bubble`/`units_in_wedge` on the wire now count units *and*
+statics** (the field names are kept for wire/parser compatibility; the
+Hook's own `dcs.log` line and the scripting-state `env.info` line below
+report the breakdown under honest `objects_*`/`statics_*` names).
+
 **The query set is the look-direction wedge, not the player bubble** (plan
 Second Revision, SS8-SS10): the bubble (10 km) bounds *candidates*;
 `PB_LOOK_HOUR`/`PB_LOOK_FOV_DEG` (mission-scripting globals, set by the
@@ -40,6 +68,43 @@ essentially never bite under a correctly-sized wedge. If
 `sightlines_computed < units_in_wedge` ever shows up in the log, the wedge
 is wrong, not the budget -- see `sightlines_computed`/`units_in_wedge` on
 the wire schema (`aircraft-layer/src/schema/line_of_sight.py`).
+
+**...but enumerating statics roughly triples the candidate population,
+and whether the cap now bites is UNMEASURED** (`BL-11` Stage 4). The
+pre-statics measurement was median 43 / max 71 units per result with
+`bridge_call_ms` ~1 ms; in a 404-object mission there are ~278 more
+candidates to filter. The cap value is deliberately **unchanged** here --
+retuning it is a decision that needs the measurement first, not a guess.
+What this change adds instead is the instrumentation that makes one
+sortie answer it:
+  * the candidate count *before* the cap is already on the wire as
+    `units_in_wedge` (now units + statics), and `sightlines_computed <
+    units_in_wedge` is exactly "the cap bit";
+  * the Hook's own `dcs.log` line now parses those counters out of the
+    result and states `cap=<n> cap_hit=<0|1>` explicitly, with a separate
+    `LOS cap bit` line naming how many candidates were dropped, so it is
+    greppable rather than inferred from a truncated `result_head=`;
+  * an `env.info` line from inside the scripting state carries the
+    units-vs-statics breakdown, which cannot cross the `dostring_in`
+    boundary without changing the wire format (one scalar return).
+    `static_enum_failures` on that line is the guard against the whole
+    statics enumeration failing *silently* -- without it, a broken
+    `coalition.getStaticObjects` would look exactly like the pre-2026-10-06
+    unit-only behaviour.
+Note the **nearest-first sort is load-bearing now**: `table.sort` by
+`rangeM` before the cap means truncation drops the *far* candidates, which
+is the right failure direction.
+
+**The cap is spliced into the bridged chunk from
+`MAX_SIGHTLINES_PER_CALL`, not re-typed** (a previous performance pass
+flagged the duplicated `128` literal as drift risk; with the population
+tripling it stops being hypothetical). The bridged chunk lives in a
+string literal and therefore cannot see this file's own `local`s, so the
+constant is prepended as a `local MAX_SIGHTLINES = <n>` line via
+`string.format("%d", ...)` at **module load time**. That is not the
+runtime-value splice the `SET_LOOK_TEMPLATE` safety argument below is
+about: the value is a module-level integer constant in this very file,
+never anything inbound, and `%d` can only ever emit `-?[0-9]+` either way.
 
 **The look-direction command channel -- a validated `string.format`
 splice, not digit dispatch (plan SS17, user's informed call after the
@@ -206,12 +271,16 @@ local MAX_LOOK_DIRECTION_DATAGRAMS_PER_FRAME = 20
 --: other `%` specifier, ever.
 local SET_LOOK_TEMPLATE = "PB_LOOK_HOUR=%d\nPB_LOOK_FOV_DEG=%d\nreturn \"ok\""
 
---: Enumerates every live unit across all three coalition sides within
+--: Enumerates every live unit **and every static object** across all
+--: three coalition sides within
 --: `PLAYER_BUBBLE_RADIUS_M` of ownship's own true position, filters those
 --: down to the ones inside the currently-commanded look-direction wedge
 --: (`PB_LOOK_HOUR`/`PB_LOOK_FOV_DEG`, defaulting per `HOUR_DEFAULT`/
---: `FOV_DEFAULT_DEG` when unset), sorts the wedge survivors nearest-first,
---: caps at `MAX_SIGHTLINES_PER_CALL`, and for each capped unit runs both
+--: `FOV_DEFAULT_DEG` when unset), sorts the wedge survivors nearest-first
+--: (load-bearing: the cap therefore truncates the *far* candidates),
+--: caps at `MAX_SIGHTLINES` (spliced from `MAX_SIGHTLINES_PER_CALL` at
+--: module load -- the chunk cannot see this file's `local`s), and for
+--: each capped object runs both
 --: the building (`SEGMENT`) and terrain (`isVisible`) sightline tests
 --: true-position-to-true-position (never a believed position -- the
 --: plan's own "Why it must be true-to-true" section). `timer.getTime()`
@@ -226,7 +295,14 @@ local SET_LOOK_TEMPLATE = "PB_LOOK_HOUR=%d\nPB_LOOK_FOV_DEG=%d\nreturn \"ok\""
 --: `Unit:getPosition()`'s forward (`x`) vector via `atan2` -- the standard
 --: DCS Mission Scripting Engine convention; **not independently
 --: live-verified this session** (file header).
-local LOS_CODE = [[
+--: Load-time splice of this file's own integer constant into the bridged
+--: chunk, so the cap has exactly one definition (see the file header's
+--: "spliced into the bridged chunk" note for why this is not the
+--: `SET_LOOK_TEMPLATE` class of splice).
+local LOS_CODE = "local MAX_SIGHTLINES = "
+    .. string.format("%d", MAX_SIGHTLINES_PER_CALL)
+    .. "\n"
+    .. [[
 local hour = PB_LOOK_HOUR or 0
 local fovHalfDeg = PB_LOOK_FOV_DEG or 45
 
@@ -254,40 +330,102 @@ local function wrapSigned180(deg)
     return wrapped
 end
 
-local candidates = {}
-local unitsInBubble = 0
-local unitsInWedge = 0
+-- Ownship exclusion anchors, resolved once. The id is the primary test
+-- (what this loop used before); the name is the backstop, because a
+-- failed `player:getID()` would otherwise silently let ownship through
+-- as a candidate. Statics cannot be ownship, so neither test runs there.
+local playerId = nil
+local okPid, pid = pcall(function() return player:getID() end)
+if okPid then playerId = pid end
+local playerName = nil
+local okPn, pn = pcall(function() return player:getName() end)
+if okPn then playerName = pn end
 
-for _, coa in pairs({coalition.side.NEUTRAL, coalition.side.RED, coalition.side.BLUE}) do
-    for _, grp in ipairs(coalition.getGroups(coa) or {}) do
-        for _, unit in ipairs(grp:getUnits() or {}) do
-            if unit and unit:isExist() and unit:getID() ~= player:getID() then
-                local okUP, up = pcall(function() return unit:getPoint() end)
-                if okUP and up ~= nil then
-                    local dx, dz = up.x - ox, up.z - oz
-                    local rangeM = math.sqrt(dx * dx + dz * dz)
-                    if rangeM <= 10000.0 then
-                        unitsInBubble = unitsInBubble + 1
-                        local trueBearingDeg = math.atan2(dz, dx) * 180.0 / math.pi
-                        if trueBearingDeg < 0 then trueBearingDeg = trueBearingDeg + 360.0 end
-                        local bodyBearingDeg = wrapSigned180(trueBearingDeg - headingDeg)
-                        local delta = wrapSigned180(bodyBearingDeg - centerAzimuthDeg)
-                        if delta < 0 then delta = -delta end
-                        if delta <= fovHalfDeg then
-                            unitsInWedge = unitsInWedge + 1
-                            local okName, name = pcall(function() return unit:getName() end)
-                            if okName then
-                                candidates[#candidates + 1] = {
-                                    name = name,
-                                    x = up.x, y = up.y, z = up.z,
-                                    rangeM = rangeM,
-                                }
-                            end
+local okSides, sides = pcall(function()
+    return { coalition.side.NEUTRAL, coalition.side.RED, coalition.side.BLUE }
+end)
+if not okSides or sides == nil then
+    return "ERR|coalition.side unavailable"
+end
+
+local candidates = {}
+local objectsInBubble = 0
+local objectsInWedge = 0
+local staticsInBubble = 0
+local staticsInWedge = 0
+local staticEnumFailures = 0
+
+-- THE single bubble/wedge/name filter, shared by both populations so they
+-- cannot drift apart (BL-11 Stage 4: a static must be treated exactly as
+-- a unit is). Declared *below* every local it closes over -- Lua has no
+-- hoisting, and a name used above its `local` compiles as a global that
+-- is nil at call time (`aircraft-layer/CLAUDE.md`).
+local function considerCandidate(obj, isStatic)
+    local okUP, up = pcall(function() return obj:getPoint() end)
+    if not okUP or up == nil then return end
+    local dx, dz = up.x - ox, up.z - oz
+    local rangeM = math.sqrt(dx * dx + dz * dz)
+    if rangeM > 10000.0 then return end
+    local okName, name = pcall(function() return obj:getName() end)
+    if not okName or type(name) ~= "string" or name == "" then return end
+    if playerName ~= nil and name == playerName then return end
+    objectsInBubble = objectsInBubble + 1
+    if isStatic then staticsInBubble = staticsInBubble + 1 end
+    local trueBearingDeg = math.atan2(dz, dx) * 180.0 / math.pi
+    if trueBearingDeg < 0 then trueBearingDeg = trueBearingDeg + 360.0 end
+    local bodyBearingDeg = wrapSigned180(trueBearingDeg - headingDeg)
+    local delta = wrapSigned180(bodyBearingDeg - centerAzimuthDeg)
+    if delta < 0 then delta = -delta end
+    if delta > fovHalfDeg then return end
+    objectsInWedge = objectsInWedge + 1
+    if isStatic then staticsInWedge = staticsInWedge + 1 end
+    candidates[#candidates + 1] = {
+        name = name,
+        x = up.x, y = up.y, z = up.z,
+        rangeM = rangeM,
+    }
+end
+
+for _, coa in pairs(sides) do
+    local okG, groups = pcall(coalition.getGroups, coa)
+    if okG and groups ~= nil then
+        for _, grp in ipairs(groups) do
+            local okU, units = pcall(function() return grp:getUnits() end)
+            if okU and units ~= nil then
+                for _, unit in ipairs(units) do
+                    local okE, exists = pcall(function() return unit:isExist() end)
+                    if okE and exists then
+                        local okI, uid = pcall(function() return unit:getID() end)
+                        if (not okI) or playerId == nil or uid ~= playerId then
+                            considerCandidate(unit, false)
                         end
                     end
                 end
             end
         end
+    end
+end
+
+-- Static objects: placed without AI or waypoints, NOT scenery. Before
+-- BL-11 Stage 4 this population was absent from the enumeration entirely
+-- and so could never receive a verdict -- 278 of 404 objects (68.8%) in
+-- the measured sortie's mission, including eight ZSU-23-4 Shilkas.
+-- Same three sides, same `considerCandidate` filter, same `candidates`
+-- list, same wire shape. `isExist` is treated as advisory here: if the
+-- call itself fails on a `StaticObject` the object is still considered,
+-- since dropping a live Shilka is worse than carrying a dead one (a dead
+-- one's verdict is simply never joined on the body-layer side).
+for _, coa in pairs(sides) do
+    local okS, statics = pcall(coalition.getStaticObjects, coa)
+    if okS and statics ~= nil then
+        for _, st in ipairs(statics) do
+            local okE, exists = pcall(function() return st:isExist() end)
+            if (not okE) or exists then
+                considerCandidate(st, true)
+            end
+        end
+    else
+        staticEnumFailures = staticEnumFailures + 1
     end
 end
 
@@ -319,7 +457,7 @@ local sightlinesComputed = 0
 local observerPoint = { x = ox, y = oy + 2.0, z = oz }
 
 for i = 1, #candidates do
-    if sightlinesComputed >= 128 then break end
+    if sightlinesComputed >= MAX_SIGHTLINES then break end
     local c = candidates[i]
     local targetPoint = { x = c.x, y = c.y + 2.0, z = c.z }
     local bClear = buildingClear(observerPoint, targetPoint)
@@ -328,7 +466,31 @@ for i = 1, #candidates do
     parts[#parts + 1] = c.name .. ":" .. (bClear and "1" or "0") .. ":" .. (tClear and "1" or "0")
 end
 
-return tostring(unitsInBubble) .. "|" .. tostring(unitsInWedge) .. "|"
+-- The units-vs-statics breakdown cannot cross the `dostring_in` boundary
+-- (one scalar return, and the wire format is fixed by
+-- `aircraft-layer/src/schema/line_of_sight.py`), so it goes to `dcs.log`
+-- directly from the scripting state instead. `static_enum_failures` is
+-- the point of this line: without it, a `coalition.getStaticObjects`
+-- that fails on every side looks exactly like the pre-BL-11-Stage-4
+-- unit-only behaviour, and nobody would know statics were missing again.
+-- `env` is guarded and the whole call pcall'd -- a logging failure must
+-- never take the poll (or the mission) with it.
+pcall(function()
+    if env ~= nil and env.info ~= nil then
+        env.info("PetrobrainLineOfSight scan"
+            .. " objects_in_bubble=" .. tostring(objectsInBubble)
+            .. " statics_in_bubble=" .. tostring(staticsInBubble)
+            .. " objects_in_wedge=" .. tostring(objectsInWedge)
+            .. " statics_in_wedge=" .. tostring(staticsInWedge)
+            .. " candidates=" .. tostring(#candidates)
+            .. " sightlines_computed=" .. tostring(sightlinesComputed)
+            .. " max_sightlines=" .. tostring(MAX_SIGHTLINES)
+            .. " cap_hit=" .. ((sightlinesComputed < #candidates) and "1" or "0")
+            .. " static_enum_failures=" .. tostring(staticEnumFailures))
+    end
+end)
+
+return tostring(objectsInBubble) .. "|" .. tostring(objectsInWedge) .. "|"
     .. tostring(sightlinesComputed) .. "|" .. tostring(hour) .. "|"
     .. tostring(fovHalfDeg) .. "|" .. tostring(timer.getTime()) .. "|"
     .. table.concat(parts, ";")
@@ -465,10 +627,40 @@ local function pollAndSend()
         logi("LOS poll error: " .. result)
         return
     end
+    -- Pull the observability triad out of the result's own leading fields
+    -- rather than leaving it inside a truncated `result_head=`. A
+    -- `string.match` pattern, not a format splice -- nothing is spliced
+    -- into executable code here. On a pattern miss the counters simply
+    -- read `?`, which is why `cap_hit` is reported as unknown rather than
+    -- as a confident `0`.
+    local inBubble, inWedge, computed = result:match("^(%d+)|(%d+)|(%d+)|")
+    local wedgeN = tonumber(inWedge)
+    local computedN = tonumber(computed)
+    local capHit = nil
+    if wedgeN ~= nil and computedN ~= nil then
+        capHit = computedN < wedgeN
+    end
     logi(
         "LOS poll: bridge_call_ms=" .. string.format("%.2f", bridgeCallMs)
-            .. " result_head=" .. result:sub(1, 40)
+            .. " objects_in_bubble=" .. tostring(inBubble or "?")
+            .. " objects_in_wedge=" .. tostring(inWedge or "?")
+            .. " sightlines_computed=" .. tostring(computed or "?")
+            .. " cap=" .. tostring(MAX_SIGHTLINES_PER_CALL)
+            .. " cap_hit=" .. ((capHit == nil) and "?" or (capHit and "1" or "0"))
     )
+    -- Its own line, so one grep answers "did 128 ever bind this sortie".
+    -- Enumerating statics roughly triples the candidate population and
+    -- this cap has never been observed to bite; the sortie is what tells
+    -- us whether that is still true (file header, BL-11 Stage 4).
+    if capHit then
+        logi(
+            "LOS cap bit: sightlines_computed=" .. tostring(computedN)
+                .. " of objects_in_wedge=" .. tostring(wedgeN)
+                .. " (cap=" .. tostring(MAX_SIGHTLINES_PER_CALL)
+                .. ", dropped=" .. tostring(wedgeN - computedN)
+                .. " farthest candidates)"
+        )
+    end
     sendPayload(result, bridgeCallMs)
 end
 
