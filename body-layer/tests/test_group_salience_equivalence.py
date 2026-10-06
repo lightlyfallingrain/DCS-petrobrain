@@ -1,8 +1,9 @@
 """`group_salient_ids` output equality across `BL-11` Stage 2's hoist.
 
-Stage 2 removed recomputation only -- `_cohesive`'s four per-candidate
-quantities, recomputed per *pair* of an O(n^2) loop, are now computed once
-per candidate in the `_resolvable_terms` pass and carried in parallel lists
+Stage 2 removed recomputation only -- the four per-candidate quantities the
+pre-change cohesion test recomputed per *pair* of an O(n^2) loop are now
+computed once per candidate in the `_resolvable_terms` pass and carried in
+parallel lists
 (`body-layer/research/2026-10-05-performance-review.md` finding 1, measured
 215 -> 27 ms at n=440). **So the acceptance test is output equality against
 the pre-change implementation, not a timing assertion** -- the returned
@@ -16,11 +17,27 @@ resolvability filter plus one cohesion test per pair. **Its gate and its
 predicate are this module's own copies of the pre-change bodies
 (`_reference_resolvable`, `_reference_cohesive`), deliberately not imported
 from `group_salience`.** Importing them made the file tautological: Stage 2
-turned `_resolvable` into a wrapper over `_resolvable_terms` and made
-`_cohesive` delegate to `_cohesive_from_terms`, both of which production's
-own loop uses -- so a change to the gate or the formula moved both sides of
-every equality together and the file still passed. Only the tuning
-constants are shared, because those are calibration rather than mechanism.
+turned the gate into a wrapper over `_resolvable_terms` and made the
+cohesion test delegate to `_cohesive_from_terms`, both of which
+production's own loop uses -- so a change to the gate or the formula moved
+both sides of every equality together and the file still passed. (Both
+wrappers were deleted once these copies replaced their only use, so the
+`_terms` functions are now production's only statement of either.)
+
+**What this file does and does not share with production, and why the line
+falls there.** Shared: the tuning constants
+(`RESOLUTION_ANGULAR_RADIUS_RAD`, `GROUP_COHESION_GAP_UNIT_WIDTHS`,
+`GROUP_MIN_MEMBERS`), because those are calibration rather than mechanism
+and a second copy would only make this file fail whenever the tuning moved;
+and four leaf geometry primitives -- `object_model.profile_for`,
+`clustering.angular_separation_rad`, `clustering.angular_size_rad` and
+`geometry.range_m`. Those four are shared on purpose: the pre-change code
+called exactly them, Stage 2 did not touch them, and a private copy of
+trigonometry in a test file would be strictly worse than importing the one
+production uses. **What must never be shared here is `_resolvable_terms`
+and `_cohesive_from_terms`**, because those two are what Stage 2 changed --
+importing either is what makes an equality in this file compare the hoist
+against itself.
 
 Scenes are built deterministically (a fixed-seed `random.Random`) over mixed
 object types and a range spread that straddles
@@ -95,11 +112,9 @@ def _reference_cohesive(
     production's own pair loop also calls, so importing it could not pin
     the formula. It too was deleted once this copy replaced its only use.
 
-    The tuning constants (`GROUP_COHESION_GAP_UNIT_WIDTHS` here,
-    `RESOLUTION_ANGULAR_RADIUS_RAD` above, `GROUP_MIN_MEMBERS` below) are
-    still imported on purpose: those are calibration, not mechanism, and a
-    second copy of them would only make this file fail whenever the tuning
-    is legitimately retuned."""
+    `GROUP_COHESION_GAP_UNIT_WIDTHS` and the geometry helpers this body
+    calls are imported rather than copied -- see the module docstring on
+    where the shared/not-shared line falls and why."""
     target_a = GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m)
     target_b = GeoPosition(x=b.x, z=b.z, alt_m=b.alt_m)
     theta_sep = angular_separation_rad(observer, target_a, target_b)

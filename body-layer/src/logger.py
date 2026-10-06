@@ -1663,15 +1663,29 @@ def _resolve_speech_log_path(
     wins (already validated by the caller to require `--crew-text
     --speech-input`).
 
-    Directory creation happens here, once, at startup -- not per write --
-    so an unwritable default location degrades to no log (reported on
-    stderr) instead of crashing a sortie over a debug artifact. A failure
-    creating an *explicit* `--speech-log` path is left to
-    `SpeechLogWriter.write`'s own per-call try/except (`CrewConsole.
-    _log_transcript`), same as before this default existed: the user asked
-    for that exact path, so silently discarding it here would be more
-    surprising than letting the existing degrade-on-write behaviour handle
-    it.
+    Directory creation happens at startup, once, rather than per write --
+    so an unwritable location degrades to no log (reported on stderr)
+    instead of crashing a sortie over a debug artifact. **The `mkdir` below
+    covers only the default path; `_per_run_log_paths` does the same for
+    all three resolved logs, including an explicit `--speech-log`, so an
+    explicit path is no longer the exception it was when this paragraph
+    was first written.** So the policy now is uniform: a missing parent is
+    created wherever the path came from, and a parent that cannot be
+    created costs that one log, reported once on stderr by
+    `_per_run_log_paths`, not per write and not silently.
+
+    That is a change in behaviour and an improvement -- an explicit
+    `--speech-log` under a missing directory previously failed *every*
+    write via `SpeechLogWriter.write`'s own per-call try/except
+    (`CrewConsole._log_transcript`), with no startup line saying so. That
+    per-call guard still exists and still catches a path that goes bad
+    mid-sortie; it is simply no longer the first thing a missing parent
+    hits.
+
+    The `mkdir` here is therefore a strictly earlier report of a condition
+    `_per_run_log_paths` would also catch, kept deliberately: it degrades
+    before the default path is ever returned, so the "writing <path>"
+    startup line is never printed for a location that cannot hold a file.
     """
     if speech_log is not None:
         return speech_log
