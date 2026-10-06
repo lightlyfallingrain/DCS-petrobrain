@@ -33,7 +33,10 @@ passes every mechanical check this environment can run.
     unchanged (and now `pcall`'d).
   - **Ownship exclusion hardened.** `player:getID()` was called unprotected inside the loop and
     was the only exclusion test; it is now resolved once under `pcall`, with `player:getName()` as
-    a backstop so a failed `getID()` cannot silently let ownship through as a candidate.
+    a backstop so a failed `getID()` **alone** no longer lets ownship through as a candidate. It is
+    a backstop, not a guarantee — if *both* resolutions fail, the unit loop's id test admits and the
+    name test is a no-op (2026-10-06 review; the claim here originally said "cannot", which
+    overstates it). That case is now reported as `ownship_unidentified=1` on the scan line.
   - **Cap literal de-duplicated.** `:322`'s hardcoded `128` now reads `MAX_SIGHTLINES`, spliced
     into the bridged chunk from `MAX_SIGHTLINES_PER_CALL` at module load time
     (`"local MAX_SIGHTLINES = " .. string.format("%d", …)`). The chunk lives in a string literal
@@ -67,15 +70,19 @@ currently unmeasured. Three additions make one sortie answer it:
    one grep rather than an inference.
 3. **`env.info` from inside the scripting state**, carrying what cannot cross the `dostring_in`
    boundary (one scalar return, fixed wire format): `statics_in_bubble`, `statics_in_wedge`,
-   `candidates`, and **`static_enum_failures`**. That last field is the point of the line — without
-   it, a `coalition.getStaticObjects` failing on every side would look *exactly* like the old
-   unit-only behaviour, and nobody would know statics had gone missing again.
+   `candidates`, **`static_enum_failures`** and (added by the review fix) **`unit_enum_failures`**
+   plus `ownship_unidentified`. The two failure counters are the point of the line — without the
+   first, a `coalition.getStaticObjects` failing on every side would look *exactly* like the old
+   unit-only behaviour; without the second, a `coalition.getGroups` failure is invisible in exactly
+   the direction that makes `cap_hit=0` read as good news. Both are per side, so both top out at 3.
 
 **What the sortie must answer:**
 
 - Does `cap_hit=1` ever appear? If so, how often, and at what `bridge_call_ms`?
 - `statics_in_bubble` > 0 on a mission known to contain statics — i.e. the enumeration is actually
-  running. `static_enum_failures=0`.
+  running. `static_enum_failures=0` **and `unit_enum_failures=0`** — a non-zero second counter
+  invalidates the `cap_hit` reading for that poll rather than merely noting a hiccup, because it
+  means the candidate population was undercounted.
 - Does `bridge_call_ms` stay near ~1 ms with the tripled candidate population? The filter cost is
   per *candidate*; only the capped survivors pay the two engine calls.
 - Do statics appear in body-layer's own join (contacts that previously had no LOS verdict now
@@ -125,11 +132,17 @@ Lua:
   sibling Hook (overlay, F10 commands) has a Structure bullet; the LOS Hook had none, and neither
   did `WORKFLOW.md`'s deploy steps. The deploy gap is left as-is — out of scope here, but it means
   the deploy procedure for this script exists only in the file's own header.
-- **The bubble radius is duplicated exactly the way the cap was.** `PLAYER_BUBBLE_RADIUS_M = 10000.0`
-  in the outer file; `if rangeM > 10000.0` re-typed inside the chunk. Likewise `HOUR_DEFAULT`/
-  `FOV_DEFAULT_DEG` versus the chunk's `or 0`/`or 45`. The splice mechanism added here would fix all
-  three in one line each, but only the cap was in scope and only the cap had been flagged by a
-  performance pass. Flagging the other two rather than fixing them.
+- **The bubble radius was duplicated exactly the way the cap was** — `PLAYER_BUBBLE_RADIUS_M = 10000.0`
+  in the outer file, `if rangeM > 10000.0` re-typed inside the chunk — and flagging it rather than
+  fixing it **was the wrong call**: the review pointed out the local therefore had *zero* code
+  readers, which is strictly worse than the cap's duplication (two live definitions that could
+  drift) because it is one live definition plus one decoy that reads as governing the bubble.
+  **Now spliced** (see the review-fix section). `HOUR_DEFAULT`/`FOV_DEFAULT_DEG` versus the chunk's
+  `or 0`/`or 45` are a *different* case and are deliberately left duplicated: the file-level pair is
+  live at `:565`/`:566` as `_safeClampInt` fallbacks for a **bad inbound value**, while the chunk's
+  `or`-defaults cover **no command having arrived yet this mission**. They are equal by coincidence,
+  not construction, so splicing them would couple two unrelated decisions — retuning the bad-input
+  clamp would silently move the no-directive-yet wedge. Reviewer's explicit ruling; do not "tidy".
 - **An unnamed object no longer counts toward `units_in_bubble`.** The name is now fetched before
   the bubble counter increments, so the counter equals the joinable population rather than the
   observed population. Previously a nil-named unit counted in bubble and wedge but produced no
@@ -138,8 +151,144 @@ Lua:
   the whole snapshot. The probe measured names as non-null 50/50 units and 94/94 statics, so this
   is defensive rather than a fix for an observed failure.
 - **`coalition.getGroups` was being called unprotected** (`ipairs(coalition.getGroups(coa) or {})`),
-  as were `grp:getUnits()`, `unit:isExist()` and `unit:getID()`. All are now `pcall`'d — an error
-  inside `onSimulationFrame` takes the mission with it.
+  as were `grp:getUnits()`, `unit:isExist()` and `unit:getID()`. All are now `pcall`'d. **The reason
+  first written here — "an error inside `onSimulationFrame` takes the mission with it" — is false,
+  and is corrected rather than defended** (2026-10-06 review). The chunk does not run in
+  `onSimulationFrame`; it runs in the **mission-scripting state** via `net.dostring_in`, behind two
+  independent layers of `pcall`: `dostring`'s own `pcall(net.dostring_in, …)` at `:513` and
+  `pcall(pollAndSend)` at `:709`. A chunk error could never have taken the mission down — it
+  produced a `poll failed:` log line. **The real reason, which is a good one:** a per-side
+  enumeration failure should degrade to *fewer candidates* rather than losing the whole poll, and
+  must then **say so in a counter**. That second clause is load-bearing and was the missing half —
+  without it the `pcall` converts a loud failure into a silent one, which is what the wrong
+  justification would have licensed next time. See the review-fix section below.
 - **Statics cost is filter-only until they survive the wedge.** `getPoint` + arithmetic per
   candidate; only the capped survivors pay the two engine calls (`searchObjects` + `isVisible`).
   So the tripled population's cost is dominated by the cheap half unless the wedge is wide.
+
+---
+
+## Review fixes (2026-10-06, `plans/los-hook-statics/review.md`)
+
+Three required fixes plus the one offered optional. The verdict was APPROVED WITH REQUIRED FIXES;
+none was a correctness defect in the shipped Lua.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` — mechanism, commit `f562cf4`.
+- `plans/los-hook-statics/implementation.md` — the corrections above, in place, next to the claims
+  they correct rather than only here. A wrong reason left standing where a reader will meet it is
+  the thing being fixed; a correction appended 100 lines below it does not fix that.
+
+### Fix 1 — `unitEnumFailures`
+
+The asymmetry was real and verified by count: `staticEnumFailures` appeared 3× in the file,
+`unitEnumFailures` 0×. The statics counter was added for a good reason — a total statics failure
+would otherwise be indistinguishable from the pre-Stage-4 unit-only behaviour — and the same commit
+wrapped the unit side's four enumeration calls in `pcall` with no equivalent. Before those `pcall`s
+such an error propagated out of the chunk and `pollAndSend` logged `poll failed:`; after them a
+side's units silently vanish.
+
+**Why it is the fix that could have cost a second flight:** fewer candidates *understates* cap
+pressure. A silent unit-enumeration failure makes `cap_hit=0` — the exact number this sortie exists
+to produce — read as good news.
+
+Counted in the `else` of the per-side `pcall(coalition.getGroups, coa)`, emitted as
+`unit_enum_failures=` on the same `env.info` line, same naming and `tostring()` formatting as the
+statics counters. **The four `pcall`'d sites on the unit side are enumerated in a comment at the
+counter's declaration** — `coalition.getGroups` (per side), `grp:getUnits()` (per group),
+`unit:isExist()` and `unit:getID()` (per unit) — stating that only the first is counted, why (it is
+the one whose failure loses a whole side, and the one granularity comparable to
+`staticEnumFailures`, which is also per side and also caps at 3), and that a fifth call needs either
+a bump or its own counter. The enumeration lives next to the guard so the next person adding a call
+can see what is being promised; a reader who only greps call sites gets the wrong count.
+
+### Fix 2 — the false justification, corrected in place
+
+Verified before correcting: `dostring` wraps `net.dostring_in` in `pcall` at `:513`, and
+`onSimulationFrame` wraps `pollAndSend` in `pcall` at `:709`. Two layers. The chunk runs in the
+mission-scripting state, not in `onSimulationFrame`, and a chunk error produced a log line, never a
+mission crash. The `pcall`s are **kept** — the real reason (degrade to fewer candidates rather than
+losing the poll, *and say so in a counter*) is good. Only the stated reason changed.
+
+### Fix 3 — the bubble radius, spliced
+
+`PLAYER_BUBBLE_RADIUS_M` had its declaration and two comment mentions and **zero code readers**; the
+live bound was the re-typed `10000.0` in `considerCandidate`. Spliced, the same shape as the cap
+three lines above, as `local BUBBLE_RADIUS_M = <value>` prepended to the chunk at module load.
+
+**`%d` is wrong for it and that is not a nitpick.** The cap is an integer count, so `%d` is exact.
+The radius is a float: `%d` would silently truncate the moment anyone writes a non-integral radius,
+turning a deliberate edit into a quiet rounding. `%.17g` is the shortest width that round-trips an
+IEEE-754 double exactly, verified rather than assumed:
+
+| value | `%.17g` | `tonumber(…)` equals original |
+|---|---|---|
+| `10000.0` | `10000` | yes |
+| `10000.05` | `10000.049999999999` | yes |
+| `1/3` | `0.33333333333333331` | yes |
+
+`tostring`/`%.14g` would have been enough for `10000.0` and not in general, which is the class of
+"works today" the splice exists to remove. The boundary test stayed `>` (inclusive at the boundary),
+unchanged.
+
+The declaration comment now states that this is the only definition of the bubble and that editing
+it really does move the bubble — the property that was false until now.
+
+### Optional taken — the ownship claim softened
+
+The Lua comment and the log both claimed a failed `getID()` "cannot silently let ownship through".
+It can, if `getID()` **and** `getName()` both fail. Claim softened in both places to what the code
+guarantees, and the condition made observable as `ownship_unidentified=0|1` on the scan line.
+
+**Why a field on the existing line rather than its own log call:** the chunk is rebuilt and
+re-executed every poll, so it holds no state across polls and cannot log "once" without introducing
+a new mission-state global — which would add a fourth deliberate global to the `GETGLOBAL` sweep's
+allowlist, for a near-impossible condition. At 1 Hz a dedicated warning line would be noise for a
+whole flight. Returning `ERR|` was rejected by the review and is worse: it drops the whole poll for
+every object.
+
+### Not done, deliberately
+
+- **`HOUR_DEFAULT`/`FOV_DEFAULT_DEG`** — explicitly out of scope; the review ruled they *should*
+  stay duplicated (reason recorded in Notable Discoveries above). Not touched.
+- **The farthest-surviving-candidate range** when the cap binds (optional refinement). The dropped
+  count already answers "is 128 binding" well enough to retune, so this does not cost a flight.
+- **The `CLAUDE.md` bullet's arrow ordering** and the `WORKFLOW.md` deploy gap — not in this task's
+  brief; the deploy gap is being filed as an `AC-B<n>` backlog item by the orchestrator.
+
+### Checks
+
+aircraft-layer/ (the only subproject touched; **`src/` and `tests/` unchanged by these fixes** —
+the diff is one `.lua` file plus one plan document, so ruff/mypy have nothing new to see, but the
+suite was run anyway because a test parses the edited Lua file):
+
+- `luac5.1 -p` on the **outer** file: **pass**.
+- `luac5.1 -p` on the **bridged chunk extracted to its own file**, with **both** spliced prefix
+  lines prepended (`local MAX_SIGHTLINES = 128`, `local BUBBLE_RADIUS_M = 10000`, the latter
+  generated by running the file's own `string.format("%.17g", …)` rather than typed by hand):
+  **pass**.
+- `luac5.1 -p` over all **25** files in `dcs-export/`: **pass**.
+- **GETGLOBAL sweep, outer:** `loadfile, log, math, net, os, package, pcall, require, string,
+  tonumber, tostring, type` — Lua stdlib plus `log`/`net`, genuine Hook-state DCS APIs. `DCS` is
+  absent because it is a `local` from `require("DCS")` at `:218`, checked rather than assumed.
+- **GETGLOBAL sweep, chunk:** `coalition, env, ipairs, land, math, Object, pairs, PB_LOOK_FOV_DEG,
+  PB_LOOK_HOUR, pcall, table, timer, tostring, type, world` — Lua stdlib, genuine scripting-state
+  DCS APIs, and the three deliberate globals (`env`, `PB_LOOK_HOUR`, `PB_LOOK_FOV_DEG`). **No own
+  helper appears**: not `considerCandidate`, `wrapSigned180`, `buildingClear`, `terrainClear`,
+  `MAX_SIGHTLINES` or the new `BUBBLE_RADIUS_M`. Unchanged from the pre-fix sweep, i.e. the new
+  local added no global.
+- **The chunk sweep's sensitivity was proved, not assumed.** Run against the chunk body *without*
+  the spliced prefix, the same sweep reports `BUBBLE_RADIUS_M` **and** `MAX_SIGHTLINES` as globals.
+  So the clean list above is evidence that the splice lands, not a vacuous pass — which matters
+  because a missing splice is exactly the no-hoisting bug this sweep exists to catch.
+- `pytest tests -q` (unfiltered, from inside `aircraft-layer/`, borrowed venv): **pass**, **252
+  passed** — identical to the baseline, as expected for a Lua-only diff.
+- `tests/test_line_of_sight_hook_lua.py -v`: all **5 named tests** pass, confirmed by name. Relevant
+  because the new `string.format("%.17g", …)` is a second `string.format` call site near
+  `SET_LOOK_TEMPLATE`, whose guard regex could in principle have been loosened by it; pytest's
+  `rootdir` resolved to the worktree, so the tests read the edited file.
+
+**Live behaviour remains unverified and unverifiable from here, and nothing in these fixes weakens
+that posture** — it is still stated in the file header, the schema docstring, the `CLAUDE.md` bullet
+and this log. Acceptance is a sortie by the pilot on branch `fix/los-hook-statics`.
