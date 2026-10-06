@@ -135,3 +135,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [BL-11 perf Stages 1/2/3b/5](project_bl11_perf_stages.md) — a note's speedup ratio is scene-dependent; null-omission vs. deliberately-null join keys; grep test fails on its own fix.
 - [Equivalence test must own its reference arithmetic](feedback_equivalence_test_must_own_its_reference_arithmetic.md) — importing the predicate made it pass 15/15 under a real mutation.
 - [mkdir in a helper pollutes relative test paths](feedback_mkdir_in_a_helper_makes_relative_test_paths_pollute.md) — passing tests started creating untracked dirs; reroot onto tmp_path.
+- [Healthy-path test needs the guarded call to matter](feedback_healthy_path_test_needs_the_guarded_call_to_matter.md) — gutting close() left all 4 tests passing; assert absence inline.
+- [BL-11 round 3 fixes](project_bl11_round3_fixes.md) — a deletion's prose fallout exceeds the named list; dated vs forward-looking refs get opposite treatment.

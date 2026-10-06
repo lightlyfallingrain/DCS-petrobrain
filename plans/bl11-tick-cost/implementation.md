@@ -240,3 +240,99 @@ work rather than a pre-existing contract.
   yield under sustained overrun, on a Mac also hosting Ollama) is now in the
   docstring, with `--poll-interval-s` named as the knob that already means
   this.
+
+---
+
+## Round 3 — review-round2.md's three required fixes plus the approved deletion
+
+Branch `feature/bl11-tick-cost`, based at `d6e6288` (checked out directly; the
+main checkout had already moved to `main`, so no `worktree-agent-` branch was
+needed). Three commits, split so that mechanism and documentation never share
+one.
+
+### Files Changed
+
+- `body-layer/tests/test_detection_trace.py`,
+  `body-layer/tests/test_belief_truth_log.py` (`c50ac21`) — each
+  `test_close_does_not_raise_on_a_healthy_writer` now writes **one poll at
+  `flush_every_n_polls=2`** and asserts the file is empty before `close()` and
+  non-empty after. Previously the row was already on disk when `close()` ran,
+  so the assertion held whatever `close()` did. The belief-truth case also
+  switches from `write_speech` to `write_poll`, because `write_speech` flushes
+  eagerly by design and cannot be buffered at all.
+- `body-layer/src/perception/group_salience.py` (`749c151`) — `_resolvable` and
+  `_cohesive` deleted (round 2's ruling). All four of the module's imports
+  remain used by the surviving code, so no import changes were needed.
+  `group_salient_ids`'s docstring now names `_resolvable_terms` /
+  `_cohesive_from_terms`; `_cohesive_from_terms` no longer claims two callers;
+  `_resolvable_terms` attributes the old recomputation to "the pre-Stage-2 pair
+  loop" rather than to a function that no longer exists.
+- `body-layer/tests/test_group_salience.py`,
+  `body-layer/tests/test_vision_calibration.py` (`749c151`) — the two prose
+  references round 2 named; both now say "`group_salience`'s resolvability
+  gate" instead of `_resolvable`.
+- `body-layer/tests/test_group_salience_equivalence.py` (`749c151` for the
+  `_reference_*` docstrings, `08025f7` for the module docstring) — the module
+  docstring's "Only the tuning constants are shared" replaced with the real
+  shared/not-shared line (see below). The two `_reference_*` docstrings now
+  describe the production wrappers as deleted, which is also the reason those
+  copies are the only remaining statement of either pre-change formula.
+- `body-layer/src/logger.py` (`08025f7`) — `_resolve_speech_log_path`'s
+  directory-creation paragraph rewritten to describe what `_per_run_log_paths`
+  now does to all three paths, including an explicit `--speech-log`.
+
+### Tests Added
+
+None. Two existing tests were strengthened, both added by this same branch
+(`061d936`/Stage 5 lineage), so no pre-existing contract was rewritten. Count
+is unchanged at 1512/4 — as expected: the deletion removes no tests and the
+close rework changes assertions rather than adding cases.
+
+### Checks (body-layer/ only — nothing else touched)
+
+- `ruff format --check src tests`: pass (118 files)
+- `ruff check src tests`: pass
+- `mypy src`: pass (54 files, strict)
+- `pytest tests -q`: **1512 passed, 4 xfailed**
+- `pytest tests/test_group_salience_equivalence.py -q`: **15 passed**
+
+Toolchain borrowed from the main checkout's `body-layer/.venv` (this worktree
+has none), with `cwd` inside the worktree's own `body-layer/`. Import
+resolution was proved first rather than assumed: a bare `python -c "import
+perception.group_salience"` with `sys.path` holding `src` tracebacks through
+the worktree's own absolute path, and `pyproject.toml`'s
+`[tool.pytest.ini_options] pythonpath = ["src", "../world-model/src"]`
+resolves against pytest's rootdir, which is the worktree's `body-layer/`.
+
+Both reworked tests were confirmed **by name in an unfiltered `pytest tests
+-v` run** (lines 126 and 592 of 1512 PASSED), not via `-k` — a `-k` filter
+silently matched nothing for an earlier implementer on this branch.
+
+### Notable Discoveries
+
+- **The healthy-close mutation was re-run after the fix, not just before.**
+  With `close()` gutted to a bare `return` in both writers, the two healthy
+  tests now fail and the other 44 in those files still pass — the raises-case
+  half cannot detect the mutation, because a `close()` that does nothing also
+  does not raise. That asymmetry is the reason the healthy half had to carry
+  the teeth. Production restored from scratch copies and verified
+  byte-identical by sha256 (`d154cc6a…` / `2a37ab4f…` before and after).
+- **`contextlib` stays imported in both writers after the mutation round**, so
+  a careless restore would have been caught by `ruff check` — but only because
+  `close()` is each module's sole `contextlib` user. Worth knowing if a future
+  mutation experiment targets a module where that is not true: the lint pass
+  is a real guard against an incomplete restore, and it is not guaranteed.
+- **Deleting `_cohesive` cost no imports, which is itself the argument for the
+  deletion.** Every name it used (`object_model.profile_for`, `range_m`,
+  `angular_size_rad`, `angular_separation_rad`, `GeoPosition`) is still used by
+  `_resolvable_terms` or the hoisted pair loop — i.e. it computed nothing the
+  live code does not already compute, which is exactly the hand-maintained
+  second copy round 2 identified.
+- **One dangling reference outside this branch's scope, left alone and flagged:**
+  `plans/player-bubble/performance.md:64` reasons about "avoiding the `O(n)`
+  `_resolvable()` pass inside `group_salient_ids`" — a *forward-looking* note
+  for an unbuilt feature, not a dated record, so unlike the research notes and
+  review documents it could mislead a future implementer. The pass it means
+  still exists as `_resolvable_terms`. Not edited: it belongs to another
+  plan, and `ROADMAP.md`/`BACKLOG.md`'s own mentions were out of bounds for
+  this task.
