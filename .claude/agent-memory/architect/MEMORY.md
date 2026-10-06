@@ -76,3 +76,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Doc corpus silent dropout](project_doc_corpus_silent_dropout.md) — splitting/moving a .md silently drops it from the graph corpus; happened twice, recorded only in graph-corpus-files.sh's comments.
 - [Scope by the right benefit](feedback_scope_by_the_right_benefit.md) — some benefits only exist at completion; label which benefit a cost/benefit table measures before recommending a stopping point.
 - [BL-11 Stage 4 fail-closed plan](project_bl11_stage4_fail_closed_plan.md) — measured 70-test blast radius, 3 shared fixture factories fix ~68 of them; coverage counter deliberately not DetectionTraceCollector-shaped.
+- [Doc graph tag hub sizing](project_doc_graph_tag_hub_sizing.md) — graphify under-recalls ~10x vs grep for doc topics; hub size is the only working lever (count it); consistency gate's per-directory ID scope is a live bug.
