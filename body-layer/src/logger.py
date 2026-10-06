@@ -1753,12 +1753,13 @@ def _per_run_log_paths(
     def resolve(path: Path | None, flag: str) -> Path | None:
         if path is None:
             return None
-        stamped = per_run_log_path(path, stamp_at)
+        expanded = path.expanduser()
         try:
+            stamped = per_run_log_path(expanded, stamp_at)
             stamped.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             print(
-                f"{flag}: could not create log directory {stamped.parent} "
+                f"{flag}: could not create log directory {expanded.parent} "
                 f"({exc}); continuing without this log",
                 file=sys.stderr,
             )
