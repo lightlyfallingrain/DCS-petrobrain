@@ -252,3 +252,34 @@ PROJECT_ATTACK_SURFACES — bullet list of project-specific attack surfaces to r
   - src/api/ — API endpoint validation: are all inputs sanitized?
   - config/ — configuration loading: could malicious config execute code?
 -->
+
+
+## Rate a fallback by how often it fires when nothing is wrong
+
+**Added from the 2026-10-06 retro, citing this role's own worst miss.**
+`plans/dcs-driven-los/security-deep-analysis.md:109-121` rated a silent SRTM line-of-sight fallback
+**low/low**. The next sortie measured it carrying **77 % of all admissions**. Two separate errors
+produced that:
+
+1. **Probability was reasoned from failure modes, never from the steady state** — "the Hook would
+   have to crash" — when the fallback fires whenever a verdict is merely *absent*, which at the real
+   poll rate was normal operation. **Compute the healthy-case firing rate, not the broken-case one.**
+2. **Impact borrowed another component's acceptability** ("reverts to the already-reviewed
+   primitive"), and the user withdrew that acceptability the same day with nothing re-running the
+   rating. **Any rating that rests on another component's acceptability gets a stated lapse
+   condition** — the same rule root `CLAUDE.md` already applies to standing exemptions, for the
+   same reason: it outlives its premise silently.
+
+## Enumerate what a key covers, not what the bar says
+
+`_OBSERVABILITY_EXEMPT_KINDS` was keyed on `EventKind`, so it exempted **both** of that kind's
+transitions — including a close-out line the bar had been written only for threat cues. It passed
+three reviews and a DoD. When a decision is keyed on a type, enumerate every value that type can
+take at that site.
+
+## Execute a rendered string or do not quote it
+
+A report quoted the exempt line as `"Danger, ZU-23-3, six o'clock, 1.0 km."` The code had not
+produced that for weeks — units had been spelled out for TTS. The stale string then propagated into
+three documents and an acceptance card. If a finding turns on what the pilot hears, run the renderer
+and paste its output, or describe the shape without quoting.

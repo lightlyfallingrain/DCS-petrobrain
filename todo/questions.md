@@ -217,3 +217,20 @@ reversal, and the honest version of the bar becomes "a threat-envelope *transiti
 which I would then write down as the licence rather than leaving the code and the comment
 disagreeing.
 
+### Q9 — Three research asks have been open across multiple sessions and never closed
+
+Surfaced by the investigator's own retro, 2026-10-06: it correctly recorded these as unresolved
+rather than guessing, but nothing tracked them, so each was re-attempted and re-abandoned instead of
+being either answered or dropped. **Each needs one thing from you, or an explicit "drop it".**
+
+1. **`forum.dcs.world/topic/194777-exportlua-destroyed-object/` has 403'd across three sessions.**
+   Its title points straight at the destroy/respawn object-id lifecycle — which is the open risk on
+   the `Unit:getID()` branch of the unit-id probe you are about to fly. A paste of the thread would
+   likely settle it without a second probe. (This is the standing "forum 403 → ask the user to
+   paste" case, now with a concrete cost attached.)
+2. **Mobile TELAR spacing was not found in any source.** Wanted for SAM-site geometry; the
+   literature searched had nothing usable.
+3. **A RUSI PDF was unparseable by the fetch tool.** Same topic.
+
+If 2 and 3 are not worth your time, say so and they get recorded as dropped with the reason — which
+is strictly better than a third session rediscovering that they are hard.

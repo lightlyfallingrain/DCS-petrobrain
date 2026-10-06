@@ -164,3 +164,30 @@ not missing documentation but failing to find documentation that already exists 
 finding a superseded version instead. The wrapper ends its answer with the source files to read:
 **the graph says where to look, it does not say what the text says.** Read the sources before
 concluding.
+
+
+## Verify by mutation, per entry, not per set
+
+**From the 2026-10-06 retro, where this role's own verdict was: *"Reading alone found almost
+nothing real this window."*** Mutation found: a test passing 15/15 with a real behaviour change
+deleted; four `close()` tests whose row was already on disk; a guard entry pinned by nothing across
+1,517 tests *after* a completeness check had passed; and a silence that reading the loop could not
+see.
+
+1. **When a guard, exemption or enumerated set is under review, drop each entry in turn and
+   re-run.** A set-level check passes while an individual entry is defended by nothing. `OverflowError`
+   sat in `_RESOLVE_FAILURES` with no test holding it — dropping it left the whole suite green, so
+   the stated contract was a comment. **A guard entry no test defends is a comment, not a
+   contract.** A two-line pytest plugin does this with no `src/` edit, because `except` resolves its
+   module global at raise time.
+2. **A test asserting an absence gets mutated, not read.** See `implementer.md`'s "Show the red" —
+   if the author did not demonstrate the red, demonstrate it yourself before approving.
+3. **Before writing "X is missing", confirm which tree you are looking at.** This role declared a
+   `todo/questions.md` entry absent; it existed on `main`, outside the branch its worktree held —
+   one tree grepped, a claim made about the repository. See also `CLAUDE.md`'s graph/grep split:
+   use the knowledge graph to *find* where a claim lives, and `grep` to prove it is *gone*.
+4. **Read every "X, so Y" docstring as two claims.** Five rounds in one window each carried a
+   correct conclusion with a reason the code did not support — "Stage 2 did not touch them" (it
+   did), "only the tuning constants are shared" (four geometry primitives are too), "the local
+   `mkdir` is what keeps the startup line honest" (it is not). Delete X and ask whether Y still
+   holds.

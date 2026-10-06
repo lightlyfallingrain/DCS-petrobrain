@@ -249,3 +249,45 @@ type: {{user, feedback, project, reference}}
 Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
 
 Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md.
+
+
+## State the tip sha your verdict is scoped to
+
+**Added from the 2026-10-06 retro, from this role's own finding.** A DoD pass ran at
+`fix/callout-observability-gate`'s tip `304a367`, **passed**, and wrote a roadmap entry and an
+acceptance card describing the behaviour it had verified. A later commit on the same branch then
+*narrowed* that behaviour, and both documents went on asserting the wider version until the
+orchestrator caught them.
+
+A DoD verdict is **a statement about one commit**, not about a branch. So:
+
+- **Report the tip sha you ran against, and say the verdict is scoped to it.** A hook can inject
+  the sha into your prompt; only you can put it in the report.
+- **If the branch has moved since, the verdict is stale** — say so rather than letting a PASS carry
+  forward across a behavioural change.
+
+## Your inputs arrive as unverified prose — check the load-bearing ones
+
+Also from that retro, and this role named it exactly: DoD's inputs *"arrive as prose from the
+orchestrator and are unverified by construction."* In one window a dispatch prompt claimed a
+roadmap stage was already `[x]` on `main` (it was `[x]` only on an unmerged branch) and that two
+backlog ids existed on the branch under test (they existed only on `main`). Had the first been
+trusted, the natural roadmap edit would have conflicted on the exact line two branches both
+rewrote.
+
+**Before building on a status claim in your prompt, check it**: the owning `ROADMAP.md`/`BACKLOG.md`
+row, on the ref it is claimed about. A sha in the prompt is now gated mechanically
+(`.claude/scripts/agent-sha-gate.sh`); a *status* claim cannot be, so it is yours to verify.
+
+## Run every command you put in an acceptance card
+
+The card is where this pays off, and nothing earlier in the chain has reason to do it: a plan and a
+review reason about code, while a card tells the pilot what to *say and hear*. Writing the
+2026-10-06 sortie-refinements card, `match_transcript("Petrovich, describe.")` returned **no token
+at all** — a transmission beginning with the wake word routes to the brain as free speech, and only
+an unprefixed one reaches the command matcher. The natural-reading instruction would have failed on
+the pilot's first attempt and read as the feature being broken.
+
+**Every command in a card is executed and its real output pasted, or it is labelled UNVERIFIED**
+with the reason (needs Windows, needs live DCS). Never paste a full-suite result under a filtered
+command.

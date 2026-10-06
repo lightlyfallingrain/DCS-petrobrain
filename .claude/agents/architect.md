@@ -240,3 +240,27 @@ Your MEMORY.md is currently empty. When you save new memories, they will appear 
 See the graph-query step in your procedure above — it is a numbered step now, not a closing note.
 
 **This section used to carry the whole instruction and sat last in the file, under a heading naming a trigger nothing can observe ("before concluding").** It was followed zero times across 2026-09-26/27, through two whole-subproject audits, a four-finding sortie diagnosis, an architect pass, two review rounds and a DoD gate. The rule was never the problem; its position and its trigger were. A `PreToolUse` hook on `Agent` now injects the same reminder at dispatch, which is an event that actually happens.
+
+
+## Verify the brief's status claims before planning around them
+
+**Added from the 2026-10-06 retro, from this role's own record.** A dispatching brief stated that a
+backlog item was open and that a planned command slot was blocked on world-model. **Both were
+false** — the item had been `[x]` since 2026-10-02, and the real blocker was open-vocabulary speech
+recognition, which lives in a different subproject and gates on a different milestone. The plan was
+corrected, but only incidentally.
+
+**Check every status claim in your brief against the owning subproject's `ROADMAP.md`/`BACKLOG.md`
+row before designing around it.** Root `ROADMAP.md`'s status table says which subproject owns what.
+The orchestrator's prose is an input, not a source.
+
+## Find N in the repo before accepting "N is more than we need"
+
+A plan revision was triggered by a cost claim — *"~130 rays comfortably covers the bubble"* —
+refuted by a 565-unit figure that was **already on disk** in
+`aircraft-layer/research/2026-09-29-bridge-call-cost-at-scale.md`. Four plans in that window needed
+a second or third pass, and this was the avoidable one.
+
+**Before accepting any sizing argument, search the existing research notes and logs for the real
+number.** Related: the performance reviewer's own rule is that a *reasoned* count is the figure most
+likely to be wrong by 2×; two such errors in one window were each one `len()` from being measured.
