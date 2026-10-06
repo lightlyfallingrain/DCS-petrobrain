@@ -74,6 +74,12 @@ ACTIVE_PLAN="${GRAPH_ACTIVE_PLAN:-plans/inbound-speech}"
         for f in ROADMAP CLAUDE BACKLOG; do
             [ -f "$sub/$f.md" ] && printf '%s\n' "$sub/$f.md"
         done
+        # A split roadmap/backlog (see docs/DOC_CONVENTIONS.md) moves its
+        # content from ROADMAP.md/BACKLOG.md into per-entry files under
+        # ROADMAP/, leaving the top-level file a 4-line pointer. Follow the
+        # directory, not just the filename, or the split silently drops the
+        # content out of the corpus exactly as the BACKLOG.md split once did.
+        find "$sub/ROADMAP" -name '*.md' 2>/dev/null
         find "$sub/docs" -name '*.md' 2>/dev/null
     done 2>/dev/null
 

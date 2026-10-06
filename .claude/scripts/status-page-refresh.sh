@@ -66,6 +66,14 @@ mission-interpreter, audio-adapter) and todo/todo.md. Reading the page first
 biases you toward patching what is already there instead of noticing what
 changed.
 
+If a subproject ROADMAP.md carries the sentinel "<!-- split-roadmap: see
+ROADMAP/ -->", it is a 4-line pointer, not the source -- read its
+ROADMAP/<subproject>-roadmap.md index instead. Before publishing, assert that
+the forward-only map and every subsystem card have at least one open item: a
+zero-item result most likely means a pointer was read as though it were the
+full roadmap, which regenerates an empty-but-well-formed page and would
+otherwise exit clean. Stop and say so rather than publish in that case.
+
 Then update docs/status/petrobrain-status.html: the five counters (recount the
 checkbox states), the subsystem cards, the mermaid dependency graph, the
 "waiting on you" blockers, the open-work rows, and the DETAIL object that backs

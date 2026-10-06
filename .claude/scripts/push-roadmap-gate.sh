@@ -56,7 +56,7 @@ done
 [ "$needs_roadmap" -eq 0 ] && exit 0
 
 range_touched=$(git diff --name-only "$range" 2>/dev/null) || exit 0
-if printf '%s\n' "$range_touched" | grep -qE '(^|/)ROADMAP\.md$'; then
+if printf '%s\n' "$range_touched" | grep -qE '(^|/)ROADMAP(\.md|/[^/]+\.md)$'; then
     exit 0
 fi
 
