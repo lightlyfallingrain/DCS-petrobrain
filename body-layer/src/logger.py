@@ -1711,6 +1711,34 @@ def _resolve_speech_log_path(
     return DEFAULT_SPEECH_LOG_PATH
 
 
+#: Every exception type a statement inside `_per_run_log_paths.resolve`
+#: can raise, enumerated per statement rather than collected by symptom.
+#: The tuple is named and sits here so that adding a fourth `pathlib`
+#: call to that closure means extending a list that is visibly incomplete,
+#: instead of adding a silent fourth way for `main()` to die before the
+#: crew starts. That is not hypothetical: `BL-11` rounds 3, 4 and 5 each
+#: found one statement's exception type missing from a guard that already
+#: caught the others, and round 4's own fix introduced the one round 5
+#: removed.
+#:
+#: * `Path.expanduser()` -- `RuntimeError`, when the first component is
+#:   `~<user>` and that user has no resolvable home (a mistyped `~sgotz`
+#:   for `~sg`). Bare `~` with `HOME` unset does *not* raise: Python 3.14
+#:   falls back to `pwd`.
+#: * `per_run_log_path()` -> `run_stamp()` -> `time.localtime()` --
+#:   `OverflowError` for a `when` outside the platform's `time_t`, and
+#:   `ValueError` for a NaN. Not reachable from `argv` (there is no
+#:   `--when` flag, only the keyword argument the tests pass), so this one
+#:   is guarded rather than argued away: the closure's contract is about
+#:   every statement in it, not only the argv-driven ones.
+#: * `per_run_log_path()` -> `Path.with_name()` -- `ValueError`, when the
+#:   final component is empty, e.g. `.`, `/` or an empty string.
+#: * `Path.mkdir()` -- `OSError`, for every filesystem reason: a
+#:   non-directory already in the way, a read-only mount, a permission
+#:   denial.
+_RESOLVE_FAILURES = (OSError, OverflowError, RuntimeError, ValueError)
+
+
 def _per_run_log_paths(
     *,
     detection_trace: Path | None,
@@ -1764,13 +1792,24 @@ def _per_run_log_paths(
     def resolve(path: Path | None, flag: str) -> Path | None:
         if path is None:
             return None
-        expanded = path.expanduser()
+        # Bound before the `try`, so that no statement inside it can leave
+        # the handler reaching for a name that statement was supposed to
+        # bind. Needing the expanded parent in the message is exactly what
+        # pushed `expanduser()` outside the guard last round and let its
+        # `RuntimeError` escape; one guard over every statement is what
+        # makes the degrade policy total, so the message has to stop
+        # depending on how far the body got. Re-pointed at the expanded
+        # parent the moment it exists, because a failing `~/x.jsonl` wants
+        # `/home/you` reported, not `~`.
+        reported_parent = path.parent
         try:
+            expanded = path.expanduser()
+            reported_parent = expanded.parent
             stamped = per_run_log_path(expanded, stamp_at)
             stamped.parent.mkdir(parents=True, exist_ok=True)
-        except (OSError, ValueError) as exc:
+        except _RESOLVE_FAILURES as exc:
             print(
-                f"{flag}: could not create log directory {expanded.parent} "
+                f"{flag}: could not create log directory {reported_parent} "
                 f"({exc}); continuing without this log",
                 file=sys.stderr,
             )
