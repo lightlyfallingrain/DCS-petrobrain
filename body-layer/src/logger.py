@@ -252,6 +252,7 @@ from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
+from run_log_paths import per_run_log_path
 from speech_log import SpeechLogWriter
 from store.reader import load_only_region
 
@@ -998,6 +999,55 @@ ATTITUDE_HISTORY_LEN = 3
 
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
+
+def _wait_for_next_tick(
+    stop_event: threading.Event, deadline: float, poll_interval_s: float
+) -> float:
+    """Sleep until `deadline`, then return the next poll's deadline --
+    `BL-11` Stage 1.
+
+    **Both poll loops used to end with `stop_event.wait(poll_interval_s)`,
+    which sleeps the full interval *after* the work**, so the realised
+    period was `work + interval` and never `interval`. With work measured
+    at a median ~330 ms at sortie scale, a 1.0 s setting realised 1.33 s
+    (`body-layer/research/2026-10-05-performance-review.md`, "The headline
+    correction") -- quantitatively the whole of the sortie's observed
+    ~1.4x miss. Sleeping to a deadline instead makes the configured number
+    mean what it says.
+
+    **Overrun policy: drop the missed ticks, do not queue them.** When the
+    work takes longer than `poll_interval_s` the remaining wait clamps to
+    zero and the *next* deadline is re-based on the clock now, so a slow
+    poll costs exactly the ticks it overran and nothing afterwards. The
+    alternative -- advancing the deadline by one interval regardless --
+    accumulates debt, and the loop would then run back-to-back with no
+    sleep at all for as long as it takes to repay it, which is the worst
+    possible behaviour on a thread that is already behind. There is nothing
+    to catch up on in any case: each poll reads the *latest* telemetry, so
+    a skipped tick has no backlog, only a gap.
+
+    **The cost that statement does not cover: sustained overrun means zero
+    voluntary yield.** "Exactly the ticks it overran and nothing afterwards"
+    is about tick debt. While the work keeps exceeding `poll_interval_s`,
+    `stop_event.wait` is never called at all and this thread runs
+    back-to-back, pinning a core on a Mac that also hosts Ollama and the
+    brain layer -- the old `wait(poll_interval_s)` tail was an accidental
+    1.0 s floor that hid this. Deliberately left as a bare clamp rather
+    than floored at ~50 ms: each iteration does real interval-scale work
+    (this is not a busy-spin), shutdown stays prompt because
+    `stop_event.is_set()` is checked at the top of every iteration, and a
+    floor would silently extend every realised period in the one regime
+    where the loop is already behind -- reintroducing a smaller version of
+    the `work + interval` bug this stage exists to remove. If core pressure
+    is ever observed in flight, the fix is a longer `--poll-interval-s`,
+    which is the knob that already means this."""
+    remaining = deadline - time.monotonic()
+    if remaining > 0.0:
+        stop_event.wait(remaining)
+        return deadline + poll_interval_s
+    return time.monotonic() + poll_interval_s
+
+
 #: The LOS query cone body-layer pushes for an ordinary naked-eye scan --
 #: `plans/dcs-driven-los/plan.md` SS17's own settled value: three o'clock
 #: hours (the one being scanned plus one either side), wide enough that a
@@ -1144,6 +1194,9 @@ def _run_console_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         connection = _ConnectionReporter()
+        # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
+        # the work -- see `_wait_for_next_tick`.
+        next_tick = time.monotonic() + poll_interval_s
         while not stop_event.is_set():
             # Same log-and-continue guard as `_run_crew_text_poll_loop`'s,
             # and for the same reason -- see that function for the full
@@ -1189,7 +1242,7 @@ def _run_console_poll_loop(
                     connection.report_failure(exc)
                 else:
                     logger.exception("console poll cycle failed; continuing")
-            stop_event.wait(poll_interval_s)
+            next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
         if trace_writer is not None:
             trace_writer.close()
@@ -1429,6 +1482,9 @@ def _run_crew_text_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         connection = _ConnectionReporter()
+        # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
+        # the work -- see `_wait_for_next_tick`.
+        next_tick = time.monotonic() + poll_interval_s
         while not stop_event.is_set():
             # One log-and-continue guard around the whole poll body, not
             # just the HTTP calls inside `_poll_f10_commands`/
@@ -1443,7 +1499,20 @@ def _run_crew_text_poll_loop(
             # frame, and perception, belief and speech are simply dead from
             # that moment on, with a stderr traceback as the only symptom.
             # Nothing in the cockpit says so. A skipped poll, by contrast,
-            # costs one cycle at 5 Hz and the next one recovers.
+            # costs one cycle at the configured poll rate
+            # (`_DEFAULT_POLL_INTERVAL_S`, 1.0 s since `abf49cd`) and the
+            # next one recovers.
+            #
+            # (This comment used to name a five-hertz rate, and so did two
+            # docstrings in `belief/brain_client.py`. All three were wrong
+            # and load-bearing: nothing in body-layer's configuration has
+            # ever been five hertz -- that is `Export.lua`'s *producer*
+            # rate, not this consumer's -- and they are what produced
+            # `BL-B30`'s wrong premise that every decay half-life and
+            # cadence constant had been tuned against a tick the runtime
+            # never ran. `BL-11` Stage 1; the rate is spelled out in words
+            # here so `test_no_stale_five_hertz_claims_remain_in_src` can
+            # hold the correction mechanically.)
             #
             # Found by the security pass on `plans/watch-reporting/`
             # (`security-review.md`), pre-existing rather than introduced
@@ -1549,7 +1618,7 @@ def _run_crew_text_poll_loop(
                     connection.report_failure(exc)
                 else:
                     logger.exception("crew-text poll cycle failed; continuing")
-            stop_event.wait(poll_interval_s)
+            next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
         if trace_writer is not None:
             trace_writer.close()
@@ -1594,15 +1663,35 @@ def _resolve_speech_log_path(
     wins (already validated by the caller to require `--crew-text
     --speech-input`).
 
-    Directory creation happens here, once, at startup -- not per write --
-    so an unwritable default location degrades to no log (reported on
-    stderr) instead of crashing a sortie over a debug artifact. A failure
-    creating an *explicit* `--speech-log` path is left to
-    `SpeechLogWriter.write`'s own per-call try/except (`CrewConsole.
-    _log_transcript`), same as before this default existed: the user asked
-    for that exact path, so silently discarding it here would be more
-    surprising than letting the existing degrade-on-write behaviour handle
-    it.
+    Directory creation happens at startup, once, rather than per write --
+    so an unwritable location degrades to no log (reported on stderr)
+    instead of crashing a sortie over a debug artifact. **The `mkdir` below
+    covers only the default path; `_per_run_log_paths` does the same for
+    all three resolved logs, including an explicit `--speech-log`, so an
+    explicit path is no longer the exception it was when this paragraph
+    was first written.** So the policy now is uniform: a missing parent is
+    created wherever the path came from, and a parent that cannot be
+    created costs that one log, reported once on stderr by
+    `_per_run_log_paths`, not per write and not silently.
+
+    That is a change in behaviour and an improvement -- an explicit
+    `--speech-log` under a missing directory previously failed *every*
+    write via `SpeechLogWriter.write`'s own per-call try/except
+    (`CrewConsole._log_transcript`), with no startup line saying so. That
+    per-call guard still exists and still catches a path that goes bad
+    mid-sortie; it is simply no longer the first thing a missing parent
+    hits.
+
+    The `mkdir` here is therefore a strictly earlier report of a condition
+    `_per_run_log_paths` would also catch, and what it buys is cosmetic
+    rather than structural: a speech-log-specific message, raised before
+    the generic per-log one. It is **not** what keeps the "writing <path>"
+    startup line honest -- `per_run_log_path` uses `Path.with_name`, so the
+    parent is identical and `_per_run_log_paths`' own `resolve` mkdirs the
+    same directory and returns `None` on any of `_RESOLVE_FAILURES`,
+    `OSError` among them. Verified by execution
+    2026-10-06: with `logs` occupied by a regular file, `_per_run_log_paths`
+    alone reports the failure and returns `(None, None, None)`.
     """
     if speech_log is not None:
         return speech_log
@@ -1621,6 +1710,128 @@ def _resolve_speech_log_path(
         )
         return None
     return DEFAULT_SPEECH_LOG_PATH
+
+
+#: Every exception type a statement inside `_per_run_log_paths.resolve`
+#: can raise, enumerated per statement rather than collected by symptom.
+#: The tuple is named and sits here so that adding a fourth `pathlib`
+#: call to that closure means extending a list that is visibly incomplete,
+#: instead of adding a silent fourth way for `main()` to die before the
+#: crew starts. That is not hypothetical: `BL-11` rounds 3, 4 and 5 each
+#: found one statement's exception type missing from a guard that already
+#: caught the others, and round 4's own fix introduced the one round 5
+#: removed.
+#:
+#: * `Path.expanduser()` -- `RuntimeError`, when the first component is
+#:   `~<user>` and that user has no resolvable home (a mistyped `~sgotz`
+#:   for `~sg`). Bare `~` with `HOME` unset does *not* raise: Python 3.14
+#:   falls back to `pwd`.
+#: * `per_run_log_path()` -> `run_stamp()` -> `time.localtime()` --
+#:   `OverflowError` for a `when` outside the platform's `time_t`, and
+#:   `ValueError` for a NaN. Not reachable from `argv` (there is no
+#:   `--when` flag, only the keyword argument the tests pass), so this one
+#:   is guarded rather than argued away: the closure's contract is about
+#:   every statement in it, not only the argv-driven ones.
+#: * `per_run_log_path()` -> `Path.with_name()` -- `ValueError`, when the
+#:   final component is empty, e.g. `.`, `/` or an empty string.
+#: * `Path.mkdir()` -- `OSError`, for every filesystem reason: a
+#:   non-directory already in the way, a read-only mount, a permission
+#:   denial. **Also `ValueError`**, for an embedded null byte -- this list
+#:   is the next author's checklist, so it must not attribute that type to
+#:   `with_name` alone.
+_RESOLVE_FAILURES = (OSError, OverflowError, RuntimeError, ValueError)
+
+
+def _per_run_log_paths(
+    *,
+    detection_trace: Path | None,
+    belief_truth_log: Path | None,
+    speech_log: Path | None,
+    when: float | None = None,
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Give each of the three JSONL logs this run's own filename -- `BL-11`
+    Stage 5, see `run_log_paths.per_run_log_path` for why timestamping
+    rather than truncating.
+
+    **One stamp for all three**, taken once here rather than per writer, so
+    a sortie's detection trace, belief-truth log and speech log carry the
+    same name component and a reader can tell at a glance which three files
+    belong to one flight. A run that straddled midnight, or three writers
+    opened a second apart, would otherwise produce three unrelated-looking
+    names.
+
+    `None` passes through as `None` -- every one of these logs is off by
+    default.
+
+    **Expands `~` and creates each resolved path's parent directory**,
+    which is the other half of applying path policy at the CLI boundary
+    rather than inside the writers. The expansion is here, once, rather
+    than on each of the three `argparse` flags: `pathlib.Path` does not
+    expand `~`, so without it the `mkdir` below would create a directory
+    literally named `~` in the working directory. Nothing else does
+    either: `per_run_log_path` only
+    renames, and `DetectionTraceWriter.__init__` /
+    `BeliefTruthLogWriter.__init__` call `path.open("a")` with no guard --
+    so a missing parent is a `FileNotFoundError` raised at construction,
+    *before* either writer's own write-failure reporting can fire, and the
+    crew does not start at all. The run scripts point at `logs/`, which is
+    gitignored and therefore absent in a fresh clone, so this is the
+    ordinary case rather than an edge one.
+
+    A path that cannot be resolved to a writable file degrades that one log
+    to `None` with a line on stderr, mirroring `_resolve_speech_log_path`
+    above: an unwritable log should cost the sortie its trace, not its
+    crew. The writers keep their "handed an exact path, writes exactly
+    there" property either way.
+
+    **Four exception types, from four statements**, because these three
+    adjacent `pathlib` calls raise three unrelated types and `run_stamp`
+    a fourth: see `_RESOLVE_FAILURES` above, which enumerates them per
+    statement and is the only list of them. Every statement in `resolve`
+    *that can fail* is inside the one guard -- the assignments are not, and
+    `reported_parent = path.parent` is deliberately outside it (it is pure:
+    no syscall, and it does not raise for `.`, `/`, `''`, `//`, an embedded
+    null byte or `~nosuchuser/x`, all probed 2026-10-06) -- because a
+    `--detection-trace .` or
+    `'~nosuchuser/trace.jsonl'` that killed `main()` with a traceback
+    would escape this policy rather than apply it. Each of the three
+    rounds that widened this guard found exactly one type missing, which
+    is why the enumeration is written down next to the guard rather than
+    rediscovered."""
+    stamp_at = time.time() if when is None else when
+
+    def resolve(path: Path | None, flag: str) -> Path | None:
+        if path is None:
+            return None
+        # Bound before the `try`, so that no statement inside it can leave
+        # the handler reaching for a name that statement was supposed to
+        # bind. Needing the expanded parent in the message is exactly what
+        # pushed `expanduser()` outside the guard last round and let its
+        # `RuntimeError` escape; one guard over every statement is what
+        # makes the degrade policy total, so the message has to stop
+        # depending on how far the body got. Re-pointed at the expanded
+        # parent the moment it exists, because a failing `~/x.jsonl` wants
+        # `/home/you` reported, not `~`.
+        reported_parent = path.parent
+        try:
+            expanded = path.expanduser()
+            reported_parent = expanded.parent
+            stamped = per_run_log_path(expanded, stamp_at)
+            stamped.parent.mkdir(parents=True, exist_ok=True)
+        except _RESOLVE_FAILURES as exc:
+            print(
+                f"{flag}: could not create log directory {reported_parent} "
+                f"({exc}); continuing without this log",
+                file=sys.stderr,
+            )
+            return None
+        return stamped
+
+    return (
+        resolve(detection_trace, "detection-trace"),
+        resolve(belief_truth_log, "belief-truth-log"),
+        resolve(speech_log, "speech-log"),
+    )
 
 
 def main() -> None:
@@ -1986,6 +2197,22 @@ def main() -> None:
         crew_text=args.crew_text,
         speech_input=args.speech_input,
     )
+
+    # BL-11 Stage 5: each run writes its own files rather than appending to
+    # one that grows across sorties. Applied after the default resolution
+    # above, so `--speech-log`'s default and an explicit path roll alike.
+    args.detection_trace, args.belief_truth_log, args.speech_log = _per_run_log_paths(
+        detection_trace=args.detection_trace,
+        belief_truth_log=args.belief_truth_log,
+        speech_log=args.speech_log,
+    )
+    for label, rolled in (
+        ("detection-trace", args.detection_trace),
+        ("belief-truth-log", args.belief_truth_log),
+        ("speech-log", args.speech_log),
+    ):
+        if rolled is not None:
+            print(f"{label}: writing {rolled}", file=sys.stderr)
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 

@@ -82,6 +82,61 @@ Two things that will bite:
 LOS gate needs elevation data. Older notes showing a two-argument command are
 out of date.
 
+### The debug logs get a new filename every run
+
+`--detection-trace`, `--belief-truth-log` and `--speech-log` all write JSONL,
+and **the path you pass is not the path written.** Each run stamps its own
+start time into the filename before the suffix, so
+
+```
+--detection-trace logs/dcs-detection-trace.jsonl
+```
+
+actually writes `logs/dcs-detection-trace-20261006-143500.jsonl`. Only the
+filename is rewritten — the path's directory is used as given, never
+relocated — and all three logs of one run share the same stamp so you can tell
+at a glance which files belong to which sortie. The logger prints each
+resolved path to stderr as it starts — that line is the authoritative answer
+to "where did it go".
+
+**The directory is created if it is missing**, which matters because `logs/`
+is gitignored and so absent in a fresh clone. Without that, the writers'
+`open(path, "a")` would raise `FileNotFoundError` during startup — before any
+of the write-failure handling below could report it — and the crew would not
+start at all. A directory that cannot be created disables that one log, with a
+line on stderr, rather than taking the sortie down with it. So does a path
+with no filename in it at all — `--detection-trace .` or `/`. (A trailing
+slash is not one of those: `--detection-trace logs/` writes a *file* named
+`logs-<stamp>` beside `logs/`, because the stamp rewrites the last
+component whatever it is.)
+
+`~` is expanded, so `--speech-log ~/dcs-speech.jsonl` writes to your home
+directory even from a shell or wrapper script that passes the `~` through
+unexpanded. A `~someone` whose home cannot be resolved — a typo in a run
+script is the likely way to meet this — disables that one log with a line on
+stderr, like the other unresolvable paths above, rather than stopping the
+crew from starting.
+
+Where the run scripts put them: `run-scripts/run-crew-text.sh` and
+`run-crew-text-debug-view.sh` both `pushd` into `body-layer/` first and pass
+relative `logs/dcs-*.jsonl` paths, so the files land in `body-layer/logs/`.
+They used to land loose in `$HOME` as `~/dcs-*.jsonl`.
+
+This is `BL-11` Stage 5. Before it, all three opened with `"a"` and never
+rolled, so one path accumulated every sortie ever flown: the detection trace
+alone writes ~50 MB a minute, and the 2026-10-05 log analysis had to seek to
+byte offset 2,448,471,603 to find that flight at all. Timestamping rather than
+truncating is deliberate — truncating would also fix the seeking, and would
+silently destroy the previous flight's log.
+
+**Globs, not fixed names**, in anything that reads these afterwards:
+`ls -t logs/dcs-detection-trace-*.jsonl | head -1` is the newest sortie.
+
+If a write fails mid-flight (a full disk is the realistic case), that writer
+says so once on stderr and then stops for the rest of the run. Perception,
+belief and speech are unaffected — losing the trace is bad, losing the crew
+member is worse.
+
 ## 3. Reading the output
 
 One flat text line per observation, tagged by source:

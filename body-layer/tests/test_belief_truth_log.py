@@ -390,3 +390,114 @@ def test_write_speech_omits_gaze_fields_when_unknown(tmp_path: Path) -> None:
 
     row = json.loads(path.read_text().strip())
     assert row == {"kind": "speech", "t_sim": 1.0, "text": "Copy.", "urgent": True}
+
+
+# --- BL-11 Stage 5: write-failure policy ---------------------------------
+
+
+class _FullDiskFile:
+    """A file object whose `write` always raises `OSError` -- a disk that
+    filled mid-flight."""
+
+    def __init__(self) -> None:
+        self.writes = 0
+
+    def write(self, text: str) -> int:
+        self.writes += 1
+        raise OSError(28, "No space left on device")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def test_a_speech_write_failure_is_reported_once_then_abandoned(
+    tmp_path: Path,
+) -> None:
+    """`BL-11` Stage 5, the same policy as `DetectionTraceWriter`: say it
+    once, stop trying. Reported on this writer's own `stderr` sink, so it
+    lands wherever the tripwire lines already do."""
+    stderr = io.StringIO()
+    writer = BeliefTruthLogWriter(tmp_path / "belief_truth.jsonl", stderr=stderr)
+    full_disk = _FullDiskFile()
+    writer._file = full_disk  # type: ignore[assignment]
+
+    for _ in range(3):
+        writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+
+    assert full_disk.writes == 1
+    assert stderr.getvalue().count("belief-truth-log: write to") == 1
+    assert "No space left on device" in stderr.getvalue()
+
+
+class _CloseFailsFile(_FullDiskFile):
+    """A full disk whose buffered data only fails on `close()`, which is
+    the real shape: `flush()` early-returns once the writer is disabled, so
+    the kernel reports the failed write at close time."""
+
+    def close(self) -> None:
+        raise OSError(28, "No space left on device")
+
+
+def test_close_does_not_raise_when_the_disk_is_full(tmp_path: Path) -> None:
+    """The poll loop calls `close()` from a `finally:` block, so an
+    `OSError` escaping it is a shutdown traceback in exactly the full-disk
+    scenario `BL-11` Stage 5 exists to make legible."""
+    stderr = io.StringIO()
+    writer = BeliefTruthLogWriter(tmp_path / "belief_truth.jsonl", stderr=stderr)
+    writer._file = _CloseFailsFile()  # type: ignore[assignment]
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+
+    writer.close()  # must not raise
+
+
+def test_close_does_not_raise_on_a_healthy_writer(tmp_path: Path) -> None:
+    """The guard must not be hiding a failure on the ordinary path: a
+    writer that never failed still flushes and closes cleanly, and its rows
+    reach disk *because of* `close()`.
+
+    **A poll write at `flush_every_n_polls=2`, not a speech write, on
+    purpose.** `write_speech` flushes eagerly by design (module docstring:
+    speech is rare), so a speech row is already on disk before `close()`
+    runs and the on-disk assertion would hold whatever `close()` does --
+    verified by mutation: gutting `close()` to a bare `return` left the old
+    version of this test passing. One poll short of the flush interval
+    leaves the row in the file object's own buffer, so the
+    empty-then-non-empty pair is what makes `close()` load-bearing here."""
+    path = tmp_path / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+    collector = DetectionTraceCollector()
+    collector.records.append(
+        _trace_entry(observation_id="OBS_1", cluster_member_object_ids=(1,))
+    )
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=2, stderr=io.StringIO())
+
+    writer.write_poll(collector, store, _ownship())
+
+    assert path.read_text() == "", "row flushed before close(); test has no teeth"
+
+    writer.close()
+
+    assert path.read_text().strip() != ""
+
+
+def test_write_poll_stops_after_a_failure(tmp_path: Path) -> None:
+    """The poll path shares the flag, so one failure disables both row
+    kinds -- a half-written log that keeps gaining speech rows but no
+    belief rows would be worse than one that plainly stops."""
+    stderr = io.StringIO()
+    writer = BeliefTruthLogWriter(tmp_path / "belief_truth.jsonl", stderr=stderr)
+    writer._file = _FullDiskFile()  # type: ignore[assignment]
+
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+    assert writer._disabled is True
+
+    # A second row of either kind is a no-op, and says nothing more.
+    writer.write_speech(t_sim=2.0, text="Scanning right.", urgent=False)
+    assert stderr.getvalue().count("belief-truth-log: write to") == 1

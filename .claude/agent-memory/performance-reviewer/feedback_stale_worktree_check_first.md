@@ -18,6 +18,15 @@ feature branch if other agents/commits land on it afterward, or if the
 worktree was cut from a different point than expected. Nothing about a
 clean `git status` or a normal-looking `git log` signals this.
 
+**Happened again, the other way round (2026-10-06, `feature/bl11-tick-cost`).** The worktree's
+HEAD was `19143fa` and the task named `8fa2ad6` — **42 commits ahead**, and this time HEAD *was*
+an ancestor. That is the easy case and it has a one-command resolution the paragraph below
+does not mention: **`git merge --ff-only <branch>`** onto the worktree's own
+`worktree-agent-<id>` branch. No path-scoped checkout, no restore dance, the whole tree is real
+code at the named tip. Check `--is-ancestor` in *both* directions first: ancestor ⇒ fast-forward;
+not an ancestor ⇒ the `git show` / path-scoped route below. (A `git archive <branch> | tar -x`
+snapshot is the third option when the tip is checked out elsewhere and cannot be fast-forwarded.)
+
 **How to apply:** before reading/measuring anything, run
 `git merge-base --is-ancestor <task's-named-tip> HEAD` (or diff HEAD against
 the task's stated base commit and check it's non-empty in the expected way).

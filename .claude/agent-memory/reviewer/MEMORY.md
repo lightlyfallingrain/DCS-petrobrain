@@ -143,3 +143,12 @@ and blowing the cap again; this pass merged them into one list.
 - [Terrain tile region filter approved](project_terrain_tile_region_filter_approved.md) - APPROVED; margin triangle-inequality proof technique.
 - [Callout observability gate review](project_callout_observability_gate_review.md) - derive a "total gate"'s newly-covered kinds yourself; found an unnamed third kind.
 - [Worktree without venv, borrow tooling](feedback_worktree_without_venv_borrow_tooling.md) - agent worktrees have no .venv; borrow main's binaries, prove imports resolve locally.
+- [Equivalence test must not import the code it pins](feedback_equivalence_test_must_not_import_the_code_it_pins.md) - a shared helper makes both sides of `==` the new path; mutate to find out.
+- [BL-11 tick cost review](project_bl11_tick_cost_review.md) - APPROVED W/ REQUIRED FIXES; the task's disk-full premise was backwards.
+- [Healthy-case guard test needs buffered state](feedback_healthy_case_guard_test_needs_buffered_state.md) - 4 close() tests passed with close() deleted entirely.
+- [BL-11 tick cost round 2 review](project_bl11_tick_cost_round2_review.md) - ruled to delete dead fns a round-1 approval's own premise created.
+- [Docstring "so" clause: delete the mechanism](feedback_docstring_so_clause_delete_the_mechanism.md) - true conclusion, false reason; 3 rounds running.
+- [BL-11 round 3 deletion review](project_bl11_round3_deletion_review.md) - which stale refs a deletion must sweep: present-tense claim vs dated record.
+- [Guard widening: check every statement](feedback_guard_widening_check_every_statement.md) - a widened except clause needs every guarded statement's exception types enumerated.
+- [BL-11 round 4 degrade guard review](project_bl11_round4_degrade_guard_review.md) - NEEDS FIXES; brute-forced a parent-equality claim, split a 2-assertion test.
+- [Every guard entry needs a failing counterfactual](feedback_every_guard_entry_needs_a_failing_counterfactual.md) - drop each except-tuple type and rerun; no source edit needed.

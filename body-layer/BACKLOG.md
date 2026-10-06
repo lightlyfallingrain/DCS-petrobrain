@@ -976,7 +976,41 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   Cheap, and worth doing alongside the `describe` synonym (`plans/sortie-2026-10-05-refinements/`
   item 2) since both touch the same table.
 
-- [ ] **BL-B30 — The poll loop runs at roughly 0.7 Hz against a specified 5 Hz. HIGH — the largest
+- [x] **BL-B30 — RESOLVED 2026-10-06 by `feature/bl11-tick-cost` (`BL-11` Stages 1/2/3b), DoD
+  PASSED on bench measurement; the flight is on the live-acceptance debt list.** The original
+  title — "roughly 0.7 Hz against a specified 5 Hz" — was wrong in both halves, and the correction
+  is recorded below under "DIAGNOSED 2026-10-05": there is **no 5 Hz specification anywhere in
+  body-layer** (about 5× of the apparent gap was a constant nobody had read), and the real mechanism
+  was `work + interval` rather than `interval`.
+
+  **Measured at the fix** (`plans/bl11-tick-cost/performance-review.md`, real `syria-full.sqlite`,
+  440 objects, 300 polls):
+
+  | | pre-branch | at the fix |
+  |---|---|---|
+  | **realised poll period, median** | **1.33 s** | **1.000 s** (mean 1.008) |
+  | poll work, median | ~330 ms | **12.6 ms** |
+  | poll work, p90 / max | — / 1,736 ms | 98.6 / 1,642 ms |
+  | `group_salient_ids` | ~300 ms every poll | **1.1 ms** |
+  | enrichment-cache hits within a callout tick | **0 %** | **89.7 %** |
+  | polls overrunning 1.0 s | — | **2.0 %** |
+
+  `_wait_for_next_tick` realises `max(interval, work)` to within 0.1 ms. The entry's own
+  prescription — *"a timing instrument around the loop is the next step, not more log reading"* —
+  was **not** what resolved it: cProfile plus a bench harness at the sortie's scale did, and the
+  in-flight instrument (the note's finding 0) is still unbuilt. Worth knowing, because the
+  instrument would have cost a sortie and the harness cost none.
+
+  **What this does NOT close.** The 2.0 % overrun tail is entirely `describe_position`'s unit cost
+  (57–85 ms/call, identical cold or warm) and is `world-model`'s `M11`, not body-layer's. And the
+  sortie's **4.98 s p90 remains unexplained** — nothing in the CPU measurements reaches it; the
+  candidates are `BL-B33` and `BL-B32`, both across a subproject seam. **The median is fixed and the
+  tail is not**, so the "every decay half-life and cadence constant was tuned against the wrong
+  rate" concern below is now answered for the typical tick and still open for the worst case.
+
+  (Original filing, kept because the premise's correction is the instructive part:)
+
+  **The poll loop runs at roughly 0.7 Hz against a specified 5 Hz. HIGH — the largest
   finding of the 2026-10-05 sortie, and it degrades everything downstream of the tick.**
 
   Measured from two independent logs of the same flight

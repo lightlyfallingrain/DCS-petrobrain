@@ -32,3 +32,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Synthetic store calibration](feedback_synthetic_store_calibration.md) — no committed .sqlite fixture: synthetic stores give honest ratios but understate absolutes 3-12x; anchor on the committed real measurement.
 - [World-model build stage shares](project_world_model_build_stage_shares.md) — 449.3s baseline obsolete; real ~82min, terrain 54%/junctions 36%; geomorphons tiling already exists (near-miss).
 - [Body-layer poll loop diagnosis](project_body_layer_poll_loop_diagnosis.md) — BL-B30 solved: no 5 Hz config exists (default 1.0 s), loop sleeps AFTER work, group_salient_ids is ~300 ms/poll and 8.1x fixable.
+- [BL-11 measured outcome](project_bl11_measured_outcome.md) — poll period 1.33s→1.000s, work 330→12.6ms; real candidate count median 232 not 440; residual tail is describe_position's 57-85ms unit cost.
+- [Group-salience hoist residual](project_group_salience_hoist_residual.md) — BL-11 Stage 2 ships 5.1x not 8.1x; angular_separation_rad still rebuilds observer vectors per pair; ratio saturates, does not scale.
+- [Enrichment cache axes](project_enrichment_cache_axes.md) — the 50 m grid key is per contact_id: fixes across-poll misses, can never touch the N-members multiplier; Stage 3a not subsumed.
+- [Benchmarks must be able to fail](feedback_benchmarks_must_be_able_to_fail.md) — build a mutate-and-assert-it-breaks probe into every harness before quoting any number from it.
