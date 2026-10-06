@@ -1458,7 +1458,22 @@ def group_callout_member_id(store: ContactStore, group: Group) -> str | None:
     leads this group's disclosure line" and is legitimately `None` there,
     this answers "which single event survives" and must always name one
     once there is an eligible member at all, or suppression would silence
-    the whole group.
+    that kind for the whole group.
+
+    **It names a contact, and what gets suppressed is an event** -- so a
+    keeper with no event of the kind being suppressed this tick still
+    consumes its peers', and that kind goes unreported for the group. See
+    `belief.callouts._WATCHED_ONLY_KINDS`' docstring and `BL-B41`; the fix
+    is a per-event election, not a stronger predicate here.
+
+    **So do not "extend this predicate" with the observability gate**, which
+    an earlier draft of this docstring suggested. `ContactStore.callout_
+    observable` takes a `now_sim` this predicate does not have, and the
+    gate's own exemption is `event.kind in _OBSERVABILITY_EXEMPT_KINDS and
+    event.engaged is True` -- per *event*. A contact-only predicate cannot
+    see `event.engaged`, so folding the gate in here would suppress exactly
+    the `engaged=True` danger call that gate goes out of its way to
+    protect.
 
     The "fewer than two" guard counts **every** still-resolving member,
     not only the eligible ones: it is a question about the group's own

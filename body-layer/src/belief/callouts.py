@@ -49,8 +49,8 @@ out of the event candidate pool before scoring (never consumed -- it
 surfaces instead as the group's own line changing, see `belief.groups`'
 module docstring on why a membership change is always a live disclosure
 trigger). `_WATCHED_ONLY_KINDS` is filtered by group membership too, but
-differently -- suppressed down to *one member's* line rather than folded
-into the group's, see that constant's own docstring -- and every remaining
+differently -- suppressed down to *at most one member's* line rather than
+folded into the group's, see that constant's own docstring -- and every remaining
 kind still competes and speaks exactly as it does today, grouped contact or
 not. `group_candidates` (the event-level,
 report-space bucketer this replaces) is retired -- see below.
@@ -241,11 +241,30 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: leaves intact: there is no group-level rendering of these kinds to fold
 #: into, and inventing one would drop the affix, which is the fact the
 #: event exists to report. The suppression fixes the cardinality (N lines
-#: about one group becomes one); the wording still names one member. Which
-#: member is decided by `belief.speech.may_be_callout_keeper` -- always one
-#: whose own effective attention passes the gate above, or the group's
-#: whole set of these kinds would be silenced by a keeper this filter then
-#: refuses to speak for.
+#: about one group becomes **at most one**); the wording still names one
+#: member. Which member is decided by `belief.speech.may_be_callout_keeper`
+#: -- always one whose own effective attention passes the gate above, or the
+#: group's whole set of these kinds would be silenced by a keeper this
+#: filter then refuses to speak for.
+#:
+#: **"At most one", not "one", and the gap is a known limitation** (review
+#: round 3, 2026-10-06, `BL-B41`). The keeper is elected **per contact**,
+#: while the thing being suppressed is **per event** -- so when every member
+#: is watched and eligible but the keeper happens to have no event of this
+#: kind *this tick*, the peers are already `_consumed` and that kind's
+#: information is lost for the group. Reproduced: three cohering watched
+#: members, motion events on the two non-keepers, nothing about movement
+#: spoken across three ticks. **Eligibility cannot close this** -- a
+#: `(store, contact)` predicate cannot express a per-event question, which
+#: is why fix round 3 is correct within its remit and the real answer is a
+#: per-event election.
+#:
+#: Bounded, and narrower than either failure it replaced: `CONTACT_RANGE_
+#: CROSSED` self-corrects when the keeper crosses the same kilometre mark a
+#: poll later, and where envelopes exist the widest-envelope member -- the
+#: most dangerous, and the one most likely to emit `CONTACT_ENGAGEMENT_
+#: CHANGED` -- is always the keeper, so engagement is largely
+#: self-protecting.
 _WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
 )
