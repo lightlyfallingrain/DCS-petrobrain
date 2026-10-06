@@ -140,8 +140,8 @@ link target, preferring the untruncated hook of each pair; no entry dropped.
 - [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; shared merge-echo predicate verified equivalent by argument-level read.
 - [Multi theatre afghanistan review](project_multi_theatre_afghanistan_review.md) - APPROVED; crossing measurement separated authoring from a defect.
 - [MTA security fix test gap](project_mta_security_fix_test_gap.md) - NEEDS REVISION; required-fix test passed even with required fix alone removed.
-- [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam.
-- [Terrain callout stage5 wiring round2 approved](project_terrain_callout_stage5_wiring_round2_approved.md) - APPROVED; silence-path doesn't need a redundant test.
+- [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam, confirmed by disabling it.
+- [Terrain callout stage5 wiring round2 approved](project_terrain_callout_stage5_wiring_round2_approved.md) - APPROVED; silence path needs no redundant test for a collapsed input.
 - [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; 4-mechanism disable-and-rerun check.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp empirically re-run under a standalone Lua interpreter.
 - [Sortie 1005 items234 scan ahead cadence review](project_sortie_1005_items234_scan_ahead_cadence_review.md) - APPROVED; instrumented-run beat hand-derived dwell-cadence arithmetic.
@@ -157,36 +157,6 @@ link target, preferring the untruncated hook of each pair; no entry dropped.
 - [Guard widening: check every statement](feedback_guard_widening_check_every_statement.md) - a widened except clause needs every guarded statement's exception types enumerated.
 - [BL-11 round 4 degrade guard review](project_bl11_round4_degrade_guard_review.md) - NEEDS FIXES; brute-forced a parent-equality claim, split a 2-assertion test.
 - [Every guard entry needs a failing counterfactual](feedback_every_guard_entry_needs_a_failing_counterfactual.md) - drop each except-tuple type and rerun; no source edit needed.
-- [BR-1 Stage 2 fold review](project_br1_stage2_fold_review.md) — APPROVED; seam closes via transitivity.
-- [Aircraft hardening accept race required fix](project_aircraft_hardening_accept_race_required_fix.md) — NEEDS REVISION then APPROVED; 300-run repro.
-- [Claude config self-audit 2026-09-27](project_claude_config_self_audit_2026_09_27.md) — X-B5; hooks drifted from CLAUDE.md.
-- [Audio adapter review fixes negative length test gap](project_audio_adapter_review_fixes_negative_length_test_gap.md) — APPROVED W/ MINOR; guard pre-existed.
-- [Audio adapter negative length round2 confirmed](project_audio_adapter_negative_length_round2_confirmed.md) — APPROVED; git-archive re-review technique.
-- [Sortie 0926 fixes observability gate review](project_sortie_0926_fixes_observability_gate_review.md) - patch-and-rerun beats reading alone.
-- [Confirm band affirmatives grace swallow](project_confirm_band_affirmatives_grace_swallow.md) — 5 rounds; each bug hid behind a default param.
-- [LOS tolerance boundary test review](project_los_tolerance_boundary_test_review.md) — APPROVED; check what range a margin actually pins.
-- [Group reporting Stage4 review](project_group_reporting_stage4_review.md) - ROADMAP.md went stale within the same branch.
-- [Terrain watershed saddle formula mismatch](project_terrain_watershed_saddle_formula_mismatch.md) — NEEDS REVISION; claimed fix wasn't.
-- [Terrain watershed fix round2 approved](terrain_watershed_fix_round2_approved.md) — APPROVED; re-derived numbers via a different method.
-- [Rendered English assertions too weak](feedback_rendered_english_assertions_too_weak.md) — negative-shape assertions miss grammar defects.
-- [Group cohesion redesign review needs revision](project_group_cohesion_redesign_review_needs_revision.md) - article bug confirmed by running code.
-- [Group undermerging fix round2 approved](project_group_undermerging_fix_round2_approved.md) — article removal correct; "a couple of" is a real idiom.
-- [Player bubble approved](project_player_bubble_approved.md) — APPROVED; doc mischaracterized a constant, didn't break conclusion.
-- [BL-B23 contact store pruning approved](project_bl_b23_contact_store_pruning_approved.md) — APPROVED; leader-coherence via fresh recompute.
-- [WM-B1 Latin names approved](project_wm_b1_latin_names_approved.md) — APPROVED; cache-invalidation verified via stale OsmCacheMeta.
-- [Landform geomorphons review](project_landform_geomorphons_review.md) - cross-process PYTHONHASHSEED determinism check.
-- [Landform geomorphons round2 approved](project_landform_geomorphons_round2_approved.md) — APPROVED; "baseline" figure checked vs git log.
-- [Landform geomorphons perf fix round3 approved](project_landform_geomorphons_perf_fix_round3_approved.md) — APPROVED; subset-not-exactness arg.
-- [Silence command approved](project_silence_command_approved.md) — APPROVED; choke-point claims re-verified by grep.
-- [Landform relief gate review](project_landform_relief_gate_review.md) — APPROVED; ROADMAP bug direction was backwards.
-- [Contact report flood review](project_contact_report_flood_review.md) - verify "always later-founded" by tracing the state machine.
-- [Redundant group disclosure approved](project_redundant_group_disclosure_approved.md) - an early-return test can pass disabled if the fallback degenerates alike.
-- [Redundant group disclosure round2 approved](project_redundant_group_disclosure_round2_approved.md) - APPROVED clean; merge-echo predicate verified equivalent to both old copies.
-- [Multi theatre afghanistan review](project_multi_theatre_afghanistan_review.md) — APPROVED; crossing measurement separated authoring from a defect.
-- [MTA security fix test gap](project_mta_security_fix_test_gap.md) — NEEDS REVISION; required-fix test passed even with required fix alone removed.
-- [Terrain callout Stage5 wiring gap](project_terrain_callout_stage5_wiring_gap.md) - NEEDS REVISION; well-tested pure fn, untested output-wiring seam, confirmed by disabling it.
-- [Terrain callout stage5 wiring round2 approved](project_terrain_callout_stage5_wiring_round2_approved.md) - APPROVED; silence path needs no redundant test for a collapsed input.
-- [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; 4-mechanism disable-and-rerun check.
-- [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
 - [Sortie 1005 round2 keeper eligibility](project_sortie_1005_round2_keeper_eligibility.md) - NEEDS FIXES; a one-per-group representative must be elected from the eligible subset.
 - [Keeper election per-contact vs per-event](project_keeper_election_per_contact_vs_per_event.md) - elect-one-consume-peers goes silent when the survivor has no event; granularity, not predicate.
+- [LOS hook statics review](project_los_hook_statics_review.md) - APPROVED W/ REQUIRED FIXES; a new pcall made a loud failure silent, asymmetric with an existing counter.
