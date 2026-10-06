@@ -174,14 +174,16 @@ unrelated reason, so "the group said something" is not evidence the movement rep
 ## Merge interaction with `main` — reported, deliberately not resolved
 
 Re-run here rather than taken from round 3: `git merge-tree --write-tree --name-only main HEAD`
-exits 1 with **seven conflicting files**.
+exits 1 with **eight conflicting files** — the seven round 3 predicted, plus
+`.claude/agent-memory/dod/MEMORY.md`, which **this DoD pass itself added** (see the correction
+below).
 
 | file | shape | who resolves how |
 |---|---|---|
 | **`body-layer/tests/test_callouts.py`** | **both branches add test blocks** | **Needs eyes. Must be resolved by reading, not by taking a side.** |
 | `body-layer/BACKLOG.md` | append | append-shaped; `main` carries `BL-B39`/`BL-B40`/`BL-B41` |
 | `docs/acceptance/2026-10-05-sortie-feedback.md` | add/add | append-shaped |
-| `.claude/agent-memory/{implementer,performance-reviewer,reviewer,security}/MEMORY.md` | append (4 files) | append-shaped index lines |
+| `.claude/agent-memory/{implementer,performance-reviewer,reviewer,security,dod}/MEMORY.md` | append (5 files) | append-shaped index lines |
 
 **`body-layer/src/belief/callouts.py` auto-merges cleanly**, and `speech.py` does not conflict at
 all — `main` never touched it.
@@ -190,8 +192,14 @@ This DoD pass's own edits were placed to avoid adding an eighth conflict, and th
 re-running `merge-tree` after each: `body-layer/ROADMAP.md` **auto-merges** (the debt entry was
 inserted mid-list, before `feature/terrain-callout-stages-345`, because two other branches inserted
 at the head of that list overnight and a third top-insert would have conflicted on the exact line
-they both rewrote), and `NOTES.md` **auto-merges**. The agent-memory index line this pass adds goes
-into `dod/MEMORY.md`, which is not among the four conflicting ones.
+they both rewrote), and `NOTES.md` **auto-merges**.
+
+**One correction, because the first draft of this report got it wrong and re-running caught it.**
+This pass's two index lines in `.claude/agent-memory/dod/MEMORY.md` *do* add an eighth conflict —
+`main` appended to that same index earlier tonight. The draft asserted the opposite from
+plausibility (the file was not in round 3's list of four) rather than from a re-run. It is
+append-shaped and resolves exactly like the other four index files, so the cost is nil — but the
+claim was wrong before it was checked, which is the failure mode this project names most often.
 
 **A post-merge silence mode is predicted and survives into merged `main`** (round 3's finding, kept
 here because whoever merges should know): `fix/callout-observability-gate` skips an unobservable
