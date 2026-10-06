@@ -627,3 +627,41 @@ def test_several_confirm_band_answer_words_do_anchor_a_verb() -> None:
     """
     for word in ("roger", "ok", "okay", "negative", "nope", "belay", "disregard"):
         assert match_transcript(word).verb_anchored is True, word
+
+
+# --- describe: report's synonym (sortie 2026-10-05 debrief,
+# plans/sortie-2026-10-05-refinements/plan.md Item 2) ---
+
+
+class TestDescribeSynonym:
+    """ "describe"/"describe contacts" resolve to `report_all`, the same
+    token "report"/"report contacts"/"what do you see" already resolve
+    to. Unlike bare "quiet" (rejected for `silence`, see `TestSilence`'s
+    own docstring), "describe" was measured and found clear: it does not
+    sit close to any existing verb-anchor word, and ordinary sentences
+    that merely contain "describe"/"describing"/"scribe" do not resolve
+    to a command."""
+
+    def test_both_phrasings_resolve_to_report_all(self) -> None:
+        for phrase in ("describe", "describe contacts"):
+            result = match_transcript(phrase)
+            assert result.token == "report_all", phrase
+            assert result.match_ratio == 1.0, phrase
+            assert result.ambiguous is False, phrase
+
+    def test_is_separable_from_everything_else(self) -> None:
+        for phrase in ("describe", "describe contacts"):
+            assert match_transcript(phrase).ambiguous is False, phrase
+
+    def test_adversarial_sentences_do_not_falsely_fire(self) -> None:
+        """Sentences that merely contain "describe"/a near-miss of it must
+        not execute `report_all` -- `token=None` (or a genuine anchor
+        rejection) is the correct outcome."""
+        for phrase in (
+            "describe the mission to me",
+            "can you describe that",
+            "i described it already",
+            "describing the situation",
+            "the scribe wrote it down",
+        ):
+            assert match_transcript(phrase).token != "report_all", phrase

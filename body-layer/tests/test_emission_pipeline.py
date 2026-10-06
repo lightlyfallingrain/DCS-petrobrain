@@ -28,15 +28,28 @@ from perception.gaze import ScanPlan
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import OwnshipState
 
-#: A persistent commanded "ahead" scan (`plans/detection-cones-slice2/
+#: A persistent, static dead-ahead stare (`plans/detection-cones-slice2/
 #: plan.md`'s 2C) rather than the free-scan default -- this fixture's
 #: whole point is a *continuously* visible candidate, which the o'clock
 #: scan loop no longer gives for free (a dead-ahead candidate is only
-#: gazed 2 of every 16 s under free scan). A single-leg sector degenerates
-#: to a static gaze by construction (`perception.gaze.gaze_at`'s own
-#: docstring), so this reproduces exactly what "continuously visible"
-#: needs without touching the scan-loop mechanism this file isn't testing.
-_PERSISTENT_AHEAD_SCAN: ScanPlan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+#: gazed 2 of every 16 s under free scan).
+#:
+#: **Built from `commanded_legs=(12,)`, not `commanded_sector="ahead"`,
+#: since sortie 2026-10-05 debrief Item 4** (`perception.gaze._SECTOR_
+#: LEGS["ahead"]` now cycles `11, 12, 1` instead of degenerating to a
+#: static `12`). This fixture is deliberately decoupled from whatever
+#: `"ahead"` currently means as a `RelativeSector` -- its own point is a
+#: continuously-visible candidate for the belief-layer pipeline test
+#: below, not an exercise of the `ahead` sector's own scan behaviour
+#: (that is `test_gaze.py`'s/`test_naked_eye_source.py`'s job). A
+#: single-leg `commanded_legs` tuple degenerates to a static gaze by
+#: construction (`perception.gaze.gaze_at`'s own docstring, `len(legs)
+#: == 1`), exactly like the old `"ahead"` did before this item -- so this
+#: reproduces what "continuously visible" needs without depending on a
+#: sector's own table staying one-element forever.
+_PERSISTENT_AHEAD_SCAN: ScanPlan = ScanPlan(
+    commanded_sector=None, command_t_sim=0.0, commanded_legs=(12,)
+)
 
 _THEATRE = "Syria"
 _FAKE_CONN = sqlite3.connect(":memory:")

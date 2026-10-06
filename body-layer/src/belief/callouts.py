@@ -102,8 +102,11 @@ REACQUIRED` event whose contact currently belongs to a group is filtered
 out of the event candidate pool before scoring (never consumed -- it
 surfaces instead as the group's own line changing, see `belief.groups`'
 module docstring on why a membership change is always a live disclosure
-trigger); every other kind still competes and speaks exactly as it does
-today, grouped contact or not. `group_candidates` (the event-level,
+trigger). `_WATCHED_ONLY_KINDS` is filtered by group membership too, but
+differently -- suppressed down to *at most one member's* line rather than
+folded into the group's, see that constant's own docstring -- and every remaining
+kind still competes and speaks exactly as it does today, grouped contact or
+not. `group_candidates` (the event-level,
 report-space bucketer this replaces) is retired -- see below.
 
 **`group_facts`/`render_group_report` are report-space bucketing, kept as
@@ -243,6 +246,7 @@ from belief.speech import (
     _format_range_km,
     _group_member_facts,
     _unit_type_display,
+    group_callout_member_id,
     group_membership_state,
     render_contact_report,
     render_group_disclosure,
@@ -383,12 +387,47 @@ _OBSERVABILITY_EXEMPT_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: regardless (see `belief.events`'s own docstring for `CONTACT_MOTION_
 #: CHANGED`), and whether it is ever *spoken* depends on attention at the
 #: moment `tick` considers it -- so a contact watched after its event fired
-#: still gets the callout. Never filtered by group membership either (see
-#: module docstring's "Group disclosure now speaks for its members") --
+#: still gets the callout. Filtered by group membership since the
+#: performance review below, but **never folded into the group's own line**
+#: (see module docstring's "Group disclosure now speaks for its members") --
 #: these kinds render through `_contact_report_text`'s `event_clause`/`lead`
 #: affixes (`belief.speech`), which `render_group_report`/`render_group_
 #: disclosure` have no concept of, so folding one into a group's own line
 #: would silently drop the very fact the event exists to report.
+#:
+#: **One line per group, still one member's wording** (performance review
+#: 2026-10-05, finding 1). `tick` now suppresses these kinds for every
+#: member of a group but one, exactly as it already does for `CONTACT_
+#: DETECTED`/`CONTACT_REACQUIRED` -- but the surviving line is the *leading
+#: member's*, affix and all, not a group-level "the group is moving". That
+#: is the no-folding half of the paragraph above, which the suppression
+#: leaves intact: there is no group-level rendering of these kinds to fold
+#: into, and inventing one would drop the affix, which is the fact the
+#: event exists to report. The suppression fixes the cardinality (N lines
+#: about one group becomes **at most one**); the wording still names one
+#: member. Which member is decided by `belief.speech.may_be_callout_keeper`
+#: -- always one whose own effective attention passes the gate above, or the
+#: group's whole set of these kinds would be silenced by a keeper this
+#: filter then refuses to speak for.
+#:
+#: **"At most one", not "one", and the gap is a known limitation** (review
+#: round 3, 2026-10-06, `BL-B41`). The keeper is elected **per contact**,
+#: while the thing being suppressed is **per event** -- so when every member
+#: is watched and eligible but the keeper happens to have no event of this
+#: kind *this tick*, the peers are already `_consumed` and that kind's
+#: information is lost for the group. Reproduced: three cohering watched
+#: members, motion events on the two non-keepers, nothing about movement
+#: spoken across three ticks. **Eligibility cannot close this** -- a
+#: `(store, contact)` predicate cannot express a per-event question, which
+#: is why fix round 3 is correct within its remit and the real answer is a
+#: per-event election.
+#:
+#: Bounded, and narrower than either failure it replaced: `CONTACT_RANGE_
+#: CROSSED` self-corrects when the keeper crosses the same kilometre mark a
+#: poll later, and where envelopes exist the widest-envelope member -- the
+#: most dangerous, and the one most likely to emit `CONTACT_ENGAGEMENT_
+#: CHANGED` -- is always the keeper, so engagement is largely
+#: self-protecting.
 _WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
 )
@@ -932,6 +971,10 @@ class CalloutScheduler:
             return []
 
         live: list[Event] = []
+        #: Per-tick memo of `group_callout_member_id` -- one lookup per
+        #: *group*, not per event, so the suppression below costs O(members)
+        #: once rather than O(events x members).
+        group_keeper: dict[str, str | None] = {}
         for event in store.unacknowledged_events:
             if event.kind not in _TEMPLATED_KINDS or event.id in self._consumed:
                 continue
@@ -949,6 +992,40 @@ class CalloutScheduler:
                 # (Stage 4 design, section 1).
                 continue
             if event.kind in _WATCHED_ONLY_KINDS:
+                belief_group = store.group_for_contact(event.contact_id)
+                if belief_group is not None:
+                    if belief_group.id not in group_keeper:
+                        group_keeper[belief_group.id] = group_callout_member_id(
+                            store, belief_group
+                        )
+                    keeper_id = group_keeper[belief_group.id]
+                    if keeper_id is not None and keeper_id != event.contact_id:
+                        # One line for the group, not one per member --
+                        # the same rule the `CONTACT_DETECTED`/`CONTACT_
+                        # REACQUIRED` branch above already applies to a
+                        # grouped contact, extended to the watched-only
+                        # kinds (performance review 2026-10-05, finding 1).
+                        # Group members are co-located *by definition*, so
+                        # they cross the same whole-kilometre mark and
+                        # change motion state in the same poll; before
+                        # this, watching a group turned one event stream
+                        # into N, each costing two `describe_contact`
+                        # calls per tick (~51 ms of `describe_position`
+                        # apiece, cache-missing by construction for a
+                        # re-observed contact) and each re-described every
+                        # non-busy tick for up to `CALLOUT_MAX_AGE_S`,
+                        # because `tick` speaks one candidate without
+                        # consuming the losers. Measured at 8 members:
+                        # ~820 ms added to one tick against a 330 ms
+                        # median poll.
+                        #
+                        # `_consumed`, not a bare `continue`: **lost, not
+                        # deferred**, the same treatment `WATCH_REPORT_
+                        # MIN_GAP_S` below gives a suppressed watched-only
+                        # event. Deferring would re-offer the peer event
+                        # every tick, which is the cost this removes.
+                        self._consumed.add(event.id)
+                        continue
                 result = describe_contact(
                     store, event.contact_id, now_sim, enrichment=enrichment
                 )

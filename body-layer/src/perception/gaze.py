@@ -85,7 +85,12 @@ never a loop or a sweep:
   sim time the command was issued): the user's own framing of focus (hard
   part 2a) -- *"within a sector it is itself a smaller cone moving in a
   scan pattern"* -- generalises directly: each `RelativeSector` decomposes
-  into its own o'clock legs (`_SECTOR_LEGS` -- `ahead` -> just `12`,
+  into its own o'clock legs (`_SECTOR_LEGS` -- `ahead` -> `11, 12, 1`
+  (sortie 2026-10-05 debrief, Item 4: a static 12 o'clock stare missed
+  anything drifting into the forward arc's own edges during a commanded
+  scan; this is the same per-hour dwell cycling mechanism `left`/`right`
+  already use, not a wider cone -- `LOOK_DIRECTION_FOV_HALF_DEG` in
+  `logger.py` is unchanged and unrelated),
   `left` -> `11, 10, 9`, `right` -> `1, 2, 3`, `full` -> the same 8-slot
   table free scan uses), cycled from `t_sim - plan.command_t_sim` instead
   of from absolute sim time, so a scan a player just ordered starts at that
@@ -238,12 +243,28 @@ FOCUS_DWELL_S: Final[float] = 2.0
 SCAN_PLAN: Final[tuple[int, ...]] = (12, 11, 10, 9, 12, 1, 2, 3)
 
 #: A commanded sector's own o'clock legs (module docstring's "Commanded
-#: scan" case) -- `ahead`/`left`/`right` are exactly the three-way split
-#: `SCAN_PLAN` itself is built from (`12` / `11, 10, 9` / `1, 2, 3`);
+#: scan" case) -- `left`/`right` are exactly two-thirds of the three-way
+#: split `SCAN_PLAN` itself is built from (`11, 10, 9` / `1, 2, 3`);
 #: `full` reuses `SCAN_PLAN` verbatim, since "scan the whole 9-3 span" is
 #: the free-scan table's own definition.
+#:
+#: **`ahead` sweeps `11, 12, 1`, not a static `(12,)`** (sortie 2026-10-05
+#: debrief, Item 4, user correction mid-task: "still one clock hour at a
+#: time. A sweeping scan like any other scan, repeating loop 11-12-1
+#: o'clock"). A one-element tuple previously made `gaze_at`'s own
+#: `index = min(..., len(legs) - 1)` always resolve to `0` -- a fixed
+#: stare at 12 that `left`/`right` never had, since cycling through a
+#: real multi-leg table is the whole mechanism this dict exists for.
+#: `LOOK_DIRECTION_FOV_HALF_DEG` (`logger.py`, a fixed 90 degrees,
+#: independent of which hour is active) is unaffected: this widens how
+#: often each of 11/12/1 is actually looked at, not how wide any single
+#: look is. The real effect is cadence, not geometry -- each hour on a
+#: 3-leg cycle is now revisited once per `3 * FOCUS_DWELL_S` = 6 s rather
+#: than dwelled on continuously, the same open dwell/revisit-interval
+#: question `left`/`right` already carry (`todo/backlog.md`), not settled
+#: here.
 _SECTOR_LEGS: Final[dict[RelativeSector, tuple[int, ...]]] = {
-    "ahead": (12,),
+    "ahead": (11, 12, 1),
     "left": (11, 10, 9),
     "right": (1, 2, 3),
     "full": SCAN_PLAN,

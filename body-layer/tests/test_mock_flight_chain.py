@@ -217,10 +217,13 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # sits dead ahead the whole flight, and this fixture exists to
         # prove out the full pipeline's wiring/threading, not the scan
         # loop (covered in `test_naked_eye_source.py`/`test_gaze.py`).
-        # "ahead" degenerates to a static gaze by construction (a single
-        # o'clock leg, `perception.gaze.gaze_at`'s own docstring), so the
-        # naked-eye channel's per-poll gating is otherwise byte-identical
-        # to before this slice and the 16/20/36 counts below are unchanged.
+        # **"ahead" no longer degenerates to a static 12-o'clock gaze**
+        # (sortie 2026-10-05 debrief, Item 4: it now cycles 11 -> 12 -> 1,
+        # the same per-hour dwell mechanism `left`/`right` already use --
+        # see `perception.gaze._SECTOR_LEGS`'s own comment). Object 101
+        # sits dead ahead, so naked-eye now only co-detects it on the
+        # 12-o'clock leg of that cycle, not every poll -- the counts below
+        # are updated accordingly; see that paragraph for the real numbers.
         # A `scan_area` task, not a direct field assignment, is what makes
         # this survive `run_once`'s own `_apply_active_gaze` call -- every
         # poll re-resolves `self.sources`' scan plan from `tasks`, which
@@ -259,52 +262,45 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
         assert runner.last_t_sim == final_t_sim
 
-        # **Rewritten 2026-09-20** (`plans/detection-cones-slice1/plan.md`,
-        # final scope change: `check_visibility`'s default optic moved to
-        # `UNAIDED_OPTIC`, M=1.0). Object 102 (infantry) is never
-        # naked-eye-visible anywhere in this fixture at the new default
-        # (module docstring's object-102 bullet has the range arithmetic)
-        # -- confirmed by actually running the pipeline poll-by-poll, not
-        # guessed:
+        # **Rewritten 2026-10-05** (sortie debrief Item 4: commanded
+        # "ahead" now cycles 11 -> 12 -> 1 instead of staring at 12). The
+        # 32-count below predates that change and is now wrong -- updated
+        # here by actually running the pipeline poll-by-poll and reading
+        # `Counter(o.source for o in runner.store.observations.values())`,
+        # not by recomputing the old arithmetic by hand:
         #
-        # - Polls 0-15: naked-eye emits exactly 1 observation per poll --
-        #   object 101 (the truck), `lowres`/`OP_GROUPSOMETHING` the whole
-        #   time (see the module docstring's object-101 bullet: this
-        #   fixture's own track never gets close enough to the truck for
-        #   naked-eye to reach `medres`/`hires` before the mask cuts it off).
-        #   16 naked-eye observations.
-        # - Polls 16-19: object 101 drops out of the naked-eye channel
-        #   entirely -- the cockpit occlusion mask cutoff (x ~ 905),
-        #   unrelated to this change. 0 naked-eye observations.
+        # `Counter({'petrovich_detection_associated': 20,
+        # 'naked_eye_visual_filtered': 3})` -- 23 total, not 32.
         #
-        # Naked-eye: 16. Hybrid: 20 (object 101, every poll, unaffected --
-        # Hybrid never clusters, has no elevation gate, and does not use
-        # `check_visibility` at all). 16 + 20 = 36.
+        # - **Hybrid: 20, unchanged.** Hybrid never clusters, has no
+        #   elevation gate, and does not use `check_visibility`/`gaze_at`
+        #   at all -- this item touches none of its inputs.
+        # - **Naked-eye: 3, down from 16.** Object 101 sits dead ahead
+        #   (bearing 0), so it is only within the naked-eye cone on the
+        #   cycle's 12-o'clock leg -- one poll in three on the `SCANNING`
+        #   dwell cycle (`FOCUS_DWELL_S=2.0s` per leg, polls 5 s apart).
+        #   Of this fixture's 20 polls, the 12-o'clock leg lands on polls
+        #   0, 6, 12, 18 (t=0, 30, 60, 90) -- but poll 18 (t=90) is already
+        #   past the pre-existing cockpit-mask cutoff (x ~ 905, unrelated
+        #   to this change, same cutoff the old 16/20/36 comment named),
+        #   so only 3 of those 4 actually detect. The binocular-search
+        #   interruptions below (t=20, 25, 50, 55) never coincide with a
+        #   12-o'clock leg in this fixture's own timing, so they cost
+        #   nothing additional here -- a coincidence of this fixture's
+        #   specific cadence, not a general claim.
         #
         # Object 102 never appearing on any channel means the same-poll
         # co-fold exclusion (`belief.contacts.ContactStore.ingest`'s
         # pre-scan, `plans/group-contact-model/plan.md` Stage 3a) has
         # nothing to exclude here any more -- there is only ever one
         # candidate contact in this fixture.
-        # **32, not 36, since the binocular cycle landed (2026-09-23).** Four
-        # polls (t=20, 25, 50, 55) are spent in a binocular *search*: this
-        # fixture carries a permanent `scan_area("ahead")` task, so
-        # `logger._search_sweep` is non-empty and the completed scan phase
-        # hands over to `OpticPhase.SEARCHING`. The sweep is aimed at the
-        # band beyond naked-eye reach (2.3-5.6 km) while this fixture's
-        # truck sits at 1.4 km closing to 0.4 km, so it is outside the cone
-        # and the naked-eye channel emits nothing on those polls.
         #
-        # **That is the cost working, not a defect**: binoculars are a
-        # narrow tube, and time spent searching far is time not watching
-        # near. An earlier version of this comment blamed the loss on
-        # aiming a stare at a quantised bearing -- that defect is real
-        # (`plans/binocular-optic/stage3b.md`) but this fixture never
-        # exercises it, because its only contact is `type`-level from frame
-        # 0 and `OpticPhase.GLASSING` is therefore never entered at all.
-        # Verified by replaying with the optic decision traced, not
-        # reasoned about.
-        assert len(runner.store.observations) == 32
+        # The binocular-search mechanism itself (polls at t=20, 25, 50, 55
+        # entering `OpticPhase.SEARCHING`, sweeping a band beyond
+        # naked-eye reach while this fixture's truck is inside naked-eye
+        # range) is unchanged by this item -- see the prior revision of
+        # this comment (git history) for that mechanism's own reasoning.
+        assert len(runner.store.observations) == 23
 
         contacts = get_contacts(runner.store, final_t_sim)
 

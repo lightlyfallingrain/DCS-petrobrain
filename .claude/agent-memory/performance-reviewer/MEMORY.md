@@ -36,3 +36,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Group-salience hoist residual](project_group_salience_hoist_residual.md) — BL-11 Stage 2 ships 5.1x not 8.1x; angular_separation_rad still rebuilds observer vectors per pair; ratio saturates, does not scale.
 - [Enrichment cache axes](project_enrichment_cache_axes.md) — the 50 m grid key is per contact_id: fixes across-poll misses, can never touch the N-members multiplier; Stage 3a not subsumed.
 - [Benchmarks must be able to fail](feedback_benchmarks_must_be_able_to_fail.md) — build a mutate-and-assert-it-breaks probe into every harness before quoting any number from it.
+- [Watch-tag amplification](project_watch_tag_amplification.md) — "watch" gates event *emission*, so tagging N contacts multiplies tick describes; a 50m per-tick memo gives zero relief for group members (8/8 cells).
