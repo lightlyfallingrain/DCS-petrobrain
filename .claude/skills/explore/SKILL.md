@@ -40,6 +40,55 @@ implementation starts reverses a design assumption, that phase was skipped.
 
 ## How to run it
 
+### First, find out what is already known — before the first question
+
+**User direction, 2026-10-06.** In their words: this phase *"also needs graphify/grep use, to check
+what we know currently from notes, roadmaps and memory files. So we don't unnecessarily spend effort
+on exploring something that is already known, just not in context at that time."*
+
+The failure is not forgetting a decision; it is that **a decision can be recorded and still absent
+from the conversation**, so the user is asked to re-derive something they already settled — or worse,
+work gets built against a direction that was already withdrawn in writing.
+
+**The worked example cost a night.** The direction *"world model LOS must not be used… testing only"*
+was captured verbatim in `docs/acceptance/2026-10-05-sortie-feedback.md` **before** four
+whole-subproject review reports were written. None of them picked it up, and the milestones written
+from them treated the silent fallback as something to make *observable* — the right fix for a
+fallback allowed to exist, and the wrong one for a fallback that must not run. The user had to
+restate it, and restating it is the symptom this step exists to remove.
+
+So, before opening the conversation, spend two or three minutes on:
+
+```sh
+.claude/scripts/gq.sh "<the topic in the user's own words>"
+```
+
+and then, because the graph does not cover everything:
+
+```sh
+grep -rn "<key term>" todo/questions.md todo/backlog.md .claude/agent-memory/   # out of corpus
+grep -rn "<key term>" docs/acceptance/                                          # prior feedback
+```
+
+**Which instrument answers which question** — the split is in root `CLAUDE.md`, "Graph to find it,
+`grep` to prove it is gone":
+
+- **graph first** for *"where is this discussed, was this decided?"* — it covers `CLAUDE.md`,
+  `AGENTS.md`, roadmaps, `NOTES.md`, `docs/`, research notes and the active plan.
+- **`grep`** for `.claude/agent-memory/`, which is **deliberately outside the corpus**
+  (`graph-corpus-files.sh:25`), and for any *"does anything still say X"* question, where a
+  trustworthy negative is needed and the graph's negatives are documented unreliable.
+
+**Then open the conversation with what you found, not with a blank question.** "Your 2026-10-05 note
+already says offline LOS is testing-only — does that extend to X?" is a better first question than
+"how should LOS work?", and it is the difference between the user teaching you something new and the
+user repeating themselves. If the check turns up a decision that **already answers** the topic, say
+so and skip the explore: that is the step working, not a reason to hold the conversation anyway.
+
+**Keep it short.** This is a few minutes of looking, not an audit — the point is to arrive informed,
+not to pre-empt the conversation. If the search is turning into a research project, that itself is
+worth saying out loud.
+
 **Open questions, not menus.** `AskUserQuestion`'s multiple choice is the wrong instrument here: it
 can only surface options already thought of, and the valuable input is precisely what was not
 thought of. Save the menus for settling a decision once its shape is understood.
