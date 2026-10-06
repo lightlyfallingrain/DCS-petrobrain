@@ -360,3 +360,207 @@ rather than trusted from the author's pasted proof. `ruff format --check`, `ruff
 implementer's reported 222 passed / 1 skipped, clean lint/type results, with `src`/`tests`
 confirmed byte-identical between the main checkout and the `6f1b327` snapshot before relying on
 that venv. Gate runtimes were measured directly, not estimated, before extrapolating to 204 files.
+
+## Review round 3 — the fix (2026-10-06)
+
+Reviewing the round-3 fix commit `66e7244` on `feature/doc-conventions-audio-adapter`, scoped to
+`git diff 6241fa9 66e7244` (three scripts and two documentation files) per AGENTS.md's "a change
+written in response to a review is ordinary new code" — this addresses the two required fixes from
+round 2 above. Rounds 1 and 2 are not re-reviewed.
+
+**Worktree addressing (AGENTS.md rule 4):** this worktree's `HEAD` was `ab18d03` (1-2 commits of
+unrelated `main` work ahead of round 2's base), not `66e7244` — the branch was checked out
+elsewhere. Confirmed `ab18d03` is a strict ancestor of `66e7244` with a clean tree, so per rule 4's
+correction path (not a stop condition) ran `git merge --ff-only 66e7244`, landing exactly on the
+named tip rather than reading from a snapshot.
+
+### Fix 1 — `status-page-refresh.sh` revert-on-failure: all four exit paths, correctly
+
+Read every exit path after Phase 1 writes `$PAGE`: `GEN_STATUS -ne 0`, `[ ! -f "$PAGE" ]`,
+`FORWARD_COUNT -eq 0`, `PUB_STATUS -ne 0` — all four now call `revert_page()`. This is the full
+enumeration; there is no fifth path between Phase 1 and the final `exit 0` that touches `$PAGE`
+and skips the helper.
+
+Re-ran the author's own mutation independently (strip all `:::` markers from the real
+`docs/status/petrobrain-status.html`, re-derive `FORWARD_COUNT` with the script's own awk/grep
+pipeline, confirm it reproduces 0, run `git checkout -- "$PAGE"`, confirm `git status --porcelain`
+comes back clean, confirm a second `FORWARD_COUNT` re-derivation against the restored file returns
+24): reproduces exactly as claimed, not re-read from the pasted transcript.
+
+`git checkout -- "$PAGE"` is correctly a no-op when the file already matches HEAD (nothing to
+undo) and correctly restores a file Phase 1 deleted outright (confirmed separately below). On "a
+file already committed by Phase 2" — that path cannot occur as written: `revert_page()` runs only
+on the `PUB_STATUS -ne 0` branch, i.e. only when Phase 2 reported failure, so a legitimate Phase-2
+commit is never followed by a revert call in the same run. The comment's own hedge ("if it already
+committed... this is a no-op") covers the one real edge case: Phase 2 commits, then a *later* step
+in the same phase (the push) fails, which the comment correctly reasons would be a no-op since the
+committed file matches the new HEAD. Not independently re-verified by mutation (would require
+faking a `claude -p` publish call), but the control-flow argument holds on inspection and the
+`git diff --stat` for this round shows no behavior change to that branch beyond adding the call.
+
+**The untracked-`$PAGE` case the task flagged as untested — probed, and the author's gap is real
+but lower-severity than the tracked case, and not currently reachable in production.** Confirmed by
+mutation in this worktree (untrack `docs/status/petrobrain-status.html` via `git rm --cached`,
+commit, restore the same bytes to disk as an untracked file, then run `git checkout --
+"$PAGE"` directly): it fails exactly as predicted (`error: pathspec '...' did not match any
+file(s) known to git`, exit 1), which `revert_page()`'s `2>/dev/null || true` swallows with no log
+line. **But guard 2 at the top of the script — `git status --porcelain --untracked-files=no` —
+explicitly excludes untracked files from its own dirty-check**, confirmed by running it against
+the probe state: empty output, i.e. guard 2 reads the tree as clean despite the stray untracked
+file sitting there. So the severe consequence round 2 found (next run sees dirty tree, skips
+forever) does **not** happen here — the next run proceeds normally and either overwrites the stray
+file with a fresh regeneration or, if that one also fails and `$PAGE` stays untracked, repeats the
+same harmless-but-silent no-op. This is a real third instance of "a failure path degrades silently
+instead of being logged" (see Standing Question below), but it is not production-reachable today:
+`$PAGE` is already a tracked, committed file in this repo (confirmed via `git diff 66e7244 --stat
+-- docs/status/petrobrain-status.html`, empty — this round didn't touch it, and it already exists
+from an earlier commit), so the only way to reach "first ever run, untracked" would be deleting it
+from git tracking first. Reverted the probe cleanly (`git revert`, confirmed `git status
+--porcelain` clean and `git diff 66e7244 -- docs/status/petrobrain-status.html` empty afterward).
+**Optional, not required** — logging the swallowed failure (`say "WARN: could not revert $PAGE
+(untracked?)"` instead of bare `|| true`) would close it cheaply if the file's tracked status is
+ever not guaranteed, but nothing today depends on that.
+
+### Fix 2 — fence-balance detection: correct for this repo's actual markdown, one theoretical gap found and sized
+
+Re-ran all three of the task's named proofs independently against real/probe files in
+`audio-adapter/ROADMAP/` (not re-reading the author's pasted transcript):
+- Unclosed fence (one opening ` ``` `, no close, followed by a real `#totally-unknown-tag` in
+  plain prose) → both `roadmap-tag-vocabulary-gate.sh` and `roadmap-toc.sh` fail loudly
+  (`unbalanced fenced code block (1 delimiter(s))`), exit 1. Confirmed.
+- Indented fence inside a list item containing a `#tag`-shaped string → stripped, not flagged, by
+  the gate; the real unknown tag outside the fence is still caught in the same run. Confirmed —
+  this is the regression check the task called the one that matters, and it holds.
+- A genuinely unknown tag in ordinary prose, with no fence involved at all → still caught
+  (baseline case, re-verified first, before any fence mutation).
+
+Went further with `grep -cE '^[[:space:]]*```' ` ` 's own blind spots, as the task asked:
+- **Four-or-more-backtick fences** (```` ```` ````) — **not a gap**. The regex is not
+  end-anchored, so a 4-backtick opener/closer still matches `^[[:space:]]*```` and both lines
+  count as delimiters; parity comes out even and the fenced content is correctly stripped.
+  Confirmed by mutation (4-backtick fence wrapping a fake tag, plus a real tag outside it — only
+  the real tag flagged).
+- **`~~~` (tilde) fences — a real gap, not handled at all.** The delimiter-count regex and the
+  `awk` strip pipeline both match only backtick fences; a `~~~`-fenced block is invisible to this
+  check entirely. Confirmed by mutation: a `~~~`-fenced block containing a fake tag is *not*
+  stripped and gets flagged as an unknown tag — a false positive (loud, blocks the commit), not
+  the dangerous false-negative direction this round exists to close, so it is the same severity
+  class as round 2's already-accepted-and-deferred indented-fence-regex gap, not the unterminated-
+  fence class. Checked whether this repo actually uses `~~~` fences: `grep -rlE '^~~~'` across
+  every `.md` file in the repo (excluding `.venv`/`node_modules`) found zero hits outside my own
+  probe file. Same bar the author and round-2 review already applied to the declined `#`-in-link-
+  title case ("not in the repo today, including the corpus that's coming next") — **theoretical
+  for this repo, not a required fix.** Worth a one-line comment if anyone later pastes
+  CommonMark-authored content that happens to use tilde fences, but not urgent.
+- **A line that is a close, not an open, inside an already-open fence** — not a risk by
+  construction: the check is parity over delimiter *lines*, with no open/close role tracking, so
+  it is correct regardless of which occurrences are semantically opens vs. closes. This is the
+  same mechanism round 2's own unterminated-fence proof already relies on (an odd *count*, not a
+  mismatched open/close pair), so there's nothing new to verify here.
+- **A 4-space-indented, non-fenced block whose own content happens to start with literal
+  backticks** — probed out of caution; behaves consistently (treated as a fence, stripped) because
+  the regex can't distinguish "real fence" from "indented block that happens to start with the
+  same three characters." Vanishingly rare in practice (would require someone to indent-format a
+  literal fence example rather than escape it), and the outcome isn't wrong either way for content
+  that doesn't actually contain a real tag. Not flagging as a practical risk.
+
+### `roadmap-toc.sh`'s new non-zero exit — no caller breaks
+
+Grepped the whole worktree for every reference to `roadmap-toc.sh` (hooks in `.claude/settings.json`,
+every file under `.claude/skills/`, every other script in `.claude/scripts/`, `commit-quality-gate.sh`,
+and prose in `docs/DOC_CONVENTIONS.md`): the only invocations are the usage comment inside the
+script itself and the author's own manual test runs recorded in `implementation.md`. Nothing wires
+it into a hook, a skill, or the commit-time gate — `docs/DOC_CONVENTIONS.md`'s own description
+("`.claude/scripts/roadmap-toc.sh <subproject>/ROADMAP/` restores [the TOC] with standard bash
+tools... No index read needed") frames it as a manual, human-invoked helper, not a gate, consistent
+with `roadmap-tag-vocabulary-gate.sh` and `roadmap-entry-consistency-gate.sh` being the only two
+scripts that carry "gate" in their name and "fail loudly" language in `DOC_CONVENTIONS.md`'s own
+prose. The author's own flag in `implementation.md` ("worth knowing if anything downstream
+currently assumes this script never fails non-zero") is answered: nothing does.
+
+### Checks
+
+- `bash -n` clean on all three changed scripts (`status-page-refresh.sh`,
+  `roadmap-tag-vocabulary-gate.sh`, `roadmap-toc.sh`), re-run independently.
+- `roadmap-tag-vocabulary-gate.sh` → `OK`, exit 0, against the real converted
+  `audio-adapter/ROADMAP/` tree (23 entries including the one index).
+  `roadmap-entry-consistency-gate.sh` → `OK`, exit 0 (unaffected by this round, confirmed
+  unchanged by the scoped diff). `roadmap-toc.sh audio-adapter/ROADMAP/` → prints all 22 entries
+  with correct tags, exit 0. `push-roadmap-gate.sh` and `graphify-dirty-flag.sh` (unchanged files)
+  both exit 0 cleanly against this tree.
+- `audio-adapter/.venv/bin/ruff format --check .` → clean; `ruff check .` → all checks passed;
+  `mypy --strict src` → no issues, 15 source files; `pytest -q` → 222 passed, 1 skipped — all
+  re-run directly, not re-read from `implementation.md`. `git diff 6241fa9 66e7244 --stat --
+  audio-adapter/` is empty, confirming this round touched only `.claude/scripts/` and plan docs.
+- Gate runtime re-measured: `time bash .claude/scripts/roadmap-tag-vocabulary-gate.sh` → 0.309s
+  real, consistent with the author's reported ~0.32-0.33s (round 2's baseline was 0.25s) — the
+  added per-file fence-count `grep` is the entire delta, as claimed, and the extrapolation to
+  ~0.6-0.7s extra at 204 files is unaffected by anything found in this round.
+
+### Standing question — a third instance of the silent-degrade shape
+
+Yes, found one, as the task asked to call out plainly if found: **`revert_page()`'s own `2>/dev/null
+|| true` is a third instance of a failure path degrading silently instead of failing loudly or
+logging**, surfaced by the untracked-`$PAGE` probe above. It differs from the first two in a way
+worth being precise about rather than lumping together: the first two ("odd fence count",
+"PUB_STATUS failure with nothing on the happy path check it") were *introduced* by this round's and
+the previous round's own new mechanisms and were live risks at today's state of the repo. This
+third one is pre-existing in the sense that `revert_page()` itself is this round's new code, but
+the specific input that trips it (an untracked `$PAGE`) cannot occur given the file's current
+tracked state — so it's the same shape, caught one layer earlier than it would have mattered. Listed
+as optional above rather than required for that reason, but the pattern recognition the task asked
+for holds: **every new guard this feature has added, across two rounds, has had at least one
+failure path that said nothing.** Worth naming as a repo-wide habit to watch for in bash gates
+generally (per-script `say`/log-to-stderr on every swallowed error, not just the `|| true` idiom),
+rather than something to fix script-by-script as it's found a fourth time.
+
+### Known-open, not defects (unchanged from round 2, re-confirmed in scope)
+
+- `AA-3`'s accepted-vs-debt contradiction — still needs the user, untouched by this round.
+- The declined `#`-in-link-title case — still absent repo-wide (not re-verified this round, out of
+  scope; round 2's finding stands).
+- The exactly-one-index gate — untouched by this round's diff, not re-tested.
+
+### Required Fixes (this round)
+
+None.
+
+### Optional Refinements (this round)
+
+- **`revert_page()` swallows a failed `git checkout` with `2>/dev/null || true` and no log line.**
+  Reachable only if `$PAGE` is ever untracked when a revert is attempted (not possible today, since
+  the file is already tracked and committed) — but if that ever changes, the failure is invisible.
+  A one-line `say "WARN: revert of $PAGE failed (untracked?)"` on the `||` branch would close it at
+  negligible cost.
+- **`~~~`-fenced blocks are invisible to the new fence-balance check and the strip pipeline in both
+  `roadmap-tag-vocabulary-gate.sh` and `roadmap-toc.sh`.** Zero uses in this repo today (verified
+  by `grep` across every `.md` file), same bar applied to the already-declined link-title case —
+  theoretical, not required. Worth a one-line comment noting the limitation if this project ever
+  ingests externally-authored CommonMark content.
+
+### Verdict
+
+**APPROVED.** Both of round 2's required fixes are correctly and completely addressed: the
+`revert_page()` helper covers all four of the real exit paths (not just the one named), and the
+fence-balance check fails loudly on an unterminated fence in both scripts while the widened
+indent-tolerant regex closes round 2's optional finding too. Every mutation probe the task asked
+for was re-run independently against real files rather than trusted from the pasted transcript,
+including two the author didn't test (untracked `$PAGE`, tilde fences) — both turned out to be
+real-but-low-severity gaps that are correctly left as optional given this repo's actual content.
+`roadmap-toc.sh`'s new non-zero exit has no live caller to break. Checks, gate runtimes, and the
+audio-adapter test suite all reproduce cleanly and match the author's reported numbers.
+
+### Review Confidence
+
+**Full read** of the scoped diff (`git diff 6241fa9 66e7244`), `implementation.md`'s round-3
+section, and both changed gate scripts in full, with the worktree corrected to the exact named tip
+(`git merge --ff-only`) rather than reviewed from a snapshot. Every claim was re-run: both required
+fixes were re-mutated from scratch against real files in `audio-adapter/ROADMAP/` and the real
+`docs/status/petrobrain-status.html`, not re-read from `implementation.md`'s pasted output; the
+fence mechanism was probed past the task's four named edge cases (4+ backticks, tilde fences,
+close-not-open parity, a non-fenced indented block starting with literal backticks); the
+untracked-`$PAGE` gap the task flagged as untested was reproduced and traced through guard 2's own
+`--untracked-files=no` to confirm it does not wedge; `roadmap-toc.sh`'s caller set was checked by
+grep across the whole worktree rather than assumed from the task's framing. `bash -n`, all five
+gate/helper scripts, and all four audio-adapter checks were re-run directly against this worktree,
+not against `main`'s copies.
