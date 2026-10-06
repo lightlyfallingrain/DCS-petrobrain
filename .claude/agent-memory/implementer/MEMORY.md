@@ -132,6 +132,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [sqlite3 URI connect is lazy](project_sqlite_uri_connect_lazy_open.md) — mode=ro connect() on missing file doesn't raise; first execute() does, wrap both.
 - [Test pure function and its wiring separately](feedback_test_pure_function_and_its_wiring_separately.md) — 5 well-tested fns, 0 tests on the write/read call sites that deliver it.
 - [DCS-driven LOS Stages 1-3](project_dcs_driven_los_stage1_3.md) — snapshot-vs-worktree edit trap; relaxed "exactly one %d" test to two, documented why; tolerance fix was doc-only.
+- [Degrade-guard exception breadth](project_degrade_guard_exception_breadth.md) — a raise one line above the `try` is invisible when reading the guard; probe degenerate paths.
 - [BL-11 perf Stages 1/2/3b/5](project_bl11_perf_stages.md) — a note's speedup ratio is scene-dependent; null-omission vs. deliberately-null join keys; grep test fails on its own fix.
 - [Equivalence test must own its reference arithmetic](feedback_equivalence_test_must_own_its_reference_arithmetic.md) — importing the predicate made it pass 15/15 under a real mutation.
 - [mkdir in a helper pollutes relative test paths](feedback_mkdir_in_a_helper_makes_relative_test_paths_pollute.md) — passing tests started creating untracked dirs; reroot onto tmp_path.

@@ -1732,9 +1732,13 @@ def _per_run_log_paths(
     `None` passes through as `None` -- every one of these logs is off by
     default.
 
-    **Also creates each resolved path's parent directory**, which is the
-    other half of applying path policy at the CLI boundary rather than
-    inside the writers. Nothing else does it: `per_run_log_path` only
+    **Expands `~` and creates each resolved path's parent directory**,
+    which is the other half of applying path policy at the CLI boundary
+    rather than inside the writers. The expansion is here, once, rather
+    than on each of the three `argparse` flags: `pathlib.Path` does not
+    expand `~`, so without it the `mkdir` below would create a directory
+    literally named `~` in the working directory. Nothing else does
+    either: `per_run_log_path` only
     renames, and `DetectionTraceWriter.__init__` /
     `BeliefTruthLogWriter.__init__` call `path.open("a")` with no guard --
     so a missing parent is a `FileNotFoundError` raised at construction,
@@ -1743,11 +1747,18 @@ def _per_run_log_paths(
     gitignored and therefore absent in a fresh clone, so this is the
     ordinary case rather than an edge one.
 
-    A directory that cannot be created degrades that one log to `None` with
-    a line on stderr, mirroring `_resolve_speech_log_path` above: an
-    unwritable log should cost the sortie its trace, not its crew. The
-    writers keep their "handed an exact path, writes exactly there"
-    property either way."""
+    A path that cannot be resolved to a writable file degrades that one log
+    to `None` with a line on stderr, mirroring `_resolve_speech_log_path`
+    above: an unwritable log should cost the sortie its trace, not its
+    crew. The writers keep their "handed an exact path, writes exactly
+    there" property either way.
+
+    **Two exception types, not one.** The `mkdir` raises `OSError`, but
+    `per_run_log_path` ends in `Path.with_name`, which raises `ValueError`
+    when the final component is empty -- `.`, `/`, or an empty string. Both
+    are inside the guard, because a `--detection-trace .` that killed
+    `main()` with a traceback would escape this policy rather than apply
+    it."""
     stamp_at = time.time() if when is None else when
 
     def resolve(path: Path | None, flag: str) -> Path | None:
