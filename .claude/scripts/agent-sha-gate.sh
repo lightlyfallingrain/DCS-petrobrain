@@ -22,13 +22,22 @@
 # it was given is real in the first place.
 #
 # **Heuristic, deliberately conservative.** A candidate must be 7-40 characters
-# of `[0-9a-f]`, word-bounded, **and contain at least one digit** -- which is
-# what keeps English words out. "deadbeef", "facade", "decade" and "effaced"
-# are all pure hex letters and would otherwise be flagged forever; requiring a
-# digit excludes them while keeping every real abbreviated sha, since a
-# 7-character hex string with no digit at all is vanishingly rare in git and
-# common in prose. False negatives are fine here: this is a backstop for an
-# error that already has a human-readable symptom, not a completeness claim.
+# of `[0-9a-f]`, word-bounded, **and contain at least one digit AND at least
+# one letter a-f**. Both halves are load-bearing and each was added after a
+# real false positive:
+#
+#   * the digit keeps **English words** out -- "deadbeef", "facade", "decade"
+#     and "effaced" are all pure hex letters;
+#   * the letter keeps **long decimal numbers** out. This gate blocked its own
+#     author on 2026-10-06 over `10000.049999999999` and `0.33333333333333331`
+#     -- float round-trip values quoted in a dispatch prompt, whose digit runs
+#     are word-bounded hex with digits and matched the earlier rule exactly.
+#
+# False negatives are fine here, and the letter requirement buys one: a real
+# abbreviated sha that happens to be all digits (~3.7% of 7-character shas)
+# will not be checked. That is the right trade -- this is a backstop for an
+# error that already has a human-readable symptom, not a completeness claim,
+# and a gate that cries wolf over arithmetic is a gate people route around.
 set -uo pipefail
 
 input=$(cat)
@@ -40,10 +49,11 @@ REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 [ -n "$REPO" ] || exit 0
 cd "$REPO" 2>/dev/null || exit 0
 
-# Candidates: word-bounded 7-40 hex runs that contain at least one digit.
+# Candidates: word-bounded 7-40 hex runs with at least one digit AND one a-f.
 candidates=$(printf '%s' "$prompt" \
     | grep -oE '\b[0-9a-f]{7,40}\b' \
     | grep -E '[0-9]' \
+    | grep -E '[a-f]' \
     | sort -u || true)
 [ -z "$candidates" ] && exit 0
 
