@@ -41,6 +41,32 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `plans/spu8-intercom/{plan.md, implementation.md, review.md, security-deep-analysis.md,
   performance.md, dod-check.md}`; roadmap entry: `audio-adapter/ROADMAP.md`'s Slice 2.
 
+- [ ] **`feature/bl11-tick-cost` (`BL-11` Stages 1, 2, 3b, 5) — DoD PASSED on bench measurement
+  2026-10-06, not yet flown.** *Deferred, not waived.* **The unusual part: there is nothing to
+  perceive.** This branch adds no behaviour — it makes the existing tick cheaper (poll work 330 →
+  12.6 ms median, realised period 1.33 → 1.000 s, `group_salient_ids` 300 → 1.1 ms, enrichment-cache
+  within-tick hits 0 % → 89.7 %). The observable is the *absence of lateness*, which cannot be scored
+  from the controls, so **the acceptance test is a log reduction over the belief-truth log's `t_sim`
+  gaps** (`median` should read ~1.000 s against a verified 1.424 s pre-branch baseline), not a
+  listening task. Card: `docs/acceptance/2026-10-06-bl11-tick-cost-sortie.md`.
+
+  **Two things the flight genuinely decides, and only one is about speed.** (a) Whether any spoken
+  terrain/road/ridge qualifier ever sounds wrong about a nearby feature — Stage 3b now shares one
+  enrichment result across a 50 m cell, worst case **~70.7 m horizontal**, plus an unquantified
+  observer-vantage staleness axis. (b) The within-tick cache hit rate under *manoeuvring* targets:
+  the bench's objects are static, so **89.7 % is an upper bound** and only a sortie gives the real
+  magnitude.
+
+  **Batches with any sortie that exercises ground contacts at mixed ranges** — it needs no particular
+  geometry, no deployment, and nothing new started, so it rides along with almost any other flight on
+  this list rather than needing its own trip. It does *not* conflict with a speech-content sortie,
+  because it changes no speech content; the one caveat is that if a terrain qualifier sounds wrong,
+  this branch and a terrain-callout change flown together would be indistinguishable.
+
+  **Do not read the p90 as a failure.** 2.0 % of polls still overrun 1.0 s, and the sortie's 4.98 s
+  p90 is unexplained by this branch — `BL-B32` (synchronous TTS in the poll body) and `BL-B33` (five
+  sequential 2.0 s timeouts) still own it. The median is fixed; the tail is not.
+
 - [ ] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`), not yet flown
   (2026-10-05).** Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
   when an existing, not-yet-`lost` contact is spatially/class-plausibly the same real thing — the
@@ -1692,7 +1718,55 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   assumption — a self-contained addition to one existing branch of `render_group_disclosure`,
   gated by a new optional parameter that defaults to the old always-full behaviour.
 
-- [ ] **BL-11 — Tick cost, and making silent degradation visible. NOT STARTED, filed 2026-10-05.**
+- [ ] **BL-11 — Tick cost, and making silent degradation visible. PARTIALLY DONE — Stages 1, 2, 3b
+  and 5 DoD PASSED on bench measurement 2026-10-06 (`feature/bl11-tick-cost`); Stages 3a, 4 and 6
+  remain.** Filed 2026-10-05.
+
+  **The milestone's headline number is met.** Measured at the branch tip on real
+  `syria-full.sqlite`, 440 objects, 10 km bubble, 300 polls
+  (`plans/bl11-tick-cost/performance-review.md`):
+
+  | | note, pre-branch | at this branch |
+  |---|---|---|
+  | poll work, median | ~330 ms | **12.6 ms** |
+  | poll work, p90 / max | — / 1,736 ms | 98.6 / 1,642 ms |
+  | **realised poll period, median** | **1.33 s** | **1.000 s** (mean 1.008, max 1.642) |
+  | `group_salient_ids` | ~300 ms **every poll** | **1.1 ms** median, 5.5 max |
+  | `describe_position` per callout tick | median 13 / ~440 ms, max 47 / 1,579 ms | median 3 / 256 ms, max 20 / 1,615 ms |
+  | enrichment-cache hits **within a callout tick** | **0 %** | **89.7 %** |
+  | polls overrunning 1.0 s | — | **2.0 %** (3.0 % at 800 objects) |
+
+  `_wait_for_next_tick` realises `max(interval, work)` to within 0.1 ms, measured side by side
+  against the pre-Stage-1 shape. **`BL-B30` is closed by this branch** — see its entry in
+  `BACKLOG.md` for the measured resolution.
+
+  **Two numbers the source note got wrong, corrected here because both were load-bearing.** The
+  note's "single most valuable number" — real in-bubble candidates per poll — is **median 232 at
+  440 objects (min 32, max 434), not 440**: out by 2×, because the player bubble sheds most of the
+  field as the ownship tracks away from the clump centroid. That 2× is what makes Stage 2's
+  remaining residual not worth chasing. And the note's 2.2 KB/row detection-trace premise was
+  wrong: real rows average **622 B**, so the 3.55 GB sortie held ~5.7 M rows, and Stage 5's
+  null-omission saves **50.3 %** on real rows rather than the little the note implied.
+
+  **Still open after this branch, none of it body-layer's to fix:** 2.0 % of polls overrun 1.0 s and
+  that residual is **entirely `describe_position`'s unit cost** — 57–85 ms/call, measured identical
+  cold or warm across four access shapes, so it is a `query.describe` question
+  (`world-model/ROADMAP.md`'s `M11`) and not more body-layer caching. The sortie's **4.98 s p90 is
+  still unexplained by this branch**; nothing in the CPU measurements reaches it, and the standing
+  candidates remain `BL-B33` (five sequential aircraft-layer GETs at 2.0 s timeouts) and `BL-B32`
+  (synchronous TTS inside the poll body, still the one live violation of the project's own
+  never-block-the-main-thread rule). **The median is fixed and the tail is not.**
+
+  **Acceptance:** `docs/acceptance/2026-10-06-bl11-tick-cost-sortie.md`. The flight is outstanding
+  and this milestone is on the live-acceptance debt list above — the whole change is invisible from
+  the cockpit, so the card's real test is a log reduction, not a perception.
+
+  **A diagnostic trap, recorded because it will mislead the next reader.**
+  `distinct_positions == describe_calls == cache_misses` — the exact signature the research note
+  used to *diagnose* the cache defect — **still holds in 37 of 37 callout-bearing ticks**. It no
+  longer means what it meant: before it held with *zero* hits, i.e. the cache did nothing; now each
+  miss is a genuinely distinct 50 m cell. Anyone re-running that diagnostic will conclude Stage 3b
+  failed. **The discriminator is the hit count beside it, never the equality alone.**
   The whole-subproject performance and security passes run on `main` @ `19143fa` after the first
   DCS-LOS sortie — `body-layer/research/2026-10-05-performance-review.md` and
   `body-layer/research/2026-10-05-security-audit.md`, both directed by
@@ -1716,8 +1790,24 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   hour — believed bearing lags, so a contact genuinely at 8:30 may legitimately render as "8
   o'clock".
 
-  **Stage 1 — the loop shape and the stale docstrings. The rate question is SETTLED: 1.0 s
-  stays.** Decided 2026-10-06 in the `/explore` conversation
+  **Stage 1 — [x] DONE 2026-10-06. The loop shape and the stale docstrings. The rate question is
+  SETTLED: 1.0 s stays.** Shipped: `logger._wait_for_next_tick`, both poll loops sleeping to a
+  deadline instead of waiting a fixed interval *after* the work, so the configured number means what
+  it says. Measured `max(interval, work)` to within 0.1 ms; at 12.6 ms of work the realised period
+  went 222.0 → 200.0 ms (scaled harness), and at a 1.0 s setting 70/330/900 ms of work all realise a
+  1.000 s median. The overrun policy re-bases **once** on the clock and cannot busy-spin (debt is
+  dropped, not queued — confirmed distinguishable from the queueing alternative by measurement, so
+  the test is not vacuous). The three stale "5 Hz" docstrings are corrected and held mechanically by
+  `test_no_stale_five_hertz_claims_remain_in_src`, which subsumes Stage 6.
+
+  **The one cost, named rather than papered over:** while work exceeds the interval,
+  `stop_event.wait` is never called, so the thread runs back-to-back with no voluntary yield on a
+  Mac also hosting Ollama. **Deliberately not floored** — a floor would re-introduce a smaller
+  `work + interval` in exactly the regime the stage exists to fix. Measured frequency: 2.0 % of
+  polls, all single `describe_position` spikes rather than sustained load, so it is a tail behaviour
+  and not an operating point. `--poll-interval-s` is the knob.
+
+  Decided 2026-10-06 in the `/explore` conversation
   (`plans/post-review-fixes/explore-notes.md`, "Still open, and decided by the orchestrator rather
   than re-asked"). The user was asked whether anything felt late and answered with the
   *"unit 7 o'clock"* callout — which turned out to be a masked-hour observability defect (see
@@ -1732,7 +1822,33 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   produced `BL-B30`'s wrong premise and a wrong budget figure in an agent's own memory.
   `perception/motion.py:91`'s *behavioural* 5 Hz assumption is `BL-B34` and goes to a debugger.
 
-  **Stage 2 — `group_salient_ids`, ~300 ms of every poll, 8.1× measured.** The largest single term
+  **Stage 2 — [x] DONE 2026-10-06. `group_salient_ids`, ~300 ms of every poll — and the speedup is
+  5.1×, not the 8.1× filed below.** Shipped: `_resolvable` split into `_resolvable_terms` returning
+  the candidate's `(GeoPosition, theta_size)`, carried in parallel lists so the O(n²) pair loop is
+  one `angular_separation_rad` call and a comparison; `@cache` on `object_model.profile_for`
+  (purity checked, not assumed — pure function of one `str` over never-mutated module tables,
+  returning a frozen slotted dataclass). **In situ the term is now 1.1 ms median / 5.5 ms max and is
+  no longer a line in the budget.**
+
+  **The 8.1× claim was corrected by measurement and the correction matters.** The ratio is 5.1× and
+  **saturates from ~2,500 pairs upward**, still 5.1× at 169,071 pairs — nearly double the sortie's
+  ~96,000. So a flight will measure 5×, not 8×, and the implementation's original
+  O(resolvable²) argument for expecting the ratio to *grow* with mission size was wrong, even though
+  it reconciles the absolute cost to within 3 % (2.30 vs the note's 2.24 µs/pair). **The missing
+  1.6× is located exactly**: `clustering.angular_separation_rad` rebuilds each candidate's
+  observer-relative difference vector on every pair — the same recomputation shape Stage 2 exists to
+  remove, and the one per-candidate quantity the hoist left in the loop. Hoisting it reaches 8.0× at
+  58 k pairs, i.e. the note's figure. **Declined with arithmetic as `BL-B40`**: 1.6× of a term that
+  is now 1.1 ms saves ~0.4 ms of a 12.6 ms poll. Recorded so it is not re-discovered as a surprise.
+
+  **Pinned by equality, not by timing.** `tests/test_group_salience_equivalence.py` holds the
+  returned `frozenset[int]` bit-identical against a *local copy* of the pre-change bodies at
+  n ∈ {0,1,2,55,128,250,440,800} across five layouts and under `BINOCULAR_OPTIC`, with a
+  non-vacuity guard (some scene must produce groups, some candidate must be excluded). The reference
+  deliberately does **not** import the production functions — a round-2 fix — and the two uncalled
+  predicates it replaced were then deleted. No timing assertion, by design: that is CI noise.
+
+  (Original filing, kept for the record:) The largest single term
   in the tick, 58 % of a 300-poll cProfile, and unconditional.
   `perception/group_salience._cohesive` recomputes two `profile_for` lookups and two `range_m`
   calls **per pair** of an O(n²) loop, all four depending on one candidate only. Hoist them into
@@ -1741,7 +1857,39 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   this is recomputation removal, not an approximation, so the acceptance test is equality against
   the current implementation, not a behavioural judgement.
 
-  **Stage 3 — `describe_position` multiplier in `CalloutScheduler.tick` (= `BL-B26`, upgraded).**
+  **Stage 3 — Stage 3b [x] DONE 2026-10-06; Stage 3a NOT BUILT, and measurement says correctly so.**
+
+  **3b shipped:** `ENRICHMENT_CACHE_POSITION_GRID_M = 50.0` and `_cache_position_key` in
+  `belief/enrichment.py` replace exact structural equality of `Contact.last_position` with the
+  containing grid cell — **integer cell indices, not rounded floats**, so the key cannot reintroduce
+  the float-equality miss it exists to remove. Measured **8,161 hits / 189 misses = 97.7 %** overall
+  and **89.7 % within the 37 callout-bearing ticks, against the note's measured 0 %**. The
+  miss-by-construction defect is gone. Pinned by mutation: reverting the key to the old exact tuple
+  fails `test_cache_hits_after_a_one_metre_nudge`, the finding's own reproduction.
+
+  **3a is settled as not worth building, and this quantifies the round-1 reviewer's call to omit
+  it:** measured **189 `describe_position` calls against 187 distinct 50 m cells — 2 redundant,
+  1.1 %** (325 vs 320, 1.5 %, at 800 objects). Being per-`contact_id`, 3b already absorbed
+  `BL-B26`'s 3× same-contact multiplier; what remains is distinct positions, which no memo at this
+  grain can merge. `belief/callouts.py`'s gather multiplier is intact at `:823`/`:833`/`:891` and
+  there is almost nothing left there to collect.
+
+  **The quantisation's cost, accepted with its bound stated.** A shared enrichment result is valid
+  for every position in one 50 m cell, so a spoken qualifier can derive from a position up to the
+  **cell diagonal — ~70.7 m horizontal, ~86.6 m in 3D** — away. That is the pilot-facing risk on the
+  acceptance card: a terrain or road qualifier attached to something it should not be. **A second
+  axis is unquantified and was deliberately not guessed at:** a hit also freezes the cached
+  `world_position`, whose observer vantage comes from the most recent contributing percept. Under the
+  old exact key a hit implied no new percept had been fused; under a 50 m cell it does not, so the
+  quantisation widens staleness along the observer axis too. The instrument is one diff of cached
+  against freshly-computed `world_position` per hit, over a run.
+
+  Also note **89.7 % is an upper bound** — the bench's objects are static, so believed positions
+  settle and cross cells rarely. The *direction* is robust (the old key could never hit for a
+  re-observed contact, whatever the motion); the magnitude needs the sortie.
+
+  (Original filing, kept for the record:) `describe_position` multiplier in
+  `CalloutScheduler.tick` (= `BL-B26`, upgraded).
   Up to 47 calls in one tick, 1,579 ms measured; `describe_position` is 51.6 ms median on
   `syria-full`, not the ~0.3 ms `BL-B26` assumed. `WorldEnrichmentCache` misses **by construction**
   for the contacts that get spoken about — its key is exact structural equality of
@@ -1797,13 +1945,52 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      Once the live path is the only path, a nonzero fallback count means a defect, and that is a
      much more useful signal than a share. Cheap, and it is what would have caught this on day one.
 
-  **Stage 5 — roll the logs per sortie.** Three writers `open("a")` with no rotation: ~290 KB/poll
+  **Stage 5 — [x] DONE 2026-10-06. Roll the logs per sortie.** Shipped: `src/run_log_paths.py`
+  (`per_run_log_path`/`run_stamp`) plus `logger._per_run_log_paths`, applying **one stamp to all
+  three logs** at the CLI boundary ahead of both the `--console` and `--crew-text` branches, so a
+  sortie's three logs always match. `main()` prints `"<label>: writing <path>"` to stderr per log —
+  **the authoritative answer to "where did it go", in preference to any document.** The three writers
+  now report a write failure **once and then disable** rather than per write or silently, and a
+  disabled detection-trace writer still clears the collector. `--detection-trace` /
+  `--belief-truth-log` / `--speech-log` now **create their parent directory**, degrading that one log
+  to off with a stderr line naming the flag if it cannot be created; previously a missing parent was
+  a startup `FileNotFoundError` that killed the crew before it started. Both run-scripts' four
+  `~/dcs-*.jsonl` paths moved to `logs/dcs-*.jsonl`. `RUN.md`: the path passed is not the path
+  written — glob, do not hardcode.
+
+  **Measured against the real artifact, and it halves the file:** sampling 20,000 rows of the
+  3.55 GB 2026-10-05 trace at the note's own byte offset and re-serialising under the shipped
+  omission rule, real rows average **622 B** carrying a **mean 12.7 omittable null fields of 25
+  keys**, so the null-omission saves **50.3 %** (622 → 309 B) and that sortie would have been
+  **~1.76 GB**. The note's 2.2 KB/row premise — and the assumption behind it, that real rows have
+  their `None` fields populated — were both wrong.
+
+  **Cost owned rather than hidden:** a new name per run is ~1.8 GB per sortie with **no retention
+  policy**, a pruning decision someone makes by hand. **And the larger half of the volume is still on
+  the table: 64.7 % of real rows are `player_bubble`** (gaze 31.9 %, range-or-size 3.4 %); dropping
+  them behind a flag takes ~1.76 GB to **~0.6 GB** for the cost of one flag. Out of Stage 5's scope,
+  and a product call — it trades away the record of what was in the bubble and rejected, which is
+  exactly what is wanted when a contact goes unreported. Surfaced on the acceptance card as `Q7`.
+
+  **Second-order, noted not actioned:** `observation_id_to_contact_id` still rebuilds its whole
+  mapping twice per poll (`detection_trace_writer.py:149-159`); measured 3.6 ms/poll, in line with
+  the note's 4.4 ms, unchanged by this branch and accepted in its own docstring.
+
+  (Original filing, kept for the record:) Three writers `open("a")` with no rotation: ~290 KB/poll
   of detection trace (one row per candidate whatever the outcome), ~50 MB/min, 1–3.5 GB/sortie,
   appended across sorties — which is why the 2026-10-05 analysis had to start at a byte offset. An
   ENOSPC mid-flight is swallowed by the poll loop's broad handler with nothing in the cockpit saying
   so. Per-run files are nearly free; a cap with a warning line closes the ENOSPC half.
 
-  **Stage 6 — the stale "5 Hz" docstrings** (`logger.py:1446`, `belief/brain_client.py:12`/`:274`).
+  **Stage 6 — [x] DONE 2026-10-06, subsumed by Stage 1.** All three corrected, and held
+  *mechanically* rather than by vigilance: `test_no_stale_five_hertz_claims_remain_in_src` greps
+  `src` and exempts only `perception/motion.py:91`. Verified by grep that nothing else remains. One
+  wording consequence worth knowing: writing "this comment used to say 5 Hz" in the correction made
+  the test fail on its own fix, so the rate is now spelled out in words there with a line saying
+  why.
+
+  (Original filing, kept for the record:) the stale "5 Hz" docstrings
+  (`logger.py:1446`, `belief/brain_client.py:12`/`:274`).
   Trivial, and it belongs in this milestone rather than the backlog because they are what produced
   `BL-B30`'s wrong premise and a wrong budget figure in an agent's own memory. `perception/motion.py:91`'s
   *behavioural* 5 Hz assumption is a separate correctness question, `BL-B34`.
@@ -1821,10 +2008,39 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   either pass is an exploitable vulnerability; what they found instead is the failure this project
   cares about more, which is a perception gate degrading silently.
 
-  **Milestone completion question**: Stage 1's answer changes what comes next. At 0.2 s the tick
+  **Milestone completion question — ANSWERED 2026-10-06 for Stages 1/2/3b/5. Yes, twice, and both
+  answers redirect work away from body-layer.**
+
+  1. **The tick-cost workstream is finished inside body-layer, and the remaining cost is
+     world-model's.** The pre-filing expectation was that Stages 2–3 would be the first of several
+     body-layer optimisation rounds. They were the last: poll work is 12.6 ms median, and the entire
+     2.0 % overrun tail is one `describe_position` call at 57–85 ms, measured **identical cold or
+     warm** across four access shapes. That rules out any further caching at this layer by
+     construction — a hit saves the full unit cost, so the grain only changes how often one is
+     available, and 189 calls against 187 distinct cells says there is nothing left to merge. **The
+     next move on tick cost is `query.describe`'s unit cost (`world-model`'s `M11`), not another
+     body-layer pass.** `BL-B40` is the body-layer residual and it is declined with arithmetic.
+  2. **The 1.0 s decision now has headroom behind it, which changes what `BL-B24` may assume.** The
+     explore settled 1.0 s before any of this was measured; the budget is now ~1 % consumed at the
+     sortie's scale and ~3.5 % at double it (35.5 ms median at 800 objects, period still 1.000 s).
+     So `BL-B24`'s contact churn and `BL-12`'s group identity work can be designed against real
+     headroom rather than against a tick already overrunning — the opposite of the constraint they
+     would have inherited a day ago. **But the tail is not fixed**, so nothing downstream may assume
+     a bounded *worst-case* period; `BL-B32`'s synchronous TTS and `BL-B33`'s five sequential 2.0 s
+     timeouts still own the 4.98 s p90, and both cross a subproject seam (Architect's).
+
+  **One downstream assumption is invalidated outright:** any analysis keyed on
+  `distinct_positions == describe_calls == cache_misses` as evidence of the cache defect. That
+  equality survives the fix (37/37 ticks) and now means the opposite. See the trap note at the head
+  of this milestone.
+
+  **Not completable without a flight, unchanged:** Stage 4's step 2 gates the rest of Stage 4 on one
+  sortie, and Stages 1/2/3b/5 are themselves on the live-acceptance debt list — their verification is
+  a log reduction, not a perception, because the whole change is invisible from the cockpit.
+
+  (Original, for the record:) Stage 1's answer changes what comes next. At 0.2 s the tick
   budget is 200 ms and Stages 2–3 are load-bearing rather than tidy; at 1.0 s they buy headroom for
-  `BL-B24`'s churn instead. Stage 4's step 2 gates the rest of Stage 4 on one sortie, so this
-  milestone cannot complete in one pass without a flight.
+  `BL-B24`'s churn instead.
 
 - [ ] **BL-12 — Group-level contact identity and continuity. NOT STARTED, Architect pass in flight
   2026-10-06.** Plan: `plans/group-contact-identity/plan.md`. This is the milestone that dissolves

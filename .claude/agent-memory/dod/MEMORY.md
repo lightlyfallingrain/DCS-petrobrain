@@ -21,3 +21,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Plan staleness across parked stages](project_plan_staleness_across_parked_stages.md) — terrain-feature-probing's parked Stages 3-5 assumed basin adjacency from a since-replaced detector; 1st occurrence, watch for a 2nd.
 - [Cross-machine handoff, zero gate risk](project_cross_machine_handoff_zero_gate_risk.md) — a branch built entirely on another machine/session can arrive with literally no test run ever performed on it.
 - [Roadmap edit target: feature branch vs main](project_roadmap_edit_target_feature_vs_main.md) — diff the file against the fork point first; if the feature branch already touched it, edit a branch off the feature tip, not main.
+- [Recurring: correct conclusion, unearned reason](project_recurring_correct_conclusion_unearned_reason.md) — 5 instances on one branch; read a review's *reason* as its own claim, usually one grep from falsification.
+- [Stage [x] can live on an unmerged branch](project_stage0_x_lives_on_an_unmerged_branch.md) — a "that stage is already done" claim may be true only of a second branch; check before editing a shared roadmap.

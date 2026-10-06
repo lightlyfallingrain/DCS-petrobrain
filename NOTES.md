@@ -827,3 +827,41 @@ two functions that must agree (2026-09-19).
   as if the tolerance were the only LOS answer. When a new mechanism supersedes part of what an old
   debt item was tracking, the debt entry needs re-reading and re-scoping, not just a new entry
   alongside it (`plans/dcs-driven-los/plan.md`; `world-model/ROADMAP.md`'s "Live acceptance debt").
+- **An entry in a guard's exception tuple that no test defends is a comment, not a contract — and
+  the next tidy-up deletes it for free.** `logger._RESOLVE_FAILURES` enumerates four types; review
+  round 5 dropped each in turn and found that removing `OverflowError` **left the whole suite
+  green**, while the other three each had a test holding them in place. The argument for keeping it
+  was sound (`run_stamp`'s `time.localtime` raises it, and "unreachable from `argv`" is a property of
+  today's callers rather than of the code — `when` is a typed keyword a replay tool could feed from a
+  JSONL stamp), but an argument is not a guard. Worth applying to any defensive `except (A, B, C)`:
+  **drop each entry and see whether anything fails.** Generalises past exception tuples to any
+  enumerated defensive set — a validator's allowed-value list, a retry's retryable-error set
+  (`plans/bl11-tick-cost/review-round5.md`; commit `f70ff3e`).
+- **Two fixes can each pass its own counterfactual while the pair still leaves the seam open,
+  because a per-fix counterfactual only ever tests the statement the fix touched.** Round 4 widened
+  `resolve`'s guard to `(OSError, ValueError)` and added `expanduser()` — both verified by mutation,
+  independently — but put the `expanduser()` call *outside* the `try:` it had just widened, so
+  `--detection-trace '~nosuchuser/trace.jsonl'` still killed startup via `RuntimeError`: the same
+  defect the round was convened to fix, now also contradicted by the docstring it had just added. The
+  fix was structural rather than a third exception type — **one `try:` over every statement in the
+  closure**, with a named module-level tuple whose comment enumerates the raising types *per
+  statement*, so a fifth call added later lands inside the guard by default instead of sitting above
+  it unnoticed (`plans/bl11-tick-cost/review-round4.md`, `review-round5.md`).
+- **A benchmark that cannot fail proves nothing, so a performance harness needs its own
+  can-this-fail probe asserted before any timing is reported.** Distinct from the already-recorded
+  "fix works ≠ cost is bounded" lesson above (`BL-B23`, which measured a real thing along only one
+  axis): this is the harness measuring *nothing* while printing plausible numbers. `BL-11`'s
+  performance pass gave every harness a probe — mutate the mechanism, assert the measurement moves —
+  and one genuinely tripped, on the enrichment-cache counter's first smoke run, which is the only
+  reason the instrument was known to be live. Cheap insurance: the probe is usually the mutation the
+  review wanted to run anyway (`plans/bl11-tick-cost/performance-review.md`).
+- **A diagnostic signature can survive the fix it diagnosed and come to mean the opposite, which
+  makes re-running the original diagnostic actively misleading.**
+  `distinct_positions == describe_calls == cache_misses` was the equality that identified
+  body-layer's enrichment cache as missing by construction. After the fix it **still holds in 37 of
+  37 callout-bearing ticks** — but now because each miss is a genuinely new 50 m cell rather than
+  because the cache does nothing. The discriminator is the hit count beside it (0 % → 89.7 %), never
+  the equality alone. **When a fix lands, check whether the signature that found the bug is still
+  true, and if it is, write down what now distinguishes the two cases** — otherwise the next person
+  reaches for the trusted diagnostic and concludes the fix failed
+  (`plans/bl11-tick-cost/performance-review.md`, finding 3).
