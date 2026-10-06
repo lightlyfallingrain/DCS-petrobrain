@@ -1736,7 +1736,9 @@ def _resolve_speech_log_path(
 #:   final component is empty, e.g. `.`, `/` or an empty string.
 #: * `Path.mkdir()` -- `OSError`, for every filesystem reason: a
 #:   non-directory already in the way, a read-only mount, a permission
-#:   denial.
+#:   denial. **Also `ValueError`**, for an embedded null byte -- this list
+#:   is the next author's checklist, so it must not attribute that type to
+#:   `with_name` alone.
 _RESOLVE_FAILURES = (OSError, OverflowError, RuntimeError, ValueError)
 
 
@@ -1786,7 +1788,11 @@ def _per_run_log_paths(
     adjacent `pathlib` calls raise three unrelated types and `run_stamp`
     a fourth: see `_RESOLVE_FAILURES` above, which enumerates them per
     statement and is the only list of them. Every statement in `resolve`
-    is inside the one guard, because a `--detection-trace .` or
+    *that can fail* is inside the one guard -- the assignments are not, and
+    `reported_parent = path.parent` is deliberately outside it (it is pure:
+    no syscall, and it does not raise for `.`, `/`, `''`, `//`, an embedded
+    null byte or `~nosuchuser/x`, all probed 2026-10-06) -- because a
+    `--detection-trace .` or
     `'~nosuchuser/trace.jsonl'` that killed `main()` with a traceback
     would escape this policy rather than apply it. Each of the three
     rounds that widened this guard found exactly one type missing, which
