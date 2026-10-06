@@ -6,8 +6,11 @@
 #
 #   1. Every [[ID]] wikilink in a converted tree resolves to an existing <ID>.md.
 #   2. Every entry file's name matches <ID>.md, where <ID> is the first token of its own H1.
-#   3. Every entry file appears in at least one index (*-roadmap.md / *-backlog.md) in its
-#      directory, as a [[ID]] link -- an orphaned entry is as much a defect as a dangling link.
+#   3. Every entry file appears in exactly one index (*-roadmap.md / *-backlog.md) in its
+#      directory, as a [[ID]] link -- an orphaned entry is as much a defect as a dangling link,
+#      and an entry linked from two indexes in the same directory (live once a subproject has
+#      both a ROADMAP and a BACKLOG index sharing one directory) is a defect in the other
+#      direction: the plan and docs/DOC_CONVENTIONS.md both say "exactly one."
 #
 # Run standalone: .claude/scripts/roadmap-entry-consistency-gate.sh
 # Exit 0 and silent on success; exit 1 with every offending file named on failure.
@@ -56,16 +59,20 @@ for dir in $DIRS; do
         fi
     done
 
-    # Check 3: every entry ID appears as a [[ID]] link in at least one index in this directory.
+    # Check 3: every entry ID appears as a [[ID]] link in exactly one index in this directory --
+    # zero is an orphan, more than one is a duplicate (both are defects).
     for id in $ids; do
-        found=0
+        count=0
         for idx in "$dir"/*-roadmap.md "$dir"/*-backlog.md; do
             [ -f "$idx" ] || continue
-            grep -qF "[[$id]]" "$idx" && found=1 && break
+            grep -qF "[[$id]]" "$idx" && count=$((count + 1))
         done
-        if [ "$found" -eq 0 ]; then
+        if [ "$count" -eq 0 ]; then
             FAIL=1
             echo "roadmap-entry-consistency-gate: $dir -- $id.md is not linked from any index in this directory" >&2
+        elif [ "$count" -gt 1 ]; then
+            FAIL=1
+            echo "roadmap-entry-consistency-gate: $dir -- $id.md is linked from $count indexes in this directory, expected exactly one" >&2
         fi
     done
 done

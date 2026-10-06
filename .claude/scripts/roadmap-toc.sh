@@ -24,7 +24,13 @@ for dir in "$@"; do
         # Skip index files -- they are not entries.
         printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
         title=$(awk '/^# /{sub(/^# [A-Za-z0-9.-]+ — /, ""); print; exit}' "$f")
-        tags=$(grep -om1 -E '#[A-Za-z][A-Za-z0-9/_-]*( #[A-Za-z][A-Za-z0-9/_-]*)*' "$f" | head -1)
+        # Strip fenced code blocks, inline code spans, and URLs before scanning for tags -- a
+        # "#" inside any of those is not a tag (same false-positive family as
+        # roadmap-tag-vocabulary-gate.sh, which this mirrors).
+        tags=$(awk '/^```/ { fence = !fence; next } fence { next } { print }' "$f" \
+            | sed -E 's/`[^`]*`//g' \
+            | sed -E "s#https?://[^][:space:]\")'>]*##g" \
+            | grep -om1 -E '#[A-Za-z][A-Za-z0-9/_-]*( #[A-Za-z][A-Za-z0-9/_-]*)*' | head -1)
         printf '%-10s %-70s %s\n' "$base" "$title" "$tags"
     done
 done
