@@ -217,6 +217,39 @@ def test_an_unresolvable_tilde_user_degrades_rather_than_raising(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_a_stamp_time_outside_the_platform_clock_degrades_rather_than_raising(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run_stamp()` -> `time.localtime()` raises `OverflowError` for a
+    `when` outside the platform's `time_t` -- the fourth type in
+    `_RESOLVE_FAILURES` and, until this test, the only one no test held
+    there.
+
+    **That is why it is tested rather than argued about.** Review round 5
+    dropped each type from the guard in turn and found that removing
+    `OverflowError` left the whole suite green, so the guard's stated
+    contract -- that it covers every statement that can fail, not only the
+    argv-reachable ones -- rested on a comment. The next tidy-up would have
+    deleted the type for free.
+
+    `when` is unreachable from `argv` today (there is no `--when` flag, only
+    this keyword), which is a property of today's callers rather than of the
+    code: a replay tool reading a stamp out of a JSONL is the obvious future
+    one."""
+    monkeypatch.chdir(tmp_path)
+
+    trace, truth, speech = logger_module._per_run_log_paths(
+        detection_trace=Path("logs/trace.jsonl"),
+        belief_truth_log=None,
+        speech_log=None,
+        when=1e30,
+    )
+
+    assert (trace, truth, speech) == (None, None, None)
+    assert "detection-trace: could not create log directory" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == [], "degraded only after creating a directory"
+
+
 def test_a_tilde_path_lands_under_the_home_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
