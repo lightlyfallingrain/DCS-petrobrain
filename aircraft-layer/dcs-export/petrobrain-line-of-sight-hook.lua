@@ -269,6 +269,15 @@ local FOV_MAX_DEG = 180
 --: 12 o'clock, 90 degrees full width. Arbitrary hour choice (nothing
 --: downstream treats "no directive yet" as meaningful beyond "some
 --: wedge"); `FOV_DEFAULT_DEG` itself is plan SS17's own settled value.
+--: **Do NOT splice these into the chunk**, unlike `MAX_SIGHTLINES_PER_CALL`
+--: and `PLAYER_BUBBLE_RADIUS_M` three lines below -- the duplication is
+--: deliberate and the review of 2026-10-06 ruled it should stay. These two
+--: are `_safeClampInt` fallbacks for a **bad inbound value**; the chunk's own
+--: `or 0`/`or 45` cover a **different** case, *no directive yet this
+--: mission*. They are equal by coincidence, not by construction, so splicing
+--: would couple two unrelated decisions and make retuning one silently move
+--: the other. The sentence above about "mirroring" the chunk's read pattern
+--: describes a resemblance, not a shared source.
 local HOUR_DEFAULT = 0
 local FOV_DEFAULT_DEG = 45
 
@@ -398,6 +407,28 @@ local staticEnumFailures = 0
 -- loses a whole side, and it is the one granularity that stays comparable
 -- to `staticEnumFailures` (also per side, max 3). A fifth call added below
 -- needs either a bump here or its own counter; do not leave it silent.
+--
+-- **Comparability is why this counter looks like the statics one; it is not
+-- why the other three sites need none.** Those reasons are specific, and the
+-- 2026-10-06 review established them (keep them here, because "it mirrors the
+-- other counter" would license dropping this one the moment the shapes
+-- diverge):
+--   * `unit:getID()` **fails open** -- the admit test is `(not okI) or
+--     playerId == nil or uid ~= playerId`, so a failure over-admits (the
+--     ownship hole, reported as `ownship_unidentified`) and can never *drop*
+--     a candidate. Nothing to count.
+--   * `grp:getUnits()` / `unit:isExist()` can only lose **already-dead**
+--     objects: the chunk runs synchronously inside one `net.dostring_in` with
+--     no yield between `coalition.getGroups` returning and these calls, so
+--     nothing enumerated can die mid-loop. A group erroring on `getUnits()`
+--     was already invalid when `getGroups` handed it over, and a dead group
+--     has no live units whether it errors or returns `{}`.
+--   * a systematic unit-side fault is already visible for free on the same
+--     line: `objects_in_bubble` would collapse to the statics population,
+--     i.e. `statics_in_bubble == objects_in_bubble`.
+-- `coalition.getGroups` is the exception on every count: a real per-side
+-- failure mode, it loses a whole side, and it is **not** inferable from the
+-- other fields, because a side with genuinely no units is legitimate.
 local unitEnumFailures = 0
 
 -- THE single bubble/wedge/name filter, shared by both populations so they

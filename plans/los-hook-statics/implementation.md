@@ -155,8 +155,8 @@ Lua:
   first written here — "an error inside `onSimulationFrame` takes the mission with it" — is false,
   and is corrected rather than defended** (2026-10-06 review). The chunk does not run in
   `onSimulationFrame`; it runs in the **mission-scripting state** via `net.dostring_in`, behind two
-  independent layers of `pcall`: `dostring`'s own `pcall(net.dostring_in, …)` at `:513` and
-  `pcall(pollAndSend)` at `:709`. A chunk error could never have taken the mission down — it
+  independent layers of `pcall`: `dostring`'s own `pcall(net.dostring_in, …)` at `:567` and
+  `pcall(pollAndSend)` at `:762`. A chunk error could never have taken the mission down — it
   produced a `poll failed:` log line. **The real reason, which is a good one:** a per-side
   enumeration failure should degrade to *fewer candidates* rather than losing the whole poll, and
   must then **say so in a counter**. That second clause is load-bearing and was the missing half —
@@ -205,8 +205,8 @@ can see what is being promised; a reader who only greps call sites gets the wron
 
 ### Fix 2 — the false justification, corrected in place
 
-Verified before correcting: `dostring` wraps `net.dostring_in` in `pcall` at `:513`, and
-`onSimulationFrame` wraps `pollAndSend` in `pcall` at `:709`. Two layers. The chunk runs in the
+Verified before correcting: `dostring` wraps `net.dostring_in` in `pcall` at `:567`, and
+`onSimulationFrame` wraps `pollAndSend` in `pcall` at `:762`. Two layers. The chunk runs in the
 mission-scripting state, not in `onSimulationFrame`, and a chunk error produced a log line, never a
 mission crash. The `pcall`s are **kept** — the real reason (degrade to fewer candidates rather than
 losing the poll, *and say so in a counter*) is good. Only the stated reason changed.
