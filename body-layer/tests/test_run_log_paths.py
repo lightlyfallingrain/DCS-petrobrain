@@ -160,3 +160,59 @@ def test_an_uncreatable_directory_disables_only_that_log(
     assert truth == tmp_path / "ok" / f"truth-{_STAMP}.jsonl"
     assert speech is None
     assert "detection-trace: could not create log directory" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("given", [".", "/", ""])
+def test_a_path_with_no_filename_degrades_rather_than_raising(
+    given: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`per_run_log_path` ends in `Path.with_name`, which raises
+    `ValueError` -- not `OSError` -- when the final component is empty, so
+    `--detection-trace .` once killed `main()` with an unhandled traceback
+    before the crew started. These three are the whole set of inputs that
+    reach it: `.`, `/`, and the empty string (which `Path` normalises to
+    `.`).
+
+    No `tmp_path` here, and none is needed: the raise happens before the
+    `mkdir`, so nothing is created wherever pytest was started."""
+    trace, truth, speech = logger_module._per_run_log_paths(
+        detection_trace=Path(given),
+        belief_truth_log=None,
+        speech_log=None,
+        when=_WHEN,
+    )
+
+    assert (trace, truth, speech) == (None, None, None)
+    assert "detection-trace: could not create log directory" in capsys.readouterr().err
+
+
+def test_a_tilde_path_lands_under_the_home_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`pathlib.Path` does not expand `~`, and the three log flags are
+    `argparse type=Path`, so a quoted `--speech-log '~/x.jsonl'` -- or one
+    from a shell that does not expand it -- used to make `mkdir` create a
+    directory literally named `~` in the working directory. `resolve`
+    expands it once, for all three logs, at the same boundary it already
+    applies the stamp and the `mkdir`.
+
+    `HOME` is redirected so the test cannot touch the real home directory,
+    and the working directory is an empty one so that "nothing was created
+    in the cwd" is checkable rather than dependent on where pytest ran."""
+    home = tmp_path / "home"
+    home.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(cwd)
+
+    trace, truth, speech = logger_module._per_run_log_paths(
+        detection_trace=Path("~/trace.jsonl"),
+        belief_truth_log=None,
+        speech_log=None,
+        when=_WHEN,
+    )
+
+    assert trace == home / f"trace-{_STAMP}.jsonl"
+    assert (truth, speech) == (None, None)
+    assert list(cwd.iterdir()) == []
