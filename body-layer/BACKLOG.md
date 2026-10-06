@@ -972,6 +972,10 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `report_bearing_deg`. So the fix is not a phrase-table entry: left/right are a *where* value in
   decision 12's grammar, and this falls out of `BL-13` Stage 1 rather than needing its own change.
   Full analysis: `plans/crew-query-path/plan.md`.
+  **An asymmetry between left and right in one session is a phrase-table defect, not a recognition
+  accident** — the confidences are near-identical and the second is *higher*. Look directly at
+  `audio-adapter/src/vocabulary.py`'s `PHRASES` and body-layer's own token handling for a missing
+  right-hand form, rather than treating it as a matcher-tuning question.
 
   Cheap, and worth doing alongside the `describe` synonym (`plans/sortie-2026-10-05-refinements/`
   item 2) since both touch the same table.

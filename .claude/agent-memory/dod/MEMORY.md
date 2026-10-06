@@ -27,3 +27,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Stale worktree base: plain checkout first](feedback_stale_worktree_base_try_plain_checkout_first.md) — try `git checkout <branch>` before ff-only/git-archive; it's exact whenever the branch isn't held elsewhere.
 - [Recurring: correct conclusion, unearned reason](project_recurring_correct_conclusion_unearned_reason.md) — 5 instances on one branch; read a review's *reason* as its own claim, usually one grep from falsification.
 - [Stage [x] can live on an unmerged branch](project_stage0_x_lives_on_an_unmerged_branch.md) — a "that stage is already done" claim may be true only of a second branch; check before editing a shared roadmap.
+- [Voice card: never prefix a command with the wake word](feedback_voice_card_never_prefix_a_command_with_the_wake_word.md) — "Petrovich, describe" routes to the brain, not the matcher; run every utterance through match_transcript first.
+- [Recurring: predicate granularity mismatch](project_recurring_predicate_granularity_mismatch.md) — 3+ rounds strengthening one predicate means it is a granularity coarser than what it governs; raise at Architect.

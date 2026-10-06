@@ -1,0 +1,557 @@
+<title>Sortie Refinements Sortie</title>
+<style>
+  :root {
+    --ground: #f4f2ee;
+    --panel: #ffffff;
+    --panel-2: #ebe8e2;
+    --ink: #1b1d1f;
+    --ink-dim: #55585c;
+    --line: #d8d4cc;
+    --amber: #b5680a;
+    --amber-ink: #6f3f04;
+    --record: #1f6f74;
+    --record-bg: #e4f0f1;
+    --danger: #a3271f;
+    --danger-bg: #f6e6e3;
+    --mono-bg: #26241f;
+    --mono-ink: #f0ead8;
+    --mono-border: #3a3730;
+    color-scheme: light dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a;
+      --panel: #1c1f24;
+      --panel-2: #23262c;
+      --ink: #ece8de;
+      --ink-dim: #a3a099;
+      --line: #34373d;
+      --amber: #e2a13d;
+      --amber-ink: #f3c874;
+      --record: #6fd3d9;
+      --record-bg: #17302f;
+      --danger: #e2695f;
+      --danger-bg: #33201e;
+      --mono-bg: #0f1113;
+      --mono-ink: #e9e4d6;
+      --mono-border: #33363c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a;
+    --panel: #1c1f24;
+    --panel-2: #23262c;
+    --ink: #ece8de;
+    --ink-dim: #a3a099;
+    --line: #34373d;
+    --amber: #e2a13d;
+    --amber-ink: #f3c874;
+    --record: #6fd3d9;
+    --record-bg: #17302f;
+    --danger: #e2695f;
+    --danger-bg: #33201e;
+    --mono-bg: #0f1113;
+    --mono-ink: #e9e4d6;
+    --mono-border: #33363c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    padding-inline: 16px;
+  }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  h1, h2, h3, .display {
+    font-family: "Barlow Condensed", "Segoe UI Condensed", system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-wrap: balance;
+  }
+  code, pre, .mono {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 64px; }
+
+  .topbar {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    font-weight: 700;
+  }
+  .branch-name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 1.05rem;
+    color: var(--amber-ink);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 8px;
+    display: inline-block;
+  }
+  .branch-note { color: var(--ink-dim); font-size: 0.92rem; }
+
+  pre.cmd {
+    background: var(--mono-bg);
+    color: var(--mono-ink);
+    border: 1px solid var(--mono-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    margin: 8px 0 0;
+    white-space: pre;
+  }
+  pre.out {
+    background: var(--panel-2);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    margin: 8px 0 0;
+    white-space: pre;
+  }
+
+  h1.title { font-size: clamp(1.9rem, 5vw, 2.6rem); margin: 0 0 4px; font-weight: 800; }
+  .subtitle { color: var(--ink-dim); font-size: 1rem; margin: 0 0 22px; max-width: 62ch; }
+
+  section.block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px 20px;
+    margin-bottom: 18px;
+  }
+
+  h2 { font-size: 1.15rem; margin: 0 0 10px; color: var(--ink); font-weight: 700; }
+  h2 .num { color: var(--amber); margin-right: 6px; }
+  p { margin: 0 0 10px; }
+  .lede { color: var(--ink-dim); font-size: 0.95rem; }
+
+  .prize {
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 0 1px var(--amber) inset;
+  }
+  .prize .badge {
+    display: inline-block;
+    background: var(--amber);
+    color: #1b1305;
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 800;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    margin-bottom: 10px;
+  }
+
+  .row { margin: 12px 0; }
+  .row-label {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 4px;
+  }
+  .row.expect .row-label { color: var(--amber); }
+  .row.record .row-label { color: var(--record); }
+
+  .line {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 7px;
+    font-size: 0.92em;
+  }
+  .line.danger { color: var(--danger); background: var(--danger-bg); border-color: var(--danger); }
+  .line.good { color: var(--record); background: var(--record-bg); border-color: var(--record); }
+
+  .say { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; }
+  .say-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .say-item .utter {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 500;
+    color: var(--amber-ink);
+    flex: 0 0 auto;
+  }
+  .say-item .arrow { color: var(--ink-dim); flex: 0 0 auto; }
+  .say-item .resp { font-size: 0.94rem; }
+
+  .checks { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--record-bg);
+    border: 1px solid var(--record);
+    border-radius: 8px;
+    padding: 9px 11px;
+  }
+  .check input[type="checkbox"] {
+    margin-top: 3px;
+    width: 17px;
+    height: 17px;
+    accent-color: var(--record);
+    flex: 0 0 auto;
+  }
+  .check label { font-size: 0.95rem; cursor: pointer; }
+
+  .not-built {
+    border-left: 4px solid var(--danger);
+    background: var(--danger-bg);
+  }
+  .not-built h2 { color: var(--danger); }
+
+  .quirk { border-left: 4px solid var(--amber); }
+
+  .bringback {
+    background: var(--panel-2);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-top: 6px;
+  }
+  .bringback ol { margin: 8px 0 0; padding-left: 1.3em; }
+  .bringback li { margin-bottom: 6px; }
+  .invite {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+  .unver {
+    display: inline-block;
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 800;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  footer { color: var(--ink-dim); font-size: 0.82rem; margin-top: 30px; text-align: center; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="eyebrow">Checkout before you fly</div>
+    <div><span class="branch-name">main</span> <span class="branch-note">— preferred, <em>after</em> this merges. The merge is not automatic: <code>test_callouts.py</code> conflicts and has to be resolved by reading, so check <code>main</code> really carries these three items first.</span></div>
+    <pre class="cmd">git checkout main &amp;&amp; git pull</pre>
+    <div><span class="branch-name">feature/sortie-refinements</span> <span class="branch-note">— if you want to fly it before the merge. You then <strong>lose</strong> the two features that merged overnight (see "Not this branch", bottom).</span></div>
+    <pre class="cmd">git checkout feature/sortie-refinements &amp;&amp; git pull</pre>
+  </div>
+
+  <h1 class="title">Sortie Refinements Sortie</h1>
+  <p class="subtitle">Three of the four things you asked for after the 2026-10-05 flight:
+    <span class="line">describe</span> as a synonym for <span class="line">report</span>,
+    <span class="line">watch</span>/<span class="line">follow</span> tagging a whole group, and
+    <span class="line">scan ahead</span> sweeping 11-12-1 instead of staring at 12. Item 1, the
+    location-fragment rewrite, is <strong>not</strong> in this and is still its own branch.</p>
+
+  <section class="block not-built">
+    <h2>Before anything — do not start a command with "Petrovich"</h2>
+    <p>A transmission that <em>begins</em> with the wake word is routed to the brain as free speech.
+      One without it is matched against the command vocabulary. So say
+      <span class="line good">"Describe."</span>, not
+      <span class="line danger">"Petrovich, describe."</span></p>
+    <p class="lede">Checked by running the matcher, not by reading it:
+      <span class="line">"Petrovich, describe."</span> comes back with no token at all, while
+      <span class="line">"describe"</span> matches <span class="line">report_all</span> at 1.00.</p>
+  </section>
+
+  <section class="block">
+    <h2>Setup</h2>
+    <p>The usual script. Nothing on this branch changes it.</p>
+    <pre class="cmd">./run-scripts/run-crew-text.sh</pre>
+    <p class="lede"><span class="unver">Unverified</span> — needs the Windows box and a live DCS
+      session, so it could not be run from here. What <em>was</em> checked: every flag it passes
+      (<code>--crew-text</code>, <code>--f10-commands</code>, <code>--speech-audio</code>,
+      <code>--speech-input</code>, <code>--speech-log</code>) still exists and still parses on this
+      branch.</p>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">1</span> "Describe" now works wherever "report" did</h2>
+    <p class="lede">Voice only — there is no F10 button for this one.</p>
+
+    <div class="row">
+      <div class="row-label">Do</div>
+      <div class="say">
+        <div class="say-item"><span class="utter">"Describe."</span><span class="arrow">&rarr;</span><span class="resp">the full contact rundown, same as <em>"Report."</em></span></div>
+        <div class="say-item"><span class="utter">"Describe contacts."</span><span class="arrow">&rarr;</span><span class="resp">the same</span></div>
+        <div class="say-item"><span class="utter">"Describe eleven o'clock."</span><span class="arrow">&rarr;</span><span class="resp">the <strong>eleven o'clock</strong> report</span></div>
+      </div>
+    </div>
+
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>That third line is the exact phrase you spoke at t_sim 258 last flight and that fell through
+        unrecognised. Note it resolves to the <em>clock</em> report rather than the all-contacts one —
+        correct and deliberately more specific, the same way <em>"report eleven o'clock"</em> already
+        behaved. Not a miss.</p>
+    </div>
+
+    <div class="row">
+      <div class="row-label">Desk check — runs on the Mac, no DCS</div>
+      <pre class="cmd">cd audio-adapter &amp;&amp; PYTHONPATH=src .venv/bin/python -c "
+from command_matcher import match_transcript
+for t in ('describe', 'describe contacts', \"describe eleven o'clock\", 'describe the mission to me'):
+    print(f'{t!r:28} -&gt; {match_transcript(t).token}')
+"</pre>
+      <p class="lede" style="margin-top:8px">Real output, run against this branch's code:</p>
+      <pre class="out">'describe'                   -> report_all
+'describe contacts'          -> report_all
+"describe eleven o'clock"    -> report_clock_11
+'describe the mission to me' -> None</pre>
+      <p class="lede" style="margin-top:8px">The last row is the point of the fourth case — an
+        ordinary sentence containing the word has to <strong>not</strong> fire.</p>
+    </div>
+
+    <div class="row record">
+      <div class="row-label">Record</div>
+      <p>Did the recogniser actually <em>hear</em> "describe" in your voice? These two phrasings were
+        added yesterday, so the recorded corpus predates them — their accuracy on your accent is
+        completely unmeasured. How many attempts out of how many landed?</p>
+    </div>
+
+    <div class="checks">
+      <div class="check"><input type="checkbox" data-k="i1" id="i1"><label for="i1">Tried all three "describe" forms in the air</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">2</span> Watch / follow now tags the whole group</h2>
+    <p class="lede">Two ways in, and the F10 one is the better in-flight test — it takes speech
+      recognition out of the loop, so a failure means the feature failed rather than the recogniser.</p>
+
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p><strong>F10 &rarr; Petrovich &rarr; Watch &rarr; Nearest</strong> (menu labels read off the
+        shipped hook script), with the nearest contact part of a real multi-vehicle group. Or say
+        <span class="line">"Watch nearest."</span>, <span class="line">"Follow group."</span>,
+        <span class="line">"Follow truck."</span>, <span class="line">"Follow armor three o'clock."</span></p>
+    </div>
+
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>The readback changes shape entirely — a count, not a description:</p>
+      <div class="say">
+        <div class="say-item"><span class="utter">two-member group</span><span class="arrow">&rarr;</span><span class="resp"><span class="line good">"Watching two."</span></span></div>
+        <div class="say-item"><span class="utter">three</span><span class="arrow">&rarr;</span><span class="resp"><span class="line good">"Watching three."</span></span></div>
+        <div class="say-item"><span class="utter">four</span><span class="arrow">&rarr;</span><span class="resp"><span class="line good">"Watching four."</span></span></div>
+        <div class="say-item"><span class="utter">above twelve</span><span class="arrow">&rarr;</span><span class="resp"><span class="line good">"Watching many."</span></span></div>
+        <div class="say-item"><span class="utter">single, ungrouped</span><span class="arrow">&rarr;</span><span class="resp">the old wording — <em>"Watching T-72, 12 o'clock, 0.5 kilometres…"</em></span></div>
+      </div>
+      <p>Those strings are the renderer's real output, run directly.</p>
+    </div>
+
+    <div class="row quirk" style="padding:10px 12px;border-radius:8px">
+      <div class="row-label">Two things that look like bugs and are not</div>
+      <p><strong>The count is what he actually marked, not the group's size.</strong> If the group
+        lost members since its last reconcile, fewer get marked and he says the smaller number — and
+        if only one is left, he falls back to the single-contact wording. A group of four reading
+        back <span class="line good">"Watching three."</span> is <em>correct</em>. This is the fix the
+        security review asked for: the line used to speak a count it had never checked.</p>
+      <p style="margin-bottom:0"><strong>The tag is a one-time snapshot</strong>, by your own
+        direction — <em>"Tag once, static."</em> A unit joining that group <em>after</em> the command
+        is not watched; one that leaves stays watched. A late arrival going unreported is the design.</p>
+    </div>
+
+    <div class="row record">
+      <div class="row-label">Record</div>
+      <p>Does the bare count tell you enough, or do you want to hear <em>what</em> you are watching?
+        It deliberately names only the number — naming four vehicle types would make this the longest
+        readback in the vocabulary for the simplest thing you can ask.</p>
+    </div>
+
+    <div class="checks">
+      <div class="check"><input type="checkbox" data-k="i2a" id="i2a"><label for="i2a">Watched a real group via F10 and heard a count</label></div>
+      <div class="check"><input type="checkbox" data-k="i2b" id="i2b"><label for="i2b">Checked the counted members then actually behaved as watched</label></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">3</span> "Scan ahead" sweeps 11 &rarr; 12 &rarr; 1</h2>
+
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p><strong>F10 &rarr; Petrovich &rarr; Scan &rarr; Ahead</strong>, or say
+        <span class="line">"Scan ahead."</span> / <span class="line">"Look ahead."</span></p>
+    </div>
+
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>It used to be a fixed stare at 12. It now steps <strong>one clock hour at a time</strong> —
+        11, 12, 1, 11, … — which is your own constraint:
+        <em>"still one clock hour at a time. A sweeping scan like any other scan, repeating loop
+        11-12-1 o'clock."</em></p>
+      <p style="margin-bottom:0">Read off the code: legs <span class="line">(11, 12, 1)</span>,
+        <strong>2.0 s</strong> dwell each, so <strong>each hour is revisited every 6 s</strong>. The
+        cone itself is <strong>unchanged at ±15°</strong> — not a widened cone, and the DCS
+        line-of-sight query cone is untouched.</p>
+    </div>
+
+    <div class="row record">
+      <div class="row-label">Record</div>
+      <p>The honest cost: 12 o'clock is now dwelled on a third as much, so something dead ahead may
+        be called a beat later than before. Does it feel like scanning, or like dithering? The
+        dwell/revisit interval is an open question, not a settled number — if 6 s is wrong, say what
+        would feel right.</p>
+    </div>
+
+    <div class="checks">
+      <div class="check"><input type="checkbox" data-k="i3" id="i3"><label for="i3">Ran a commanded "scan ahead" long enough to feel the sweep</label></div>
+    </div>
+  </section>
+
+  <section class="block prize">
+    <div class="badge">The one worth the most</div>
+    <h2>Does a watched group ever lose a whole kind of report? (BL-B41)</h2>
+    <p>This is a <strong>known, filed gap</strong> that shipped knowingly, and it is the one thing on
+      this branch that could read as a bug. Its real frequency in flight is <em>unknown</em> — and
+      that number is what decides whether the fix is urgent or can wait.</p>
+    <p>The mechanism, briefly: one member of a watched group is elected to speak for it, and the
+      others' reports of that kind are dropped. The election is per <em>contact</em>; the dropping is
+      per <em>event</em>. So when the elected member happens to have no event of that kind on that
+      tick, <strong>that kind goes unreported for the whole group</strong>.</p>
+
+    <div class="row expect">
+      <div class="row-label">What it looks like</div>
+      <p style="margin-bottom:0"><strong>A watched convoy starts moving and you hear nothing about
+        movement.</strong> That is BL-B41, not a new defect.</p>
+    </div>
+
+    <div class="row quirk" style="padding:10px 12px;border-radius:8px">
+      <div class="row-label">The part that makes it hard to score</div>
+      <p style="margin-bottom:0"><strong>The observable is not silence.</strong> In the
+        reproduction, the group's own line still fired for an unrelated reason. So
+        <em>"the group said something"</em> is <strong>not</strong> evidence the movement report
+        survived. What is lost is that <em>kind's</em> content, not every utterance about the group.</p>
+    </div>
+
+    <div class="row">
+      <div class="row-label">What you are unlikely to lose</div>
+      <p style="margin-bottom:0">Range crossings self-correct a poll or two later. And where weapon
+        envelopes are known the widest-envelope member — the most dangerous one — is always the
+        elected speaker, so engagement calls are mostly safe. The exposed case is a
+        <strong>partial movement transition inside a tightly-clustered group</strong>.</p>
+    </div>
+
+    <div class="row record">
+      <div class="row-label">Record</div>
+      <p>Watch a group, then get it moving, and say whether you heard a movement call. Even one
+        clean observation either way is worth more than everything else on this card — the fix is a
+        real redesign (a per-event election, shared with the merged observability gate's matching
+        gap) and nobody knows yet whether it is annoying or invisible.</p>
+    </div>
+
+    <div class="checks">
+      <div class="check"><input type="checkbox" data-k="prize" id="prize"><label for="prize">Watched a group, saw it start moving, noted whether movement was called</label></div>
+    </div>
+  </section>
+
+  <section class="block quirk">
+    <h2>One thing to listen for that is not a feature</h2>
+    <p>A commanded <span class="line">scan ahead</span> now changes gaze direction on ~66% of polls
+      instead of ~1%, because the direction cycles instead of sitting still. Per-poll CPU is
+      unchanged and each push is sub-millisecond locally, ~5-10 ms over the LAN — but the
+      aircraft-layer HTTP timeout is <strong>2.0 s</strong> with no connection reuse, so that tail is
+      now reachable ~66&times; more often <em>while a commanded scan ahead is running</em>.</p>
+    <p class="lede" style="margin-bottom:0">If you get a periodic ~2 s stall in reporting,
+      specifically during a commanded <span class="line">scan ahead</span>, that is the network tail,
+      not the sweep. Measured over loopback only; the LAN figure is unknown. One line in the debrief
+      is enough — it strengthens an already-owned item to shorten those timeouts.</p>
+  </section>
+
+  <section class="block">
+    <h2>Not this branch — don't score these here</h2>
+    <p>Two other features merged overnight. Each has its own card; these are on
+      <span class="line">main</span> and <strong>not</strong> on
+      <span class="line">feature/sortie-refinements</span>.</p>
+    <div class="say">
+      <div class="say-item"><span class="utter">no 5/6/7 o'clock</span><span class="arrow">&rarr;</span><span class="resp">no unprompted callout names clock hours 5, 6 or 7 any more — <code>2026-10-06-callout-observability-sortie.md</code></span></div>
+      <div class="say-item"><span class="utter">stamped logs</span><span class="arrow">&rarr;</span><span class="resp">sortie logs now land in <code>body-layer/logs/dcs-*-&lt;stamp&gt;.jsonl</code> — <code>2026-10-06-bl11-tick-cost-sortie.md</code></span></div>
+    </div>
+    <p class="lede" style="margin-bottom:0">All three cards change what you hear in the same
+      cockpit, so one flight settles them — which is the argument for flying merged
+      <span class="line">main</span> rather than this branch.</p>
+  </section>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ol>
+      <li><strong>BL-B41</strong> — did a watched group ever lose a <em>kind</em> of report? (remember: silence is not the only form it takes)</li>
+      <li>Did the recogniser hear <strong>"describe"</strong> in your voice — roughly how many attempts landed?</li>
+      <li>Is the bare count (<em>"Watching three."</em>) enough, or do you want to hear what you're watching?</li>
+      <li>Does the <strong>11-12-1 sweep</strong> feel like scanning or like dithering? Is 6 s per revisit about right?</li>
+      <li>Anything dead ahead that got called noticeably later than you'd expect?</li>
+      <li>Any periodic ~2 s stall, specifically during a commanded <em>scan ahead</em>?</li>
+    </ol>
+    <div class="invite">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>
+    Source of truth: <code>docs/acceptance/2026-10-06-sortie-refinements-sortie.md</code> ·
+    Record: <code>plans/sortie-2026-10-05-refinements/</code>
+  </footer>
+</div>
+
+<script>
+  const KEY = 'sortie-refinements-2026-10-06';
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(b => {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', () => {
+        try {
+          const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) { /* storage unavailable; checkbox still works */ }
+      });
+    });
+  } catch (e) { /* storage unavailable; page renders and ticks normally */ }
+</script>
