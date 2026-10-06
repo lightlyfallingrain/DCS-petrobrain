@@ -70,7 +70,8 @@ Recorded with the user's own words, because the wording carries the reasoning.
 It's allright if they go stale later, that's backlog grooming work then. IDs allow tracking items
 and dependencies, I'd rather use them."* → The branch-name filename alternative is dead. 57 new
 IDs minted (not ~72 — see "The ID scheme" below for why the number dropped). Dependency tracking
-is the stated purpose, which is what makes `[[ID]]` links load-bearing rather than decorative.
+is the stated purpose, which is what makes the `[[…\|ID]]` links load-bearing rather than
+decorative.
 
 **D-2 — Repo-wide, every subproject.** *"graph benefit and limited sub-systems - true for you and
 the agents, but a human reader benefits from all sub-systems following this convention and being
@@ -79,9 +80,10 @@ six subprojects is not browsable. The agent-token figures below stay as the hone
 benefit; they are not the argument.
 
 **D-3 — Not bound by the spike's structure.** *"spike was a test - we do not have to follow it
-strictly, we can use a better structure if there's one"* → Four structural changes below (link
-form, filename case, tag spelling, index-per-file), each with the spike's cost named. Three
-spike choices kept with a stated reason.
+strictly, we can use a better structure if there's one"* → Three structural changes below
+(filename case, tag spelling, index-per-file), each with the spike's cost named. Four spike choices
+kept with a stated reason — one of them, the link form, kept because the better structure was
+tested on 2026-10-06 and Obsidian would not resolve it ("Tested and rejected" below).
 
 **D-4 — `.obsidian` gitignored everywhere.** *".obsidian needs to be gitignored, in all folders"*
 → Unanchored pattern, and the spike's five tracked files removed in the same change.
@@ -338,36 +340,36 @@ provenance. Re-measure after Stage 2 against the 185/264 baseline.
 
 ### Changed from the spike
 
-1. **Link form: `[[<ID>]]`, resolved by a frontmatter `aliases:` entry** — replacing
-   `[[AA-1.1-Stage_1_synthesis_and_local_playback\|AA-1.1]]`. **What the spike's form costs:** 56
-   characters to express "AA-1.1", in the text an *agent* reads (spending back part of the split's
-   token saving); every referring file must be re-edited when a title is reworded; and the `\|`
-   escape is required inside a markdown table but wrong outside it — **two spellings of one link**,
-   which is the same class of trap as the `#`-in-frontmatter one the spike already hit. With an
-   alias the link is the bare ID, *identical to the 441 historical prose mentions*, so
-   `grep -rn 'AA-1\.1'` finds links and prose together. Frontmatter carries `aliases: ["AA-1.1"]`
-   and nothing else; the gate checks the alias equals the filename's ID prefix, so it is derivable
-   and cannot drift. **This is a claim about third-party software** — Obsidian resolving `[[alias]]`
-   is documented core behaviour but unverified *here*, so it is a one-minute user check at Stage 1
-   with the spike's pipe form as the stated fallback. Not encoded as fact.
-2. **Filename: `<ID>-<kebab-title>.md`**, not `<ID>-<Title_with_underscores>.md`. The repo has one
+1. **Filename: `<ID>-<kebab-title>.md`**, not `<ID>-<Title_with_underscores>.md`. The repo has one
    case convention everywhere else — branches (`feature/dcs-driven-los`), plan directories
    (`plans/obsidian-links-and-tags/`), research notes. The spike's mixed hyphen-then-underscore form
-   costs nothing concrete, but it is a second convention in a repo that has one, and with aliases
-   the filename never appears inside a link anyway.
-3. **Tags: inline `#tag` only, nowhere else.** The spike puts topics in frontmatter (no `#`) and
+   costs nothing concrete, but it is a second convention in a repo that has one. This matters more
+   than it would have under the alias form (see "Tested and rejected" below), because the filename
+   now appears inside every link's raw text.
+2. **Tags: inline `#tag` only, nowhere else.** The spike puts topics in frontmatter (no `#`) and
    `#status/...` inline — the two-spellings trap its own `docs/TAGS.md` warns about, in the file
    that warns about it. Keep the *better* half: `docs/TAGS.md` Rule 2's argument is sound (status
    lives next to its checkbox marker so the two cannot diverge unnoticed), so put **every** tag
    there: `- [x] **AA-4.5 — Stage 5 …** #status/done #topic/ptt #topic/cockpit-io`. One spelling,
    one location, every `grep` recipe identical, Obsidian's tag pane works on inline tags.
-4. **One index per source file, not per directory.** `body-layer/ROADMAP/` holds both roadmap and
+3. **One index per source file, not per directory.** `body-layer/ROADMAP/` holds both roadmap and
    backlog entries but gets two indexes (`body-layer-roadmap.md`, `body-layer-backlog.md`) so each
    pointer file has exactly one destination and the 441 historical mentions of
    `body-layer/BACKLOG.md` resolve to the right list.
 
 ### Kept from the spike, with reasons
 
+- **The escaped-pipe link form, `[[aa-4.7-press-to-readback-latency\|AA-4.7]]`** — kept because the
+  bare-ID alternative was tested on the user's own install and failed (see "Tested and rejected"
+  immediately below). Its costs are real and are now accepted costs, not unnoticed ones: ~56
+  characters to express "AA-4.7" in the text an agent reads, which spends back part of the split's
+  token saving; `\|` required inside a markdown table and wrong outside it, so **one link has two
+  spellings**; and a retitle touches every referring file. Two of those three are mitigable and the
+  plan mitigates them — Obsidian's own rename updates referrers mechanically (user's judgement,
+  2026-10-06: *"I think file renaming is rare"*), and the link gate (R5) checks every `[[link]]`
+  resolves, which catches a hand-written link the rename missed. The two-spellings trap is **not**
+  mitigable and is the one to watch: the spike recommends escaping everywhere so there is one rule,
+  and that stands.
 - **`<subproject>/ROADMAP/` per subproject** — not a flat repo-wide `docs/roadmap/`. A flat
   directory would break root `CLAUDE.md`'s "each subproject's `ROADMAP.md` is that subproject's own
   source of truth", break per-subproject `grep`, make `graph-corpus-files.sh`'s
@@ -386,12 +388,44 @@ provenance. Re-measure after Stage 2 against the 185/264 baseline.
   reading four lines and reporting success.
 - **Dotted sub-IDs (`AA-4.7`)**, not `AA-4-7`. Hundreds of prose mentions across `plans/`,
   `audits/` and research notes use the dotted form; changing the separator makes every one of them
-  un-greppable for readability in a filename the alias form hides.
+  un-greppable, for readability in a filename the link alias hides anyway.
 - **Hand-kept indexes plus a mechanical consistency gate**, not a generator — even at seven
   indexes. A generator is a build step in a repo that deliberately has almost none, and it would
   have to preserve each index's irreplaceable prose preamble. The ~15-line pre-commit gate catches
   the two failures a generator would not: a dangling `[[link]]`, and an entry file absent from its
   index. Its cost rises linearly with indexes, which is fine.
+
+### Tested and rejected: the bare-ID link form
+
+**Measured on the user's own Obsidian install, 2026-10-06. Frontmatter aliases do not resolve
+`[[wikilinks]]` here, so the clean `[[AA-4.7]]` form is not available.** This was the plan's one
+structural claim about third-party software and it is now settled by test rather than carried as a
+documented-behaviour assumption. The planned Stage 1 verification step is therefore already
+discharged.
+
+What was run — four target notes at the vault root, one linking note, each link clicked:
+
+| form | result |
+|---|---|
+| `aliases: [ZZ-1]` (inline list) → `[[ZZ-1]]` | **FAIL** — unresolved, Obsidian offers to create a new note |
+| `aliases:` + `- ZZ-2` (block list) → `[[ZZ-2]]` | **FAIL** |
+| `alias: ZZ-3` (deprecated singular key) → `[[ZZ-3]]` | **FAIL** |
+| plain filename → `[[zz-target-inline]]` | PASS |
+| escaped pipe → `[[zz-target-block\|ZZ-2 via pipe]]` | PASS, in prose and inside a table |
+
+Every resolving link is filename-based; every alias-based link fails. A vault reload
+("Reload app without saving") was performed and the three alias forms still failed, which rules out
+metadata-cache lag from a branch switch — the explanation that best fit the symptom. Cause not
+diagnosed further: an unavailable mechanism does not need a root cause to be unavailable, and the
+fallback was already specified.
+
+The other candidate considered and rejected: **filename *is* the ID** (`AA-4.7.md`, title as the
+H1). That makes `[[AA-4.7]]` a plain filename link, so it works today with one spelling and no
+escaping — but Obsidian labels both the file explorer and the graph view by filename, so the
+sidebar becomes a column of bare IDs. That is a direct hit on the human-browsability benefit that
+drove D-2, and the trade runs the wrong way: the link text is read mostly by an agent, the sidebar
+mostly by the human whose benefit is the point. Revisit only if the pipe form's two-spellings trap
+actually bites in practice.
 
 ---
 
@@ -421,11 +455,13 @@ Ordered by how silent each is, because silence is the whole problem.
 - **R4 — the push and commit gates block or warn spuriously.** Both regexes stop matching. Loud,
   failing in the safe direction. Fix in Stage 0 anyway: a gate that cries wolf gets bypassed.
 - **R5 — dangling wikilinks, now across ~300+ conversions.** Obsidian colours an unresolved
-  `[[link]]`; `grep` does not, and no gate does. With the alias form the failure mode shifts from
-  "wrong title in the link text" to "alias missing from the target's frontmatter", which is
-  *mechanically checkable* — a strict improvement. The Stage 1 gate checks: every `[[target]]`
-  resolves to a known ID, every entry file's alias matches its filename prefix, every entry appears
-  in exactly one index.
+  `[[link]]`; `grep` does not, and no gate does. The pipe form makes this risk **worse** than the
+  rejected alias form would have — a link carries the target's full filename, so a retitle breaks
+  every referrer rather than none, and the alias form's mechanically-checkable "alias matches
+  filename prefix" invariant does not exist. The Stage 1 gate therefore has to carry the weight:
+  every `[[target]]` resolves to an existing entry file, every alias text after the `\|` equals that
+  file's ID prefix (so the displayed ID cannot drift from the file it points at), every `|` inside a
+  link is escaped, and every entry appears in exactly one index.
 - **R6 — committed editor state.** The spike commits five `audio-adapter/.obsidian/` files, 276
   lines, including 220 lines of `workspace.json` pane geometry that rewrites on every pane move.
   Resolved by decision 4; see Stage 1 for the exact pattern and removal.
@@ -495,23 +531,23 @@ re-derives it.
      `docs/DOC_CONVENTIONS.md` is the only record that will exist.
    - Adjacent and free, flagged not assumed: `.DS_Store` is also untracked and showing in
      `git status`. Outside decision 4's wording — add it only if the user says so.
-2. **Verify the `aliases:` link form in Obsidian** (one minute, user): does `[[AA-1.1]]` resolve to
-   a file whose frontmatter declares `aliases: ["AA-1.1"]`? Yes → the clean form. No → fall back to
-   the spike's escaped-pipe form and say so in the convention doc. **This gates structural change 1
-   and nothing else.**
+2. ~~Verify the `aliases:` link form in Obsidian.~~ **Already done, 2026-10-06 — aliases do not
+   resolve on this install, so the escaped-pipe form stands.** See "Tested and rejected" above. No
+   work left in this step; it is kept numbered so the stage's shape matches the record.
 3. **Resolve `AA-3`** with the user (open decision 1 below) — a correctness question, not a
    convention one.
-4. **Re-form the merged spike to the revised structure:** kebab filenames, `aliases:` frontmatter,
-   inline-only tags, the `AA-*` IDs unchanged.
+4. **Re-form the merged spike to the revised structure:** kebab filenames, escaped-pipe links,
+   inline-only tags, the `AA-*` IDs unchanged. The spike's own link text already uses the pipe form,
+   so this is a filename-case and tag-spelling pass, not a relink.
 5. **Write `docs/DOC_CONVENTIONS.md`** — the directory layout, the `<prefix>-W<n>` scheme and its
-   four assignment rules, the grooming rule, the `[[ID]]` link form, the pointer sentinel, the
+   four assignment rules, the grooming rule, the escaped-pipe link form and why the bare-ID form was rejected by test, the pointer sentinel, the
    index's no-status rule, the repo-root vault and its hand-configuration, world-model's `M<n>`
    irregularity, `MI-5b`'s letter suffix. `docs/TAGS.md` stays as the vocabulary and is linked, not
    duplicated. **It must not list which subprojects are converted** (R8).
 6. **One line each** pointing at it from: root `CLAUDE.md` "Backlog Management" (the natural home —
    it already owns the ID scheme, and the `-W<n>` space belongs there), and `docs/PROCESS.md`
    "Keeping the knowledge graph honest" (the corpus now follows `ROADMAP/` directories).
-7. **Add the two gates:** the index/link/alias consistency check (R5), and a vocabulary check that
+7. **Add the two gates:** the index/link consistency check (R5), and a vocabulary check that
    every inline tag in a converted file appears in `docs/TAGS.md` — benefit (d) is conditional on
    the second one existing.
 8. **Update the ~22 prose lines** across the six agent role files, `merge`/`integrity-audit`/`retro`
@@ -545,7 +581,7 @@ in 30 days, read on almost every session.
 5. Convert 139 cross-references; tag; `/graph-refresh`; re-measure node count against the 185/264
    baseline to answer the spike's open question 4 with a number.
 
-**Gate:** the link/alias/index check passes; a Session Start on body-layer is measurably cheaper;
+**Gate:** the link/index check passes; a Session Start on body-layer is measurably cheaper;
 body-layer's graph node count rises from 54 toward 49+. **Stop point:** two subprojects converted —
 49% of the token cost and the whole of the stress test.
 
