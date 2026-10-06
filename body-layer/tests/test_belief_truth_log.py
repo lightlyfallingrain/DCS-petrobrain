@@ -454,10 +454,33 @@ def test_close_does_not_raise_when_the_disk_is_full(tmp_path: Path) -> None:
 
 
 def test_close_does_not_raise_on_a_healthy_writer(tmp_path: Path) -> None:
-    """The guard must not be hiding a failure on the ordinary path."""
+    """The guard must not be hiding a failure on the ordinary path: a
+    writer that never failed still flushes and closes cleanly, and its rows
+    reach disk *because of* `close()`.
+
+    **A poll write at `flush_every_n_polls=2`, not a speech write, on
+    purpose.** `write_speech` flushes eagerly by design (module docstring:
+    speech is rare), so a speech row is already on disk before `close()`
+    runs and the on-disk assertion would hold whatever `close()` does --
+    verified by mutation: gutting `close()` to a bare `return` left the old
+    version of this test passing. One poll short of the flush interval
+    leaves the row in the file object's own buffer, so the
+    empty-then-non-empty pair is what makes `close()` load-bearing here."""
     path = tmp_path / "belief_truth.jsonl"
-    writer = BeliefTruthLogWriter(path, stderr=io.StringIO())
-    writer.write_speech(t_sim=1.0, text="Copy.", urgent=False)
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+    collector = DetectionTraceCollector()
+    collector.records.append(
+        _trace_entry(observation_id="OBS_1", cluster_member_object_ids=(1,))
+    )
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=2, stderr=io.StringIO())
+
+    writer.write_poll(collector, store, _ownship())
+
+    assert path.read_text() == "", "row flushed before close(); test has no teeth"
 
     writer.close()
 
