@@ -5,10 +5,22 @@
 `net.dostring_in("scripting", ...)` bridge `petrobrain-mission-telemetry-
 hook.lua` already uses for unit velocity -- but unlike that feed, this one
 is **cone-scoped** (plan Second Revision, SS8-SS10): the snippet only
-computes a sightline for a unit inside the currently-commanded look-
+computes a sightline for an object inside the currently-commanded look-
 direction wedge (`PB_LOOK_HOUR`/`PB_LOOK_FOV_DEG`, set by the inbound
 look-direction command channel, see `collector.command_sender.
-LookDirectionSender`), not for every unit in the player bubble.
+LookDirectionSender`), not for every object in the player bubble.
+
+**The enumerated population is AI units *and* static objects** (`BL-11`
+Stage 4, 2026-10-06; evidence `aircraft-layer/research/2026-10-06-unit-id-
+join-results.md`). The Hook previously walked `coalition.getGroups()` ->
+`grp:getUnits()` only, so statics -- 278 of 404 objects, 68.8%, in the
+measured sortie's own mission, including eight `ZSU-23-4 Shilka` -- could
+never appear in a result and never received a verdict. A static is
+**indistinguishable from a unit on this wire**: same entry shape, same
+`unit_name` join key, nothing here branches on it. The field names
+`units_in_bubble`/`units_in_wedge` are therefore now counts of *objects*
+(units + statics); they keep their names so the wire format and every
+existing consumer stay unchanged.
 
 Wire format (Hook -> collector), one JSON datagram per poll (matches
 `petrobrain-mission-telemetry-hook.lua`'s own envelope shape):
@@ -32,6 +44,11 @@ own observability triad (SS1/SS10/SS12): `units_in_wedge` turns the plan's
 uniform-azimuth cone-population *estimates* into a measurement, and
 `sightlines_computed < units_in_wedge` would mean the `MAX_SIGHTLINES_PER_
 CALL` guard (a blow-up backstop, not a policy -- plan SS10) actually bit.
+**That comparison is the thing to watch after `BL-11` Stage 4**: adding
+statics roughly triples the candidate population, the pre-statics
+measurement was median 43 / max 71 per result, and whether the cap of 128
+now binds is unmeasured. The Hook also logs it directly (`cap_hit`, plus
+its own `LOS cap bit` line) so a sortie answers it by grep.
 `hour_used`/`fov_half_deg_used` are the wedge the snippet actually queried
 with this poll, independent of whatever body-layer most recently pushed --
 see `annotate_los`'s own docstring (`perception/detection_trace.py`) for why

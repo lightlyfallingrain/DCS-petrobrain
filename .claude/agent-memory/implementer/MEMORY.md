@@ -144,4 +144,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Healthy-path test needs the guarded call to matter](feedback_healthy_path_test_needs_the_guarded_call_to_matter.md) — gutting close() left all 4 tests passing; assert absence inline.
 - [BL-11 round 3 fixes](project_bl11_round3_fixes.md) — a deletion's prose fallout exceeds the named list; dated vs forward-looking refs get opposite treatment.
 - [Sortie 1005 review fixes](project_sortie_1005_review_fixes.md) — review named a helper that reintroduces its own fix's cost; tick() suppression tests need many ticks inside CALLOUT_MAX_AGE_S.
+- [LOS Hook statics](project_los_hook_statics.md) — extract a bridged chunk (with spliced prefix) to luac-check it; StaticObject has no getObjectID.
 - [Keeper eligibility predicate](project_keeper_eligibility_predicate.md) — electing a survivor and consuming peers = silence unless election uses the consumer's own gate.
