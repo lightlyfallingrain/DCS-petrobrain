@@ -1688,7 +1688,8 @@ def _resolve_speech_log_path(
     the generic per-log one. It is **not** what keeps the "writing <path>"
     startup line honest -- `per_run_log_path` uses `Path.with_name`, so the
     parent is identical and `_per_run_log_paths`' own `resolve` mkdirs the
-    same directory and returns `None` on `OSError`. Verified by execution
+    same directory and returns `None` on any of `_RESOLVE_FAILURES`,
+    `OSError` among them. Verified by execution
     2026-10-06: with `logs` occupied by a regular file, `_per_run_log_paths`
     alone reports the failure and returns `(None, None, None)`.
     """
@@ -1781,12 +1782,16 @@ def _per_run_log_paths(
     crew. The writers keep their "handed an exact path, writes exactly
     there" property either way.
 
-    **Two exception types, not one.** The `mkdir` raises `OSError`, but
-    `per_run_log_path` ends in `Path.with_name`, which raises `ValueError`
-    when the final component is empty -- `.`, `/`, or an empty string. Both
-    are inside the guard, because a `--detection-trace .` that killed
-    `main()` with a traceback would escape this policy rather than apply
-    it."""
+    **Four exception types, from four statements**, because these three
+    adjacent `pathlib` calls raise three unrelated types and `run_stamp`
+    a fourth: see `_RESOLVE_FAILURES` above, which enumerates them per
+    statement and is the only list of them. Every statement in `resolve`
+    is inside the one guard, because a `--detection-trace .` or
+    `'~nosuchuser/trace.jsonl'` that killed `main()` with a traceback
+    would escape this policy rather than apply it. Each of the three
+    rounds that widened this guard found exactly one type missing, which
+    is why the enumeration is written down next to the guard rather than
+    rediscovered."""
     stamp_at = time.time() if when is None else when
 
     def resolve(path: Path | None, flag: str) -> Path | None:

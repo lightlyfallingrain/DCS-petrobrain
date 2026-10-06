@@ -401,3 +401,76 @@ resolve`.
   020000`). The degrading set is exactly `.`, `/` and `""`. This is the third
   round on this branch to produce a correct conclusion with an unearned reason
   attached, caught here before the commit rather than by a reviewer.
+
+## Round 5 — closing the closure's exception seam completely (`review-round4.md`)
+
+Round 4's second fix put `path.expanduser()` **outside** the `try:` it had just
+widened, and that call raises `RuntimeError` — so
+`--detection-trace '~nosuchuser/trace.jsonl'` still killed `main()` before the
+crew started, which is the same defect as finding 1 and is contradicted by the
+docstring round 4 added. The instruction for this round was not to fix the third
+type but to make the closure's contract true for *every* statement in it, with
+something structural rather than a comment preventing the fourth.
+
+### Files Changed
+
+- `body-layer/src/logger.py` — **one `try:` over every statement in `resolve`**,
+  catching a named module-level tuple `_RESOLVE_FAILURES = (OSError,
+  OverflowError, RuntimeError, ValueError)` whose comment enumerates the types
+  *per statement*: `expanduser` → `RuntimeError`, `run_stamp`/`time.localtime`
+  → `OverflowError` and `ValueError`, `with_name` → `ValueError`, `mkdir` →
+  `OSError`. The structural part is that a fifth `pathlib` call added to the
+  closure is now inside the guard by default and meets a visibly per-statement
+  list, instead of sitting above it unnoticed.
+  The unbound-variable problem that pushed `expanduser()` out last round is
+  solved by not making the message depend on how far the body got:
+  `reported_parent` is bound from `path.parent` before the `try:` and
+  re-pointed at `expanded.parent` as soon as that exists. A failing
+  `~/x.jsonl` therefore still reports `/home/you`; an unresolvable `~sgotz/`
+  reports `~sgotz`, which is what the user typed. The
+  `"could not create log directory"` wording and both existing stderr
+  assertions are untouched.
+  Docstring (documentation commit) rewritten from "Two exception types, not
+  one" to point at `_RESOLVE_FAILURES` as the single enumeration;
+  `_resolve_speech_log_path`'s sibling description kept in step.
+- `body-layer/tests/test_run_log_paths.py` — one test added; the
+  no-filename test's docstring claim corrected (see below).
+- `body-layer/RUN.md` — one sentence: an unresolvable `~someone` disables that
+  one log rather than stopping the crew.
+
+### Tests Added
+
+- `test_an_unresolvable_tilde_user_degrades_rather_than_raising` —
+  `~nosuchuser12345/trace.jsonl` degrades to `(None, None, None)` with a stderr
+  line. The cwd is a redirected empty directory and asserted still empty
+  afterwards, so a guard that returned `None` only *after* creating
+  `~nosuchuser12345/` would fail too.
+
+### Checks (body-layer, the only subproject touched)
+
+- `ruff format --check src tests`: pass (118 files)
+- `ruff check src tests`: pass
+- `mypy src`: pass (54 files)
+- `pytest tests -q`: **1517 passed, 4 xfailed** — baseline 1516/4 plus one.
+  Confirmed by name in unfiltered `pytest -v`, not via `-k`.
+
+### Notable Discoveries
+
+- **`run_stamp` is a fifth raise site nobody had counted.**
+  `time.localtime()` raises `OverflowError` for a `when` outside the platform's
+  `time_t` (`1e30`) and `ValueError` for a NaN — probed on this interpreter. It
+  is not reachable from `argv` (there is no `--when` flag; only the tests pass
+  the keyword), which is exactly why four rounds of looking at argv-driven
+  inputs never surfaced it. It is guarded anyway: the contract being written
+  down is about every statement in the closure, not only the argv-driven ones.
+  All four types verified degrading through the real function.
+- **`//` does not normalise to `/`**, which is where round 4's reviewer's own
+  reason was slightly off while its conclusion was right. `Path("//")` is
+  `PosixPath('//')` on POSIX — a distinct path, not the same one as `/` — and
+  `Path("///")` *is* `/`. The parametrisation over `.`, `/`, `""` is still
+  adequate, but not because every other spelling normalises onto one of them:
+  it is because the behaviour depends only on the final component being empty,
+  which `//` also satisfies (`Path("//").name == ""`). The docstring now says
+  that instead. Fifth round, fifth correct-conclusion-wrong-reason.
+- **`..` is not in the degrading set**, incidentally: `Path("..").name` is
+  `".."`, so it stamps and mkdirs normally.

@@ -169,9 +169,12 @@ def test_a_path_with_no_filename_degrades_rather_than_raising(
     """`per_run_log_path` ends in `Path.with_name`, which raises
     `ValueError` -- not `OSError` -- when the final component is empty, so
     `--detection-trace .` once killed `main()` with an unhandled traceback
-    before the crew started. These three are the whole set of inputs that
-    reach it: `.`, `/`, and the empty string (which `Path` normalises to
-    `.`).
+    before the crew started. `.`, `/` and the empty string are not the
+    whole set of spellings that reach it -- `./`, `./.`, `/.` and `//` do
+    too -- but what decides the behaviour is the single property all of
+    them share, an empty final component, so these three cover it.
+    (`Path` reduces most of those spellings to `.` or `/` anyway; `//`
+    stays `//` on POSIX, and still has no name.)
 
     No `tmp_path` here, and none is needed: the raise happens before the
     `mkdir`, so nothing is created wherever pytest was started."""
