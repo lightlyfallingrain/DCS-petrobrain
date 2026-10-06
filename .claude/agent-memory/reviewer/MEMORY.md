@@ -152,3 +152,4 @@ and blowing the cap again; this pass merged them into one list.
 - [BL-11 round 3 deletion review](project_bl11_round3_deletion_review.md) - which stale refs a deletion must sweep: present-tense claim vs dated record.
 - [Guard widening: check every statement](feedback_guard_widening_check_every_statement.md) - a widened except clause needs every guarded statement's exception types enumerated.
 - [BL-11 round 4 degrade guard review](project_bl11_round4_degrade_guard_review.md) - NEEDS FIXES; brute-forced a parent-equality claim, split a 2-assertion test.
+- [Every guard entry needs a failing counterfactual](feedback_every_guard_entry_needs_a_failing_counterfactual.md) - drop each except-tuple type and rerun; no source edit needed.
