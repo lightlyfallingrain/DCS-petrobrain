@@ -24,6 +24,32 @@ module load. Say so explicitly in the header next to the existing `SET_LOOK_TEMP
 the next reader will conflate the two. The `%d` guard test only inspects `SET_LOOK_TEMPLATE`, so
 this does not trip it.
 
+**Match the format specifier to the constant's TYPE, not to its current value.** `%d` is exact for an
+integer count; on a float it silently truncates the moment someone writes a non-integral value, so a
+deliberate edit becomes a quiet rounding. For a float use **`%.17g`** — the shortest width that
+round-trips an IEEE-754 double exactly. `tostring`/`%.14g` round-trip `10000.0` and are not
+guaranteed in general, which is the "works today" class the splice exists to remove. Verified:
+`%.17g` of `10000.0`→`10000`, `10000.05`→`10000.049999999999`, `1/3`→`0.33333333333333331`, all
+`tonumber`-equal to the original.
+
+**Prove the GETGLOBAL sweep is sensitive before trusting a clean list.** Run it on the chunk body
+*without* the spliced prefix: the spliced names must appear as globals. If they do, a clean list with
+the prefix is evidence the splice lands; if the sweep cannot see them either way, the clean pass is
+vacuous — and a missing splice is exactly the no-hoisting bug the sweep exists to catch.
+
+**A dead constant is worse than a duplicated one, and is easy to mis-triage as "pre-existing, flag
+it".** `PLAYER_BUBBLE_RADIUS_M` was declared, commented as the bubble bound, and had **zero code
+readers** — the live bound was a re-typed literal in the chunk. A duplicated constant is two live
+definitions that may drift; a dead one is one live definition plus a decoy that the next editor will
+change believing they moved the bubble. Count the *readers*, not the mentions, before deciding to
+flag rather than fix.
+
+**Not every duplicate is drift.** `HOUR_DEFAULT`/`FOV_DEFAULT_DEG` versus the chunk's `or 0`/`or 45`
+look identical to the bubble case and must stay duplicated: the outer pair are `_safeClampInt`
+fallbacks for a **bad inbound value**, the chunk's cover **no command yet this mission**. Equal by
+coincidence, not construction — splicing would couple two unrelated decisions. Reviewer's explicit
+ruling. The test for "is this drift": do the two sites answer the same question?
+
 **When a second population must get "the same filters" as an existing one, extract the filter.**
 Re-typing it is how the two drift. Here the unit loop's bubble/wedge/name/ownship logic became one
 `considerCandidate(obj, isStatic)` that both loops call — "same filters" is then structurally true
@@ -39,4 +65,5 @@ subproject dir, so mypy's CWD-only config discovery and pytest's `pythonpath` st
 the worktree.
 
 Related: [[feedback_verify_full_suite_not_just_new_files]],
-[[project_dcs_driven_los_stage1_3]].
+[[project_dcs_driven_los_stage1_3]],
+[[feedback_a_pcall_without_a_counter_converts_loud_to_silent]].

@@ -1,9 +1,8 @@
 # Agent Memory Index
 
-One line per entry, under ~150 characters: `- [Title](file.md) — one-line hook`.
-Individual memory files live alongside this index, named `feedback_<topic>.md` (corrections/
-confirmations about how to approach work) or `project_<topic>.md` (non-obvious project facts).
-Write directly to this directory — it already exists, no need to create it or check first.
+One line per entry, under ~150 chars: `- [Title](file.md) — hook`. Files here are
+`feedback_<topic>.md` (how to work) or `project_<topic>.md` (non-obvious facts).
+Write directly — the dir exists.
 
 - [No dep tooling in world-model](project_worldmodel_no_dep_tooling.md) — no venv/lockfile before M1; use pytest `pythonpath` ini.
 - [Verify full suite, not just new files](verify_full_suite_not_just_new_files.md) — ruff check flags pre-existing drift; fix separately.
@@ -36,7 +35,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Binocular, not unaided-eye, reinterpretation](feedback_binocular_not_unaided_eye.md) — reused ED constant, new meaning by user decision.
 - [Verify keyword vocab against real strings](feedback_verify_keyword_vocab_against_real_strings.md) — fabricated-string tests mask real gaps.
 - [Reporting-name lookup pattern](project_reporting_name_lookup_pattern.md) — 2nd keyword pass via ED vocab; ~24%->64.5% coverage.
-- [Bucket coverage metrics by scope](feedback_bucket_coverage_metrics_by_scope.md) — blended coverage floor hides in-scope gaps; assert per-bucket.
+- [Bucket coverage metrics by scope](feedback_bucket_coverage_metrics_by_scope.md) — a blended floor hides in-scope gaps; assert per bucket.
 - [Coverage floor needs real nulls](feedback_coverage_floor_needs_real_nulls.md) — a pre-selected fixture pins the metric; enumerate fully.
 - [PB-1.5 coverage-floor word-boundary bug](project_pb1_5_coverage_floor_word_boundary_bug.md) — bare substrings matched inside longer codes.
 - [PB-2 Stage 0 scope-channel repair](project_pb2_stage0_scope_channel_repair.md) — debounce-preservation gotcha, single->multi-item guard.
@@ -79,10 +78,9 @@ Write directly to this directory — it already exists, no need to create it or 
 - [MI-4 Ollama synth](project_mi4_ollama_synth.md) — Ollama auto-pulls an absent model; Bash curl to loopback denied, urllib worked.
 - [MI-5 player questions](project_mi5_player_questions.md) — ownship choice-question path is dead (falls back to free_text).
 - [MI-6 runtime compilation](project_mi6_runtime_compilation.md) — plan prose vs. declared field type mismatch: prefer the type.
-- [Group-contact-model Stage 4b speech/events](project_group_contact_model_stage4b_speech_events.md) — structural test caught a private helper.
+- [Group-contact-model Stage 4b speech/events](project_group_contact_model_stage4b_speech_events.md) — a structural test caught a private helper.
 - [F10 command vocabulary Stage 6-7](project_f10_command_vocabulary_stage6_7.md) — dispatch mirrors an existing D5 pattern.
-- [F10 command vocabulary review fix](project_f10_command_vocabulary_review_fix.md) — captured PendingIntent.area went stale after reprojection.
-- [Group-contact-model Stage 3b-i ellipse](project_group_contact_model_stage3bi_ellipse.md) — xfail'd a real regression. SUPERSEDED by rev.2.
+- [F10 command vocabulary review fix](project_f10_command_vocabulary_review_fix.md) — a captured PendingIntent.area went stale after reprojection.
 - [Group-contact-model Stage 3b-i rev.2 angular](project_group_contact_model_stage3bi_rev2_angular.md) — formula-sharing was the real defect.
 - [Group-contact-model Stages 1-2](project_group_contact_model_stage1_2.md) — majority-overlap continuity needs a global 2-pass, not per-cluster.
 - [Group-contact-model Stages 3a-4a](project_group_contact_model_stage3a_4a.md) — cardinality "unknown" = literal (0,inf).
@@ -105,44 +103,45 @@ Write directly to this directory — it already exists, no need to create it or 
 - [watch-reporting Stage 1-5](project_watch_reporting_stage1_5.md) — watched-only kind needs singleton grouping too.
 - [position-belief hold-recovery fix](project_position_belief_hold_recovery_fix.md) — two timestamps + always-fresh-from-base inflation.
 - [Eyesight view + belief-truth-log](project_eyesight_view.md) — range-0 ray hides set_if_blank markers.
-- [BR-1 offered-vocabulary asymmetry](project_br1_offered_vocabulary_asymmetry.md) — per-call-varying offered sets (PICK) vs. constant (CONFIRM).
+- [BR-1 offered-vocabulary asymmetry](project_br1_offered_vocabulary_asymmetry.md) — per-call-varying offered sets (PICK) vs constant (CONFIRM).
 - [BR-1 Stage 2 fold duplicate branch](project_br1_stage2_fold_duplicate_branch.md) — module-independence blocks cross-boundary tests.
 - [BR-1 Stage 2 OllamaDecider](project_br1_stage2_ollama_decider.md) — poll_replies() to background thread, not shorter timeout.
-- [Aircraft-layer hardening fixes](project_aircraft_layer_hardening_fixes.md) — shutdown flag before close()'s mutation, not inferred from it.
-- [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — grace field needs "last confirmed observable"; pending/committed split.
+- [Aircraft-layer hardening fixes](project_aircraft_layer_hardening_fixes.md) — set the shutdown flag before close()'s mutation, not inferred from it.
+- [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — "last confirmed observable" grace field; pending/committed split.
 - [Verify a reviewer's suggested test mechanism](feedback_regression_test_verify_mechanism_not_just_hypothesis.md) — read both code paths first.
-- [Worktree branch behind main](feedback_worktree_branch_behind_main.md) — check worktree's own branch vs main; ff-merge, never reset --hard.
-- [Missed-AAA LOS tolerance](project_missed_aaa_los_tolerance.md) — real mechanism/calibration commit split; tolerance cost can depend on consumer's tactics, not just data error.
-- [Group-reporting sparse-scene backstop](project_group_reporting_sparse_scene_backstop.md) — n=2 cohesion tautology fix; two lookalike test workarounds resolved oppositely.
-- [Group-reporting Stages 1-3](project_group_reporting_stage1_3.md) — plan named collision `render_group_report`; exact per-class counts.
-- [Don't improvise scope for plan framing](feedback_dont_improvise_scope_to_satisfy_plan_framing.md) — flag the tension, don't wire into next stage's territory.
-- [Group-reporting Stage 4](project_group_reporting_stage4.md) — mid-task course corrections invert dispatch; sparse-scene cohesion always groups any 2 contacts.
-- [Group-reporting unit-width backstop](project_group_reporting_unit_width_backstop.md) — borrow currency not constant; mechanism/calibration split isn't always zero-diff; profile_for/OP_* quirk.
-- [Terrain feature probing watershed](project_terrain_feature_probing_watershed.md) — saddle=min-of-max-per-contact not naive-min; sinuosity needs geometry-step fix not retuning; numpy<2.5 mypy pin.
-- [Terrain feature probing Stage 1-2](project_terrain_feature_probing_stage1_2.md) — checkerboard ceiling is spacing-invariant; plan's fine/coarse split didn't survive real-data sweep.
-- [Landform-geomorphons perf fix](project_landform_geomorphons_perf_fix.md) — streaming terrain inserts via callback; O(N) Chaikin via per-point support windows.
+- [Worktree branch behind main](feedback_worktree_branch_behind_main.md) — check the worktree's own branch vs main; ff-merge, never reset --hard.
+- [Missed-AAA LOS tolerance](project_missed_aaa_los_tolerance.md) — mechanism/calibration commit split; tolerance cost can depend on consumer's tactics.
+- [Group-reporting sparse-scene backstop](project_group_reporting_sparse_scene_backstop.md) — n=2 cohesion tautology; two lookalike workarounds resolved oppositely.
+- [Group-reporting Stages 1-3](project_group_reporting_stage1_3.md) — plan named a collision, `render_group_report`; exact per-class counts.
+- [Don't improvise scope for plan framing](feedback_dont_improvise_scope_to_satisfy_plan_framing.md) — flag the tension; don't wire into the next stage's territory.
+- [Group-reporting Stage 4](project_group_reporting_stage4.md) — mid-task corrections invert dispatch; sparse cohesion groups any 2.
+- [Group-reporting unit-width backstop](project_group_reporting_unit_width_backstop.md) — borrow currency not constant; mechanism/calibration split isn't always zero-diff.
+- [Terrain feature probing watershed](project_terrain_feature_probing_watershed.md) — saddle=min-of-max-per-contact; sinuosity needs a geometry fix, not retuning.
+- [Terrain feature probing Stage 1-2](project_terrain_feature_probing_stage1_2.md) — checkerboard ceiling is spacing-invariant; fine/coarse split died on real data.
+- [Landform-geomorphons perf fix](project_landform_geomorphons_perf_fix.md) — streaming terrain inserts via callback; O(N) Chaikin via support windows.
 - [macOS ru_maxrss unit is bytes](reference_macos_ru_maxrss_unit_bytes.md) — bytes on macOS, KB on Linux; divide by 1024*1024 for MB on Mac.
-- [Landform geomorphons implementation](project_landform_geomorphons.md) — plan cited wrong spike's min_cells; junction-walk is order-dependent; M8 chunk pipeline had no equivalent.
-- [Relief gate + decimation fix](project_landform_relief_gate_decimation_fix.md) — windowed deviation check silently neutered decimation; check whole polyline, not one segment.
-- [Terrain-feature-probing Rev3 Stages 3a-5](project_terrain_feature_probing_rev3_stages345.md) — nearest_feature shape frozen; 5 fixtures shared one latent trap; scratch-copy commit-split technique.
+- [Landform geomorphons implementation](project_landform_geomorphons.md) — plan cited the wrong spike's min_cells; junction-walk is order-dependent.
+- [Relief gate + decimation fix](project_landform_relief_gate_decimation_fix.md) — a windowed deviation check silently neutered decimation; check the whole line.
+- [Terrain-feature-probing Rev3 Stages 3a-5](project_terrain_feature_probing_rev3_stages345.md) — nearest_feature shape frozen; 5 fixtures shared one trap; scratch-copy splits.
 
-- [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression checks must exclude same-poll peers or mutual lockout silences everything.
-- [Redundant group disclosure](project_redundant_group_disclosure.md) — already-reported lives in scheduler, not Contact/Group; fix broke+fixed a real second redundant case the plan didn't name.
-- [Multi-theatre Afghanistan Stages 1/2/3/5](project_multi_theatre_afghanistan.md) — test-impact list missed 2 files; Tagged[str] theatre wasn't actually parsed yet; stage 8 RUN.md table stale.
-- [sqlite3 URI connect is lazy](project_sqlite_uri_connect_lazy_open.md) — mode=ro connect() on missing file doesn't raise; first execute() does, wrap both.
-- [Test pure function and its wiring separately](feedback_test_pure_function_and_its_wiring_separately.md) — 5 well-tested fns, 0 tests on the write/read call sites that deliver it.
-- [DCS-driven LOS Stages 1-3](project_dcs_driven_los_stage1_3.md) — snapshot-vs-worktree edit trap; relaxed "exactly one %d" test to two, documented why; tolerance fix was doc-only.
-- [Subject-discriminating gate breadth](feedback_subject_discriminating_gate_breadth.md) — breadth comes from the kinds set, not the call sites; test an exemption's bar against the non-members.
+- [Contact-report-flood same-poll trap](project_contact_report_flood.md) — scored-candidate suppression must exclude same-poll peers or all go silent.
+- [Redundant group disclosure](project_redundant_group_disclosure.md) — already-reported lives in the scheduler; the fix exposed a second case.
+- [Multi-theatre Afghanistan Stages 1/2/3/5](project_multi_theatre_afghanistan.md) — test-impact list missed 2 files; Tagged[str] theatre wasn't parsed yet.
+- [sqlite3 URI connect is lazy](project_sqlite_uri_connect_lazy_open.md) — mode=ro connect() on a missing file doesn't raise; the first execute() does.
+- [Test pure function and its wiring separately](feedback_test_pure_function_and_its_wiring_separately.md) — 5 tested fns, 0 tests on the call sites that deliver them.
+- [DCS-driven LOS Stages 1-3](project_dcs_driven_los_stage1_3.md) — snapshot-vs-worktree edit trap; relaxed the "exactly one %d" test to two.
+- [Subject-discriminating gate breadth](feedback_subject_discriminating_gate_breadth.md) — breadth is the kinds set, not the call sites; test the bar on non-members.
 - [Counterfactuals must not perturb an imported constant](feedback_counterfactual_must_not_perturb_a_constant_the_test_imports.md) — the test's timeline moves with it; it fails open.
-- [Prose is no substitute for the test it replaces](feedback_prose_is_not_a_substitute_for_the_test_it_replaces.md) — a quoted example string in a docstring is an unasserted expectation; it went stale.
+- [Prose is no substitute for the test it replaces](feedback_prose_is_not_a_substitute_for_the_test_it_replaces.md) — a docstring's example string is an unasserted expectation; it went stale.
 - [pytest -k can silently skip a new test](feedback_pytest_k_substring_skips_new_tests.md) — "exempt" doesn't match "exemption"; 4 passed looked like full coverage.
 - [Guard every statement, not the one that raised](feedback_guard_every_statement_not_the_one_that_raised.md) — enumerate a block's raises; 5 rounds on one 8-line closure.
-- [Degrade-guard exception breadth](project_degrade_guard_exception_breadth.md) — a raise one line above the `try` is invisible when reading the guard; probe degenerate paths.
-- [BL-11 perf Stages 1/2/3b/5](project_bl11_perf_stages.md) — a note's speedup ratio is scene-dependent; null-omission vs. deliberately-null join keys; grep test fails on its own fix.
+- [Degrade-guard exception breadth](project_degrade_guard_exception_breadth.md) — a raise above the `try` is invisible from the guard; probe degenerate paths.
+- [BL-11 perf Stages 1/2/3b/5](project_bl11_perf_stages.md) — speedup ratios are scene-dependent; null-omission vs deliberately-null keys.
 - [Equivalence test must own its reference arithmetic](feedback_equivalence_test_must_own_its_reference_arithmetic.md) — importing the predicate made it pass 15/15 under a real mutation.
 - [mkdir in a helper pollutes relative test paths](feedback_mkdir_in_a_helper_makes_relative_test_paths_pollute.md) — passing tests started creating untracked dirs; reroot onto tmp_path.
-- [Healthy-path test needs the guarded call to matter](feedback_healthy_path_test_needs_the_guarded_call_to_matter.md) — gutting close() left all 4 tests passing; assert absence inline.
-- [BL-11 round 3 fixes](project_bl11_round3_fixes.md) — a deletion's prose fallout exceeds the named list; dated vs forward-looking refs get opposite treatment.
-- [Sortie 1005 review fixes](project_sortie_1005_review_fixes.md) — review named a helper that reintroduces its own fix's cost; tick() suppression tests need many ticks inside CALLOUT_MAX_AGE_S.
+- [Healthy-path test needs the guarded call to matter](feedback_healthy_path_test_needs_the_guarded_call_to_matter.md) — gutting close() left all 4 tests passing; assert the absence inline.
+- [BL-11 round 3 fixes](project_bl11_round3_fixes.md) — a deletion's prose fallout exceeds the named list; dated vs forward refs differ.
+- [Sortie 1005 review fixes](project_sortie_1005_review_fixes.md) — a named helper reintroduced its own fix's cost; tick() tests need many ticks.
 - [LOS Hook statics](project_los_hook_statics.md) — extract a bridged chunk (with spliced prefix) to luac-check it; StaticObject has no getObjectID.
-- [Keeper eligibility predicate](project_keeper_eligibility_predicate.md) — electing a survivor and consuming peers = silence unless election uses the consumer's own gate.
+- [A pcall without a counter goes loud→silent](feedback_a_pcall_without_a_counter_converts_loud_to_silent.md) — check the sibling population for the asymmetry.
+- [Keeper eligibility predicate](project_keeper_eligibility_predicate.md) — electing a survivor and consuming peers = silence, unless via the real gate.
