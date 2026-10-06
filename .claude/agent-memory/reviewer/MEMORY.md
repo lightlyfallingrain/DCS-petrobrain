@@ -136,3 +136,4 @@ link target, preferring the untruncated hook of each pair; no entry dropped.
 - [SPU-8 intercom cross-machine handoff approved](project_spu8_intercom_cross_machine_handoff_approved.md) - APPROVED clean; 4-mechanism disable-and-rerun check.
 - [X-B29 DCS-driven LOS review approved](project_dcs_driven_los_review_approved.md) - APPROVED clean; NaN-clamp re-run under a standalone Lua interpreter.
 - [Sortie 1005 round2 keeper eligibility](project_sortie_1005_round2_keeper_eligibility.md) - NEEDS FIXES; a one-per-group representative must be elected from the eligible subset.
+- [Keeper election per-contact vs per-event](project_keeper_election_per_contact_vs_per_event.md) - elect-one-consume-peers goes silent when the survivor has no event; granularity, not predicate.
