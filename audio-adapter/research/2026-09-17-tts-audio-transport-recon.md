@@ -1,5 +1,9 @@
 # BL-10 first slice: TTS audio transport (local playback + SRS injection path)
 
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
 **Date:** 2026-09-17
 **DCS version:** not verified locally — see below (no live DCS/SRS test performed this session)
 **Theatre:** n/a

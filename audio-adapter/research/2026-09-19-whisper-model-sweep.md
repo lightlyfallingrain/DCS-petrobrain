@@ -1,5 +1,9 @@
 # How light can the whisper model go?
 
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-4.1]]
+<!-- doc-provenance:end -->
+
 **Date:** 2026-09-19 · whisper.cpp 1.9.4, Apple Silicon (Metal) · corpus: 252 clips, the user's own
 voice, headset, Windows-recorded · all rows use `--prompt` (`vocabulary.to_prompt()`)
 

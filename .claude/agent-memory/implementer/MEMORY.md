@@ -151,3 +151,4 @@ Write directly — the dir exists.
 - [BL-11 Stage 4 logging visibility fix](project_bl11_stage4_logging_visibility_fix.md) — lastResort=WARNING ate INFO; scope the fix to one named logger, not basicConfig.
 - [Obsidian-links Stage 0/1 audio-adapter](project_obsidian_links_stage1_audio_adapter.md) — root .obsidian tracked unexpectedly.
 - [Obsidian gate class fixes](project_obsidian_gate_class_fixes.md) — exactly-one-index count; strip code/URL before tag scan; LLM-prompt "assertion" isn't a mechanical check.
+- [Doc-provenance Stage A0](project_doc_provenance_stage_a0.md) — no plan.md has an H1; blank-line strip must be a while not an if; bare plan-dir citations collapse to plan.md.

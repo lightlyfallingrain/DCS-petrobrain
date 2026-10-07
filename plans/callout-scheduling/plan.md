@@ -1,3 +1,7 @@
+<!-- doc-provenance:start -->
+**Decision for:** [[AA-1.6]]
+<!-- doc-provenance:end -->
+
 ### Goal
 
 Replace the current "render every unacknowledged event, every poll, all at once" callout path with

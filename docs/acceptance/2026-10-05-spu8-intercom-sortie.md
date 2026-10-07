@@ -1,5 +1,9 @@
 # SPU-8 intercom sortie
 
+<!-- doc-provenance:start -->
+**Flight for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
 **Cockpit card (published):** https://claude.ai/artifact/At1jot58qBitCgwrrp9FaS — the same content
 below, laid out for reading in glances. This file stays the source of truth.
 

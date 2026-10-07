@@ -1,3 +1,7 @@
+<!-- doc-provenance:start -->
+**Decision for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
 ### Goal
 
 Make Petrovich's audibility and listening gated by the SPU-8 intercom switches the real aircraft

@@ -269,3 +269,234 @@ prose outside the fence is still caught. Both probe files were removed after pro
   function always exited 0 past the usage check). Adding the fence-balance failure gives it one for
   the first time — worth knowing if anything downstream currently assumes this script never fails
   non-zero past argument validation.
+
+### Implementation Summary — Stage A0 (2026-10-07)
+
+Implemented Stage A0 from `plans/obsidian-links-and-tags/plan-document-graph.md`: lift the
+document citations already written in prose inside `audio-adapter/ROADMAP/AA-*.md` into a
+generated `doc-provenance` block on the **cited document** (never the entry). No tags, no typed
+dependency edges, no git-history inference for the uncited entries — all later stages, out of
+scope here per the plan and the task's own scope section. Branch tip before this round: `fbd62b9`
+(fast-forwarded into this worktree; see handoff note below).
+
+### Files Changed
+
+- `.claude/scripts/roadmap-entry-consistency-gate.sh` — **R1 fix.** Check 1 (dangling-link
+  resolution) now resolves every `[[ID]]` against the **union** of IDs across every converted
+  `*/ROADMAP/` and `todo/backlog/` directory, not just the directory the link was written from.
+  Previously a per-directory-only ID set meant `[[AA-3]]` written from outside
+  `audio-adapter/ROADMAP/` reported as dangling — live now, since Stage A0 writes exactly that
+  shape of link into `plans/*/plan.md` and `*/research/*.md`. Check 3 (index membership) stays
+  per-directory deliberately — an index only ever lists its own directory's entries, so "exactly
+  one" is a per-directory fact, unlike check 1's resolution target.
+- `.claude/scripts/doc_provenance.py` — **new.** Shared extraction/generation/verification logic.
+  Citation extraction over the 22 entry files (three regex classes: `plans/<name>/`, bare or
+  subproject-prefixed `research/<file>.md`, `docs/acceptance/<file>.md`); builds a
+  target-document → (kind, ordered citing-entry-ids) map; renders/strips the delimited block;
+  drives both `refresh` (writes) and `gate` (verify-only, regenerate-into-temp-and-diff) modes
+  from one code path, plus a `plan` mode that prints what would change without touching anything.
+  Written in Python rather than bash/awk (there is precedent in this family —
+  `commit-quality-gate.sh` already shells out to `python3`) because the block-insertion/strip
+  logic is a small stateful text transform that is far more reliably expressed and reviewed with
+  real control flow than as an awk state machine attempting the same idempotency guarantee.
+- `.claude/scripts/doc-provenance-refresh.sh` — **new.** Thin wrapper: `python3 doc_provenance.py
+  refresh`. On demand only, per the plan's "nothing that writes runs in a hook" rule — same
+  reasoning as `doc-graph-refresh.sh`'s design (not yet built; this stage does not need it).
+- `.claude/scripts/doc-provenance-gate.sh` — **new.** Thin wrapper: `python3 doc_provenance.py
+  gate`. Verify-only.
+- `docs/DOC_CONVENTIONS.md` — new "Document provenance" section (block format, the three labels
+  and which document kind maps to each, the plan-directory-is-one-unit rule, scope, regenerate /
+  verify commands); "Gates" section extended from two checks to three. **Deliberately does not
+  list which documents are converted** — per the task's R8 instruction, a path check
+  (`doc-provenance-gate.sh` itself, or `grep -l doc-provenance:start`) answers that and a written
+  list goes stale.
+- 13 cited documents gained a `doc-provenance` block (see "Generated blocks" below):
+  `aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`,
+  `aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md`,
+  `aircraft-layer/research/2026-10-05-spu8-intercom-write-path-recon.md`,
+  `audio-adapter/research/2026-09-17-tts-audio-transport-recon.md`,
+  `audio-adapter/research/2026-09-19-whisper-model-sweep.md`,
+  `docs/acceptance/2026-09-18-stage6-sortie.md`,
+  `docs/acceptance/2026-09-23-voice-command-sortie.md`,
+  `docs/acceptance/2026-10-05-spu8-intercom-probe.md`,
+  `docs/acceptance/2026-10-05-spu8-intercom-sortie.md`,
+  `plans/callout-scheduling/plan.md`, `plans/inbound-speech/plan.md`,
+  `plans/spu8-intercom/plan.md`, `plans/tts-voice-output/plan.md`. No `audio-adapter/ROADMAP/*.md`
+  entry file was edited — the entries are the citing side, never the cited side.
+
+### Decisions made during implementation
+
+- **Bare-directory citations (`plans/spu8-intercom/`, `plans/callout-scheduling/`,
+  `plans/tts-voice-output/`) all resolve to `plan.md`.** The task named `plans/spu8-intercom/`
+  (nominated by `AA-3`) as needing a decision; the same shape recurred twice more
+  (`AA-1`, `AA-1.6`), so the decision was generalized rather than special-cased once: a plan
+  directory is one unit (plan-document-graph.md §1's own rule for Stage B), so `plan.md` is its
+  designated carrier regardless of which sibling file the citing prose actually names, or
+  whether it names a file at all. `AA-3` cites `plans/spu8-intercom/{plan.md, implementation.md,
+  review.md, security-deep-analysis.md, performance.md, dod-check.md}` by brace-expansion in
+  prose — read as one directory-level citation (matching the plan's own accounting: "AA-3's five
+  citations are two in `aircraft-layer/research/`, two in `docs/acceptance/`, **one plan
+  directory**"), not six separate document citations. Only `plan.md` got a block.
+- **One line per citing entry, not one line listing every ID.** `plans/inbound-speech/plan.md` is
+  cited by both `AA-4` and `AA-4.1`; it carries two `**Decision for:**` lines rather than one line
+  with two `[[ID]]`s. This reads the task's "gains a second line inside the same block, not a
+  second block" instruction literally, and generalizes cleanly if a later stage ever needs a
+  second *kind* of relation line in the same block.
+- **Block placement for a file with no H1 at all.** Every `plans/<name>/plan.md` in this corpus
+  opens directly with `### Goal` — none has a top-level `# ` heading, which the parent plan's
+  "placed immediately after the H1" rule did not anticipate. Fallback: the block goes at the very
+  top of the file when no H1 is found. Flagged below as a real discovery, not a edge case
+  invented for completeness.
+- **Bare `research/<file>.md` citations (no subproject prefix) resolve to `audio-adapter/`.**
+  Two entries (`AA-3`, `AA-4.1`) cite `research/<file>.md` with no leading path segment; both
+  files exist only under `audio-adapter/research/`, confirmed by `find` before writing the
+  resolution rule, not assumed.
+
+### Idempotency bug found and fixed during implementation
+
+First version of `strip_existing_block` removed at most **one** blank line adjacent to the block,
+on whichever side the block's insertion side was. That is correct the first time, but the no-H1
+insertion path adds its separator blank **after** the block, and the first real run against
+`plans/*/plan.md` left that blank in place on strip (an off-by-one: the removal loop was an `if`,
+not a `while`), so a second `refresh` run re-added a second blank — found by actually running
+`refresh` twice and reading the file (`cat -A`-equivalent via `Read`), not by inspection. Fixed by
+stripping *every* consecutive blank line adjacent to the block on the correct side (a `while`,
+not an `if`) — correct both for the one-blank case a clean run produces and for a leftover
+multi-blank case from the buggy intermediate state. Re-verified idempotent by sha1 checksum
+before/after a second `refresh` run on four affected files (see "Checks" below) and by `git
+status --porcelain` staying unchanged across a third run.
+
+### Checks
+
+- `bash -n` clean on `doc-provenance-refresh.sh`, `doc-provenance-gate.sh`,
+  `roadmap-entry-consistency-gate.sh`, `roadmap-tag-vocabulary-gate.sh`.
+- `python3 -c "import ast; ast.parse(...)"` clean on `doc_provenance.py`.
+- **R1 mutation proof** (`roadmap-entry-consistency-gate.sh`): a scratch `body-layer/ROADMAP/`
+  with one dummy entry (`BL-99.md`) and its index was created; a temporary `[[BL-99]]` link added
+  to `audio-adapter/ROADMAP/AA-5.md` passed under the fixed gate (would have failed as dangling
+  under the old per-directory logic); a further `[[AA-99]]` (genuinely nonexistent) in the same
+  line still failed, naming the file and the missing target. Both edits and the scratch directory
+  were fully reverted before continuing; `git status --porcelain` confirmed clean before the next
+  step.
+- **Gate exit-path proofs** (`doc-provenance-gate.sh`): (1) ran before any `refresh`, over all 13
+  cited documents with no block yet — failed loud on every one, each with a real unified diff and
+  a pointer to the refresh command; (2) ran after `refresh`, with every document already
+  matching — `OK`, exit 0; (3) hand-edited an extra `**Flight for:** [[AA-99]]` line inside an
+  existing block — failed loud, diff showed exactly the injected line, restored, re-ran clean;
+  (4) deleted the `<!-- doc-provenance:end -->` line from a block, leaving an unbalanced
+  delimiter pair — failed loud naming the exact counts (`1 start delimiter(s) and 0 end
+  delimiter(s)`), restored from a pre-edit copy, re-ran clean.
+- **Idempotency proof**: ran `doc-provenance-refresh.sh` three times in a row. First run wrote
+  all 13 files (fresh generation). Second run (after the blank-line bug fix) wrote the 4 no-H1
+  files again correcting the double-blank; `sha1sum` of 4 representative files (one of each
+  kind, including the twice-cited `plans/inbound-speech/plan.md`) taken before and after a third
+  run were byte-identical, and the third run itself reported "nothing to change"; `git status
+  --porcelain` after staging showed no further changes from the third run.
+- `.claude/scripts/roadmap-entry-consistency-gate.sh` → `OK`.
+- `.claude/scripts/roadmap-tag-vocabulary-gate.sh` → `OK`.
+- `.claude/scripts/doc-provenance-gate.sh` → `OK`.
+- `.claude/scripts/push-roadmap-gate.sh` → exit 0 (fails open; re-run with `CLAUDE_PROJECT_DIR`
+  set explicitly — unbound without it in this standalone invocation, unrelated to this change).
+- `.claude/scripts/graphify-dirty-flag.sh` → exit 0.
+- audio-adapter checks, via the main checkout's sibling `.venv` (this worktree's own `src` is
+  untouched by this round — `git diff --stat audio-adapter/src` is empty):
+  - `ruff format --check .` — 63 files already formatted
+  - `ruff check .` — all checks passed
+  - `mypy --strict src` — no issues, 15 source files
+  - `pytest -q` — **222 passed, 1 skipped**
+
+### Generated blocks (full text, as written)
+
+```markdown
+aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-4.5]]
+<!-- doc-provenance:end -->
+
+aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
+aircraft-layer/research/2026-10-05-spu8-intercom-write-path-recon.md
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
+audio-adapter/research/2026-09-17-tts-audio-transport-recon.md
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
+audio-adapter/research/2026-09-19-whisper-model-sweep.md
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-4.1]]
+<!-- doc-provenance:end -->
+
+docs/acceptance/2026-09-18-stage6-sortie.md
+<!-- doc-provenance:start -->
+**Flight for:** [[AA-1.6]]
+<!-- doc-provenance:end -->
+
+docs/acceptance/2026-09-23-voice-command-sortie.md
+<!-- doc-provenance:start -->
+**Flight for:** [[AA-4.6]]
+<!-- doc-provenance:end -->
+
+docs/acceptance/2026-10-05-spu8-intercom-probe.md
+<!-- doc-provenance:start -->
+**Flight for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
+docs/acceptance/2026-10-05-spu8-intercom-sortie.md
+<!-- doc-provenance:start -->
+**Flight for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
+plans/callout-scheduling/plan.md
+<!-- doc-provenance:start -->
+**Decision for:** [[AA-1.6]]
+<!-- doc-provenance:end -->
+
+plans/inbound-speech/plan.md
+<!-- doc-provenance:start -->
+**Decision for:** [[AA-4]]
+**Decision for:** [[AA-4.1]]
+<!-- doc-provenance:end -->
+
+plans/spu8-intercom/plan.md
+<!-- doc-provenance:start -->
+**Decision for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
+plans/tts-voice-output/plan.md
+<!-- doc-provenance:start -->
+**Decision for:** [[AA-1]]
+<!-- doc-provenance:end -->
+```
+
+### Entries that produced nothing (15 of 22) — the honest limit, as the plan names it
+
+`AA-1.1`, `AA-1.2`, `AA-1.3`, `AA-1.4`, `AA-1.5`, `AA-2`, `AA-4.2`, `AA-4.3`, `AA-4.4`, `AA-4.7`,
+`AA-4.8`, `AA-5`, `AA-B1`, `AA-B2`, `AA-B3` cite nothing matching the three citation shapes in
+scope, and correctly produced no block anywhere. Not attempted: inferring a citation from branch
+names some of these do mention (e.g. `AA-5`'s `feature/silence-command`) — the plan explicitly
+defers that to a later, separate decision.
+
+### Notable Discoveries
+
+- **No `plans/*/plan.md` in this corpus has an H1.** All four touched (`tts-voice-output`,
+  `callout-scheduling`, `spu8-intercom`, `inbound-speech`) open directly with `### Goal`. The
+  parent plan's "placed immediately after the H1" rule silently assumed one exists everywhere;
+  it does not, for the one document kind (`plan.md`) this stage writes into that is not a
+  research note or acceptance card. Worth carrying into Stage B/D, which touch the same files.
+- **The plan's own citation count held up exactly.** Plan-document-graph.md's Stage A0 section
+  measured "7 entries cite a plan/research/acceptance doc; 15 cite nothing" and "~8–10 external
+  documents" for `AA-3` alone (2 research + 2 acceptance + 1 plan directory). The implementation's
+  mechanical extraction found the same 7 citing entries and the same per-entry citation shapes
+  with no manual curation — a real cross-check that the earlier measurement was not an
+  undercount or overcount, not just a repeated claim.
+- **An off-by-one in blank-line stripping only showed up on the second refresh run of the no-H1
+  path**, not the first. A single-run review of generated output would have looked correct; the
+  idempotency proof (run twice, diff/checksum) is what caught it, consistent with this project's
+  "a counterfactual is evidence only if you ran it" standard.
