@@ -4,13 +4,29 @@
 # Three checks, over every */ROADMAP/ and todo/backlog/ directory found on disk (discovered,
 # never enumerated -- the same rule this project applies to subprojects generally):
 #
-#   1. Every [[ID]] wikilink in a converted tree resolves to an existing <ID>.md.
+#   1. Every [[ID]] wikilink in a converted tree resolves to an existing <ID>.md, ANYWHERE in the
+#      union of converted directories -- not just the directory the link was written from. A
+#      cross-subproject link (`[[AA-3]]` written from `aircraft-layer/research/`, or from inside
+#      a `plans/*/plan.md` carrying a doc-provenance block) is a normal, correct thing to write
+#      once more than one subproject is converted, or once a document outside any ROADMAP/
+#      directory cites a roadmap ID. Checking each directory against only its own ID set reports
+#      a correct cross-directory link as dangling (R1, fixed 2026-10-07) -- it had not fired yet
+#      only because audio-adapter was the sole converted subproject and nothing outside
+#      `audio-adapter/ROADMAP/` linked into it. The moment either changes, it fires on correct
+#      links, and a gate that cries wolf is a gate that gets bypassed (the parent plan's R4).
 #   2. Every entry file's name matches <ID>.md, where <ID> is the first token of its own H1.
 #   3. Every entry file appears in exactly one index (*-roadmap.md / *-backlog.md) in its
 #      directory, as a [[ID]] link -- an orphaned entry is as much a defect as a dangling link,
 #      and an entry linked from two indexes in the same directory (live once a subproject has
 #      both a ROADMAP and a BACKLOG index sharing one directory) is a defect in the other
-#      direction: the plan and docs/DOC_CONVENTIONS.md both say "exactly one."
+#      direction: the plan and docs/DOC_CONVENTIONS.md both say "exactly one." This check stays
+#      per-directory on purpose -- an index only ever lists entries from its own directory, so
+#      "exactly one" is a per-directory fact, unlike check 1's resolution target.
+#
+# This gate still only scans [[ID]] links written inside the converted directories themselves
+# (hand-written cross-references, **Depends on:** lines). A doc-provenance-generated block
+# outside those directories (a research note, an acceptance card, a plan.md) is checked by
+# doc-provenance-gate.sh instead, against the same union-of-IDs this fix introduces.
 #
 # Run standalone: .claude/scripts/roadmap-entry-consistency-gate.sh
 # Exit 0 and silent on success; exit 1 with every offending file named on failure.
@@ -31,9 +47,19 @@ done
 
 [ -z "$DIRS" ] && exit 0
 
+# All known IDs, across every converted directory (R1 fix, 2026-10-07) -- this is the union
+# check 1 resolves against, because an ID lives in exactly one directory but is a legal link
+# target from any of them (or from outside them entirely, once something does).
+ALL_IDS=""
 for dir in $DIRS; do
-    # Known IDs: every entry file's basename minus .md, excluding the index(es) themselves
-    # (named *-roadmap.md / *-backlog.md, which never match an ID shape).
+    ALL_IDS="$ALL_IDS
+$(find "$dir" -maxdepth 1 -name '*.md' -exec basename {} .md \; \
+    | grep -E '^[A-Z]+-[A-Za-z0-9.]+$' || true)"
+done
+
+for dir in $DIRS; do
+    # Known IDs for THIS directory only -- still needed for check 3, which is a per-directory
+    # fact (an index only ever lists its own directory's entries). Check 1 below uses ALL_IDS.
     ids=$(find "$dir" -maxdepth 1 -name '*.md' -exec basename {} .md \; \
         | grep -E '^[A-Z]+-[A-Za-z0-9.]+$' || true)
 
@@ -50,12 +76,13 @@ for dir in $DIRS; do
         fi
     done
 
-    # Check 1: every [[target]] across every file in this directory resolves to a known ID.
+    # Check 1: every [[target]] across every file in this directory resolves to a known ID,
+    # anywhere in the union across all converted directories (not just this one -- R1).
     links=$(grep -rohE '\[\[[A-Za-z0-9._-]+\]\]' "$dir" 2>/dev/null | sed -E 's/\[\[|\]\]//g' | sort -u)
     for target in $links; do
-        if ! printf '%s\n' "$ids" | grep -qxF "$target"; then
+        if ! printf '%s\n' "$ALL_IDS" | grep -qxF "$target"; then
             FAIL=1
-            echo "roadmap-entry-consistency-gate: $dir -- dangling link [[$target]], no $target.md" >&2
+            echo "roadmap-entry-consistency-gate: $dir -- dangling link [[$target]], no $target.md in any converted directory" >&2
         fi
     done
 

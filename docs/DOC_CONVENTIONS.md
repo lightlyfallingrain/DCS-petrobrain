@@ -110,19 +110,79 @@ See `docs/TAGS.md` for the vocabulary. Two rules repeated here because they deci
 shape above: tag only what the ID and path do not already say, and tag status on the same line as
 its checkbox marker, never in frontmatter and never elsewhere in the entry.
 
+## Document provenance
+
+**The underlying question this answers: "how did we get here?"** — which document brought a
+roadmap entry to the state it is in, or is expected to bring it there. Full rationale and the
+measurements behind the design: `plans/obsidian-links-and-tags/plan-document-graph.md`, Stage A0.
+
+**Generated, delimited, and cited what already exists in prose — nothing inferred.** A roadmap
+entry's own text already names the research notes, acceptance cards and plans that brought it to
+its current state (`[[AA-3]]`'s own entry cites five of them, in plain prose). The generator
+(`.claude/scripts/doc-provenance-refresh.sh`) lifts exactly those citations into a block on the
+**cited document**, never on the entry — Obsidian's backlinks pane supplies the reverse list
+(every document that answers "how did we get to `AA-3`") for free, and the entry files, which
+churn constantly, stay untouched.
+
+```markdown
+<!-- doc-provenance:start -->
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+```
+
+Placed immediately after the document's H1 (or at the very top, for a `plans/*/plan.md` that
+opens straight into `### Goal` with no H1 at all — true of every plan in this corpus today).
+One line per citing entry, so a document cited by more than one entry gains a second line inside
+the same block rather than a second block.
+
+**The label states which kind of relation it is, by the citing document's own kind** — not a
+human judgement call per document:
+
+| document kind | label | meaning |
+|---|---|---|
+| a research note (`*/research/*.md`) | `**Evidence for:**` | recon or a measurement that informed the entry |
+| an acceptance card (`docs/acceptance/*.md`) | `**Flight for:**` | an in-cockpit test of the entry |
+| a plan (`plans/<name>/plan.md`) | `**Decision for:**` | the design decision behind the entry |
+
+**A plan directory is one unit — the block always lands on `plan.md`**, regardless of which
+sibling file (`implementation.md`, `review.md`, `security-deep-analysis.md`, …) the citing prose
+actually names, or whether it names the bare directory with no file at all. `plan.md` is the
+directory's designated representative for this purpose, the same convention Stage B's own
+document-unit rule uses for a plan.
+
+**Scope is exactly what the entries cite — nothing swept, nothing inferred.** This stage covers
+only `audio-adapter/ROADMAP/AA-*.md`'s own citations; a roadmap entry with no citation in its
+prose gets no block for anyone, and inferring one from git history (a branch name, a commit) is a
+later, separate decision this stage deliberately does not make.
+
+**Regenerate on demand** with `.claude/scripts/doc-provenance-refresh.sh` — deterministic and
+idempotent; running it twice in a row changes nothing. **Never runs in a hook**, the same rule as
+every other generator in this convention: a regenerator that trips its own guard mid-commit turns
+one bad run into a permanent silent outage.
+`.claude/scripts/doc-provenance-gate.sh` is **verify-only** — it never writes, it regenerates
+every cited document into a temporary directory and diffs the result against the real file, and
+it fails loudly (naming the file and printing the diff) on a stale block, a hand-edit inside the
+delimited region, a malformed or duplicated delimiter pair, or a generated `[[ID]]` that does not
+resolve to a real entry file.
+
 ## Gates
 
-Two mechanical checks, run before committing a converted file (and available to run standalone):
+Three mechanical checks, run before committing a converted file (and available to run standalone):
 
 - **Consistency** (`.claude/scripts/roadmap-entry-consistency-gate.sh`): every `[[ID]]` in a
-  converted tree resolves to an existing `<ID>.md`; every entry file's name matches `<ID>.md` with
-  an H1 whose first token is that same ID; every entry appears in exactly one index.
+  converted tree resolves to an existing `<ID>.md`, across the union of every converted directory
+  (not just the one the link was written from — a research note or a plan citing a roadmap ID
+  from outside any `*/ROADMAP/` directory is a normal, correct link); every entry file's name
+  matches `<ID>.md` with an H1 whose first token is that same ID; every entry appears in exactly
+  one index.
+- **Document provenance** (`.claude/scripts/doc-provenance-gate.sh`): see "Document provenance"
+  above.
 - **Tag vocabulary** (`.claude/scripts/roadmap-tag-vocabulary-gate.sh`): every inline `#tag` in a
   converted entry file appears in `docs/TAGS.md`.
 
-Both fail loudly (non-zero exit, message naming the offending file) rather than silently —
-a dangling link or an unlisted tag is exactly the kind of defect that looks fine until someone
-clicks it or greps for it.
+All three fail loudly (non-zero exit, message naming the offending file) rather than silently —
+a dangling link, a stale or hand-edited provenance block, or an unlisted tag is exactly the kind
+of defect that looks fine until someone clicks it or greps for it.
 
 ## TOC helper
 
