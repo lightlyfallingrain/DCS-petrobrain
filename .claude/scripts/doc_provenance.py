@@ -4,11 +4,20 @@
 Stage A0 of plans/obsidian-links-and-tags/plan-document-graph.md: lift the document citations
 that already exist in prose inside audio-adapter/ROADMAP/AA-*.md into a generated, delimited
 block on the *cited* document (never on the entry) -- a research note, an acceptance card, or a
-plan's plan.md. Cite what is there; infer nothing. No tags, no typed dependency edges, no
-git-history inference -- those are later stages, out of scope here.
+plan's plan.md. Cite what is there; infer nothing. No typed dependency edges, no git-history
+inference -- those are later stages, out of scope here.
 
-Deterministic and read-only on the entry files. The only files this ever writes are the cited
-documents themselves.
+Stage A/B (plan-document-graph.md Sec.1/Sec.3) extends the same block with a **Topics:** line,
+on every document unit including the roadmap entries themselves -- the one document kind that
+never carries a citation line of its own ("Roadmap: no -- it IS one"). A tag is only ever emitted
+if it has an approved section in docs/TAGS.md (read fresh on every run via
+load_approved_topic_tags): the vocabulary is closed, and this generator is the enforcement of
+that, not docs/TAGS.md's prose alone. With no approved tags, every Topics line is empty and the
+entry-only half of this extension writes nothing -- this is Stage A's own stop point, by
+construction rather than by a special case.
+
+Deterministic and read-only on the entry files' own citations. The files this writes are: every
+document a converted entry cites, and (once a topic tag is approved) the entries themselves.
 
 Usage:
     doc_provenance.py plan                 -- print what would change, write nothing
@@ -42,7 +51,17 @@ LABELS = {
     "research": "Evidence for",
     "flight": "Flight for",
     "plan": "Decision for",
+    # "entry" deliberately has no label: a roadmap entry's block carries Topics only, never a
+    # Roadmap/Evidence/Flight/Decision line -- it IS the thing other documents cite, so it never
+    # cites itself (plan-document-graph.md's per-kind table).
 }
+
+# Topic-tag vocabulary, read fresh from docs/TAGS.md on every run (Stage A/B). A tag's own
+# `### \`#tag\`` section header and its `**Matches:**` line -- the same shape doc_tags.py's
+# load_approved_tags reads, duplicated here rather than imported so this module stays runnable
+# standalone, matching every other script in this family.
+TAG_SECTION_RE = re.compile(r"^### `#([A-Za-z0-9/_-]+)`\s*$", re.MULTILINE)
+MATCHES_LINE_RE = re.compile(r"^- \*\*Matches:\*\* `([^`]+)`\s*$", re.MULTILINE)
 
 
 class MalformedBlock(Exception):
@@ -80,6 +99,62 @@ def find_entries(root: Path) -> list[tuple[str, Path]]:
             entries.append((entry_id, f))
     entries.sort(key=lambda pair: id_sort_key(pair[0]))
     return entries
+
+
+def _strip_fenced_code(text: str) -> str:
+    """Removes fenced code blocks (```...```) before scanning for `### #tag` sections --
+    docs/TAGS.md's own "Format" section demonstrates the section shape inside a fence (its
+    `#SPU-8` example), and a naive scan reads that illustration as a real approved tag: found
+    live, by running this module's own `plan` mode against the committed tree and seeing
+    `1 approved topic tag(s)` when docs/TAGS.md's prose says "None approved yet." Mirrors
+    roadmap-tag-vocabulary-gate.sh's own fence handling, including treating an odd fence count
+    as a hard failure rather than silently scanning past an unclosed fence."""
+    lines = text.split("\n")
+    fence_count = sum(1 for line in lines if re.match(r"^\s*```", line))
+    if fence_count % 2 != 0:
+        raise MalformedBlock(
+            f"docs/TAGS.md has an unbalanced fenced code block ({fence_count} delimiter(s)) -- "
+            "cannot safely scan for approved tag sections"
+        )
+    out = []
+    fence = False
+    for line in lines:
+        if re.match(r"^\s*```", line):
+            fence = not fence
+            continue
+        if not fence:
+            out.append(line)
+    return "\n".join(out)
+
+
+def load_approved_topic_tags(root: Path) -> list[tuple[str, re.Pattern[str]]]:
+    """Every approved `### \\`#tag\\`` section in docs/TAGS.md, in declaration order -- order
+    matters here, since it is what makes a document's **Topics:** line byte-stable across runs
+    rather than depending on dict/set iteration order. Empty today: Stage A ends at a candidate
+    list (docs/TAGS.proposals.md), nothing is approved yet, so this always returns [] until the
+    user promotes a row -- which is what makes "nothing is tagged this round" true by
+    construction rather than by a special case in the generator."""
+    tags_path = root / "docs" / "TAGS.md"
+    try:
+        text = _strip_fenced_code(tags_path.read_text(encoding="utf-8"))
+    except OSError:
+        return []
+    approved: list[tuple[str, re.Pattern[str]]] = []
+    for m in TAG_SECTION_RE.finditer(text):
+        name = m.group(1)
+        rest = text[m.end() :]
+        next_section = rest.find("\n### ")
+        section = rest[:next_section] if next_section != -1 else rest
+        match_m = MATCHES_LINE_RE.search(section)
+        if match_m:
+            approved.append((name, re.compile(r"\b" + match_m.group(1) + r"\b", re.IGNORECASE)))
+    return approved
+
+
+def topics_for_text(text: str, approved: list[tuple[str, re.Pattern[str]]]) -> list[str]:
+    """Every approved tag whose pattern matches anywhere in `text`, in docs/TAGS.md's own
+    declaration order."""
+    return [name for name, pattern in approved if pattern.search(text)]
 
 
 def extract_citations(text: str) -> list[tuple[str, str]]:
@@ -122,6 +197,12 @@ def build_target_map(
     """Returns (target -> (kind, [citing entry ids in ascending id order]), raw citation log).
 
     The raw log is (entry_id, kind, target) triples in the order discovered, for reporting.
+
+    Every converted roadmap entry is ALSO added as its own unit, kind="entry", ids=[] -- the one
+    document kind whose block never carries a citation line (Stage A/B's per-kind table: a
+    roadmap entry gets Topics, never Roadmap, "it IS one"). No citation pattern in
+    `extract_citations` can ever target a path under audio-adapter/ROADMAP/, so an entry can
+    never collide with a cited target here.
     """
     target_map: dict[str, tuple[str, list[str]]] = {}
     log: list[tuple[str, str, str]] = []
@@ -141,16 +222,27 @@ def build_target_map(
             if entry_id not in ids:
                 ids.append(entry_id)
 
+    for entry_id, path in find_entries(root):
+        rel = path.relative_to(root).as_posix()
+        target_map.setdefault(rel, ("entry", []))
+
     return target_map, log
 
 
-def block_lines(kind: str, ids: list[str]) -> list[str]:
-    label = LABELS[kind]
-    lines = [START]
-    for entry_id in ids:
-        lines.append(f"**{label}:** [[{entry_id}]]")
-    lines.append(END)
-    return lines
+def block_lines(kind: str, ids: list[str], topics: list[str]) -> list[str] | None:
+    """Returns None -- no block at all, never an empty one -- when there is nothing to say:
+    plan-document-graph.md Sec.1's "a line with no values is omitted entirely" rule, extended
+    from citation lines to the whole block now that Topics can also be empty on its own."""
+    body: list[str] = []
+    if topics:
+        body.append("**Topics:** " + " ".join(f"#{t}" for t in topics))
+    if kind in LABELS:
+        label = LABELS[kind]
+        for entry_id in ids:
+            body.append(f"**{label}:** [[{entry_id}]]")
+    if not body:
+        return None
+    return [START, *body, END]
 
 
 def find_h1_index(lines: list[str]) -> int | None:
@@ -206,14 +298,27 @@ def strip_existing_block(lines: list[str]) -> list[str]:
     return lines[:remove_from] + lines[e + 1 :]
 
 
-def regenerate_content(original_text: str, kind: str, ids: list[str]) -> str:
+def _stripped_lines(original_text: str) -> list[str]:
+    """The file's lines with any existing, well-formed doc-provenance block (and its separator
+    blank) removed -- shared by topic-matching (which must match the document's own content, not
+    a block left over from a previous run) and regenerate_content (which rebuilds onto the same
+    stripped base). Raises MalformedBlock on anything that is not exactly one clean block."""
     had_trailing_newline = original_text.endswith("\n")
     lines = original_text.split("\n")
     if had_trailing_newline:
         lines = lines[:-1]
+    return strip_existing_block(lines)
 
-    stripped = strip_existing_block(lines)
-    new_block = block_lines(kind, ids)
+
+def regenerate_content(original_text: str, kind: str, ids: list[str], topics: list[str]) -> str:
+    stripped = _stripped_lines(original_text)
+    new_block = block_lines(kind, ids, topics)
+
+    if new_block is None:
+        # Nothing to say -- no citations and no matching topic tag. The file reverts to its
+        # stripped form rather than keeping a now-empty block (block_lines' own "never an empty
+        # one" rule, applied here to the whole-block case).
+        return "\n".join(stripped) + "\n"
 
     h1_idx = find_h1_index(stripped)
     if h1_idx is not None:
@@ -241,8 +346,10 @@ def collect_ids_in_blocks(text: str) -> list[str]:
 
 def plan(root: Path) -> int:
     target_map, log = build_target_map(root)
+    approved_tags = load_approved_topic_tags(root)
     print(f"doc-provenance: {len(log)} citation(s) found across audio-adapter/ROADMAP/*.md")
-    print(f"doc-provenance: {len(target_map)} distinct cited document(s)")
+    print(f"doc-provenance: {len(target_map)} distinct document unit(s) (cited documents + entries)")
+    print(f"doc-provenance: {len(approved_tags)} approved topic tag(s)")
     known_ids = {entry_id for entry_id, _ in find_entries(root)}
     for target in sorted(target_map):
         kind, ids = target_map[target]
@@ -257,13 +364,21 @@ def plan(root: Path) -> int:
                     file=sys.stderr,
                 )
                 return 1
-        print(f"  [{kind:8s}] {target}  <-  {' '.join(ids)}")
+        try:
+            body_text = "\n".join(_stripped_lines(full_path.read_text(encoding="utf-8")))
+        except MalformedBlock as exc:
+            print(f"doc-provenance: ERROR: {target}: {exc}", file=sys.stderr)
+            return 1
+        topics = topics_for_text(body_text, approved_tags)
+        topics_str = f" topics={topics}" if topics else ""
+        print(f"  [{kind:8s}] {target}  <-  {' '.join(ids)}{topics_str}")
     return 0
 
 
 def refresh(root: Path, write: bool) -> int:
     target_map, _ = build_target_map(root)
     known_ids = {entry_id for entry_id, _ in find_entries(root)}
+    approved_tags = load_approved_topic_tags(root)
 
     # Validate everything first -- no partial writes on a late failure.
     planned: dict[Path, str] = {}
@@ -281,7 +396,9 @@ def refresh(root: Path, write: bool) -> int:
                 return 1
         original = full_path.read_text(encoding="utf-8")
         try:
-            new_text = regenerate_content(original, kind, ids)
+            body_text = "\n".join(_stripped_lines(original))
+            topics = topics_for_text(body_text, approved_tags)
+            new_text = regenerate_content(original, kind, ids, topics)
         except MalformedBlock as exc:
             print(f"doc-provenance-refresh: ERROR: {target}: {exc}", file=sys.stderr)
             return 1
@@ -312,6 +429,7 @@ def refresh(root: Path, write: bool) -> int:
 def gate(root: Path) -> int:
     target_map, _ = build_target_map(root)
     known_ids = {entry_id for entry_id, _ in find_entries(root)}
+    approved_tags = load_approved_topic_tags(root)
     fail = False
 
     with tempfile.TemporaryDirectory(prefix="doc-provenance-gate-") as tmp:
@@ -335,7 +453,9 @@ def gate(root: Path) -> int:
 
             original = full_path.read_text(encoding="utf-8")
             try:
-                new_text = regenerate_content(original, kind, ids)
+                body_text = "\n".join(_stripped_lines(original))
+                topics = topics_for_text(body_text, approved_tags)
+                new_text = regenerate_content(original, kind, ids, topics)
             except MalformedBlock as exc:
                 print(f"doc-provenance-gate: FAIL: {target}: {exc}", file=sys.stderr)
                 fail = True

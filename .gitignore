@@ -34,3 +34,6 @@ graphify-out/
 # Mac Finder-app options
 .DS_Store
 
+# Python bytecode cache -- generated wherever a .claude/scripts/*.py is run directly
+# (doc_provenance.py, doc_tags.py, ...), never worth tracking.
+__pycache__/

@@ -500,3 +500,218 @@ defers that to a later, separate decision.
   path**, not the first. A single-run review of generated output would have looked correct; the
   idempotency proof (run twice, diff/checksum) is what caught it, consistent with this project's
   "a counterfactual is evidence only if you ran it" standard.
+
+### Implementation Summary — Stage A (2026-10-07)
+
+Implemented Stage A from `plans/obsidian-links-and-tags/plan-document-graph.md`: the topic-tag
+vocabulary rule, the proposer, and the generator/gate extension to carry topic tags in the same
+block the provenance lines already occupy. **Built and proven; nothing tagged.** Per the task's
+explicit stop point, `docs/TAGS.md` gains no topic rows this round and no document gains a topic
+tag — the committed tree is byte-identical to before this round everywhere except the four files
+below, and the generator/gate mechanism was proven against a scratch copy outside the repo, then
+discarded. Branch tip before this round: `d4b3efb` (fast-forwarded into this worktree — see
+handoff note below).
+
+### Files Changed
+
+- `docs/TAGS.md` — rewrote the `#topic/*` admission rule: "crosses at least two subprojects"
+  (wrong axis, zero members) replaced with three rules — crosses at least two *document kinds*,
+  lands in the measured 3–25 band, flat spelling. Closed-vocabulary argument kept in substance.
+  Format changed from a table to one short section per tag (a `|` inside a match-pattern table
+  cell is exactly the two-spellings footgun this file warns about).
+- `.claude/scripts/doc_tags.py` — **new.** The proposer's logic. `all_units()` enumerates every
+  document unit of the four in-scope kinds repo-wide (239 measured live, close to the plan's
+  243 — the plan's own roadmap-entry count of 23 included the index file, 22 is correct);
+  `in_scope_units()` is Stage A's own 35 (22 `audio-adapter/ROADMAP/AA-*.md` + the 13 documents
+  already carrying a doc-provenance block, detected by checking each unit's own representative
+  file for the literal block, never a directory-wide text search — see "Notable Discoveries").
+  `harvest_occurrences()` gathers candidates from exactly the three sources the plan names
+  (graphify community/concept-node labels — borrowed from the main checkout's graph the same way
+  `gq.sh` does, since `graphify-out/` is gitignored and absent from this worktree; ID-shaped
+  hardware/jargon tokens; capitalised multi-word phrases) in one pass that doubles as the
+  repo-wide measurement, deliberately never re-scanning per candidate (see "Performance" below).
+  `measurement_from_occurrence()` turns one candidate's occurrence set into both counts the task
+  asked for — repo-wide (admission) and in-scope (worth emitting now) — kept as two separate
+  fields throughout rather than blended.
+- `.claude/scripts/doc-tags-propose.sh` — **new.** Thin wrapper (`doc_tags.py propose` /
+  `measure <term>`), matching the `doc-provenance-*` family's shape.
+- `.claude/scripts/doc_provenance.py` — **extended**, not replaced. `build_target_map()` now also
+  adds every converted roadmap entry as its own document unit (`kind="entry"`, no citation ids —
+  "it IS one," per the plan's per-kind table). `block_lines()` takes a `topics` list and returns
+  `None` (no block at all) when there is nothing to say, extending the existing "a line with no
+  values is omitted entirely" rule from citation lines to the whole block. `regenerate_content()`
+  reverts a document to its stripped form when `block_lines` returns `None`, rather than leaving
+  the block structurally present with empty content, since Stage A's own real run depends on that
+  (zero approved tags → every Topics line empty → every block must either already carry a
+  citation or not exist at all). `load_approved_topic_tags()` reads `docs/TAGS.md`'s per-tag
+  sections fresh on every run — the vocabulary is enforced here, not just documented in prose.
+- `.claude/scripts/roadmap-tag-vocabulary-gate.sh` — extended past `*/ROADMAP/` to a second file
+  group: any document whose own text (after this gate's existing fence-strip) still contains the
+  literal `<!-- doc-provenance:start -->` delimiter, discovered via `grep -rl` rather than
+  enumerated. The fence-strip-then-recheck step is load-bearing, not incidental — see "Notable
+  Discoveries."
+- `.gitignore` — added `__pycache__/`. `doc_tags.py` is a second script run directly in this
+  directory; running it created an untracked `__pycache__/` that nothing previously ignored.
+
+### Tests / proofs (no automated test suite in `.claude/scripts/`, per this family's own
+convention — `doc-provenance-gate.sh`'s own header note applies here too: proofs are gate runs
+and scratch-copy demonstrations, not pytest)
+
+- **Vocabulary-gate false-positive fix, proven by mutation**: before the fix, `load_approved_tags`
+  (doc_tags.py) and `load_approved_topic_tags` (doc_provenance.py) both read `docs/TAGS.md`'s own
+  "Format" example — a `### \`#SPU-8\`` section written *inside a fenced code block* to illustrate
+  the convention — as a real approved tag. Caught by running `doc_provenance.py plan` against the
+  committed tree and seeing `1 approved topic tag(s)` when the prose says "None approved yet."
+  Fixed by fence-stripping `docs/TAGS.md` before scanning for `### #tag` sections (mirroring
+  `roadmap-tag-vocabulary-gate.sh`'s own existing fence handling, odd-count-fails-loudly included)
+  in both modules; re-ran `plan` and confirmed `0 approved topic tag(s)`.
+- **`candidate_pattern` regex-escaping bug, found by reading generated output, not by
+  inspection**: `re.escape("SPU-8")` produces the literal two characters `\-`; substituting for a
+  bare `-` afterwards matches only the second character, leaving `\bSPU\[- ]?8\b` in
+  `docs/TAGS.proposals.md` — compiles and runs without error, matches the wrong text. Fixed by
+  splitting on hyphen/space first and escaping each part before rejoining
+  (`candidate_inner_pattern`/`candidate_pattern`). Re-ran `doc-tags-propose.sh measure SPU-8` and
+  confirmed 18 units repo-wide, matching the plan's own independent measurement exactly.
+- **Performance**: the first version of `harvest_occurrences` also harvested every lowercase word
+  with document-frequency ≥3 (thousands of candidates on a 239-unit corpus) and then re-scanned
+  the whole corpus per candidate for the repo-wide count — over two minutes of 100% CPU with no
+  completion, killed by hand. Two independent fixes: (1) record occurrence sets during the single
+  harvest pass instead of re-scanning per candidate (`harvest_occurrences` now doubles as the
+  measurement); (2) drop the generic word-frequency source entirely — it is not one of the plan's
+  three named sources, and a project's own documentation is dense enough with generic nouns
+  ("panel", "delay", "press") that document-frequency ≥3 alone cannot tell a topic from ordinary
+  prose. After both fixes: ~239 units, 46 in-band candidates, runs in under 10 seconds.
+- **Boilerplate precision filter, found by reading the first clean run's output**: even after
+  dropping word-frequency harvesting, Title-Case section *headings* repeated across every
+  `dod-check.md`/`review.md`/`security-*.md` ("Second-Order Effect", "Milestone Completion",
+  "Content-Length") surfaced as spurious candidates, both as literal ATX headings and as inline
+  cross-references to them ("see Optional Refinements below"). Fixed with an ATX-heading strip
+  before harvesting plus a `_PROCESS_VOCAB` denylist of ~20 known structural terms — a precision
+  filter on cross-cutting document-template vocabulary, not a hand-seeding of real topic
+  candidates (no domain term like `SPU-8`/`BTR-70`/`aircraft-manipulation` is in that list).
+- **`doc-provenance-gate.sh`/`doc-provenance-refresh.sh` against the real committed tree, with
+  zero approved tags**: `refresh`/`check` report "nothing to change"; `gate` reports `OK`;
+  `git status --porcelain` stays empty around both runs. This is the task's own acceptance
+  condition for the real tree, run and confirmed rather than assumed from the code.
+- **Scratch-copy proof the mechanism works** (`git archive`-equivalent: a plain recursive copy of
+  this worktree to a scratchpad directory outside the repo, since the copy's own `.git` file
+  resolves `git rev-parse --show-toplevel` to the copy's own path, verified before any write):
+  added two `### #tag` sections to the scratch copy's `docs/TAGS.md` (`#SPU-8`,
+  `#aircraft-manipulation`, both marked "SCRATCH-RUN-ONLY, not a real approval" in their own
+  one-line descriptions) and ran `doc_provenance.py refresh`. 12 files gained a `**Topics:**`
+  line — `AA-3` and 11 others matching `#SPU-8` (none matched `#aircraft-manipulation`, which is
+  a real finding, not a bug: `AA-3`'s own text never spells it that way, consistent with the
+  plan's observation that `#SPU-8` and `#aircraft-manipulation` are two separate tags).
+  `plans/inbound-speech/plan.md`'s block gained a Topics line alongside its two existing
+  `**Decision for:**` lines, confirming "same block, one more line" rather than a second block.
+  A second `refresh` reported "nothing to change" (idempotent); both `doc-provenance-gate.sh` and
+  `roadmap-tag-vocabulary-gate.sh` reported `OK` against the scratch-approved vocabulary. The
+  scratch copy was then deleted in full; `git status --porcelain` on the real worktree was
+  unaffected throughout (confirmed before and after).
+- `bash -n` clean on `doc-tags-propose.sh`, `doc-provenance-refresh.sh`, `doc-provenance-gate.sh`,
+  `roadmap-tag-vocabulary-gate.sh`, `roadmap-entry-consistency-gate.sh`.
+- `python3 -c "import ast; ast.parse(...)"` clean on `doc_tags.py`, `doc_provenance.py`.
+- `.claude/scripts/doc-provenance-gate.sh` → `OK`. `.claude/scripts/roadmap-tag-vocabulary-gate.sh`
+  → `OK` (both the entry-file group and the new block-carrying-document group). `.claude/scripts/
+  roadmap-entry-consistency-gate.sh` → `OK`. `.claude/scripts/push-roadmap-gate.sh` → exit 0 (with
+  `CLAUDE_PROJECT_DIR` set explicitly, same pre-existing unbound-without-it behaviour Stage A0
+  noted, unrelated to this change). `.claude/scripts/graphify-dirty-flag.sh` → exit 0.
+- audio-adapter checks, via the main checkout's sibling `.venv` (no `audio-adapter/src` or
+  `tests` file is touched by this round — `git diff --stat audio-adapter` is empty):
+  - `ruff format --check .` — 63 files already formatted
+  - `ruff check .` — all checks passed
+  - `mypy --strict src` — no issues, 15 source files
+  - `pytest -q` — 222 passed, 1 skipped
+
+### Candidate table
+
+**Final measurement, taken against the committed tree after this very section was written** —
+`plans/obsidian-links-and-tags/` is itself a plan unit, and this section's own prose (candidate
+names, counts) feeds back into the next measurement of the same corpus. Rather than report a
+table that could not be reproduced by re-running the tool against what actually got committed,
+this is the number `doc-tags-propose.sh` reports *after* this file reached its final form —
+confirmed by re-running it once more following the last edit below and diffing `docs/
+TAGS.proposals.md` byte-for-byte against what is committed.
+
+239 document units measured repo-wide, 35 in Stage A's scope:
+
+| candidate | repo-wide | by kind | in-scope |
+|---|---|---|---|
+| `#SPU-8` | 17 | 2 roadmap, 5 research, 5 acceptance, 5 plan | 13 |
+| `#NET-1` | 6 | 1 roadmap, 2 research, 1 acceptance, 2 plan | 5 |
+| `#NET-2` | 4 | 1 roadmap, 2 research, 1 plan | 3 |
+| `#russian-accented-english` | 3 | 1 roadmap, 1 research, 1 plan | 3 |
+| `#BTR-70` | 19 | 7 research, 4 acceptance, 8 plan | 2 |
+| `#apple-silicon` | 3 | 3 research | 2 |
+| `#mission-scripting` | 20 | 18 research, 2 plan | 1 |
+| `#ZSU-23` | 19 | 5 research, 4 acceptance, 10 plan | 1 |
+| `#SA-3` | 18 | 6 research, 3 acceptance, 9 plan | 1 |
+| `#BMP-2` | 17 | 2 research, 1 acceptance, 14 plan | 1 |
+| `#ZU-23` | 16 | 4 research, 5 acceptance, 7 plan | 1 |
+| `#ASP-17` | 9 | 1 roadmap, 5 research, 3 plan | 1 |
+
+12 shown (batch size), 34 more in-band (not expanded — mostly further Soviet/DCS unit designators:
+`#BMP-1`, `#BM-21`, `#BTR-60`, `#BMD-1`, `#SA-10`/`#SA-15`/`#SA-2`/`#SA-6`/`#SA-8`/`#SA-9`/`#SA-13`,
+`#BTR-80`, `#BM-27`/`#BM-30`, `#ASP-17V`, `#2K12`, `#KS-19`, `#ZPU-4`; plus `#mission-editor`,
+`#world-model-builder`, `#petrobrain-runtime`, `#mission-understanding`, `#windows-python`,
+`#transverse-mercator`, `#douglas-peucker`, `#low-blow`, `#give-petrovich`, `#IEEE-754`,
+`#LGPL-3`, `#eagle-dynamics`, `#jabal-ansariyah`, `#new-hook`, `#sivas-province`). 2 TOO BROAD
+(`#9K113` 43, `#saved-games` 38 — both split-before-proposing, not process-vocab misses). 739 TOO
+NARROW (<3 units, compact). 6 ALREADY-SAID (every subproject's own directory name). Full ranked
+output and both counts for every in-band candidate: `docs/TAGS.proposals.md` (the 12 shown above,
+in the section format ready to promote).
+
+The slight upward drift from the mid-implementation measurement quoted in "Notable Discoveries"
+below (`#NET-1` 5→6, `#BTR-70` 18→19, …) is this section's own text joining the corpus it
+measures — `#NET-1`/`#NET-2` pick up one more `plans/obsidian-links-and-tags/plan.md`-unit match
+because this very file (`implementation.md`) is a sibling in that plan directory, and the unit is
+matched as a whole. Harmless and expected, not a bug: the mid-implementation numbers in "Notable
+Discoveries" are quoted because they are what the fixes below were verified against at the time,
+not because they are the final answer.
+
+### Notable Discoveries
+
+- **"In-scope" cannot be `grep -rl` for the delimiter directly.** Two files
+  (`docs/DOC_CONVENTIONS.md`, `plans/obsidian-links-and-tags/implementation.md` — this very file)
+  *quote* `<!-- doc-provenance:start -->` as documentation, inside a fenced example, and a naive
+  `grep -rl` lists both alongside the 13 real provenance-bearing documents. Both `doc_tags.py`'s
+  `has_provenance_block` (checks only the unit's own representative file, never a whole-directory
+  text search — `plans/obsidian-links-and-tags/plan.md` itself has zero occurrences even though
+  its sibling `implementation.md` has thirteen) and the tag-vocabulary gate's new file group
+  (fence-strips first, then re-checks the delimiter survives) independently exclude both, and both
+  were verified against this exact pair of files, not assumed correct from the code.
+- **The task's instruction to reuse `docs/TAGS.md`'s pattern convention cuts both ways.** The
+  `Matches:` value in `docs/TAGS.proposals.md` and in `docs/TAGS.md`'s own example (`SPU-?8`) is
+  the *inner* pattern with no `\b` word-boundary wrapping — `load_approved_topic_tags` and
+  `load_approved_tags` both add that wrapping themselves when compiling. The regex-escaping bug
+  above was found precisely because the first version emitted the *wrapped* form into the
+  proposals file, which read as `\bSPU\[- ]?8\b` and immediately looked wrong next to the
+  documented example.
+- **A roadmap entry's own block is genuinely different in shape from every other kind's**: no
+  label line is ever possible (an entry is never "cited" by anything the generator tracks), so
+  `block_lines` returning `None` for an entry with no matching topic is the *common* case today
+  (22 of 22), not an edge case — every other kind's block always has at least one citation line
+  and so never exercises the "nothing to say" path in the real tree, only the scratch run.
+- **`#9K113`'s 43-unit TOO BROAD reading is a real hardware designator** (the 9K113 Shturm ATGM,
+  mentioned across many research/plan documents) and would need splitting by context before it
+  could be proposed, same treatment as `#audio` in the parent plan — not a harvester defect.
+  `#saved-games` (38) is DCS's own filesystem concept (the `Saved Games/` folder) and is genuinely
+  a hub, not boilerplate. Both are correctly reported TOO BROAD rather than silently dropped: the
+  tool's job is to measure and band, not to decide a broad term is wrong to have found.
+- **A document that merely quotes the provenance delimiter can carry it two different ways, and
+  the gate's own fence-strip only caught one.** `roadmap-tag-vocabulary-gate.sh`'s new group-(b)
+  discovery excludes a quoting document by checking the delimiter does not survive a fence-strip
+  — correct for `docs/DOC_CONVENTIONS.md`'s and this very `implementation.md`'s *earlier* fenced
+  examples, but this round's own new prose quotes the delimiter a second way, inside a
+  single-backtick inline code span rather than a ``` block (" the literal `<!-- doc-provenance:
+  start -->` delimiter"). A block-fence-only strip leaves that survive, which pulled this file
+  into tag-scanning and surfaced an unrelated 10-year-old-in-project-time false positive: a
+  fence-mutation-test transcript earlier in the same file, documenting a literal
+  `#fenced-code-tag` test string, whose own run of stray ``` markers happened to leave it
+  unstripped by the simple toggle. Found by running the gate against the real committed tree
+  after writing this very paragraph, not by inspection — exactly the self-referential trap this
+  file's own "Candidate table" section above calls out for the corpus measurement, now showing
+  up in the gate too. Fixed by stripping inline code spans in the real-block check as well
+  (the same two-step strip `scan_file` already uses), which is the more general fix and the one
+  that should have been there from the start, since "a quote survives one stripping step but not
+  two" was never a property specific to fenced examples.
