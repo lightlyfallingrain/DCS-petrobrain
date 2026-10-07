@@ -1,11 +1,24 @@
 #!/bin/bash
-# Tag-vocabulary check for split roadmap/backlog entries (docs/DOC_CONVENTIONS.md).
+# Tag-vocabulary check for split roadmap/backlog entries AND every document carrying a
+# doc-provenance block (docs/DOC_CONVENTIONS.md, docs/TAGS.md).
 #
-# Every inline #tag found in a converted entry file (*/ROADMAP/*.md, todo/backlog/*.md -- index
-# files excluded, since the convention is tags live on entries, never on the index) must appear
-# as a row in docs/TAGS.md. An unlisted tag fails loudly: the whole point of a closed vocabulary
-# is that "grep finds nothing tagged X" is trustworthy, which breaks the moment a tag can be
-# spelled two ways with nothing catching the second spelling.
+# Every inline #tag found in (a) a converted entry file (*/ROADMAP/*.md, todo/backlog/*.md --
+# index files excluded, since the convention is tags live on entries, never on the index), or
+# (b) any document carrying a real <!-- doc-provenance:start --> block (a research note, an
+# acceptance card, a plan.md -- the generator's Topics: line lands there too, per
+# plan-document-graph.md Sec.1/Sec.3) must appear as a row in docs/TAGS.md. Extended past (a) to
+# (b) deliberately (Stage A/B task spec): a tag can now land anywhere the generator writes a
+# block, not only on a roadmap entry, so the gate's reach has to match the generator's.
+# An unlisted tag fails loudly: the whole point of a closed vocabulary is that "grep finds
+# nothing tagged X" is trustworthy, which breaks the moment a tag can be spelled two ways with
+# nothing catching the second spelling.
+#
+# "Carrying a real block" is deliberately not "grep -l the delimiter": docs/DOC_CONVENTIONS.md
+# and plans/obsidian-links-and-tags/implementation.md both *quote* the delimiter, inside a fenced
+# example, as documentation of the convention -- neither is a document the generator has ever
+# written to. A file only enters group (b) if the delimiter survives this gate's own fence-strip
+# (the same strip already used for tag-scanning below), i.e. the delimiter appears in real prose,
+# not inside a ``` fence.
 #
 # Before scanning, fenced code blocks, inline code spans, and URLs are stripped from each file's
 # content -- a `#` inside any of those reads as a tag to a naive regex but is not one: a code span
@@ -41,6 +54,39 @@ fi
 known=$(grep -ohE '`#[A-Za-z0-9/_-]+`' "$TAGS_FILE" | tr -d '`' | sort -u)
 
 FAIL=0
+
+# Scans one file for #tags, fence/code-span/URL-stripped, against $known. Shared by both file
+# groups below so the two get identical treatment -- the fence-handling comments above apply to
+# both, and nothing in this function cares which group found the file.
+scan_file() {
+    f="$1"
+    # An odd number of fence delimiters means the file has an unclosed fence -- fail loudly
+    # rather than let the fence-stripping below silently swallow the rest of the file (see
+    # header comment). Leading whitespace is allowed so an indented fence still counts.
+    fence_count=$(grep -cE '^[[:space:]]*```' "$f")
+    if [ $((fence_count % 2)) -ne 0 ]; then
+        FAIL=1
+        echo "roadmap-tag-vocabulary-gate: $f -- unbalanced fenced code block ($fence_count delimiter(s)) -- cannot safely scan for tags" >&2
+        return
+    fi
+    # Strip fenced code blocks, inline code spans, and URLs before scanning -- a "#" inside
+    # any of those is not a tag (see header comment). A tag starts with a letter -- "#1",
+    # "RECOMMENDED #1" etc. are ordinals in prose, not tags, and must not trip this gate
+    # (found live on the first real conversion, 2026-10-06). The fence match tolerates
+    # leading whitespace so a fence indented inside a list item is still recognized as one.
+    used=$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } { print }' "$f" \
+        | sed -E 's/`[^`]*`//g' \
+        | sed -E "s#https?://[^][:space:]\")'>]*##g" \
+        | grep -ohE '#[A-Za-z][A-Za-z0-9/_-]*' | sort -u)
+    for tag in $used; do
+        if ! printf '%s\n' "$known" | grep -qxF "$tag"; then
+            FAIL=1
+            echo "roadmap-tag-vocabulary-gate: $f -- tag $tag not listed in $TAGS_FILE" >&2
+        fi
+    done
+}
+
+# Group (a): converted entry files, as before.
 DIRS=""
 for d in */pyproject.toml; do
     sub="${d%/pyproject.toml}"
@@ -48,39 +94,36 @@ for d in */pyproject.toml; do
 done
 [ -d todo/backlog ] && DIRS="$DIRS todo/backlog"
 
-[ -z "$DIRS" ] && exit 0
-
 for dir in $DIRS; do
     for f in "$dir"/*.md; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
         # Skip index files (not entries, and not subject to the tag-on-checkbox rule).
         printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
-        # An odd number of fence delimiters means the file has an unclosed fence -- fail loudly
-        # rather than let the fence-stripping below silently swallow the rest of the file (see
-        # header comment). Leading whitespace is allowed so an indented fence still counts.
-        fence_count=$(grep -cE '^[[:space:]]*```' "$f")
-        if [ $((fence_count % 2)) -ne 0 ]; then
-            FAIL=1
-            echo "roadmap-tag-vocabulary-gate: $f -- unbalanced fenced code block ($fence_count delimiter(s)) -- cannot safely scan for tags" >&2
-            continue
-        fi
-        # Strip fenced code blocks, inline code spans, and URLs before scanning -- a "#" inside
-        # any of those is not a tag (see header comment). A tag starts with a letter -- "#1",
-        # "RECOMMENDED #1" etc. are ordinals in prose, not tags, and must not trip this gate
-        # (found live on the first real conversion, 2026-10-06). The fence match tolerates
-        # leading whitespace so a fence indented inside a list item is still recognized as one.
-        used=$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } { print }' "$f" \
-            | sed -E 's/`[^`]*`//g' \
-            | sed -E "s#https?://[^][:space:]\")'>]*##g" \
-            | grep -ohE '#[A-Za-z][A-Za-z0-9/_-]*' | sort -u)
-        for tag in $used; do
-            if ! printf '%s\n' "$known" | grep -qxF "$tag"; then
-                FAIL=1
-                echo "roadmap-tag-vocabulary-gate: $f -- tag $tag not listed in $TAGS_FILE" >&2
-            fi
-        done
+        scan_file "$f"
     done
+done
+
+# Group (b): any document carrying a real doc-provenance block (docs/DOC_CONVENTIONS.md's
+# "Document provenance" section) -- discovered, not enumerated, since the generator can write
+# this block onto any research note, acceptance card, or plan.md, in any subproject. A fast
+# `grep -l` net catches files that merely *quote* the delimiter as documentation too -- found
+# live, both inside a fenced example (docs/DOC_CONVENTIONS.md, this plan's own implementation.md)
+# and inside a single-backtick inline code span (this implementation.md's own description of
+# this very extension, added in the same round: "the literal `<!-- doc-provenance:start -->`
+# delimiter"). A block-fence-only strip catches the first kind and misses the second, so the
+# real-block check below strips BOTH fenced blocks and inline code spans before re-checking for
+# the delimiter -- the same two steps `scan_file` already applies before its own tag scan, not a
+# narrower check.
+candidates=$(grep -rl '<!-- doc-provenance:start -->' --include='*.md' . 2>/dev/null \
+    | grep -vE '^\./\.claude/|^\./\.git/' | sed 's|^\./||' | sort -u)
+for f in $candidates; do
+    [ -f "$f" ] || continue
+    real_block=$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } { print }' "$f" \
+        | sed -E 's/`[^`]*`//g' \
+        | grep -c '<!-- doc-provenance:start -->')
+    [ "$real_block" -gt 0 ] || continue
+    scan_file "$f"
 done
 
 [ "$FAIL" -eq 0 ] && echo "roadmap-tag-vocabulary-gate: OK"
