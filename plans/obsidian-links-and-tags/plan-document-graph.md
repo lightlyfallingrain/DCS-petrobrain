@@ -401,7 +401,35 @@ grows — in a project whose recurring failure is a convention outliving the fil
 
 ---
 
+## Decisions taken — user, 2026-10-07
+
+All five answered. **Each is settled; do not re-open them.** The originals are kept below so the
+reasoning that produced each answer stays attached to it.
+
+| # | decision | answer |
+|---|---|---|
+| 1 | split `#audio` | **yes** |
+| 2 | topic tags move into the generated block | **yes** (revises the parent plan) |
+| 3 | generator may write into 128 dated records | **yes** |
+| 4 | typed edges hand-written | **yes**, Stage C happens |
+| 5 | stop after Stage B | **yes** — stop and look at the real graph |
+
+**And one correction that outranks the sketch:** *"The drawing is example, not final truth."* So
+`sketch-document-graph.jpg` is an illustration of the shape wanted, **not a specification to satisfy
+literally**. Do not treat its particular tags, nodes or edges as requirements — `#audio` splitting
+into `#audio-playback`/`#audio-volume` is a correction *of* the drawing, and that is allowed and
+expected. The explore notes' framing of the sketch as "the specification" is superseded by this.
+
+**Scope: audio-adapter only, again.** *"Still limit to audio adapter, I want to see it in small
+scale before using the effort on whole repo."* Same reasoning as Stage 1's limited-scale test — the
+22-file conversion is what surfaced the tag-regex bug and the stale corpus baseline, and 151 units
+is not a small-scale test.
+
+---
+
 ## Decisions requiring user input
+
+**Answered above, 2026-10-07. Retained for the reasoning.**
 
 1. **`#audio` has to be split, and it is in your sketch.** It would connect 80 documents, which is
    the hub you were worried about. Measured alternatives: `#audio-playback`, `#audio-volume`,
