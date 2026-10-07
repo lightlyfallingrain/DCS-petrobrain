@@ -346,6 +346,50 @@ roadmap links. Every hub is 3–25 by construction — that is what the band is 
 
 Every stage leaves the repo working and the convention coherent.
 
+### Stage A0 — provenance first, from citations that already exist (2026-10-07)
+
+**Inserted ahead of Stage A, and it reorders the feature.** The user named the question the whole
+Obsidian effort is actually for:
+
+> *"The underlying question in all this obsidian work is 'how did we get here?' And 'what
+> information brought us here?' The 'here' most often being a roadmap item. Similarly for
+> not-yet-done items, what gets us there and based on what information."*
+
+**Topic tags are a weak proxy for that.** `#SPU-8` says *related to*; it does not say *this recon is
+why AA-3 exists*. Provenance is a typed, directional, causal relation, and tags cannot express it.
+
+**And it is already written down, in prose, for a third of the entries.** Measured over the 22
+converted entries: **7 cite a plan, research note or acceptance card; 15 cite nothing.** `AA-3` is
+the rich case and every path it names is a real answer — the recon that found the cockpit args, the
+probe that confirmed them, the sortie that accepted it, the plan that decided it. Lifting an
+existing prose mention into a structured link **infers nothing**, which is why this goes first: it
+is the highest-confidence, lowest-risk part of the feature, and it answers the question directly.
+
+**Scope (user, 2026-10-07): the entry set is audio-adapter's 22; the document set is whatever those
+entries already cite.** No sweep of other subprojects, no judgement about relevance — the entries
+nominate their own evidence. This is ~8–10 external documents, and **they are mostly outside
+`audio-adapter/`** (AA-3's five citations are two in `aircraft-layer/research/`, two in
+`docs/acceptance/`, one plan directory). That is not a scope violation: "stay in audio-adapter" and
+"how did we get here" pull against each other, because the evidence for an audio-adapter entry is
+simply not stored in audio-adapter, and the entry nominating it is what keeps the set bounded.
+
+1. **Fix R1 first** — the consistency gate's per-directory ID set. No longer theoretical: this stage
+   creates exactly the cross-subproject `[[AA-3]]` links that trip it.
+2. **The cited document states the relation**, not the entry — §1's rule, and it survives here.
+   Backlinks give `AA-3` its reverse list for free, documents stay off the link-target side so
+   renames and deletions stay free, and the entry files (the churn) are not edited at all.
+3. **Typed by the citing document's kind**, since the type is what makes this answer the question:
+   a research note is evidence, an acceptance card is a flight, a plan is a decision. Exact wording
+   is the implementer's, inside the delimited block.
+4. **Stop point, and the user asked for it explicitly** — *"Do this stage first, then let's stop and
+   inspect."* Open `AA-3` in Obsidian and read its backlinks: is the provenance chain there, and does
+   it answer *how did we get here*? Stage A's vocabulary work is judged on what that looks like.
+
+**The honest limit: 15 of 22 entries have no citation at all**, so for them this stage produces
+nothing and the answer is not in the documents. Those entries do name branches
+(`feature/spu8-intercom`), so git history could supply a weaker, inferred answer later — that is not
+this stage, and it should not be attempted until the citation-based version has been judged.
+
 ### Stage A — the vocabulary, with nothing generated
 1. Fix R1 (union-of-IDs in the consistency gate). Independent of everything else here.
 2. Rewrite `docs/TAGS.md`: new rule, per-tag section format, the closed-vocabulary argument kept.
