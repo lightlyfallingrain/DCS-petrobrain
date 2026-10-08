@@ -1783,8 +1783,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   gated by a new optional parameter that defaults to the old always-full behaviour.
 
 - [ ] **BL-11 — Tick cost, and making silent degradation visible. PARTIALLY DONE — Stages 1, 2, 3b
-  and 5 DoD PASSED on bench measurement 2026-10-06 (`feature/bl11-tick-cost`); Stages 3a, 4 and 6
-  remain.** Filed 2026-10-05.
+  and 5 DoD PASSED on bench measurement 2026-10-06 (`feature/bl11-tick-cost`); Stage 4's steps 2 and
+  2b DoD PASSED and flown 2026-10-08 (`fix/los-hook-statics`); Stage 3a, Stage 4 steps 3-4, and
+  Stage 6 remain.** Filed 2026-10-05.
 
   **The milestone's headline number is met.** Measured at the branch tip on real
   `syria-full.sqlite`, 440 objects, 10 km bubble, 300 polls
@@ -2061,8 +2062,18 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
   **The order is forced, and getting it wrong blinds Petrovich.** Measured from the sortie trace
   during the explore: **323 of 425 admitted objects never received a live verdict once**, while
-  2,602 of 2,621 polls carried *some* verdict. So failing closed today would drop 76 % of objects.
-  Join first, fallback removal second.
+  2,602 of 2,621 polls carried *some* verdict. So failing closed *at that time* would have dropped
+  76 % of objects. Join first, fallback removal second.
+
+  **That 76 % is now stale, and this is the sentence not to read forward.** Step 2 shipped and flew
+  2026-10-08: statics now receive verdicts, which was the whole cause of the no-verdict population.
+  The blocker on step 3 is therefore no longer "most objects have no verdict" — it is that **a
+  static's verdict has never been observed reaching a tracked contact downstream**. The wire shape
+  and join key were verified unchanged (a static is indistinguishable from a unit on the wire; the
+  body-layer join at `naked_eye_source.py` is a pure `unit_name` match with no unit/static branch),
+  so the mechanism is sound on inspection and unobserved in flight. **One sortie with
+  `--detection-trace` settles it, and that is what step 3 now waits on** — not a re-measurement of
+  coverage.
 
   **ANSWERED AND PARTLY WRONG — the probe flew 2026-10-06, twice.** Full evidence:
   `aircraft-layer/research/2026-10-06-unit-id-join-results.md`. Steps 1 and 2 as originally written
@@ -2075,7 +2086,24 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      not, excluding outcome B and the MIST respawn risk) — **but it does not exist on
      `StaticObject`, `<NONE>` in 94/94**, so no integer key spans both populations and an integer
      join would be units-only for no gain. **Keep the name join.**
-  2. **The real mechanism: the Hook never enumerates statics.**
+  2. **[x] DONE and FLOWN 2026-10-08 — the real mechanism was that the Hook never enumerated
+     statics.** Shipped on `fix/los-hook-statics`, DoD PASSED, merged. Live confirmation from the
+     user's 2026-10-08 sortie: open terrain `objects_in_wedge=49` of which **42 statics**, city
+     `objects_in_wedge=152` of which **113 statics**, `static_enum_failures=0` and
+     `unit_enum_failures=0` throughout — so both enumerations run and `cap_hit` is trustworthy rather
+     than biased toward 0 by a silent failure. Security's deep analysis also found and closed a
+     delimiter hole on the way (a `;` in any mission-author object name discarded the whole poll's
+     verdicts; now dropped per-object and counted as `name_rejects` on the scan line).
+
+     **The statics turned out to be contacts, emphatically.** Counted from the flown mission's own
+     Lua (`MI24-outpost-M03.miz`, 388 statics): 120 infantry, 65 tanks, 70 APCs, 8 ZSU-23-4 Shilka,
+     60 parked aircraft, 21 `big_smoke`, ~12 carrier crew — and **zero buildings**. An in-flight
+     reading that the city population was buildings was tested against the mission and refuted;
+     filtering on it would have blinded Petrovich to exactly the contacts he exists to call. `BL-B42`
+     carries that record, including the user's direction that `big_smoke` stays too, since smoke works
+     as a landmark for referencing.
+
+     Original diagnosis, kept because the error is instructive:
      `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua:261-263` walks
      `coalition.getGroups()` → `grp:getUnits()`, so static objects cannot appear in a result at all —
      **278 of 404 objects, 68.8 %**, in the sortie's own mission. That is the same fact as the
@@ -2091,9 +2119,19 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      anomaly was read as evidence for the first. A hypothesis that explains an anomaly is not thereby
      the mechanism.
 
-  2b. **Re-measure the sightline cap and bridge cost — now unmeasured.** The pre-statics figures were
-     median 43 / max 71 units per result against a 128 cap, `bridge_call_ms` ~1 ms. Adding ~278
-     candidate statics may reach that cap for the first time. Do not carry the old headroom forward.
+  2b. **[x] ANSWERED 2026-10-08 by the sortie — the cap binds, and the cost says what to do about
+     it.** Over Damascus: `objects_in_wedge=152`, `sightlines_computed=128`, **`cap_hit=1`**, 24
+     farthest candidates dropped. The nearest-first sort means the loss is the far tail, the right
+     failure direction, but it is a real truncation now rather than a hypothetical one.
+
+     `bridge_call_ms` is ~2 ms semi-open, ~5 ms over the city, **27 ms at maximum** — so ~0.21 ms per
+     sightline across two engine calls each. At 60 fps that makes today's 128 cap already ~1.6 frames
+     of work in one poll, 152 would be ~1.9 and 256 ~3.2. **So the cap must not simply rise**;
+     covering the whole city wedge in one poll would make the poll the hitch this sortie proves it is
+     not. The direction is to **amortise** — a per-poll budget near one frame, nearest candidates
+     every poll, and a rotating offset through the far tail. Tracked as `BL-B42`, needs `/explore`
+     before an Architect pass. An earlier "2.6× headroom" estimate taken from one open-terrain poll
+     was refuted by this flight; do not carry it forward either.
 
   3. **Then fail closed**: no live verdict means not admitted, and `world-model`'s
      `line_of_sight_clear` is not called from the live path. Keep it for offline tests
