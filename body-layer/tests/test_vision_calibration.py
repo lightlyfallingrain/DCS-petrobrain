@@ -416,6 +416,12 @@ def _line_candidates(
             z=(i - (count - 1) / 2.0) * spacing_m,
             alt_m=500.0,
             is_ownship=False,
+            # `live_los_clear=True` (`plans/bl11-stage4-fail-closed/
+            # plan.md`, `BL-11` Stage 4 step 3): gate 4 now rejects a
+            # `None` verdict outright, and these candidates are meant to
+            # clear every gate but the angular-radius/group-salience one
+            # this ladder actually tests.
+            live_los_clear=True,
         )
         for i in range(count)
     ]
@@ -589,6 +595,7 @@ def test_group_salience_does_not_affect_medres_or_hires_thresholds() -> None:
         z=0.0,
         alt_m=500.0,
         is_ownship=False,
+        live_los_clear=True,
     )
     hires_candidate = WorldObjectCandidate(
         object_id=7001,
@@ -597,6 +604,7 @@ def test_group_salience_does_not_affect_medres_or_hires_thresholds() -> None:
         z=0.0,
         alt_m=500.0,
         is_ownship=False,
+        live_los_clear=True,
     )
 
     for group_salient in (False, True):

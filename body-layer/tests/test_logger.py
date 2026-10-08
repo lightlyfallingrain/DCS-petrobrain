@@ -625,7 +625,11 @@ def _t72_world_object() -> dict[str, Any]:
     # lat_deg/lon_deg pass straight through as x/z (mirrors
     # test_naked_eye_source.py's own fixture posture) -- 500 m dead ahead of
     # the ownship above, well within a T-72's naked-eye range threshold
-    # (~3500 m) and FOV.
+    # (~3500 m) and FOV. `unit_name` (`plans/bl11-stage4-fail-closed/
+    # plan.md` step 4, `BL-11` Stage 4): the live-LOS join key -- gets one
+    # so `FakeConsoleAircraftClient.get_line_of_sight_latest` below can
+    # mark it clear and the fail-closed gate admits it, same as before
+    # this plan.
     return {
         "object_id": 1,
         "object_type": "t-72",
@@ -635,6 +639,7 @@ def _t72_world_object() -> dict[str, Any]:
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
         "is_ownship": False,
+        "unit_name": "unit_1",
     }
 
 
@@ -642,7 +647,12 @@ class FakeConsoleAircraftClient:
     """Duck-typed `AircraftLayerClient` covering everything `_build_sources`'
     two concrete tiers call: telemetry (both tiers), world objects (both
     tiers), and Petrovich's HelperAI indication (Hybrid only -- returning
-    `None` here means Hybrid stays silent, only NakedEye is exercised)."""
+    `None` here means Hybrid stays silent, only NakedEye is exercised).
+
+    `plans/bl11-stage4-fail-closed/plan.md` step 4 (`BL-11` Stage 4):
+    `get_line_of_sight_latest` synthesizes a working live-LOS join by
+    default -- see `test_naked_eye_source.py`'s `FakeAircraftClient` for
+    the full reasoning (duplicated here rather than shared)."""
 
     def __init__(
         self, telemetry: dict[str, Any], world_objects: dict[str, Any]
@@ -654,13 +664,26 @@ class FakeConsoleAircraftClient:
         return self._telemetry
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
-        return self._world_objects
+        if "dcs_model_time_s" in self._world_objects:
+            return self._world_objects
+        return {**self._world_objects, "dcs_model_time_s": 0.0}
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        objects = self._world_objects.get("objects", [])
+        verdicts: dict[str, Any] = {}
+        for obj in objects:
+            name = obj.get("unit_name")
+            if isinstance(name, str):
+                verdicts[name] = {"building_clear": True, "terrain_clear": True}
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "hour_used": None,
+            "fov_half_deg_used": None,
+            "verdicts": verdicts,
+        }
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         pass
