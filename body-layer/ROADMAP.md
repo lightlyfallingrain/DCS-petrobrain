@@ -1801,8 +1801,16 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   PASSED on bench measurement 2026-10-06 (`feature/bl11-tick-cost`); Stage 3a settled as not worth
   building, by measurement, 2026-10-06; Stage 4 steps 1-2/2b DoD PASSED and flown 2026-10-08
   (`fix/los-hook-statics`); **Stage 4 steps 3-4 (fail closed on live LOS, add a coverage counter)
-  DoD PASSED 2026-10-08 (`feature/bl11-stage4-fail-closed`)**; Stage 6 DONE 2026-10-06. Filed
-  2026-10-05.
+  DoD PASSED 2026-10-08 and MERGED 2026-10-09 (`feature/bl11-stage4-fail-closed`, merge commit
+  `b961977`)**; Stage 6 DONE 2026-10-06. Filed 2026-10-05.
+
+  **Live-acceptance debt, and it is narrow.** The fail-closed gate itself needs **no** re-flight —
+  it was authorised on the 2026-10-08 sortie's own evidence (145/145 evaluated and 85/85 admitted
+  objects receiving a live verdict, against a 76 % no-verdict baseline;
+  `docs/acceptance/2026-10-08-los-statics-population-sortie.md`). What is owed is only that Stage 4
+  step 4's two log lines behave on a real run: the end-of-run summary appears with plausible totals
+  and reads `0/N` when healthy, and the transition warning stays quiet when the feed is fine. Card:
+  `docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md`.
 
   **The milestone's headline number is met.** Measured at the branch tip on real
   `syria-full.sqlite`, 440 objects, 10 km bubble, 300 polls
