@@ -24,3 +24,7 @@ graphify-out/
 # session id, swept after 12h). Local session state, not project state.
 .claude/state/sessions/
 .claude/state/
+
+#Obsidian files
+.obsidian
+
