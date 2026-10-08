@@ -1311,8 +1311,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `continue` while its peers are already consumed — the identical silence mode by a second trigger.
   Doing them apart means designing the per-event election twice.
 
-- [ ] **BL-B42 — Over a dense city the LOS sightline cap binds, and the population it drops is
-  unidentified.** Found during the user's 2026-10-08 test flight of `fix/los-hook-statics`
+- [ ] **BL-B42 — Over a dense city the LOS sightline cap binds. The population is now identified,
+  and it is all worth seeing.** Found during the user's 2026-10-08 test flight of `fix/los-hook-statics`
   (`docs/acceptance/2026-10-08-los-statics-sortie-feedback.md` item 2), on first flight of the
   `BL-11` Stage 4 statics enumeration.
 
@@ -1322,19 +1322,65 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   buildings, I believe. We don't really need buildings in objects that we track, especially we
   don't need to LOS them."*
 
-  **The reading may be wrong, and the paste that would settle it was not captured**:
-  `coalition.getStaticObjects(side)` returns coalition-owned mission-editor statics; DCS scenery
-  buildings are terrain objects with no coalition and should not be returned by that call at all.
-  So either the mission author placed ~200 statics around Damascus, or the ~200 are AI units, or
-  this understanding of `getStaticObjects` is wrong — three different fixes, and filtering on
-  "building" would be wrong in two of them. The discriminator is the scan line's own
-  `statics_in_wedge=` field on a Damascus poll, not yet collected.
+  **RESOLVED 2026-10-08, and the answer removes the filtering premise.** The user supplied the
+  Damascus scan line and the mission itself (`win-mac-sync/from-windows/MI24-outpost-M03.miz`):
 
-  **The direction stands regardless of the mechanism**: objects the crew has no reason to track
-  should not consume sightline budget, consistent with the project's standing test (a candidate
-  the pilot could not evade or attack is not earning its sightline). Not yet decided: whether the
-  filter is by object category, a type allow/deny list, by coalition, or something else; whether
-  the 128 cap should also rise once the population is honest.
+  ```
+  objects_in_bubble=238 statics_in_bubble=182 objects_in_wedge=152 statics_in_wedge=113
+  candidates=152 sightlines_computed=128 max_sightlines=128 cap_hit=1
+  LOS cap bit: sightlines_computed=128 of objects_in_wedge=152 (dropped=24 farthest candidates)
+  ```
+
+  The mission's 388 statics, counted from its own `mission` Lua by category:
+
+  | count | type |
+  |---|---|
+  | 120 | Soldier M4 GRG (infantry) |
+  | 65 | tanks — 31 T-55, 19 T-72B, 15 T-72B3 |
+  | 70 | APCs — 25 Tigr_233036, 23 BTR-80, 22 BMP-2 |
+  | 8 | ZSU-23-4 Shilka |
+  | 60 | parked aircraft — MiG-21Bis, SA342L, Mi-24P, MiG-29A |
+  | 21 | `big_smoke` |
+  | ~12 | carrier deck crew, misc |
+
+  **Zero buildings.** `coalition.getStaticObjects` behaved exactly as documented — DCS scenery
+  buildings are terrain objects with no coalition and never appeared. The user's in-flight reading
+  (*"those are buildings, I believe"*) was mistaken, and filtering on it would have blinded
+  Petrovich to 120 infantry, 65 tanks, 70 APCs and 8 Shilkas — the contacts the copilot exists to
+  call. This is the second time this session the statics-are-decorative assumption was overturned by
+  looking at the actual inventory; the first was the 2026-10-05 reversal in
+  `docs/acceptance/2026-10-05-sortie-feedback.md`.
+
+  `big_smoke` was proposed as the one droppable class (21 slots, against 24 dropped at the cap — it
+  would have recovered almost exactly the deficit). **The user rejected that too, and the reason is
+  domain knowledge worth recording:**
+
+  > *"Big smoke can actually be usefull. In same way as signal smoke and signal flares, they work as
+  > landmarks for referencing."*
+
+  So smoke is a *referenceable feature* — something Petrovich can see and name to locate a contact —
+  not scenery. It stays.
+
+  **Net: nothing in this population should be filtered.** The item is therefore not "which objects
+  to exclude" but **"the 128 cap is too small for a dense city"**. Still open: whether the cap rises,
+  whether the budget becomes time-based rather than count-based, and whether the nearest-first sort
+  plus a cap is already an acceptable answer given the dropped 24 were the farthest. The per-poll
+  cost does **not** currently argue for urgency — see the cost note below.
+
+  **Cost note, and it is why this is not urgent.** `bridge_call_ms` is ~2 ms over semi-open terrain
+  and ~5 ms over Damascus, and a filter for values over 100 ms returned **nothing** across the whole
+  sortie. Tripling the candidate population did not make the bridge call expensive. An earlier
+  reading of `max 2026` as a 2-second stall was almost certainly the log line's **year** (`2026-10-08`
+  leads every line), not a millisecond count; confirmation pending via
+  `grep -o 'bridge_call_ms=[0-9.]*' dcs.log | cut -d= -f2 | sort -n | tail -3`.
+
+  **Unexplained, tracked here because it was found alongside**: the scan lines hold a steady 1.004 s
+  cadence and then show one **2.645 s gap** (`16:26:53.628` → `16:26:56.273`). With no
+  `bridge_call_ms` above 100 ms, the LOS poll does not explain it, and neither does `Export.lua`'s
+  reconnect path (`grep "connect failed"` returned nothing, so the collector was connected
+  throughout). The user separately reports *"a small stutter every 5 s"*, whose period matches
+  neither the 1 Hz LOS poll nor the 5 Hz export. **Two hypotheses tested and both refuted; no
+  current candidate.** Do not re-propose either without new evidence.
 
   **Explicitly not a blocker on `BL-11` Stage 4's statics fix** — the fix under that stage is the
   enumeration itself, and this is a consequence to design for separately. Per root `CLAUDE.md`'s
