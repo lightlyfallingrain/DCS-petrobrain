@@ -165,3 +165,139 @@ This goes back to **Implementer** for the logging-visibility fix, then **Reviewe
 fix only, per the standing change-request loop), then back to **DoD**. No acceptance testing plan
 is being written this round — writing one now would mean handing the user a card instructing them
 to look for a log line that, as shipped, cannot appear.
+
+---
+
+## Round 2 — `feature/bl11-stage4-fail-closed` @ `ee329fd19319b73ec14ec9154a96cecf7e63e9f0`
+
+**Verdict scoped to this exact tip.** Worktree landed on `main` again (AGENTS.md rule 4, expected
+— this branch is checked out in the main checkout); the scaffolding branch had no commits of its
+own (`git log --oneline main..worktree-agent-<id>` empty), so moved via `git checkout -B` to the
+named tip, discarding nothing. If the branch moves again, this verdict does not carry forward.
+
+### Overall: **PASS**
+
+The round-1 required fix (`_log_live_los_coverage_summary`'s silent `INFO` line) is fixed in
+`cf65d8a`, reviewed and APPROVED in round 4 (`ee329fd`). Independently re-verified below — every
+command actually run, not read.
+
+### Independent verification performed this round
+
+**The exact round-1 repro, re-run against the fix** (not trusted from `implementation.md`):
+
+```
+$ cd body-layer
+$ PYTHONPATH=src:../world-model/src /Users/sg/Code/DCS-petrobrain/body-layer/.venv/bin/python -c "
+import logger as logger_module
+logger_module._configure_logger_for_main()
+logger_module.logger.info('INFO test line - should it show now?')
+logger_module.logger.warning('WARNING test line - should it show?')
+"
+INFO test line - should it show now?
+WARNING test line - should it show?
+```
+
+Both lines print. Round 1 only the `WARNING` line printed. This is the outside-pytest check that
+mattered last round, re-run myself rather than taken on the implementer's or reviewer's word.
+
+**Code read, not just the transcript**: `body-layer/src/logger.py:1945-1993` —
+`_configure_logger_for_main()` clears `logger.handlers`, attaches one fresh
+`StreamHandler(sys.stderr)` (`"%(message)s"` formatter), sets `logger.setLevel(logging.INFO)`; it
+is `main()`'s first statement (`logger.py:2005`). Matches `implementation.md` round 4 and
+`review.md` round 4 exactly.
+
+**Full suite, run myself:**
+
+```
+$ PYTHONPATH=src:../world-model/src .../python -m pytest tests -q
+1551 passed, 4 xfailed in 15.08s
+$ ... -W error::pytest.PytestUnhandledThreadExceptionWarning
+1551 passed, 4 xfailed in 13.43s (0 warnings)
+$ ruff format --check src tests   → 118 files already formatted
+$ ruff check src tests            → All checks passed!
+$ mypy src (from inside body-layer/) → Success: no issues found in 54 source files
+```
+
+All match the implementer's, reviewer's, and round-1 DoD's reported figures (1549 → 1551, the two
+new visibility tests added). The two new tests
+(`test_log_live_los_coverage_summary_is_visible_under_default_logging_config`,
+`test_live_los_coverage_gap_warning_is_visible_under_default_logging_config`) use `capsys` against
+real `stderr` with no `caplog.at_level` anywhere — confirmed by reading `test_logger.py:2678-2730`
+directly, not by trusting the description.
+
+**Scope**: `git diff cf65d8a~1..ee329fd --stat` touches only `body-layer/src/logger.py`,
+`body-layer/tests/test_logger.py`, two plan files, and two agent-memory files. No debug
+output/TODOs introduced (`grep -n "TODO\|FIXME\|print(\|pdb\|breakpoint"` over the diff: empty).
+`git status --porcelain` clean at the reviewed tip.
+
+**Security sign-off**: `security-review.md` APPROVED (round "deep analysis" document); no
+`security-plan-review.md` for this feature, expected under the current once-per-feature cadence —
+confirmed against `.claude/agent-memory/dod/project_current_cadence_one_security_pass_per_feature.md`.
+
+**The accepted loose end, re-confirmed rather than re-litigated**: `logger.propagate` stays at its
+default `True` (checked `grep -n "propagate" body-layer/src/logger.py` — no assignment). Round 4
+ruled this optional, not required — the failure mode is noisy (double-print if this module is ever
+imported as a library into a host that also configures root logging), not silent, and no code
+path in this repo reaches that scenario today. I agree with that ruling and am not reopening it.
+
+**Reviewer's optional note on `body-layer/CLAUDE.md`'s `## Testing` section** (give the
+monkeypatched-shared-stdlib-module trap a general home there, not just an implementer memory
+file): I agree it belongs there. Not required; not done this round, since it is documentation
+housekeeping orthogonal to this fix and no DoD round has ever blocked on it.
+
+### Milestone bookkeeping
+
+`BL-11` Stage 4 steps 3-4 are now genuinely done — the end-of-run summary and transition warning
+are both visible on a real run, not just inside `caplog`'s forced level. Updated:
+
+- `body-layer/ROADMAP.md`: `BL-11`'s top-level status moved `PARTIALLY DONE` → `DONE`; Stage 4
+  items 3 and 4 marked `[x]` with the fix recorded; the "Not completable without a flight" note
+  rewritten since steps 3-4 needed no flight (no in-cockpit observable, by design) but still owe a
+  narrow log-visibility check to the next sortie, now tracked on the live-acceptance debt list as
+  `feature/bl11-stage4-fail-closed`.
+- Root `ROADMAP.md`: body-layer row appended with `BL-11`'s closure.
+- `world-model/ROADMAP.md`: `M11`'s "going away" language replaced with "CONFIRMED 2026-10-08 —
+  the consumer is gone", verified directly against the code
+  (`grep -n "line_of_sight_clear" body-layer/src/perception/*.py` — only the re-export, its own
+  definition, and offline test code remain as call sites) before writing it, per the dispatch
+  brief's instruction not to trust the claim unchecked.
+
+**Milestone completion question, answered**: completing Stage 4 steps 3-4 does invalidate a
+downstream assumption — `world-model/ROADMAP.md`'s `M11` Stage 1 ("`line_of_sight_clear` returns
+`True` when every sample is void") drops from a live-correctness defect to a fixture-correctness
+one, now that nothing on the live path can reach it. This does not change Stage 1's priority to
+zero (an offline test oracle that lies is still a real defect, per `M11`'s own Stage 1 text), but
+it does change how urgently the next reader should treat it — recorded in `M11`'s annotation
+itself, not just here.
+
+### Acceptance
+
+**No in-cockpit observable, by design.** Nothing for the user to hear. The authorising flight
+evidence (145/145 evaluated, 85/85 admitted objects receiving a live verdict, 2026-10-08, against
+a 76 % baseline) is already recorded in
+`docs/acceptance/2026-10-08-los-statics-population-sortie.md` and is **not** re-flown here.
+
+Published acceptance card for the narrow thing the next sortie does owe (the two log lines
+behaving live): `docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md`, published at
+https://claude.ai/artifact/G7asVkZQQ6p51TsEMqjY8m.
+
+### Merge note
+
+Not performed — user approval required. **Correcting the dispatch brief's count**: `main` is
+`b9b8590`, this branch (`ee329fd`) is **13 commits** ahead (`git log --oneline main..ee329fd`),
+not 14. `git diff --name-only main ee329fd` shows changes on both sides of the divergence —
+this branch's own `body-layer/src/logger.py`/`test_logger.py`/`plans/bl11-stage4-fail-closed/*`/
+feature-specific agent-memory files, *and* `main`'s own cross-cutting bookkeeping the branch
+doesn't carry (`todo/backlog.md`, `todo/questions.md`, `body-layer/BACKLOG.md`,
+`plans/crew-query-path/plan.md`, `.claude/settings.json`, `.claude/scripts/
+flight-feedback-clear.sh`, an `aircraft-layer/research/` note) — measured before this round's own
+roadmap edits were committed, so it does not yet include them. No single path in that pre-edit
+list is touched by both sides in a conflicting way. This round's own edits to
+`body-layer/ROADMAP.md`, root `ROADMAP.md` and `world-model/ROADMAP.md` are new since that
+measurement and have not been checked against `main`'s own concurrent edits to those same files —
+a real possibility, since `main` is actively being used for cross-cutting bookkeeping. Recommend a
+plain `git merge --no-ff` via the disposable-worktree pattern and resolve by hand if those three
+files conflict; do not assume a clean merge.
+
+Queued deliberately behind this branch, not folded in here: `BL-B43`, `BL-B44`, `X-B34`, `BL-B45`
+(gated on `BL-8`), and the `propagate` loose end above (filed, not required).
