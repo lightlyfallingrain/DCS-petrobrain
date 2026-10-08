@@ -1,0 +1,259 @@
+<title>LOS Statics Population Sortie</title>
+<style>
+:root{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08;
+  --focus:#e8a93a;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f3eee1; --panel:#ffffff; --panel2:#ece4d1;
+    --line:#d8cba8; --ink:#241d12; --ink-dim:#5b5138; --ink-faint:#8a7f63;
+    --amber:#a8661a; --amber-dim:#8a531a;
+    --record:#1f7d76; --record-dim:#bfe6e2;
+    --danger:#a8382a; --good:#4c7a34;
+    --mono-bg:#efe8d4;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#13100c; --panel:#1b160f; --panel2:#201a12; --line:#3a2f1e;
+  --ink:#f1e9d8; --ink-dim:#b8ab8e; --ink-faint:#7d7260;
+  --amber:#e8a93a; --amber-dim:#a87a2c;
+  --record:#5fc7c0; --record-dim:#2c5a56;
+  --danger:#d9644f; --good:#7fae5a;
+  --mono-bg:#0d0b08;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:'Source Sans 3', system-ui, sans-serif;
+  padding:0 16px; padding-block:24px 56px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:720px; margin:0 auto;}
+h1,h2,h3{font-family:'Barlow Condensed', system-ui, sans-serif; text-wrap:balance; margin:0;}
+h1{font-size:clamp(1.9rem,6vw,2.6rem); font-weight:700; letter-spacing:0.01em; color:var(--amber);}
+.eyebrow{
+  font-family:'JetBrains Mono', monospace; font-size:0.72rem; letter-spacing:0.12em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;
+}
+.subhead{color:var(--ink-dim); font-size:1rem; margin-top:8px; line-height:1.5;}
+header.top{margin-bottom:22px;}
+
+.branch-box{
+  background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber);
+  border-radius:6px; padding:16px 18px; margin:18px 0;
+}
+.branch-box .label{font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--amber); letter-spacing:0.04em;}
+code, pre{font-family:'JetBrains Mono', monospace;}
+pre{
+  background:var(--mono-bg); border:1px solid var(--line); border-radius:6px;
+  padding:12px 14px; font-size:0.84rem; overflow-x:auto; line-height:1.55; margin:10px 0 0;
+  color:var(--ink);
+}
+.inline-code{background:var(--mono-bg); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:0.86em;}
+
+.alert{
+  background:var(--panel2); border:1px solid var(--good); border-radius:6px;
+  padding:14px 16px; margin:20px 0; color:var(--ink);
+}
+.alert .tag{color:var(--good); font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; font-size:0.85rem; letter-spacing:0.06em;}
+
+section.block{
+  background:var(--panel); border:1px solid var(--line); border-radius:8px;
+  padding:18px 20px; margin:16px 0;
+}
+section.block.prize{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim) inset;}
+.block-num{
+  font-family:'Barlow Condensed',sans-serif; font-weight:700; color:var(--amber);
+  font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase;
+}
+.block h3{font-size:1.25rem; margin-top:4px; color:var(--ink);}
+.prize-tag{
+  display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.68rem;
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--bg); background:var(--amber);
+  padding:2px 8px; border-radius:3px; margin-left:8px; vertical-align:middle;
+}
+.row{display:flex; gap:10px; align-items:flex-start; margin-top:12px;}
+.row .k{
+  flex:0 0 72px; font-family:'JetBrains Mono',monospace; font-size:0.7rem;
+  letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-faint); padding-top:3px;
+}
+.row .v{flex:1; color:var(--ink-dim); line-height:1.55; font-size:0.95rem;}
+.row.record .k{color:var(--record);}
+.row.record .v{color:var(--ink);}
+
+.checklist{display:flex; align-items:flex-start; gap:10px; margin-top:12px;}
+.checklist input[type=checkbox]{
+  width:19px; height:19px; margin-top:2px; accent-color:var(--amber); flex:0 0 auto;
+  cursor:pointer;
+}
+.checklist label{color:var(--ink); font-size:0.95rem; line-height:1.5; cursor:pointer;}
+
+.not-testing{
+  background:var(--panel2); border:1px dashed var(--line); border-radius:6px;
+  padding:14px 16px; margin:16px 0; color:var(--ink-dim); font-size:0.92rem; line-height:1.6;
+}
+.not-testing li{margin-bottom:8px;}
+.not-testing ul{margin:8px 0 0; padding-left:1.1em;}
+
+.bringback{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:8px;
+  padding:18px 20px; margin:26px 0 10px;
+}
+.bringback h3{color:var(--record); font-size:1.15rem;}
+.bringback ul{color:var(--ink); margin:10px 0 0; padding-left:1.2em; line-height:1.65;}
+.bringback .surprise{
+  margin-top:12px; font-style:italic; color:var(--ink-dim); font-size:0.92rem;
+}
+
+footer{margin-top:28px; font-size:0.78rem; color:var(--ink-faint); line-height:1.6;}
+footer a{color:var(--amber-dim);}
+
+@media (max-width:480px){
+  .row{flex-direction:column; gap:3px;}
+  .row .k{flex:none;}
+}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">Petrobrain &middot; Acceptance Sortie &middot; 2026-10-08</div>
+  <h1>LOS Statics &mdash; Population &amp; Join</h1>
+  <p class="subhead">Your first flight today already proved the statics enumeration works &mdash;
+  42 of 49 candidates were statics, zero enumeration failures. This card covers only what's still
+  open from that flight: what's binding the sightline cap over a dense city, and whether a
+  static's verdict ever actually reaches a tracked contact.</p>
+</header>
+
+<div class="branch-box">
+  <span class="label">BRANCH</span>
+  <pre style="margin-top:8px;">git checkout fix/los-hook-statics &amp;&amp; git pull</pre>
+  <div style="margin-top:10px; color:var(--ink-dim); font-size:0.88rem;">
+    DoD PASSED on mechanical checks (ruff/mypy/pytest &mdash; 256 tests, luac). Nothing new to
+    deploy &mdash; same Hook script, same collector as your last flight.
+  </div>
+</div>
+
+<div class="alert">
+  <span class="tag">Already confirmed &mdash; not retested here</span>
+  <p style="margin:8px 0 0; line-height:1.55;">Open terrain: <code class="inline-code">objects_in_bubble=218
+  statics_in_bubble=168 objects_in_wedge=49 statics_in_wedge=42 candidates=49
+  sightlines_computed=49 cap_hit=0 static_enum_failures=0 unit_enum_failures=0</code>. The
+  enumeration mechanism itself is done. This flight is about the two things it couldn't settle.</p>
+</div>
+
+<h2 style="font-size:1.4rem; color:var(--ink); margin-top:30px;">Do / expect / record</h2>
+
+<section class="block prize">
+  <div class="block-num">1 <span class="prize-tag">prize</span></div>
+  <h3>The full scan line over Damascus (or any dense city)</h3>
+  <div class="row"><div class="k">do</div><div class="v">Tail/grep <code class="inline-code">dcs.log</code>
+  for <code class="inline-code">"PetrobrainLineOfSight scan"</code> while flying over or near a
+  dense built-up area &mdash; the kind that gave you <code class="inline-code">cap_hit=1</code>
+  last time. Capture the <strong>whole</strong> line &mdash; last time's paste was missing
+  <code class="inline-code">statics_in_wedge</code>, which is the field that actually answers the
+  question.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">A line shaped
+  <code class="inline-code">objects_in_bubble=N statics_in_bubble=N objects_in_wedge=N
+  statics_in_wedge=N candidates=N sightlines_computed=N max_sightlines=128 cap_hit=0|1
+  static_enum_failures=N unit_enum_failures=N name_rejects=N ownship_unidentified=0|1</code>.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Is <code class="inline-code">statics_in_wedge</code>
+  close to <code class="inline-code">objects_in_wedge</code> (the ~200+ really are statics &mdash;
+  next question is which types), or small while <code class="inline-code">objects_in_wedge</code>
+  stays big (they're AI units, and the statics change isn't the cause at all)? Also note whether
+  either enum-failure counter is nonzero &mdash; that would make the whole reading unreliable.</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c1"><label for="">Checked</label></div>
+</section>
+
+<section class="block prize">
+  <div class="block-num">2 <span class="prize-tag">never observed</span></div>
+  <h3>Does a static's verdict ever reach a tracked contact?</h3>
+  <div class="row"><div class="k">do</div><div class="v">Fly toward a mission-placed static
+  vehicle you can identify (a T-55/T-72/Shilka emplacement, not a moving AI unit) until Petrovich
+  would plausibly pick it up. Check <code class="inline-code">dcs-detection-trace.jsonl</code>
+  (or its summary via <code class="inline-code">summarize_detection_trace.py</code>) for that
+  object afterward.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v">An entry with
+  <code class="inline-code">building_clear</code>/<code class="inline-code">terrain_clear</code>
+  populated, same shape as a unit's &mdash; nothing in the trace distinguishes a static from a
+  unit, so it should look perfectly ordinary if it shows up.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">Did the static's verdict show
+  up in the trace at all? If so, did it ever fold into a tracked <code class="inline-code">Contact</code>
+  (visible via <code class="inline-code">show &lt;id&gt;</code> if running <code class="inline-code">--console</code>)?
+  This has never been directly seen &mdash; your first flight proved the enumeration produces
+  statics, not that one was ever consumed downstream.</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c2"><label for="">Checked</label></div>
+</section>
+
+<section class="block">
+  <div class="block-num">3</div>
+  <h3>Pause-state check</h3>
+  <div class="row"><div class="k">do</div><div class="v">Pause mid-flight, wait a few seconds,
+  unpause. This Hook-script family has a history of export-rate bugs invisible to in-flight-only
+  testing.</div></div>
+  <div class="row"><div class="k">expect</div><div class="v"><code class="inline-code">PetrobrainLineOfSight
+  scan</code> lines keep appearing, or cleanly stop and resume &mdash; not silently stale while
+  the sim clock stops.</div></div>
+  <div class="row record"><div class="k">record</div><div class="v">What <code class="inline-code">dcs.log</code>
+  showed across the pause.</div></div>
+  <div class="checklist"><input type="checkbox" data-k="c3"><label for="">Checked</label></div>
+</section>
+
+<div class="not-testing">
+  <strong style="color:var(--ink);">Not tested on this flight</strong>
+  <ul>
+    <li>The ~5&nbsp;s stutter from your last flight. Leading hypothesis is
+    <code class="inline-code">Export.lua</code>'s collector-reconnect path (blocking 200&nbsp;ms
+    connect every 5&nbsp;s while disconnected), not this Hook script &mdash; it polls at 1&nbsp;Hz,
+    so it would stutter at 1&nbsp;s if it were the cause. Worth a glance if you happen to see it,
+    but it's a separate investigation.</li>
+    <li>Whether the cap should be raised, or the population filtered. That decision waits on this
+    flight's data (item 1) and a conversation afterward &mdash; not something to decide mid-flight.</li>
+  </ul>
+</div>
+
+<div class="bringback">
+  <h3>Bring back</h3>
+  <ul>
+    <li>The full scan line over a dense city, <code class="inline-code">statics_in_wedge</code> included.</li>
+    <li>Whether a static's verdict was ever seen folded into a tracked contact.</li>
+    <li>Anything across the pause-state check.</li>
+  </ul>
+  <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+</div>
+
+<footer>
+  Source of truth: <code class="inline-code">docs/acceptance/2026-10-08-los-statics-population-sortie.md</code>.
+  Full record: <code class="inline-code">plans/los-hook-statics/</code>,
+  <code class="inline-code">body-layer/BACKLOG.md</code> BL-B42. Checkboxes persist in this
+  browser only &mdash; they're a place-keeper, not a report. Bring the answers back in words.
+</footer>
+
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='los-statics-population-sortie';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>

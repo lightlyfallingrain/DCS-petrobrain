@@ -1311,3 +1311,33 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `continue` while its peers are already consumed — the identical silence mode by a second trigger.
   Doing them apart means designing the per-event election twice.
 
+- [ ] **BL-B42 — Over a dense city the LOS sightline cap binds, and the population it drops is
+  unidentified.** Found during the user's 2026-10-08 test flight of `fix/los-hook-statics`
+  (`docs/acceptance/2026-10-08-los-statics-sortie-feedback.md` item 2), on first flight of the
+  `BL-11` Stage 4 statics enumeration.
+
+  Measured over Damascus: `objects_in_bubble=~200+`, `objects_in_wedge=~200+`, `cap_hit=1` against
+  the 128-candidate cap — nearest-first sort, so the dropped candidates are the farthest, the right
+  failure direction but a real truncation. The user's reading, **not yet measured**: *"those are
+  buildings, I believe. We don't really need buildings in objects that we track, especially we
+  don't need to LOS them."*
+
+  **The reading may be wrong, and the paste that would settle it was not captured**:
+  `coalition.getStaticObjects(side)` returns coalition-owned mission-editor statics; DCS scenery
+  buildings are terrain objects with no coalition and should not be returned by that call at all.
+  So either the mission author placed ~200 statics around Damascus, or the ~200 are AI units, or
+  this understanding of `getStaticObjects` is wrong — three different fixes, and filtering on
+  "building" would be wrong in two of them. The discriminator is the scan line's own
+  `statics_in_wedge=` field on a Damascus poll, not yet collected.
+
+  **The direction stands regardless of the mechanism**: objects the crew has no reason to track
+  should not consume sightline budget, consistent with the project's standing test (a candidate
+  the pilot could not evade or attack is not earning its sightline). Not yet decided: whether the
+  filter is by object category, a type allow/deny list, by coalition, or something else; whether
+  the 128 cap should also rise once the population is honest.
+
+  **Explicitly not a blocker on `BL-11` Stage 4's statics fix** — the fix under that stage is the
+  enumeration itself, and this is a consequence to design for separately. Per root `CLAUDE.md`'s
+  "flight feedback is captured, then explored, then planned," this goes to `/explore` with the user
+  before any Architect or Implementer pass.
+

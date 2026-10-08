@@ -29,3 +29,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Stage [x] can live on an unmerged branch](project_stage0_x_lives_on_an_unmerged_branch.md) — a "that stage is already done" claim may be true only of a second branch; check before editing a shared roadmap.
 - [Voice card: never prefix a command with the wake word](feedback_voice_card_never_prefix_a_command_with_the_wake_word.md) — "Petrovich, describe" routes to the brain, not the matcher; run every utterance through match_transcript first.
 - [Recurring: predicate granularity mismatch](project_recurring_predicate_granularity_mismatch.md) — 3+ rounds strengthening one predicate means it is a granularity coarser than what it governs; raise at Architect.
+- [pcall degradation without a counter](project_pcall_degradation_without_counter.md) — a pcall added for graceful degradation shipped with no paired failure counter; 1st occurrence at DoD, watch for a 2nd.
