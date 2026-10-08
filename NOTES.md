@@ -924,3 +924,23 @@ two functions that must agree (2026-09-19).
   true, and if it is, write down what now distinguishes the two cases** — otherwise the next person
   reaches for the trusted diagnostic and concludes the fix failed
   (`plans/bl11-tick-cost/performance-review.md`, finding 3).
+- **Wrapping an enumeration call in `pcall` to degrade gracefully is not complete without a paired
+  failure counter.** `fix/los-hook-statics` wrapped `coalition.getGroups`/`grp:getUnits()`/
+  `unit:isExist()`/`unit:getID()` in `pcall` so a per-side failure yields fewer candidates instead of
+  losing the whole poll — correct, but on its own it converts a *loud* failure (previously an
+  uncaught error, logged by the caller) into a *silent* one: fewer candidates with nothing saying
+  why, which biases exactly the number a later measurement would trust. The fix needed a dedicated
+  counter (`unitEnumFailures`, mirroring the already-shipped `staticEnumFailures`) emitted on the
+  same log line. Lesson: a `pcall` added for graceful degradation and a counter recording that the
+  degradation happened are two different changes — shipping the first without the second looks safe
+  and is not (`plans/los-hook-statics/review.md` Required Fix 1).
+- **A delimiter-joined wire field is only as safe as the external strings allowed into it.** This
+  project's LOS feed joins per-object entries with `;` (`name:building_clear:terrain_clear`); a
+  mission-author-chosen DCS object name containing a literal `;` splits into a malformed fragment
+  that the Python parser rejects, dropping every verdict in that poll — not just the offending
+  object's. The population at risk (free-text names on mission-editor-placed objects) was widened by
+  an unrelated change (adding statics) without anyone revisiting the wire format's assumptions about
+  what characters a name can contain. Lesson: when a feed widens *which objects* feed a
+  delimiter-joined format, re-check what characters the delimiter still assumes are impossible in the
+  field's content — the assumption can go from "false in practice" to "one bad mission away" without
+  the wire format itself changing at all (`plans/los-hook-statics/security-review.md` Finding 1).
