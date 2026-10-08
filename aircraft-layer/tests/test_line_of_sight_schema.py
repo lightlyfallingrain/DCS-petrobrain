@@ -60,6 +60,10 @@ def test_duplicate_unit_name_is_last_entry_wins() -> None:
         "172|12|12|3|45|1234.5|Truck-1:1",  # entry missing a flag
         "172|12|12|3|45|1234.5|Truck-1:2:1",  # flag not 0/1
         "172|12|12|3|45|1234.5|:1:1",  # empty unit_name
+        # A ';' inside a unit_name splits one entry into two fragments, and
+        # neither is a valid entry. Guarded Hook-side now (see the blast-radius
+        # test below for why that is the only place it can be fixed).
+        "172|12|12|3|45|1234.5|Depot; South:1:1",
     ],
 )
 def test_malformed_payloads_raise(payload: str) -> None:
@@ -67,6 +71,41 @@ def test_malformed_payloads_raise(payload: str) -> None:
         LineOfSightSnapshot.from_wire(
             payload, bridge_call_ms=1.0, received_wall_clock_s=1000.0
         )
+
+
+def test_a_semicolon_in_one_name_costs_the_whole_poll() -> None:
+    """One ';' in one mission-author object name discards *every* verdict in
+    that poll, not just its own entry -- the parse raises from inside
+    `from_wire`, so the well-formed entries alongside it are unrecoverable.
+
+    That blast radius is why the fix lives in the Hook's `considerCandidate`
+    (which drops the one offending object and counts it as `name_rejects`)
+    rather than here: this wire format has no escaping, and the parser's
+    strictness is correct. Mission-editor names are free text, so this input
+    is reachable from any mission this project does not control.
+
+    Kept as a test rather than prose because a later tidy-up of the entry
+    split would silently reintroduce it. Found by the 2026-10-08 security
+    deep analysis of `fix/los-hook-statics`.
+    """
+    with pytest.raises(LineOfSightParseError):
+        LineOfSightSnapshot.from_wire(
+            "172|2|2|3|45|1234.5|Depot; South:1:1;Truck-1:1:0",
+            bridge_call_ms=1.0,
+            received_wall_clock_s=1000.0,
+        )
+
+    # The same poll minus the offending object -- what the Hook now sends --
+    # parses, and Truck-1's verdict survives. This is the pair that makes the
+    # test meaningful: without it, the raise above could be read as the
+    # payload being malformed for some unrelated reason.
+    snapshot = LineOfSightSnapshot.from_wire(
+        "172|2|1|3|45|1234.5|Truck-1:1:0",
+        bridge_call_ms=1.0,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.verdicts["Truck-1"].building_clear is True
+    assert snapshot.verdicts["Truck-1"].terrain_clear is False
 
 
 def test_to_dict_round_trip_shape() -> None:
