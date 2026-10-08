@@ -102,3 +102,36 @@ it may be a configuration state rather than a defect.
 The two security-required fixes already in flight on this branch (the `;`
 name guard and the splice guard test) are unrelated to all three and continue
 independently.
+
+---
+
+## Resolution of items 2 and 3, same day
+
+**Item 2 — the Damascus population is identified, and the filtering premise is gone.**
+`statics_in_wedge=113` of `objects_in_wedge=152` settles the mechanism: these are
+mission-placed statics, not scenery. Counting the mission's own Lua
+(`MI24-outpost-M03.miz`, 388 statics) gives 120 infantry, 65 tanks, 70 APCs,
+8 ZSU-23-4 Shilka, 60 parked aircraft, 21 `big_smoke`, ~12 carrier crew — and
+**zero buildings**. `coalition.getStaticObjects` behaved as documented.
+
+So the user's in-flight reading was mistaken. Recorded plainly because the error
+direction matters: filtering on it would have removed exactly the contacts
+Petrovich exists to call.
+
+`big_smoke` was then proposed as the one droppable class, and the user rejected
+that too:
+
+> *"Big smoke can actually be usefull. In same way as signal smoke and signal
+> flares, they work as landmarks for referencing."*
+
+Smoke is a referenceable landmark, not scenery. **Nothing in this population is
+filtered.** `BL-B42` is now "the 128 cap is too small for a dense city", not
+"which objects to exclude".
+
+**Item 3 — both stutter hypotheses refuted.** `grep "connect failed"` returned
+nothing, so the collector was connected throughout and the `Export.lua` reconnect
+theory is dead. A filter for `bridge_call_ms > 100` also returned nothing (~2 ms
+semi-open, ~5 ms over Damascus), so the LOS poll does not explain it either. The
+reported `max 2026` was almost certainly the log line's year. One real 2.645 s gap
+in an otherwise steady 1.004 s cadence remains unexplained. **No current
+candidate** — do not re-propose either refuted hypothesis without new evidence.
