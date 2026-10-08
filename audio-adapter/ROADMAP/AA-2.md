@@ -1,5 +1,9 @@
 # AA-2 — Hardening: per-source `--poll-hz` default + `Content-Length` guard
 
+<!-- doc-provenance:start -->
+**Topics:** #push-to-talk
+<!-- doc-provenance:end -->
+
 - [x] **Hardening: per-source `--poll-hz` default + `Content-Length` guard — done 2026-09-26, merged `1a8795d`** #status/done #needs-flight
 (`fix/audio-adapter-review-findings`, no `plan.md` — scoped directly from the 2026-09-26
 whole-subproject performance and security reviews, `docs/reviews/`). `--ptt dcs` now defaults to

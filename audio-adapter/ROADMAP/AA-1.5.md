@@ -1,5 +1,9 @@
 # AA-1.5 — Stage 5 — live Windows verification
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-playback
+<!-- doc-provenance:end -->
+
 - [x] **Stage 5 — live Windows verification. Passed 2026-09-18** #status/done, after one real failure and a
   fix.
   - **Playback works.** `winsound` plays audio on the Windows box, cross-machine, end to end.

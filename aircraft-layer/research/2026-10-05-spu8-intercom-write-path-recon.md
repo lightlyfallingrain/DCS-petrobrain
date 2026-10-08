@@ -1,6 +1,7 @@
 # SPU-8 intercom write path — can code set arg 664 (operator intercom power) from the pilot's seat?
 
 <!-- doc-provenance:start -->
+**Topics:** #cockpit-manipulation #intercom
 **Evidence for:** [[AA-3]]
 <!-- doc-provenance:end -->
 

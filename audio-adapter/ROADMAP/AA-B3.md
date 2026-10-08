@@ -1,5 +1,9 @@
 # AA-B3 — `POST /audio/play` has no request-size cap
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-playback
+<!-- doc-provenance:end -->
+
 - [ ] **AA-B3 — `POST /audio/play` has no request-size cap** #status/open (and neither do audio-adapter's own
   `/speak`/`/transcribe`/`/stop`, per the 2026-09-26 security audit's RECOMMENDED #1 — the same
   standing exemption covers them explicitly rather than by assumption) and, like every other

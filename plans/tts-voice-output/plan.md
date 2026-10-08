@@ -1,4 +1,5 @@
 <!-- doc-provenance:start -->
+**Topics:** #audio-playback #speech-synthesis #intercom
 **Decision for:** [[AA-1]]
 <!-- doc-provenance:end -->
 

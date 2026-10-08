@@ -1,5 +1,9 @@
 # AA-1.6 — Stage 6 — live sortie acceptance
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition
+<!-- doc-provenance:end -->
+
 - [x] **Stage 6 — live sortie acceptance. ANSWERED 2026-09-26 (user), never flown as a
   dedicated flight.** #status/done All three questions it existed to ask were settled across the sorties that
   were actually flown, which is why no Stage 6 card was ever completed — see also

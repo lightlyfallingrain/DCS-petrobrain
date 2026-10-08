@@ -1,4 +1,5 @@
 <!-- doc-provenance:start -->
+**Topics:** #audio-playback #speech-synthesis
 **Decision for:** [[AA-1.6]]
 <!-- doc-provenance:end -->
 

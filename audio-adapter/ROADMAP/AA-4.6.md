@@ -1,5 +1,9 @@
 # AA-4.6 — The ~0.14 s device-open gap — CLOSED
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition #push-to-talk #intercom
+<!-- doc-provenance:end -->
+
 - [x] **The ~0.14 s device-open gap — CLOSED 2026-09-23, not felt, nothing built.** #status/done The sortie
   answered it: press-then-speak *"is the natural, normal way how aviation radios work"*, and
   press-while-speaking *"works surprisingly well"* — the verb survives. So none of the three

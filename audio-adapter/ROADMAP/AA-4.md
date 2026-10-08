@@ -1,5 +1,9 @@
 # AA-4 — Slice 3 — inbound speech (STT + PTT)
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-playback #speech-recognition #push-to-talk #intercom
+<!-- doc-provenance:end -->
+
 - [~] **Slice 3 — inbound speech (STT + PTT).** #status/in-progress The larger half. **Next priority** (user,
 2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body receives
 already-transcribed `PlayerUtterance` records and never sees audio. Full design:

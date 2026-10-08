@@ -1,5 +1,9 @@
 # AA-4.3 — Stage 3 — recognition as a service, and body-layer's inbound wiring
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition
+<!-- doc-provenance:end -->
+
 - [x] **Stage 3 — recognition as a service, and body-layer's inbound wiring.** #status/done Merged
   2026-09-20. `POST /transcribe` and `GET /transcripts/poll` on the existing server, a bounded
   transcript queue, `AudioAdapterClient.get_transcripts()`, and `--speech-input` on the logger.

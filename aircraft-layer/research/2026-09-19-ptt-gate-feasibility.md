@@ -1,6 +1,7 @@
 # Push-to-talk gate: can Export.lua read a held cockpit control?
 
 <!-- doc-provenance:start -->
+**Topics:** #speech-synthesis #speech-recognition #push-to-talk #cockpit-manipulation #intercom
 **Evidence for:** [[AA-4.5]]
 <!-- doc-provenance:end -->
 

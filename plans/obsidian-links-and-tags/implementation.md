@@ -715,3 +715,107 @@ not because they are the final answer.
   (the same two-step strip `scan_file` already uses), which is the more general fix and the one
   that should have been there from the start, since "a quote survives one stripping step but not
   two" was never a property specific to fenced examples.
+
+### Implementation Summary — Topic-tag vocabulary approved and generated (2026-10-08)
+
+The seven-tag vocabulary the user approved on 2026-10-08 (`#audio-playback`, `#audio-volume`,
+`#speech-synthesis`, `#speech-recognition`, `#push-to-talk`, `#cockpit-manipulation`,
+`#intercom`) written into `docs/TAGS.md`, and the generator run for real — no further proposing,
+measuring-for-admission, or pattern tuning; the vocabulary was handed over final. Every hardware
+designator (`#SPU-8`, `#NET-1`, `#NET-2`, the Soviet/DCS unit designators) is recorded as
+deliberately excluded, in the user's own words, so it is not re-proposed.
+
+### Files Changed
+
+- `docs/TAGS.md` — replaced the "None approved yet" Topic tags section: the "Deliberately
+  excluded" paragraph (designators, user's own quotes), a fourth rule ("a tag's pattern must
+  include the concept's common shorthand" — PTT/STT/ASR/TTS/ICS, with `#field-of-view`/`FOV`
+  named as a future illustrative example), a stated band exception under rule 2 (shorthand reach
+  can legitimately push a candidate over 25 units — `#push-to-talk`'s 29 is why), and the seven
+  tags' own sections in the file's existing one-section-per-tag format. The Format
+  sub-section's worked example was changed from `#SPU-8` (now excluded) to the illustrative,
+  unapproved `#field-of-view`, so the file no longer demonstrates its own format convention with
+  an example it elsewhere says must never be proposed.
+- 29 documents — every file `doc_provenance.py refresh` regenerated: the 22
+  `audio-adapter/ROADMAP/AA-*.md` entries (20 gained a non-empty `**Topics:**` line; AA-1.4 and
+  AA-5/AA-B1/AA-B2 stay topic-less, correctly — their prose matches none of the seven) and the 13
+  documents already carrying a `doc-provenance` block from Stage A0 (3 research notes, 4
+  acceptance cards, 4 plan.md files, matching Stage A0's own set). No file outside that 35-unit
+  scope was touched — `build_target_map`'s own citation-driven target set is exactly Stage A's
+  scope, so "generate only in scope" needed no extra gating beyond running the existing generator.
+
+### Tests Added
+
+None — this stage writes vocabulary and runs the existing generator/gates; no new code paths.
+`audio-adapter`'s own suite (222 passed, 1 skipped) re-run unchanged as a touched-subproject
+check, since the 29 regenerated files include 22 of its own `ROADMAP/` entries and `ruff`/`mypy`
+scope includes `src`/`tests`, neither of which this stage edited.
+
+### Checks
+
+(audio-adapter — the only subproject whose own code tree this stage could plausibly affect,
+since the change is entirely to Markdown vocabulary/provenance documents)
+- ruff format --check: pass (29 files already formatted)
+- ruff check: pass
+- mypy --strict: pass (15 source files)
+- pytest -q: pass (222 passed, 1 skipped)
+
+Mechanical gates (not subproject-specific, run repo-root):
+- `doc-provenance-gate.sh`: OK
+- `roadmap-tag-vocabulary-gate.sh`: OK
+- `roadmap-entry-consistency-gate.sh`: OK
+- `push-roadmap-gate.sh`: OK (needs `CLAUDE_PROJECT_DIR` set; unbound-variable otherwise — not a
+  regression from this change, the script reads it unconditionally)
+- `graphify-dirty-flag.sh`: OK
+- `bash -n` on every touched/invoked shell script, `python3 -c ast.parse` on `doc_tags.py` and
+  `doc_provenance.py`: all pass. No `.sh`/`.py` file was edited this round — only `docs/TAGS.md`
+  and the 29 generated Markdown files — so these are confirmation checks, not regression checks.
+- Idempotency: `doc_provenance.py refresh` run twice; second run reported "nothing to change",
+  `git status --porcelain` identical before/after the second run.
+- Gate-fails-loudly demonstration: hand-edited `AA-1.md`'s `**Topics:**` line to add
+  `#not-a-real-tag`. `roadmap-tag-vocabulary-gate.sh` failed naming the file and tag;
+  `doc-provenance-gate.sh` failed separately, printing the exact diff back to the approved state.
+  Restored by hand to `#speech-synthesis` alone; both gates passed again; `git diff --stat`
+  confirmed the file was back to its pre-mutation generated state (4 lines added net, matching
+  the original refresh).
+
+### Notable Discoveries
+
+- **The four expected-shape documents named in the task matched exactly**, with no pattern
+  adjustment: `2026-10-05-spu8-intercom-write-path-recon.md` →
+  `#cockpit-manipulation #intercom`; `2026-10-05-spu8-intercom-sortie.md` →
+  `#audio-playback #audio-volume #push-to-talk #intercom`;
+  `2026-09-19-whisper-model-sweep.md` → `#speech-recognition #push-to-talk`;
+  `2026-09-18-stage6-sortie.md` → `#speech-synthesis`.
+- **`load_approved_topic_tags`/`load_approved_tags` wrap a tag's whole `Matches:` string in
+  `\b...\b` without adding a grouping `(...)`.** For a top-level alternation with no enclosing
+  parens (`#audio-playback`'s, `#audio-volume`'s, `#cockpit-manipulation`'s patterns, as given —
+  none of the three wrap their own alternatives in parens), regex `|` has lower precedence than
+  the added `\b`, so only the *first* alternative gets a leading boundary and only the *last* gets
+  a trailing one; the inner alternatives get no boundary enforcement at all. The three patterns
+  that already self-wrap in parens (`#speech-synthesis`, `#speech-recognition`, `#push-to-talk`,
+  and `#intercom`'s own `(intercom|\bICS\b)`) are unaffected. This did not produce any observed
+  false positive against the real corpus (the false-positive spot-check below found none), but it
+  means the *effective* matching behavior for those three tags is "first/last alternative
+  boundary-checked, middle alternatives substring-matched" rather than the fully-boundary-checked
+  behavior the inner-pattern convention implies elsewhere in this file. Not changed here — the
+  patterns were handed over approved and final, and the task's own measured counts (produced by
+  `grep -E` against the bare pattern, per the task's header) did not go through this wrapping
+  either, so the approved counts and the generator's live behavior are consistent with each
+  other; it is the *literal* `\b`-wrapping mechanism in `doc_provenance.py`/`doc_tags.py` whose
+  precedence quirk is worth knowing about before writing a future pattern with top-level
+  alternation and assuming the wrapper parenthesizes it.
+- **The repo-wide drift check (`doc_tags.py propose`) already shows two of the seven tags
+  outgrowing the band**: `#push-to-talk` 29→32 units and `#speech-recognition` 21→28 units,
+  both now `TOO BROAD` by the drift check's own flag, measured minutes after admission on the
+  same tree. Not acted on here — the vocabulary was handed over approved and final, "do not
+  re-measure for admission" — but the drift is real and fast, and whoever next runs
+  `doc-tags-propose.sh` will see both flagged. Worth deciding soon whether the growth is more
+  shorthand reach (same exception already recorded for `#push-to-talk`) or genuine scope creep
+  into unrelated documents.
+- **`docs/TAGS.proposals.md` needed no change.** Re-running `doc-tags-propose.sh` to get the
+  drift-check regenerated it byte-identically (`git diff` empty) — its own top-12 candidate list
+  (`#SPU-8`, `#NET-1`, `#NET-2`, …) is unaffected by this round's approvals, since none of the
+  seven approved tags appear in it. Left as the regenerated file rather than hand-edited or
+  deleted; its own header already says what to do with it next (delete unwanted rows, promote the
+  rest by hand) and nothing here changes that guidance.
