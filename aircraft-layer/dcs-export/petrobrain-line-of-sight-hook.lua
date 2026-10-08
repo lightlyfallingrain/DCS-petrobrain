@@ -326,9 +326,17 @@ local SET_LOOK_TEMPLATE = "PB_LOOK_HOUR=%d\nPB_LOOK_FOV_DEG=%d\nreturn \"ok\""
 --: while `PLAYER_BUBBLE_RADIUS_M` is a **float** -- `%d` on it is wrong (it
 --: would silently truncate the moment anyone writes a non-integral radius),
 --: and `%.14g`/`tostring` are not guaranteed to round-trip an IEEE-754
---: double. `%.17g` is the shortest width that always does, so the spliced
---: text is numerically identical to the constant for *any* value assigned
---: to it, not just for a round 10000.0.
+--: double. `%.17g` is the shortest width that always does for any *finite*
+--: value, so the spliced text is numerically identical to the constant
+--: for any finite value assigned to it, not just for a round 10000.0 --
+--: NOT for `math.huge`/`-math.huge`/NaN, which `%.17g` renders as
+--: `inf`/`-inf`/`nan`, none of which are valid Lua numeral syntax, so the
+--: chunk would fail to compile and every poll would return an error
+--: (Security deep analysis Finding 3). `PLAYER_BUBBLE_RADIUS_M` is a
+--: numeric literal assigned once and never reassigned (grep-confirmed),
+--: so this is not reachable today; it is the same finiteness this file's
+--: own `_safeClampInt` NaN/infinity guards exist to enforce on every
+--: *inbound* value, just not yet asserted on this one load-time constant.
 local LOS_CODE = "local MAX_SIGHTLINES = "
     .. string.format("%d", MAX_SIGHTLINES_PER_CALL)
     .. "\nlocal BUBBLE_RADIUS_M = "
@@ -431,6 +439,20 @@ local staticEnumFailures = 0
 -- other fields, because a side with genuinely no units is legitimate.
 local unitEnumFailures = 0
 
+-- A `;` in a mission-author-chosen name cannot survive the wire: the
+-- entries field is `;`-joined (`aircraft-layer/src/schema/line_of_sight.
+-- py`'s own `entries` format) and the parser (`_parse_entry`) raises on a
+-- fragment that does not rsplit cleanly, dropping every verdict in the
+-- poll -- not just this one object's (Security deep analysis Finding 1,
+-- required fix 1). Counted for the same reason `staticEnumFailures`/
+-- `unitEnumFailures` are: a drop that is not counted reads as "nothing to
+-- report" rather than "one object lost its verdict every poll it stays in
+-- the wedge". `:` and `|` are left alone -- `_parse_entry` already handles
+-- `:` by design (`rsplit(":", 2)`) and `|` lands harmlessly inside the
+-- entries field (`from_wire`'s `maxsplit=6`) -- rejecting either would
+-- drop real objects for no gain.
+local nameRejects = 0
+
 -- THE single bubble/wedge/name filter, shared by both populations so they
 -- cannot drift apart (BL-11 Stage 4: a static must be treated exactly as
 -- a unit is). Declared *below* every local it closes over -- Lua has no
@@ -444,6 +466,10 @@ local function considerCandidate(obj, isStatic)
     if rangeM > BUBBLE_RADIUS_M then return end
     local okName, name = pcall(function() return obj:getName() end)
     if not okName or type(name) ~= "string" or name == "" then return end
+    if string.find(name, ";", 1, true) then
+        nameRejects = nameRejects + 1
+        return
+    end
     if playerName ~= nil and name == playerName then return end
     objectsInBubble = objectsInBubble + 1
     if isStatic then staticsInBubble = staticsInBubble + 1 end
@@ -569,6 +595,7 @@ pcall(function()
             .. " cap_hit=" .. ((sightlinesComputed < #candidates) and "1" or "0")
             .. " static_enum_failures=" .. tostring(staticEnumFailures)
             .. " unit_enum_failures=" .. tostring(unitEnumFailures)
+            .. " name_rejects=" .. tostring(nameRejects)
             .. " ownship_unidentified="
             .. ((playerId == nil and playerName == nil) and "1" or "0"))
     end
