@@ -154,3 +154,4 @@ itself carried three stacked copies of that warning until 2026-10-06; merged, no
 - [LOS hook statics round2 approved](project_los_hook_statics_round2_approved.md) - APPROVED; rank an uncounted pcall by fails-open vs can-the-scope-yield, not by intuition.
 - [LOS hook statics round3 approved](project_los_hook_statics_round3_approved.md) - APPROVED clean; a log-only counter excluded from a wire count matches existing precedent, not a defect.
 - [BL-11 Stage 4 coverage log defect](project_bl11_stage4_fail_closed_coverage_log_defect.md) - NEEDS REVISION; log-on-growth guard floods on a cumulative counter, silent when healthy.
+- [BL-11 Stage 4 coverage log round2 approved](project_bl11_stage4_fail_closed_coverage_log_round2_approved.md) - APPROVED; mutation-verified all 5 new tests + teardown.
