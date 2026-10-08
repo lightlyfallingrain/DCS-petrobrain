@@ -513,29 +513,32 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 05 Oct 2026</span>
+      <span>Derived from ROADMAP.md · 09 Oct 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems, two hundred tracked items &mdash; and the chain that was parked
-      four days ago on the pilot's own eye is <strong>unparked, rebuilt and accepted</strong>. The
-      third landform detector (geomorphons, classified then traced) was built with its cache in from
-      the first pass, and the 2026-10-04 full-theatre rebuild cleared it by the pilot's own
-      criteria: <strong>zero relief-gate violations, 234,799 ridge and valley lines, a 720&nbsp;MB
-      store where 2.4&nbsp;GB was predicted</strong>, the Bekaa floor clean and Palmyra's chains
-      intact by eye. Nothing in the cockpit changes from it &mdash; the three callout stages are
-      still unbuilt and still gated on a consumer that wants landform references. Everything that
-      <em>would</em> change the cockpit went the other way this cycle: the 10&nbsp;km bubble, lost
-      contacts out of clustering, a <code>silence</code> command, merge-echo suppression and group
-      lines that stop repeating what was already said. All of it is merged, and <strong>none of it
-      has been heard in the air</strong>.</p>
+    <p class="lede">Six subsystems, two hundred and forty tracked items &mdash; and the
+      line-of-sight chain that has run through this project since September is <strong>closed</strong>.
+      <code>BL-11</code> is done: Petrovich's eye now <strong>fails closed</strong>. No live DCS
+      line-of-sight verdict means a contact is not admitted, and world-model's offline terrain
+      primitive is no longer reachable from the live path at all &mdash; the pilot's own standing
+      direction (<em>&ldquo;world model LOS must not be used &hellip; especially for
+      correctness&rdquo;</em>) finally taking effect in code. It was authorised on measurement, not
+      argument: the 2026-10-08 sortie put <strong>145 of 145 evaluated objects and 85 of 85 admitted
+      ones</strong> on a real verdict, against a baseline where <strong>76&nbsp;% had none</strong>.
+      The cause of that 76&nbsp;% turned out to be one missing engine call &mdash; the Hook had never
+      enumerated static objects, so 278 of 404 objects in the flown mission could not receive a
+      verdict at all. Those statics were never scenery: <strong>120 infantry, 65 tanks, 70 APCs and
+      eight Shilkas, and not one building</strong>. What remains unheard in the air is everything
+      about <em>what he says</em> &mdash; eight merged cards' worth, still batched behind one
+      flight.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>127</b><span>Done</span></div>
-    <div class="count is-active"><b>11</b><span>In progress</span></div>
-    <div class="count is-open"><b>60</b><span>Open</span></div>
-    <div class="count is-hold"><b>14</b><span>Deferred</span></div>
+    <div class="count is-done"><b>125</b><span>Done</span></div>
+    <div class="count is-active"><b>12</b><span>In progress</span></div>
+    <div class="count is-open"><b>95</b><span>Open</span></div>
+    <div class="count is-hold"><b>12</b><span>Deferred</span></div>
     <div class="count is-block"><b>3</b><span>Await you</span></div>
   </div>
 
@@ -564,13 +567,16 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Aircraft Layer</h3>
         <span class="path">aircraft-layer/</span>
         <div class="bar"><i style="width:95%"></i></div>
-        <span class="chip done">Core complete, both new channels accepted</span>
-        <p class="next">Live DCS I/O stable since Sept 7. The mission-scripting bridge is now
-          measured rather than feared: 568 units at a mean of 1.99&nbsp;ms, p99 8&nbsp;ms, about
-          2.6&nbsp;&micro;s an item &mdash; which is what makes batched work on the DCS side
-          affordable at all. <b>Next:</b> a damage and firing channel, and the bigger idea this
-          measurement unlocked &mdash; <b>DCS answering line of sight itself</b>, batched
-          collector-side, instead of our own grid approximating it.</p>
+        <span class="chip done">Core complete &mdash; the LOS Hook now sees statics too</span>
+        <p class="next">Live DCS I/O stable since Sept 7, and the idea the bridge measurement
+          unlocked is now flying: <b>DCS answers line of sight itself</b>. The Hook enumerates
+          static objects alongside AI units as of 2026-10-08 &mdash; the one missing call behind a
+          76&nbsp;% no-verdict population &mdash; at <b>~5&nbsp;ms a poll over a dense city,
+          27&nbsp;ms at worst</b>. Both halves of each sightline are published unANDed, and the
+          flight proved they genuinely disagree in both directions, so building occlusion
+          discriminates on its own. <b>Next:</b> the 128-sightline cap binds over a city, and the
+          cost says amortise it rather than raise it; a damage and firing channel is still
+          unbuilt.</p>
         <span class="more">Details</span>
       </article>
 
@@ -588,16 +594,17 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="bl">
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
-        <div class="bar"><i style="width:94%"></i></div>
-        <span class="chip active">Five quieting changes merged &mdash; not one of them flown</span>
-        <p class="next">The whole cycle was spent on how much Petrovich says and about what. Cohesion
-          went <b>size-relative and kind-aware</b> (merged); a 10&nbsp;km bubble bounds what is
-          computed at all; lost contacts left clustering, which took sortie-length cost out of the
-          tick; <code>silence</code> mutes him absolutely on one word; and two speech-layer fixes
-          stop the same units being announced twice &mdash; once as a merge echo, once as a group
-          line restating members already named. <b>Next:</b> one flight settles all of it, and the
-          open question underneath is still yours: what should he <em>say</em> when sixteen
-          separately-resolvable vehicles sit in one sector?</p>
+        <div class="bar"><i style="width:96%"></i></div>
+        <span class="chip done">BL-11 closed &mdash; the eye now fails closed</span>
+        <p class="next">The eye's correctness chain is finished. <code>BL-11</code> went
+          <b>done</b>: gate 4 fails closed, so no live DCS verdict means not admitted, and the
+          offline terrain primitive has <b>zero remaining live call sites</b> &mdash; verified by
+          grep, not asserted. A regression guard rides with it, logging even a clean
+          <code>0/N</code> so a passing check is distinguishable from a check that never ran. The
+          quieting work from the previous cycle is all still merged and still unheard. <b>Next:</b>
+          one flight settles that backlog, and the open question underneath is unchanged and still
+          yours: what should he <em>say</em> when sixteen separately-resolvable vehicles sit in one
+          sector?</p>
         <span class="more">Details</span>
       </article>
 
@@ -750,11 +757,11 @@ flowchart LR
 
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
-    <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing that is
-      done. The landform group has shrunk to almost nothing: last cycle it was four parked nodes
-      with no edge to anything, and the only thing left in it now is the callout work nobody has
-      asked for yet. What replaced it as the largest group is the one that cannot be reasoned
-      about from a desk at all.</p>
+    <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing
+      that is done. The line-of-sight group has changed meaning rather than shrinking: last cycle it
+      was a probe awaiting a flight and a batched-LOS design: now detection is closed and what sits
+      there is a <em>budget</em> question, some log hygiene, and a process gap. The largest group is
+      still the one that cannot be reasoned about from a desk.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -788,10 +795,11 @@ flowchart LR
     AMB["BL-B24 · BL-B25&lt;br/&gt;the ambiguity rule itself, untouched"]:::open
   end
 
-  subgraph LOSG ["Line of sight, the DCS way"]
+  subgraph LOSG ["Line of sight &mdash; closed; what is left is budget and hygiene"]
     direction LR
-    ELEV["Elevation-cost probe&lt;br/&gt;deployed, needs a flight"]:::block
-    DLOS["Batched LOS + occluders&lt;br/&gt;buildings DCS, trees OSM"]:::open
+    CAP128["BL-B42 the 128 cap binds&lt;br/&gt;amortise, do not enlarge"]:::open
+    TRACE["BL-B43 · BL-B44&lt;br/&gt;writer-level rows · drop the footer"]:::open
+    PROBE["AC-B5 probe-Hook teardown&lt;br/&gt;two stutters, same cause class"]:::open
     SURF["X-B32 per-tree placement&lt;br/&gt;behind the payload wall"]:::hold
   end
 
@@ -831,9 +839,7 @@ flowchart LR
   OVER -.->|"the root rule, below both fixes"| AMB
   FRAG -.-> AMB
   DMG --> POL
-  ELEV --> DLOS
-  DLOS -.->|"only route left"| SURF
-  DLOS -.->|"removes the grid's last live reader"| GRID
+  CAP128 -.->|"unblocked: the grid lost its last live reader"| GRID
   PARK --> DENS
   SAY -.->|"same question, different data"| DENS
   D10 --> BR3
@@ -865,63 +871,77 @@ flowchart LR
       fragmentation defect all sit in one node downstream of them rather than being closed by them.
       Both roadmap entries say so explicitly &mdash; the value of drawing it is that the three stop
       reading as unrelated backlog.</p>
-    <p class="section-note"><strong>The landform group is no longer a chain, it is a question.</strong>
-      Detection was the hard part and it is solved and accepted at theatre scale. What is left is
-      not engineering: 234,799 ridge and valley lines exist and almost none of them are worth
-      <em>saying</em>. That is the same question the sixteen-vehicles node asks about contacts, from
-      the opposite direction &mdash; which is why the two are now joined, and why neither of them is
-      a coding task.</p>
+    <p class="section-note"><strong>Closing the live path unblocked something nobody
+      filed.</strong> The elevation grid's retirement had been gated on &ldquo;whatever removes its
+      last live reader&rdquo;, and that is exactly what <code>BL-11</code> Stage 4 did: with
+      world-model's line-of-sight primitive out of the live path, the grid has no runtime reader
+      left. The dashed edge into <code>GRID</code> used to be a dependency; it is now a statement
+      that the condition has been met. Nothing in the roadmaps says this, because the consequence
+      landed in a different subproject from the change.</p>
+    <p class="section-note"><strong>Two probe Hooks, two stutters, and the pilot found both.</strong>
+      <code>AC-B5</code> reads as a tidiness item until you notice it has happened twice: the
+      elevation-cost probe drew <em>&ldquo;a small but annoying stutter every few seconds&rdquo;</em>
+      on 2026-10-05, and a forgotten unit-id-join probe Hook drew another on 2026-10-08 &mdash; the
+      second one after three separate hypotheses had been tested against log evidence and refuted
+      while the real cause sat in the Hooks directory. A probe is heavier than production code by
+      construction, nothing distinguishes one once deployed, and nothing removes it. That makes it a
+      measurement-integrity problem, not housekeeping: both sorties were flown to measure cost, and
+      a leftover probe is a confounder in exactly that measurement.</p>
   </section>
 
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Three. The landform acceptance that sat here last time is cleared, and what replaced it is
-        one large flight, one small isolated one, and a question only you can answer. Nothing here
-        can be settled from the Mac.</p>
+      <p>Three, and two of the three that sat here last time are cleared &mdash; the elevation-cost
+        probe was flown 2026-10-05, and the line-of-sight chain it fed has since been flown twice
+        and closed. What is left is one batched flight, one small check that can ride along with it,
+        and a design conversation.</p>
       <ul class="blockers">
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>Eight cards on <code>main</code>, none heard in the air</b>
-            <p>Everything merged since 2026-09-25 is waiting on one flight: group reporting and the
-              12&nbsp;m line-of-sight tolerance, the confirm band, the 2026-09-26 crew-behaviour
-              fixes, the brain's first real model, the cohesion redesign, <code>silence</code>, and
-              the two fixes that stop the same units being announced twice. <strong>The two newest
-              are the reason to fly now rather than later</strong>: both reduce what you hear, and
-              both carry the same risk in the same direction &mdash; a genuine split immediately
-              after a merge is indistinguishable from a merge echo at the speech layer and also goes
-              quiet. That is an accepted cost on paper; whether it is ever actually <em>noticed</em>
-              is a cockpit question. Fly with <code>--detection-trace</code>: the belief log
-              structurally cannot record a <em>rejected</em> candidate.</p>
+            <b>Eight cards on <code>main</code>, still none heard in the air</b>
+            <p>Every quieting change merged since 2026-09-25 is still waiting on one flight: group
+              reporting and the 12&nbsp;m line-of-sight tolerance, the confirm band, the 2026-09-26
+              crew-behaviour fixes, the brain's first real model, the cohesion redesign,
+              <code>silence</code>, and the two fixes that stop the same units being announced
+              twice. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
+              all of them reduce what you hear, and a genuine contact split immediately after a merge
+              is indistinguishable from a merge echo at the speech layer, so it also goes quiet. That
+              is an accepted cost on paper; whether it is ever <em>noticed</em> is a cockpit
+              question. Fly with <code>--detection-trace</code> &mdash; the belief log structurally
+              cannot record a <em>rejected</em> candidate.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="saywhat">
           <span class="chip block">Your judgement</span>
           <div>
             <b>What should he say about sixteen vehicles in one sector?</b>
-            <p>This is the open question under all of the quieting work, and it is explicitly
-              recorded as needing your judgement before anyone writes a plan. The 2026-09-19
-              vocabulary decisions do not cover it: they assumed the plural case arrives as
-              <em>one plural contact</em>, not as sixteen separately-resolvable singular ones &mdash;
-              and the 2026-09-28 log showed the clustering is right to see them as sixteen. So the
-              remaining lever is what a crew member would actually <em>say</em>, and no amount of
-              code reading produces that sentence.</p>
+            <p>Still the open question under all of the quieting work, and still explicitly recorded
+              as needing your judgement before anyone writes a plan. The 2026-09-19 vocabulary
+              decisions do not cover it: they assumed the plural case arrives as <em>one plural
+              contact</em>, not as sixteen separately-resolvable singular ones &mdash; and the
+              2026-09-28 log showed the clustering is right to see sixteen. The remaining lever is
+              what a crew member would actually <em>say</em>, and no amount of code reading produces
+              that sentence. <code>BL-B42</code>'s cap question now sits next to it: over Damascus
+              152 candidates compete for 128 sightlines, and the measured cost says amortise the
+              budget rather than raise it &mdash; which is a design conversation, not a fix.</p>
           </div>
         </li>
-        <li class="bl" role="button" tabindex="0" data-detail="elevprobe">
-          <span class="chip block">Windows box</span>
+        <li class="bl" role="button" tabindex="0" data-detail="logvis">
+          <span class="chip block">Rides along</span>
           <div>
-            <b>Fly the elevation-cost probe &mdash; alone, with nothing else running</b>
-            <p>The hook is already deployed on the Windows box and writes straight to
-              <code>dcs.log</code>; no collector, no body layer, no audio. Two things it settles
-              that no log elsewhere can: whether <code>land.getHeight</code> works through the
-              mission bridge at all (high confidence, never once demonstrated), and
-              <strong>whether the call stutters the frame</strong> &mdash; which only you can
-              judge, because milliseconds in a log cannot record a hitch. Fly it separately from any
-              crew-behaviour sortie: a deliberate frame hitch is precisely what would contaminate a
-              judgement about whether callouts feel right. Card:
-              <code>docs/acceptance/2026-09-29-elevation-cost-probe.md</code>.</p>
+            <b>Confirm two log lines, on any sortie</b>
+            <p>The only thing <code>BL-11</code> left unverified, and it needs no dedicated flight.
+              Stage 4's guard has no in-cockpit observable by design &mdash; it is a regression
+              guard, not something Petrovich says &mdash; so what is owed is just that its two lines
+              behave on a real run: the end-of-run summary appears with plausible totals and reads
+              <code>0/N</code> when the feed is healthy, and the transition warning stays quiet.
+              <strong>The gate itself must not be re-flown</strong>; it was authorised on the
+              2026-10-08 evidence. This exists as a separate item only because the identical claim
+              was verified by four gates through <code>caplog</code> and was still false in
+              production. Card:
+              <code>docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md</code>.</p>
           </div>
         </li>
       </ul>
@@ -984,15 +1004,17 @@ flowchart LR
       <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
         <span class="who">aircraft-layer</span>
         <div class="what">
-          <b>Let DCS answer line of sight, batched, next to the game</b>
-          <p>The bridge turned out cheap &mdash; 568 units, 1.99&nbsp;ms mean &mdash; so one batched
-            sweep can compute line of sight for every unit in the bubble instead of body-layer asking
-            per candidate over the LAN. Terrain <em>and</em> buildings, true position to true
-            position, which is new capability rather than a fix: nothing occludes behind a building
-            today. Not omniscience &mdash; line of sight is a physical fact, and belief about
-            <em>position</em> stays as fuzzy as it is now.</p>
+          <b>The 128-sightline cap binds over a city &mdash; and the cost says amortise, not enlarge</b>
+          <p>DCS answering line of sight is <b>built, flown and closed</b>; what the flight left open
+            is the budget. Over Damascus 152 candidates competed for 128 sightlines and the cap bound
+            for the first time, dropping the 24 farthest &mdash; the right direction, but a real
+            truncation. The measured cost is what decides the fix: 27&nbsp;ms for 128 sightlines is
+            ~0.21&nbsp;ms each, so today's cap is already ~1.6 frames at 60&nbsp;fps and covering the
+            whole wedge in one poll would make the poll the hitch it currently is not. So the answer
+            is a per-poll budget with a rotating offset through the far tail, not a bigger number.
+            <b>BL-B42</b>, and it wants a conversation before a plan.</p>
         </div>
-        <span class="chip open">Planned</span>
+        <span class="chip open">Needs /explore</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="cond">
@@ -1216,7 +1238,7 @@ flowchart TB
     direction TB
     DCS["DCS World&lt;br/&gt;Mi-24P / Petrovich cockpit"]:::done
     AL["Aircraft Layer&lt;br/&gt;Export.lua + collector&lt;br/&gt;pinned: needs the install"]:::done
-    LOSQ["Batched line of sight&lt;br/&gt;terrain + buildings&lt;br/&gt;PLANNED, not built"]:::hold
+    LOSQ["LOS Hook &mdash; DCS answers sightlines&lt;br/&gt;units + statics, buildings + terrain&lt;br/&gt;Hook state, 1 Hz, ~5 ms"]:::done
   end
 
   subgraph MAC ["Mac — for now, by decision, not by need"]
@@ -1233,7 +1255,7 @@ flowchart TB
   DCS ==>|"telemetry, world objects,&lt;br/&gt;HelperAI indication"| AL
   AL ==>|"text overlay, F10/voice&lt;br/&gt;commands, audio playback"| DCS
   AL -->|"HTTP/JSON"| BL
-  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)"| WM
+  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)&lt;br/&gt;terrain semantics only &mdash; LOS left&lt;br/&gt;the live path 2026-10-09"| WM
   BL -->|"HTTP/JSON"| AA
   AA -->|"HTTP/JSON"| AL
   MI -.->|"HTTP/JSON, offline query"| WM
@@ -1242,8 +1264,9 @@ flowchart TB
   BRAIN -->|"HTTP/JSON, drained in&lt;br/&gt;the poll loop"| BL
   BRAIN -->|"Stage 2, wired 2026-09-25"| OLL
   MI -.->|"same model, kept warm"| OLL
-  DCS -.->|"one bridge call per sweep"| LOSQ
-  LOSQ -.->|"would join the unit feed"| AL
+  DCS ==>|"one dostring_in bridge call per poll"| LOSQ
+  LOSQ ==>|"UDP 7796, joined by unit_name"| AL
+  AL -.->|"UDP 7797, look direction"| LOSQ
 </pre>
       </div>
     </div>
@@ -1333,16 +1356,17 @@ const DETAIL = {
   },
 
   dcslos: {
-    kicker: "aircraft-layer/", title: "DCS answers line of sight, batched", chip: ["open", "Planned, measured, not built"],
-    facts: [["Bridge cost", "568 units, mean 1.99 ms, p99 8 ms"], ["Per sweep", "50 units 0.9 ms · 200 units 2.2 ms · 500 units 4.9 ms"], ["Status", "plan only"]],
+    kicker: "aircraft-layer/", title: "DCS answers line of sight &mdash; built, flown, and now a budget question", chip: ["open", "BL-B42: the cap binds; amortise it"],
+    facts: [["Closed", "BL-11 Stage 4, merged 2026-10-09"], ["Verdict coverage", "145/145 evaluated, 85/85 admitted"], ["Was", "76% of admitted objects had no verdict"], ["Poll cost", "~2 ms open, ~5 ms city, 27 ms worst"]],
     sections: [
-      { h: "The inversion that removes the LAN problem", p: "Today body-layer asks world-model for line of sight per candidate, per poll, at 5 Hz, in-process on the Mac. The proposal is the other way round: aircraft-layer computes it for every relevant unit in <strong>one batched bridge call</strong> and publishes the result the way it already publishes telemetry, world objects and indication text. Body-layer polls one response. Existing pattern, no new seam &mdash; and at 1 Hz it is 0.2&ndash;0.5% duty on a cadence the mission bridge already runs." },
-      { h: "Why this is more than an optimisation", p: "It removes the elevation grid from the line-of-sight path entirely. Line of sight computed against DCS's own terrain and own buildings has no SRTM error to correct and no probe accumulation to wait for, so it <strong>dissolves the missed-AAA defect class at its source</strong> rather than mitigating it with a 12 m tolerance. And buildings do not occlude anything today in either path &mdash; that half is new capability, additive, and cannot regress what works." },
-      { h: "Not a loosening of the invariant", p: "Line of sight is a physical fact about the world, not knowledge. Belief about <em>position</em> stays exactly as fuzzy as it is now; what changes is whether the terrain and buildings between two real points are modelled correctly. The detectability model &mdash; angular size, optic, conditions, salience &mdash; sits on top of that answered fact, unchanged." },
-      { h: "Three constraints any design must keep", p: "Tests must run with no DCS and no collector, which is a hard requirement &mdash; so world-model's own primitive stays as the offline and test path and this becomes the <em>live</em> path, not a replacement. The Mission Interpreter still needs the elevation grid for offline enrichment across the whole map, where coarse is adequate. And aircraft-layer has so far reported facts rather than computing gates; HelperAI's own detection text is the precedent that this is not a new kind of thing, but the boundary shift should be argued rather than assumed." }
+      { h: "The inversion shipped, and it inverted the LAN problem away", p: "Body-layer used to ask world-model for line of sight per candidate, per poll, in-process on the Mac &mdash; against a terrain-only, building-blind primitive. Now the Hook computes it inside DCS in <strong>one <code>dostring_in</code> bridge call per poll</strong> and publishes the result on UDP 7796 the way telemetry and world objects already travel, joined by <code>unit_name</code>. Gate 4 fails closed on the result, and the offline primitive has <strong>zero remaining live call sites</strong>." },
+      { h: "The 76% was one missing engine call, and the diagnosis before it was wrong", p: "Most objects never received a verdict at all, and the first explanation &mdash; nameless or duplicate <code>unit_name</code>s breaking the join &mdash; was <strong>wrong, and survived three documents</strong>. A probe settled it: names are unique and non-null on both sides (units 50/50, statics 94/94), and the real cause was that the Hook walked <code>coalition.getGroups()</code> only, so <strong>static objects could not appear in a result</strong> &mdash; 278 of 404 objects in the flown mission. The wrong mechanism survived because &ldquo;nameless statics cluster close in&rdquo; and &ldquo;static vehicles cluster close in&rdquo; predict the same observable. A hypothesis that explains an anomaly is not thereby the mechanism." },
+      { h: "Those statics were never scenery, and the pilot's own reading was overturned twice", p: "In flight the dense city population read as buildings &mdash; <em>&ldquo;we don't really need buildings in objects that we track&rdquo;</em>. Counting the flown mission's own Lua settled it: 388 statics, of which <strong>120 infantry, 65 tanks, 70 APCs and eight ZSU-23-4 Shilkas &mdash; and zero buildings</strong>. Filtering on that reading would have blinded Petrovich to exactly the contacts he exists to call. A follow-up proposal to drop the 21 <code>big_smoke</code> effects was also declined, on the pilot's grounds that smoke works as a landmark for referencing, like signal smoke and flares. <strong>Nothing in the population is filtered.</strong>" },
+      { h: "What the flight proved that no desk analysis had", p: "Building occlusion discriminates <em>independently</em> of terrain. Both halves of each sightline are published never-pre-ANDed, and across the sortie 14,251 rows had terrain blocking while buildings were clear, with 6,634 the reverse. The two engine calls disagree in both directions at volume, so the building check is not shadowing the terrain one &mdash; which is the capability this was built for, demonstrated in the air for the first time, and precisely what was unavailable while the population whose occlusion matters most received no verdicts." },
+      { h: "What is actually left, and why it is not a bigger number", p: "Over Damascus the cap bound: 152 candidates, 128 sightlines, the 24 farthest dropped &mdash; nearest-first, so the right failure direction, but a real truncation. The cost is what decides the fix. 27&nbsp;ms across 128 sightlines is ~0.21&nbsp;ms each over two engine calls, so <strong>128 is already ~1.6 frames at 60&nbsp;fps</strong>; 152 would be ~1.9 and 256 ~3.2. Raising the cap would make the poll into the hitch this sortie proved it is not. The direction is to <strong>amortise</strong> &mdash; a per-poll budget near one frame, nearest candidates every poll, and a rotating offset through the far tail, covering the full wedge in ~2 polls at flat cost. <code>BL-B42</code>, needing a conversation first." }
     ],
-    items: [["done","Bridge cost measured at scale"],["done","Building sightline cost measured (8.7 us)"],["open","Terrain source swap"],["open","Building occlusion (the cheaper, higher-value half)"],["hold","Trees - no DCS route exists"]],
-    src: "plans/dcs-driven-los/plan.md, todo/backlog.md (X-B29, X-B30, X-B31)"
+    items: [["done","Hook enumerates units AND statics, all three sides"],["done","Gate 4 fails closed; offline primitive unreachable"],["done","Coverage guard, always on, all three entry points"],["done","Delimiter guard: a ';' no longer drops a whole poll"],["open","BL-B42: amortise the sightline budget"],["open","BL-B43 · BL-B44: trace rows and the ASCII footer"],["open","AC-B5: probe-Hook teardown is undocumented"]],
+    src: "aircraft-layer/ROADMAP.md, body-layer/ROADMAP.md (BL-11 Stage 4), plans/bl11-stage4-fail-closed/, plans/los-hook-statics/, aircraft-layer/research/2026-10-06-unit-id-join-results.md"
   },
 
   quieting: {
@@ -1386,17 +1410,16 @@ const DETAIL = {
     src: "todo/todo.md (Sortie 2026-09-28), plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md"
   },
 
-  elevprobe: {
-    kicker: "Waiting on you", title: "Fly the elevation-cost probe", chip: ["block", "Windows box"],
-    facts: [["Setup", "DCS alone — no collector, no body layer"], ["Already deployed", "hook on the Windows box, writes to dcs.log"], ["Known already", "the bridge costs ~2.6 us an item"]],
+  logvis: {
+    kicker: "body-layer/", title: "Two log lines, unverified in the air", chip: ["block", "Rides along with any sortie"],
+    facts: [["Owed", "that two lines print on a real run"], ["NOT owed", "re-flying the fail-closed gate"], ["Found by", "DoD round 1, running the code outside pytest"], ["Missed by", "4 gates, all using caplog.at_level"]],
     sections: [
-      { h: "Two things the existing measurement cannot tell us", p: "The bridge cost is settled for one call: 0.5 ms fixed plus ~2.6 &micro;s an item, p99 8 ms at 568 units, read out of a sortie that was already in <code>dcs.log</code>. What that figure cannot answer: whether <code>land.getHeight</code> works through the mission bridge <em>at all</em> &mdash; high confidence, never once demonstrated, since every prior elevation probe ran offline through mission-editor triggers &mdash; and what it costs when it does." },
-      { h: "Half of it is yours and cannot be delegated", p: "<strong>Does the call block DCS's own frame?</strong> A log can record milliseconds; it cannot record whether the aircraft stuttered. The 20 ms outliers in the existing data are the hint that a bridge payload might stall the renderer rather than merely taking time." },
-      { h: "Fly it separately, deliberately", p: "Not on a crew-behaviour sortie. The probe may hitch the frame by design, which is exactly what would contaminate a judgement about whether Petrovich's callouts feel right &mdash; and the reverse holds too." },
-      { h: "What it decides", p: "Whether real DCS elevation gets accumulated in flight at all. The alternative route is real but unfinished: <code>Syria.surface5</code> does encode elevation, confirmed 129/129 against ground truth with a working index walker, but only a per-tile min/max envelope has been decoded &mdash; per-node heights sit behind the same payload-addressing wall that has now stopped two separate attempts. If this probe comes back cheap, that fortnight-long decode never needs attempting." }
+      { h: "Why this is a separate item and not part of the gate's own acceptance", p: "<code>BL-11</code> Stage 4 deliberately has <strong>no in-cockpit observable</strong> &mdash; the roadmap's own words are <em>\"a regression guard rather than an observable\"</em>. Petrovich says nothing new. So the gate itself was accepted on the 2026-10-08 flight evidence (145/145 evaluated objects on a live verdict, 85/85 admitted, against a 76% no-verdict baseline) and <strong>must not be re-flown</strong>. What is left is only that the guard's own two lines appear: the end-of-run summary with plausible totals, reading <code>0/N</code> when the feed is healthy, and the transition warning staying silent when nothing is wrong." },
+      { h: "The reason it earned its own entry at all", p: "The identical claim was verified by four separate gates &mdash; three review rounds and a security deep analysis &mdash; and was <strong>still false in production</strong>. Every test asserted through <code>caplog.at_level(logging.INFO)</code>, which forcibly overrides the level. Nothing in <code>body-layer/src/</code> configured a logging handler, so Python fell back to <code>logging.lastResort</code> at threshold <code>WARNING</code> and the summary was silently dropped on every real run. The tests proved the call <em>fires</em>; none proved it is <em>visible</em>. The DoD caught it by running the module outside pytest, which is the only check that could have." },
+      { h: "What the guard is for, so the lines mean something when you see them", p: "Now that the live DCS verdict is the only path, <strong>a nonzero fallback count is a defect</strong>, not a statistic. The summary logs even at zero precisely so a passing guard is distinguishable from a guard that never ran &mdash; the same reason <code>static_enum_failures</code> exists on the Hook side. If you ever see the transition warning, the live line-of-sight feed stopped mid-sortie and Petrovich went quiet rather than wrong; that is the designed failure direction, and the log is the only place it is visible." }
     ],
-    items: [["done","Bridge cost at scale, from an existing log"],["done","surface5 elevation confirmed (envelope only)"],["open","Does land.getHeight work through the bridge?"],["open","Does it hitch the frame?"]],
-    src: "docs/acceptance/2026-09-29-elevation-cost-probe.md, todo/backlog.md (X-B26)"
+    items: [["done","Fail-closed gate, authorised on flight evidence"],["done","Coverage counter, always on, all three entry points"],["done","Visibility fixed + pinned by a no-override test"],["block","Confirm both lines on a real run"],["open","BL-B46: propagate would double-print in a host"]],
+    src: "body-layer/ROADMAP.md (BL-11 Stage 4), plans/bl11-stage4-fail-closed/dod-check.md, docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md"
   },
 
   wm: {
