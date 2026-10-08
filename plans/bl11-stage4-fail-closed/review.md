@@ -305,3 +305,172 @@ calls they claim to pin. The cross-test-pollution claim was reproduced directly 
 watched the warnings reappear, re-applied the fix, watched them disappear) rather than taken from
 the implementation log. Full suite, ruff, and mypy run independently in this worktree, not
 inherited.
+
+---
+
+## Round 4 — review of the DoD required-fix commit `cf65d8a`
+
+**Scope: `cf65d8a` alone** — the fix for `d19a8e7`'s DoD FAIL (`plans/bl11-stage4-fail-closed/
+dod-check.md`: `_log_live_los_coverage_summary`'s unconditional end-of-run `INFO` line was never
+visible on a real run, because nothing in `body-layer/` configures logging and Python's
+`logging.lastResort` fallback threshold is `WARNING`, above `INFO`). Rounds 1-3 and security's
+deep analysis all missed this because every existing test uses `caplog.at_level(logging.INFO,
+...)`, which forcibly overrides the ambient level and proves the call fires without proving it is
+visible. Not re-reviewing the branch as a whole; see rounds 1-3 above for that.
+
+**Worktree state**: landed on `main` as AGENTS.md rule 4 predicts. The scaffolding branch
+(`worktree-agent-aab502e96dbf401da`) had no commits of its own, so it was moved to the named tip
+`cf65d8ab9151542b176bfd6ccb7fb61ae6fac350` via `git checkout -B`, discarding nothing — confirmed
+clean tree and no unique commits first.
+
+### What `cf65d8a` does
+
+Adds `_configure_logger_for_main()` (`body-layer/src/logger.py`), called as `main()`'s first
+statement: clears this module's own `logging.getLogger(__name__)` logger's handlers, attaches a
+fresh `StreamHandler(sys.stderr)` with a plain `"%(message)s"` formatter, sets level `INFO`.
+Deliberately scoped to this one named logger, never `logging.basicConfig`/root. Adds two tests
+asserting on real captured `stderr` via `capsys`, with no `caplog` override anywhere.
+
+### Verification performed myself (not taken from `implementation.md`)
+
+- **Reproduced the pre-fix defect and the fix, both directly**: `logger.lastResort.level == 30`
+  confirmed; pre-fix `logger.info(...)` silently dropped, `logger.warning(...)` printed by
+  accident of that threshold; post-fix, with `_configure_logger_for_main()` called, both an
+  `INFO` and a `WARNING` line print from a plain `python -c` one-liner, matching
+  `implementation.md`'s own transcript exactly.
+- **Mutation-verified the two new tests are genuinely immune to the failure mode that hid the
+  original bug.** Commented out the `_configure_logger_for_main()` call in `main()`, reran both
+  visibility tests: both failed exactly as `implementation.md` claims —
+  `assert '...' in ''` against real captured `stderr` — while pytest's own "Captured log call"
+  section still showed the `WARNING` record (the `INFO` line, now dropped, does not even reach
+  that section, which is consistent: `caplog`'s handler sees the raw record regardless of the
+  module's own level, but a dropped-for-this-run record from a `info()` call that never fired a
+  handler at all is a different story — either way, the point holds: the record existing in
+  `caplog`'s view and the record being visible on real `stderr` are provably different claims).
+  Restored the call with `Edit`; `git diff --stat src/logger.py` empty afterward; both tests green
+  again.
+- **Confirmed the handler-management reasoning (point (b) in the dispatching brief) by the same
+  mutation**: the failure mode the implementer describes for a `if not logger.handlers:` guard
+  (binding to test 1's `capsys`-substituted stream and going silent for every later in-process
+  `main()` call) is consistent with `capsys`'s per-test fixture scope — each test gets its own
+  substituted `sys.stderr` object, and a guard that skips re-adding a handler across tests would
+  indeed hold the first test's object. Did not independently re-derive this with a second mutation
+  (guarding the clear and rerunning the full file) since the reasoning is straightforward from
+  `capsys`'s documented per-test behaviour and the fix's current form (clear-and-readd, unconditional)
+  is demonstrably correct via the test suite's own green run across many tests in one session; no
+  evidence of handler leakage (checked `len(logger.handlers)` stays 1 after this file's full test
+  run — did not see more than one handler attached at any point by re-running with a one-line
+  temporary assertion, since removed).
+- **Confirmed the scoping decision's blast-radius survey**: `grep -rn "logger.info\|logger.warning"
+  src/` shows exactly the four `INFO` sites `implementation.md` names
+  (`logger.py:945`, `logger.py:1218`, `belief/crew_console.py:964`,
+  `perception/hybrid_source.py:303`). Confirmed `hybrid_source.py:303`'s `_record_drop` is called
+  from both of `_poll`'s unassociable-detection branches (`hybrid_source.py:206`, `:223`) — i.e. a
+  persistently-unassociable detection re-triggers it every poll it is still present, matching the
+  "every unassociable detection, every poll" claim. Confirmed named-logger independence directly:
+  `logger.py`'s own logger is `logging.getLogger(__name__)` with `__name__ == "logger"` (run via
+  `python -m logger`); `hybrid_source.py` and `crew_console.py` use `__name__` values
+  `"perception.hybrid_source"` and `"belief.crew_console"` respectively — neither is a dotted
+  prefix of `"logger"` or vice versa, so Python's logger-hierarchy lookup cannot route
+  `logger`'s level/handler change to either. The scoping choice is sound and the flood-risk
+  rejection of a global `basicConfig` is correctly argued.
+- **Ran the full suite independently**: `ruff format --check src tests` → 118 files already
+  formatted; `ruff check src tests` → all checks passed; `mypy src` (from inside `body-layer/`) →
+  success, 54 source files; `pytest tests -q` → 1551 passed, 4 xfailed; `pytest tests -q -W
+  error::pytest.PytestUnhandledThreadExceptionWarning` → same, 0 warnings. All match
+  `implementation.md`'s reported numbers exactly.
+- **Reproduced the real `main()` end-to-end run claim**: ran the exact one-liner from
+  `implementation.md` (`_configure_logger_for_main()` then `logger.info(...)`/`logger.warning(...)`
+  via `python -c`) and got identical output to the transcript recorded there. Did not
+  independently re-run the full `MockAircraftLayerServer`-backed `main()` end-to-end scenario
+  beyond what the two new pytest tests already exercise (they drive `main()` itself under
+  `capsys`, which is the same code path) — treating the pytest-level reproduction as sufficient
+  given it exercises the identical call sequence the standalone claim describes.
+
+### Required Fixes
+
+None.
+
+### Findings ruled on, as asked
+
+**(a) `logger.propagate` is left at its default `True`, and I confirm this is real** — reproduced
+independently:
+
+```
+$ python -c "
+import logging, logger as m
+logging.basicConfig(level=logging.INFO, format='ROOT> %(message)s')
+m._configure_logger_for_main()
+m.logger.info('does this appear once or twice?')
+print('propagate =', m.logger.propagate)"
+does this appear once or twice?
+ROOT> does this appear once or twice?
+propagate = True
+```
+
+**Ruling: optional, not required — but the docstring should be narrowed, and I'd ask the
+implementer to do it rather than close this silently.** Reasoning:
+
+- The scenario the docstring invokes — "if this module were ever imported into a larger process
+  instead of run standalone" — does not exist today. `logger.py`'s `main()` is this subproject's
+  own standalone entrypoint; nothing in this codebase imports `logger` as a library and calls
+  `main()` from inside a host process. The duplicate-line effect is real but currently
+  unreachable from any code path that exists.
+- It is not a *correctness* regression in the sense the rest of this round's fixes were — nobody
+  is silently losing information; at worst a future host sees a line twice, which is a cosmetic
+  annoyance, not a dropped signal (the inverse of the bug this whole round exists to fix).
+  That asymmetry — "worse case is noisy, not silent" — is why I land on optional rather than
+  required, even though the branch has now disagreed with its own comments twice (the flood/
+  silence inversion in round 1, and this one).
+- But the docstring's own words make a claim ("avoid clobbering a host application's own logging
+  setup") that is broader than what the code delivers, and that specific gap — text asserting a
+  property the code doesn't have — is exactly the class of defect this round's retrospective
+  lesson (`implementation.md`'s own "Notable Discoveries") is about. Leaving it unaddressed with
+  no note anywhere is how a future reader "fixes" something else assuming the isolation claim
+  already holds.
+- **Recommendation for whoever picks this up next** (not blocking this review): either add
+  `logger.propagate = False` (one line, makes the docstring's claim true, and is unconditionally
+  safe here since this logger has no legitimate reason to also fan out through a root handler —
+  its own handler already does the printing) or narrow the docstring to say what is actually true
+  ("scoped to avoid turning on other modules' `INFO` logging, not yet handling the
+  imported-as-a-library double-print case"). I'd pick the one-line fix over the docstring edit —
+  it's cheaper than the sentence describing why it's missing, and it closes the gap the docstring
+  already promises is closed. Filing as a note rather than a required fix because nothing in the
+  current call graph reaches it; if this project's posture is "any code/docstring disagreement on
+  this branch is required," overrule me and I'll treat it as one.
+
+**(b) Clear-and-reattach vs. guarded attach**: confirmed correct, see verification above. The
+reasoning holds and matches `capsys`'s per-test fixture semantics; no leakage observed across the
+full suite run.
+
+**(c) Scoping decision (reject global `basicConfig`)**: confirmed correct, see verification above.
+Frequency claim for `hybrid_source.py:303` checked against its two call sites, not assumed.
+Named-logger independence confirmed directly from each module's `__name__`.
+
+**(d) Are the two new tests immune to the failure mode that hid this?**: yes, confirmed by
+mutation — see verification above. This is the most valuable part of the round and it reproduces
+cleanly.
+
+### Optional Refinements
+
+- `logger.propagate = False`, or a narrowed docstring — see (a) above. Optional, not blocking.
+
+### Verdict
+
+**APPROVED.** `cf65d8a` closes the DoD's required fix correctly: the mechanism is sound, the
+scoping decision is well-argued and verified (not just asserted), and the two new tests are
+proven — by mutation, not by reading — to close the exact visibility gap that let the original
+defect survive three review rounds and a security pass. One optional refinement (`logger.
+propagate`), explicitly not blocking. Ready for DoD.
+
+### Review Confidence (round 4)
+
+Full read of `cf65d8a` alone, per scope. Reproduced the DoD's own repro, the fix's own repro, and
+the implementer's mutation (disable-the-call, watch both tests fail against real `stderr` while
+`caplog`'s "Captured log call" still shows the record; restore; confirm clean diff and green
+tests) independently rather than trusting the written account. Verified the blast-radius survey
+(4 `logger.info` call sites, named-logger independence) by `grep` and by reading each call site,
+not by trusting the count. Did not independently re-derive the handler-leakage claim with a
+second, separate mutation (guarding the handler attach and rerunning); relied on `capsys`'s
+documented per-test isolation semantics plus the full suite's own green run as sufficient evidence
+no leakage occurs in practice.
