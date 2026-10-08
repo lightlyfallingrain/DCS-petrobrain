@@ -1942,6 +1942,54 @@ def _per_run_log_paths(
     )
 
 
+def _configure_logger_for_main() -> None:
+    """Give this module's own `logger` (`logging.getLogger(__name__)`,
+    above) a level and a handler, so `_log_live_los_coverage_summary`'s
+    end-of-run line and `_warn_live_los_coverage_gap_once`'s transition
+    warning are actually visible on a real run (`plans/
+    bl11-stage4-fail-closed/dod-check.md`'s required fix).
+
+    **Why this was needed at all**: nothing in this codebase configured
+    logging anywhere, so with no handler attached anywhere in the
+    hierarchy, Python falls back to `logging.lastResort`, whose threshold
+    is `WARNING` (30) -- `logger.warning(...)` calls printed by accident
+    of that fallback, but every `logger.info(...)` call, including the
+    coverage summary's unconditional `0/N` line, was silently dropped on
+    every real sortie. All three entry points (`--console`, `--crew-text`,
+    and the plain-logger `else:` branch) share this one module-level
+    `logger`, so configuring it once here covers all three.
+
+    **Deliberately scoped to this module's own logger instance, never
+    `logging.basicConfig`/the root logger.** `main()` is this subproject's
+    own standalone entrypoint (`python -m logger ...`), so touching
+    logging configuration here is defensible -- but a global
+    `basicConfig` call would do two things this fix does not want: clobber
+    a host application's own logging setup if this module were ever
+    imported into a larger process instead of run standalone, and raise
+    *every other module's* logger to `INFO` as a side effect, which would
+    turn on `perception.hybrid_source`'s per-dropped-detection `INFO` line
+    globally -- a flood, and a second regression of the exact kind this
+    fix exists to close in the opposite direction. Named loggers
+    (`logging.getLogger(__name__)`) are independent of each other unless
+    one's name is a dotted child of another's; `"logger"` (this module's
+    `__name__` when run via `python -m logger`) is not a parent of
+    `"perception.hybrid_source"` or `"belief.crew_console"`, so this call
+    cannot reach them.
+
+    Clears and re-adds this logger's own handler on every call rather than
+    checking `if not logger.handlers:` first -- idempotent in production
+    (`main()` runs this exactly once per process), and correct under
+    repeated in-process calls in tests, where a guard would bind the
+    handler's `StreamHandler` to whichever `sys.stderr` was current on the
+    *first* call and never see a later test's `capsys`-substituted stream
+    again."""
+    logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def main() -> None:
     """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
     ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
@@ -1950,7 +1998,11 @@ def main() -> None:
     tests (a live/replay-loop driver, same posture as
     `aircraft-layer/src/collector/__main__.py`'s own untested `main()`);
     `PerceptionLogger`'s, `HybridPerceptionSource`'s, and
-    `NakedEyePerceptionSource`'s own logic is."""
+    `NakedEyePerceptionSource`'s own logic is.
+
+    First line is `_configure_logger_for_main()` -- see its own docstring
+    for why logging needs configuring here at all."""
+    _configure_logger_for_main()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--aircraft-layer-url",

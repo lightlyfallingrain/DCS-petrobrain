@@ -2662,3 +2662,74 @@ def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
     assert summaries == [
         "live LOS coverage: 2/2 gate-4 evaluations had no live verdict this sortie"
     ], summaries
+
+
+# -- Logging visibility under the real, unconfigured default (`plans/
+# bl11-stage4-fail-closed/dod-check.md`'s required fix): every test above
+# this point proves the call fires, using `caplog.at_level(...)`, which
+# forcibly lowers the effective level for its block -- exactly the thing
+# that hid this defect from four review rounds. These two prove the two
+# log lines are visible with *no* level override at all, i.e. under
+# whatever `main()` itself configures (`_configure_logger_for_main`), the
+# same way a real operator running `python -m logger ...` would see
+# them. ------------------------------------------------------------------
+
+
+def test_log_live_los_coverage_summary_is_visible_under_default_logging_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No `caplog.at_level` anywhere in this test -- `capsys` captures
+    whatever actually lands on the real `sys.stderr` stream, which is
+    exactly what the DoD's repro ran against directly
+    (`PYTHONPATH=... python -c "logger.logger.info(...)"`). Same two-poll
+    drive as `test_plain_logger_path_logs_the_coverage_summary_in_its_
+    finally_block` above, so the expected totals are identical; the only
+    difference is the absence of a level override, which is the point."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    stderr = capsys.readouterr().err
+    assert (
+        "live LOS coverage: 2/2 gate-4 evaluations had no live verdict this sortie"
+        in stderr
+    ), stderr
+
+
+def test_live_los_coverage_gap_warning_is_visible_under_default_logging_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The transition warning's half of the same proof. This one worked
+    even before the fix, by accident of `logging.lastResort`'s own
+    `WARNING` threshold -- nothing pinned that it stays visible once
+    `_configure_logger_for_main` starts managing this logger's level and
+    handler explicitly, so this is a regression guard for the fix itself,
+    not only a test of pre-existing behaviour."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    stderr = capsys.readouterr().err
+    assert "live LOS coverage gap" in stderr, stderr

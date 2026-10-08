@@ -148,3 +148,4 @@ Write directly — the dir exists.
 - [BL-11 Stage 4 coverage-log fix](project_bl11_stage4_coverage_log_fix.md) — log-on-change is wrong for a monotonic counter; edge-trigger + unconditional summary.
 - [BL-11 Stage 4 fail-closed blast radius](project_bl11_stage4_fail_closed_test_blast_radius.md) — plan's per-file counts didn't sum to its own total; 4 more files hid the same gap.
 - [monkeypatch module attr, not shared stdlib](feedback_monkeypatch_module_attr_not_shared_stdlib.md) — `mod.time.sleep` patch leaks across threads; rebind the name in `mod` instead.
+- [BL-11 Stage 4 logging visibility fix](project_bl11_stage4_logging_visibility_fix.md) — lastResort=WARNING ate INFO; scope the fix to one named logger, not basicConfig.
