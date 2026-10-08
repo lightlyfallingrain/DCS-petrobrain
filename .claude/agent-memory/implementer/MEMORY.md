@@ -145,4 +145,5 @@ Write directly — the dir exists.
 - [LOS Hook statics](project_los_hook_statics.md) — extract a bridged chunk (with spliced prefix) to luac-check it; StaticObject has no getObjectID.
 - [A pcall without a counter goes loud→silent](feedback_a_pcall_without_a_counter_converts_loud_to_silent.md) — check the sibling population for the asymmetry.
 - [Keeper eligibility predicate](project_keeper_eligibility_predicate.md) — electing a survivor and consuming peers = silence, unless via the real gate.
+- [BL-11 Stage 4 coverage-log fix](project_bl11_stage4_coverage_log_fix.md) — log-on-change is wrong for a monotonic counter; edge-trigger + unconditional summary.
 - [BL-11 Stage 4 fail-closed blast radius](project_bl11_stage4_fail_closed_test_blast_radius.md) — plan's per-file counts didn't sum to its own total; 4 more files hid the same gap.

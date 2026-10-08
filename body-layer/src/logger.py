@@ -855,46 +855,102 @@ def _push_gaze_line(
     return gaze.label
 
 
-def _log_live_los_coverage_if_growing(
-    sources: list[PerceptionSource], last_logged_no_verdict: int
-) -> int:
+def _warn_live_los_coverage_gap_once(
+    sources: list[PerceptionSource], already_warned: bool
+) -> bool:
     """Reads the naked-eye source's `LiveLosCoverage` counter
     (`plans/bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 step 4) and
-    logs a warning via the standing `logging.getLogger(__name__)` channel
-    whenever the cumulative `no_verdict` count has grown since the last
-    poll this was logged at -- called from both `_run_console_poll_loop`
-    and `_run_crew_text_poll_loop`, mirroring `_push_gaze_line`'s own
-    log-on-change shape. Deliberately **not** every poll once `no_verdict`
-    is nonzero: at a ~1 s poll interval a dead live-LOS feed would
-    otherwise print one line per poll for the rest of the sortie, crowding
-    out every other log line without adding information after the first
-    one. On by default, with no `--flag` to gate it (unlike `--detection-
+    logs a one-time warning via the standing `logging.getLogger(__name__)`
+    channel the first time `no_verdict` becomes nonzero -- called from
+    both `_run_console_poll_loop` and `_run_crew_text_poll_loop`.
+
+    **Not `_push_gaze_line`'s log-on-change shape, deliberately** -- that
+    function's earlier revision copied it and that was the bug (review
+    round 1, `plans/bl11-stage4-fail-closed/review.md`). `_push_gaze_line`
+    repeats on a *label* that can hold steady at a repeating value, so
+    "changed since last call" is a real steady-state guard. `no_verdict`
+    is cumulative for the process lifetime, so under a continuously dead
+    feed it is strictly greater than whatever was last logged on every
+    single poll -- there is no steady state for a monotonically
+    increasing counter to settle into, so a "log when it grew" guard logs
+    every poll for the rest of the sortie, which is backwards from this
+    function's whole purpose (one line, not a flood). The fix is an
+    edge-trigger instead: log once on the zero-to-nonzero transition, and
+    never again regardless of how much further `no_verdict` grows. That
+    one line carries all the actionable information ("a gap exists");
+    `_log_live_los_coverage_summary` below is where the magnitude lives,
+    because it is only known at the end of the run.
+
+    On by default, with no `--flag` to gate it (unlike `--detection-
     trace`) -- this is the regression guard, not an opt-in diagnostic
     (plan Decision 2): a dead feed must be observable on an ordinary
     sortie with no debugging flags set at all. A true no-op for a
     `sources` list holding no naked-eye source (same guard
     `_apply_active_gaze` uses).
 
-    Returns the `no_verdict` value just logged (or `last_logged_no_verdict`
-    unchanged if nothing was logged this call), so the caller's local
-    carries forward to the next poll -- the same pattern `_push_gaze_line`
-    uses for `last_gaze_label`."""
+    Returns `True` once the warning has fired (unchanged from
+    `already_warned=True` on every later call), so the caller's local
+    carries forward to the next poll -- the same "carry a local across
+    polls" pattern `_push_gaze_line` uses for `last_gaze_label`, applied
+    to a different trigger condition."""
+    if already_warned:
+        return True
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             coverage = source.live_los_coverage
-            if coverage.no_verdict > last_logged_no_verdict:
+            if coverage.no_verdict > 0:
                 logger.warning(
-                    "live LOS coverage gap: %d/%d naked-eye gate-4 "
-                    "evaluations this sortie had no live verdict "
+                    "live LOS coverage gap: naked-eye gate-4 evaluations "
+                    "started receiving no live verdict this sortie "
                     "(world-model's offline LOS primitive is no longer "
-                    "used as a fallback -- these candidates were "
-                    "rejected, not approximated)",
+                    "used as a fallback -- affected candidates are "
+                    "rejected, not approximated); see the end-of-run "
+                    "summary for the final totals"
+                )
+                return True
+            return False
+    return False
+
+
+def _log_live_los_coverage_summary(sources: list[PerceptionSource]) -> None:
+    """Unconditional end-of-run totals for the naked-eye source's
+    `LiveLosCoverage` counter -- logged exactly once, from each poll
+    loop's own `finally:` block, regardless of whether
+    `_warn_live_los_coverage_gap_once` ever fired (user design call,
+    `plans/bl11-stage4-fail-closed/review.md`'s dispatching brief, not
+    the Reviewer's own required fix).
+
+    **Logged even when `no_verdict` is zero.** A `0/N` line is the guard
+    visibly passing; without one, a silent log is indistinguishable from
+    a guard that never ran at all -- the same reasoning
+    `detection_trace.py`'s `static_enum_failures` counter already applies
+    on the Hook side. The transition warning above tells the pilot *that*
+    a gap started; this tells whoever reads the log afterward *how big*
+    it ended up, which the transition warning cannot know at the moment
+    it fires -- this counter's stated purpose
+    (`body-layer/ROADMAP.md`, Stage 4) is a post-flight regression guard,
+    and the magnitude is the number that guard exists to report.
+
+    Must never raise: this runs during teardown that still has to close
+    `trace_writer`/`belief_truth_writer`/`world_model_conn` after it, so
+    a failure here is logged and swallowed rather than allowed to skip
+    that teardown -- the same non-negotiable `finally:` has for every
+    other resource it closes. A true no-op for a `sources` list holding
+    no naked-eye source (same guard `_apply_active_gaze` and
+    `_warn_live_los_coverage_gap_once` use)."""
+    try:
+        for source in sources:
+            if isinstance(source, NakedEyePerceptionSource):
+                coverage = source.live_los_coverage
+                logger.info(
+                    "live LOS coverage: %d/%d gate-4 evaluations had no "
+                    "live verdict this sortie",
                     coverage.no_verdict,
                     coverage.evaluated,
                 )
-                return coverage.no_verdict
-            return last_logged_no_verdict
-    return last_logged_no_verdict
+                return
+    except Exception:
+        logger.exception("live LOS coverage summary failed (ignoring)")
 
 
 def _render_eyesight_frame(
@@ -1235,7 +1291,7 @@ def _run_console_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
-        last_logged_no_verdict = 0
+        live_los_warned = False
         connection = _ConnectionReporter()
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
@@ -1272,8 +1328,8 @@ def _run_console_poll_loop(
                         trace_writer.write_poll(trace_collector, runner.store)
                     else:
                         trace_collector.records.clear()
-                last_logged_no_verdict = _log_live_los_coverage_if_growing(
-                    runner.sources, last_logged_no_verdict
+                live_los_warned = _warn_live_los_coverage_gap_once(
+                    runner.sources, live_los_warned
                 )
                 if runner.overlay_client is not None and runner.last_t_sim is not None:
                     last_gaze_label = _push_gaze_line(
@@ -1290,6 +1346,7 @@ def _run_console_poll_loop(
                     logger.exception("console poll cycle failed; continuing")
             next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
+        _log_live_los_coverage_summary(runner.sources)
         if trace_writer is not None:
             trace_writer.close()
         if belief_truth_writer is not None:
@@ -1527,7 +1584,7 @@ def _run_crew_text_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
-        last_logged_no_verdict = 0
+        live_los_warned = False
         connection = _ConnectionReporter()
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
@@ -1586,8 +1643,8 @@ def _run_crew_text_poll_loop(
                         trace_writer.write_poll(trace_collector, runner.store)
                     else:
                         trace_collector.records.clear()
-                last_logged_no_verdict = _log_live_los_coverage_if_growing(
-                    runner.sources, last_logged_no_verdict
+                live_los_warned = _warn_live_los_coverage_gap_once(
+                    runner.sources, live_los_warned
                 )
                 if runner.last_t_sim is not None:
                     crew_console.enrichment = runner.enrichment
@@ -1670,6 +1727,7 @@ def _run_crew_text_poll_loop(
                     logger.exception("crew-text poll cycle failed; continuing")
             next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
+        _log_live_los_coverage_summary(runner.sources)
         if trace_writer is not None:
             trace_writer.close()
         if belief_truth_writer is not None:
