@@ -245,3 +245,106 @@ End-of-run summary (unconditional, every run, `%d` placeholders are `no_verdict`
   calling `_log_live_los_coverage_summary(runner.sources)` from `finally:` safe even on a path that
   raised before `runner.sources` was ever assigned inside the `try:` — no extra guard needed in the
   new function beyond the one it already has (a true no-op for a list with no naked-eye source).
+
+### Round 3: wired the plain-logger entry point into the same coverage logging
+(Security deep analysis's advisory finding, dispatched by the user)
+
+Security's deep analysis (`plans/bl11-stage4-fail-closed/security-review.md`) found that
+`main()`'s bare `else:` branch (reached with neither `--console` nor `--crew-text`) shares
+`_build_sources` with the two instrumented poll loops, so it is subject to the identical
+fail-closed gate 4 — but its `finally:` block only ever closed `world_model_conn`; neither
+`_warn_live_los_coverage_gap_once` nor `_log_live_los_coverage_summary` was wired in at all.
+On this path a dead live-LOS feed produced zero signal, not even post-flight — strictly worse
+than the two instrumented loops.
+
+Security judged this low-probability on the premise that `body-layer/CLAUDE.md` documents only
+`--console`/`--crew-text` as real usage. **That premise doesn't hold**: `body-layer/RUN.md`
+section 2 ("Run the perception logger") gives the bare invocation — no `--console`, no
+`--crew-text` — as its primary example for both macOS and Windows. The dispatching user verified
+this directly and decided to fix rather than backlog.
+
+#### Files Changed (round 3)
+
+- `body-layer/src/logger.py` — `main()`'s plain-logger `else:` branch: `sources` is now built
+  outside the `try:` (`sources: list[PerceptionSource] = []`, reassigned inside) so `finally:`'s
+  summary call always has a valid list to read even if `_build_sources`/`PerceptionLogger(...)`
+  itself raised before `perception_logger` would otherwise have been bound — the same reasoning
+  `ConsolePerceptionRunner.sources`'s `default_factory=list` already relies on in the other two
+  loops, but here there is no dataclass default to lean on since `perception_logger` is a bare
+  local, so an explicit pre-`try` binding was needed instead. A `live_los_warned` local carries
+  the edge-trigger state across iterations, mirroring the other two loops exactly; the summary
+  call is the first statement in `finally:`, ahead of `world_model_conn.close()`, same ordering
+  as the other two loops.
+- `body-layer/tests/test_logger.py` — added `from support.mock_aircraft_layer import
+  MockAircraftLayerServer` (ruff's isort placed it in the third-party group, no blank line after
+  `pytest`, matching `test_mock_flight_chain.py`'s own precedent for this import). New
+  `_run_plain_logger_main_for_n_polls` helper and two tests (see Tests Added).
+
+#### Tests Added (round 3)
+
+Chose to call `main()` directly rather than extract a new testable runner function out of the
+plain-logger branch — the brief's own instruction was not to restructure production code for an
+advisory fix, and `main()`'s own docstring and this project's agent-memory
+(`project_logger_main_untested_by_design.md`) already establish `main()` as deliberately
+untested *end-to-end*; the precedent that exists (`test_main_rejects_neither_theatre_pair_nor_
+mission_understanding` et al.) calls `main()` directly only for its argparse/`parser.error`
+path via `sys.argv` monkeypatching and `pytest.raises(SystemExit)`. This extends that same
+precedent one step further — driving the loop body too — rather than inventing a new seam.
+`main()` itself was not restructured.
+
+- `test_plain_logger_path_warns_on_the_live_los_coverage_gap_once` — drives `main()`'s plain-
+  logger branch for 2 polls against one `MockAircraftLayerServer` frame with no `"line_of_sight"`
+  key at all (the live-LOS-feed-absent cause) and a world object with no `unit_name`, so gate 4
+  rejects it fail-closed every poll. Asserts the transition warning fires exactly once (poll 1's
+  `no_verdict` 0->1 transition), not again on poll 2 (1->2, not a transition) — same `== 1` not
+  `>= 1` distinction round 2's pure-function test makes for the same reason.
+- `test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block` — same two-poll drive;
+  asserts the end-of-run summary reads the real accumulated totals (`"2/2 ..."`) and that it ran
+  from `finally:`, not merely that the two functions exist.
+
+**Stopping mechanism, and a real bug it surfaced in itself:** both tests break `main()`'s
+`while True:` loop via `KeyboardInterrupt`, the same way a real operator (Ctrl-C) does. The first
+attempt monkeypatched `logger_module.time.sleep` directly — which mutates the real, process-wide
+`time` module, so a leftover `belief.brain_client.BrainLayerClient` daemon poll thread from an
+earlier test in the same pytest session (retry-backoff-sleeping, never stopped because nothing
+joins a `daemon=True` thread) got an unrelated `KeyboardInterrupt` raised inside *it* too —
+observed as a `PytestUnhandledThreadExceptionWarning`, tests still green but cross-test
+pollution. Fixed by rebinding the `time` *name* inside `logger` module's own namespace
+(`monkeypatch.setattr(logger_module, "time", _RaiseAfterNSleeps())`) to a small stand-in that
+fakes only `.sleep` and delegates everything else (`.time()`, needed by `_per_run_log_paths`'s
+stamping before the branch is even reached) to the real module via `__getattr__` — this only
+changes what `logger.py`'s own `time.sleep(...)` resolves to; every other module's `import time`
+is untouched. Confirmed clean (0 warnings) on a full suite run afterward.
+
+Each test proven able to fail for the stated reason: removed the `_warn_live_los_coverage_gap_
+once` call from the loop body (warning test went from pass to `assert 0 == 1`), then separately
+removed the `_log_live_los_coverage_summary` call from `finally:` (summary test went from pass to
+an empty-list assertion failure, with the transition warning still visibly firing in the
+captured log, confirming the two failures are independent) — reverted both with `Edit`, confirmed
+`git diff src/logger.py` matched the intended fix exactly afterward.
+
+#### Checks (round 3)
+
+(body-layer/ is the only subproject touched)
+
+- ruff format --check: pass
+- ruff check: pass
+- mypy --strict (src only): pass, 54 source files
+- pytest -q: pass — 1549 passed, 4 xfailed, 0 failed, 0 warnings (1547 baseline + 2 new tests)
+
+#### Notable Discoveries (round 3)
+
+- **A global `monkeypatch.setattr(some_module.time, "sleep", ...)` is unsafe whenever any other
+  thread in the same pytest process might call `time.sleep` during the window** — it mutates the
+  shared stdlib `time` module, not a module-local reference. Rebinding the *name* in the
+  module-under-test's own namespace instead (`monkeypatch.setattr(target_module, "time", fake)`)
+  scopes the patch correctly. Worth a general note for this codebase since at least one other
+  daemon-thread-spawning path (`BrainLayerClient`) is never stopped by its own tests and stays
+  alive for the rest of the pytest session.
+- **`main()` can be driven past its argparse path and into its loop body without restructuring
+  it** — `sys.argv` monkeypatching plus breaking the `while True:` via a controlled
+  `KeyboardInterrupt` reaches real production code (including a real `MockAircraftLayerServer`
+  HTTP round-trip) with no changes to `main()` itself. Not done lightly: this project's own
+  convention and agent-memory both treat `main()` as deliberately untested end-to-end, so this
+  precedent should stay reserved for cases like this one, not become the default way to add
+  coverage to `logger.py`.

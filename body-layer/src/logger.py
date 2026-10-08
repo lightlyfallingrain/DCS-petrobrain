@@ -2445,23 +2445,36 @@ def main() -> None:
             poll_thread.join()
     else:
         world_model_conn = open_world_model(world_model_db)
+        # Built outside the try so `finally`'s summary call always has a
+        # valid (possibly empty) list to read, even if `_build_sources`/
+        # `PerceptionLogger(...)` itself raised before `perception_logger`
+        # would otherwise have been bound -- same reasoning as
+        # `ConsolePerceptionRunner.sources`'s `default_factory=list` in the
+        # other two poll loops (see `_run_console_poll_loop`'s `finally:`).
+        sources: list[PerceptionSource] = []
         try:
+            sources = _build_sources(
+                aircraft_client,
+                theatre,
+                world_model_conn,
+                emit_mode="on_change",
+            )
             perception_logger = PerceptionLogger(
                 aircraft_client=aircraft_client,
-                sources=_build_sources(
-                    aircraft_client,
-                    theatre,
-                    world_model_conn,
-                    emit_mode="on_change",
-                ),
+                sources=sources,
                 output=sys.stdout,
             )
+            live_los_warned = False
             while True:
                 perception_logger.run_once()
+                live_los_warned = _warn_live_los_coverage_gap_once(
+                    sources, live_los_warned
+                )
                 time.sleep(args.poll_interval_s)
         except KeyboardInterrupt:
             pass
         finally:
+            _log_live_los_coverage_summary(sources)
             world_model_conn.close()
 
 
