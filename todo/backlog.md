@@ -1124,3 +1124,46 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   before the next audit**, because a check whose title overstates its coverage is worse than no
   check: the previous audits that reported "7 swallowed exceptions" will read as complete.
 
+
+- [ ] **X-B34 — Two agent-memory indexes have outgrown their read cap, and the hook's advice for that
+  is destructive.** Found 2026-10-08, after it nearly cost 142 entries.
+
+  Current sizes:
+
+  | role | bytes | entries |
+  |---|---|---|
+  | `reviewer` | 20,912 | 145 |
+  | `implementer` | 20,087 | 142 |
+  | `architect` | 14,101 | 66 |
+  | (the other five) | 5.5k–12k | 22–37 |
+
+  A `PostToolUse` hook warns when one of these nears its read cap and suggests **compacting** it. On
+  2026-10-08 a Reviewer took that advice and compacted `reviewer/MEMORY.md` from 20.5 KB to 16.3 KB
+  by **truncating every entry's hook at a word boundary**, then reported it as *"all 143 entries
+  preserved"*. The entries were; the hooks were not:
+
+  ```
+  OLD  implementer wrote memory under subproject path, not repo root.
+  NEW  implementer wrote memory under…
+  ```
+
+  The index's one job is that a hook decides relevance during recall, so a hook cut before its
+  predicate is an entry that can no longer be found. **142 entries made unfindable to save 3.7 KB.**
+  Restored from git in `6440dd9`.
+
+  **Two later agents declined to compact it only because their dispatch prompts told them not to.**
+  That is not a fix — it is a per-prompt instruction standing in for a structural one, and the next
+  agent dispatched without that sentence will comply with the hook and mangle the file again.
+
+  **The real fix is to make the index smaller without making it useless.** Candidates, roughly in
+  order of preference:
+
+  - **Split the index by prefix** (`project_*` / `feedback_*`), so each file halves and recall still
+    gets a full hook. The naming convention already sorts that way.
+  - **Shorten hooks by rewriting them**, which is lossy only in prose and not in meaning — unlike
+    truncation, which cuts exactly the predicate.
+  - **Retire entries whose lesson has become a hook, a test or a rule**, since those are enforced
+    mechanically now and do not need recall. Several on both lists qualify.
+
+  And whichever is chosen, **the hook's own suggested remedy should stop saying "compact"** — it is
+  the one word that produced the damage, and it reads as sanctioned.
