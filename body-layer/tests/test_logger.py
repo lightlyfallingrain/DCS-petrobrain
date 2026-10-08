@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
+from support.mock_aircraft_layer import MockAircraftLayerServer
 
 import logger as logger_module
 from aircraft_client import AircraftLayerError
@@ -48,11 +49,14 @@ from logger import (
     _active_gaze,
     _apply_active_gaze,
     _format_gaze_line,
+    _log_live_los_coverage_summary,
     _poll_transcripts,
     _push_gaze_line,
     _resolve_speech_log_path,
     _run_console_poll_loop,
     _run_console_repl,
+    _run_crew_text_poll_loop,
+    _warn_live_los_coverage_gap_once,
     format_observation_line,
     main,
 )
@@ -625,7 +629,11 @@ def _t72_world_object() -> dict[str, Any]:
     # lat_deg/lon_deg pass straight through as x/z (mirrors
     # test_naked_eye_source.py's own fixture posture) -- 500 m dead ahead of
     # the ownship above, well within a T-72's naked-eye range threshold
-    # (~3500 m) and FOV.
+    # (~3500 m) and FOV. `unit_name` (`plans/bl11-stage4-fail-closed/
+    # plan.md` step 4, `BL-11` Stage 4): the live-LOS join key -- gets one
+    # so `FakeConsoleAircraftClient.get_line_of_sight_latest` below can
+    # mark it clear and the fail-closed gate admits it, same as before
+    # this plan.
     return {
         "object_id": 1,
         "object_type": "t-72",
@@ -635,14 +643,31 @@ def _t72_world_object() -> dict[str, Any]:
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
         "is_ownship": False,
+        "unit_name": "unit_1",
     }
+
+
+def _t72_world_object_no_live_verdict() -> dict[str, Any]:
+    """Same geometry as `_t72_world_object` but with no `unit_name` at
+    all (`test_naked_eye_source.py`'s own `unit_name=None` escape hatch)
+    -- `FakeConsoleAircraftClient.get_line_of_sight_latest` then has no
+    join key for this object, so the candidate reaches gate 4 with
+    `live_los_clear is None` and is rejected fail-closed, incrementing
+    `LiveLosCoverage.no_verdict`. Exists for the coverage-logging tests
+    below, which need a real poll to actually produce a coverage gap."""
+    return {**_t72_world_object(), "unit_name": None}
 
 
 class FakeConsoleAircraftClient:
     """Duck-typed `AircraftLayerClient` covering everything `_build_sources`'
     two concrete tiers call: telemetry (both tiers), world objects (both
     tiers), and Petrovich's HelperAI indication (Hybrid only -- returning
-    `None` here means Hybrid stays silent, only NakedEye is exercised)."""
+    `None` here means Hybrid stays silent, only NakedEye is exercised).
+
+    `plans/bl11-stage4-fail-closed/plan.md` step 4 (`BL-11` Stage 4):
+    `get_line_of_sight_latest` synthesizes a working live-LOS join by
+    default -- see `test_naked_eye_source.py`'s `FakeAircraftClient` for
+    the full reasoning (duplicated here rather than shared)."""
 
     def __init__(
         self, telemetry: dict[str, Any], world_objects: dict[str, Any]
@@ -654,13 +679,26 @@ class FakeConsoleAircraftClient:
         return self._telemetry
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
-        return self._world_objects
+        if "dcs_model_time_s" in self._world_objects:
+            return self._world_objects
+        return {**self._world_objects, "dcs_model_time_s": 0.0}
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        objects = self._world_objects.get("objects", [])
+        verdicts: dict[str, Any] = {}
+        for obj in objects:
+            name = obj.get("unit_name")
+            if isinstance(name, str):
+                verdicts[name] = {"building_clear": True, "terrain_clear": True}
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "hour_used": None,
+            "fov_half_deg_used": None,
+            "verdicts": verdicts,
+        }
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         pass
@@ -2127,6 +2165,174 @@ def test_all_three_trace_consumers_see_one_polls_records(
     )
 
 
+# -- Live LOS coverage logging (`plans/bl11-stage4-fail-closed/plan.md`
+# review round 1's required fix, plus the user's own end-of-run-summary
+# design call) ---------------------------------------------------------------
+
+
+def _naked_eye_source_stub() -> NakedEyePerceptionSource:
+    """A `NakedEyePerceptionSource` for exercising
+    `_warn_live_los_coverage_gap_once`/`_log_live_los_coverage_summary` in
+    isolation from a real poll -- `aircraft_client` is never called by
+    either function under test, so `None` is enough (`live_los_coverage`
+    itself is the only field either function reads)."""
+    return NakedEyePerceptionSource(
+        aircraft_client=None,  # type: ignore[arg-type]
+        theatre="Syria",
+        world_model_conn=sqlite3.connect(":memory:"),
+    )
+
+
+def test_warn_live_los_coverage_gap_once_fires_exactly_once_under_continuous_growth(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """This is the review's own reproduction of the defect, run against
+    the fix: `no_verdict` growing every poll (a continuously dead feed)
+    used to log on every one of these polls -- the exact flood the
+    docstring claimed not to produce. Driven over 10 polls, the same
+    count the Reviewer used. Asserts the record count is exactly 1, not
+    `>= 1` -- `>= 1` is what the pre-fix flood already satisfies."""
+    source = _naked_eye_source_stub()
+    warned = False
+    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+        for no_verdict in range(1, 11):
+            source.live_los_coverage.no_verdict = no_verdict
+            warned = _warn_live_los_coverage_gap_once([source], warned)
+
+    assert warned is True
+    warnings = [r for r in caplog.records if "live LOS coverage gap" in r.getMessage()]
+    assert len(warnings) == 1, warnings
+
+
+def test_warn_live_los_coverage_gap_once_never_fires_while_no_verdict_stays_zero(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The healthy-sortie case: a live feed with no coverage gap at all
+    must never log the transition warning, across many polls."""
+    source = _naked_eye_source_stub()
+    warned = False
+    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+        for _ in range(10):
+            warned = _warn_live_los_coverage_gap_once([source], warned)
+
+    assert warned is False
+    assert caplog.records == []
+
+
+def test_log_live_los_coverage_summary_logs_zero_over_evaluated_when_healthy(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The guard-visibly-passing case (user's own design call): a sortie
+    with real gate-4 traffic but no coverage gap still gets an end-of-run
+    line, reading `0/<evaluated>` rather than nothing at all."""
+    source = _naked_eye_source_stub()
+    source.live_los_coverage.evaluated = 7
+    source.live_los_coverage.no_verdict = 0
+
+    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        _log_live_los_coverage_summary([source])
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages == [
+        "live LOS coverage: 0/7 gate-4 evaluations had no live verdict this sortie"
+    ], messages
+
+
+def test_console_poll_loop_logs_the_coverage_summary_in_its_finally_block(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`_run_console_poll_loop`'s own teardown, not a direct call: drives
+    a real poll with a candidate carrying no `unit_name` (no live-LOS
+    join key), so gate 4 rejects it fail-closed and `no_verdict` becomes
+    1 -- then stops the loop and asserts the summary line landed with the
+    real totals, proving it runs from `finally:` and not just when called
+    directly."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object_no_live_verdict()]}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    stop_event = threading.Event()
+
+    poll_thread = threading.Thread(
+        target=_run_console_poll_loop,
+        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
+    )
+    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        poll_thread.start()
+        try:
+            deadline = time.monotonic() + 5.0
+            while runner.last_t_sim is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+        finally:
+            stop_event.set()
+            poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    summaries = [
+        r.getMessage() for r in caplog.records if "live LOS coverage:" in r.getMessage()
+    ]
+    assert summaries == [
+        "live LOS coverage: 1/1 gate-4 evaluations had no live verdict this sortie"
+    ], summaries
+
+
+def test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same proof as the console-loop test above, for
+    `_run_crew_text_poll_loop`'s own `finally:` -- the two loops share no
+    code path for this, each wires the summary call independently, and
+    the review's blast-radius lesson (`plans/bl11-stage4-fail-closed/
+    review.md`) is exactly that a fix applied to one loop and not its
+    twin goes unnoticed."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object_no_live_verdict()]}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
+    stop_event = threading.Event()
+
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+        poll_thread.start()
+        try:
+            deadline = time.monotonic() + 5.0
+            while runner.last_t_sim is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+        finally:
+            stop_event.set()
+            poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    summaries = [
+        r.getMessage() for r in caplog.records if "live LOS coverage:" in r.getMessage()
+    ]
+    assert summaries == [
+        "live LOS coverage: 1/1 gate-4 evaluations had no live verdict this sortie"
+    ], summaries
+
+
 def test_connection_reporter_says_disconnected_once_then_connected_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -2310,3 +2516,220 @@ def test_no_stale_five_hertz_claims_remain_in_src() -> None:
     )
 
     assert offenders == []
+
+
+# -- Live LOS coverage logging, plain-logger entry point
+# (`plans/bl11-stage4-fail-closed/implementation.md` round 3, Security's
+# advisory finding) -----------------------------------------------------
+
+
+def _run_plain_logger_main_for_n_polls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    url: str,
+    n_polls: int,
+) -> None:
+    """Drives `main()`'s bare `else:` branch (no `--console`/`--crew-text`)
+    through exactly `n_polls` iterations of its `while True:` loop, then
+    stops it the same way a real operator does -- `KeyboardInterrupt` --
+    by rebinding the `time` name inside `logger` module's own namespace
+    (not the real `time` module's `sleep` attribute) to a stand-in that
+    raises on the `n_polls`-th call rather than actually sleeping.
+
+    **Deliberately not `monkeypatch.setattr(logger_module.time, "sleep",
+    ...)`** -- that mutates the real, process-wide `time` module, so any
+    *other* thread calling `time.sleep` during this test (e.g. a leftover
+    `belief.brain_client.BrainLayerClient` daemon poll thread from an
+    earlier test in the same pytest session, still retry-backoff-sleeping
+    because nothing stops a `daemon=True` thread) gets an unrelated
+    `KeyboardInterrupt` raised inside it too -- observed as a
+    `PytestUnhandledThreadExceptionWarning` the first time this was tried.
+    Rebinding `logger_module.time` itself only changes what `logger.py`'s
+    own `time.sleep(...)` call resolves to; every other module's `import
+    time` still gets the real one.
+
+    `main()` itself is not restructured; this calls it exactly as the CLI
+    would, the same `sys.argv`-monkeypatch pattern
+    `test_main_rejects_neither_theatre_pair_nor_mission_understanding`
+    already uses elsewhere in this file for `main()`'s argparse path --
+    extended here to also drive the loop body, since the plain-logger
+    branch has no extracted `_run_*_poll_loop` function of its own to call
+    directly (unlike `--console`/`--crew-text`)."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            url,
+            "--theatre",
+            "Syria",
+            "--world-model-db",
+            str(db_path),
+        ],
+    )
+
+    real_time = time
+
+    class _RaiseAfterNSleeps:
+        """Stands in for the `time` module as seen from inside `logger.py`
+        only -- every other attribute `main()` touches before reaching the
+        poll loop (`time.time()`, for `_per_run_log_paths`'s stamping)
+        delegates to the real module unchanged; only `sleep` is faked."""
+
+        def __init__(self) -> None:
+            self._calls = 0
+
+        def sleep(self, _seconds: float) -> None:
+            self._calls += 1
+            if self._calls >= n_polls:
+                raise KeyboardInterrupt
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(real_time, name)
+
+    monkeypatch.setattr(logger_module, "time", _RaiseAfterNSleeps())
+    logger_module.main()
+
+
+def test_plain_logger_path_warns_on_the_live_los_coverage_gap_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Security's advisory finding: `main()`'s plain-logger `else:` branch
+    (reached with neither `--console` nor `--crew-text`) shares
+    `_build_sources` with the two instrumented poll loops, so it is
+    subject to the identical fail-closed gate 4 -- but before this fix,
+    nothing in this branch ever called `_warn_live_los_coverage_gap_once`
+    at all, so a dead live-LOS feed here produced no signal whatsoever,
+    not even delayed. Drives two polls against a single frame with no
+    `"line_of_sight"` key at all (the feed-absent cause, `naked_eye_source.
+    _resolve_live_los_by_object_id`'s `line_of_sight is None` branch) and
+    a world object with no `unit_name` either, so gate 4 rejects it
+    fail-closed on both polls. The transition fires on poll 1
+    (`no_verdict` 0 -> 1) and must not fire again on poll 2 (`no_verdict`
+    1 -> 2, not a zero-to-nonzero transition) -- asserts exactly one
+    record, not `>= 1`, the same distinction round 2's pure-function test
+    makes for the same reason."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+            _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    warnings = [r for r in caplog.records if "live LOS coverage gap" in r.getMessage()]
+    assert len(warnings) == 1, warnings
+
+
+def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Same finding, the other half: before this fix, this branch's
+    `finally:` only closed `world_model_conn` -- a dead feed here was
+    silent in the strongest sense this whole plan exists to prevent, not
+    even summarised post-flight. Same two-poll drive as the warning test
+    above (one frame, no live-LOS feed at all, held across both polls by
+    `MockAircraftLayerServer`'s "holds at the last frame" semantics), so
+    the accumulated totals are `evaluated=2, no_verdict=2` by the time
+    `KeyboardInterrupt` unwinds into `finally:`."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+            _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    summaries = [
+        r.getMessage() for r in caplog.records if "live LOS coverage:" in r.getMessage()
+    ]
+    assert summaries == [
+        "live LOS coverage: 2/2 gate-4 evaluations had no live verdict this sortie"
+    ], summaries
+
+
+# -- Logging visibility under the real, unconfigured default (`plans/
+# bl11-stage4-fail-closed/dod-check.md`'s required fix): every test above
+# this point proves the call fires, using `caplog.at_level(...)`, which
+# forcibly lowers the effective level for its block -- exactly the thing
+# that hid this defect from four review rounds. These two prove the two
+# log lines are visible with *no* level override at all, i.e. under
+# whatever `main()` itself configures (`_configure_logger_for_main`), the
+# same way a real operator running `python -m logger ...` would see
+# them. ------------------------------------------------------------------
+
+
+def test_log_live_los_coverage_summary_is_visible_under_default_logging_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No `caplog.at_level` anywhere in this test -- `capsys` captures
+    whatever actually lands on the real `sys.stderr` stream, which is
+    exactly what the DoD's repro ran against directly
+    (`PYTHONPATH=... python -c "logger.logger.info(...)"`). Same two-poll
+    drive as `test_plain_logger_path_logs_the_coverage_summary_in_its_
+    finally_block` above, so the expected totals are identical; the only
+    difference is the absence of a level override, which is the point."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    stderr = capsys.readouterr().err
+    assert (
+        "live LOS coverage: 2/2 gate-4 evaluations had no live verdict this sortie"
+        in stderr
+    ), stderr
+
+
+def test_live_los_coverage_gap_warning_is_visible_under_default_logging_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The transition warning's half of the same proof. This one worked
+    even before the fix, by accident of `logging.lastResort`'s own
+    `WARNING` threshold -- nothing pinned that it stays visible once
+    `_configure_logger_for_main` starts managing this logger's level and
+    handler explicitly, so this is a regression guard for the fix itself,
+    not only a test of pre-existing behaviour."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    stderr = capsys.readouterr().err
+    assert "live LOS coverage gap" in stderr, stderr

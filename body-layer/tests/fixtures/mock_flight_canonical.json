@@ -28,7 +28,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -38,7 +39,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -47,6 +49,22 @@
       "received_wall_clock_s": 1000.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 0.0,
+      "received_wall_clock_s": 1000.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -79,7 +97,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -89,7 +108,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -98,6 +118,22 @@
       "received_wall_clock_s": 1005.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 5.0,
+      "received_wall_clock_s": 1005.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -130,7 +166,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -140,7 +177,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -149,6 +187,22 @@
       "received_wall_clock_s": 1010.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 10.0,
+      "received_wall_clock_s": 1010.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -181,7 +235,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -191,7 +246,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -200,6 +256,22 @@
       "received_wall_clock_s": 1015.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 15.0,
+      "received_wall_clock_s": 1015.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -232,7 +304,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -242,7 +315,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -251,6 +325,22 @@
       "received_wall_clock_s": 1020.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 20.0,
+      "received_wall_clock_s": 1020.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -283,7 +373,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -293,7 +384,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -302,6 +394,22 @@
       "received_wall_clock_s": 1025.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 25.0,
+      "received_wall_clock_s": 1025.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -334,7 +442,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -344,7 +453,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -353,6 +463,22 @@
       "received_wall_clock_s": 1030.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 30.0,
+      "received_wall_clock_s": 1030.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -385,7 +511,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -395,7 +522,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -404,6 +532,22 @@
       "received_wall_clock_s": 1035.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 35.0,
+      "received_wall_clock_s": 1035.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -436,7 +580,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -446,7 +591,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -455,6 +601,22 @@
       "received_wall_clock_s": 1040.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 40.0,
+      "received_wall_clock_s": 1040.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -487,7 +649,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -497,7 +660,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -506,6 +670,22 @@
       "received_wall_clock_s": 1045.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 45.0,
+      "received_wall_clock_s": 1045.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -538,7 +718,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -548,7 +729,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -557,6 +739,22 @@
       "received_wall_clock_s": 1050.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 50.0,
+      "received_wall_clock_s": 1050.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -589,7 +787,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -599,7 +798,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -608,6 +808,22 @@
       "received_wall_clock_s": 1055.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 55.0,
+      "received_wall_clock_s": 1055.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -640,7 +856,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -650,7 +867,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -659,6 +877,22 @@
       "received_wall_clock_s": 1060.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 60.0,
+      "received_wall_clock_s": 1060.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -691,7 +925,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -701,7 +936,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -710,6 +946,22 @@
       "received_wall_clock_s": 1065.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 65.0,
+      "received_wall_clock_s": 1065.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -742,7 +994,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -752,7 +1005,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -761,6 +1015,22 @@
       "received_wall_clock_s": 1070.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 70.0,
+      "received_wall_clock_s": 1070.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -793,7 +1063,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -803,7 +1074,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -812,6 +1084,22 @@
       "received_wall_clock_s": 1075.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 75.0,
+      "received_wall_clock_s": 1075.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -844,7 +1132,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -854,7 +1143,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -863,6 +1153,22 @@
       "received_wall_clock_s": 1080.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 80.0,
+      "received_wall_clock_s": 1080.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -895,7 +1201,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -905,7 +1212,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -914,6 +1222,22 @@
       "received_wall_clock_s": 1085.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 85.0,
+      "received_wall_clock_s": 1085.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -946,7 +1270,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -956,7 +1281,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -965,6 +1291,22 @@
       "received_wall_clock_s": 1090.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 90.0,
+      "received_wall_clock_s": 1090.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   },
@@ -997,7 +1339,8 @@
           "lon_deg": 35.90008410584537,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_101"
         },
         {
           "object_id": 102,
@@ -1007,7 +1350,8 @@
           "lon_deg": 35.89994795435313,
           "altitude_m": 500.0,
           "heading_true_rad": 0.0,
-          "is_ownship": false
+          "is_ownship": false,
+          "unit_name": "unit_102"
         }
       ]
     },
@@ -1016,6 +1360,22 @@
       "received_wall_clock_s": 1095.0,
       "fields": {
         "middle_list_text": "Ural truck"
+      }
+    },
+    "line_of_sight": {
+      "dcs_model_time_s": 95.0,
+      "received_wall_clock_s": 1095.0,
+      "hour_used": null,
+      "fov_half_deg_used": null,
+      "verdicts": {
+        "unit_101": {
+          "building_clear": true,
+          "terrain_clear": true
+        },
+        "unit_102": {
+          "building_clear": true,
+          "terrain_clear": true
+        }
       }
     }
   }

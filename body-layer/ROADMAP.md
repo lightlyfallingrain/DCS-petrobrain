@@ -86,6 +86,21 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   p90 is unexplained by this branch — `BL-B32` (synchronous TTS in the poll body) and `BL-B33` (five
   sequential 2.0 s timeouts) still own it. The median is fixed; the tail is not.
 
+- [ ] **`feature/bl11-stage4-fail-closed` (`BL-11` Stage 4 steps 3-4) — DoD PASSED 2026-10-08, not
+  yet flown.** *Deferred, not waived.* No in-cockpit observable, by design — this is a regression
+  guard (fail-closed on live LOS, plus a fallback-coverage counter), not new crew behaviour. The
+  authorising flight evidence (145/145 evaluated, 85/85 admitted objects receiving a live verdict,
+  2026-10-08, 76 % baseline cleared) is already recorded and must **not** be re-flown. What this
+  sortie owes, narrowly: that `_log_live_los_coverage_summary`'s end-of-run line and
+  `_warn_live_los_coverage_gap_once`'s transition warning actually print on a real run — a round-1
+  DoD fail found the summary line silently unreachable under this codebase's default logging
+  config (no handler/level configured anywhere, so `logging.lastResort`'s `WARNING` threshold ate
+  every `INFO` call), fixed round 4 by giving this module's own named logger a handler/level in
+  `main()`. Mutation-verified against pytest's `capsys`, never flown. Batches with
+  `feature/bl11-tick-cost` above — same log-reduction, invisible-from-cockpit shape, same sortie.
+  Card: `docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md`, published at
+  https://claude.ai/artifact/G7asVkZQQ6p51TsEMqjY8m.
+
 - [ ] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`), not yet flown
   (2026-10-05).** Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
   when an existing, not-yet-`lost` contact is spatially/class-plausibly the same real thing — the
@@ -1782,10 +1797,12 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   assumption — a self-contained addition to one existing branch of `render_group_disclosure`,
   gated by a new optional parameter that defaults to the old always-full behaviour.
 
-- [ ] **BL-11 — Tick cost, and making silent degradation visible. PARTIALLY DONE — Stages 1, 2, 3b
-  and 5 DoD PASSED on bench measurement 2026-10-06 (`feature/bl11-tick-cost`); Stage 4's steps 2 and
-  2b DoD PASSED and flown 2026-10-08 (`fix/los-hook-statics`); Stage 3a, Stage 4 steps 3-4, and
-  Stage 6 remain.** Filed 2026-10-05.
+- [x] **BL-11 — Tick cost, and making silent degradation visible. DONE.** Stages 1, 2, 3b and 5 DoD
+  PASSED on bench measurement 2026-10-06 (`feature/bl11-tick-cost`); Stage 3a settled as not worth
+  building, by measurement, 2026-10-06; Stage 4 steps 1-2/2b DoD PASSED and flown 2026-10-08
+  (`fix/los-hook-statics`); **Stage 4 steps 3-4 (fail closed on live LOS, add a coverage counter)
+  DoD PASSED 2026-10-08 (`feature/bl11-stage4-fail-closed`)**; Stage 6 DONE 2026-10-06. Filed
+  2026-10-05.
 
   **The milestone's headline number is met.** Measured at the branch tip on real
   `syria-full.sqlite`, 440 objects, 10 km bubble, 300 polls
@@ -2133,14 +2150,29 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      before an Architect pass. An earlier "2.6× headroom" estimate taken from one open-terrain poll
      was refuted by this flight; do not carry it forward either.
 
-  3. **Then fail closed**: no live verdict means not admitted, and `world-model`'s
-     `line_of_sight_clear` is not called from the live path. Keep it for offline tests
-     (`WM-B8`'s fixture grid is the intended consumer) — and note that even for that use it has a
-     real bug, `world-model/ROADMAP.md`'s `M11` Stage 1: it returns `True` when every sample is
-     void.
-  4. **A coverage counter is still worth having, as a regression guard rather than an observable.**
-     Once the live path is the only path, a nonzero fallback count means a defect, and that is a
-     much more useful signal than a share. Cheap, and it is what would have caught this on day one.
+  3. **[x] DONE 2026-10-08 (`feature/bl11-stage4-fail-closed`).** Fail closed: no live verdict
+     means not admitted, and `world-model`'s `line_of_sight_clear` is not called from the live
+     path at all (`perception/naked_eye_source.py`'s only call site is the offline/fixture path).
+     Kept for offline tests (`WM-B8`'s fixture grid is the intended consumer) — and note that even
+     for that use it has a real bug, `world-model/ROADMAP.md`'s `M11` Stage 1: it returns `True`
+     when every sample is void. **Second-order effect of landing this: that bug stops being a live-
+     correctness defect and becomes a fixture-correctness one**, now that nothing on the live path
+     can reach it — see `M11`'s own annotation.
+  4. **[x] DONE 2026-10-08, same branch.** A coverage counter, as a regression guard rather than an
+     observable: once the live path is the only path, a nonzero fallback count means a defect,
+     which is a much more useful signal than a share. `_log_live_los_coverage_summary`'s end-of-run
+     `0/N` line and `_warn_live_los_coverage_gap_once`'s transition warning. Shipped in round 1,
+     but the summary line was silently unreachable under this codebase's default logging config
+     (nothing anywhere configures a handler/level, so `logging.lastResort`'s `WARNING` threshold
+     ate every `INFO` call) — DoD caught it by running the code outside pytest rather than trusting
+     `caplog`-based tests, which all forcibly lower the effective level and cannot by construction
+     see this. Fixed round 4 (`_configure_logger_for_main()`, scoped to this module's own named
+     logger, never global `basicConfig`/root — a global enable would have flooded
+     `perception.hybrid_source`'s per-dropped-detection `INFO` line instead, the same defect class
+     inverted). Reviewed and APPROVED. One accepted, non-blocking loose end:
+     `logger.propagate` stays at its default `True`, so a future host process that imports this
+     module as a library and configures root logging would see both log lines print twice — noisy,
+     not silent, and unreachable from any call graph that exists today. Filed, not required.
 
   **Stage 5 — [x] DONE 2026-10-06. Roll the logs per sortie.** Shipped: `src/run_log_paths.py`
   (`per_run_log_path`/`run_stamp`) plus `logger._per_run_log_paths`, applying **one stamp to all
@@ -2231,9 +2263,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   equality survives the fix (37/37 ticks) and now means the opposite. See the trap note at the head
   of this milestone.
 
-  **Not completable without a flight, unchanged:** Stage 4's step 2 gates the rest of Stage 4 on one
-  sortie, and Stages 1/2/3b/5 are themselves on the live-acceptance debt list — their verification is
-  a log reduction, not a perception, because the whole change is invisible from the cockpit.
+  **Resolved — Stage 4's step 2 flight settled the gate, and steps 3-4 needed no further flight to
+  ship.** Step 2's sortie (2026-10-08) is what unblocked steps 3-4; those two are a regression
+  guard with no in-cockpit observable by design (`body-layer/ROADMAP.md` itself calls this out),
+  so DoD shipped them without a new flight. What the *next* sortie still owes, narrowly: that the
+  two coverage log lines behave live (plausible totals, `0/N` on a healthy run, no spurious
+  transition warning) — tracked in the live-acceptance debt list above rather than reflying any of
+  the already-authorised evidence. Stages 1/2/3b/5 remain on that list for the same reason they
+  always were: their verification is a log reduction, not a perception, because the whole change
+  is invisible from the cockpit.
 
   (Original, for the record:) Stage 1's answer changes what comes next. At 0.2 s the tick
   budget is 200 ms and Stages 2–3 are load-bearing rather than tidy; at 1.0 s they buy headroom for
