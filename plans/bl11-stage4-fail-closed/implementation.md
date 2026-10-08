@@ -348,3 +348,142 @@ captured log, confirming the two failures are independent) — reverted both wit
   convention and agent-memory both treat `main()` as deliberately untested end-to-end, so this
   precedent should stay reserved for cases like this one, not become the default way to add
   coverage to `logger.py`.
+
+### Round 4: logging-visibility fix (DoD required fix, `plans/bl11-stage4-fail-closed/dod-check.md`)
+
+DoD found that `_log_live_los_coverage_summary`'s `logger.info(...)` line — the unconditional
+`0/N` end-of-run guard-visibly-passing line — never printed on a real run. Nothing in this
+codebase configures logging anywhere, so with no handler attached in the hierarchy, Python falls
+back to `logging.lastResort`, whose threshold is `WARNING` (30); `INFO` (20) never clears it. The
+transition warning (`logger.warning(...)`) worked, by accident of that same fallback's threshold
+matching its own level — but nothing pinned that it would keep working, which matters now that
+this fix starts managing this logger's level and handler explicitly.
+
+Reproduced the defect directly first (DoD's own repro, re-run against the pre-fix tree): confirmed
+only the `WARNING` line printed and `logging.lastResort.level == 30`, before touching anything.
+
+#### The design choice (round 4)
+
+The brief left the mechanism open, with two live options: (a) a few lines in `main()` to give
+*this module's own logger* a level and handler, or (b) following the existing
+`print(..., file=sys.stderr)` operator-line precedent (`main()`'s `"{label}: writing {rolled}"`
+lines) and bypass the logging module for these two messages specifically.
+
+**Chose (a) — configure `logger` (this module's own `logging.getLogger(__name__)`) explicitly in
+`main()`, scoped to that one logger instance, never `logging.basicConfig`/root.** Rejected (b)
+because both call sites (`_warn_live_los_coverage_gap_once`/`_log_live_los_coverage_summary`) are
+`logger.warning`/`logger.info` calls today, called from three separate places
+(`_run_console_poll_loop`'s/`_run_crew_text_poll_loop`'s `finally:` blocks and the plain-logger
+`else:` branch's own `finally:`) — switching them to `print` would mean touching three call
+sites' surrounding control flow instead of one `main()`-level fix, and would throw away the
+`logging` module's own level/formatting machinery for no reason once it is actually configured
+correctly. Rejected a global `logging.basicConfig(level=logging.INFO, ...)` specifically (the
+brief's own suggested minimal version) because it would also raise every *other* module's logger
+to `INFO` as a side effect — surveyed the actual blast radius first (constraint 2 in the brief):
+exactly 4 `logger.info` call sites exist in `src/` (`logger.py:945` the summary itself,
+`logger.py:1218` "%s connected" — once per connection, rare, harmless either way,
+`belief/crew_console.py:964` — fires only on a stale brain reply, rare, `perception/
+hybrid_source.py:303` — `_record_drop`, called on *every unassociable detection, every poll*,
+which is exactly the per-poll flood this plan's own review rounds already fought once in the
+opposite direction). A global `basicConfig` would turn that fourth site on unconditionally,
+re-creating the same class of defect this round exists to fix, just inverted (silence -> flood
+instead of flood -> silence).
+
+Named-logger independence is what makes the scoped version both correct and simple: `"logger"`
+(this module's `__name__` under `python -m logger`) is not a dotted parent of
+`"perception.hybrid_source"` or `"belief.crew_console"`, so `logger.setLevel(logging.INFO)` /
+`logger.addHandler(...)` on `logger` alone cannot reach either of those other two call sites —
+confirmed by running the survey above and reasoning about Python's logger-hierarchy lookup
+(`Logger.getEffectiveLevel`/`Logger.callHandlers` walk by dotted name, not by root fan-out),
+not merely assumed.
+
+#### Files Changed (round 4)
+
+- `body-layer/src/logger.py` — new `_configure_logger_for_main()`, called as the first statement
+  in `main()`. Clears `logger.handlers` and re-adds one fresh `logging.StreamHandler(sys.stderr)`
+  (plain `"%(message)s"` formatter, no timestamp/level prefix — matches the existing
+  `print(..., file=sys.stderr)` operator-line style rather than a verbose logging format) plus
+  `logger.setLevel(logging.INFO)`, every call — deliberately *not* guarded by
+  `if not logger.handlers:`. A guard would bind the `StreamHandler` to whichever `sys.stderr`
+  object was current on the *first* call in a process and never rebind; harmless in production
+  (`main()` runs once per process) but wrong for the new visibility tests below, which call
+  `main()` directly, in-process, under `capsys` — a guard would bind to test 1's captured stream
+  and go silent (from that stream's perspective) for every later test in the same session.
+  Clear-and-re-add costs nothing extra in production and makes every in-process `main()` call
+  self-correct against whatever `sys.stderr` is current at call time.
+- `body-layer/tests/test_logger.py` — two new tests (see below). No existing test changed.
+
+#### Tests Added (round 4)
+
+- `test_log_live_los_coverage_summary_is_visible_under_default_logging_config` — drives the same
+  plain-logger two-poll scenario as round 3's `test_plain_logger_path_logs_the_coverage_summary_
+  in_its_finally_block`, but with **no `caplog.at_level` at all**; captures real `sys.stderr` via
+  `capsys` and asserts the `"2/2 ..."` summary line is present in it. This is the gap every
+  existing `caplog`-based test in this file cannot by construction detect — `caplog.at_level`
+  forcibly lowers the effective level for its block, which proves the call fires but not that it
+  is visible under the ambient configuration a real sortie runs with.
+- `test_live_los_coverage_gap_warning_is_visible_under_default_logging_config` — same shape, for
+  the transition warning, asserting `"live LOS coverage gap"` lands on real `stderr`. Written
+  because the warning's pre-fix visibility was an accident of `logging.lastResort`'s threshold
+  matching `WARNING`, not a guarantee — this pins that it stays visible now that
+  `_configure_logger_for_main` manages the level/handler explicitly, rather than relying on the
+  same accident indefinitely.
+
+Both proven able to go red for the stated reason: temporarily removed the
+`_configure_logger_for_main()` call from `main()` (captured `shasum src/logger.py` before/after),
+re-ran both tests — both failed with `assert '...' in ''` against real captured `stderr`, while
+pytest's own `-v` output still showed the `WARNING` record in its "Captured log call" section
+(proving the record *was* emitted, just not visible on the real stream — exactly the DoD's
+distinction between "the call fires" and "it is visible"). Restored with `Edit`; `shasum` matched
+the pre-removal value exactly, confirming a clean revert. Re-ran both — green.
+
+#### Checks (round 4)
+
+(body-layer/ is the only subproject touched)
+
+```
+ruff format --check src tests   -> 118 files already formatted
+ruff check src tests            -> All checks passed!
+mypy src                        -> Success: no issues found in 54 source files
+pytest tests -q                 -> 1551 passed, 4 xfailed (1549 baseline + 2 new tests)
+pytest tests -q -W error::pytest.PytestUnhandledThreadExceptionWarning
+                                 -> 1551 passed, 4 xfailed, 0 warnings
+```
+
+**Outside pytest** (the DoD's own standard — a claim of visibility that was only ever tested
+inside pytest is what this round exists to fix):
+
+```
+$ PYTHONPATH=src:../world-model/src .venv/bin/python -c "
+import logger as logger_module
+logger_module._configure_logger_for_main()
+logger_module.logger.info('INFO test line - should it show now?')
+logger_module.logger.warning('WARNING test line - should it show?')
+"
+INFO test line - should it show now?
+WARNING test line - should it show?
+```
+
+Both lines now print under the real, unconfigured-by-anyone-else default — the exact repro from
+`dod-check.md`, re-run against the fix, with only the previously-silent `INFO` line now showing.
+Also ran a full, real `main()` invocation end-to-end (no `--console`/`--crew-text`, against a
+`MockAircraftLayerServer`, stopped after one poll the same way `KeyboardInterrupt` would) and
+confirmed the summary line surfaces from that real run too: `live LOS coverage: 0/0 gate-4
+evaluations had no live verdict this sortie` — the healthy `0/N` case the plan's own design intent
+is about, printed from an actual `main()` call rather than a direct function call.
+
+#### Notable Discoveries (round 4)
+
+- **A `caplog.at_level` test proves a call fires; it cannot prove the call is visible under the
+  configuration a real run actually has**, because the fixture overrides that configuration for
+  its own block by design. Every test in this file written before this round used that fixture for
+  these two functions, and the gap it leaves is exactly the shape of defect that survived three
+  review rounds and a security deep analysis. Worth a general note for this codebase (and
+  recorded in `.claude/agent-memory/implementer/` below): a module with no logging configuration
+  of its own needs at least one visibility test that does not touch `caplog`'s level override at
+  all.
+- **Named-logger independence is what makes a scoped fix safe**: `logging.getLogger(__name__)` in
+  different modules only compose hierarchically if one name is a dotted prefix of another.
+  `"logger"`, `"perception.hybrid_source"`, and `"belief.crew_console"` are three unrelated names,
+  so configuring one's level/handler cannot leak into the others — this is what let the fix stay
+  scoped to one `main()`-local call instead of needing per-module logger surgery.
