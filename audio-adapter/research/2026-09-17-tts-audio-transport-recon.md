@@ -1,6 +1,7 @@
 # BL-10 first slice: TTS audio transport (local playback + SRS injection path)
 
 <!-- doc-provenance:start -->
+**Topics:** #audio-playback #speech-synthesis #speech-recognition #push-to-talk #intercom
 **Evidence for:** [[AA-3]]
 <!-- doc-provenance:end -->
 

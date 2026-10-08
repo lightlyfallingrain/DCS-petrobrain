@@ -1,6 +1,7 @@
 # SPU-8 intercom read/write probe
 
 <!-- doc-provenance:start -->
+**Topics:** #audio-volume #cockpit-manipulation #intercom
 **Flight for:** [[AA-3]]
 <!-- doc-provenance:end -->
 

@@ -1,5 +1,9 @@
 # AA-4.5 — Stage 5 — real PTT through DCS
 
+<!-- doc-provenance:start -->
+**Topics:** #push-to-talk #intercom
+<!-- doc-provenance:end -->
+
 - [x] **Stage 5 — real PTT through DCS. FLOWN AND ACCEPTED 2026-09-23.** #status/done Built the same day on
   `feature/inbound-speech-stage4` (stacked on Stage 4 at user direction, tested as one).
 

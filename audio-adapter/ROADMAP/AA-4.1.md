@@ -1,5 +1,9 @@
 # AA-4.1 — Stage 1 — the recognition bench
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition
+<!-- doc-provenance:end -->
+
 - [x] **Stage 1 — the recognition bench. STOP/GO GATE: PASSED** #status/done (2026-09-19, user: *"this
   clears the gate"*). `stt_engine.py`, `vocabulary.py`, `tools/stt_bench.py`, plus
   `tools/record_corpus.py` for building the corpus.

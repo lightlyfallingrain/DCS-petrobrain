@@ -1,5 +1,9 @@
 # AA-4.2 — Stage 2 — the matcher and the command path
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition
+<!-- doc-provenance:end -->
+
 - [x] **Stage 2 — the matcher and the command path.** #status/done Merged 2026-09-20. The matcher moved to
   this subproject (plan's "Decision 4 REVISED"): body was going to hold a third hand-synced
   vocabulary copy, and whisper-specific normalisation — "180" for a spoken "one eight zero",

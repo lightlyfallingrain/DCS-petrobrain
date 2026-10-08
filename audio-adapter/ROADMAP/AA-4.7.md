@@ -1,5 +1,9 @@
 # AA-4.7 — Press-to-readback latency
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition
+<!-- doc-provenance:end -->
+
 - [ ] **Press-to-readback is ~3 s, and that is the next real problem.** #status/open Measured on the
   2026-09-23 sortie (user: *"time from release to feedback is about 3 s"*). A crew member answers
   in well under a second, so this is what will keep him feeling like a machine no matter how good

@@ -1,4 +1,5 @@
 <!-- doc-provenance:start -->
+**Topics:** #audio-playback #speech-synthesis #speech-recognition #push-to-talk #cockpit-manipulation #intercom
 **Decision for:** [[AA-4]]
 **Decision for:** [[AA-4.1]]
 <!-- doc-provenance:end -->

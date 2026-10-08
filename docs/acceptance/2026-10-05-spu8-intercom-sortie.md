@@ -1,6 +1,7 @@
 # SPU-8 intercom sortie
 
 <!-- doc-provenance:start -->
+**Topics:** #audio-playback #audio-volume #push-to-talk #intercom
 **Flight for:** [[AA-3]]
 <!-- doc-provenance:end -->
 

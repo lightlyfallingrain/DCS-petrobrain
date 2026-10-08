@@ -1,5 +1,9 @@
 # AA-1.1 — Stage 1 — synthesis + local playback
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-playback
+<!-- doc-provenance:end -->
+
 - [x] **Stage 1 — synthesis + local playback.** #status/done `TTSEngine` protocol with one implementation,
   `MacSayEngine` (the `say` binary, an external CLI rather than a package dependency — this
   subproject is stdlib-only like its siblings), `POST /speak`, and `--target local` playing the

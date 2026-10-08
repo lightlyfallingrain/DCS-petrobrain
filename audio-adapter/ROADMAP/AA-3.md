@@ -1,5 +1,9 @@
 # AA-3 — Slice 2 — cockpit state drives the audio
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-playback #audio-volume #speech-synthesis #push-to-talk #cockpit-manipulation #intercom
+<!-- doc-provenance:end -->
+
 - [x] **Slice 2 — cockpit state drives the audio. FLOWN, TESTED AND ACCEPTED 2026-10-05** #status/done (user:
 *"SPU-8 feature works, tested and accepted."*). Merged `be12734`. Un-deferred the same day the
 user wrote the behaviour out in full (the user wrote the

@@ -1,5 +1,9 @@
 # AA-4.4 — Stage 4 — capture
 
+<!-- doc-provenance:start -->
+**Topics:** #push-to-talk
+<!-- doc-provenance:end -->
+
 - [x] **Stage 4 — capture. FLOWN AND ACCEPTED 2026-09-23.** #status/done Built 2026-09-22
   (`feature/inbound-speech-stage4`). Voice through the live path works: the clip is captured,
   recognised, dispatched and read back.

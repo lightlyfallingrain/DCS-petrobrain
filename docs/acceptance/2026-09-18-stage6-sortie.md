@@ -1,6 +1,7 @@
 # Stage 6 acceptance sortie — flight card
 
 <!-- doc-provenance:start -->
+**Topics:** #speech-synthesis
 **Flight for:** [[AA-1.6]]
 <!-- doc-provenance:end -->
 

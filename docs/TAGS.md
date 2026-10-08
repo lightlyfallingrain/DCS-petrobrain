@@ -42,15 +42,24 @@ is correct and merged; it does not mean anything is wrong. |
 
 ## Topic tags
 
-**None approved yet.** This section used to require a `#topic/*` tag to cross **at least two
-subprojects** — the wrong axis. The user's own worked example (`AA-3` is about `#SPU-8`,
-`#aircraft-manipulation`, and `#audio`) crosses two *document kinds* inside one subproject
-(a roadmap entry and the research notes/acceptance cards that informed it), and no path lookup
-relates those directories. `#topic/*` had zero members when this was rewritten, so nothing needed
-renaming — the rule was replaced before its first real use. Full rationale and the measurements
-behind the numbers below: `plans/obsidian-links-and-tags/plan-document-graph.md`, §2–§3, §8.
+**Seven approved, 2026-10-08.** This section used to require a `#topic/*` tag to cross **at
+least two subprojects** — the wrong axis. The user's own worked example (`AA-3` is about
+`#SPU-8`, `#aircraft-manipulation`, and `#audio`) crosses two *document kinds* inside one
+subproject (a roadmap entry and the research notes/acceptance cards that informed it), and no
+path lookup relates those directories. `#topic/*` had zero members when this was rewritten, so
+nothing needed renaming — the rule was replaced before its first real use. Full rationale and the
+measurements behind the numbers below: `plans/obsidian-links-and-tags/plan-document-graph.md`,
+§2–§3, §8.
 
-**Three rules, all load-bearing:**
+**Deliberately excluded: every hardware/unit designator** (`#SPU-8`, `#NET-1`, `#NET-2`, and the
+Soviet/DCS unit designators listed in `docs/TAGS.proposals.md` — `#BTR-70`, `#ZSU-23`, `#SA-3`,
+`#BMP-2`, `#ZU-23`, `#ASP-17`, `#9K113`, and the rest). User direction, 2026-10-08: *"I don't think
+Designators-only is even needed. The concepts are more important than parts, I can go and find the
+parts from the concepts."* and *"even SPU-8 is about audio playback and volume. SPU-8 is just the
+tool that controls them."* The part is reachable through the concept it serves; the reverse is not
+useful. Say so here rather than leaving the omission to be rediscovered and re-proposed later.
+
+**Four rules, all load-bearing:**
 
 1. **Crosses at least two document kinds** — roadmap entry / research note / acceptance card /
    plan. A tag confined to one kind in one directory is something `ls`/`grep` over that directory
@@ -67,9 +76,24 @@ behind the numbers below: `plans/obsidian-links-and-tags/plan-document-graph.md`
    to titles/headings only drops the sketch's own centre (`AA-3`'s H1 never says "SPU-8"). The
    band is the only lever that works, which is why it is the admission rule rather than a
    judgement call.
+
+   **Stated exception: shorthand reach.** A candidate over 25 is still `TOO BROAD` *unless* the
+   excess comes from an approved shorthand of a single coherent concept (rule 4 below), in which
+   case it is admitted and the reason is recorded on its own `**Measured:**` line.
+   `#push-to-talk` measures 29 units *because* its pattern also matches `PTT`, not because it is
+   vague — it is one coherent topic with a widely-used abbreviation. The band was using raw count
+   as a proxy for specificity, and the shorthand rule breaks that proxy: the fix is to write the
+   exception down, not to narrow a pattern just to fit a number it was never measuring correctly
+   in the first place.
 3. **Flat spelling for topics** (`#SPU-8`, `#aircraft-manipulation`), never prefixed. The
    machine-read tags above (`#status/*`, `#needs-flight`) keep their prefix — they are a different
    kind of thing, read by a gate rather than clicked for navigation.
+4. **A tag's pattern must include the concept's common shorthand**, when the concept has one.
+   User direction, 2026-10-08: *"PTT is shorthand for push-to-talk, so push-to-talk must match
+   PTT. Similar for other shorthands like FOV = field-of-view."* `#speech-synthesis` matches
+   `TTS`, `#speech-recognition` matches `STT`/`ASR`/`whisper`, `#push-to-talk` matches `PTT`,
+   `#intercom` matches `ICS`. A future `#field-of-view` tag would need to match `FOV` for the same
+   reason — named here as the illustrative example, not yet proposed.
 
 **Why the closed vocabulary still matters — kept verbatim in substance from before this
 rewrite.** `grep -rl '#SPU-8'` is only a trustworthy *negative* — "nothing is tagged this" really
@@ -79,15 +103,64 @@ which axis admits a tag; it depends on every tag that exists being listed here a
 **Format: one short section per tag, not a table row.** A match pattern needs alternation, and
 `|` inside a markdown table cell has to be escaped — precisely the two-spellings footgun this file
 exists to prevent, in the file that documents it. A section looks like this once a tag is
-approved:
+approved (illustrative shape below, not an approved tag — see rule 4):
 
 ```markdown
-### `#SPU-8`
+### `#field-of-view`
 
-- **Matches:** `SPU-?8`
+- **Matches:** `field[- ]of[- ]view|FOV`
 - **Measured:** 18 units, 2026-10-07 (9 research · 4 acceptance · 3 plan · 2 roadmap)
-- The Mi-24P intercom box: its cockpit arguments, its gating behaviour, and the audio path it owns.
+- The pilot's/gunner's visible cockpit volume and its limits.
 ```
+
+### `#audio-playback`
+
+- **Matches:** `playback|audio (transport|channel)|/audio/play|wav (file|payload)`
+- **Measured:** 21 units, 7 roadmap entries, 2026-10-08.
+- Moving a rendered audio payload from wherever it is produced (TTS output, a recorded wav) onto
+  the aircraft's own audio path — the transport/channel mechanism, not any one box that uses it.
+
+### `#audio-volume`
+
+- **Matches:** `audio volume|playback volume|volume knob|volume scal`
+- **Measured:** 5 units, 1 roadmap entry, 2026-10-08.
+- Scaling or setting playback loudness — the volume knob/control concept, independent of which
+  cockpit box exposes it.
+
+### `#speech-synthesis`
+
+- **Matches:** `\b(TTS|text-to-speech|speech synthesis)\b`
+- **Measured:** 13 units, 2 roadmap entries, 2026-10-08.
+- Turning Petrovich's text into spoken audio (TTS) before it reaches the audio-playback path.
+
+### `#speech-recognition`
+
+- **Matches:** `\b(STT|ASR|speech-to-text|whisper)\b`
+- **Measured:** 21 units, 7 roadmap entries, 2026-10-08.
+- Turning the player's captured speech into text (STT/ASR, including the Whisper model family)
+  before it reaches command handling.
+
+### `#push-to-talk`
+
+- **Matches:** `\b(push[- ]to[- ]talk|PTT)\b`
+- **Measured:** 29 units, 6 roadmap entries, 2026-10-08 — admitted over the 3–25 band under rule
+  2's shorthand exception: the excess comes entirely from `PTT`, this tag's own approved shorthand
+  (rule 4), for one coherent concept, not from vagueness.
+- Gating player speech capture to only the window the player is holding a transmit key, and the
+  key/gesture that opens that window.
+
+### `#cockpit-manipulation`
+
+- **Matches:** `cockpit argument|clickable|performClickableAction|set_command`
+- **Measured:** 18 units, 1 roadmap entry, 2026-10-08.
+- Driving a DCS cockpit argument/clickable as code would — `performClickableAction`/`set_command`
+  and the argument IDs they move — independent of which cockpit box is on the other end.
+
+### `#intercom`
+
+- **Matches:** `(intercom|\bICS\b)`
+- **Measured:** 18 units, 4 roadmap entries, 2026-10-08.
+- The crew intercom system (ICS) as a concept: who can hear whom, and over what.
 
 ## Adding a tag
 

@@ -1,6 +1,7 @@
 # How light can the whisper model go?
 
 <!-- doc-provenance:start -->
+**Topics:** #speech-recognition #push-to-talk
 **Evidence for:** [[AA-4.1]]
 <!-- doc-provenance:end -->
 
