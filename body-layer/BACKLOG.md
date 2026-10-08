@@ -1393,8 +1393,29 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   152-candidate wedge would be covered within ~2 polls. Not yet designed or decided; this is the
   direction the cost data points at, and it needs `/explore` before an Architect pass.
 
-  **The reported 5 s stutter is almost certainly not this project's.** The user reports *"a small
-  stutter every 5 s"*. A full gap scan of the scan-line cadence over the whole sortie finds exactly
+  **The 5 s stutter is RESOLVED 2026-10-08: a probe Hook left deployed.** The user found it:
+
+  > *"I think the 5s interval micro stutter may have been caused by
+  > petrobrain-unit-id-join-probe-hook.lua that I had forgotten to remove. Now that I removed it, no
+  > stutter."*
+
+  Removing it ended the stutter. Worth recording honestly: that probe polls at **1 Hz**
+  (`POLL_INTERVAL_S = 1.0`), not 5 s, so the felt period did not match its interval — but it does far
+  more work per poll than the LOS Hook (a full unit enumeration plus `getObjectID` per unit), which
+  fits a heavier, less regular hitch. The empirical result is the evidence; the period was an
+  estimate.
+
+  **The process gap is the finding, not the probe.** A probe Hook stays in
+  `Saved Games/DCS/Scripts/Hooks/` until someone remembers to delete it, and while it is there it
+  taxes every sortie and contaminates exactly the performance measurements a sortie is flown to take.
+  Three hypotheses were tested against the real cause sitting in the Hooks directory the whole time.
+  Filed as **`AC-B5`**.
+
+  The refuted-hypothesis record below is kept, because the reasoning still holds for the LOS Hook
+  itself and the measurements are the ones that cleared it.
+
+  **What was ruled out, and why it stayed ruled out.** The user reported *"a small stutter every
+  5 s"*. A full gap scan of the scan-line cadence over the whole sortie finds exactly
   **two** gaps — 7.62 s at `16:04:24.954` and 2.65 s at `16:26:56.273` — against an otherwise
   metronomic 1.004 s. Two isolated events 22 minutes apart are not a 5 s period.
 
@@ -1406,12 +1427,14 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   | LOS poll cost | `bridge_call_ms` max 27 ms; nothing above 100 ms all sortie |
   | LOS poll cadence | only two gaps in the sortie, neither periodic |
 
-  Nothing this project injects into the DCS thread has a 5 s period (LOS Hook 1 Hz, F10 Hook 1 Hz,
-  `Export.lua` 5 Hz) and nothing of it is slow. **Do not re-propose any of the three without new
-  evidence.** The decisive test is to move `Export.lua` and `Hooks/petrobrain-*.lua` aside and fly the
-  same area: if the stutter survives, it was never ours. The two gaps themselves are plausibly DCS's
-  own (a pause, or terrain streaming on approach to the city) — untested, and recorded as a guess, not
-  a finding.
+  Nothing in the *shipped* set injects a 5 s period (LOS Hook 1 Hz, F10 Hook 1 Hz, `Export.lua` 5 Hz)
+  and nothing in it is slow — all three conclusions stand. The gap the reasoning had was that the
+  deployed set was assumed to be the shipped set, and a leftover probe Hook was in it. **The lesson is
+  to enumerate what is actually in the Hooks directory before reasoning about what runs on the DCS
+  thread**, rather than reasoning from the repository.
+
+  The two cadence gaps remain unattributed and are not worth chasing: two events 22 minutes apart,
+  with the periodic symptom now explained.
 
   **Explicitly not a blocker on `BL-11` Stage 4's statics fix** — the fix under that stage is the
   enumeration itself, and this is a consequence to design for separately. Per root `CLAUDE.md`'s
