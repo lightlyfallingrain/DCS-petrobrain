@@ -292,3 +292,129 @@ suite was run anyway because a test parses the edited Lua file):
 **Live behaviour remains unverified and unverifiable from here, and nothing in these fixes weakens
 that posture** — it is still stated in the file header, the schema docstring, the `CLAUDE.md` bullet
 and this log. Acceptance is a sortie by the pilot on branch `fix/los-hook-statics`.
+
+---
+
+## Security deep analysis fixes (2026-10-08, `plans/los-hook-statics/security-review.md`)
+
+Two required fixes plus one fix-before-public item taken while here. Verdict was
+**APPROVED WITH REQUIRED FIXES**; no exploitable vulnerability, no dependency exposure. Base-commit
+correction: the worktree landed on `main` (`2ddceff`), diverged from the named tip `60e5b07` with no
+`--ff-only` path available since `worktree-agent-<id>` carried no unique commits — moved the branch
+ref directly (`git checkout -B <branch> 60e5b07...`), per AGENTS.md rule 4's documented mechanism.
+
+### Required fix 1 — a `;` in an object's name no longer drops the whole poll
+
+Demonstrated mechanism (security review): `LineOfSightSnapshot.from_wire` splits `entries` on `;`,
+and a fragment that does not `rsplit` into three `:`-separated fields raises
+`LineOfSightParseError` — logged at `debug` in `line_of_sight_receiver.py:134` and the exception
+propagates out of `from_wire`, discarding **every** verdict in that poll, not just the offending
+object's. `:` and `|` are already safe by construction (`rsplit(":", 2)`, `maxsplit=6`) and were
+deliberately left alone.
+
+Fixed on the Hook side, in the shared `considerCandidate` filter, immediately after the existing
+name-validity check: a name containing `;` (`string.find(name, ";", 1, true)` — plain find, not a
+pattern) now drops that one object rather than the whole poll. Counted in a new `nameRejects` local,
+declared above `considerCandidate` per the no-hoisting rule, reported as `name_rejects=` on the
+existing `env.info` scan line — appended after `unit_enum_failures=` and before
+`ownship_unidentified=`, so every existing field keeps its name and position. Counting it follows
+this same branch's own `pcall-without-a-counter` lesson (commit `5ec13eb`): a drop with no counter
+reads as "nothing to report."
+
+### Required fix 2 — `LOS_CODE`'s splice gets the mechanical guard its sibling has
+
+`tests/test_line_of_sight_hook_lua.py` already guarded `SET_LOOK_TEMPLATE` (exactly two `%d`, no
+other specifier); the `LOS_CODE` prefix — `MAX_SIGHTLINES` via `%d`, `BUBBLE_RADIUS_M` via `%.17g` —
+had no equivalent, so a later edit reaching for `%s` on either would land silently. Extended the
+same test module (no new file), following `_extract_template`'s extraction approach:
+
+- `_extract_los_code_prefix()` pulls both `string.format` calls' format-spec strings out of the
+  `LOS_CODE` concatenation via regex, mirroring `_extract_template`.
+- `test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g` asserts the conversion sets
+  are exactly `["%d"]` and `["%.17g"]`.
+- `test_los_code_prefix_sets_both_globals_the_bridged_chunk_reads` asserts the splice actually
+  assigns `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M` — load-bearing, not decoration, since the bridged chunk
+  cannot see the outer file's `local`s and a typo here would leave it reading a `nil` global.
+
+**Non-obvious choice:** the existing `_FORMAT_DIRECTIVE_RE = re.compile(r"%[^%]")` only spans
+single-character conversions and misparses `%.17g` as a bare `%.` (verified by running it red
+first — it failed with `['%.'] == ['%.17g']`). Rather than widen that regex and risk changing
+`SET_LOOK_TEMPLATE`'s existing guard behaviour, added a second regex, `_PRINTF_DIRECTIVE_RE`, that
+spans a full printf-style directive (flags/width/`.precision`/conversion letter), used only by the
+two new tests.
+
+**Counterfactual run, not just reasoned:** temporarily changed the real `%.17g` call site to
+`%.17s` (an edit to the actual splice, not to a copy or to the test), confirmed
+`test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g` goes red for exactly that
+reason, then reverted via `Edit` back to `%.17g` and re-ran the full suite to confirm the restore
+(254 passed, matching the post-fix baseline).
+
+### Fix-before-public, taken while here — the `%.17g` "any value" comment
+
+The header comment's "numerically identical to the constant for *any* value assigned to it" is
+false for `math.huge`/`-math.huge`/NaN, which `%.17g` renders as `inf`/`-inf`/`nan` — not valid Lua
+numeral syntax, so the chunk would fail to compile and every poll would error. Harmless today (the
+constant is a literal `10000.0`, never reassigned — grep-confirmed by the earlier review round).
+Narrowed the comment to "any *finite* value" and pointed at the existing NaN/infinity guards
+(`_safeClampInt`, `test_lua_file_contains_the_nan_and_infinity_guards`) as the pattern that would
+need to extend here if this constant ever stopped being a fixed literal. **No new runtime guard
+added** — the value is not reachable today, so one would be ceremony against nothing live; said so
+rather than papering over it, per the task's own instruction.
+
+Finding 4 (the "neither test runs there" comment) was **not** touched — out of this round's named
+scope (only the `%.17g` comment was named as in-scope-while-here); flagging that it remains open
+for whoever next does a fix-before-public pass.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` — the `;`-reject guard + `nameRejects`
+  counter + `name_rejects=` field; the `%.17g` comment correction.
+- `aircraft-layer/tests/test_line_of_sight_hook_lua.py` — `_extract_los_code_prefix`,
+  `_PRINTF_DIRECTIVE_RE`, and the two new guard tests.
+- `plans/los-hook-statics/implementation.md` — this section.
+
+### Tests Added
+
+- `test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g` — `LOS_CODE`'s two
+  `string.format` calls carry exactly `%d` and `%.17g` respectively, nothing else.
+- `test_los_code_prefix_sets_both_globals_the_bridged_chunk_reads` — the splice assigns the two
+  names (`MAX_SIGHTLINES`, `BUBBLE_RADIUS_M`) the bridged chunk actually reads.
+
+No new parser-side test was added for Finding 1 (a `;`-rejected name): the parser itself was not
+changed (deliberately — review's own ruling, strictness stays on the Lua/wire side), so there is no
+new Python behaviour to assert on; the fix is Lua text, covered by reading and the bytecode checks
+below, not by a Python test.
+
+### Checks
+
+aircraft-layer/ (only subproject touched; borrowed `.venv` from the main checkout at
+`/Users/sg/Code/DCS-petrobrain/aircraft-layer/.venv`, source resolution confirmed unaffected since
+only this worktree's own `src`/`tests`/Lua files changed):
+
+- `ruff format --check src tests`: **pass** (56 files already formatted)
+- `ruff check src tests`: **pass**
+- `mypy src` (run from inside `aircraft-layer/`): **pass**, 21 source files
+- `pytest tests -q` (unfiltered): **pass**, **254 passed** (252 baseline + 2 new)
+- `pytest tests/test_line_of_sight_hook_lua.py -v`: all **7 named tests** pass, confirmed by name —
+  including both new ones, not just a `-k` filter.
+- `luac5.1 -p` on the outer file: **pass**.
+- `luac5.1 -p` on the bridged `LOS_CODE` chunk, extracted to its own file with both spliced prefix
+  lines prepended (`local MAX_SIGHTLINES = 128`, `local BUBBLE_RADIUS_M = 10000.0`): **pass**.
+- **GETGLOBAL sweep, outer file:** `loadfile, log, math, net, os, package, pcall, require, string,
+  tonumber, tostring, type` — unchanged from the pre-fix baseline, Lua stdlib plus genuine
+  Hook-state DCS APIs only.
+- **GETGLOBAL sweep, bridged chunk:** `coalition, env, ipairs, land, math, Object, pairs,
+  PB_LOOK_FOV_DEG, PB_LOOK_HOUR, pcall, string, table, timer, tostring, type, world` — unchanged
+  from the pre-fix baseline. No script-own helper (`considerCandidate`, `wrapSigned180`,
+  `buildingClear`, `terrainClear`, `nameRejects`) appears as a global; the `;`-guard reads only the
+  already-in-scope `name` local and increments the already-closed-over `nameRejects` local, so it
+  introduces no new global by construction, confirmed by the sweep rather than assumed.
+
+### Notable Discoveries
+
+- **`_FORMAT_DIRECTIVE_RE` (single-char-conversion regex) silently misparses `%.17g`** — a precision
+  digit between `%` and the conversion letter reads as `%.` plus stray literal text under that
+  regex. It was adequate for `SET_LOOK_TEMPLATE` (`%d` only) by coincidence of that template's own
+  simplicity, not because the regex is general. Left unchanged for the existing test; a second,
+  more general regex was added for the new one rather than risk altering `SET_LOOK_TEMPLATE`'s
+  established guard behaviour on an unrelated fix.
