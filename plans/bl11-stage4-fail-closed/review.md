@@ -123,3 +123,84 @@ mutation-tested (both the fail-closed gate and the coverage-log guard). Test dif
 across all touched files; the four-file blast-radius grep sweep was run directly rather than
 trusted from the implementation log. Full suite + ruff + mypy reproduced independently, not
 inherited from the implementer's report.
+
+---
+
+## Round 2: review of the fix (`77faae3`, answering round 1's required fix (a))
+
+Worktree landed on `main` as expected; its scaffolding branch carried no unique commits, so it
+was moved to the named tip `77faae3bd3e0d9e3b8f19685adbc134131e5bac6` via `git checkout -B`,
+discarding nothing. Scope narrowed to the coverage-log fix and its five new tests only, per the
+dispatching brief — everything else in this file's round 1 stands.
+
+`_log_live_los_coverage_if_growing` was renamed to `_warn_live_los_coverage_gap_once` (edge-
+triggered on the zero-to-nonzero `no_verdict` transition, fires once, never again) and a new
+`_log_live_los_coverage_summary` was added — an unconditional, try/except-wrapped `logger.info`
+called as the first statement in both poll loops' `finally:` blocks, logging the real totals even
+at `no_verdict == 0`. This second piece was the user's own design call, not something round 1
+asked for, and the dispatching brief invited pushback on it; I don't have one — treating a `0/N`
+line as "the guard visibly passing" is consistent with `detection_trace.py`'s
+`static_enum_failures` precedent already in this codebase, and a post-flight regression guard
+whose whole job is reporting a magnitude needs the magnitude logged even when it's zero.
+
+Reproduced the implementer's own repro independently before trusting the fix: dead feed over 6
+polls warns exactly once (poll 1); end-of-run line reads `30/30`; a healthy run never warns but
+still logs `0/28`. Matches the report exactly.
+
+**Mutation-verified each of the five new tests and the teardown claim myself, not by reading:**
+
+1. **The `== 1` call-count test is load-bearing, not vacuous.** Removed the `if already_warned:
+   return True` early-return guard (reproducing the old flood shape against the new trigger
+   condition) and reran. `test_..._fires_exactly_once_under_continuous_growth` failed with
+   `10 == 1` — ten warnings logged, one per poll, exactly the pre-fix flood. The weaker `>= 1`
+   shape the brief warned about would have passed this mutation; the test as written does not.
+   Reverted with `Edit`; `git diff --stat` empty afterward.
+2. **Both `finally:`-block tests are wired independently, not sharing a path.** Replaced the
+   `_log_live_los_coverage_summary(runner.sources)` call in `_run_console_poll_loop`'s `finally:`
+   with `pass` and reran both integration tests: `test_console_poll_loop_logs_the_coverage_
+   summary_in_its_finally_block` failed (`summaries == []`), and
+   `test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block` still passed. The two
+   loops genuinely do not share a code path for this call — breaking one does not break the other,
+   confirming the implementer's claim and item 3 of the dispatching brief. Reverted with `Edit`;
+   `git diff --stat` empty afterward.
+
+**Teardown safety (item 2 of the brief).** Read `_log_live_los_coverage_summary`'s body: every
+statement that can raise (the `isinstance` check, the `coverage` attribute access, and the
+`logger.info` call itself) is inside the `try:`; nothing executes before entering it. Python's
+`logging` module does not propagate formatting/handler exceptions by default (`Handler.
+handleError` swallows them unless `logging.raiseExceptions` is forced off and a handler is
+unusually configured, neither true here), so in practice the surrounding `except Exception:` is
+already a second line of defense behind stdlib's own. The claim "must never raise" holds for both
+reasons, not just the one stated.
+
+**Reachable disagreement between the `bool` flag and the source's counter (item 4).** Grepped
+`runner.sources = _build_sources(...)` in `logger.py`: it is assigned exactly once per loop, before
+the `while` loop starts, and never reassigned inside it (confirmed by reading both loop bodies in
+full — no second `runner.sources =` anywhere between the `try:` and the matching `finally:`). A
+`NakedEyePerceptionSource` is therefore never rebuilt mid-run on either poll-loop path, so the
+`live_los_warned` local and the source's own `LiveLosCoverage` counter cannot diverge in the
+current code. This is worth stating explicitly, as the brief asked, because `_build_sources` is a
+plain function call sitting right there in the source — a future change that moved it inside the
+loop (e.g. to support hot-reconnecting a source) would silently reintroduce this as a real bug with
+no test currently positioned to catch it.
+
+**Docstring/code agreement (item 5).** Both new docstrings match what the code does: the
+edge-trigger-once claim, the "no `--flag` to gate it" claim, and the "must never raise" claim are
+all true of the code as written (verified above, not just read). `implementation.md`'s round 2
+section accurately describes the same mutation-testing approach used here, independently reached.
+
+Full checks reproduced independently: ruff format/check clean, `mypy --strict` clean (54 source
+files, run from inside `body-layer/`), pytest 1547 passed / 4 xfailed / 0 failed — matching the
+implementer's report exactly.
+
+### Verdict (round 2)
+
+APPROVED. The required fix from round 1 is correctly implemented and its tests are genuinely
+load-bearing (verified by mutation, not just by reading). The unconditional summary is a sound
+addition consistent with existing project precedent. Ready for DoD.
+
+### Review Confidence (round 2)
+
+Full read, scoped to the fix as instructed. Every new test mutation-verified against the actual
+mechanism it claims to pin, not inherited from the implementer's report. Teardown-safety and
+mid-run-rebuild reachability both checked by reading the full relevant code paths, not assumed.
