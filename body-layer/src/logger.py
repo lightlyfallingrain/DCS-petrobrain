@@ -855,6 +855,48 @@ def _push_gaze_line(
     return gaze.label
 
 
+def _log_live_los_coverage_if_growing(
+    sources: list[PerceptionSource], last_logged_no_verdict: int
+) -> int:
+    """Reads the naked-eye source's `LiveLosCoverage` counter
+    (`plans/bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 step 4) and
+    logs a warning via the standing `logging.getLogger(__name__)` channel
+    whenever the cumulative `no_verdict` count has grown since the last
+    poll this was logged at -- called from both `_run_console_poll_loop`
+    and `_run_crew_text_poll_loop`, mirroring `_push_gaze_line`'s own
+    log-on-change shape. Deliberately **not** every poll once `no_verdict`
+    is nonzero: at a ~1 s poll interval a dead live-LOS feed would
+    otherwise print one line per poll for the rest of the sortie, crowding
+    out every other log line without adding information after the first
+    one. On by default, with no `--flag` to gate it (unlike `--detection-
+    trace`) -- this is the regression guard, not an opt-in diagnostic
+    (plan Decision 2): a dead feed must be observable on an ordinary
+    sortie with no debugging flags set at all. A true no-op for a
+    `sources` list holding no naked-eye source (same guard
+    `_apply_active_gaze` uses).
+
+    Returns the `no_verdict` value just logged (or `last_logged_no_verdict`
+    unchanged if nothing was logged this call), so the caller's local
+    carries forward to the next poll -- the same pattern `_push_gaze_line`
+    uses for `last_gaze_label`."""
+    for source in sources:
+        if isinstance(source, NakedEyePerceptionSource):
+            coverage = source.live_los_coverage
+            if coverage.no_verdict > last_logged_no_verdict:
+                logger.warning(
+                    "live LOS coverage gap: %d/%d naked-eye gate-4 "
+                    "evaluations this sortie had no live verdict "
+                    "(world-model's offline LOS primitive is no longer "
+                    "used as a fallback -- these candidates were "
+                    "rejected, not approximated)",
+                    coverage.no_verdict,
+                    coverage.evaluated,
+                )
+                return coverage.no_verdict
+            return last_logged_no_verdict
+    return last_logged_no_verdict
+
+
 def _render_eyesight_frame(
     runner: ConsolePerceptionRunner,
     trace_records: list[DetectionTrace],
@@ -1193,6 +1235,7 @@ def _run_console_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
+        last_logged_no_verdict = 0
         connection = _ConnectionReporter()
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
@@ -1229,6 +1272,9 @@ def _run_console_poll_loop(
                         trace_writer.write_poll(trace_collector, runner.store)
                     else:
                         trace_collector.records.clear()
+                last_logged_no_verdict = _log_live_los_coverage_if_growing(
+                    runner.sources, last_logged_no_verdict
+                )
                 if runner.overlay_client is not None and runner.last_t_sim is not None:
                     last_gaze_label = _push_gaze_line(
                         runner.overlay_client,
@@ -1481,6 +1527,7 @@ def _run_crew_text_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
+        last_logged_no_verdict = 0
         connection = _ConnectionReporter()
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
@@ -1539,6 +1586,9 @@ def _run_crew_text_poll_loop(
                         trace_writer.write_poll(trace_collector, runner.store)
                     else:
                         trace_collector.records.clear()
+                last_logged_no_verdict = _log_live_los_coverage_if_growing(
+                    runner.sources, last_logged_no_verdict
+                )
                 if runner.last_t_sim is not None:
                     crew_console.enrichment = runner.enrichment
                     # plans/spu8-intercom/plan.md Stage 5: a one-shot

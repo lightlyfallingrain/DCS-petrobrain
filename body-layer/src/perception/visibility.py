@@ -145,10 +145,20 @@ detection here to be ambiguous *about*):
    `profile.size_m` anyway whenever a profile carries no measured
    dimensions (every row except the two S-300 ones migrated so far) or the
    candidate's heading is unknown this tick.
-4. **Terrain LOS** -- reuses `geometry.line_of_sight_clear` as-is; the piece
-   `geometry.py`'s own docstring already anticipated needing ("turning
-   'clear line of sight' into an actual detectability decision... [is] a
-   concrete tier's job... not this shared helper's").
+4. **Terrain LOS, fail-closed on the live verdict**
+   (`plans/bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 steps 3-4,
+   superseding `plans/dcs-driven-los/plan.md` (X-B29)'s earlier fallback).
+   `candidate.live_los_clear` is the only signal this gate consults --
+   `True` admits, and `False` *or* `None` (no live verdict this poll:
+   feed absent, this unit outside the queried wedge, or too stale) both
+   reject. World-model's offline `geometry.line_of_sight_clear` primitive
+   is never called from this function; it remains importable for
+   `replay.py` and offline fixtures only. An optional `live_los_coverage`
+   parameter (`LiveLosCoverage`, defaulting to `None`, the same additive
+   pattern as `trace`) counts how many candidates reached this gate and
+   how many of those carried no live verdict, so a dead live-LOS feed is
+   observable in the logs rather than indistinguishable from an empty sky
+   (step 4; see `logger.py`).
 
 **Resolution vs. salience (`plans/group-detectability/plan.md`).** Gate 3's
 `profile.size_m`-based presence threshold above conflated two different
@@ -184,15 +194,46 @@ from perception.detection_trace import (
     GateOutcome,
 )
 from perception.gaze import Gaze, within_gaze
+
+# `line_of_sight_clear` is deliberately re-exported into this module's
+# namespace, unused by any code below (`plans/bl11-stage4-fail-closed/
+# plan.md`, `BL-11` Stage 4 step 3: fail-closed removed its only call
+# site). Kept importable here, not deleted, so `test_visibility.py`'s
+# negative-space tests can still `monkeypatch.setattr(visibility,
+# "line_of_sight_clear", ...)` and assert it is never invoked -- the
+# claim those tests exist to pin.
 from perception.geometry import (
     GeoPosition,
     bearing_deg,
     body_relative_direction,
-    line_of_sight_clear,
+    line_of_sight_clear,  # noqa: F401
     range_m,
 )
 from perception.optics import UNAIDED_OPTIC, Optic, within_optic_fov
 from perception.source import OwnshipState
+
+
+@dataclass
+class LiveLosCoverage:
+    """Always-on regression guard, not a diagnostic (`plans/
+    bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 step 4) --
+    deliberately a separate mechanism from `DetectionTraceCollector`
+    rather than a mode of it, because that collector's whole design
+    intent is "a proven no-op unless `--detection-trace` is passed," and
+    this counter must be visible on an ordinary sortie with no debugging
+    flags set at all. Mutable (not `frozen`): `check_visibility`
+    increments it in place every time gate 4 is reached.
+
+    `evaluated` counts every candidate that reached gate 4 (i.e. survived
+    gates 0-3). `no_verdict` counts the subset of those where
+    `candidate.live_los_clear is None` specifically -- a confirmed
+    `False` (blocked) is not a coverage gap and does not increment it.
+    `NakedEyePerceptionSource` owns one instance for the lifetime of the
+    source; `logger.py`'s poll loop reads it after every `poll()` call."""
+
+    evaluated: int = 0
+    no_verdict: int = 0
+
 
 #: **Historical derivation, `BINOCULAR_RANGE_MULTIPLIER` itself is retired
 #: (slice 2A)** -- these three thresholds were originally derived using
@@ -591,6 +632,7 @@ def check_visibility(
     gaze: Gaze | None = None,
     trace: DetectionTraceCollector | None = None,
     group_salient: bool = False,
+    live_los_coverage: LiveLosCoverage | None = None,
 ) -> VisibilityResult | None:
     """Run `candidate` through all five gates: gaze, cockpit mask, per-optic
     field of view (`plans/detection-cones-slice1/plan.md`), angular-radius
@@ -661,13 +703,19 @@ def check_visibility(
     always populated regardless of which gate fired. No change to this
     function's existing return value or gate order.
 
-    **Gate 4 (terrain LOS), as of `plans/dcs-driven-los/plan.md` (X-B29):**
+    **Gate 4 (terrain LOS), fail-closed as of `plans/
+    bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4 steps 3-4), superseding
+    the fallback `plans/dcs-driven-los/plan.md` (X-B29) originally shipped:**
     `candidate.live_los_clear` (a DCS-driven, true-to-true verdict joined
-    onto the candidate upstream, `naked_eye_source.py`) is consulted first
-    when it is not `None`; world-model's offline `line_of_sight_clear`
-    primitive is the fallback, exactly as before, whenever no live verdict
-    exists this poll. See `WorldObjectCandidate.live_los_clear`'s own
-    docstring for the tri-state contract.
+    onto the candidate upstream, `naked_eye_source.py`) is the *only* signal
+    this gate consults -- `None` (no live verdict this poll) now rejects
+    exactly like a confirmed `False`, rather than falling back to
+    world-model's offline `line_of_sight_clear` primitive. That primitive
+    is never called from this function any more. See
+    `WorldObjectCandidate.live_los_clear`'s own docstring for the tri-state
+    contract. `live_los_coverage`, if given, counts every candidate that
+    reaches this gate and how many of those carried no live verdict -- see
+    `LiveLosCoverage`'s own docstring just above this function.
 
     **Merge note (2026-09-20).** BL-9 and cones slice 1 were developed in
     parallel and their interaction produced two defects that neither
@@ -774,19 +822,22 @@ def check_visibility(
         _record(GateOutcome.RANGE_OR_SIZE)
         return None
 
-    # `plans/dcs-driven-los/plan.md` (X-B29): a live, DCS-driven verdict
-    # (true position to true position, computed collector-side) takes
-    # priority over world-model's offline terrain-only primitive. `None`
-    # means no live verdict this poll (feed absent, this unit outside the
-    # queried wedge, or too stale) -- the `elif` branch below is then
-    # exactly today's code, unchanged, which is also what every test
-    # fixture and the replay harness still exercises (candidates built
-    # without `live_los_clear` default to `None`).
-    if candidate.live_los_clear is not None:
-        if not candidate.live_los_clear:
-            _record(GateOutcome.TERRAIN_LOS)
-            return None
-    elif not line_of_sight_clear(conn, theatre, observer, target):
+    # `plans/dcs-driven-los/plan.md` (X-B29), fail-closed per
+    # `plans/bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4 steps 3-4):
+    # a live, DCS-driven verdict (true position to true position, computed
+    # collector-side) is the only verdict this gate consults. `None` means
+    # no live verdict this poll (feed absent, this unit outside the queried
+    # wedge, or too stale) and is treated identically to a confirmed
+    # `False` -- Python's falsiness already does this, so there is no
+    # separate `is None` branch. World-model's offline `line_of_sight_clear`
+    # primitive is no longer reachable from this live gate at all; it stays
+    # importable for `replay.py` and offline fixtures only (see that plan's
+    # "Affected Modules").
+    if live_los_coverage is not None:
+        live_los_coverage.evaluated += 1
+        if candidate.live_los_clear is None:
+            live_los_coverage.no_verdict += 1
+    if not candidate.live_los_clear:
         _record(GateOutcome.TERRAIN_LOS)
         return None
 
