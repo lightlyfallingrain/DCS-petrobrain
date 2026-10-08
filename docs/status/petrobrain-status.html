@@ -696,7 +696,7 @@ flowchart LR
   BRIDGE["Bridge cost measured&lt;br/&gt;568 units, 1.99 ms"]:::done
   TREE["Tree LOS probe&lt;br/&gt;no DCS call sees trees"]:::done
   OSMV["OSM landcover&lt;br/&gt;the shipping answer"]:::open
-  DLOS["DCS answers LOS&lt;br/&gt;batched, plan only"]:::open
+  DLOS["DCS answers LOS&lt;br/&gt;units + statics, fail closed"]:::done
   SURF[".surface5 payload wall&lt;br/&gt;hit twice, deferred"]:::hold
 
   M6["M6 curvature detector&lt;br/&gt;checkerboard noise"]:::done
@@ -705,6 +705,7 @@ flowchart LR
   GATE["Relief gate + decimation&lt;br/&gt;720 MB, 234,799 lines"]:::done
   WMB1["WM-B1 Latin place names&lt;br/&gt;cleared on the same build"]:::done
   PARK["Callout stages 3–5&lt;br/&gt;unbuilt, waiting on a consumer"]:::open
+  GRIDOUT["Retire the elevation grid&lt;br/&gt;now unblocked"]:::open
 
   BL8["BL-8&lt;br/&gt;memory interfaces"]:::open
   BR1["BR-1 Stage 1&lt;br/&gt;async wire, stub decider"]:::done
@@ -735,13 +736,13 @@ flowchart LR
   TREE --> OSMV
   TREE -.->|"placement exists, unaddressable"| SURF
   BRIDGE --> DLOS
-  LOS -.->|"a mitigation, not the fix"| DLOS
+  LOS -.->|"a mitigation; DLOS was the fix"| DLOS
   BR1 --> BR2 --> BRAIN
   CBS -.->|"tunes"| BRAIN
   BL27 -.->|"needs real flights"| BL8 -.-> BRAIN
   WM --> M6 --> WSHED --> WMB6 --> GATE --> PARK
   WM --> WMB1 -.->|"one rebuild carried both"| GATE
-  DLOS -.->|"removes the grid's last gate"| GATE
+  DLOS -->|"BL-11 closed: the grid lost its last live reader"| GRIDOUT
 </pre>
       </div>
     </div>
@@ -1219,8 +1220,8 @@ flowchart LR
     <h2>Architecture</h2>
     <p class="section-note">The other two graphs are about time — how we got here, what is next. This
       one is about shape, and stays useful once every milestone above is done. Two machines, two seam
-      kinds, and one component drawn as absent again: a line-of-sight answer computed inside DCS,
-      which exists as a plan and nothing else.</p>
+      kinds, and and the component that was drawn as absent for
+      three cycles is now built: DCS answers line of sight itself, inside the game.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-arch" type="button">Expand graph</button>
@@ -1274,7 +1275,6 @@ flowchart TB
     <div class="legend">
       <span class="chip done">Built</span>
       <span class="chip active">Built, one slice deep</span>
-      <span class="chip hold">Planned, not built</span>
     </div>
 
     <p class="section-note">The double-line edges are DCS itself &mdash; read <em>and</em> written,
@@ -1288,20 +1288,22 @@ flowchart TB
       not Petrovich has finished thinking. <strong>Only the aircraft layer is pinned to Windows</strong>
       &mdash; it needs the DCS install. Body layer and world model sit on the Mac by decision, not by
       need, and they move together or not at all: that in-process import is the one this project
-      allows, so a service split between them has been rejected rather than merely postponed. The
-      dashed box inside Windows is the planned line-of-sight answer &mdash; drawn absent on purpose,
-      because today the world model still approximates it from a 1000&nbsp;m elevation grid.</p>
+      allows, so a service split between them has been rejected rather than merely postponed. <strong>The
+      line-of-sight box inside Windows is no longer dashed.</strong> It was drawn as absent for three
+      cycles; as of 2026-10-09 DCS answers sightlines itself, for units and statics alike, and the
+      world model's own primitive has left the live path entirely &mdash; so the in-process seam to it
+      now carries terrain semantics only. That is the one architectural change this cycle, and it
+      moved a seam rather than adding a box.</p>
   </section>
 
   <footer>
     Generated from <code>ROADMAP.md</code> across six subprojects plus <code>todo/todo.md</code>,
     <code>todo/backlog.md</code> and each subproject's own <code>BACKLOG.md</code>. This page is a
     view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
-    files is a bug in this page, not in them. Last cycle's exception is gone: everything the counts
-    cover now lives on <code>main</code>. One thing the roadmap itself is briefly behind on, noted
-    rather than corrected here: <code>body-layer/ROADMAP.md</code> still describes the two newest
-    fixes as &ldquo;not yet merged&rdquo; — they merged the same day as their DoD, in
-    <code>3fe93fd</code> and <code>2ae34cc</code>.
+    files is a bug in this page, not in them. Everything the counts cover lives on <code>main</code>, including
+    <code>BL-11</code>'s closure (merge <code>b961977</code>). The open count rose this cycle rather
+    than falling, and that is not drift: a single day's work filed seven new backlog items, which is
+    what closing a long chain tends to produce.
   </footer>
 
 </div>
@@ -1351,7 +1353,7 @@ const DETAIL = {
       { h: "A correction that reaches backwards, and is worth knowing", p: "Every terrain render judged by eye before this branch &mdash; including the ones that produced the \"choose geomorphons\" decision and the 2026-10-02 acceptance &mdash; was of raw or Chaikin-only geometry, <em>not what the store actually held</em>. That does not reopen the mechanism choice, which was made on a zoomed-in window where the gap is proportionally small. But any impression of density or clutter taken from those earlier pictures should not be trusted for what ships." },
       { h: "What is genuinely left, and it is not detection", p: "Stages 3&ndash;5 &mdash; adjacency, bearing, and the actual spoken phrase &mdash; are unbuilt, and still gated on the same reopening condition as before: a consumer that wants landform references. <strong>Nothing in the cockpit changes from any of this yet.</strong> And the density question survived the rewrite unchanged: 234,799 lines is fine as geometry and far too many to speak, so \"which of these is worth mentioning\" is still open. One known gap: a <em>region-scoped</em> build does not clip terrain output to its own bbox, so a <code>latakia-20km</code> rebuild stores a whole SRTM tile's lines." }
     ],
-    items: [["done","Geomorphons classify, thin, trace, cache"],["done","Theatre build: extraction confirmed at 131 tiles"],["done","Relief gate (50 m) + DEM-scale decimation"],["done","Acceptance cleared on the 2026-10-04 rebuild"],["done","WM-B1 Latin place names, same build"],["open","Stages 3-5: adjacency, bearing, the callout"],["open","Density: which lines are worth speaking"],["open","Region-scoped builds do not clip to bbox"],["hold","Retire the elevation grid"]],
+    items: [["done","Geomorphons classify, thin, trace, cache"],["done","Theatre build: extraction confirmed at 131 tiles"],["done","Relief gate (50 m) + DEM-scale decimation"],["done","Acceptance cleared on the 2026-10-04 rebuild"],["done","WM-B1 Latin place names, same build"],["open","Stages 3-5: adjacency, bearing, the callout"],["open","Density: which lines are worth speaking"],["open","Region-scoped builds do not clip to bbox"],["open","Retire the elevation grid - now unblocked"]],
     src: "world-model/ROADMAP.md (WM-B6, Live acceptance debt), plans/landform-relief-gate/implementation.md, docs/acceptance/2026-10-04-landform-relief-gate-rebuild.md"
   },
 
@@ -1431,7 +1433,7 @@ const DETAIL = {
       { h: "The landform line: three detectors, and the third one holds", p: "M6's curvature classifier gave checkerboard noise; the marker-controlled watershed passed every check set for it and was then judged wrong by eye; geomorphons was chosen from rendered comparisons and is the one that shipped. Two defects the first theatre build exposed &mdash; no relief gate, and stored geometry 16x denser than a 90 m DEM justifies &mdash; were fixed, and your 2026-10-04 rebuild cleared all three acceptance blocks. <strong>The stored <code>ridge</code>/<code>valley</code> rows are now a layer later work can build on</strong>, which is the opposite of what this entry said four days ago. Nothing consumes them yet." },
       { h: "Latin-script place names, cleared on the same build", p: "<code>WM-B1</code>: named places stored OSM's raw <code>name</code>, which in Syria is frequently Arabic script &mdash; and DCS cannot render non-Latin-1 text, so those names reached the cockpit overlay as blanks. Body-layer was already dropping them at render time, which made the data usable while losing real information. Ingest now prefers <code>name:en</code>, then <code>int_name</code>, then <code>name</code>, keeping only what actually encodes as Latin-1, and records which tag won. Name-source counts landed exactly as predicted on the real build &mdash; ~12,926 via <code>name:en</code>, ~864 via <code>int_name</code>, 13,073 of 49,226 places affected. Riding one rebuild for both this and the landform pass is why the expensive geomorphons work was unparked when it was." },
       { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and it is add-entries-and-verify rather than a rewrite — projections and regions are per-theatre registries, not code forks. Per theatre you need verified projection parameters, a region bbox, and a hand-derived raster chart registration. Kola is the exception that needs thought: SRTM has no coverage above 60 degrees north, so its elevation source has to change." },
-      { h: "The elevation grid's future is now in question, and that is new", p: "Line of sight is moving to DCS, which was the grid's strongest claimed consumer; contact enrichment can use a unit's own DCS-reported altitude, which is exact; and the Mission Interpreter turns out to receive elevation as unread payload rather than reading it. Measured, so the size argument is not guessed at: the grid is 49 MB of a 608 MB store &mdash; about 8% &mdash; while OSM features are the bulk. <strong>The reason to do that work is quality, not disk.</strong>" },
+      { h: "The elevation grid's future is now in question, and that is new", p: "Line of sight <strong>has moved</strong> to DCS as of 2026-10-09, which was the grid's strongest claimed consumer and is now gone; contact enrichment can use a unit's own DCS-reported altitude, which is exact; and the Mission Interpreter turns out to receive elevation as unread payload rather than reading it. Measured, so the size argument is not guessed at: the grid is 49 MB of a 608 MB store &mdash; about 8% &mdash; while OSM features are the bulk. <strong>The reason to do that work is quality, not disk.</strong>" },
       { h: "Unmeasured", p: "Full-theatre OSM parse time and peak memory were never measured — the validating build hit a warm cache and skipped the parse. Stage 5 of that pipeline also has pathological single-chunk stalls. Both are backlog, neither is a correctness gate." }
     ],
     items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive + 12 m tolerance"],["done","HTTP API server"],["done","WM-B6 geomorphons landforms, accepted at theatre scale"],["done","WM-B1 Latin-script place names"],["open","Callout stages 3-5 (adjacency, bearing, phrase)"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["open","Region-scoped builds do not clip terrain to bbox"],["hold","WM-B4/B5 retired into WM-B6"],["hold","Power lines from DCS data"]],
@@ -1448,7 +1450,7 @@ const DETAIL = {
       { h: "Open: split the export throttle", p: "<code>EXPORT_INTERVAL_S = 0.2</code> is one shared 5 Hz throttle gating all three feeds together. Ground units do not need 5 Hz; self-data may want to stay fast. The fix is two interval constants. Not urgent, because there is no measured cost to react to yet — see below." },
       { h: "Open: measure the real FPS cost", p: "No quantified per-call cost for <code>LoGetWorldObjects</code> exists at realistic unit counts of 50-200 — only forum folklore. The test is to fly with world-objects export on and off at 5, 2 and 1 Hz and diff frame times. Worth checking at the same time whether being fired at is served by this poll at all; nothing currently reads it for threat detection, and urgent callouts may need their own signal." },
       { h: "A found gap in our own documentation", p: "The clickabledata.lua dump that documents Mi-24P controls missed 13 of 749 elements — precisely the ones with more than one action, including both push-to-talk triggers. Listed by hand in a warning box at the top of the reference for now; the generator is the real fix." },
-      { h: "The bridge stopped being a worry and became a foundation", p: "<code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13, and its cost is now measured rather than feared: <strong>568 units at a mean of 1.99 ms, p99 8 ms, about 2.6 &micro;s an item</strong>. That single figure is what makes batched work on the DCS side affordable &mdash; and it is why line of sight is now proposed to move here, one sweep per second over every unit in the bubble, instead of body-layer asking per candidate across the LAN." }
+      { h: "The bridge stopped being a worry and became a foundation", p: "<code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13, and its cost is now measured rather than feared: <strong>568 units at a mean of 1.99 ms, p99 8 ms, about 2.6 &micro;s an item</strong>. That single figure is what makes batched work on the DCS side affordable &mdash; and it is why line of sight moved here: one bridge call per second over every unit <em>and static</em> in the bubble, instead of body-layer asking per candidate across the LAN. Shipped and flown 2026-10-08; gate 4 now fails closed on the result." }
     ],
     items: [["done","Core telemetry pipeline"],["done","/world_objects/latest"],["done","/petrovich_indication/latest"],["done","Text overlay write channel"],["done","F10 command inbound channel"],["done","POST /audio/play"],["done","/unit_velocity/latest - ACCEPTED 2026-09-23"],["done","Push-to-talk channel - ACCEPTED 2026-09-23"],["open","Split the export throttle"],["open","Measure LoGetWorldObjects FPS cost"],["open","Regenerate command-surface reference with a raw-table parser"]],
     src: "aircraft-layer/ROADMAP.md"
@@ -1589,14 +1591,14 @@ const DETAIL = {
 
   crewsortie: {
     kicker: "Waiting on you", title: "Eight cards on main, none flown", chip: ["block", "Sortie"],
-    facts: [["Branch", "main -- everything here is merged"], ["Oldest card", "2026-09-25, crew behaviour"], ["Newest", "2026-10-05, the two quieting fixes"], ["Fly with", "--detection-trace"]],
+    facts: [["Branch", "main -- everything here is merged"], ["Oldest card", "2026-09-25, crew behaviour"], ["Newest", "2026-10-08, BL-11 log visibility"], ["Fly with", "--detection-trace"]],
     sections: [
       { h: "What is waiting, and why it keeps growing", p: "Group reporting and the 12 m line-of-sight tolerance, the confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, the cohesion redesign, the <code>silence</code> command, and the two fixes that stop the same units being announced twice. All merged, none heard. Most were merged ahead of their flight at your direction &mdash; <em>\"so many things at this stage are intertwined that it's better to test to current HEAD\"</em> &mdash; which is the right call each time and is also exactly why eight cards now sit behind one flight." },
       { h: "The newest two are the reason to fly now", p: "Merge-echo suppression and the group-disclosure fix both <em>reduce</em> what you hear, and both carry the same accepted cost: a genuine split right after a merge is indistinguishable from an echo at the speech layer and also goes quiet. Every other item on this list fails loudly if it is wrong. These two fail silently, which makes them the hardest thing here to catch and the thing a flight is most needed for. The 17-of-34 suppression figure is a reconstruction from pipeline outputs, not a replay." },
       { h: "The single calibration answer worth most", p: "Whether the group boundary draws groups where you perceive them. It is 20 unit widths &mdash; about 140 m between neighbouring vehicles &mdash; and it is your own <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Two audible failure directions: too tight and a convoy fragments; too loose and separate clusters merge into a group you do not perceive. The 500 m installation cap and the air-defence class list are single-source-of-evidence guesses in the same position." },
       { h: "Fly with the detection trace on", p: "The belief-truth log records what Petrovich believes; it <strong>structurally cannot record a candidate he rejected</strong>. That is precisely why the missed-AAA defect needed an offline reproduction to find at all &mdash; the evidence of the miss was the absence of a row. The trace records every visibility call, including the rejections, which is doubly worth having on a flight whose two newest features work by suppression." },
       { h: "Three things no flight here can judge", p: "<code>follow &lt;descriptor&gt;</code> still cannot pick the right contact &mdash; the validator's rule is right and currently unsatisfiable, so he will correctly ask rather than pick, and that is not a defect to report. The 12 m tolerance will also reveal units genuinely masked by a ridge by less than that: accepted knowingly, watch for it rather than test it. And sector fairness is explicitly not in any of this &mdash; \"all ten units to my left get identified\" is still expected to fail and must not be read as a regression." },
-      { h: "The one card deliberately not in this set", p: "The elevation-cost probe. It may hitch the frame by design, which would contaminate any judgement about whether callouts feel right &mdash; and the reverse holds too." }
+      { h: "The card that used to sit outside this set has flown", p: "The elevation-cost probe was flown alone on 2026-10-05 and answered both its questions &mdash; <code>land.getHeight</code> works through the bridge, and it <em>does</em> hitch the frame (<em>&ldquo;a small but annoying stutter every few seconds&rdquo;</em>). Worth carrying forward as a habit rather than a card: a second forgotten probe Hook produced another stutter on 2026-10-08, after three hypotheses had been refuted against log evidence while the real cause sat in the Hooks directory. Check that directory holds only the four shipped scripts before any sortie flown to measure anything." }
     ],
     items: [["open","Merge-echo suppression + group disclosure"],["open","silence - one word, absolute quiet"],["open","Cohesion redesign - six delta branches by ear"],["open","Group reporting - one line per group"],["open","12 m LOS tolerance - the missed AAA"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
     src: "docs/acceptance/2026-10-05-contact-report-flood-sortie.md, 2026-10-04-silence-command.md, 2026-10-01-group-cohesion-sortie.md, 2026-09-29-group-reporting-sortie.md, 2026-09-29-los-tolerance-sortie.md, 2026-09-28-confirm-band-sortie.md, 2026-09-26-sortie-fixes-sortie.md"
