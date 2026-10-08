@@ -142,6 +142,10 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/merge-skill-review.sh",
             "timeout": 10,
             "statusMessage": "Checking for skill candidates after merge..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/flight-feedback-clear.sh || true"
           }
         ]
       }

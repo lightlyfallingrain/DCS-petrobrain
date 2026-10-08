@@ -17,62 +17,68 @@ Created 2026-10-06, when the user handed over an autonomous overnight run and sa
 
 ## Open
 
-### Q1 — `flight-feedback-clear.sh` cannot see a capture written through Bash (config change, needs your ok)
+### ~~Q1 — `flight-feedback-clear.sh` cannot see a capture written through Bash~~ APPROVED AND DONE
 
-**What happened:** the feedback-capture hook fired correctly when you raised the two review items,
-and then stayed up after the capture was written — so it warned on every later Architect dispatch
-even though the feedback was captured *and* explored. `flight-feedback-clear.sh` is `PostToolUse` on
-`Write|Edit` and matches `.tool_input.file_path`; the capture went into
-`docs/acceptance/2026-10-05-sortie-feedback.md` via a Bash heredoc, which has no `file_path` field,
-so the marker never cleared. I cleared it by hand.
+**User, 2026-10-08: "approved."** Implemented the same day. The hook is now wired to the `Bash`
+PostToolUse matcher as well as `Write|Edit`, and the Bash branch asks
+`git status --porcelain -- docs/acceptance/` whether a feedback/sortie file actually changed instead
+of looking for a `file_path` field that Bash payloads do not have. **Observe the effect, not the
+instrument** — the same reasoning that made the gate structural.
 
-**Why it will keep happening:** this session runs with an auto-mode instruction to prefer Bash for
-file edits, so the common path for writing a file is exactly the one the hook cannot observe.
+It had misfired three times on 2026-10-08 before this landed.
 
-**Proposed fix:** add `Bash` to the clear hook's matcher and have it clear the marker when
-`git status --porcelain docs/acceptance/` shows a change, rather than reading `file_path`. That makes
-the hook observe the *effect* instead of the *instrument*, which is the same reasoning that made the
-gate structural in the first place.
+**One thing changed during implementation, and it is the part worth remembering.** The first version
+also checked `git diff HEAD~1 HEAD` so a capture written *and committed* inside one Bash call would
+clear. That is wrong: it stays true for every later Bash invocation until another commit lands, so a
+single acceptance-file commit would silently clear the gate for every unrelated command after it —
+the one failure direction this hook must not have. Dropped it; working-tree only. A combined
+write-and-commit that slips through costs an advisory warning, which is the safe way round. Five
+regression cases run (no-marker no-op, bash+dirty clears, bash+clean keeps *even after an acceptance
+commit*, write-to-acceptance clears, write-elsewhere keeps).
 
-**Needs you because** it edits `.claude/settings.json` hook wiring, and I do not change your hook
-configuration on my own judgement. Nothing blocks meanwhile — the gate is advisory and never blocks
-a dispatch.
+### ~~Q2 — `BL-B36`: the speech log is a verbatim transcript~~ ANSWERED — leave it as it is
 
-### Q2 — `BL-B36`: the speech log is a verbatim transcript of everything the microphone heard
+**User, 2026-10-08, and the premise of the finding was wrong:**
 
-From the 2026-10-05 security audit. The sortie log contains `"Peace."`, `"All right."`,
-`"Can I sell it?"` — you talking, not commanding. Harmless on your own machine; this repo is
-**intended to go public**, and a committed or shared log is a voice transcript of your living room.
+> *"Audio only captures when I key the PTT. And the microphone is close to my mouth, does not pick
+> ambient that well. Ignore, keep as it is now."*
 
-**Three options, and it is your call which:** hash or omit non-command utterances; keep the full
-transcript but make the log opt-in with that stated in `RUN.md`; or leave it and rely on never
-sharing the file. I would take the second — the full transcript is genuinely useful for diagnosing
-`say_again` cases, which is exactly what it earned its place for.
+So the log is not a transcript of the room — it is a transcript of **deliberate keyed transmissions**
+into a close-talking mic. The security audit read `"Peace."` / `"All right."` / `"Can I sell it?"` as
+ambient capture; they are the user talking *on the intercom*, which is exactly what the log exists to
+record. No change, no opt-in, no hashing.
 
-**Does not block** anything in flight. It blocks a public release.
+`BL-B36` is closed as **declined with reason**, not deferred: the privacy exposure it described rests
+on ambient capture that the hardware does not do.
 
-### Q3 — `report` band slot: filter, or sort hint? (`plans/crew-query-path/plan.md`, Q1)
+### ~~Q3 — `report` band slot: filter or sort hint?~~ ANSWERED — **filter**
 
-You asked for `report|describe [what] [where] [how far]` with bands near <2 km / medium 2–5 km /
-far 5 km+. The plan needs to know whether the band **filters** or merely **orders** the answer.
+**User, 2026-10-08: "filter."** Matches the literal reading and the Architect's recommendation. A
+band narrows the answer rather than merely ordering it, so `report two o'clock near` does not mention
+a tank at 2.1 km. Shorter answers are the point; the user can ask again with a wider band.
 
-Literal reading is a filter, and it gives a shorter answer — but then a tank at 2.1 km goes
-unmentioned to someone who asked about two o'clock. Architect recommends filter. **Not blocking:**
-Stage 1 ships the grammar without the band's semantics being settled.
+Recorded in `plans/crew-query-path/plan.md` Q1.
 
-### Q4 — Should air defence always survive the summary's aggregation? (`plans/crew-query-path/plan.md`, Q2)
+### ~~Q4 — Should air defence always survive the summary's aggregation?~~ ANSWERED — **yes**
 
-A summary can hide the one thing that mattered — one SAM among seven infantry. Architect
-recommends air defence is **always named** even when everything else aggregates, with the length
-budget absorbing it by dropping the deferral clause. This interacts with decision 6 (air-defence
-classes need positive confirmation to inherit an identity), so the two should be answered together
-if you disagree with either.
+**User, 2026-10-08: "air defense survives."** Air defence is named individually even when everything
+else aggregates, with the length budget absorbing it by dropping the deferral clause. Consistent with
+decision 6 (air-defence classes need positive confirmation to inherit an identity) and with the
+project's own test — a summary that hides the one SAM among seven infantry has failed the pilot it
+exists to serve.
+
+Recorded in `plans/crew-query-path/plan.md` Q2.
 
 ### Q5 — Is ~25 words / ~10 s the right answer length?
 
-Derived from **your own chosen mock B** (24 words ≈ 10.2 s at `speech_duration_s`), not guessed. But
-you read that mock on the ground. It may be too long in a hover under fire, and the honest answer is
-that only flying it will say.
+Derived from **your own chosen moc### Q5 — Is ~25 words / ~10 s the right answer length? — **DEFERRED by the user, stays open**
+
+**User, 2026-10-08: "cannot tell yet, we'll determine later."**
+
+Left open deliberately rather than closed with a default: the current ~25-word budget came from the
+user's own chosen mock B (24 words ≈ 10.2 s at `speech_duration_s`), so it is not a guess, and it
+ships as-is. The question is whether it is still right in a hover under fire, which only flying it
+answers. **Nothing blocks.** Revisit when a sortie produces an opinion.
 
 ### ~~Q6 — Do you recall the confirm prompt saying "report east, confirm?"~~ ANSWERED BY THE LOG
 
@@ -152,16 +158,33 @@ become unspoken rather than spoken correctly. The contacts are still believed, s
 view, still answerable by `report`. Whether some should reach you another way — an "I've lost sight
 of it" marker — is a product question nobody has answered.
 
-### Q7 — Should the detection trace keep one `PLAYER_BUBBLE` row per out-of-bubble candidate per poll?
+### ~~Q7 — Should the detection trace keep one `PLAYER_BUBBLE` row per out-of-bubble candidate?~~ ANSWERED — **drop them**, plus one more thing
 
-`BL-11` Stage 5 rolled the logs per run and halved the bytes, so the trace is now ~25 MB/min rather
-than ~50 — but **60–80 % of what remains is still `PLAYER_BUBBLE` rows**, one per candidate that was
-never evaluated, each carrying one bit of information ("further than 10 km") that any other row's
-`true_range_m` already implies.
+**User, 2026-10-08:**
 
-Dropping them behind a flag is a ten-line change. **The reason I did not do it unasked**: you have
-been reading the debug ASCII view off these rows, and what gets recorded is a product decision, not
-a performance fix. Perf review recommended dropping them; I overrode that on those grounds.
+> *"drop them, if it does not disable the ASCII graph view. The detection lines below the graph are
+> not necessary."*
+
+**The condition is satisfiable, and the distinction is load-bearing** — checked before recording this,
+because the first reading was wrong:
+
+- Markers beyond the view radius are **clamped to the rim, not dropped** (`eyesight_view.py:448`,
+  `clipped_rng = min(rng, radius_m)`, and the module docstring says so explicitly: *"a contact beyond
+  `radius_m` is never silently dropped"*). So out-of-bubble objects **do** appear in the graph.
+- But the live `--eyesight-view` builds its ground-truth half from the **in-memory
+  `DetectionTraceCollector` snapshot**, not from the JSONL file (`logger.py:_eyesight_frame`'s own
+  docstring).
+
+**So: drop the rows at the JSONL writer, never at the collector.** A writer-level drop costs the
+graph nothing. A collector-level drop would strip the rim markers — which is the ASCII view the user
+is asking to preserve. Two changes that look alike and are not.
+
+**Second ask, independent:** the lines printed *below* the graph are `render_frame`'s `beyond` list —
+one line per believed/ground-truth marker past `radius_m`. Those go.
+
+Both filed as `BL-B43` (writer-level row drop) and `BL-B44` (remove the `beyond` footer). Not done in
+this turn: an Implementer is live on `body-layer` for `BL-11` Stage 4 and `logger.py` is in its blast
+radius, so these wait for that branch to land rather than racing it.
 
 ### `CONTACT_ENGAGEMENT_CHANGED` is excluded from the observability gate
 
@@ -193,44 +216,51 @@ Still an untuned starting value by its own docstring, and because it equals `CAL
 anything masked for over ten seconds is **dropped rather than deferred**. Not a decision needed now —
 a sortie can measure it, and nobody has changed the number.
 
-### Q8 — Should *"Safe from <threat>"* also survive the observability gate, or only *"Danger"*?
+### ~~Q8 — Should *"Safe from <threat>"* survive the observability gate?~~ ANSWERED — **yes, but it needs mission memory first**
 
-The security pass found my exemption was wider than the reason I gave for it. I exempted
-`CONTACT_ENGAGEMENT_CHANGED` on the bar *"silence costs a threat cue the pilot needs in order to
-evade"* — but the gate tests the event **kind**, so **both** transitions pass, and the leaving one
-renders as *"Safe from ZU-23-3, four o'clock, 2.0 km."* That is a comfort, not a cue, and it means
-one case of the original 17-line defect survives: a watched AAA identified while visible, `"Danger"`
-spoken, you egress, it goes astern, grace lapses, range opens past the hysteresis — and he announces
-a classification and a position for something the mask says he cannot see.
+**User, 2026-10-08:**
 
-**I have narrowed it to the entering transition only.** Reasons: it is what my written bar actually
-licenses, and your standing complaint is report *volume*, so the conservative default is to say less
-about what he cannot see.
+> *"mission memory will let Petrovich remember where that threat was -> safe from is realistic. But
+> only from mission memory, that is needed first."*
 
-**The counter-argument is real, which is why this is here.** The reviewer's view — which I do not
-think is wrong — is that *a pilot who heard "Danger" is owed the "Safe from" that closes it*. An
-unclosed warning leaves you believing you are still in a threat envelope you have actually left.
-That is a different argument from the one in my docstring, not a weaker one.
+This settles the argument rather than picking a side of it. The reviewer's case (*a pilot who heard
+"Danger" is owed the "Safe from" that closes it*) is **accepted in principle** — an unclosed warning
+leaves the pilot believing they are still inside an envelope they have left. The orchestrator's
+narrowing was right **for now**, and for a reason neither side had stated: a close-out call about a
+threat he can no longer see is only honest if he *remembers where it was*, and that memory does not
+exist yet.
 
-So: do you want the close-out call back, for a threat you can no longer see? If yes it is a one-line
-reversal, and the honest version of the bar becomes "a threat-envelope *transition* either way",
-which I would then write down as the licence rather than leaving the code and the comment
-disagreeing.
+**So the current behaviour stands — entering transition only — and this becomes a dependency rather
+than a disagreement.** When the memory layer (`BL-8`) can supply a remembered threat position, the
+close-out call becomes licensed by that memory rather than by the live percept, and the bar becomes
+"a threat-envelope transition either way, where the leaving call is sourced from mission memory."
 
-### Q9 — Three research asks have been open across multiple sessions and never closed
+Filed as `BL-B45`, explicitly gated on `BL-8`. The one-line reversal is **not** taken now: doing it
+without the memory layer would reintroduce exactly the no-omniscience violation the gate was built to
+close.
 
-Surfaced by the investigator's own retro, 2026-10-06: it correctly recorded these as unresolved
-rather than guessing, but nothing tracked them, so each was re-attempted and re-abandoned instead of
-being either answered or dropped. **Each needs one thing from you, or an explicit "drop it".**
+### ~~Q9 — Three research asks open across multiple sessions~~ ANSWERED — all three closed
 
-1. **`forum.dcs.world/topic/194777-exportlua-destroyed-object/` has 403'd across three sessions.**
-   Its title points straight at the destroy/respawn object-id lifecycle — which is the open risk on
-   the `Unit:getID()` branch of the unit-id probe you are about to fly. A paste of the thread would
-   likely settle it without a second probe. (This is the standing "forum 403 → ask the user to
-   paste" case, now with a concrete cost attached.)
-2. **Mobile TELAR spacing was not found in any source.** Wanted for SAM-site geometry; the
-   literature searched had nothing usable.
-3. **A RUSI PDF was unparseable by the fetch tool.** Same topic.
+**User, 2026-10-08: "Drop points 2 and 3. I'm pasting the forum content below."**
 
-If 2 and 3 are not worth your time, say so and they get recorded as dropped with the reason — which
-is strictly better than a third session rediscovering that they are hard.
+1. **The `Export.lua` destroyed-object thread — read, and it answers nothing.** Full writeup:
+   `aircraft-layer/research/2026-10-08-export-lua-destroyed-object-forum-thread.md`. Three posts over
+   sixteen months, no solution; the asker gets stuck on `coalition` being nil in `Export.lua` and a
+   `world.addEventHandler` that does not fire there, and nobody ever replies. **The destroy/respawn
+   object-id lifecycle question is untouched by it.** Closed as *read, no finding* — which is worth
+   the paste anyway, because it stops a fourth session reopening the URL.
+
+   Two incidental confirmations kept: `Export.lua` state genuinely has no `coalition`/`world` (an
+   independent 2018/2020 attestation of the state separation this project already bridges with
+   `net.dostring_in("scripting", ...)`), and `unit:getLife()` plus `S_EVENT_DEAD`/`S_EVENT_CRASH` do
+   exist in the *scripting* state, which is where a future damage feed would have to call them.
+   MIST was mentioned and is declined — it is a dependency on the mission author's setup, and this
+   project flies others' missions.
+
+   And the risk has largely dissolved from another direction: the id-lifecycle question was a risk on
+   the `Unit:getID()` branch, which the 2026-10-06 probe ruled out anyway (`getObjectID` does not
+   exist on `StaticObject`, so the join key stays `getName()`).
+
+2. **Mobile TELAR spacing — DROPPED** by user direction. Recorded as not worth the time rather than
+   unresolved, so it is not re-attempted.
+3. **The unparseable RUSI PDF — DROPPED**, same direction, same reason.

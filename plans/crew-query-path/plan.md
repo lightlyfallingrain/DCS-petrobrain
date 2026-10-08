@@ -344,12 +344,21 @@ excluded). The filter reading is the literal one and makes the answer shorter, b
 at 2.1 km goes unmentioned to a pilot who asked about two o'clock. My recommendation: **filter**, on
 the grounds that he asked a narrow question and can ask a wider one — but it is his call.
 
+> **ANSWERED 2026-10-08 — "filter."** (User.) The band narrows the answer, it does not merely order
+> it. The 2.1 km tank goes unmentioned to a pilot who asked about *near*; he can ask a wider band.
+> Shorter answers were the point of the whole feature.
+
 **Q2 — Should an air-defence contact always survive the summary's aggregation?** Eight contacts,
 seven infantry and one SAM, currently summarise as "mostly infantry". Adding "and a short range SAM"
 costs ~5 of the 25-word budget. D6 already treats air defence as the exception elsewhere (threat
 envelopes key on believed classification), and `_OP_CLASS_DISPLAY`'s own comment argues the SAM tier
 is the most decision-relevant thing in a call. Recommendation: **yes, always named**, and the budget
 absorbs it by dropping the deferral clause first.
+
+> **ANSWERED 2026-10-08 — "air defense survives."** (User.) Air defence is named individually even
+> when everything else aggregates; the length budget absorbs it by dropping the deferral clause.
+> Consistent with D6, and with the project's own test: a summary that hides the one SAM among seven
+> infantry has failed the pilot it exists to serve.
 
 **Q3 — Is `REPORT_SUMMARY_MAX_WORDS = 25` (~10 s) right?** It is taken from the length of mock B,
 the answer you chose, so it is at least defensible — but mock B was read on the ground. If 10 s of
