@@ -19,9 +19,17 @@ misreading that would be expensive if missed:
 
 Fixture/monkeypatch posture mirrors `test_naked_eye_source.py`/
 `test_emission_pipeline.py`: `association.wgs84_to_dcs` is identity-mapped
-so `lat_deg`/`lon_deg` pass straight through as DCS-native x/z, and
-`visibility.line_of_sight_clear` always returns `True` (no real world-model
-`.sqlite` needed).
+so `lat_deg`/`lon_deg` pass straight through as DCS-native x/z. Gate 4 of
+`visibility.check_visibility` is fail-closed as of `plans/
+bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4) -- world-model's offline
+`line_of_sight_clear` primitive is never consulted from the live path any
+more, so `FakeAircraftClient.get_line_of_sight_latest` below synthesizes a
+real live-LOS join (every object gets a `unit_name`, resolving "clear" by
+default) instead of the old blanket monkeypatch, which is what used to
+need no real world-model `.sqlite` -- same fix as `test_naked_eye_source.
+py`'s `FakeAircraftClient`, duplicated here rather than shared (this file
+has its own independent copy of the fake-client pattern; see that file's
+docstring for why that duplication is left as-is).
 """
 
 from __future__ import annotations
@@ -32,7 +40,7 @@ from typing import Any, Final
 import pytest
 
 from belief.contacts import ContactStore
-from perception import association, visibility
+from perception import association
 from perception.association import PLAYER_BUBBLE_RADIUS_M
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.hybrid_source import HybridPerceptionSource
@@ -51,6 +59,10 @@ def _world_object(object_id: int, *, range_m: float) -> dict[str, Any]:
     # Dead ahead (lon_deg=0) so the default scan plan's dead-ahead gaze
     # cone never interferes with this file's own concern (the bubble, not
     # gaze) -- same placement choice test_emission_pipeline.py makes.
+    # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4): the
+    # live-LOS join key -- every object in this file gets one so
+    # `FakeAircraftClient.get_line_of_sight_latest` below can mark it
+    # clear and the fail-closed gate admits it, same as before this plan.
     return {
         "object_id": object_id,
         "object_type": "Infantry",
@@ -60,6 +72,7 @@ def _world_object(object_id: int, *, range_m: float) -> dict[str, Any]:
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
         "is_ownship": False,
+        "unit_name": f"unit_{object_id}",
     }
 
 
@@ -68,13 +81,34 @@ class FakeAircraftClient:
         self._world_objects = world_objects
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
-        return self._world_objects
+        if self._world_objects is None:
+            return None
+        if "dcs_model_time_s" in self._world_objects:
+            return self._world_objects
+        return {**self._world_objects, "dcs_model_time_s": 0.0}
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        # `plans/bl11-stage4-fail-closed/plan.md` step 4: every object
+        # present in `_world_objects` resolves "clear" by default -- see
+        # `test_naked_eye_source.py`'s `FakeAircraftClient` for the full
+        # reasoning (duplicated here, not shared; module docstring).
+        if self._world_objects is None:
+            return None
+        objects = self._world_objects.get("objects", [])
+        verdicts: dict[str, Any] = {}
+        for obj in objects:
+            name = obj.get("unit_name")
+            if isinstance(name, str):
+                verdicts[name] = {"building_clear": True, "terrain_clear": True}
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "hour_used": None,
+            "fov_half_deg_used": None,
+            "verdicts": verdicts,
+        }
 
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return {
@@ -87,11 +121,6 @@ def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         association, "wgs84_to_dcs", lambda theatre, lat, lon: (lat, lon)
     )
-
-
-@pytest.fixture(autouse=True)
-def clear_line_of_sight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: True)
 
 
 # --- 1. Beyond the bubble is never handed to check_visibility -------------

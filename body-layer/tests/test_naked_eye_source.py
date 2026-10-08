@@ -5,13 +5,16 @@ Uses a fake `AircraftLayerClient`-shaped object (duck-typed, matching
 `get_world_objects_latest`) -- no network I/O, mirroring
 `test_hybrid_source.py`'s fake-client pattern. `association.wgs84_to_dcs`
 is monkeypatched to an identity mapping (lat/lon pass straight through as
-x/z) so candidate positions are plain numbers, and
-`visibility.line_of_sight_clear` is monkeypatched to always return `True`
-(no real world-model `.sqlite` needed) -- both mirroring
-`test_hybrid_source.py`/`test_visibility.py`'s own fixture posture. The real
-`visibility.check_visibility` still runs, so these tests exercise the whole
-poll() pipeline (visibility filtering + quantisation + debounce + cap) with
-a genuine, un-mocked detectability decision underneath.
+x/z) so candidate positions are plain numbers. Gate 4 of `visibility.
+check_visibility` is fail-closed as of `plans/bl11-stage4-fail-closed/
+plan.md` (`BL-11` Stage 4) -- world-model's offline `line_of_sight_clear`
+primitive is never consulted from the live path any more, so `FakeAircraft
+Client.get_line_of_sight_latest` below synthesizes a real live-LOS join
+(every object gets a `unit_name`; every present one resolves "clear" by
+default) instead, which is what used to need no real world-model `.sqlite`.
+The real `visibility.check_visibility` still runs, so these tests exercise
+the whole poll() pipeline (visibility filtering + quantisation + debounce +
+cap) with a genuine, un-mocked detectability decision underneath.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Any, Final
 
 import pytest
 
-from perception import association, object_model, visibility
+from perception import association, object_model
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
@@ -91,6 +94,15 @@ def _ownship() -> OwnshipState:
     return OwnshipState(t_sim=100.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
 
 
+#: Sentinel distinguishing "not passed" from "explicitly passed `None`" for
+#: `_world_object`'s `unit_name` keyword below -- `None` is itself a
+#: meaningful value (omit the key entirely, simulating an object the live
+#: LOS feed has no verdict for; `plans/bl11-stage4-fail-closed/plan.md`
+#: step 4's "omit one to simulate no verdict for this object"), so it
+#: cannot also mean "use the auto-derived default."
+_AUTO_UNIT_NAME: Final[object] = object()
+
+
 def _world_object(
     object_id: int,
     object_type: str,
@@ -98,8 +110,18 @@ def _world_object(
     lat_deg: float,
     lon_deg: float,
     is_ownship: bool | None = False,
+    unit_name: str | None | object = _AUTO_UNIT_NAME,
 ) -> dict[str, Any]:
-    return {
+    # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4, `BL-11`
+    # Stage 4): the live-LOS join key (`naked_eye_source._resolve_los_by_
+    # unit_name`). Every object gets one by default (`f"unit_{object_id}"`)
+    # so `FakeAircraftClient.get_line_of_sight_latest` below can mark it
+    # clear and the fail-closed gate admits it, same as before this plan
+    # -- pass `unit_name=None` to omit the key and simulate "no live
+    # verdict for this object," or an explicit string to name it for
+    # `FakeAircraftClient`'s `blocked_unit_names` override.
+    resolved_name = f"unit_{object_id}" if unit_name is _AUTO_UNIT_NAME else unit_name
+    obj: dict[str, Any] = {
         "object_id": object_id,
         "object_type": object_type,
         "coalition": 1.0,
@@ -109,27 +131,79 @@ def _world_object(
         "heading_true_rad": 0.0,
         "is_ownship": is_ownship,
     }
+    if resolved_name is not None:
+        obj["unit_name"] = resolved_name
+    return obj
 
 
 class FakeAircraftClient:
+    """`plans/bl11-stage4-fail-closed/plan.md` step 4 (`BL-11` Stage 4):
+    synthesizes a working live-LOS join by default, rather than always
+    returning no verdict (`get_line_of_sight_latest` used to always return
+    `None`) -- fail-closed rejects a candidate with no live verdict, so a
+    double that never supplies one would silently reject every candidate
+    every test in this file constructs, not just the ones a test means to
+    exercise the LOS gate with.
+
+    `get_world_objects_latest`'s returned dict is given a `dcs_model_time_s`
+    (defaulting to `0.0` when the caller's own `world_objects` literal
+    doesn't set one, which is every call site in this file) so the skew
+    check in `naked_eye_source._resolve_los_by_unit_name` has something to
+    compare against; `get_line_of_sight_latest`'s own verdict snapshot
+    carries the identical value, so skew is always `0.0` -- well inside
+    `LOS_MAX_AGE_S` -- regardless of which `now_sim` a given poll uses.
+
+    `blocked_unit_names` (default empty) is the per-test override hook:
+    any `unit_name` in that set resolves to `terrain_clear=False` (blocked)
+    instead of the default "clear." Combined with `_world_object`'s own
+    `unit_name=None` escape hatch (no live verdict at all for that object),
+    these two optional parameters cover all three live-LOS states a test
+    might need without reviving the old, now-vacuous `clear_line_of_sight`
+    autouse fixture."""
+
     def __init__(
         self,
         world_objects: dict[str, Any] | None,
         unit_velocity: dict[str, Any] | None = None,
+        *,
+        blocked_unit_names: frozenset[str] = frozenset(),
     ) -> None:
         self._world_objects = world_objects
         self._unit_velocity = unit_velocity
+        self._blocked_unit_names = blocked_unit_names
         self.world_objects_calls = 0
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
         self.world_objects_calls += 1
-        return self._world_objects
+        if self._world_objects is None:
+            return None
+        if "dcs_model_time_s" in self._world_objects:
+            return self._world_objects
+        return {**self._world_objects, "dcs_model_time_s": 0.0}
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return self._unit_velocity
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        if self._world_objects is None:
+            return None
+        objects = self._world_objects.get("objects", [])
+        verdicts: dict[str, Any] = {}
+        for obj in objects:
+            name = obj.get("unit_name")
+            if not isinstance(name, str):
+                continue
+            blocked = name in self._blocked_unit_names
+            verdicts[name] = {
+                "building_clear": not blocked,
+                "terrain_clear": not blocked,
+            }
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "hour_used": None,
+            "fov_half_deg_used": None,
+            "verdicts": verdicts,
+        }
 
 
 @pytest.fixture(autouse=True)
@@ -139,15 +213,12 @@ def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.fixture(autouse=True)
-def clear_line_of_sight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: True)
-
-
 def _source(
     world_objects: dict[str, Any] | None,
+    *,
+    blocked_unit_names: frozenset[str] = frozenset(),
 ) -> tuple[NakedEyePerceptionSource, FakeAircraftClient]:
-    client = FakeAircraftClient(world_objects)
+    client = FakeAircraftClient(world_objects, blocked_unit_names=blocked_unit_names)
     source = NakedEyePerceptionSource(
         aircraft_client=client,  # type: ignore[arg-type]
         theatre=_THEATRE,
@@ -199,6 +270,60 @@ def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
 
     assert len(observations) == 1
     assert observations[0].classification_raw == "OP_INFANTRY"
+
+
+# -- LiveLosCoverage (plans/bl11-stage4-fail-closed/plan.md step 4,
+# `BL-11` Stage 4) -----------------------------------------------------------
+
+
+def test_live_los_coverage_counts_only_gate_4_reaching_candidates() -> None:
+    """`live_los_coverage.evaluated` counts candidates that reach gate 4
+    (survived gates 0-3), not every candidate in the poll -- a mix of one
+    in-gaze and one out-of-gaze candidate (same geometry as
+    `test_default_scan_plan_narrows_to_whichever_cone_is_active` above)
+    proves the gaze-rejected one never increments it. Both objects carry
+    a real `unit_name` (default `_world_object` behaviour) resolving
+    "clear," so `no_verdict` stays at 0 -- the companion test below covers
+    the no-verdict case."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),  # ahead
+            _world_object(2, "Infantry", lat_deg=0.0, lon_deg=100.0),  # abeam
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1  # only the ahead candidate was admitted
+    assert source.live_los_coverage.evaluated == 1
+    assert source.live_los_coverage.no_verdict == 0
+
+
+def test_live_los_coverage_no_verdict_excludes_gaze_rejected_candidates() -> None:
+    """The no-verdict count only grows for a candidate that actually
+    reaches gate 4 with `live_los_clear is None` -- the gaze-rejected
+    abeam candidate here has no live verdict either (no `unit_name`), but
+    never reaches gate 4 at all, so it must not inflate the count.
+    `evaluated` and `no_verdict` both land on 1, not 2."""
+    world_objects = {
+        "objects": [
+            # Ahead, but with no unit_name at all (`_world_object`'s
+            # `unit_name=None` escape hatch) -- no live verdict for this
+            # object, reaches gate 4, and is rejected by it (fail-closed).
+            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0, unit_name=None),
+            # Abeam, also no unit_name -- but this one is rejected by the
+            # gaze gate (gate 0) before it ever reaches gate 4.
+            _world_object(2, "Infantry", lat_deg=0.0, lon_deg=100.0, unit_name=None),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert observations == []  # the ahead candidate is now rejected too
+    assert source.live_los_coverage.evaluated == 1
+    assert source.live_los_coverage.no_verdict == 1
 
 
 # -- Gaze filtering (slice 2B; 2C's o'clock scan loop replaces the plain

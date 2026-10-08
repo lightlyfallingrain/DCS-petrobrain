@@ -4,10 +4,15 @@ observation annotation, and `detection_trace_writer.DetectionTraceWriter`'s
 belief join (BL-9, `plans/bl9-debug-visualization/plan.md`).
 
 Fixture conventions mirror `test_visibility.py`/`test_naked_eye_source.py`:
-`WorldObjectCandidate` instances are built directly with DCS-native x/z, and
-`visibility.line_of_sight_clear` is monkeypatched to always return `True`
-so these tests exercise the cockpit-mask/angular-radius gates (and now the
-trace they emit) without a real world-model `.sqlite`.
+`WorldObjectCandidate` instances are built directly with DCS-native x/z.
+Gate 4 of `visibility.check_visibility` is fail-closed as of `plans/
+bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4) -- world-model's offline
+`line_of_sight_clear` primitive is never consulted from the live path any
+more, so `_candidate()`'s own `live_los_clear=True` default and
+`FakeAircraftClient.get_line_of_sight_latest`'s synthesized live-LOS join
+(every `_world_object` gets a `unit_name`, resolving "clear" by default)
+do the job the old blanket monkeypatch used to -- same fix as
+`test_naked_eye_source.py`'s doubles, duplicated here rather than shared.
 """
 
 from __future__ import annotations
@@ -41,11 +46,6 @@ _THEATRE = "Syria"
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-@pytest.fixture(autouse=True)
-def clear_line_of_sight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: True)
-
-
 def _ownship(*, t_sim: float = 100.0, heading_true_deg: float = 0.0) -> OwnshipState:
     return OwnshipState(
         t_sim=t_sim, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=heading_true_deg
@@ -53,8 +53,17 @@ def _ownship(*, t_sim: float = 100.0, heading_true_deg: float = 0.0) -> OwnshipS
 
 
 def _candidate(
-    object_type: str, *, object_id: int = 1, x: float, z: float, alt_m: float = 500.0
+    object_type: str,
+    *,
+    object_id: int = 1,
+    x: float,
+    z: float,
+    alt_m: float = 500.0,
+    live_los_clear: bool | None = True,
 ) -> WorldObjectCandidate:
+    # `live_los_clear` defaults to `True` (`plans/bl11-stage4-fail-closed/
+    # plan.md`, `BL-11` Stage 4 step 3) -- see `test_visibility.py`'s
+    # `_candidate` for the full reasoning.
     return WorldObjectCandidate(
         object_id=object_id,
         object_type=object_type,
@@ -62,6 +71,7 @@ def _candidate(
         z=z,
         alt_m=alt_m,
         is_ownship=False,
+        live_los_clear=live_los_clear,
     )
 
 
@@ -123,10 +133,14 @@ def test_range_or_size_failure_records_range_cap_bound() -> None:
     assert entry.range_threshold_m == pytest.approx(visibility.NAKED_EYE_RANGE_CAP_M)
 
 
-def test_terrain_los_failure_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: False)
+def test_terrain_los_failure_is_recorded() -> None:
+    # Rewritten for fail-closed (`plans/bl11-stage4-fail-closed/plan.md`
+    # step 4, `BL-11` Stage 4 step 3): "blocked" can no longer be
+    # simulated by monkeypatching the now-dead offline primitive -- the
+    # only way to express it is a candidate carrying `live_los_clear=False`
+    # directly.
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=250.0, z=0.0)
+    candidate = _candidate("Infantry", x=250.0, z=0.0, live_los_clear=False)
     trace = DetectionTraceCollector()
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE, trace=trace)
@@ -234,22 +248,47 @@ def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakeAircraftClient:
+    # `plans/bl11-stage4-fail-closed/plan.md` step 4 (`BL-11` Stage 4):
+    # synthesizes a working live-LOS join by default -- see
+    # `test_naked_eye_source.py`'s `FakeAircraftClient` for the full
+    # reasoning (duplicated here rather than shared).
     def __init__(self, world_objects: dict[str, Any] | None) -> None:
         self._world_objects = world_objects
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
-        return self._world_objects
+        if self._world_objects is None:
+            return None
+        if "dcs_model_time_s" in self._world_objects:
+            return self._world_objects
+        return {**self._world_objects, "dcs_model_time_s": 0.0}
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        if self._world_objects is None:
+            return None
+        objects = self._world_objects.get("objects", [])
+        verdicts: dict[str, Any] = {}
+        for obj in objects:
+            name = obj.get("unit_name")
+            if isinstance(name, str):
+                verdicts[name] = {"building_clear": True, "terrain_clear": True}
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "hour_used": None,
+            "fov_half_deg_used": None,
+            "verdicts": verdicts,
+        }
 
 
 def _world_object(
     object_id: int, object_type: str, *, lat_deg: float, lon_deg: float
 ) -> dict[str, Any]:
+    # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4): the
+    # live-LOS join key -- every object here gets one so
+    # `FakeAircraftClient.get_line_of_sight_latest` above can mark it
+    # clear and the fail-closed gate admits it, same as before this plan.
     return {
         "object_id": object_id,
         "object_type": object_type,
@@ -259,6 +298,7 @@ def _world_object(
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
         "is_ownship": False,
+        "unit_name": f"unit_{object_id}",
     }
 
 

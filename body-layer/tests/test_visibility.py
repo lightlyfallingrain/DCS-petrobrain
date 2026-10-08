@@ -4,13 +4,18 @@ Hand-authored fixtures, mirroring `test_association.py`'s pattern --
 `WorldObjectCandidate` instances are built directly with DCS-native x/z, no
 `from_dict`/coordinate-conversion involved.
 
-`visibility.line_of_sight_clear` (imported into `perception.visibility`'s
-own namespace) is monkeypatched to always return `True` by an autouse
-fixture, so these tests exercise the cockpit-mask/angular-radius-tier gates
-in isolation without a real world-model `.sqlite`. `geometry.py`'s own LOS
-sampling-loop logic is already covered by `test_geometry.py`; the dedicated
-LOS test below only confirms `check_visibility` correctly gates on that
-function's result, not the LOS math itself.
+Gate 4 is fail-closed as of `plans/bl11-stage4-fail-closed/plan.md`
+(`BL-11` Stage 4 steps 3-4): it consults only `WorldObjectCandidate.
+live_los_clear` and never calls world-model's offline `line_of_sight_clear`
+primitive at all, so these tests need no real world-model `.sqlite` and no
+autouse monkeypatch to keep it out of the way -- `_candidate()`'s own
+`live_los_clear=True` default is enough to clear gate 4 for every test not
+specifically exercising it. `visibility.line_of_sight_clear` stays
+importable in this module's namespace purely so the `live_los_clear`-
+specific tests below can monkeypatch it and assert it is never called
+(`_fail_if_called`) -- that assertion is the point of those tests, not a
+setup detail. `geometry.py`'s own LOS sampling-loop logic is covered by
+`test_geometry.py`.
 
 The cockpit-mask integration tests below (`plans/cockpit-visibility/
 plan.md`) exercise `check_visibility`'s wiring against the real, shipped
@@ -72,11 +77,6 @@ _MASK_ONLY_OPTIC = Optic(
 )
 
 
-@pytest.fixture(autouse=True)
-def clear_line_of_sight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: True)
-
-
 def _ownship(
     *,
     heading_true_deg: float = 0.0,
@@ -102,7 +102,14 @@ def _candidate(
     z: float,
     alt_m: float = 500.0,
     heading_true_deg: float | None = None,
+    live_los_clear: bool | None = True,
 ) -> WorldObjectCandidate:
+    # `live_los_clear` defaults to `True` (`plans/bl11-stage4-fail-closed/
+    # plan.md`, `BL-11` Stage 4 step 3) rather than `WorldObjectCandidate`'s
+    # own `None` default -- gate 4 now rejects a `None` verdict outright
+    # (fail-closed), so every test in this file not specifically exercising
+    # that gate needs a candidate that clears it to keep testing what it
+    # was built to test.
     return WorldObjectCandidate(
         object_id=1,
         object_type=object_type,
@@ -111,6 +118,7 @@ def _candidate(
         alt_m=alt_m,
         is_ownship=False,
         heading_true_deg=heading_true_deg,
+        live_los_clear=live_los_clear,
     )
 
 
@@ -517,12 +525,29 @@ def test_candidate_rejected_level_becomes_visible_when_banked_toward_it() -> Non
     )
 
 
+def _fail_if_called(*args: object, **kwargs: object) -> bool:
+    """Shared monkeypatch target for the three `live_los_clear` tests
+    below (`plans/bl11-stage4-fail-closed/plan.md` step 5) -- raises
+    rather than merely recording a call, so a regression that reintroduces
+    a call to the offline primitive fails loudly inside `check_visibility`
+    itself rather than depending on the caller remembering to assert a
+    counter afterwards."""
+    raise AssertionError(
+        "line_of_sight_clear must never be called from check_visibility "
+        "(BL-11 Stage 4 fail-closed)"
+    )
+
+
 def test_terrain_los_blocked_drops_an_otherwise_visible_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: False)
+    """Rewritten for fail-closed (`plans/bl11-stage4-fail-closed/plan.md`
+    step 4, `BL-11` Stage 4 step 3): "blocked" can no longer be simulated
+    by monkeypatching the now-dead offline primitive -- the only way to
+    express it is a candidate carrying `live_los_clear=False` directly."""
+    monkeypatch.setattr(visibility, "line_of_sight_clear", _fail_if_called)
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=500.0, z=0.0)
+    candidate = _candidate("Infantry", x=500.0, z=0.0, live_los_clear=False)
 
     assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
 
@@ -530,37 +555,25 @@ def test_terrain_los_blocked_drops_an_otherwise_visible_candidate(
 def test_live_los_clear_false_drops_a_candidate_without_consulting_the_offline_primitive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`plans/dcs-driven-los/plan.md` (X-B29): a DCS-driven `False` verdict
-    on the candidate itself blocks gate 4 outright -- the offline
-    `line_of_sight_clear` primitive (here monkeypatched to always say
-    "clear") is never consulted when a live verdict already exists."""
-    called = False
-
-    def _fail_if_called(*args: object, **kwargs: object) -> bool:
-        nonlocal called
-        called = True
-        return True
-
+    """`plans/dcs-driven-los/plan.md` (X-B29), fail-closed per `plans/
+    bl11-stage4-fail-closed/plan.md`: a DCS-driven `False` verdict on the
+    candidate itself blocks gate 4 outright -- the offline
+    `line_of_sight_clear` primitive is never consulted at all any more."""
     monkeypatch.setattr(visibility, "line_of_sight_clear", _fail_if_called)
     ownship = _ownship(heading_true_deg=0.0)
     candidate = dataclasses.replace(
         _candidate("Infantry", x=500.0, z=0.0), live_los_clear=False
     )
 
-    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
-
-    assert result is None
-    assert called is False
+    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
 
 
 def test_live_los_clear_true_admits_a_candidate_without_consulting_the_offline_primitive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The mirror case: a DCS-driven `True` verdict admits the candidate
-    through gate 4 even if the offline primitive would have said
-    "blocked" -- the live answer takes priority, never a belt-and-braces
-    second check against it."""
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: False)
+    through gate 4, with the offline primitive never consulted."""
+    monkeypatch.setattr(visibility, "line_of_sight_clear", _fail_if_called)
     ownship = _ownship(heading_true_deg=0.0)
     candidate = dataclasses.replace(
         _candidate("Infantry", x=500.0, z=0.0), live_los_clear=True
@@ -569,15 +582,22 @@ def test_live_los_clear_true_admits_a_candidate_without_consulting_the_offline_p
     assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is not None
 
 
-def test_live_los_clear_none_falls_back_to_the_offline_primitive() -> None:
-    """Default behaviour (no live feed, as in every other test in this
-    file) is unchanged: `live_los_clear` stays `None` and gate 4 reads
-    exactly as it always has."""
+def test_live_los_clear_none_is_not_admitted_and_the_offline_primitive_is_never_called(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewritten for fail-closed (`plans/bl11-stage4-fail-closed/plan.md`
+    step 4, `BL-11` Stage 4 step 3) -- supersedes the old
+    `test_live_los_clear_none_falls_back_to_the_offline_primitive`, which
+    asserted the exact fallback behaviour this plan removes. `None` (no
+    live verdict this poll) now rejects exactly like a confirmed `False`,
+    and `line_of_sight_clear` is never reached regardless -- the gate no
+    longer has a code path that could call it."""
+    monkeypatch.setattr(visibility, "line_of_sight_clear", _fail_if_called)
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=500.0, z=0.0)
+    candidate = _candidate("Infantry", x=500.0, z=0.0, live_los_clear=None)
     assert candidate.live_los_clear is None
 
-    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is not None
+    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
 
 
 def test_steep_depression_inside_the_old_cone_is_now_rejected() -> None:
