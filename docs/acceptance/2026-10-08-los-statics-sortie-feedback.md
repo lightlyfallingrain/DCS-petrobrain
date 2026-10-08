@@ -128,10 +128,26 @@ Smoke is a referenceable landmark, not scenery. **Nothing in this population is
 filtered.** `BL-B42` is now "the 128 cap is too small for a dense city", not
 "which objects to exclude".
 
-**Item 3 — both stutter hypotheses refuted.** `grep "connect failed"` returned
-nothing, so the collector was connected throughout and the `Export.lua` reconnect
-theory is dead. A filter for `bridge_call_ms > 100` also returned nothing (~2 ms
-semi-open, ~5 ms over Damascus), so the LOS poll does not explain it either. The
-reported `max 2026` was almost certainly the log line's year. One real 2.645 s gap
-in an otherwise steady 1.004 s cadence remains unexplained. **No current
-candidate** — do not re-propose either refuted hypothesis without new evidence.
+**Item 3 — three hypotheses refuted; the stutter is almost certainly not ours.**
+
+| hypothesis | refuted by |
+|---|---|
+| `Export.lua` reconnect (5.0 s, blocking connect) | `grep "connect failed"` empty — collector connected throughout |
+| LOS poll cost | `bridge_call_ms` max **27 ms** (`sort -n` gives `26.00 26.00 27.00`) |
+| LOS poll cadence | a full gap scan finds exactly **two** gaps all sortie — 7.62 s at `16:04:24.954`, 2.65 s at `16:26:56.273` — against a metronomic 1.004 s. Two events 22 min apart are not a 5 s period |
+
+The reported `max 2026` was the log line's **year**, confirmed. Nothing this
+project puts on the DCS thread has a 5 s period (LOS 1 Hz, F10 1 Hz, export
+5 Hz) and nothing of it is slow.
+
+**Decisive test:** move `Export.lua` and `Hooks/petrobrain-*.lua` aside, fly the
+same area. If the stutter survives, it was never ours. **Do not re-propose any of
+the three refuted hypotheses without new evidence.**
+
+**One genuinely useful thing fell out of the cost data** — the cap is cost-bound,
+not arbitrary. 27 ms / 128 sightlines is ~0.21 ms each, so 128 is already ~1.6
+frames at 60 fps and covering the full 152-candidate city wedge in one poll would
+make the poll the hitch it currently is not. So `BL-B42`'s answer is to
+**amortise, not enlarge**: a per-poll budget near one frame, nearest candidates
+every poll, and a rotating offset through the far tail so it is covered across
+successive polls instead of discarded. Full detail in `BL-B42`.

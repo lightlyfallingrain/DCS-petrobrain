@@ -1367,20 +1367,51 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   plus a cap is already an acceptable answer given the dropped 24 were the farthest. The per-poll
   cost does **not** currently argue for urgency — see the cost note below.
 
-  **Cost note, and it is why this is not urgent.** `bridge_call_ms` is ~2 ms over semi-open terrain
-  and ~5 ms over Damascus, and a filter for values over 100 ms returned **nothing** across the whole
-  sortie. Tripling the candidate population did not make the bridge call expensive. An earlier
-  reading of `max 2026` as a 2-second stall was almost certainly the log line's **year** (`2026-10-08`
-  leads every line), not a millisecond count; confirmation pending via
-  `grep -o 'bridge_call_ms=[0-9.]*' dcs.log | cut -d= -f2 | sort -n | tail -3`.
+  **Measured cost, and it decides the shape of the fix.** `bridge_call_ms` is ~2 ms over semi-open
+  terrain, ~5 ms over Damascus, and **27 ms at the measured maximum** (confirmed: `sort -n | tail -3`
+  gives `26.00 26.00 27.00`). An earlier reading of `max 2026` as a 2-second stall was the log line's
+  **year** — `2026-10-08` leads every line. Nothing stalls.
 
-  **Unexplained, tracked here because it was found alongside**: the scan lines hold a steady 1.004 s
-  cadence and then show one **2.645 s gap** (`16:26:53.628` → `16:26:56.273`). With no
-  `bridge_call_ms` above 100 ms, the LOS poll does not explain it, and neither does `Export.lua`'s
-  reconnect path (`grep "connect failed"` returned nothing, so the collector was connected
-  throughout). The user separately reports *"a small stutter every 5 s"*, whose period matches
-  neither the 1 Hz LOS poll nor the 5 Hz export. **Two hypotheses tested and both refuted; no
-  current candidate.** Do not re-propose either without new evidence.
+  That maximum is the useful number. 27 ms across 128 sightlines is **~0.21 ms per sightline** (two
+  engine calls each: `world.searchObjects`/`SEGMENT` plus `land.isVisible`). At 60 fps a frame is
+  16.7 ms, so:
+
+  | sightlines | est. cost | frames |
+  |---|---|---|
+  | 128 (today's cap) | 27 ms | ~1.6 |
+  | 152 (this sortie's full wedge) | ~32 ms | ~1.9 |
+  | 256 | ~54 ms | ~3.2 |
+
+  **So the cap must not simply rise** — it is already above a one-frame budget, and covering the full
+  city wedge in one poll would make the poll itself the hitch that this sortie proved it currently is
+  not.
+
+  **Proposed shape instead: amortise, don't enlarge.** Hold a per-poll budget near one frame, keep the
+  nearest candidates checked every poll, and carry a **rotating offset** through the far tail so it is
+  covered over successive polls rather than discarded. Far contacts gain eventual coverage at flat
+  per-poll cost — strictly better than both today's truncation and a larger cap. At 1 Hz the whole
+  152-candidate wedge would be covered within ~2 polls. Not yet designed or decided; this is the
+  direction the cost data points at, and it needs `/explore` before an Architect pass.
+
+  **The reported 5 s stutter is almost certainly not this project's.** The user reports *"a small
+  stutter every 5 s"*. A full gap scan of the scan-line cadence over the whole sortie finds exactly
+  **two** gaps — 7.62 s at `16:04:24.954` and 2.65 s at `16:26:56.273` — against an otherwise
+  metronomic 1.004 s. Two isolated events 22 minutes apart are not a 5 s period.
+
+  Three hypotheses tested and refuted:
+
+  | hypothesis | refuted by |
+  |---|---|
+  | `Export.lua` reconnect (`RECONNECT_INTERVAL_S = 5.0`, blocking 200 ms connect) | `grep "connect failed"` empty — collector connected throughout |
+  | LOS poll cost | `bridge_call_ms` max 27 ms; nothing above 100 ms all sortie |
+  | LOS poll cadence | only two gaps in the sortie, neither periodic |
+
+  Nothing this project injects into the DCS thread has a 5 s period (LOS Hook 1 Hz, F10 Hook 1 Hz,
+  `Export.lua` 5 Hz) and nothing of it is slow. **Do not re-propose any of the three without new
+  evidence.** The decisive test is to move `Export.lua` and `Hooks/petrobrain-*.lua` aside and fly the
+  same area: if the stutter survives, it was never ours. The two gaps themselves are plausibly DCS's
+  own (a pause, or terrain streaming on approach to the city) — untested, and recorded as a guess, not
+  a finding.
 
   **Explicitly not a blocker on `BL-11` Stage 4's statics fix** — the fix under that stage is the
   enumeration itself, and this is a consequence to design for separately. Per root `CLAUDE.md`'s
