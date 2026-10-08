@@ -132,3 +132,116 @@ hypothesis. All are fixed; full suite is clean (1540 passed, 4 xfailed, 0 failed
   rejected, not approximated)"` on first growth, then stays silent on an immediate repeat call with
   no new gap — confirmed the log-on-growth guard actually suppresses the repeat, not just that the
   message text reads correctly.
+
+### Round 2: fixed the coverage-log flood/silence inversion (review round 1 required fix, plus
+user design call)
+
+Review round 1 (`plans/bl11-stage4-fail-closed/review.md`) found `_log_live_los_coverage_if_growing`
+backwards from its own stated intent: `no_verdict` is cumulative for the process lifetime, so under
+a continuously dead feed it is strictly greater than whatever was last logged on *every* poll —
+there is no steady-state value for a monotonically increasing counter to settle into the way a
+repeating *label* gives `_push_gaze_line`'s identical-looking guard. Empirically 6/6 dead-feed polls
+logged and 0/4 healthy polls logged, the opposite of "print one line, not one per poll." Reproduced
+the Reviewer's own measurement before touching anything.
+
+The dispatching user specified two parts, the second going beyond the Reviewer's own recommendation
+(explicitly not optional, and explicitly not the Reviewer's optional item (b), which stays
+out of scope per the dispatch):
+
+1. **Edge-trigger the warning once**, on the zero-to-nonzero `no_verdict` transition, never again
+   for the rest of the run — the Reviewer's own recommended fix.
+2. **Always log an unconditional end-of-run summary**, with the real totals, from each poll loop's
+   own `finally:` block — including when the count is zero, so a passing guard is visibly
+   distinguishable from a guard that never ran (same reasoning `detection_trace.py`'s
+   `static_enum_failures` counter already applies). This was the user's own addition, not asked for
+   by the Reviewer.
+
+#### Files Changed (round 2)
+
+- `body-layer/src/logger.py` —
+  - `_log_live_los_coverage_if_growing` renamed to `_warn_live_los_coverage_gap_once` and rewritten:
+    takes/returns a `bool` (`already_warned`) rather than the last-logged `int`, logs exactly once on
+    the zero-to-nonzero transition and never again. Docstring rewritten to explain *why* the old
+    log-on-change shape was wrong for this counter specifically (a monotonic counter has no steady
+    state a repeated value can hold at), not just that it was wrong.
+  - New `_log_live_los_coverage_summary(sources)` — unconditional, `logger.info`, reads the same
+    `LiveLosCoverage` counter and logs `"live LOS coverage: %d/%d gate-4 evaluations had no live
+    verdict this sortie"` regardless of value (including `0/N`). Wrapped in `try`/`except Exception`
+    so a failure here can never skip the teardown that follows it in the same `finally:` block
+    (`trace_writer.close()`/`belief_truth_writer.close()`/`world_model_conn.close()`).
+  - Both `_run_console_poll_loop` and `_run_crew_text_poll_loop`: `last_logged_no_verdict = 0` ->
+    `live_los_warned = False`; the per-poll call site swapped to the renamed function; and
+    `_log_live_los_coverage_summary(runner.sources)` added as the first statement in each loop's
+    existing `finally:` block (ahead of the trace/belief-truth writer closes, teardown order
+    otherwise unchanged). `runner.sources` is always a valid (possibly empty) list by this point —
+    `ConsolePerceptionRunner.sources` has `default_factory=list`, so this is safe even if the `try`
+    body raised before `runner.sources` was ever assigned.
+  - `src/replay.py`'s plain-`PerceptionLogger` CLI path (the `else:` branch of `main()`, no
+    `--console`/`--crew-text`) was **not** touched — it never called the old function either, is out
+    of this plan's two named poll loops, and the brief named only those two.
+- `body-layer/tests/test_logger.py` —
+  - New `_t72_world_object_no_live_verdict()` fixture helper (same geometry as `_t72_world_object()`,
+    `unit_name=None`) so a real poll can produce a genuine `no_verdict > 0` for the two integration
+    tests below.
+  - New `_naked_eye_source_stub()` helper constructing a bare `NakedEyePerceptionSource` (dummy
+    `aircraft_client`/in-memory `world_model_conn`, neither touched by the functions under test) for
+    the two pure unit tests.
+  - Five new tests (see Tests Added).
+  - Import block: added `_log_live_los_coverage_summary`, `_run_crew_text_poll_loop`,
+    `_warn_live_los_coverage_gap_once`.
+
+#### Tests Added (round 2)
+
+- `test_warn_live_los_coverage_gap_once_fires_exactly_once_under_continuous_growth` — drives the
+  function over 10 polls with `no_verdict` growing every single one (the Reviewer's own
+  reproduction, same poll count). Asserts the warning-message record count is exactly `1`, not
+  `>= 1` — `>= 1` is what the pre-fix flood already satisfies, so this is the assertion that would
+  have let the original defect through a weaker test.
+- `test_warn_live_los_coverage_gap_once_never_fires_while_no_verdict_stays_zero` — 10 polls, 0 growth,
+  asserts zero log records and `warned` stays `False`.
+- `test_log_live_los_coverage_summary_logs_zero_over_evaluated_when_healthy` — direct call with
+  `evaluated=7, no_verdict=0`; asserts the exact `"live LOS coverage: 0/7 gate-4 evaluations had no
+  live verdict this sortie"` line is logged, pinning that a healthy run still gets a visible summary.
+- `test_console_poll_loop_logs_the_coverage_summary_in_its_finally_block` — real thread-driven poll
+  through `_run_console_poll_loop` with the no-live-verdict fixture, stopped after one successful
+  poll; asserts the summary line (`"live LOS coverage: 1/1 ..."`) appears in `caplog` after the
+  thread has fully joined, i.e. that it ran from `finally:`.
+- `test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block` — same proof for
+  `_run_crew_text_poll_loop`'s own independently-wired `finally:` block — the two loops share no code
+  for this, so fixing one and not its twin (the exact blast-radius failure mode review round 1 named
+  for the original fix) would not be caught by the console-loop test alone.
+
+Each of the five was proven able to fail: broke the specific mechanism it asserts (removed the
+`already_warned` early return; inverted `no_verdict > 0` to `>= 0`; made the summary skip logging at
+`no_verdict == 0`; removed the summary call from each loop's `finally:` in turn), confirmed the
+exact test failed for the stated reason with the others still green, then reverted with `Edit`
+(never `git stash`, per this repo's own worktree rule on the shared stash stack).
+
+#### Checks (round 2)
+
+(body-layer/ is the only subproject touched)
+
+- ruff format --check: pass
+- ruff check: pass
+- mypy --strict (src only): pass, 54 source files
+- pytest -q: pass — 1547 passed, 4 xfailed, 0 failed (1542 baseline + 5 new tests, same xfail count)
+
+#### Final log lines, verbatim
+
+Transition warning (fires once, on the zero-to-nonzero transition):
+
+> `live LOS coverage gap: naked-eye gate-4 evaluations started receiving no live verdict this sortie (world-model's offline LOS primitive is no longer used as a fallback -- affected candidates are rejected, not approximated); see the end-of-run summary for the final totals`
+
+End-of-run summary (unconditional, every run, `%d` placeholders are `no_verdict`/`evaluated`):
+
+> `live LOS coverage: %d/%d gate-4 evaluations had no live verdict this sortie`
+
+#### Notable Discoveries (round 2)
+
+- **The bug was in the trigger condition, not the counter semantics** — `LiveLosCoverage` itself
+  (from round 1) needed no change; only `logger.py`'s consumption of it did. Confirms the plan's
+  own division of labor (counter mechanism vs. logging policy) held even under a required fix.
+- **`ConsolePerceptionRunner.sources`'s `default_factory=list`** (round 1's own design) is what makes
+  calling `_log_live_los_coverage_summary(runner.sources)` from `finally:` safe even on a path that
+  raised before `runner.sources` was ever assigned inside the `try:` — no extra guard needed in the
+  new function beyond the one it already has (a true no-op for a list with no naked-eye source).
