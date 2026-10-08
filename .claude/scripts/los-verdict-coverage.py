@@ -42,6 +42,19 @@ from pathlib import Path
 #: real state (the two are published never-pre-ANDed, by design).
 _VERDICT_FIELDS = ("live_los_clear", "building_clear", "terrain_clear")
 
+#: **The denominator correction, and the first version of this script got it
+#: wrong.** The Hook computes sightlines only for objects inside the player
+#: bubble AND inside the commanded look-direction wedge. An object that never
+#: got past either gate *cannot* have a verdict, and counting it as a miss is
+#: not a finding about the join -- it is a finding about where the pilot was
+#: looking. On the 2026-10-08 trace that mistake read 36.2% coverage over all
+#: 403 objects, where the real figure over the 145 actually evaluated was
+#: 100%. It also made the number non-comparable with the 76% baseline, which
+#: was itself measured over *admitted* objects.
+#:
+#: So these two outcomes mean "never evaluated", not "no verdict".
+_NOT_EVALUATED = frozenset({"player_bubble", "gaze"})
+
 
 def _newest_default_trace() -> Path | None:
     matches = sorted(glob.glob("logs/dcs-detection-trace-*.jsonl"))
@@ -77,8 +90,11 @@ def main() -> int:
         print(f"No such trace: {path}", file=sys.stderr)
         return 2
 
-    # object_id -> did this object EVER carry a verdict, in any poll
+    # object_id -> did this object EVER carry a verdict / reach a Contact,
+    # and which gate outcomes it ever saw (to decide if it was evaluated).
     ever: dict[object, bool] = {}
+    contacted: dict[object, bool] = {}
+    outcomes: dict[object, set[str]] = {}
     rows = 0
     malformed = 0
     gate_counts: Counter[str] = Counter()
@@ -100,46 +116,70 @@ def main() -> int:
             key = row.get("object_id", row.get("object_type"))
             has = any(row.get(f) is not None for f in _VERDICT_FIELDS)
             ever[key] = ever.get(key, False) or has
+            contacted[key] = contacted.get(key, False) or (
+                row.get("contact_id") is not None
+            )
             outcome = row.get("outcome") or row.get("gate_outcome")
             if isinstance(outcome, str):
                 gate_counts[outcome] += 1
+                outcomes.setdefault(key, set()).add(outcome)
 
-    total = len(ever)
-    if total == 0:
+    if not ever:
         print(f"{path}: {rows} rows, no objects found.", file=sys.stderr)
         return 1
 
-    got = sum(1 for v in ever.values() if v)
-    missing = total - got
-    pct_got = 100.0 * got / total
-    pct_missing = 100.0 * missing / total
+    # The population the question is actually about: objects the Hook had any
+    # opportunity to produce a verdict for. See _NOT_EVALUATED.
+    evaluated = {k for k, o in outcomes.items() if o - _NOT_EVALUATED}
+    admitted = {k for k, o in outcomes.items() if "admitted" in o}
+
+    def line_for(label: str, keys: set[object]) -> float | None:
+        if not keys:
+            print(f"  {label:<44} n=0")
+            return None
+        got = sum(1 for k in keys if ever.get(k))
+        pct = 100.0 * got / len(keys)
+        print(f"  {label:<44} {got:,}/{len(keys):,}  ({pct:.1f}%)")
+        return pct
 
     print(f"trace:   {path}")
     print(f"rows:    {rows:,}" + (f"  ({malformed} malformed, skipped)" if malformed else ""))
-    print(f"objects: {total:,} distinct")
+    print(f"objects: {len(ever):,} distinct")
     print()
-    print(f"  received a live verdict:  {got:,}  ({pct_got:.1f}%)")
-    print(f"  never received one:       {missing:,}  ({pct_missing:.1f}%)")
+    print("Share that ever received a live DCS verdict:")
+    line_for("all objects in trace (NOT the metric)", set(ever))
+    pct_eval = line_for("evaluated (past bubble + gaze)", evaluated)
+    line_for("admitted at least once", admitted)
     print()
-    print("  baseline before the statics fix: 323 of 425 objects (76.0%) never")
-    print("  received one. That is the number this is measured against.")
+    print("  Only the 'evaluated' row answers the question. An object outside the")
+    print("  10 km bubble or outside the commanded look wedge cannot have a")
+    print("  verdict, by design -- counting it is a fact about where the pilot")
+    print("  looked, not about the join.")
+    print()
+    joined = sum(1 for k in evaluated if ever.get(k) and contacted.get(k))
+    print(f"  verdict AND folded into a Contact:           {joined:,}")
+    print()
+    print("  baseline before the statics fix: 323 of 425 ADMITTED objects")
+    print("  (76.0%) never received one.")
     if gate_counts:
         print()
         print("  gate outcomes across all rows:")
         for name, count in gate_counts.most_common():
             print(f"    {name:<24} {count:,}")
     print()
-    if pct_missing <= 10.0:
-        print("READ: the join reaches nearly everything. BL-11 Stage 4 step 3")
-        print("('fail closed') looks safe to take -- confirm against the named")
-        print("object you flew at before deciding.")
-    elif pct_missing < 40.0:
-        print("READ: much better than the 76% baseline but not clean. Worth asking")
-        print("WHICH objects still have none before failing closed -- a residue")
-        print("concentrated in one kind is a different bug from a flat share.")
+    if pct_eval is None:
+        print("READ: nothing was evaluated this flight -- the pilot never looked at")
+        print("anything in the bubble, or the gaze command never took effect.")
+    elif pct_eval >= 99.0:
+        print("READ: the join reaches everything it can. BL-11 Stage 4 step 3")
+        print("('fail closed') is safe on this evidence.")
+    elif pct_eval >= 60.0:
+        print("READ: better than the baseline but not clean. Ask WHICH evaluated")
+        print("objects still have none -- a residue concentrated in one kind is a")
+        print("different bug from a flat share.")
     else:
-        print("READ: still a large no-verdict population. The join is NOT fixed")
-        print("downstream of the wire. Do not take step 3 on this data.")
+        print("READ: a large share of EVALUATED objects still have no verdict. The")
+        print("join is broken downstream of the wire. Do not take step 3 on this.")
     return 0
 
 
