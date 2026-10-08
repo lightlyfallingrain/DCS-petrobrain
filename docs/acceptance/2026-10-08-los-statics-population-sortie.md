@@ -149,3 +149,62 @@ Also useful:
   conversation (`/explore`) before anything is built, not a mid-flight decision.
 - **Filtering the population.** Settled: nothing gets filtered. The statics are contacts and
   `big_smoke` is a landmark, by your own direction.
+
+
+---
+
+## FLOWN AND ANSWERED, 2026-10-08 evening
+
+**The join works completely.** Trace `body-layer/logs/dcs-detection-trace-20261008-211507.jsonl`,
+280,782 rows, 403 distinct objects:
+
+| population | ever received a live DCS verdict |
+|---|---|
+| **evaluated** (past bubble + gaze — the only meaningful denominator) | **145 / 145 — 100 %** |
+| **admitted** at least once | **85 / 85 — 100 %** |
+| verdict **and** folded into a `Contact` | **85** |
+
+Baseline before the statics fix: **323 of 425 admitted objects (76 %) had none.** Now zero.
+
+**Statics are demonstrably among those contacts** — the types that received a verdict *and* became a
+tracked contact include 25 `Soldier M4 GRG`, 20 `BMP-2`, 13 `T-55`, **6 `ZSU-23-4 Shilka`**,
+3 `Land_Rover_109_S3`, 2 `SA342L`. Mission statics by name. That is the thing this card existed to
+observe, and it had never been seen.
+
+**Unlooked-for finding: building occlusion is real and independent.** Verdict pairs across the
+sortie:
+
+| `building_clear` | `terrain_clear` | rows |
+|---|---|---|
+| True | True | 25,734 |
+| True | **False** | 14,251 |
+| False | False | 7,836 |
+| **False** | True | 6,634 |
+
+The two off-diagonal rows are the point: the two engine calls disagree in **both** directions at
+real volume, so the building check is not shadowing the terrain check — it discriminates on its own.
+That is the capability `X-B29` was built for, demonstrated in flight for the first time, and it is
+precisely what was structurally unavailable while the population whose occlusion matters most was
+receiving no verdicts at all.
+
+**Consequence: `BL-11` Stage 4 step 3 (fail closed) is safe on this evidence.** Authorised by the
+user the same evening; step 3 and step 4 (the coverage counter) are being built together, since once
+live is the only path a nonzero fallback count is a defect signal and without it a dead feed is
+indistinguishable from an empty sky.
+
+### A false negative I nearly reported, kept visible
+
+`.claude/scripts/los-verdict-coverage.py` first printed **36.2 %** and concluded *"the join is NOT
+fixed downstream of the wire."* Wrong, in the dangerous direction — it would have blocked a correct
+change.
+
+The metric counted all 403 objects, including ~267,000 rows for objects outside the 10 km bubble or
+outside the commanded look wedge. **Those cannot have a verdict by design**, since the Hook only
+computes sightlines for the gaze wedge; counting them measures where the pilot looked, not whether
+the join works. It was also non-comparable with the 76 % baseline, which was itself over *admitted*
+objects.
+
+Fixed: the script now reports evaluated and admitted populations separately, labels the all-objects
+row `(NOT the metric)`, and carries the reason in a `_NOT_EVALUATED` comment so the denominator
+cannot quietly regress. The lesson is older than this script — **a coverage metric is only as good as
+its denominator, and the wrong denominator fails toward "broken", which reads as caution.**
