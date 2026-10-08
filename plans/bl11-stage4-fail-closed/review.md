@@ -204,3 +204,104 @@ addition consistent with existing project precedent. Ready for DoD.
 Full read, scoped to the fix as instructed. Every new test mutation-verified against the actual
 mechanism it claims to pin, not inherited from the implementer's report. Teardown-safety and
 mid-run-rebuild reachability both checked by reading the full relevant code paths, not assumed.
+
+---
+
+## Round 3: review of the fix (`c6f196e`, answering Security's advisory finding)
+
+Worktree landed on `main` as expected; its scaffolding branch carried no unique commits
+(`git log main..worktree-agent-<id>` empty), so it was moved to the named tip
+`c6f196e5782dbe270b9d35a51d2d96364e11a04a` via `git checkout -B`, discarding nothing. Scope
+narrowed to this one commit, per the dispatching brief — rounds 1 and 2 above stand and were not
+re-reviewed.
+
+This wires `_warn_live_los_coverage_gap_once`/`_log_live_los_coverage_summary` (already approved
+in round 2) into `main()`'s third, previously-uninstrumented branch — the bare `else:` reached
+with neither `--console` nor `--crew-text` — mirroring the other two poll loops' shape exactly.
+
+**1. The `sources` hoist.** Correct, and the right call. `sources: list[PerceptionSource] = []`
+is declared before the `try:` and reassigned from `_build_sources(...)` inside it, so `finally:`'s
+`_log_live_los_coverage_summary(sources)` always has a valid list even if `_build_sources`/
+`PerceptionLogger(...)` raised first. On the empty-list path, `_log_live_los_coverage_summary` is
+a documented no-op (no `NakedEyePerceptionSource` in the list to match the `isinstance` check),
+so a startup failure here produces no summary line — same as it would produce none today without
+this fix, since the function didn't exist on this path before. I don't read this as masking
+anything: the exception itself still propagates out of the `except KeyboardInterrupt: pass` (which
+does not catch it) and out of `finally:` after `world_model_conn.close()`, so a construction
+failure is still loud via its own traceback; the summary's silence on that path is "nothing to
+report" layered on top of a failure that is reported through a different, pre-existing channel.
+Confirmed the hoist changes nothing on the success path (full suite reproduced identically before
+and after reading it) and confirmed by direct mutation (below) that `finally:` really does run
+with a non-empty list on the normal path. `mypy --strict`'s clean pass is not hiding a widened
+type — the annotation `list[PerceptionSource]` matches `_build_sources`'s own return type exactly,
+and `[]` is a valid literal for that annotation with no `Any` or union introduced.
+
+**2. The test approach (`main()` driven through its loop body).** Sound, and appropriately
+scoped. This does make `main()`'s bare-branch loop body a tested surface for the first time —
+previously only its argparse path was (`test_main_rejects_neither_theatre_pair_nor_mission_
+understanding` et al.) — but it is the correct tool for proving a wiring defect is actually fixed:
+Security's finding was specifically that this branch's production code failed to call two
+functions, and the only way to prove the calls are now reachable from a real `sys.argv` invocation
+is to invoke it that way. `main()` itself is unmodified (confirmed: `git show` of this commit's
+`logger.py` diff touches only the `else:` branch body, nothing in argument parsing or dispatch).
+The implementer's own notes correctly flag this as a precedent to keep narrow rather than adopt
+generally, and I agree with that framing — read it as "this branch's wiring is now pinned," not
+"`main()` is now an integration-tested entrypoint."
+
+**3. Cross-test pollution, verified by reproducing it, not reading about it.** Temporarily
+reverted the fix's own fix — changed `monkeypatch.setattr(logger_module, "time",
+_RaiseAfterNSleeps())` back to the rejected `monkeypatch.setattr(logger_module.time, "sleep",
+_RaiseAfterNSleeps().sleep)` — and ran the full suite: **6 `PytestUnhandledThreadExceptionWarning`s**
+reappeared, each a `KeyboardInterrupt` raised inside a leftover `belief.brain_client.
+BrainLayerClient._poll_loop` daemon thread's `time.sleep(_POLL_RETRY_BACKOFF_S)` call, exactly as
+described. Reverted; full suite back to 1549 passed / 4 xfailed / **0 warnings** (ran with
+`-W error::pytest.PytestUnhandledThreadExceptionWarning` to make a reappearing warning fail the
+run outright, not just print). The stand-in cannot swallow an attribute the module needs: grepped
+every `time.<attr>` use in `logger.py`/`run_log_paths.py` reachable from this branch —
+`time.sleep` (faked) and `time.time()` (via `_per_run_log_paths`'s stamping, called before the
+loop) — and `_RaiseAfterNSleeps.__getattr__` delegates anything but `sleep` to the real module, so
+`time.time()` still resolves correctly. `time.monotonic()` (used by `_wait_for_next_tick`) is
+never reached on this branch at all — the plain-logger path calls `time.sleep` directly, not
+`_wait_for_next_tick` — so there's no attribute this stand-in is asked for and doesn't have.
+
+On whether this belongs somewhere more discoverable than `.claude/agent-memory/implementer/
+feedback_monkeypatch_module_attr_not_shared_stdlib.md`: **yes, as an optional refinement, not a
+blocker.** The trap is general-purpose (any test monkeypatching a shared stdlib module in a suite
+that leaves daemon threads running past their test) and `body-layer/CLAUDE.md`'s own `## Testing`
+section is where a future test author would look for this class of guidance, not an implementer's
+personal memory file. I'd suggest a one- or two-line addition there pointing at this commit's
+docstring rather than duplicating the explanation. Not required for this round.
+
+**4. Non-vacuousness of the two new tests, reproduced by mutation myself.**
+- Removed the `live_los_warned = _warn_live_los_coverage_gap_once(sources, live_los_warned)` call
+  from the loop body: `test_plain_logger_path_warns_on_the_live_los_coverage_gap_once` failed with
+  `assert 0 == 1` (`warnings == []`). Reverted with `Edit`; `git diff --stat` empty afterward.
+- Separately removed `_log_live_los_coverage_summary(sources)` from `finally:`:
+  `test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block` failed
+  (`summaries == []` vs. the expected `2/2` line) — and the captured log for that run still showed
+  the transition warning firing, confirming the two failures are independent, matching the
+  implementer's own report exactly. Reverted with `Edit`; `git diff --stat` empty afterward.
+
+Both mutations were run in isolation (`-k plain_logger_path`), each reverted before the next, and
+a final full-suite run after all reverts confirmed a clean tree and 1549 passed / 4 xfailed /
+0 failed / 0 warnings.
+
+Checks reproduced independently: ruff format --check clean, ruff check clean, `mypy --strict`
+clean (54 source files, run from inside `body-layer/`), `pytest -q` 1549 passed / 4 xfailed /
+0 failed / 0 warnings — matching the implementer's report exactly.
+
+### Verdict (round 3)
+
+APPROVED. The hoist is correct and does not mask anything beyond what was already unreported on
+this path; the `main()`-driving test approach is sound and appropriately scoped as a one-off, not
+a new default; the cross-test-pollution fix reproducibly holds; both new tests are genuinely
+load-bearing. One optional refinement only (give the monkeypatch-stdlib trap a home in
+`body-layer/CLAUDE.md`, not required). Ready for DoD.
+
+### Review Confidence (round 3)
+
+Full read, scoped to `c6f196e` as instructed. Both new tests mutation-verified against the actual
+calls they claim to pin. The cross-test-pollution claim was reproduced directly (reverted the fix,
+watched the warnings reappear, re-applied the fix, watched them disappear) rather than taken from
+the implementation log. Full suite, ruff, and mypy run independently in this worktree, not
+inherited.
