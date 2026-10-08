@@ -30,3 +30,7 @@ graphify-out/
 # half-working vault that resolves links within one subproject only. The vault
 # is rooted at the repo root; see docs/DOC_CONVENTIONS.md.
 .obsidian/
+
+# Mac Finder-app options
+.DS_Store
+
