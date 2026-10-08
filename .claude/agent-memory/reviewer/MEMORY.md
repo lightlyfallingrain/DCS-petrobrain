@@ -156,3 +156,4 @@ itself carried three stacked copies of that warning until 2026-10-06; merged, no
 - [BL-11 Stage 4 coverage log defect](project_bl11_stage4_fail_closed_coverage_log_defect.md) - NEEDS REVISION; log-on-growth guard floods on a cumulative counter, silent when healthy.
 - [BL-11 Stage 4 coverage log round2 approved](project_bl11_stage4_fail_closed_coverage_log_round2_approved.md) - APPROVED; mutation-verified all 5 new tests + teardown.
 - [BL-11 Stage 4 round3 main-branch wiring approved](project_bl11_stage4_round3_main_branch_wiring_approved.md) - APPROVED; sources hoist, main()-driving tests, time-rebind pollution all reproduced.
+- [BL-11 Stage 4 round4 logging visibility fix approved](project_bl11_stage4_round4_logging_visibility_fix_approved.md) - APPROVED; caplog.at_level hides visibility gap; propagate=True left optional.
