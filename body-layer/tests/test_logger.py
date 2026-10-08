@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
+from support.mock_aircraft_layer import MockAircraftLayerServer
 
 import logger as logger_module
 from aircraft_client import AircraftLayerError
@@ -2515,3 +2516,149 @@ def test_no_stale_five_hertz_claims_remain_in_src() -> None:
     )
 
     assert offenders == []
+
+
+# -- Live LOS coverage logging, plain-logger entry point
+# (`plans/bl11-stage4-fail-closed/implementation.md` round 3, Security's
+# advisory finding) -----------------------------------------------------
+
+
+def _run_plain_logger_main_for_n_polls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    url: str,
+    n_polls: int,
+) -> None:
+    """Drives `main()`'s bare `else:` branch (no `--console`/`--crew-text`)
+    through exactly `n_polls` iterations of its `while True:` loop, then
+    stops it the same way a real operator does -- `KeyboardInterrupt` --
+    by rebinding the `time` name inside `logger` module's own namespace
+    (not the real `time` module's `sleep` attribute) to a stand-in that
+    raises on the `n_polls`-th call rather than actually sleeping.
+
+    **Deliberately not `monkeypatch.setattr(logger_module.time, "sleep",
+    ...)`** -- that mutates the real, process-wide `time` module, so any
+    *other* thread calling `time.sleep` during this test (e.g. a leftover
+    `belief.brain_client.BrainLayerClient` daemon poll thread from an
+    earlier test in the same pytest session, still retry-backoff-sleeping
+    because nothing stops a `daemon=True` thread) gets an unrelated
+    `KeyboardInterrupt` raised inside it too -- observed as a
+    `PytestUnhandledThreadExceptionWarning` the first time this was tried.
+    Rebinding `logger_module.time` itself only changes what `logger.py`'s
+    own `time.sleep(...)` call resolves to; every other module's `import
+    time` still gets the real one.
+
+    `main()` itself is not restructured; this calls it exactly as the CLI
+    would, the same `sys.argv`-monkeypatch pattern
+    `test_main_rejects_neither_theatre_pair_nor_mission_understanding`
+    already uses elsewhere in this file for `main()`'s argparse path --
+    extended here to also drive the loop body, since the plain-logger
+    branch has no extracted `_run_*_poll_loop` function of its own to call
+    directly (unlike `--console`/`--crew-text`)."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            url,
+            "--theatre",
+            "Syria",
+            "--world-model-db",
+            str(db_path),
+        ],
+    )
+
+    real_time = time
+
+    class _RaiseAfterNSleeps:
+        """Stands in for the `time` module as seen from inside `logger.py`
+        only -- every other attribute `main()` touches before reaching the
+        poll loop (`time.time()`, for `_per_run_log_paths`'s stamping)
+        delegates to the real module unchanged; only `sleep` is faked."""
+
+        def __init__(self) -> None:
+            self._calls = 0
+
+        def sleep(self, _seconds: float) -> None:
+            self._calls += 1
+            if self._calls >= n_polls:
+                raise KeyboardInterrupt
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(real_time, name)
+
+    monkeypatch.setattr(logger_module, "time", _RaiseAfterNSleeps())
+    logger_module.main()
+
+
+def test_plain_logger_path_warns_on_the_live_los_coverage_gap_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Security's advisory finding: `main()`'s plain-logger `else:` branch
+    (reached with neither `--console` nor `--crew-text`) shares
+    `_build_sources` with the two instrumented poll loops, so it is
+    subject to the identical fail-closed gate 4 -- but before this fix,
+    nothing in this branch ever called `_warn_live_los_coverage_gap_once`
+    at all, so a dead live-LOS feed here produced no signal whatsoever,
+    not even delayed. Drives two polls against a single frame with no
+    `"line_of_sight"` key at all (the feed-absent cause, `naked_eye_source.
+    _resolve_live_los_by_object_id`'s `line_of_sight is None` branch) and
+    a world object with no `unit_name` either, so gate 4 rejects it
+    fail-closed on both polls. The transition fires on poll 1
+    (`no_verdict` 0 -> 1) and must not fire again on poll 2 (`no_verdict`
+    1 -> 2, not a zero-to-nonzero transition) -- asserts exactly one
+    record, not `>= 1`, the same distinction round 2's pure-function test
+    makes for the same reason."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+            _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    warnings = [r for r in caplog.records if "live LOS coverage gap" in r.getMessage()]
+    assert len(warnings) == 1, warnings
+
+
+def test_plain_logger_path_logs_the_coverage_summary_in_its_finally_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Same finding, the other half: before this fix, this branch's
+    `finally:` only closed `world_model_conn` -- a dead feed here was
+    silent in the strongest sense this whole plan exists to prevent, not
+    even summarised post-flight. Same two-poll drive as the warning test
+    above (one frame, no live-LOS feed at all, held across both polls by
+    `MockAircraftLayerServer`'s "holds at the last frame" semantics), so
+    the accumulated totals are `evaluated=2, no_verdict=2` by the time
+    `KeyboardInterrupt` unwinds into `finally:`."""
+    frames = [
+        {
+            "telemetry": _console_telemetry_dict(),
+            "world_objects": {"objects": [_t72_world_object_no_live_verdict()]},
+        }
+    ]
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        with caplog.at_level(logging.INFO, logger=logger_module.__name__):
+            _run_plain_logger_main_for_n_polls(monkeypatch, tmp_path, url, n_polls=2)
+    finally:
+        server.stop()
+
+    summaries = [
+        r.getMessage() for r in caplog.records if "live LOS coverage:" in r.getMessage()
+    ]
+    assert summaries == [
+        "live LOS coverage: 2/2 gate-4 evaluations had no live verdict this sortie"
+    ], summaries
