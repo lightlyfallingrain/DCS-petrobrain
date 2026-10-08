@@ -23,7 +23,7 @@ import pytest
 
 from belief.contacts import ContactStore
 from belief.decay import certainty_of
-from perception import association, visibility
+from perception import association
 from perception.gaze import ScanPlan
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import OwnshipState
@@ -62,6 +62,10 @@ def _ownship() -> OwnshipState:
 
 
 def _world_object(object_id: int, *, lat_deg: float, lon_deg: float) -> dict[str, Any]:
+    # `unit_name` (`plans/bl11-stage4-fail-closed/plan.md` step 4): the
+    # live-LOS join key -- gets one so `FakeAircraftClient.
+    # get_line_of_sight_latest` below can mark it clear and the
+    # fail-closed gate admits it, same as before this plan.
     return {
         "object_id": object_id,
         "object_type": "Infantry",
@@ -71,24 +75,42 @@ def _world_object(object_id: int, *, lat_deg: float, lon_deg: float) -> dict[str
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
         "is_ownship": False,
+        "unit_name": f"unit_{object_id}",
     }
 
 
 class FakeAircraftClient:
     """A stationary, continuously-visible object -- every poll returns the
-    same single candidate, mirroring PB-1.5's fake-client pattern."""
+    same single candidate, mirroring PB-1.5's fake-client pattern.
+    `plans/bl11-stage4-fail-closed/plan.md` step 4 (`BL-11` Stage 4):
+    synthesizes a working live-LOS join by default -- see
+    `test_naked_eye_source.py`'s `FakeAircraftClient` for the full
+    reasoning (duplicated here rather than shared)."""
 
     def __init__(self, world_objects: dict[str, Any]) -> None:
         self._world_objects = world_objects
 
     def get_world_objects_latest(self) -> dict[str, Any]:
-        return self._world_objects
+        if "dcs_model_time_s" in self._world_objects:
+            return self._world_objects
+        return {**self._world_objects, "dcs_model_time_s": 0.0}
 
     def get_unit_velocity_latest(self) -> dict[str, Any] | None:
         return None
 
     def get_line_of_sight_latest(self) -> dict[str, Any] | None:
-        return None
+        objects = self._world_objects.get("objects", [])
+        verdicts: dict[str, Any] = {}
+        for obj in objects:
+            name = obj.get("unit_name")
+            if isinstance(name, str):
+                verdicts[name] = {"building_clear": True, "terrain_clear": True}
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "hour_used": None,
+            "fov_half_deg_used": None,
+            "verdicts": verdicts,
+        }
 
 
 @pytest.fixture(autouse=True)
@@ -96,11 +118,6 @@ def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         association, "wgs84_to_dcs", lambda theatre, lat, lon: (lat, lon)
     )
-
-
-@pytest.fixture(autouse=True)
-def clear_line_of_sight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: True)
 
 
 def _run_pipeline(emit_mode: str) -> tuple[ContactStore, list[float]]:

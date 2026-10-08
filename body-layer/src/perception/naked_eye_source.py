@@ -276,7 +276,7 @@ from perception.source import (
     OwnshipState,
     PositionUncertainty,
 )
-from perception.visibility import VisibilityResult, check_visibility
+from perception.visibility import LiveLosCoverage, VisibilityResult, check_visibility
 
 #: Caps newly-admitted *clusters* (groups) per poll tick, nearest-first --
 #: how many distinct things register in one fixation, not how many
@@ -381,6 +381,20 @@ class NakedEyePerceptionSource:
     #: object_ids and the emitted `Observation.id` once clustering and
     #: emission are done (see `poll()`).
     trace_sink: DetectionTraceCollector | None = None
+    #: Fail-closed regression guard (`plans/bl11-stage4-fail-closed/plan.md`,
+    #: `BL-11` Stage 4 step 4) -- deliberately always-constructed, not
+    #: optional and not gated by any flag (unlike `trace_sink` above):
+    #: gate 4 of `check_visibility` now rejects a candidate with no live
+    #: LOS verdict rather than falling back to world-model's offline
+    #: primitive, so a dead live-LOS feed would otherwise be silently
+    #: indistinguishable from an empty sky. `logger.py`'s poll loop reads
+    #: this after every `poll()` call and logs when `no_verdict` is
+    #: nonzero. Not settable at construction (`init=False`) -- there is
+    #: exactly one correct value, a fresh counter, so no caller should be
+    #: passing one in.
+    live_los_coverage: LiveLosCoverage = field(
+        default_factory=LiveLosCoverage, init=False, repr=False
+    )
     #: The gaze/scan filter (`plans/detection-cones-slice2/plan.md`,
     #: `perception.gaze`) -- a frozen `ScanPlan`, not a `Gaze` (2C: gaze
     #: needs no state at all, module docstring point 1 of the plan's "hard
@@ -575,6 +589,7 @@ class NakedEyePerceptionSource:
                 gaze=candidate_gaze,
                 trace=self.trace_sink,
                 group_salient=candidate.object_id in salient_ids,
+                live_los_coverage=self.live_los_coverage,
             )
             if self.trace_sink is not None:
                 resolved_los = los_by_object_id.get(candidate.object_id)

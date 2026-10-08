@@ -493,9 +493,17 @@ sortie actually exercises it, and say which one.
   > *testing* only tool, not for live flight. Not only because of performance, but especially for
   > *correctness*."*
 
-  So the consumer of `line_of_sight_clear` is going away: `body-layer`'s `BL-11` Stage 4 removes it
-  from the live path (join first, then fail closed — 323 of 425 objects in the 2026-10-05 sortie
-  never got a live verdict, so the order matters). Three consequences for the stages below, and the
+  **CONFIRMED 2026-10-08 — the consumer is gone, not just going.** `body-layer`'s `BL-11` Stage 4
+  steps 3-4 shipped and DoD-passed (`feature/bl11-stage4-fail-closed`): `visibility.py`'s gate 4
+  now fails closed on `candidate.live_los_clear` alone, and `line_of_sight_clear` is re-exported
+  into that module's namespace unused by any call below it — kept importable only so
+  `test_visibility.py`'s negative-space tests can assert it is never invoked. Verified directly
+  (`grep -n "line_of_sight_clear" body-layer/src/perception/*.py`): the only remaining call sites
+  are the re-export, its own definition in `geometry.py`, and offline/fixture test code. **So
+  `line_of_sight_clear` is now a purely offline/testing-only primitive in practice, not just by
+  intent** — which is exactly what the user's direction below asked for, and what makes Stage 1's
+  bug below a fixture-correctness question rather than a live-correctness one. Three consequences
+  for the stages below, and the
   correction is kept visible because the reports got this wrong in a specific, instructive way —
   they proposed making a silent fallback *observable*, which is right for a fallback allowed to
   exist and wrong for one that must not run:
@@ -506,7 +514,7 @@ sortie actually exercises it, and say which one.
     from "a live gate is lying to the pilot" to "a test oracle will lie to us".
   - **Stage 2 keeps its priority for a different reason.** Deriving the tolerance from the store no
     longer protects a live gate; it protects every *other* elevation consumer, and it is still
-    `WM-B3`'s literal mechanism. The 12 m constant itself is on its way out of the live path with
+    `WM-B3`'s literal mechanism. The 12 m constant itself is now out of the live path along with
     its only caller, which the user had already said in
     `docs/acceptance/2026-10-05-sortie-feedback.md`: *"becomes obsolete and incorrect. It may be
     used in test code when LOS is simulated offline, but must not be used in actual code."*

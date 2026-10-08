@@ -944,3 +944,13 @@ two functions that must agree (2026-09-19).
   delimiter-joined format, re-check what characters the delimiter still assumes are impossible in the
   field's content — the assumption can go from "false in practice" to "one bad mission away" without
   the wire format itself changing at all (`plans/los-hook-statics/security-review.md` Finding 1).
+- **A `caplog.at_level(...)` test proves a log call fires; it cannot prove the call is visible
+  under the configuration a real run actually has.** The fixture forcibly lowers the effective
+  level for its own block, which is exactly what hid a real defect from three review rounds and a
+  security deep analysis: `body-layer`'s `logger.py` configured no handler or level anywhere, so
+  Python's `logging.lastResort` fallback (threshold `WARNING`) silently dropped every `INFO` call
+  on a real run, while every test for those same calls used `caplog.at_level(logging.INFO, ...)`
+  and passed. A module with no logging configuration of its own needs at least one test that
+  captures the real stream (`capsys`, or a subprocess) with no `caplog` level override at all —
+  that is the only way to tell "the call fires" from "the call is visible"
+  (`plans/bl11-stage4-fail-closed/dod-check.md`, implementation.md round 4).

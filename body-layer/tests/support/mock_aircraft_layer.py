@@ -1,9 +1,18 @@
 """`MockAircraftLayerServer` -- a real loopback `http.server.HTTPServer`
-serving `GET /telemetry/latest`, `GET /world_objects/latest`, and
-`GET /petrovich_indication/latest` from a preloaded list of poll frames,
-mirroring `tests/test_aircraft_client.py`'s handler-factory pattern (a real
-server, not a mocked `urllib`) so the mock-flight chain tests exercise the
-real HTTP wire shape end to end.
+serving `GET /telemetry/latest`, `GET /world_objects/latest`,
+`GET /petrovich_indication/latest`, and `GET /line_of_sight/latest` from a
+preloaded list of poll frames, mirroring `tests/test_aircraft_client.py`'s
+handler-factory pattern (a real server, not a mocked `urllib`) so the
+mock-flight chain tests exercise the real HTTP wire shape end to end.
+
+**`line_of_sight` added by `plans/bl11-stage4-fail-closed/plan.md` step 4
+(`BL-11` Stage 4)**: fail-closed means a naked-eye candidate with no live
+LOS verdict is now rejected outright rather than falling back to
+world-model's offline primitive, so this server has to actually serve one
+for the mock-flight chain's naked-eye observations to be admitted at all --
+see `tests/fixtures/mock_flight_canonical.json`'s own per-frame
+`"line_of_sight"` key (added alongside this change) and `_world_object`'s
+new `unit_name` field.
 
 **Frame advance is keyed on `GET /telemetry/latest` only** -- this is the
 one correctness-critical property this module exists to get right (see
@@ -111,6 +120,10 @@ class MockAircraftLayerServer:
         with self._lock:
             return self._frames[self._served_index].get("petrovich_indication")
 
+    def _line_of_sight_response(self) -> Any:
+        with self._lock:
+            return self._frames[self._served_index].get("line_of_sight")
+
 
 def _make_handler(server: MockAircraftLayerServer) -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
@@ -121,6 +134,8 @@ def _make_handler(server: MockAircraftLayerServer) -> type[BaseHTTPRequestHandle
                 self._respond(200, server._world_objects_response())
             elif self.path == "/petrovich_indication/latest":
                 self._respond(200, server._petrovich_indication_response())
+            elif self.path == "/line_of_sight/latest":
+                self._respond(200, server._line_of_sight_response())
             else:
                 self._respond(404, {"error": "not found"})
 

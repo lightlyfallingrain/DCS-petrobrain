@@ -855,6 +855,104 @@ def _push_gaze_line(
     return gaze.label
 
 
+def _warn_live_los_coverage_gap_once(
+    sources: list[PerceptionSource], already_warned: bool
+) -> bool:
+    """Reads the naked-eye source's `LiveLosCoverage` counter
+    (`plans/bl11-stage4-fail-closed/plan.md`, `BL-11` Stage 4 step 4) and
+    logs a one-time warning via the standing `logging.getLogger(__name__)`
+    channel the first time `no_verdict` becomes nonzero -- called from
+    both `_run_console_poll_loop` and `_run_crew_text_poll_loop`.
+
+    **Not `_push_gaze_line`'s log-on-change shape, deliberately** -- that
+    function's earlier revision copied it and that was the bug (review
+    round 1, `plans/bl11-stage4-fail-closed/review.md`). `_push_gaze_line`
+    repeats on a *label* that can hold steady at a repeating value, so
+    "changed since last call" is a real steady-state guard. `no_verdict`
+    is cumulative for the process lifetime, so under a continuously dead
+    feed it is strictly greater than whatever was last logged on every
+    single poll -- there is no steady state for a monotonically
+    increasing counter to settle into, so a "log when it grew" guard logs
+    every poll for the rest of the sortie, which is backwards from this
+    function's whole purpose (one line, not a flood). The fix is an
+    edge-trigger instead: log once on the zero-to-nonzero transition, and
+    never again regardless of how much further `no_verdict` grows. That
+    one line carries all the actionable information ("a gap exists");
+    `_log_live_los_coverage_summary` below is where the magnitude lives,
+    because it is only known at the end of the run.
+
+    On by default, with no `--flag` to gate it (unlike `--detection-
+    trace`) -- this is the regression guard, not an opt-in diagnostic
+    (plan Decision 2): a dead feed must be observable on an ordinary
+    sortie with no debugging flags set at all. A true no-op for a
+    `sources` list holding no naked-eye source (same guard
+    `_apply_active_gaze` uses).
+
+    Returns `True` once the warning has fired (unchanged from
+    `already_warned=True` on every later call), so the caller's local
+    carries forward to the next poll -- the same "carry a local across
+    polls" pattern `_push_gaze_line` uses for `last_gaze_label`, applied
+    to a different trigger condition."""
+    if already_warned:
+        return True
+    for source in sources:
+        if isinstance(source, NakedEyePerceptionSource):
+            coverage = source.live_los_coverage
+            if coverage.no_verdict > 0:
+                logger.warning(
+                    "live LOS coverage gap: naked-eye gate-4 evaluations "
+                    "started receiving no live verdict this sortie "
+                    "(world-model's offline LOS primitive is no longer "
+                    "used as a fallback -- affected candidates are "
+                    "rejected, not approximated); see the end-of-run "
+                    "summary for the final totals"
+                )
+                return True
+            return False
+    return False
+
+
+def _log_live_los_coverage_summary(sources: list[PerceptionSource]) -> None:
+    """Unconditional end-of-run totals for the naked-eye source's
+    `LiveLosCoverage` counter -- logged exactly once, from each poll
+    loop's own `finally:` block, regardless of whether
+    `_warn_live_los_coverage_gap_once` ever fired (user design call,
+    `plans/bl11-stage4-fail-closed/review.md`'s dispatching brief, not
+    the Reviewer's own required fix).
+
+    **Logged even when `no_verdict` is zero.** A `0/N` line is the guard
+    visibly passing; without one, a silent log is indistinguishable from
+    a guard that never ran at all -- the same reasoning
+    `detection_trace.py`'s `static_enum_failures` counter already applies
+    on the Hook side. The transition warning above tells the pilot *that*
+    a gap started; this tells whoever reads the log afterward *how big*
+    it ended up, which the transition warning cannot know at the moment
+    it fires -- this counter's stated purpose
+    (`body-layer/ROADMAP.md`, Stage 4) is a post-flight regression guard,
+    and the magnitude is the number that guard exists to report.
+
+    Must never raise: this runs during teardown that still has to close
+    `trace_writer`/`belief_truth_writer`/`world_model_conn` after it, so
+    a failure here is logged and swallowed rather than allowed to skip
+    that teardown -- the same non-negotiable `finally:` has for every
+    other resource it closes. A true no-op for a `sources` list holding
+    no naked-eye source (same guard `_apply_active_gaze` and
+    `_warn_live_los_coverage_gap_once` use)."""
+    try:
+        for source in sources:
+            if isinstance(source, NakedEyePerceptionSource):
+                coverage = source.live_los_coverage
+                logger.info(
+                    "live LOS coverage: %d/%d gate-4 evaluations had no "
+                    "live verdict this sortie",
+                    coverage.no_verdict,
+                    coverage.evaluated,
+                )
+                return
+    except Exception:
+        logger.exception("live LOS coverage summary failed (ignoring)")
+
+
 def _render_eyesight_frame(
     runner: ConsolePerceptionRunner,
     trace_records: list[DetectionTrace],
@@ -1193,6 +1291,7 @@ def _run_console_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
+        live_los_warned = False
         connection = _ConnectionReporter()
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
@@ -1229,6 +1328,9 @@ def _run_console_poll_loop(
                         trace_writer.write_poll(trace_collector, runner.store)
                     else:
                         trace_collector.records.clear()
+                live_los_warned = _warn_live_los_coverage_gap_once(
+                    runner.sources, live_los_warned
+                )
                 if runner.overlay_client is not None and runner.last_t_sim is not None:
                     last_gaze_label = _push_gaze_line(
                         runner.overlay_client,
@@ -1244,6 +1346,7 @@ def _run_console_poll_loop(
                     logger.exception("console poll cycle failed; continuing")
             next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
+        _log_live_los_coverage_summary(runner.sources)
         if trace_writer is not None:
             trace_writer.close()
         if belief_truth_writer is not None:
@@ -1481,6 +1584,7 @@ def _run_crew_text_poll_loop(
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         last_gaze_label: str | None = None
+        live_los_warned = False
         connection = _ConnectionReporter()
         # BL-11 Stage 1: sleep to a deadline, not for a fixed interval after
         # the work -- see `_wait_for_next_tick`.
@@ -1539,6 +1643,9 @@ def _run_crew_text_poll_loop(
                         trace_writer.write_poll(trace_collector, runner.store)
                     else:
                         trace_collector.records.clear()
+                live_los_warned = _warn_live_los_coverage_gap_once(
+                    runner.sources, live_los_warned
+                )
                 if runner.last_t_sim is not None:
                     crew_console.enrichment = runner.enrichment
                     # plans/spu8-intercom/plan.md Stage 5: a one-shot
@@ -1620,6 +1727,7 @@ def _run_crew_text_poll_loop(
                     logger.exception("crew-text poll cycle failed; continuing")
             next_tick = _wait_for_next_tick(stop_event, next_tick, poll_interval_s)
     finally:
+        _log_live_los_coverage_summary(runner.sources)
         if trace_writer is not None:
             trace_writer.close()
         if belief_truth_writer is not None:
@@ -1834,6 +1942,54 @@ def _per_run_log_paths(
     )
 
 
+def _configure_logger_for_main() -> None:
+    """Give this module's own `logger` (`logging.getLogger(__name__)`,
+    above) a level and a handler, so `_log_live_los_coverage_summary`'s
+    end-of-run line and `_warn_live_los_coverage_gap_once`'s transition
+    warning are actually visible on a real run (`plans/
+    bl11-stage4-fail-closed/dod-check.md`'s required fix).
+
+    **Why this was needed at all**: nothing in this codebase configured
+    logging anywhere, so with no handler attached anywhere in the
+    hierarchy, Python falls back to `logging.lastResort`, whose threshold
+    is `WARNING` (30) -- `logger.warning(...)` calls printed by accident
+    of that fallback, but every `logger.info(...)` call, including the
+    coverage summary's unconditional `0/N` line, was silently dropped on
+    every real sortie. All three entry points (`--console`, `--crew-text`,
+    and the plain-logger `else:` branch) share this one module-level
+    `logger`, so configuring it once here covers all three.
+
+    **Deliberately scoped to this module's own logger instance, never
+    `logging.basicConfig`/the root logger.** `main()` is this subproject's
+    own standalone entrypoint (`python -m logger ...`), so touching
+    logging configuration here is defensible -- but a global
+    `basicConfig` call would do two things this fix does not want: clobber
+    a host application's own logging setup if this module were ever
+    imported into a larger process instead of run standalone, and raise
+    *every other module's* logger to `INFO` as a side effect, which would
+    turn on `perception.hybrid_source`'s per-dropped-detection `INFO` line
+    globally -- a flood, and a second regression of the exact kind this
+    fix exists to close in the opposite direction. Named loggers
+    (`logging.getLogger(__name__)`) are independent of each other unless
+    one's name is a dotted child of another's; `"logger"` (this module's
+    `__name__` when run via `python -m logger`) is not a parent of
+    `"perception.hybrid_source"` or `"belief.crew_console"`, so this call
+    cannot reach them.
+
+    Clears and re-adds this logger's own handler on every call rather than
+    checking `if not logger.handlers:` first -- idempotent in production
+    (`main()` runs this exactly once per process), and correct under
+    repeated in-process calls in tests, where a guard would bind the
+    handler's `StreamHandler` to whichever `sys.stderr` was current on the
+    *first* call and never see a later test's `capsys`-substituted stream
+    again."""
+    logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def main() -> None:
     """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
     ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
@@ -1842,7 +1998,11 @@ def main() -> None:
     tests (a live/replay-loop driver, same posture as
     `aircraft-layer/src/collector/__main__.py`'s own untested `main()`);
     `PerceptionLogger`'s, `HybridPerceptionSource`'s, and
-    `NakedEyePerceptionSource`'s own logic is."""
+    `NakedEyePerceptionSource`'s own logic is.
+
+    First line is `_configure_logger_for_main()` -- see its own docstring
+    for why logging needs configuring here at all."""
+    _configure_logger_for_main()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--aircraft-layer-url",
@@ -2337,23 +2497,36 @@ def main() -> None:
             poll_thread.join()
     else:
         world_model_conn = open_world_model(world_model_db)
+        # Built outside the try so `finally`'s summary call always has a
+        # valid (possibly empty) list to read, even if `_build_sources`/
+        # `PerceptionLogger(...)` itself raised before `perception_logger`
+        # would otherwise have been bound -- same reasoning as
+        # `ConsolePerceptionRunner.sources`'s `default_factory=list` in the
+        # other two poll loops (see `_run_console_poll_loop`'s `finally:`).
+        sources: list[PerceptionSource] = []
         try:
+            sources = _build_sources(
+                aircraft_client,
+                theatre,
+                world_model_conn,
+                emit_mode="on_change",
+            )
             perception_logger = PerceptionLogger(
                 aircraft_client=aircraft_client,
-                sources=_build_sources(
-                    aircraft_client,
-                    theatre,
-                    world_model_conn,
-                    emit_mode="on_change",
-                ),
+                sources=sources,
                 output=sys.stdout,
             )
+            live_los_warned = False
             while True:
                 perception_logger.run_once()
+                live_los_warned = _warn_live_los_coverage_gap_once(
+                    sources, live_los_warned
+                )
                 time.sleep(args.poll_interval_s)
         except KeyboardInterrupt:
             pass
         finally:
+            _log_live_los_coverage_summary(sources)
             world_model_conn.close()
 
 
