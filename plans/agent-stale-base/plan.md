@@ -29,7 +29,54 @@ covered it because each agent happened to check. The failure mode if one did not
 confidently doing the work against documents that do not exist, which is the 2026-09-27 class of
 defect the rule was written for.
 
-## The mechanism — established as far as cheap evidence allows
+## RESOLVED 2026-10-09 — the cause is `origin/main`, and it is neither candidate below
+
+`git reflog show worktree-agent-a8670f1ca75f53a4a`:
+
+```
+2856770 …@{0}: merge 2856770…: Fast-forward
+29217c0 …@{1}: branch: Created from origin/main
+```
+
+**Agent branches are created from `origin/main`.** Not from the project root's HEAD, not from local
+`main`, not from the dispatching session's HEAD. The distinguishing test described below is answered
+and does not need to be run.
+
+Three consequences:
+
+1. **Candidate fix 1 — "do feature work in the main checkout" — would not have worked.** Where the
+   main loop sits is irrelevant; so is what the project root has checked out. It was marked
+   conditional on cause 1, and cause 1 is false.
+2. **Candidate fix 2 is the only one that helps**, and it is now the whole of the work: have
+   `.claude/scripts/agent-sha-gate.sh` compute the dispatching session's `HEAD` and inject it as the
+   sha to name, rather than relying on the dispatcher to type it. Under this cause a stale base is
+   not an accident to be detected — it is the **guaranteed** starting state for any dispatch whose
+   target is not `origin/main` itself, which is every feature-branch dispatch there will ever be.
+3. **A latent hazard this exposes, worth the hook knowing about.** The base is the *remote-tracking*
+   ref. Local `main` and `origin/main` were identical all session (`git rev-list --left-right
+   --count main...origin/main` → `0 0`), so it never bit — but **work merged to local `main` and not
+   yet pushed puts every agent behind even local `main`**, with nothing in the dispatch naming a sha
+   that exists only locally. A dispatch should either verify `main` is pushed or name a sha reachable
+   from `origin/main` plus the branch.
+
+### Bearing on the "all work in worktrees" direction (user, 2026-10-09)
+
+> *"It would actually be more convenient for me if **all work** is done via worktrees. That would
+> then free the root dir to be whatever branch I happen to need for testing. Or, most probably,
+> `main` where I could also add user input documents without disturbing the ongoing agentic work."*
+
+**That direction is independent of this problem and can be adopted on its own merits.** Because the
+base is `origin/main` regardless, freeing the root dir neither fixes nor worsens the stale base. The
+earlier draft of this plan implied the two were coupled — they are not. See
+`plans/all-work-in-worktrees/plan.md`.
+
+## The mechanism — superseded by the section above, kept for the probe it records
+
+> **Superseded by "RESOLVED" above.** This narrowed the cause to two candidates and specified a test
+> to distinguish them; the reflog answered it instead, and neither candidate was right. Kept because
+> the probe it records — a worktree created from a session's own working directory defaults to that
+> session's HEAD — is a true fact that the resolution does not contain, and it is what rules out any
+> fix based on where the main loop sits.
 
 **A new worktree created from *this* session's working directory defaults to *this* session's HEAD.**
 Probed directly: `git worktree add --detach <scratch>` run from the `doc-conventions` worktree
