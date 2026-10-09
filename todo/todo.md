@@ -6,5 +6,6 @@ first: it lists the priority items at the top, marked, and carries the dated ori
 — where things stand, which sortie produced which finding, and what is owed by the user — that used
 to open this file. The cross-cutting backlog is separate and unchanged in location: `todo/backlog.md`,
 itself split to `todo/backlog/`. See `docs/DOC_CONVENTIONS.md` for the convention this follows. This
-file is kept, not deleted, because root `CLAUDE.md` names it by path three times, `AGENTS.md` and
-`.claude/scripts/session-start.sh` once each, and every such reference has to keep resolving.
+file is kept, not deleted, because root `CLAUDE.md` names it by path five times,
+`.claude/scripts/session-start.sh` twice, and a dozen other skills, agent roles and scripts besides
+— every one of those references has to keep resolving.
