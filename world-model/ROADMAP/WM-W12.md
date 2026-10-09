@@ -1,7 +1,7 @@
 # WM-W12 — OSM ingest optimization + landcover split
 
 - [x] **OSM ingest optimization + landcover split (no M-number — an optimization and data-model
-  change on M9, not a milestone; done 2026-09-16, merged 2026-09-16, merge `b9d7c17`, branch
+  change on WM-M9, not a milestone; done 2026-09-16, merged 2026-09-16, merge `b9d7c17`, branch
   `feature/osm-landcover-optimization`).** #status/done
   Two changes in one branch: a tags pre-filter step that shrinks the `.osm.pbf` before parsing
   (RUN.md §2.4), and a rework of what OSM contributes — `road` dropped from OSM entirely (DCS
@@ -16,7 +16,7 @@
   ~60 min wall-clock): `landcover=44811` (`fields` 21428, `forest` 9710, `orchard` 7171,
   `scrub` 4027, `barren` 2475), `coastline=1269`, `water=5119`, `settlement=26182`,
   `named_place=23044` (21,862 OSM + 1,182 DCS `towns.lua` — both kinds share `named_place`),
-  `road=14833` (DCS-only, unchanged from M7). Simplification: 8,343,864 → 2,010,767 vertices
+  `road=14833` (DCS-only, unchanged from WM-M7). Simplification: 8,343,864 → 2,010,767 vertices
   (24.1% kept) across 12,450 multipolygon relations, `relations_skipped=0`,
   `ways_skipped_unresolved_nodes=0`. Drops are all counted, per the module's "never a silent
   drop" convention: `rings_dropped_min_area=183492`, `holes_kept=4575` vs
@@ -63,11 +63,11 @@
   - *`describe_position` p99 at full-theatre scale* — **answered** (user-run
     `tools/measure_m7_stage4_perf.py latency --region syria-full`, 348 points: 8 control + 300
     random + 40 boundary): mean 53.4 ms, median 24.5 ms, p95 211.6 ms, **p99 440.7 ms**, max
-    551.3 ms. Every quantile is roughly half M7's recorded baseline (mean 136.8 / median 52.4 /
-    p95 497.7 / p99 803.4 ms), which also retires M7's own open flag that its p99 tail ran "~3x
-    M5's baseline".
+    551.3 ms. Every quantile is roughly half WM-M7's recorded baseline (mean 136.8 / median 52.4 /
+    p95 497.7 / p99 803.4 ms), which also retires WM-M7's own open flag that its p99 tail ran "~3x
+    WM-M5's baseline".
 
-    **The apparent halving against M7 is not a code effect — do not cite it as one.** Resolved
+    **The apparent halving against WM-M7 is not a code effect — do not cite it as one.** Resolved
     2026-09-16 by measuring the *same* milestone's store on both hosts:
 
     | | Mac | Windows (WSL, store on `/mnt/d`) | ratio |
@@ -79,7 +79,7 @@
     | min | 0.31 ms | 27.7 ms | 89x |
 
     Same store content, same code, ~4.4x apart at p99. **Host variance is several times larger
-    than any delta this milestone could plausibly have caused**, and M7's 803 ms baseline has no
+    than any delta this milestone could plausibly have caused**, and WM-M7's 803 ms baseline has no
     recorded host and falls *between* the two — so it cannot support a claim in either
     direction. Any future `describe_position` latency comparison must name its host and,
     ideally, re-measure the baseline store on that same host; a bare number is not evidence.

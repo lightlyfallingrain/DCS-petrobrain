@@ -71,20 +71,41 @@ ALL_IDS=""
 for dir in $DIRS; do
     ALL_IDS="$ALL_IDS
 $(find "$dir" -maxdepth 1 -name '*.md' -exec basename {} .md \; \
-    | grep -E '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || true)"
+    | grep -E '^[A-Z]+-[A-Za-z0-9.]+$' || true)"
 done
 
 for dir in $DIRS; do
     # Known IDs for THIS directory only -- still needed for check 3, which is a per-directory
     # fact (an index only ever lists its own directory's entries). Check 1 below uses ALL_IDS.
     ids=$(find "$dir" -maxdepth 1 -name '*.md' -exec basename {} .md \; \
-        | grep -E '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || true)
+        | grep -E '^[A-Z]+-[A-Za-z0-9.]+$' || true)
 
     # Check 2: filename vs. own H1 first token.
+    #
+    # Check 0, inline below, is the one that keeps checks 2 and 3 honest. Every file in a split
+    # directory must be either an entry (ID-shaped name) or a known index shape; anything else
+    # is reported rather than skipped. Added 2026-10-09, after world-model's bare `M<n>` IDs
+    # showed what the previous silent skip costs: `M5` did not match the ID pattern, so check 2
+    # never read `M5.md`'s H1 and check 3 never asked whether it was indexed -- both reported
+    # zero findings against a mutated file, while the dangling-link check went loud with twelve
+    # false positives. The loud half is the trap: acting on it would have deleted twelve correct
+    # links and left the silent half skipping twelve files indefinitely. Widening the ID regex
+    # fixed that one instance; this closes the class, so the next unanticipated filename shape
+    # fails the gate instead of disappearing from it. (The `M<n>` form itself is gone -- the
+    # user renamed those IDs to `WM-M<n>` the same day, which is why the regex is simple again.)
     for f in "$dir"/*.md; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
-        printf '%s\n' "$base" | grep -qE '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || continue  # skip index files
+        if ! printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$'; then
+            case "$base" in
+                *-roadmap|*-backlog|*-tasks) ;;  # a known index shape, legitimately not an entry
+                *)
+                    FAIL=1
+                    echo "roadmap-entry-consistency-gate: $f -- neither an ID-shaped entry name nor a known index shape (*-roadmap.md, *-backlog.md, *-tasks.md); it would be skipped by every other check in this gate" >&2
+                    ;;
+            esac
+            continue
+        fi
         h1=$(grep -m1 '^# ' "$f" || true)
         h1_id=$(printf '%s' "$h1" | sed -E 's/^# +//' | awk '{print $1}')
         if [ "$h1_id" != "$base" ]; then

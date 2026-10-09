@@ -1,6 +1,6 @@
-# M10 — Road-junction detection
+# WM-M10 — Road-junction detection
 
-- [x] **M10 — Road-junction detection (done, merged 2026-09-13).** #status/done Derives road-junction
+- [x] **WM-M10 — Road-junction detection (done, merged 2026-09-13).** #status/done Derives road-junction
   landmarks purely from geometry over the already-parsed `.routes`/road layer — no new
   dependency, no OSM data. Grid-bucketed union-find over road-segment endpoints/interior
   vertices (`src/roadnet/junctions.py`); a junction is emitted at degree ≥ 3 (endpoint = 1 arm,

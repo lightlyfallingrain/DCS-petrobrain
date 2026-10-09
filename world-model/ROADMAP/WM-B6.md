@@ -128,7 +128,7 @@ present on `main`. Every sentence below is kept exactly as the source wrote it, 
   - **Licence constraint, and it rules out most of the obvious names**: GRASS, RichDEM, pysheds and
     pytopotoolbox are **GPL-3.0 / GPLv2+**, which conflicts with this project's intent to be public
     open source under a permissive licence. pysheds additionally pulls GDAL back in via rasterio,
-    which M4 deliberately avoided. **Do not let a future architect reach for these without seeing
+    which WM-M4 deliberately avoided. **Do not let a future architect reach for these without seeing
     this.** WhiteboxTools' MIT licence was corroborated from secondary sources but **not** read from
     its own LICENSE file (one fetch 404'd) — verify before committing to it. Landlab's MIT is
     unverified for the same reason.
@@ -199,7 +199,7 @@ present on `main`. Every sentence below is kept exactly as the source wrote it, 
   run at every world model rebuild. If cache exists, then just bring that into the sqlite."*
 
   This is the established third-store pattern, not a new mechanism — `world-model/CLAUDE.md`
-  documents `data/world-model/<region>-osm-cache.sqlite` alongside the base store and M8's probe
+  documents `data/world-model/<region>-osm-cache.sqlite` alongside the base store and WM-M8's probe
   store, built for the same reason (a ~25-30 minute classify pass that hurts a rebuild loop).
   Mirror it:
 
@@ -233,7 +233,7 @@ present on `main`. Every sentence below is kept exactly as the source wrote it, 
   - **A ground unit's elevation already comes from DCS, exactly, per poll.**
     `aircraft_layer.schema.world_objects.WorldObjectSample` carries `altitude_m` on every object,
     and for a ground unit that *is* the ground elevation at its own position — DCS-authoritative,
-    not SRTM-interpolated, and better than anything the grid can give (M7 measured the grid at
+    not SRTM-interpolated, and better than anything the grid can give (WM-M7 measured the grid at
     −7.19 m mean / 11.52 m stddev against DCS). So the foot/slope/crest judgement is
     *contact's own reported altitude* against *the landform's stored `elevation_range_m`*. Neither
     term needs `sample_grid`.
@@ -332,7 +332,7 @@ present on `main`. Every sentence below is kept exactly as the source wrote it, 
   synthetic junction with no approach chain, it does not, and the junction splits into N stubs
   instead. Verified with synthetic fixtures (straight line, spur, 4-arm X) in `tests/test_skeleton.py`.
 
-  **One discovered gap outside this plan's own scope, also handled rather than left broken**: M8's
+  **One discovered gap outside this plan's own scope, also handled rather than left broken**: WM-M8's
   `build.pipeline.add_probe_chunk` called the now-deleted `ingest_terrain_chunk` for chunk-scoped
   ridge/valley extraction. Geomorphons' processing unit is a whole SRTM tile with a multi-kilometre
   margin, not a 5 km probe chunk, and this plan did not design a chunk-scoped equivalent. Chunk-scoped

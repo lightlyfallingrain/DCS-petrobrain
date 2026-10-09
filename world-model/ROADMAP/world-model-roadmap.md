@@ -15,10 +15,10 @@ Obsidian vault, so a wikilink here reaches `body-layer/ROADMAP/` and `todo/` ent
 this directory's own.
 
 **The ID space in this directory is deliberately irregular, and `docs/DOC_CONVENTIONS.md` records
-it rather than fixing it.** Milestones are bare `M<n>` (`M0.md`…`M11.md`), backlog items are
+it rather than fixing it.** Milestones are bare `M<n>` (`WM-M0.md`…`WM-M11.md`), backlog items are
 `WM-B<n>`, and work items that are neither — a bug fix, a cross-subproject refactor, an
-optimization, the entries whose own text says *"no M-number"* — are `WM-W<n>`. Renaming `M5` to
-`WM-5` would mean rewriting several hundred bare `M5`/`M7` prose mentions across `plans/` and
+optimization, the entries whose own text says *"no M-number"* — are `WM-W<n>`. Renaming `WM-M5` to
+`WM-5` would mean rewriting several hundred bare `WM-M5`/`WM-M7` prose mentions across `plans/` and
 `research/`, which `docs/PROCESS.md` forbids.
 
 ## Live acceptance
@@ -58,28 +58,28 @@ work rule `plans/obsidian-links-and-tags/plan.md` sets out.
 Milestones and the un-numbered work items that sit beside them, in the source document's own
 order:
 
-- [[M0]] — Repo + research notebook
-- [[M1]] — One coordinate
-- [[M2]] — Raster understanding
-- [[M3]] — OSM overlay
-- [[M4]] — DCS elevation
-- [[M5]] — First persistent model
-- [[M6]] — Terrain semantics
-- [[M7]] — Full theatre pipeline
-- [[M8]] — Incremental probe store
+- [[WM-M0]] — Repo + research notebook
+- [[WM-M1]] — One coordinate
+- [[WM-M2]] — Raster understanding
+- [[WM-M3]] — OSM overlay
+- [[WM-M4]] — DCS elevation
+- [[WM-M5]] — First persistent model
+- [[WM-M6]] — Terrain semantics
+- [[WM-M7]] — Full theatre pipeline
+- [[WM-M8]] — Incremental probe store
 - [[WM-W6]] — Line-of-sight query primitive
-- [[M10]] — Road-junction detection
+- [[WM-M10]] — Road-junction detection
 - [[WM-W7]] — Road-junction detection memory fix
 - [[WM-W8]] — Road-junction progress logging
 - [[WM-W9]] — HTTP API server
-- [[M9]] — OSM augmentation (geofabrik)
+- [[WM-M9]] — OSM augmentation (geofabrik)
 - [[WM-W10]] — OSM streaming-ingest memory fix
 - [[WM-W11]] — OSM classified-feature persistent cache
 - [[WM-W12]] — OSM ingest optimization + landcover split
 
 Ahead:
 
-- [[M11]] — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild
+- [[WM-M11]] — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild
 
 ## Backlog (open, unscheduled)
 

@@ -56,7 +56,7 @@ bare `<prefix>-<n>` for milestones, both never-reuse, never-renumber. This conve
 more marker and one formatting rule:
 
 - **`<prefix>-W<n>`** — a work item that is neither a milestone (the bare `<prefix>-<n>` space,
-  which stays reserved for a subproject's own numbered plan stages, e.g. `BL-12`, `M12`) nor a
+  which stays reserved for a subproject's own numbered plan stages, e.g. `BL-12`) nor a
   backlog item (which means "not yet done", and most historical work items are done). Numbered
   from 1 per subproject, independent of both other spaces. Where a subproject has no declared
   milestone series consuming the bare space (audio-adapter, aircraft-layer), its Status entries
@@ -71,6 +71,34 @@ more marker and one formatting rule:
   sequences. One ID space may not span two files' numbering, because the next-unused-number rule is
   read per file and two readers would hand out the same number. `T` for todo; the entries are
   `todo/todo/X-T<n>.md`.
+- **World-model's milestones are `WM-M<n>` — REVISED 2026-10-09, by user direction.** *"for the
+  world model `M<n>`, rename them `WM-M<n>`. Then it fits the pattern used elsewhere."* So
+  world-model is now regular: milestones `WM-M0`…`WM-M11`, work items `WM-W<n>`, backlog
+  `WM-B<n>`, all three sharing the subproject's own prefix. **There is no irregular ID shape left
+  anywhere in the repo**, and the three consumers that had been widened to recognise one were
+  simplified back to `^[A-Z]+-[A-Za-z0-9.]+$` the same day.
+
+  **Why this was affordable when the version below judged it was not.** That judgement priced the
+  rename as `M5` → `WM-5`, which destroys the `M5` substring and strands every historical mention.
+  `WM-M5` **contains** `M5`, so a `grep M5` over the repo still finds the new ID *and* the ~2,100
+  untouched mentions in research notes, plans, audits, agent memory and source. The rename
+  therefore only had to touch documents that assert **current** state — 185 mentions across 34
+  files (world-model's own entries and index, `world-model/CLAUDE.md`, root `ROADMAP.md`,
+  `world-model/docs/`, `docs/concept/`) — and could leave the dated record alone, which is what
+  `docs/PROCESS.md` ("Superseding a decision") actually requires.
+
+  **The asymmetry that remains, stated because it is the cost that was accepted:** a `grep WM-M5`
+  does **not** find the bare `M5` mentions in historical documents. When searching for a
+  world-model milestone's history, search the bare form; the new form finds only live documents.
+  File *names* outside `world-model/ROADMAP/` keep the bare form too, deliberately —
+  `world-model/docs/M7_RUN_INSTRUCTIONS.md`, `M8_PROBE_STORE.md`, `M9_OSM_RUN_INSTRUCTIONS.md` are
+  cited by path, and renaming them would break citations to buy nothing the convention asks for.
+
+  > **Superseded by the entry above.** This recorded `M<n>` as an accepted irregularity on a cost
+  > estimate that assumed the only available rename was `WM-5`. The user's `WM-M<n>` form was not
+  > considered, and it is an order of magnitude cheaper for the reason given above. Kept because
+  > the tooling-tax paragraph under it is the live argument against any *future* irregular ID.
+
 - **World-model's `M<n>` stays irregular** — milestones are bare `M<n>` (`M0`…`M11`), backlog is
   `WM-B<n>`, work items are `WM-W<n>` (`WM-W1`…`WM-W12`, minted 2026-10-09 by that file's
   conversion; all three shapes are now live on disk). Fixing the mismatch would mean renaming
@@ -90,11 +118,22 @@ more marker and one formatting rule:
   to recognise one** — if another subproject ever wants one, that is the argument against.
   Enumerate the alternatives explicitly rather than loosening to `^[A-Z]`, which would also match
   a stray `README.md` or `RUN.md` and start checking it as an entry.
-- **A short basename is fine, but check it.** `M5.md` is as short as an entry filename gets, and
+
+  **The loud half was the trap, and that is the part worth carrying forward.** Twelve false
+  dangling-link findings invite exactly one response — delete the twelve links — which would have
+  looked like a clean fix while leaving the two silent checks skipping those same twelve files
+  indefinitely. Widening the regex fixed that one instance. **The class is now closed instead:**
+  `roadmap-entry-consistency-gate.sh` fails on any file in a split directory whose name is neither
+  ID-shaped nor a known index shape (`*-roadmap.md`, `*-backlog.md`, `*-tasks.md`), so an
+  unanticipated filename can no longer vanish from the gate that is supposed to be reading it.
+  Proven by reintroducing a bare `M99.md`: reported, exit 1.
+- **A short basename is fine, but check it.** `M5.md` was as short as an entry filename got, and
   Obsidian resolves wikilinks by basename across the *whole* vault, so a two-character name is
   where a collision is most likely. Checked mechanically before writing them (every `*.md`
   basename in the repo, against `M0`…`M11`): no collision, and the repo's existing duplicate
   basenames are all structural (`plan.md`, `review.md`, `CLAUDE.md`, …), none of them entry-shaped.
+  Those files are `WM-M<n>.md` now, so the two-character case no longer exists on disk — the check
+  is kept because the next convention change could reintroduce one.
   Run that check rather than assuming, and run it over the repo rather than over `*/ROADMAP/`.
 - **Numbers are assigned in document order, top to bottom of the file being converted** — so a
   rebase or a redone conversion produces the same numbers, rather than depending on whatever order
@@ -143,10 +182,13 @@ more marker and one formatting rule:
   already-converted directories to add them.** A retroactive link sweep is a separate change, and
   bundling one into a conversion makes the conversion's diff unreviewable — which defeats the only
   mechanism anyone has for checking that a conversion carried its text verbatim.
-- **Convert a backticked ID mention, not a bare one.** `` `M7` `` becomes `[[M7]]`;
-  "M7's baseline" in running prose stays as it is. The restraint is not stylistic: world-model's
-  roadmap carries several hundred bare `M5`/`M7` mentions, inside file paths, SQL and code
-  examples, and a bare-word rewrite would corrupt them. One scripted pass over backtick spans
+- **Convert a backticked ID mention, not a bare one.** `` `WM-M7` `` becomes `[[WM-M7]]`;
+  "WM-M7's baseline" in running prose stays as it is. The restraint is not stylistic: world-model's
+  roadmap carried several hundred bare `M5`/`M7` mentions, inside file paths, SQL and code
+  examples, and a bare-word rewrite would corrupt them. (That was written when the IDs were bare
+  `M<n>`, where the hazard was acute. The 2026-10-09 rename to `WM-M<n>` reduced it — `WM-M7` is
+  not a substring of anything — but the rule stands for every other prefix, and the rename itself
+  still had to exclude `M8_PROBE_STORE.md` by lookahead to avoid exactly this corruption.) One scripted pass over backtick spans
   whose *entire* content is a resolvable ID, skipping fenced blocks and self-references, is both
   safe and enough — it found 56 real links across the three files converted on 2026-10-09.
 - **A parent milestone with its own stages links down to them**, e.g. `Stages: [[AA-1.1]] [[AA-1.2]]

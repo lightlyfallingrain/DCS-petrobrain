@@ -1,9 +1,9 @@
 # WM-W11 — OSM classified-feature persistent cache
 
 - [x] **OSM classified-feature persistent cache (no M-number — a performance optimization, not a
-  milestone; done, merged 2026-09-13).** #status/done Extends M8's two-store pattern (persistent sibling store,
+  milestone; done, merged 2026-09-13).** #status/done Extends WM-M8's two-store pattern (persistent sibling store,
   atomic populate, explicit invalidation key) to a third instance: `<region>-osm-cache.sqlite`
-  caches already-classified `StoredFeature` rows from M9's pyosmium parse + classification pass.
+  caches already-classified `StoredFeature` rows from WM-M9's pyosmium parse + classification pass.
   Motivation: the ~25-30+ minute parse-plus-classify cost, while not eliminated, is incurred only
   once per `.osm.pbf`/classifier-version pair; subsequent `syria-full` rebuilds (schema bump, road
   fix, DCS patch) skip the expensive parse and copy pre-classified rows from the cache instead,
@@ -12,7 +12,7 @@
   `OSM_CACHE_SCHEMA_VERSION` (if `StoredFeature` shape changes), and region bbox (rows are baked
   with bbox clip). Populate is atomic (write at `.tmp`, `os.replace` to canonical path only after
   success) — no corrupt half-populated cache can silently lead to wrong data. Population happens
-  during the same `stream_features` pass M9 already runs (piggybacks on `_flush_nodes`/`_flush_ways`
+  during the same `stream_features` pass WM-M9 already runs (piggybacks on `_flush_nodes`/`_flush_ways`
   callbacks, not a second read of the `.osm.pbf`). Cache-hit read path reuses the existing
   `insert_features` per batch rather than a hand-rolled `ATTACH`+bulk-SQL optimization (documented
   fallback if real-scale performance proves insufficient). Implemented in `src/osm_cache/` (schema,

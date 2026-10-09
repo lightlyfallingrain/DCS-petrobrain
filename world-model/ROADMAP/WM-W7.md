@@ -1,13 +1,13 @@
 # WM-W7 — Road-junction detection memory fix
 
-- [x] **Road-junction detection memory fix (no M-number — a bug fix on M10, not a milestone; done,
-  merged 2026-09-13).** #status/done A real `syria-full` rebuild (with M9's OSM roads folded into the DCS
+- [x] **Road-junction detection memory fix (no M-number — a bug fix on WM-M10, not a milestone; done,
+  merged 2026-09-13).** #status/done A real `syria-full` rebuild (with WM-M9's OSM roads folded into the DCS
   `road` layer) died at Stage 5 ("road junctions") with a silent OOM-kill after OSM ingest
-  completed. Root cause: M10's junction detector (`roadnet.junctions.extract_clusters` +
+  completed. Root cause: WM-M10's junction detector (`roadnet.junctions.extract_clusters` +
   `ingest_junctions.ingest_junctions`) bulk-loaded the entire combined `road` feature layer
   into one Python list before clustering — a size (~500K+ vertices at `syria-full` scale with
   OSM) that the pipeline had never actually run against, only extrapolated for. Fixed: spatial
-  chunking reuses M8's existing chunk lattice (`store/chunks.py`), walking the theatre in 5 km
+  chunking reuses WM-M8's existing chunk lattice (`store/chunks.py`), walking the theatre in 5 km
   tiles, querying padded-bbox per tile (`padding_m = max(tolerance_m * 10.0, 10.0)` = 10 m at
   defaults), clustering only within that tile's padded extent, keeping only clusters whose
   centroid falls in the tile's unpadded core (centroid-in-core ownership — no double-count,
@@ -43,7 +43,7 @@ minted no marker for it.
 
 - **RESOLVED: `roadnet/junctions.py` memory issue at `syria-full`+OSM scale (2026-09-13).**
   Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`
-  addendum): M10's bulk-load approach (`store.reader.all_features`) failed in practice when that
+  addendum): WM-M10's bulk-load approach (`store.reader.all_features`) failed in practice when that
   `"road"` layer grew to include both DCS `.routes` and OSM `highway` ways (~500K vertices at
   theatre scale), causing a silent OOM-kill of the actual `syria-full` rebuild at Stage 5.
   **Fixed by junctions-streaming-fix (merged 2026-09-13):** spatial chunking walks the theatre
