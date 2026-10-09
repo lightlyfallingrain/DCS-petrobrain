@@ -14,8 +14,8 @@ yet scoped"* predates that sentence rather than contradicting it. Nothing else w
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
   rewrite. Per-theatre work identified: (1) Transverse Mercator projection params — `pydcs` has
   fitted values for every theatre, but each needs live-DCS verification against real
-  `coord.LOtoLL` output like M1 did for Syria, not trusted blind; (2) a `RegionDefinition` entry
-  (bbox/name) — cheap, mechanical; (3) raster chart registration (F10 paper map) — M2's Syria fit
+  `coord.LOtoLL` output like WM-M1 did for Syria, not trusted blind; (2) a `RegionDefinition` entry
+  (bbox/name) — cheap, mechanical; (3) raster chart registration (F10 paper map) — WM-M2's Syria fit
   was hand-derived from real-world control points on that specific raster, genuinely per-theatre
   manual work, not automatable from the pattern; (4) DCS source files (`towns.lua`/`beacons.lua`/
   `.routes`) — same parsers *should* work (same DCS-internal formats) but need an investigator

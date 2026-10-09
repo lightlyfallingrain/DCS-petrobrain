@@ -108,7 +108,7 @@ for dir in $DIRS; do
         # it this gate skipped all twelve of them silently, which is the wrong direction for a
         # gate whose whole value is a trustworthy negative. See the sibling consistency gate's
         # own header note for why the shape is enumerated rather than loosened to `^[A-Z]`.
-        printf '%s\n' "$base" | grep -qE '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || continue
+        printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
         scan_file "$f"
     done
 done

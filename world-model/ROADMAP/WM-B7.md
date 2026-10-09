@@ -45,7 +45,7 @@
   - What interpolation, and at what spacing. "Coarse" is the point — this competes against a
     2,365,517-sample grid that is 46 MB of a 704 MB store.
   - Whether it replaces the stored `grid`/`grid_sample` tables or sits beside them. Replacing them
-    changes `store.schema.SCHEMA_VERSION` and the M8 probe-store pairing; a sibling does not.
+    changes `store.schema.SCHEMA_VERSION` and the WM-M8 probe-store pairing; a sibling does not.
   - How it behaves where there are no landform lines at all — flat desert has neither ridges nor
     valleys, and the relief gate removed everything under 50 m. An interpolation with no control
     points nearby must say so rather than inventing a plausible height.

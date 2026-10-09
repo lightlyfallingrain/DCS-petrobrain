@@ -1,6 +1,6 @@
 # WM-W10 — OSM streaming-ingest memory fix
 
-- [x] **OSM streaming-ingest memory fix (no M-number — a bug fix on M9, not a milestone; done,
+- [x] **OSM streaming-ingest memory fix (no M-number — a bug fix on WM-M9, not a milestone; done,
   merged 2026-09-13).** #status/done A real `syria-full` rebuild (full 7-country merge, dominated by Turkey's
   646MB extract) stalled after ~8.6M ways / high memory usage on the user's Windows box, killed
   after 22 minutes of total silence — `osm/pbf.py`'s `_FeatureCollector` accumulated every kept
@@ -9,7 +9,7 @@
   (50,000) elements instead of buffering the whole file; `build/pipeline.py`'s `osm_pbf_path`
   branch calls it directly, writing each batch to the store immediately (`tracemalloc`-verified
   memory bound, Reviewer confirmed the pipeline actually uses the new path, not just that better
-  code exists unused). `load_features` (M9's original entry point) stays a thin
+  code exists unused). `load_features` (WM-M9's original entry point) stays a thin
   backward-compatible wrapper (`stream_features` with an unbounded batch), so its existing
   correctness tests are untouched. New regression test proves streaming and bulk paths produce
   byte-identical output. Also produced a memory-exhaustion audit of the rest of the pipeline

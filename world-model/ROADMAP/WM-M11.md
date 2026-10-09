@@ -1,6 +1,6 @@
-# M11 — Provenance out of the LOS primitive
+# WM-M11 — Provenance out of the LOS primitive
 
-- [ ] **M11 — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild.
+- [ ] **WM-M11 — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild.
   NOT STARTED, filed 2026-10-05.** #status/open From the two whole-subproject passes run on `main` @ `19143fa`
   after the first DCS-LOS sortie — `research/2026-10-05-security-audit.md` and
   `research/2026-10-05-performance-review.md`, directed by
@@ -67,7 +67,7 @@
   paste into a note**. `11.52` appears in this file and five research notes and in **zero lines of
   code**, while `_TERRAIN_TOLERANCE_M = 12.0` (`query/line_of_sight.py:122`) is a hand-copy of it —
   now applied unchanged to Afghanistan, whose error has never been measured (that build note's own
-  line 119: *"not attempted this session"*), and M4's Gemerek measurement was **28.02 m stddev,
+  line 119: *"not attempted this session"*), and WM-M4's Gemerek measurement was **28.02 m stddev,
   2.4× the number the constant is sized to**. Four steps, no schema bump: write the alignment
   report into the elevation `grid` row's existing `stats_json`; add `grid_vertical_error_m()`
   beside `grid_provenance()`; add `vertical_stddev_m` to `ElevationInfo`; have
@@ -87,8 +87,8 @@
      `CalloutScheduler.tick`, so it compounds with [[BL-11]] Stage 3 — measure after both, not after
      either.
 
-  **Stage 4 — the build is ~82 minutes, not 449 s, and two stages are 90 % of it.** [[M7]]'s 449.3 s
-  figure predates M9/M10/geomorphons and used a **1000 m** grid; the current 500 m default is 4× the
+  **Stage 4 — the build is ~82 minutes, not 449 s, and two stages are 90 % of it.** [[WM-M7]]'s 449.3 s
+  figure predates WM-M9/WM-M10/geomorphons and used a **1000 m** grid; the current 500 m default is 4× the
   cells. The authoritative figure is `research/2026-10-05-afghanistan-theatre-build.md`: terrain
   semantics **2640.2 s (54 %)**, road junctions **1751.1 s (36 %)**, `.routes` walk 320.2 s, SRTM
   grid 136.8 s, OSM overlay 85.9 s. Any rebuild plan sized against 449 s is wrong by an order of
@@ -137,7 +137,7 @@
   *correct* by project invariant, not an instance of the provenance finding.
 
   **Measurement caveat that matters for ranking**: the performance pass's absolute numbers come from
-  a synthetic store 3–12× less clustered than real Syria. **M7's committed 136.8 ms mean / 497.7 ms
+  a synthetic store 3–12× less clustered than real Syria. **WM-M7's committed 136.8 ms mean / 497.7 ms
   p95 stays authoritative**; read the new figures as ratios. Verifying Stage 4's savings needs a
   `syria-full` rebuild with per-stage timings, which **only the user can run** (execution-boundary
   rule).

@@ -7,7 +7,7 @@ built, Revision 3, 2026-10-05"*. Mechanically settled: `world-model/src/query/di
 Revision 3's own divide counter, is present on `main`, so the unbuilt claim is the stale half.
 Both records are carried verbatim and neither was edited.
 
-- [x] **`feature/terrain-landform-features` — marker-controlled watershed replaces the M6
+- [x] **`feature/terrain-landform-features` — marker-controlled watershed replaces the WM-M6
   curvature ridge/valley detector (Stages 1-2). Merged 2026-10-01 (`0bef4b9`), and the user's own
   full-theatre build confirms it.** #status/done Acceptance ran against the real `syria-full` store, not a test
   region, and both falsifiable checks hold: **zero valleys within 8 km of Baalbek** (the Bekaa

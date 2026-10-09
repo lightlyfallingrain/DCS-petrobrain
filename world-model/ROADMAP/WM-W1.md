@@ -5,7 +5,7 @@
   on an attack run, and Petrovich never called it out. Debugged and reproduced offline
   (`plans/missed-aaa-detection/debug.md`): `query.line_of_sight.line_of_sight_clear` treated its
   SRTM-sourced elevation grid as exact, so a unit sitting under a grid cell that overestimates
-  ground height by as little as M7's own recorded error (mean −7.19 m, stddev 11.52 m) reads as
+  ground height by as little as WM-M7's own recorded error (mean −7.19 m, stddev 11.52 m) reads as
   permanently "underground" relative to the model at its own position — blocked from every
   angle, at every range, not a per-look coin flip. Fix (user-chosen option 1 of five laid out):
   `_TERRAIN_TOLERANCE_M = 12.0` (rounded up from the stddev) added to the terrain-blocking
