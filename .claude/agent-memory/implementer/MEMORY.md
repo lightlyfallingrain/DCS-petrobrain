@@ -158,3 +158,5 @@ Write directly — the dir exists.
 - [Doc-tags Stage A](project_doc_tags_stage_a.md) — self-referential plan-dir corpus trap; re.escape-then-substitute corrupts; fence-only strip misses inline code-span quoting.
 - [Obsidian links Stage 3 todo split](project_obsidian_links_stage3_todo_split.md) — un-IDed blocks are an entry's own history; both link gates missed todo/todo/ silently.
 - [Narrative prose stays in the index](feedback_narrative_prose_stays_in_the_index.md) — prose describing the set, not a member, is never shredded into entries.
+- [Execute the published recipe](feedback_execute_the_published_recipe_before_trusting_it.md) — `sort -t B`/`-t W` split on a char the prefix contains; both shipped wrong.
+- [Doc-conventions round-4 fixes](project_doc_conventions_round4_consumer_fixes.md) — roadmap-source.sh; why doc-provenance-gate stayed unwired; a bare assert crashed a gate.

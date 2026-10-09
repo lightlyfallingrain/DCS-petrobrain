@@ -1638,3 +1638,207 @@ directories or keys off the `<!-- split-roadmap: see ROADMAP/ -->` sentinel.
   prediction in the task brief was exactly right: none of `docs/DOC_CONVENTIONS.md`,
   `plans/obsidian-links-and-tags/implementation.md`, `body-layer/ROADMAP/` or `todo/todo/` existed
   in the tree as created.
+
+---
+
+## Round 4 fixes — 2026-10-09
+
+All ten required fixes from `review.md`'s "Review round 4" section, plus its Observations list. Two
+commits: `959c034` (RF4-1…RF4-5) and `2b3bcd2` (RF4-2, RF4-6…RF4-10 and the observations).
+
+**Addressing.** Worktree `HEAD` was `29217c0`, a strict ancestor of the named tip
+`2856770` with a clean tree, so `git merge --ff-only` per `AGENTS.md` rule 4 — 35 commits. Fifth
+consecutive stale dispatch. All five named input documents verified present afterwards.
+
+### What each fix changed
+
+**RF4-1 — the ID table, and a second collision found by executing the recipe instead of reading
+it.** Four of five rows named a pointer file, so the minting rule nine lines below would read a
+four-line pointer and mint `WM-B1`/`X-B30`/`BL-B43`/`AC-B4` against 16/5/4/2 live items. The rows
+now name the split directories, and the rule names a command rather than describing one.
+
+**The command the task supplied is itself broken, and so was the one already published.** Measured:
+
+| recipe | returns | real highest | would mint |
+|---|---|---|---|
+| `ls body-layer/ROADMAP/ \| grep -oE '^[A-Z]+-B[0-9]+' \| sort -t B -k2 -n \| tail -1` | `BL-B9` | `BL-B46` | `BL-B10`, collides |
+| `ls world-model/ROADMAP/ \| grep -oE '^[A-Z]+-W[0-9]+' \| sort -t W -k2 -n \| tail -1` | `WM-W9` | `WM-W12` | `WM-W10`, collides |
+
+`-t B` splits on the literal `B`, which the `BL-` prefix contains; `-t W` on the `W` in `WM-`. Every
+affected file then shares an empty second field and the tie decays to a lexicographic comparison.
+The second row is the form `docs/DOC_CONVENTIONS.md:142` had carried since the convention was
+written, so **minting the next `WM-W` item from the repo's own published recipe would have produced
+the exact collision RF4-1 exists to prevent.** Both are now `sort -V`, verified correct for all
+five `-B` spaces and both `-W` spaces. Nothing about either recipe looks wrong on the page; this is
+only visible by running it.
+
+**RF4-2 — the three gates, two of them wired.** See "Where this round departed from the review"
+below for why `doc-provenance-gate.sh` is not the third.
+
+**RF4-3 — the `#needs-flight` recipe.** As published it returned 9 entries and **exited 0**. Fixed,
+executed: 13 tagged entries across four subprojects, including the four the review named
+(`AC-8`, `WM-W2`, `AA-2`, `AA-5`). The sweep for the same recipe shape found two more copies —
+world-model's index (now identical) and audio-adapter's (marked as deliberately subproject-scoped,
+with a pointer to the repo-wide form). All three now carry one spelling, with a note in each saying
+to change the others in the same commit.
+
+*One correction to the task brief's framing:* it expected "all 14 unflown items". The measured truth
+is **13** tagged entry files. The 14 came from counting the broken recipe's 10 returned paths (9
+entries + 1 index) plus the 4 missing ones; the correct recipe returns 16 paths, 3 of which are
+index files that match because they discuss the tag. The `grep -v` in the fixed recipe drops those.
+
+**RF4-4 / RF4-5 — the `WM-M<n>` rename.** The corrupted sentence was rewritten, not renumbered: it
+claimed "several hundred bare `WM-M5`/`WM-M7` mentions" where the measured truth is **422 bare
+`M5`/`M7` and zero `WM-M5`/`WM-M7`**, so it asserted the opposite of its own point while arguing
+against a rename that had happened. Eleven live documents still asserted a bare `M<n>` — the five in
+`BL-11.md`, one each in `BL-12`/`BL-B26`/`BL-B30`, four in `todo/backlog/` — now `[[WM-M<n>]]` links
+that resolve, plus `aircraft-layer/CLAUDE.md` as backticked `WM-M4`/`WM-M5` (plain, not a wikilink:
+it sits outside any split directory, so no gate would check a link there).
+
+After the sweep, `(^|[^-A-Za-z0-9_])M[0-9]+([^A-Za-z0-9_]|$)` over every live surface returns
+**only** two standing false positives the pattern cannot avoid — `MI24-outpost-M03.miz` (a mission
+filename) and `Soldier M4 GRG` (a weapon name) — both now named in `DOC_CONVENTIONS.md` so the next
+sweeper does not chase them.
+
+`RUN.md` and `NOTES.md` were named on neither side of the boundary, so the boundary is now written
+as a **rule**: a document asserting what is true *now* is rewritten; one recording what was true
+*then* keeps the bare form. It puts the two on opposite sides, which is the useful part. `RUN.md`
+tells you which flags exist today, so its bare `M3` was a stale instruction — fixed. `NOTES.md`'s 40
+mentions are dated citations ("Finding 1 of `M1` verification note") and rewriting them would
+falsify the record.
+
+**RF4-6 / RF4-7 — the resolver, and the consumer sweep.** `.claude/scripts/roadmap-source.sh` is
+new: `<path>` → the index, `--dir` → the directory, `--entries` → every entry file, `--is-pointer` →
+a silent test, and a non-pointer passes through unchanged so a caller can pipe every roadmap path
+through it unconditionally. The destination is **derived**, not listed (`<dir>/ROADMAP` or
+`<dir>/<stem>`), so a ninth split document needs no edit; the sentinel's own text cannot be used
+because it reads `see ROADMAP/` under `todo/` too.
+
+Writing consumers fixed: `dod.md` ×3, `merge/SKILL.md` ×2 paths, `retro/SKILL.md` ×3. Counting and
+searching consumers fixed: `status-page/SKILL.md` ×5 sites, `status-page-refresh.sh`'s Phase 1
+prompt, `docs/status/README.md`, `explore/SKILL.md`, `integrity-audit/SKILL.md` ×4. The full sweep
+beyond the review's eight spot-checks added: **root `ROADMAP.md`'s status table**, whose six
+`Roadmap` links all pointed at pointers — the single most-followed pointer in the repo, and the one
+five other consumers are explicitly told to take their list from, so fixing it there fixes them at
+the source. Plus the block all six role files carry verbatim, four subproject `CLAUDE.md`s,
+`architect.md` ×2, root `CLAUDE.md` ×5 and `docs/concept/WORLD_MODEL_BUILDER.md`.
+
+**A finding the review did not have, and it changes the fix in four of five cases:
+body-layer's is the only "Live acceptance debt" list that was dissolved.** `world-model`'s and
+`audio-adapter`'s indexes still carry a section of that name. So of the five live references,
+four needed only a path correction (pointer → index) and one needed rewording. Treating them
+uniformly — the obvious reading of RF4-6 — would have been wrong four times out of five.
+
+**RF4-8 — reverting Phase 1 as a set.** `revert_page()` became `revert_phase1()` at all four
+post-Phase-1 exit paths (enumerated: `grep -c` gives 5 = 1 definition + 4 call sites, and 0 stale
+references). It reverts `git diff --name-only HEAD` as a set, logs a WARNING naming any file outside
+`$PAGE`, and then **re-checks the tree and logs a loud ABORT** if anything remains — because
+`git checkout --` cannot undo a staged addition, so the function would otherwise report a clean
+revert it did not achieve. Process substitution, not a pipe, so the loop is not a subshell.
+
+**RF4-9 — discovery, and a crash underneath it.** `find_entries()` went from a hardcoded
+`audio-adapter/ROADMAP` (22 entries, prefix `AA` only) to all seven split directories: **245 entries
+across 7 directories** — 13 + 22 + 103 + 9 + 34 + 24 + 40. `doc_tags.entry_units()` had the same
+missing-`todo/` gap (187 → 245) and was brought level, because fixing one half of a pair is the
+error this entire round is about.
+
+Widening discovery exposed a latent crash: `id_sort_key` has `assert m is not None` with no message,
+and its regex `^([A-Za-z]*)(\d*)$` requires letters-then-digits — but a suffixed ID is
+digits-then-letter. **`BL-5a` and `MI-5b` are both real on disk**, so the gate died on an
+`AssertionError` naming nothing the moment it could see body-layer or mission-interpreter. Invisible
+while the function only ever saw `audio-adapter/ROADMAP/`, which has no suffixed ID. The pattern is
+total now, ordering verified (`BL-5` < `BL-5a` < `BL-6`).
+
+**RF4-10 — Session Start.** Both halves fixed in both homes, plus `CLAUDE.md`'s Current priority,
+Milestone Completion and subproject-pointer paragraphs, the six role files' shared block and the
+four subproject `CLAUDE.md`s making the same claim.
+
+### Observations
+
+Three gate scripts' header comments described a removed bare-`M<n>` regex alternative and a retired
+`M5`→`WM-5` cost argument as live. Each now states what the code does and keeps only the part worth
+carrying forward — that the loud half of that episode was the trap. `roadmap-entry-consistency-gate.sh:87`
+turned out **already accurate** (its closing parenthesis says the form is gone), so only the header
+needed the fix. Corpus guard: 434 → re-measured **435**. The two latent word-splitting loops now
+read line by line **via process substitution rather than a pipe** — a pipe would run each loop in a
+subshell, discarding every `FAIL=1` at the `done` and exiting 0 with findings already printed to
+stderr, which is worse than not checking. Both re-proven red afterwards. The `cd "$CLAUDE_PROJECT_DIR" || exit 0`
+under `set -u` in `commit-quality-gate.sh` and `push-roadmap-gate.sh` now uses the sibling gates'
+pattern; verified fail-open with the variable unset. And `DOC_CONVENTIONS.md` now says the
+sentinel's literal `see ROADMAP/` spelling is correct under `todo/` and must not be adapted.
+
+### Where this round departed from the review, and why
+
+**`doc-provenance-gate.sh` is deliberately not wired into `commit-quality-gate.sh`.** RF4-2 named
+all three gates, resting on RF4-9's statement that the provenance gate was *"latent only because
+zero provenance blocks exist."* **That premise is false: 32 documents carry a real block today.**
+Fixing RF4-9's discovery means the generator now finds the cross-subproject citations it previously
+could not, so **127 documents' blocks are stale by regeneration.** Established by counterfactual,
+not inference:
+
+| `doc_provenance.py` | gate result |
+|---|---|
+| pre-fix (`git show HEAD:…`, copied in) | `doc-provenance-gate: OK`, rc=0 |
+| with the RF4-9 fix | 166 FAIL lines over **127 distinct files** |
+
+Restored by checksum (`18d2222…` before and after). Wiring it would refuse **every commit touching
+any `ROADMAP/` path, repo-wide**, until all 127 are regenerated — and regenerating them is the
+Obsidian document-graph work, paused by user direction, adding ~200 keyword-derived citations nobody
+has reviewed. A gate that refuses every roadmap commit is precisely the *"cries wolf, gets
+bypassed"* failure this review names as the thing to avoid, and is strictly worse than the status
+quo. The gate remains correct and runnable standalone; the reason and the one-line unblock condition
+(`doc-provenance-refresh.sh`, once the work unpauses) are written at the wiring site and in
+`DOC_CONVENTIONS.md`. **This needs a decision rather than a quiet choice.**
+
+**`doc_tags.py` was fixed although the review named only `doc_provenance.py`.** Same one-line
+discovery gap, same two missing directories. Leaving it would have been this round's own diagnosis
+repeated verbatim.
+
+### Verification
+
+- **All four doc gates run.** The two wired ones `OK` rc=0; `graph-corpus-guard.sh` `OK — 435 files
+  (ceiling 520)` against a freshly generated corpus. `doc-provenance-gate.sh` fails on the 127
+  pre-existing stale blocks described above.
+- **`bash -n` clean** on all ten shell scripts touched; `py_compile` clean on both Python helpers.
+- **Mutation proofs, restored by `shasum`:**
+  - dangling `[[ZZ-999]]` staged ⇒ `commit-quality-gate.sh` returns `continue:false` naming it.
+  - **a `.py`-only commit is silent, rc=0, *while the dangling link is still in the tree*** — which
+    is what proves the staged-path condition rather than the gate merely passing.
+  - a non-executable gate script ⇒ skipped, not reported (fail-open on internal error).
+  - `CLAUDE_PROJECT_DIR` unset ⇒ still reaches the refusal, so the `cd` fix works.
+  - after the loop rewrites, `[[QQ-404]]` and an unlisted `#not-a-real-tag` **each drive their gate
+    to rc=1** and surface through the commit gate — the tag one specifically proves `FAIL=1` survives
+    the new `while`-read form. `doc-provenance` appears nowhere in that output, as intended.
+  - every target restored byte-identically (`c9406c68…`, `43eb2596…`, `18d2222…`).
+- **RF4-8's failure path was executed, not reasoned about**, since this script has wedged the repo
+  once. From a clean tree, two tracked files dirtied:
+  - reverting only `$PAGE` (the old behaviour) ⇒ guard 2's exact command returns
+    `[ M docs/status/README.md]` — **the permanent-skip wedge, reproduced.**
+  - reverting the whole set ⇒ guard 2 returns `[]`, next run proceeds.
+  - a staged new file ⇒ survives `git checkout --`, so `$still` is non-empty and the ABORT branch
+    fires naming the file — the information the old silent failure denied.
+  - tree afterwards: `git diff --stat HEAD` empty, byte-identical to the commit.
+- **Executed rather than inspected:** the `#needs-flight` recipe (13 entries), `find_entries()` (245
+  across 7 directories, all seven prefixes), `roadmap-source.sh` (all eight pointers resolve, a
+  non-pointer passes through, every mode and both error paths), and the gate's ID resolution —
+  `BL-11`, `WM-M5`, `X-B29`, `X-T1`, `AA-3`, `AC-8`, `MI-5b`, `BL-5a` all resolve while `ZZ-999` is
+  still rejected. That last one is the discriminating test: a green run would not distinguish a
+  widened gate from a gate that accepts everything.
+- **Per-subproject checks, all five touched subprojects**, run from inside each with the main
+  checkout's venv (every file my diff touches in a subproject is markdown — no source, tests or
+  tools):
+
+  | subproject | `ruff format` | `ruff check` | `mypy --strict` | `pytest -q` |
+  |---|---|---|---|---|
+  | world-model | pass (118) | pass | pass (72) | 565 passed, 3 skipped |
+  | body-layer | pass (118) | pass | pass (54) | 1551 passed, 4 xfailed |
+  | aircraft-layer | pass (56) | pass | pass (21) | 256 passed |
+  | audio-adapter | pass (29) | pass | pass (15) | 222 passed, 1 skipped |
+  | mission-interpreter | pass (46) | pass | pass (31) | 108 passed, 3 skipped |
+
+  **2702 passed, 7 skipped, 4 xfailed, 0 failed** — identical to the review's own baseline, so no
+  regression. The known pre-existing `ruff format` non-conformances in `body-layer/research/`,
+  `world-model/tools/` and `world-model/research/` are outside the documented `src tests` scope and
+  were **confirmed, not asserted**: my commits touch 0 files there, `git diff main --` over those
+  paths is empty, and the diff machinery was sanity-checked against a file this branch does change
+  (`docs/DOC_CONVENTIONS.md`, 492 insertions).
