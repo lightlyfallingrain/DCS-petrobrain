@@ -18,8 +18,8 @@ sections warn about for the subproject list itself, applied to this one.
   beside `AA-4.7.md`). A second `BACKLOG/` directory would double the corpus-script and link-gate
   surface for one ID-prefix distinction the ID already carries.
 - One index per source file, at `<subproject>/ROADMAP/<subproject>-roadmap.md` (and
-  `<subproject>-backlog.md` where a subproject's backlog is split separately, e.g. a future
-  `body-layer/ROADMAP/body-layer-backlog.md`) — never `index.md`, which would collide across
+  `<subproject>-backlog.md` where a subproject's backlog is split separately, as
+  `body-layer/ROADMAP/body-layer-backlog.md` is) — never `index.md`, which would collide across
   subprojects in Obsidian's single-vault basename namespace.
 - The original `<subproject>/ROADMAP.md` (and `BACKLOG.md`) stays in place as a 4-line pointer,
   carrying the sentinel `<!-- split-roadmap: see ROADMAP/ -->` on its own first line. **Never
@@ -71,10 +71,31 @@ more marker and one formatting rule:
   sequences. One ID space may not span two files' numbering, because the next-unused-number rule is
   read per file and two readers would hand out the same number. `T` for todo; the entries are
   `todo/todo/X-T<n>.md`.
-- **World-model's `M<n>` stays irregular** — milestones are bare `M<n>`, backlog is `WM-B<n>`,
-  work items are `WM-W<n>`. Fixing the mismatch would mean renaming `M5` → `WM-5` across several
-  hundred prose mentions that `docs/PROCESS.md` ("Superseding a decision") forbids rewriting.
-  Recorded, not fixed.
+- **World-model's `M<n>` stays irregular** — milestones are bare `M<n>` (`M0`…`M11`), backlog is
+  `WM-B<n>`, work items are `WM-W<n>` (`WM-W1`…`WM-W12`, minted 2026-10-09 by that file's
+  conversion; all three shapes are now live on disk). Fixing the mismatch would mean renaming
+  `M5` → `WM-5` across several hundred prose mentions that `docs/PROCESS.md` ("Superseding a
+  decision") forbids rewriting. Recorded, not fixed.
+
+  **It is not free, and the cost landed in the tooling rather than the documents.** An ID shape is
+  what every consumer uses to tell an entry file from an index file, and all of them spelled it
+  `^[A-Z]+-[A-Za-z0-9.]+$` — which `M5` does not match. Converting world-model therefore needed
+  `roadmap-entry-consistency-gate.sh`, `roadmap-tag-vocabulary-gate.sh` and `roadmap-toc.sh` all
+  widened to `^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$`. Before that widening the
+  dangling-link check reported all twelve `[[M<n>]]` links as unresolvable — loud, and caught at
+  once — while the filename-matches-H1 and appears-in-exactly-one-index checks **skipped all
+  twelve files silently**, so a wrong H1 or an entry missing from its index would have passed.
+  Verified by running the pre-fix regex against both defects deliberately introduced: zero
+  findings each. **So an irregular ID shape is a standing tax on every future consumer that has
+  to recognise one** — if another subproject ever wants one, that is the argument against.
+  Enumerate the alternatives explicitly rather than loosening to `^[A-Z]`, which would also match
+  a stray `README.md` or `RUN.md` and start checking it as an entry.
+- **A short basename is fine, but check it.** `M5.md` is as short as an entry filename gets, and
+  Obsidian resolves wikilinks by basename across the *whole* vault, so a two-character name is
+  where a collision is most likely. Checked mechanically before writing them (every `*.md`
+  basename in the repo, against `M0`…`M11`): no collision, and the repo's existing duplicate
+  basenames are all structural (`plan.md`, `review.md`, `CLAUDE.md`, …), none of them entry-shaped.
+  Run that check rather than assuming, and run it over the repo rather than over `*/ROADMAP/`.
 - **Numbers are assigned in document order, top to bottom of the file being converted** — so a
   rebase or a redone conversion produces the same numbers, rather than depending on whatever order
   a converter happened to work in.
@@ -114,6 +135,20 @@ more marker and one formatting rule:
   carries the title. A prose reference to an *unconverted* subproject's entry (e.g.
   "`body-layer/ROADMAP.md`'s BL-10 entry" from an audio-adapter file) stays plain prose — it only
   becomes a link once that subproject's own entry file exists to link to.
+- **Cross-subproject links are now ordinary, and that caveat above has no remaining instances.**
+  Every subproject's roadmap and backlog is split, so an ID mentioned anywhere resolves: a
+  world-model entry links `[[BL-11]]`, `[[X-B29]]` and `[[X-B30]]`, an aircraft-layer entry links
+  `[[WM-W2]]`. The consistency gate resolves against the union of every converted directory, so
+  these are checked, not merely tolerated. **Make them in the file you are writing; do not sweep
+  already-converted directories to add them.** A retroactive link sweep is a separate change, and
+  bundling one into a conversion makes the conversion's diff unreviewable — which defeats the only
+  mechanism anyone has for checking that a conversion carried its text verbatim.
+- **Convert a backticked ID mention, not a bare one.** `` `M7` `` becomes `[[M7]]`;
+  "M7's baseline" in running prose stays as it is. The restraint is not stylistic: world-model's
+  roadmap carries several hundred bare `M5`/`M7` mentions, inside file paths, SQL and code
+  examples, and a bare-word rewrite would corrupt them. One scripted pass over backtick spans
+  whose *entire* content is a resolvable ID, skipping fenced blocks and self-references, is both
+  safe and enough — it found 56 real links across the three files converted on 2026-10-09.
 - **A parent milestone with its own stages links down to them**, e.g. `Stages: [[AA-1.1]] [[AA-1.2]]
   …` — so opening the parent alone does not lose the stage breakdown that used to be nested
   bullets in the same file.
@@ -165,11 +200,33 @@ Where the source document's own job is to be read first — `todo/todo.md` is na
 prioritised items at least as prominent as they were.** A reader landing on the index must not have
 to open every entry to find out what is prioritised. Put them first, marked, above the narrative.
 
+### Two blocks in one entry: the entry's own record leads, and that is not cosmetic
+
+An entry file can end up holding more than one checkbox block — an item plus its own superseded
+text (`BL-B34`, `WM-B7`, `X-B27`), or an item plus the live-acceptance-debt record that was about
+it (`WM-B1`, `WM-B6`, `WM-W1`). **The first checkbox line in the file is the entry's state**, for
+every reader and every tool: `roadmap-toc.sh` reports that block's tag, and `grep '#status/done'`
+finds the entry on it. So block order decides what the entry appears to be.
+
+- **An item and its own superseded text go in source order**, which puts the current form first
+  because that is how these are written (`WM-B7`'s rejection above `WM-B7 (original text)`).
+- **A folded debt record goes *after* the entry it was about, regardless of source order.** The
+  debt list sits at the head of a roadmap, far above the entries it refers to, so source order
+  would put a `[x]` clearance note on top of its entry — and on `WM-B6` it did, making the TOC and
+  a status grep report an in-progress item as done. Found by reading the TOC's real output after
+  the conversion, not by inspection. The entry is the record; the debt line is a note about it.
+
 ## Tags
 
 See `docs/TAGS.md` for the vocabulary. Two rules repeated here because they decide the entry file
 shape above: tag only what the ID and path do not already say, and tag status on the same line as
 its checkbox marker, never in frontmatter and never elsewhere in the entry.
+
+**"On the same line as its checkbox marker" means after the leading bold span, which is sometimes
+a later line** — a bold lead often wraps, and several entries put the tag on the entry's second or
+third physical line as a result (`BL-W12` and `WM-B6` both do). That is the established placement.
+Where the bold span is followed immediately by sentence punctuation, put the tag after the
+punctuation, not before it, or the entry reads `… was parked** #status/in-progress, because …`.
 
 ## `**OPEN**` and `**USER**` — a contradiction found during a split is carried, not resolved
 

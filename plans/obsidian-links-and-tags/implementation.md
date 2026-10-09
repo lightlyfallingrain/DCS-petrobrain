@@ -1263,3 +1263,378 @@ means reading a pointer and following it one hop.
   `body-layer/ROADMAP/` at all — i.e. none of this stage's primary inputs existed in the tree as
   created. That is the "a stale base is dangerous for inputs" case AGENTS.md records, met for the
   second time.
+
+---
+
+## 2026-10-09 — Stages 4 and 5: `world-model`, `aircraft-layer`, `mission-interpreter`
+
+### Implementation Summary
+
+The last three roadmaps converted, completing the set: every subproject's roadmap and backlog now
+lives as one file per entry. Method unchanged from Stages 2 and 3 — each entry body is a
+**verbatim line-range slice** of its source, extracted by a Python script written to the
+scratchpad (not committed), never retyped.
+
+| source | entries | directory | index | pointer |
+|---|---|---|---|---|
+| `world-model/ROADMAP.md` (1398 lines, 42 checkboxes) | 40 | `world-model/ROADMAP/` | `world-model-roadmap.md` | yes |
+| `aircraft-layer/ROADMAP.md` (164 lines, 13 checkboxes) | 13 | `aircraft-layer/ROADMAP/` | `aircraft-layer-roadmap.md` | yes |
+| `mission-interpreter/ROADMAP.md` (177 lines, 9 checkboxes) | 9 | `mission-interpreter/ROADMAP/` | `mission-interpreter-roadmap.md` | yes |
+
+62 entry files and 3 indexes. `brain-layer/` has no `ROADMAP.md` of its own — confirmed by
+listing it; its `BR-*` entries remain in `body-layer/ROADMAP/`, so nothing was owed there.
+
+### The full ID mapping
+
+**`world-model/ROADMAP.md`.** Three ID spaces, all irregular and all kept that way.
+
+*Milestones — identity on 12 bare `M<n>`:* `M0` (src 183), `M1` (184), `M2` (185), `M3` (186),
+`M4` (187), `M5` (188), `M6` (189), `M7` (190), `M8` (192), `M10` (204), `M9` (275), `M11`
+(489–637). `M11` describes Stages 1–5 inside one checkbox item, so it stays one file — no
+`M11.1`…`M11.5`, matching Stage 2's treatment of `BL-W32` ("Stages 1 through 5").
+
+*Work items — `WM-W1`…`WM-W12` minted in document order* (first point in the document where each
+resulting entry's content appears):
+
+| ID | source lines | what it was |
+|---|---|---|
+| `WM-W1` | 460–487 + 16–41 | LOS elevation-tolerance fix, folded with its own debt record |
+| `WM-W2` | 43–79 | `feature/dcs-driven-los` (debt list, no Status counterpart) |
+| `WM-W3` | 91–125 | `fix/landform-relief-gate` (debt list, no counterpart) |
+| `WM-W4` | 127–158 | `feature/terrain-landform-features` (debt list, no counterpart) |
+| `WM-W5` | 160–181 | `feature/multi-theatre-afghanistan` (debt list, no counterpart) |
+| `WM-W6` | 193–202 | Line-of-sight query primitive ("no M-number") |
+| `WM-W7` | 221–249 + 1343–1354 | Road-junction memory fix, folded with the backlog's `RESOLVED` bullet |
+| `WM-W8` | 251–260 | Road-junction progress logging ("no M-number") |
+| `WM-W9` | 262–273 | HTTP API server ("no M-number") |
+| `WM-W10` | 294–312 | OSM streaming-ingest memory fix ("no M-number") |
+| `WM-W11` | 314–337 | OSM classified-feature persistent cache ("no M-number") |
+| `WM-W12` | 339–458 | OSM ingest optimization + landcover split ("no M-number") |
+
+Each "no M-number" entry's own parenthetical reason — *a bug fix on M10, not a milestone*, *a
+cross-subproject refactor*, *a performance optimization* — is carried verbatim inside the entry,
+because it is the justification for the `WM-W` ID rather than a bare `M<n>`, and the next reader
+would otherwise wonder why `M9` and `WM-W10` sit next to each other.
+
+*Backlog — identity on `WM-B1`…`WM-B14`, plus two mints:*
+
+- `WM-B1` (644–717 + the debt record at 81–83) and `WM-B6` (783–1236 + 85–89) each absorb the
+  live-acceptance-debt record that names them in its own text.
+- `WM-B7` (1238–1259 + 1261–1298) holds **two checkbox blocks in one file**: the rejection and the
+  `WM-B7 (original text)` block the source kept beneath it. The same ID twice in the source is one
+  entry. **No `WM-B15` was minted for it** — this was the trap the task warned about, and it
+  behaved exactly as Stage 3 predicted.
+- `WM-B15` (1317–1341) and `WM-B16` (1356) **are mints, and they were not on the task's list.** See
+  "The two mints the task did not predict" below.
+
+**`aircraft-layer/ROADMAP.md`.** `AC-1`…`AC-8` minted in the bare space (not `AC-W<n>`), per the
+convention's "no declared milestone series consuming the bare space" rule: `AC-1` (10–15), `AC-2`
+(16–19), `AC-3` (20–21), `AC-4` (22–26), `AC-5` (27–32), `AC-6` (34–47), `AC-7` (48–64), `AC-8`
+(66–85). `AC-B1`…`AC-B5` identity (92–104, 106–116, 118–124, 125–131, 133–164). **The task said
+"count the un-IDed Status entries yourself; the plan says 8" — counted, and it is 8.** Worth
+noting the plan's figure was right here while being wrong in both measured stages before it; the
+difference is that aircraft-layer has no debt list to fold.
+
+**`mission-interpreter/ROADMAP.md`.** **Zero mints, verified rather than assumed**: all nine
+checkbox items already carry an ID — `MI-0` (20–26), `MI-1` (27–35), `MI-1.5` (36–44), `MI-2`
+(45–57), `MI-3` (58–73), `MI-4` (74), `MI-5` (75–94), `MI-5b` (95–96), `MI-6` (97–120). `MI-5b`
+keeps its letter suffix rather than becoming `MI-5.1`. `MI-4`'s single ~2000-word line is carried
+as one line, unreflowed.
+
+### The two mints the task did not predict
+
+**The task's list of what to mint named only the "no M-number" entries and the debt-list head. It
+missed three top-level prose bullets in the Backlog section** — items in every respect except that
+they carry no checkbox and no ID, so `grep -cE '^- \['` never counted them and a scan for ID-shaped
+leads never saw them. They were found by the boundary-derivation pass matching `^- \*\*` as well as
+`^- \[`, which is the only reason they surfaced at all.
+
+Each needed a decision, and they went three different ways:
+
+- **`WM-B15` — Multi-theatre support (Afghanistan, Caucasus, Kola)** → promoted, `[~]`. Real
+  outstanding work, actively in flight (*"Started 2026-10-04 with Afghanistan, then Caucasus, Kola
+  last (user direction)"*), and it is what `WM-W5`'s Afghanistan record is a slice of. The marker is
+  the conversion's; the entry says so and says where it came from. Note the source's bold lead still
+  reads *"not yet scoped"*, which predates the "Started" sentence below it — carried as written.
+- **`WM-B16` — Incremental per-layer pipeline builds** → promoted, `[ ]`. A distinct wanted
+  capability, cited from `plans/m9-osm-geofabrik/plan.md`.
+- **`RESOLVED: roadnet/junctions.py memory issue`** → **not promoted.** It is the backlog-side
+  record of the fix `WM-W7` already is, agreeing with it on every fact, so minting a `WM-B17` would
+  have created a second permanent ID for one piece of work — the thing the plan's whole
+  debt-list argument rules out. Folded into `WM-W7` instead, keeping its original no-checkbox bullet
+  form (so no marker was minted) and both copies' distinct material, with a prose note at the
+  junction. Same shape as Stage 3's `BL-B23` reconciliation.
+
+**The lesson generalises Stage 3's.** Stage 3's rule was *count un-IDed blocks only after reading
+the line above them* — aimed at a block that is an entry's own history. This stage adds the
+opposite error: a bullet that **is** an item but was never written as a checkbox, which no
+checkbox-shaped count can see. So the enumeration has to be of every top-level bullet, then a
+per-bullet judgement, not a count of `^- \[`.
+
+### Where I did not resolve a contradiction — three `**OPEN**`, zero `**USER**`
+
+The task predicted world-model's Status head was the most likely place yet for a real one. It was,
+and there are three. All are mechanically settled rather than needing the user's judgement, so all
+are `**OPEN**`; every half of every one is carried verbatim and no source sentence was edited.
+
+1. **`AC-8`** says *"not yet merged, not yet flown"*, against `WM-W2`'s *"FLOWN 2026-10-05"* with
+   101,091 live verdicts read off `aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`.
+   Settled by `git ls-tree main`: `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` is
+   on `main`, and `main`'s log carries the branch's whole DoD trail (`3b904fc`). `AC-8`'s text is the
+   stale half. `#needs-flight` deliberately withheld while the marker stands.
+2. **`WM-B6`** carries two stale merge claims — *"merge pending (`feature/landform-geomorphons`)"*
+   and *"`feature/terrain-callout-stages-345` — not yet merged"* — against the debt record folded
+   into the same file and against `main`, which holds `world-model/src/terrain/geomorphons.py`,
+   `world-model/src/terrain_cache/` and `world-model/src/query/divides.py`.
+3. **`WM-W4`** says *"Parked 2026-10-01"* and *"Stages 3-5 … remain unbuilt"* against `WM-B6`'s own
+   *"Unparked 2026-10-01, same day it was parked"* and *"Stages 3-5 built, Revision 3, 2026-10-05"*.
+   `query/divides.py` on `main` settles it.
+
+**Three pairs that look like contradictions and are not**, each checked by reading the full text
+rather than by shape:
+
+- `WM-W1`'s two records (debt `[x]` ACCEPTED 2026-10-09 vs. Status *"Unflown — see 'Live
+  acceptance debt' above"*). The Status entry **points at the list it is paired with**, i.e. it
+  knows it is the same record — the same self-aware doubling Stage 2 ruled on for
+  `fix/contact-report-flood`. Time-ordered, not disputed.
+- `WM-W2`'s own body: *"FLOWN 2026-10-05"* above *"Original entry follows … not yet merged, not yet
+  flown"*. Self-labelled superseded text, the `BL-B34`/`X-B27` pattern.
+- `WM-B7`'s two blocks, for the same reason.
+
+### Fidelity accounting
+
+Verified mechanically: a multiset comparison of every non-blank line of each original (read via
+`git show HEAD:<path>`) against the new corpus, with the three transformations a conversion is
+allowed to make normalised out first — an inserted `#status/*`/`#needs-flight` tag, a minted
+checkbox marker, and a backticked ID rewritten as `[[ID]]`.
+
+| source | non-blank lines | not carried verbatim |
+|---|---|---|
+| `world-model/ROADMAP.md` | 1235 | **0** |
+| `aircraft-layer/ROADMAP.md` | 145 | **0** |
+| `mission-interpreter/ROADMAP.md` | 160 | **0** |
+
+**Zero on all three, including the H1s and preambles** — unlike Stages 2 and 3, which had 12/17/12
+index-prose lines to account for. That is not a better conversion, it is a different index-building
+method: the three indexes **splice their reusable source passages in verbatim by line range**
+(`world-model`'s "Decisions locked in" bullets, its live-acceptance-debt preamble, its backlog
+preamble and its "Not doing yet" tail; `aircraft-layer`'s preamble and backlog preamble;
+`mission-interpreter`'s entire 16-line decision preamble and its whole 56-line narrative tail)
+rather than being rewritten by hand around them. Worth adopting if this is ever done again: it
+turns "which lines did I paraphrase" from a judgement into a measurement.
+
+**The fidelity check was proven able to go red**, not just observed green: deleting
+`world-model/ROADMAP/WM-W9.md` produced 12 MISSING lines naming that entry's own text; restored by
+`shasum`, back to 0.
+
+**56 cross-references linked**, by script, over backtick spans whose entire content is an ID
+resolving to a real entry file in one of the seven converted directories (245 resolvable IDs),
+skipping fenced blocks and self-references. Bare prose mentions were deliberately left alone —
+world-model has several hundred bare `M5`/`M7` mentions inside paths, SQL and code examples.
+Cross-subproject links now land for the first time at scale: `[[BL-11]]`, `[[X-B29]]`, `[[X-B30]]`,
+`[[X-B26]]` from world-model entries, `[[WM-W2]]` from `AC-8`.
+
+### Consumer scripts: three needed a fix, four did not
+
+| script | reaches the three new dirs? | action |
+|---|---|---|
+| `graph-corpus-files.sh` | yes (`find "$sub/ROADMAP"`) | none |
+| `graphify-dirty-flag.sh` | yes (`[^/]+/ROADMAP/[^/]+\.md`) | none |
+| `push-roadmap-gate.sh` | yes (`(^\|/)ROADMAP(\.md\|/[^/]+\.md)$`) | none |
+| `doc-provenance-gate.sh` | n/a (zero blocks added) | none |
+| `roadmap-entry-consistency-gate.sh` | directory yes, **ID shape no** | fixed |
+| `roadmap-tag-vocabulary-gate.sh` | directory yes, **ID shape no** | fixed |
+| `roadmap-toc.sh` | directory yes, **ID shape no** | fixed |
+
+**Discovery was proven, not reasoned** — the task's own instruction, after Stage 3 found both link
+gates silently skipping 25 files. Both gates discover `*/ROADMAP` beside a `pyproject.toml`, which
+does reach all three new directories; the loop was reproduced standalone and printed all seven
+directories with their real counts (13 / 40 / 9 entries in the new ones, plus one index each).
+
+**But the gap this time was not the directory, it was the ID shape, and it was half-silent.** All
+three scripts spelled an entry ID `^[A-Z]+-[A-Za-z0-9.]+$`, which `M5` does not match. Widened to
+`^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$`, enumerated rather than loosened to `^[A-Z]` (which
+would also match a stray `README.md`). Consequence of the gap, measured against the pre-fix regex in
+a scratch copy:
+
+| check | pre-fix behaviour on a bare-`M<n>` entry |
+|---|---|
+| 1, dangling link | 12 **false** danglings on a clean tree — loud, caught immediately |
+| 2, filename vs. H1 | wrong H1 planted in `M5.md` → reported **0 times** |
+| 3, exactly one index | `- [[M5]]` row deleted from the index → reported **0 times** |
+
+So the loud half would have been "fixed" by someone deleting twelve correct links, leaving the two
+silent checks skipping twelve files permanently. **The first attempt at this counterfactual was
+worthless and said so**: a `sed` expression to revert the regex failed with *"bad flag in
+substitute command"*, the copied script was never written, and the harness still printed
+"0 findings" — a perfect false confirmation. Redone in Python with an assertion that three sites
+were actually reverted.
+
+**Gates proven by mutation, one per new directory plus the two bare-`M<n>`-specific checks**, each
+restored by `shasum`:
+
+| mutation | gate output | restored |
+|---|---|---|
+| `[[M999]]` → `world-model/ROADMAP/M5.md` | dangling link, exit 1 | `621c9679…` |
+| `[[AC-999]]` → `aircraft-layer/ROADMAP/AC-3.md` | dangling link, exit 1 | `f8ec3d4a…` |
+| `[[MI-999]]` → `mission-interpreter/ROADMAP/MI-5b.md` | dangling link, exit 1 | `799a9259…` |
+| `- [[M5]]` index row deleted | `M5.md is not linked from any index`, exit 1 | `13306581…` |
+| `M5.md`'s H1 changed to `# M99 — …` | `filename ID 'M5' does not match H1 first token 'M99'`, exit 1 | `621c9679…` |
+| `#topic/not-in-vocabulary` → `M5.md` | `tag … not listed in docs/TAGS.md`, exit 1 | `621c9679…` |
+
+`push-roadmap-gate.sh` was checked by running its **real** regex over the **real** new paths, not
+by reading it: all twelve sampled paths match, including the three pointers. Unlike Stage 3's
+`todo/` case this is correct and wanted — these are genuine subproject roadmaps, so a feature merge
+touching one now satisfies the gate.
+
+### Corpus ceiling
+
+`graph-corpus-files.sh` emits **434** files post-conversion (62 entry files + 3 indexes against
+Stage 3's 369 — exactly the ~65 the task predicted). Ceiling raised **420 → 520**.
+
+**Sized differently from the three previous raises, deliberately.** Each of those left ~14% for one
+known-coming stage. There is no next stage, so the headroom is for ongoing growth instead: 520 is
+~20% over 434, which at the plan's own ~+50 entry files/year is upwards of eighteen months, and
+still nowhere near the 1182-file blowout this guard exists to catch. Recorded in the script's own
+comment alongside the measured count. Guard re-run: `graph-corpus-guard: OK — 434 files (ceiling 520)`.
+
+All three new directory shapes confirmed present in the emitted corpus: 41 `world-model/ROADMAP/*`,
+14 `aircraft-layer/ROADMAP/*`, 10 `mission-interpreter/ROADMAP/*` (entries plus index each).
+
+### Read-cost measurement
+
+Bytes/4, pointer + index + **median** entry against the whole original file:
+
+| source | before | after | saving |
+|---|---|---|---|
+| `world-model/ROADMAP.md` | 29,541 | 2,210 (pointer 166 + index 1,708 + median entry 336) | **93%** |
+| `aircraft-layer/ROADMAP.md` | 3,256 | 970 (123 + 661 + 185) | **70%** |
+| `mission-interpreter/ROADMAP.md` | 3,990 | 2,101 (169 + 1,628 + 305) | **47%** |
+| all three | 36,788 | 5,281 | **86%** |
+
+**`mission-interpreter`'s 47% is the lowest of the eight files converted, and it confirms Stage 3's
+structural finding rather than contradicting it.** Stage 3 observed that `todo/todo.md` split at
+only 70% because its index carries orientation narrative nine times the size of its median entry. In
+`mission-interpreter`, 44 of 160 non-blank lines — 28% of the document — are the acceptance record
+and the MI-6-goes-nowhere finding, both of which have to stay whole in the index. Its index is five
+times its median entry. **A mostly-narrative document does not split profitably, and this is now
+measured twice.** The plan already said the token case for Stage 5 was weak and that it was being
+done on browsability grounds alone; that judgement holds up exactly.
+
+### Checks
+
+- `.claude/scripts/roadmap-entry-consistency-gate.sh`: **OK**
+- `.claude/scripts/roadmap-tag-vocabulary-gate.sh`: **OK**
+- `.claude/scripts/doc-provenance-gate.sh`: **OK** (zero provenance blocks added — out of scope by
+  instruction; a pass with zero blocks is the expected result)
+- `.claude/scripts/graph-corpus-guard.sh`: **OK**, 434/520
+- `.claude/scripts/roadmap-toc.sh` on all three new directories: all 62 entries listed with correct
+  titles and status tags, exit 0
+- `bash -n` on all four edited scripts: clean
+
+Per touched subproject, from inside each one, using the main checkout's `.venv` (this worktree has
+none — gitignored). Commands as each subproject's own `CLAUDE.md` states them, i.e. scoped to
+`src`/`tests`:
+
+| | world-model | aircraft-layer | mission-interpreter |
+|---|---|---|---|
+| `ruff format --check` | pass (118 files) | pass (56 files) | pass (46 files) |
+| `ruff check` | pass | pass | pass |
+| `mypy src` | pass (72 files) | pass (21 files) | pass (31 files) |
+| `pytest -q` | **565 passed, 3 skipped** | **256 passed** | **108 passed, 3 skipped** |
+
+Docs-only change, so these are no-regression confirmations.
+
+**A `ruff format --check .` / `ruff check .` over the whole of `world-model/` reports 7 unformatted
+files and 23 lint errors** — all in `world-model/research/*.md` fenced examples and
+`world-model/tools/*.py`, neither of which is in the documented command's scope. Confirmed
+pre-existing rather than asserted: `git diff --stat main --` on each named path is empty, and
+`git diff --name-only main -- world-model/ | grep -v '^world-model/ROADMAP'` is empty, i.e. this
+branch touches nothing in that subproject outside `ROADMAP/` and `ROADMAP.md`.
+
+### The plan's "Stop point: complete" claim, tested
+
+The plan says: *"`ls */ROADMAP/` shows five subprojects plus `todo/backlog/`, and no file anywhere
+lists which."* Run:
+
+```
+$ ls -d */ROADMAP/          $ ls -d todo/*/
+aircraft-layer/ROADMAP/     todo/backlog/
+audio-adapter/ROADMAP/      todo/todo/
+body-layer/ROADMAP/
+mission-interpreter/ROADMAP/
+world-model/ROADMAP/
+```
+
+**The first half holds, for the predicted reason.** Five, not six, because `brain-layer/` has no
+roadmap of its own and its `BR-*` entries live in `body-layer/ROADMAP/` — which is what the plan's
+Stage 2 step 4 decided and what `body-layer-roadmap.md` says in its own index line.
+
+**"plus `todo/backlog/`" understates it:** there are two directories under `todo/`, because the user
+overrode the plan's scope table and Stage 3 split `todo/todo.md` as well.
+
+**The second half does not hold.** `grep` finds one file that lists which subprojects are converted:
+**root `CLAUDE.md` line 367**, in the Backlog Management prefix table —
+
+```
+| `AA-B<n>` | `audio-adapter/ROADMAP/` (split; `audio-adapter/ROADMAP.md` is now a pointer) |
+```
+
+— which names audio-adapter as the split one and, by omission, implies the other four are not. It
+was accurate the day Stage 1 wrote it and is now wrong about five subprojects: it is exactly the
+stale-list failure `docs/DOC_CONVENTIONS.md`'s own opening paragraph warns about, in the file that
+sends every session to read it. Four sibling rows in the same table (`BL-B<n>` →
+`body-layer/BACKLOG.md`, `AC-B<n>` → `aircraft-layer/ROADMAP.md`, `WM-B<n>` →
+`world-model/ROADMAP.md`, `X-B<n>` → `todo/backlog.md`) now point at 4-line pointers. **Nothing is
+stranded** — every pointer is kept and resolves — but each row reads as if that file holds the
+items. **Not edited**: root `CLAUDE.md` is out of this stage's scope by instruction, and the
+rewording is the user's call. The smallest correction that would make the table honest is to drop
+the parenthetical from the `AA-B<n>` row entirely and let `ls */ROADMAP/` answer, which is what the
+convention doc already prescribes.
+
+No script hardcodes a converted-subproject list — checked, and every one either discovers the
+directories or keys off the `<!-- split-roadmap: see ROADMAP/ -->` sentinel.
+
+### Notable Discoveries
+
+- **An irregular ID space is a standing tax on every consumer that has to recognise an ID, and the
+  bill arrives late.** `M<n>` was accepted as "recorded, not fixed" in Stage 1's convention doc, at
+  a time when no consumer had met it. Converting world-model needed three scripts widened, and two
+  of the three checks involved had been **failing silently** on exactly the shape being introduced.
+  The decision was still right — several hundred prose mentions outweigh one regex — but the cost
+  belongs next to it, and is now written into `docs/DOC_CONVENTIONS.md`.
+- **Fold order decides what an entry's state looks like, and getting it wrong is silent.** Putting
+  `WM-B6`'s `[x]` debt record above its own `[~]` block made `roadmap-toc.sh` report an in-progress
+  item as **done**, and would have done the same to any `grep '#status/'`. Caught by reading the
+  TOC's real output after the conversion rather than by inspecting the entry. Source order is the
+  right rule for an item plus its own superseded text and the **wrong** rule for a folded debt
+  record, because the debt list sits at the head of the document, far above what it refers to.
+- **A checkbox-shaped count cannot see an item that was never written as a checkbox.** Stage 3's
+  lesson was the inverse — a `^- \[` block that is not a new item. Here three top-level `- **…**`
+  prose bullets in a Backlog section were items (or an item's duplicate record) with no checkbox
+  and no ID, invisible to `grep -cE '^- \['`, and the task's own mint list did not name them. Two
+  became `WM-B15`/`WM-B16`; one was folded. **Enumerate every top-level bullet, then judge each.**
+- **Reading the source from the working tree makes the conversion a one-shot.** Writing the pointer
+  over `world-model/ROADMAP.md` and then re-running the converter sliced line ranges out of the
+  8-line pointer and corrupted the entry files. Fixed by reading every source through
+  `git show HEAD:<path>` (which the fidelity checker already did), making the whole pipeline
+  idempotent and re-runnable. Caught immediately by the fidelity check, which is the second time
+  that check has earned its place this stage.
+- **A `sed` that fails still lets a harness print a confident number.** The first
+  revert-the-regex counterfactual printed "0 findings" for both probes while the script it was
+  supposed to run had never been written. The result happened to be the *same* as the real answer,
+  which is worse than being wrong — it would have been recorded as evidence. Redone in Python with
+  an assert on the substitution count.
+- **The plan's mint estimate was high rather than low this time** (20 `WM-W` predicted, 12 minted),
+  the opposite direction from Stage 2's undercount of 11. The difference is the debt-list fold: two
+  of world-model's seven debt records name their own backlog ID in their own text, and the plan
+  counted the "no M-number" Status entries and the debt list as disjoint sets when `WM-W1` is both.
+  **Across four stages the plan's mint counts have now been high once, low once, and exactly right
+  twice** — which is an argument for deriving them from the document every time rather than
+  calibrating a correction factor.
+- **The worktree's `HEAD` was again a strict ancestor of the named tip** (`29217c0` vs `004a1cd`,
+  26 commits behind — the whole of Stages 1 through 3 plus the document-graph work, 253 files).
+  Fast-forwarded per AGENTS.md rule 4 before reading anything. Third consecutive stage, and the
+  prediction in the task brief was exactly right: none of `docs/DOC_CONVENTIONS.md`,
+  `plans/obsidian-links-and-tags/implementation.md`, `body-layer/ROADMAP/` or `todo/todo/` existed
+  in the tree as created.
