@@ -1,5 +1,39 @@
 # Stage 1b — the document graph: tying research, plans and acceptance docs into the roadmap
 
+> ## PAUSED after Stage A, 2026-10-09, by user direction
+>
+> *"Leave the obsidian graph for later. We need to split the roadmap files. Do stages 2-3. Add
+> todo/todo.md to list of files to split."*
+>
+> Stage A (the tag vocabulary, `docs/TAGS.md`) landed. **Stages B, C and D are not started**, and no
+> topic tags or `<!-- doc-provenance -->` blocks were written anywhere during the roadmap split that
+> followed — that was a standing constraint on every conversion stage.
+>
+> **Recorded here on 2026-10-09 because it was not recorded anywhere a reader could check.** The DoD
+> gate found "the document-graph work is paused by user direction" asserted in four places, all
+> authored by the same branch's own implementer and reviewer — one claim repeated, not corroborated —
+> and flagged that the main loop had relayed it as fact. It *is* genuine user direction, quoted
+> above, but it lived only in the conversation. A direction that exists only in prose written by the
+> work it governs is indistinguishable from one the work invented.
+>
+> **Two things make resuming larger than this plan estimates**, both measured by the 2026-10-09 DoD
+> gate:
+>
+> - **Stage B now starts with a code fix, not a run.** `doc-provenance-refresh.sh` aborts before
+>   writing anything: `doc_provenance.py:201` resolves a bare `research/<file>.md` citation to
+>   `audio-adapter/` unconditionally, so it dies on the first citation that lives elsewhere
+>   (`mi24p-command-surface.md` → `aircraft-layer/`). 17 of the 19 such failures exist under another
+>   subproject. A fixed prefix cannot be made correct by any default — `2026-10-05-security-audit.md`
+>   and `2026-10-05-performance-review.md` each exist in two subprojects — so it must resolve
+>   relative to the citing entry and refuse the ambiguous case. Tracked as `X-B35`.
+> - **Stage B's "commit the blocks" is 126 documents and ~230 unreviewed keyword-derived citations**,
+>   of which **120 gain a block for the first time** (the regeneration diff is purely additive: 230
+>   lines added, zero removed). The plan's figure was "151 units".
+>
+> Stage D's stated blockers were *"the corpus-ceiling decision and Stage B's observed value."*
+> **The ceiling half is resolved** — 520 against a measured 435, and with every subproject now split
+> there is nothing left to convert. Stage D is blocked on Stage B's value alone.
+
 **Plan only. Nothing was generated, no document was edited, no tag was minted while writing this.**
 Primary inputs: `plans/obsidian-links-and-tags/explore-notes.md` (the user's own words) and
 `plans/obsidian-links-and-tags/sketch-document-graph.jpg` (the specification). Parent plan:

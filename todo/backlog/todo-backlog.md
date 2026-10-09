@@ -83,6 +83,7 @@ than normalised.
 - [[X-B32]] — DCS's per-tree placement is behind the payload-addressing wall
 - [[X-B33]] — `/invariant-check` cannot see `contextlib.suppress(...)`
 - [[X-B34]] — Two agent-memory indexes have outgrown their read cap
+- [[X-B35]] — Provenance path resolution is hardcoded to audio-adapter, and the gate it feeds is red
 
 ## One entry carries two checkbox blocks
 
@@ -90,5 +91,11 @@ than normalised.
 followed by an un-IDed checkbox block introduced with *"Original item follows, kept because its
 reasoning is what the decision rests on."* That block is not a separate item — it is `X-B27`'s own
 earlier form, which is why the conversion minted **no** new ID for it and folded it into
-`X-B27.md`, in source order, with its original `[ ]` state untouched. The highest `X-B<n>` in this
-directory is therefore still `X-B34`, as it was before the split.
+`X-B27.md`, in source order, with its original `[ ]` state untouched. The split itself therefore
+minted nothing, leaving the highest at `X-B34`; `X-B35` was filed afterwards, by the 2026-10-09 DoD
+gate. Read the current highest with the recipe in `docs/DOC_CONVENTIONS.md` rather than from this
+sentence:
+
+```sh
+ls todo/backlog/ | grep -oE '^X-B[0-9]+' | sort -V | tail -1
+```
