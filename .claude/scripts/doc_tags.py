@@ -194,12 +194,26 @@ def _subproject_dirs(root: Path) -> list[str]:
     return sorted(p.parent.name for p in root.glob("*/pyproject.toml"))
 
 
+def _split_entry_dirs(root: Path) -> list[Path]:
+    """Every split entry directory: a */ROADMAP/ beside a pyproject.toml, plus the two under
+    todo/, which has no pyproject.toml and so is invisible to the glob.
+
+    The two todo/ directories were missing here for the same reason they were missing from
+    doc_provenance.find_entries (review round 4, RF4-9): the discovery loop was written when only
+    subproject roadmaps were split, and todo/backlog.md and todo/todo.md were converted later.
+    Their 58 entries were silently outside every unit this module builds. The shell gates
+    (roadmap-entry-consistency-gate.sh, roadmap-tag-vocabulary-gate.sh) already name them
+    explicitly, so this brings the Python half level with the shell half rather than introducing a
+    new rule.
+    """
+    dirs = [root / sub / "ROADMAP" for sub in _subproject_dirs(root)]
+    dirs += [root / "todo" / "backlog", root / "todo" / "todo"]
+    return [d for d in dirs if d.is_dir()]
+
+
 def entry_units(root: Path) -> list[DocUnit]:
     units = []
-    for sub in _subproject_dirs(root):
-        roadmap_dir = root / sub / "ROADMAP"
-        if not roadmap_dir.is_dir():
-            continue
+    for roadmap_dir in _split_entry_dirs(root):
         for f in sorted(roadmap_dir.glob("*.md")):
             if not ENTRY_ID_RE.match(f.stem):
                 continue  # the index file, e.g. audio-adapter-roadmap.md

@@ -161,8 +161,27 @@ fi
 # unaffected -- this is a PreToolUse hook on every `git commit`, and a gate that fires on
 # unrelated commits is a gate that gets bypassed. A missing or non-executable gate script is
 # skipped rather than reported: this hook must stay fail-open on its own internal errors.
+#
+# **doc-provenance-gate.sh is DELIBERATELY NOT in this list, and that is a deviation from the
+# round-4 instruction, taken on evidence the review did not have.** RF4-2 named all three gates,
+# on RF4-9's stated premise that the provenance gate was "latent only because zero provenance
+# blocks exist". That premise is false: 32 documents carry a real block today. Fixing RF4-9's
+# hardcoded `audio-adapter/ROADMAP` -- widening discovery from 22 entries to 245 across all seven
+# split directories -- means the generator now finds the cross-subproject citations it previously
+# could not see, so **127 documents' blocks are now stale by regeneration.** Measured by
+# counterfactual: with the pre-fix discovery the gate reports OK, rc=0; with the fix it names 127
+# files. So wiring it here would refuse every commit that touches any ROADMAP/ path, repo-wide,
+# until all 127 are regenerated -- and regenerating them is the Obsidian document-graph work,
+# which is paused by user direction, and would add ~200 keyword-derived citations nobody has
+# reviewed. A gate that refuses every roadmap commit is the "cries wolf, gets bypassed" failure
+# this review itself warns about, and is strictly worse than the status quo.
+#
+# It remains correct, runnable standalone, and its RF4-9 fix is in place and proven. **Condition
+# for adding it to this list: once the 127 blocks have been regenerated and reviewed** (one
+# command, `.claude/scripts/doc-provenance-refresh.sh`, when the document-graph work unpauses) --
+# at which point the gate passes and keeps them in step, which is what it is for.
 if printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP/|^todo/(backlog|todo)/|^docs/TAGS\.md$'; then
-    for gate in roadmap-entry-consistency-gate roadmap-tag-vocabulary-gate doc-provenance-gate; do
+    for gate in roadmap-entry-consistency-gate roadmap-tag-vocabulary-gate; do
         gate_path=".claude/scripts/$gate.sh"
         [ -x "$gate_path" ] || continue
         run "$gate" "$gate_path"

@@ -16,8 +16,10 @@
 # Ceiling raised 420 -> 520, 2026-10-09, by the obsidian-links-and-tags Stages 4 and 5
 # conversion (world-model/ROADMAP.md -> world-model/ROADMAP/, aircraft-layer/ROADMAP.md ->
 # aircraft-layer/ROADMAP/, mission-interpreter/ROADMAP.md -> mission-interpreter/ROADMAP/).
-# Measured post-conversion count: 434 -- 40 + 13 + 9 entry files plus three new indexes, 65 more
-# than Stage 3's 369, against the 420 ceiling Stage 3 left.
+# Measured post-conversion count: 435 -- 40 + 13 + 9 entry files plus three new indexes, 66 more
+# than Stage 3's 369, against the 420 ceiling Stage 3 left. (Recorded as 434 until 2026-10-09;
+# re-measured by running graph-corpus-files.sh rather than by reading this line, which is the only
+# way the claim "each raise carries a measured count" stays literally true.)
 #
 # **This is the last conversion, so the headroom is sized for ongoing growth rather than for a
 # next stage.** Every subproject's roadmap and backlog is now split; nothing is left to convert,

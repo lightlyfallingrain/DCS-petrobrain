@@ -1,6 +1,6 @@
 ---
 name: integrity-audit
-description: Audit this project's Claude Code operating environment (CLAUDE.md files, AGENTS.md, docs/AGENT_ROLES.md, .claude/agents, .claude/skills, .claude/settings.json hooks, agent-memory, auto-memory, todo/todo.md, NOTES.md) as a whole system for contradiction, staleness, drift, and gaps. Diagnostic and advisory only — never edits config itself. Use when the user asks for a system/config/process integrity audit, or to check whether the Claude setup has drifted from how the project actually works.
+description: Audit this project's Claude Code operating environment (CLAUDE.md files, AGENTS.md, docs/AGENT_ROLES.md, .claude/agents, .claude/skills, .claude/settings.json hooks, agent-memory, auto-memory, the roadmap/backlog/todo entry files, NOTES.md) as a whole system for contradiction, staleness, drift, and gaps. Diagnostic and advisory only — never edits config itself. Use when the user asks for a system/config/process integrity audit, or to check whether the Claude setup has drifted from how the project actually works.
 ---
 
 # System Integrity Audit
@@ -25,7 +25,16 @@ point is catching drift since the last audit. Enumerate:
   scripts they invoke under `.claude/scripts/`
 - `.claude/agent-memory/**` (per-role memory) and the auto-memory dir for this project
   (`~/.claude/projects/<sanitized-cwd>/memory/`, indexed by its `MEMORY.md`)
-- `todo/todo.md`, `todo/backlog.md`, `NOTES.md`, and each subproject's own `NOTES.md`/`ROADMAP.md`/`BACKLOG.md` if present
+- `NOTES.md` and each subproject's own `NOTES.md`
+- **The roadmap, backlog and todo sources — and resolve each path before reading it.** Seven of the
+  ten source kinds named in this list are four-line pointers: every subproject's `ROADMAP.md`,
+  `body-layer/BACKLOG.md`, `todo/todo.md` and `todo/backlog.md` carry
+  `<!-- split-roadmap: see ROADMAP/ -->` and the content is one file per entry under a sibling
+  directory. **An audit that reads the pointers compares an empty set against the config and
+  reports no drift** — which is not a hypothetical: the 2026-10-09 review of the split found ten
+  required fixes, and this skill as previously written would have surfaced none of them.
+  `.claude/scripts/roadmap-source.sh --entries <path>` lists the entry files and passes a
+  non-pointer through unchanged, so run it on every path rather than judging which need it.
 - `plans/**` directory names (to sanity-check milestone/feature references elsewhere)
 
 Skim each, don't deep-read yet — this pass is just "what exists and what does it claim to
@@ -62,12 +71,12 @@ accurate:
 
 - Do referenced paths, scripts, and commands (`ruff format world-model/src`, hook script
   paths, etc.) still exist and match current structure?
-- Does "Current priority" / "Current Focus" language in CLAUDE.md and `todo/todo.md` agree
+- Does "Current priority" / "Current Focus" language in CLAUDE.md and `todo/todo/todo-tasks.md` agree
   with each other and with recent git history (`git log --oneline -20`)? A stale "next
   milestone" pointer that both files still repeat is a coherence bug, not just an oversight
   in one file.
 - Do any milestone/gate statements (e.g. "gate lifted", "deferred") contradict what
-  `world-model/ROADMAP.md` or other subproject roadmaps now say?
+  `world-model/ROADMAP/` or other subprojects' resolved roadmaps now say?
 
 ## Phase 3 — Genericity leaks
 

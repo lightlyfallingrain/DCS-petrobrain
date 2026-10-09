@@ -17,15 +17,24 @@
 #   2. Every entry file's name matches <ID>.md, where <ID> is the first token of its own H1.
 #
 # The ID shape, which is what tells an entry file from an index file in all three checks, is
-# `<PREFIX>-<n...>` OR a bare `M<n>` -- the second alternative added 2026-10-09 by the Stage 4
-# conversion of world-model/ROADMAP.md, whose milestones are bare `M0`...`M11` with no prefix
-# (docs/DOC_CONVENTIONS.md records that irregularity rather than fixing it, because renaming
-# `M5` to `WM-5` would mean rewriting several hundred prose mentions docs/PROCESS.md forbids
-# touching). Before this, `M5.md` matched no shape here: check 1 reported every `[[M5]]` link as
-# dangling -- loud, and caught -- but checks 2 and 3 SKIPPED all twelve files silently, so a
-# wrong H1 or an entry missing from the index would have passed. The ID shape is enumerated
-# explicitly rather than loosened to `^[A-Z]`, which would also match a stray `README.md` or
-# `RUN.md` dropped into one of these directories and start checking it as an entry.
+# `<PREFIX>-<n...>` and nothing else. There is no bare-`M<n>` alternative: one was added on
+# 2026-10-09 for world-model's unprefixed milestones and removed the same day, when the user
+# renamed them to `WM-M<n>`. **This comment described that alternative as though it were still in
+# the code until 2026-10-09**, which is worse than a stale comment elsewhere -- it is the
+# authoritative-looking explanation a maintainer reads before widening the regex, and it argued
+# for a widening the code no longer has and does not need. The retired cost argument it carried
+# (that renaming `M5` to `WM-5` would mean rewriting several hundred prose mentions) was itself
+# superseded: `WM-M5` *contains* `M5`, so the rename cost nothing in historical documents. See
+# docs/DOC_CONVENTIONS.md for both.
+#
+# What is worth carrying forward is the failure the episode exposed. While `M5.md` matched no
+# shape here, check 1 reported every `[[M5]]` link as dangling -- loud, and caught at once -- but
+# checks 2 and 3 SKIPPED all twelve files silently, so a wrong H1 or an entry missing from its
+# index would have passed. The loud half was the trap: acting on it would have deleted twelve
+# correct links while leaving the silent half skipping those files indefinitely. Check 0 below
+# closes that class, so an unanticipated filename now fails the gate instead of vanishing from
+# it. The ID shape stays enumerated rather than loosened to `^[A-Z]`, which would also match a
+# stray `README.md` or `RUN.md` dropped into one of these directories and check it as an entry.
 #   3. Every entry file appears in exactly one index (*-roadmap.md / *-backlog.md) in its
 #      directory, as a [[ID]] link -- an orphaned entry is as much a defect as a dangling link,
 #      and an entry linked from two indexes in the same directory (live once a subproject has
@@ -117,12 +126,19 @@ for dir in $DIRS; do
     # Check 1: every [[target]] across every file in this directory resolves to a known ID,
     # anywhere in the union across all converted directories (not just this one -- R1).
     links=$(grep -rohE '\[\[[A-Za-z0-9._-]+\]\]' "$dir" 2>/dev/null | sed -E 's/\[\[|\]\]//g' | sort -u)
-    for target in $links; do
+    # Read line by line rather than `for target in $links`, which word-splits. Safe today only
+    # because the capture class above excludes whitespace; if it is ever widened, the unquoted
+    # form turns one link into two bogus targets and reports two dangling links instead of
+    # checking one. Process substitution, not a pipe, so FAIL=1 survives the loop (see the
+    # sibling tag gate's note on why that distinction is the difference between a gate and a
+    # gate-shaped no-op).
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
         if ! printf '%s\n' "$ALL_IDS" | grep -qxF "$target"; then
             FAIL=1
             echo "roadmap-entry-consistency-gate: $dir -- dangling link [[$target]], no $target.md in any converted directory" >&2
         fi
-    done
+    done < <(printf '%s\n' "$links")
 
     # Check 3: every entry ID appears as a [[ID]] link in exactly one index in this directory --
     # zero is an orphan, more than one is a duplicate (both are defects).

@@ -464,7 +464,7 @@ present on `main`. Every sentence below is kept exactly as the source wrote it, 
   the terrain qualifier itself (does "next valley"/"beyond the ridge" fire where the pilot would
   say it, does it ever displace something more useful) is outstanding and rides along with the
   already-pending `fix/contact-report-flood` / `fix/redundant-group-disclosure` sortie rather
-  than needing its own flight — see `body-layer/ROADMAP.md`'s "Live acceptance debt" list.
+  than needing its own flight — see `body-layer/ROADMAP/body-layer-roadmap.md`’s "Live acceptance" section.
 
 Its live-acceptance-debt record follows. The source document kept that list at the head of the
 file, away from the entry it was about; both are reproduced here, with the entry first so that its

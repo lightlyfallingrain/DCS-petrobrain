@@ -84,15 +84,22 @@ the Artifact tool and do NOT commit or push anything. Only update
 docs/status/petrobrain-status.html on disk, then stop. Publishing and
 committing happen later, in a separate step, after a mechanical check.
 
-Read the roadmap files FIRST, before opening the page: root ROADMAP.md, every
-subproject ROADMAP.md (world-model, aircraft-layer, body-layer,
-mission-interpreter, audio-adapter) and todo/todo.md. Reading the page first
-biases you toward patching what is already there instead of noticing what
-changed.
+Read the sources FIRST, before opening the page. Take the subproject list from
+root ROADMAP.md status table, and add body-layer/BACKLOG.md, todo/todo.md and
+todo/backlog.md. Reading the page first biases you toward patching what is
+already there instead of noticing what changed.
 
-If a subproject ROADMAP.md carries the sentinel "<!-- split-roadmap: see
-ROADMAP/ -->", it is a 4-line pointer, not the source -- read its
-ROADMAP/<subproject>-roadmap.md index instead.
+EVERY one of those paths except root ROADMAP.md is now a 4-line pointer
+carrying "<!-- split-roadmap: see ROADMAP/ -->", with the content in one file
+per entry under a sibling directory. Resolve each one before reading it:
+
+  .claude/scripts/roadmap-source.sh --entries <path>   # the entry files
+  .claude/scripts/roadmap-source.sh <path>             # the index
+
+A non-pointer passes through unchanged, so run it on every path rather than
+deciding which need it. Count checkbox states over the entry files, not the
+indexes. Omitting the two todo/ sources and body-layer/BACKLOG.md drops 104
+items and the forward-count check below still passes, so this is not optional.
 
 Then update docs/status/petrobrain-status.html: the five counters (recount the
 checkbox states), the subsystem cards, the mermaid dependency graph, the
@@ -114,24 +121,57 @@ GEN_OUT=$("$CLAUDE_BIN" -p "$GEN_PROMPT" --permission-mode acceptEdits 2>&1)
 GEN_STATUS=$?
 printf '%s\n' "$GEN_OUT" >>"$LOG"
 
-# Every exit path from here on runs after Phase 1 may have already touched $PAGE on disk, and
-# guard 2 at the top of this script ("working tree dirty -> SKIP") means a leftover modified file
-# turns one bad run into a silent permanent outage (see plans/obsidian-links-and-tags/review.md,
-# round 2, required fix 1). `git checkout -- "$PAGE"` is the revert for all of them: it is a
-# no-op when $PAGE already matches HEAD (nothing to undo), restores a partially-written or
-# emptied file, and restores a file Phase 1 deleted outright -- so it is applied uniformly on
-# every non-success exit below rather than only the one guard that happened to be tested.
-revert_page() { git checkout -- "$PAGE" 2>/dev/null || true; }
+# Every exit path from here on runs after Phase 1 may have already touched the working tree, and
+# guard 2 at the top of this script ("working tree dirty -> SKIP") means ANY leftover modified
+# tracked file turns one bad run into a silent permanent outage: every subsequent run skips
+# forever, logging only "working tree has uncommitted changes" (see
+# plans/obsidian-links-and-tags/review.md, round 2 required fix 1 and round 4 RF4-8).
+#
+# Reverting only $PAGE re-opens that wedge one file sideways, which is what round 4 found. Phase 1
+# is a `claude -p --permission-mode acceptEdits` run told in PROSE not to touch anything outside
+# docs/status/, and prose is exactly as reliable as that run's instruction-following. If it edits
+# any other tracked file and the forward-count check then fails, the page is restored and the other
+# file is left modified -- permanent outage, with nothing in the log naming the file responsible.
+#
+# So the revert is scoped to the SET, not to the file this script happens to know about. Guard 2
+# proved the tracked tree clean immediately before Phase 1 ran, so every tracked path dirty now is
+# Phase 1's and is safe to restore; `git diff --name-only HEAD` is that set (staged and unstaged
+# both, since Phase 1 could have run `git add`).
+#
+# `git checkout --` cannot undo everything: a staged *addition* of a new file stays staged, and an
+# untracked file is not in the set at all (harmless for the wedge, since guard 2 passes
+# --untracked-files=no). So the tree is re-checked afterwards and a loud ABORT is logged naming
+# what remains, rather than the script reporting a clean revert it did not achieve. A human reading
+# the log then has the one thing the old failure mode denied them: the name of the file to clear.
+revert_phase1() {
+    local dirty extra still f
+    dirty=$(git diff --name-only HEAD 2>/dev/null)
+    if [ -z "$dirty" ]; then
+        return
+    fi
+    extra=$(printf '%s\n' "$dirty" | grep -vxF "$PAGE" || true)
+    if [ -n "$extra" ]; then
+        say "WARNING: Phase 1 modified tracked file(s) outside $PAGE, despite being told not to -- reverting the whole set: $(printf '%s' "$extra" | tr '\n' ' ')"
+    fi
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        git checkout -- "$f" 2>/dev/null || true
+    done < <(printf '%s\n' "$dirty")
+    still=$(git status --porcelain --untracked-files=no)
+    if [ -n "$still" ]; then
+        say "ABORT: tracked changes remain after revert -- guard 2 will skip EVERY subsequent run until these are cleared by hand: $(printf '%s' "$still" | tr '\n' ' ')"
+    fi
+}
 
 if [ $GEN_STATUS -ne 0 ]; then
     say "--- FAILED generation (exit $GEN_STATUS) ---"
-    revert_page
+    revert_phase1
     exit 0
 fi
 
 if [ ! -f "$PAGE" ]; then
     say "--- FAILED: $PAGE missing after generation ---"
-    revert_page
+    revert_phase1
     exit 0
 fi
 
@@ -145,7 +185,7 @@ FORWARD_COUNT=$(awk '/id="graph-upcoming"/,/<\/pre>/' "$PAGE" \
 
 if [ "$FORWARD_COUNT" -eq 0 ]; then
     say "--- FAILED: forward-only map has zero items -- likely a split-ROADMAP pointer read as the full roadmap. NOT publishing or committing. ---"
-    revert_page
+    revert_phase1
     exit 1
 fi
 
@@ -176,6 +216,6 @@ else
     # Phase 2 was supposed to commit $PAGE on success; a non-zero exit here means that may not
     # have happened, which would leave it modified and uncommitted -- same guard-2 lockout as
     # above. If it already committed (e.g. the failure was in the push step), this is a no-op.
-    revert_page
+    revert_phase1
 fi
 exit 0

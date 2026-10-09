@@ -37,7 +37,10 @@ This file describes **the role**. The project's current shape comes from, in ord
 
 - **The orchestrator's prompt** — what *this* task is, and which branch and subproject it concerns.
 - **Root `ROADMAP.md`** — which subprojects exist and which is active.
-- **`<subproject>/ROADMAP.md`** — that subproject's milestone status; its own source of truth.
+- **`<subproject>/ROADMAP/`** — that subproject's milestone status; its own source of truth. One
+  file per entry, with an index at `<subproject>/ROADMAP/<subproject>-roadmap.md`.
+  **`<subproject>/ROADMAP.md` is a four-line pointer**, so reading it tells you nothing and
+  writing to it is worse — `.claude/scripts/roadmap-source.sh <path>` resolves either form.
 - **Root and per-subproject `CLAUDE.md`** — structure, commands, conventions.
 
 If your task needs to know what exists, read those. Do not trust a structure cached in a role

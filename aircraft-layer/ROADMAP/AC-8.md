@@ -29,5 +29,5 @@ a side.
   attempted here, needs a live DCS flight**: the `atan2` heading/bearing convention inside the Hook's
   `LOS_CODE` string, `tonumber("nan")`/`tonumber("inf")` behaviour on DCS's bundled Lua/CRT, whether a
   building actually occludes in the running game, per-frame look-direction socket-poll cost. See
-  `world-model/ROADMAP.md`'s "Live acceptance debt" list and
+  `world-model/ROADMAP/world-model-roadmap.md`’s "Live acceptance debt" list and
   `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`. Full record: `plans/dcs-driven-los/`.

@@ -404,18 +404,39 @@ resolve to a real entry file.
 
 ## Gates
 
-Three mechanical checks, run before committing a converted file (and available to run standalone):
+Three mechanical checks. **Two of them run automatically before a commit; the third is standalone
+only, and the difference matters because this section asserted all three were enforced while none
+of them was wired to anything.** `grep` for the three script names across `.claude/settings.json`,
+`install-git-hooks.sh` and `commit-quality-gate.sh` returned nothing until 2026-10-09: a dangling
+`[[ID]]`, an orphaned entry or an unlisted tag committed clean across 245 entry files for as long
+as this paragraph had been claiming otherwise (review round 4, RF4-2). A stated mechanical
+guarantee that does not exist is worse than no guarantee, because it is relied on instead of
+checked.
+
+As wired now, in `.claude/scripts/commit-quality-gate.sh`, conditioned on the staged diff matching
+`(^|/)ROADMAP/|^todo/(backlog|todo)/|^docs/TAGS\.md$` — so a commit touching none of those paths is
+unaffected, and each gate scans the whole tree rather than only the staged paths, because a
+dangling link and an orphaned entry are relational and a staged-paths-only check would miss the
+half of each pair that did not change:
 
 - **Consistency** (`.claude/scripts/roadmap-entry-consistency-gate.sh`): every `[[ID]]` in a
   converted tree resolves to an existing `<ID>.md`, across the union of every converted directory
   (not just the one the link was written from — a research note or a plan citing a roadmap ID
   from outside any `*/ROADMAP/` directory is a normal, correct link); every entry file's name
   matches `<ID>.md` with an H1 whose first token is that same ID; every entry appears in exactly
-  one index.
-- **Document provenance** (`.claude/scripts/doc-provenance-gate.sh`): see "Document provenance"
-  above.
+  one index. **Wired.**
 - **Tag vocabulary** (`.claude/scripts/roadmap-tag-vocabulary-gate.sh`): every inline `#tag` in a
-  converted entry file appears in `docs/TAGS.md`.
+  converted entry file appears in `docs/TAGS.md`. **Wired.**
+- **Document provenance** (`.claude/scripts/doc-provenance-gate.sh`): see "Document provenance"
+  above. **Standalone only, deliberately, and this is a temporary state with a stated exit.** Its
+  own discovery bug was fixed on 2026-10-09 (it had hardcoded `audio-adapter/ROADMAP`, seeing 22
+  entries of 245 and so rejecting a correct `[[BL-11]]` citation). Fixing it revealed that **127
+  documents' provenance blocks are stale** — the generator can now see the cross-subproject
+  entries it previously could not, so it wants citations the existing blocks do not carry.
+  Regenerating those is the paused document-graph work. Wiring the gate meanwhile would refuse
+  every commit touching any `ROADMAP/` path repo-wide, which is the cry-wolf failure that gets a
+  gate bypassed. **Wire it once `.claude/scripts/doc-provenance-refresh.sh` has been run and its
+  output reviewed.**
 
 All three fail loudly (non-zero exit, message naming the offending file) rather than silently —
 a dangling link, a stale or hand-edited provenance block, or an unlisted tag is exactly the kind

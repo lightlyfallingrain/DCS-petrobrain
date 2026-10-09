@@ -135,9 +135,13 @@ For each real finding, propose a specific, mapped change — not a vague "improv
 - A role missing a check it could reasonably run itself → an edit to that role's own
   `.claude/agents/<role>.md` process steps, with the concrete incident as the worked example (so
   future readers know *why*, not just *what*).
-- A caveat that keeps recurring without ever being tracked → a small tracked list in the
-  relevant `ROADMAP.md` (see root `ROADMAP.md` / per-subproject `ROADMAP.md` convention), not a
-  one-off note that will drift stale itself.
+- A caveat that keeps recurring without ever being tracked → a tracked entry in the relevant
+  subproject's `ROADMAP/` directory (one file per entry — `<subproject>/ROADMAP.md` is a four-line
+  pointer; `.claude/scripts/roadmap-source.sh --dir <path>` finds the directory), not a one-off
+  note that will drift stale itself. **Prefer a tag on the entry over a new list**: the one
+  hand-kept list this repo had, body-layer's "Live acceptance debt", was dissolved in favour of
+  `#needs-flight` precisely because a list is maintained by whoever remembers it while a tag plus a
+  `grep` is not (`docs/TAGS.md`).
 - Explicitly flag findings that need **no** change (e.g. a role correctly reporting no activity
   because of a deliberate project-phase exemption) — don't manufacture a fix for a non-problem.
 
@@ -158,8 +162,11 @@ invoking the skill. When implementing:
   sentinel before finishing).
 - Agent `.md` edits: keep them concrete — cite the specific incident/file that motivated the
   change, not just an abstract rule.
-- `ROADMAP.md` trackers: match the existing per-subproject roadmap's tone and structure; don't
-  invent a new section pattern per retro.
+- Roadmap trackers: write them as entry files under `<subproject>/ROADMAP/`, matching the existing
+  entries' tone and structure; don't invent a new section pattern per retro, and don't write into
+  `<subproject>/ROADMAP.md`, which is a pointer. A new entry needs an ID from that subproject's
+  space (read the highest with the command in root `CLAUDE.md`) and a link from the directory's
+  index, or `roadmap-entry-consistency-gate.sh` will report it as an orphan.
 - Commit with a message that names which retro findings drove which change, so a future retro
   (or integrity audit) can see the causal chain instead of an unexplained config diff.
 
@@ -184,6 +191,6 @@ it and the next run silently re-reads the same window. Commit this alongside any
   not a finding to manufacture around.
 - Keep the retrospective's own output out of `agent-memory/` — it's a meta-review of the roles
   and the orchestrator, not one role's own memory. If a proposal becomes an actual change, that
-  change should show up in the normal places (role `.md` files, `settings.json`, `ROADMAP.md`),
-  not as a new memory type. Do not create an `agent-memory/orchestrator/` directory — see this
+  change should show up in the normal places (role `.md` files, `settings.json`, a roadmap entry
+  file under `<subproject>/ROADMAP/`), not as a new memory type. Do not create an `agent-memory/orchestrator/` directory — see this
   file's own opening note on why the transcript substitutes for it.
