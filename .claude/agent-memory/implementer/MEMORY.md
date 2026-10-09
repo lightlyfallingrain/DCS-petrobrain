@@ -154,3 +154,5 @@ Write directly — the dir exists.
 - [Obsidian gate class fixes](project_obsidian_gate_class_fixes.md) — exactly-one-index count; strip code/URL before tag scan; LLM-prompt "assertion" isn't a mechanical check.
 - [Doc-provenance Stage A0](project_doc_provenance_stage_a0.md) — no plan.md has an H1; blank-line strip must be a while not an if; bare plan-dir citations collapse to plan.md.
 - [Doc-tags Stage A](project_doc_tags_stage_a.md) — self-referential plan-dir corpus trap; re.escape-then-substitute corrupts; fence-only strip misses inline code-span quoting.
+- [Obsidian links Stage 3 todo split](project_obsidian_links_stage3_todo_split.md) — un-IDed blocks are an entry's own history; both link gates missed todo/todo/ silently.
+- [Narrative prose stays in the index](feedback_narrative_prose_stays_in_the_index.md) — prose describing the set, not a member, is never shredded into entries.
