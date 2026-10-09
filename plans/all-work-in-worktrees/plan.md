@@ -252,3 +252,89 @@ how this session came to start where it did** rather than guessing.
 - **Do not make the root a worktree too.** It is the repository; the user wants it ordinary.
 - **Do not couple this to the stale-base fix.** Proven independent above, and bundling them would
   make either one's failure look like the other's.
+
+
+---
+
+## The branch-based dispatch, and what it fixes (user, 2026-10-09)
+
+> *"Since the branch for work is known, a created worktree should start from where that branch is.
+> Then we only really need to know the branch. Right? Agent do commit as they progress so changes do
+> end up in the branch. Then you could instruct agent to use worktree and checkout `<branch>` to do
+> whatever needs doing. Whether worktree should be closed when agent finishes or at merge is another
+> question."*
+
+**The direction is right and leads somewhere better than the current scheme. Two corrections.**
+
+### Correction 1 — an agent cannot check the branch out; it must start *from* it
+
+**Git will not check the same branch out in two worktrees**, and the feature branch is held by the
+main loop's worktree. So `checkout <branch>` in an agent's worktree fails. This is a git constraint,
+not a project policy, and it is the actual reason agents commit to `worktree-agent-<id>` at all.
+
+What works is starting *from* the branch without owning the ref:
+
+```sh
+git worktree add --detach <path> <branch>      # detached at the branch tip
+git worktree add -b worktree-agent-<id> <path> <branch>   # own branch, based there
+```
+
+Both give the agent the branch's content. Only the second gives it somewhere to commit, which it
+needs.
+
+### Correction 2 — commits do *not* land on the branch, and the fix is better than that
+
+An agent's commits land on `worktree-agent-<id>`. The branch gets them at harvest. **But if the
+worktree starts at the branch tip, the harvest becomes a fast-forward instead of a cherry-pick** —
+and that is the material gain:
+
+| | base at `origin/main` (today) | base at the branch tip |
+|---|---|---|
+| harvest | cherry-pick | `git merge --ff-only worktree-agent-<id>` |
+| shas | rewritten | **preserved** |
+| does the branch register as merged? | **never** | **yes** |
+| `git branch -d` | refuses; needs `-D` | works |
+| "is this branch harvested?" | **unanswerable** | answered by git |
+
+That last row is the 2026-09-27 defect at its root: 67 agent branches against 58 real ones, with no
+way to tell a harvested branch from an unharvested one, *because the harvest was a cherry-pick.*
+`AGENTS.md` rule 1 prescribes cherry-pick and deletion-at-harvest as the mitigation. **Under
+branch-based dispatch the mitigation is unnecessary** — git answers the question itself.
+
+### We are accidentally most of the way there already
+
+Every agent's first action is `git merge --ff-only <named tip>`, so **its branch is already a
+descendant of the branch tip.** Verified on the in-flight fix agent: `git merge-base --is-ancestor`
+confirms its branch descends from the tip it was given, and the harvest could have been a
+fast-forward. **I cherry-picked all four of this session's harvests anyway**, following rule 1 — which
+was written when agents started at `origin/main` and a cherry-pick was the only option.
+
+So one change to rule 1 captures most of the benefit with no configuration at all: **prefer
+`git merge --ff-only` when the agent's branch descends from the feature branch tip, and fall back to
+cherry-pick when it does not.**
+
+### The one constraint this adds, and I broke it today
+
+**A fast-forward harvest requires the main loop not to advance the branch while an agent holds it.**
+I committed four plan commits to this branch during the fix round, so its tip moved past the agent's
+base and the agent's branch no longer fast-forwards in. That harvest has to be a cherry-pick or a
+real merge, and it is my doing, not a flaw in the scheme.
+
+Either the main loop stops committing to a branch while an agent works on it, or it accepts
+cherry-pick whenever it has. The first is cheap discipline with a mechanical check
+(`git merge-base --is-ancestor <agent-branch> <branch>` before committing); the second is the status
+quo. **Worth stating in the rule rather than discovered per harvest.**
+
+### Worktree lifetime — the user's open question
+
+Different answers for the two kinds, and the reason is what `git worktree list` should mean:
+
+- **Agent worktrees: close at harvest.** Then `git worktree list` means "work in flight", which is
+  the signal the branch accumulation destroyed. Unchanged from today, and the plain
+  `git worktree remove` refusal on untracked files stays the safety check.
+- **Feature worktrees (the main loop's): keep until merge.** That is where the work lives, and the
+  user's own case for this change — being able to check out a branch at the root to fly it — depends
+  on the branch's working copy continuing to exist somewhere else.
+
+With both, `git worktree list` becomes the honest answer to "what is going on right now", which is
+an argument for naming feature worktrees after the feature rather than after an agent id.
