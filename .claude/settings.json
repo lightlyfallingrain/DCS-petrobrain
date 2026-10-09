@@ -31,7 +31,7 @@
           },
           {
             "type": "command",
-            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '^git (checkout -b|switch -c)'; then current=$(git -C $CLAUDE_PROJECT_DIR rev-parse --abbrev-ref HEAD 2>/dev/null); if [ \"$current\" != \"main\" ]; then printf '{\"continue\":false,\"stopReason\":\"Branch rule: new branches must be created from main. Currently on: %s. Run: git checkout main first.\"}' \"$current\"; exit 0; fi; fi",
+            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '^git (checkout -b|switch -c)'; then current=$(git -C $CLAUDE_PROJECT_DIR rev-parse --abbrev-ref HEAD 2>/dev/null); if [ \"$current\" != \"main\" ]; then printf '{\"continue\":false,\"stopReason\":\"Branch rule: a new branch is created from main, and the repo root is parked on %s -- so the ROOT is what is blocking this, not anything you did. Do NOT check main out in the root: AGENTS.md rule 3 (Where work happens) makes the root the space that belongs to the user, and moving its branch under them is what that rule forbids. Two ways forward, in order: (1) you almost certainly want a worktree, not a checkout -- git worktree add -b <branch> ../%s-<short-name> main creates the branch from main without touching the root at all, and is the rule-3 way to start any work; (2) if a checkout in the root is genuinely needed, STOP and tell the user that their checkout is parked on %s and only they move it.\"}' \"$current\" \"$(basename $CLAUDE_PROJECT_DIR)\" \"$current\"; exit 0; fi; fi",
             "statusMessage": "Checking branch rule..."
           },
           {

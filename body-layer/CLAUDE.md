@@ -63,9 +63,16 @@ and still running, and renaming code scheduled for deletion buys nothing.
 ```sh
 ruff format body-layer/src body-layer/tests   # format
 ruff check body-layer/src body-layer/tests    # lint
-mypy body-layer/src                            # type check (strict)
+cd body-layer && .venv/bin/mypy src            # type check (strict) -- CWD-only config discovery, see below
 pytest body-layer/tests -q                     # test
 ```
+
+**`mypy` must run from inside the subproject.** Its config discovery is CWD-only, so
+`mypy body-layer/src` from the repo root silently drops `strict` and the CWD-relative `mypy_path`
+(root `CLAUDE.md`, "Subprojects"). Measured on world-model, 2026-10-09: the root form reports a
+phantom `scipy-stubs` import error on a tree that `cd world-model && .venv/bin/mypy src` calls
+clean. All five subprojects carried the broken form until then; `brain-layer/CLAUDE.md` did not,
+which is the shape to match.
 
 **mypy config discovery is CWD-only, and `--config-file` alone does not fix it**:
 `mypy_path` in `pyproject.toml` is itself resolved relative to the working directory the

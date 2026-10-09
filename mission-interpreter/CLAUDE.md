@@ -101,9 +101,16 @@ the plan this subproject was built from, and `docs/concept/MISSION_INTERPRETER.m
 ```sh
 ruff format mission-interpreter/src mission-interpreter/tests   # format
 ruff check mission-interpreter/src mission-interpreter/tests    # lint
-mypy mission-interpreter/src                                     # type check (strict)
+cd mission-interpreter && .venv/bin/mypy src                     # type check (strict) -- CWD-only config discovery, see below
 pytest mission-interpreter/tests -q                               # test
 ```
+
+**`mypy` must run from inside the subproject.** Its config discovery is CWD-only, so
+`mypy mission-interpreter/src` from the repo root silently drops `strict` and the CWD-relative `mypy_path`
+(root `CLAUDE.md`, "Subprojects"). Measured on world-model, 2026-10-09: the root form reports a
+phantom `scipy-stubs` import error on a tree that `cd world-model && .venv/bin/mypy src` calls
+clean. All five subprojects carried the broken form until then; `brain-layer/CLAUDE.md` did not,
+which is the shape to match.
 
 Run a single test: `pytest mission-interpreter/tests/path/to/test_file.py::test_name -q`.
 
