@@ -535,9 +535,9 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>125</b><span>Done</span></div>
+    <div class="count is-done"><b>129</b><span>Done</span></div>
     <div class="count is-active"><b>12</b><span>In progress</span></div>
-    <div class="count is-open"><b>95</b><span>Open</span></div>
+    <div class="count is-open"><b>91</b><span>Open</span></div>
     <div class="count is-hold"><b>12</b><span>Deferred</span></div>
     <div class="count is-block"><b>3</b><span>Await you</span></div>
   </div>
@@ -558,8 +558,10 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
           your 2026-10-04 rebuild</b>: no stored line under 50&nbsp;m of relief, 234,799 lines, a
           720&nbsp;MB store. Latin-script place names cleared on the same run. <b>Next:</b> still
           nothing urgent here. Callout stages 3&ndash;5 are unbuilt and gated on a consumer that
-          actually wants landform references; multi-theatre (Kola has no SRTM) is the other open
-          milestone; the 12&nbsp;m LOS tolerance is still unflown.</p>
+          actually wants landform references; multi-theatre is the other open milestone and is
+          further along than it looks &mdash; Caucasus and Kola are implemented and reviewer-approved
+          on an unmerged branch, waiting on a user-run build each. The 12&nbsp;m LOS tolerance was
+          accepted 2026-10-09.</p>
         <span class="more">Details</span>
       </article>
 
@@ -687,7 +689,7 @@ flowchart LR
   RGD["Group lines stop&lt;br/&gt;restating known members"]:::done
   BUBBLE["10 km player bubble&lt;br/&gt;built, no cockpit observable"]:::done
   PRUNE["BL-B23 lost contacts&lt;br/&gt;out of clustering"]:::done
-  CBS["Everything on main&lt;br/&gt;still unflown"]:::block
+  CBS["On main, still unheard&lt;br/&gt;four cards (four accepted 10-09)"]:::block
 
   PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
   DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
@@ -776,7 +778,7 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  SORTIE["Everything merged since 25 Sep&lt;br/&gt;eight cards, one flight"]:::block
+  SORTIE["Still unheard in the air&lt;br/&gt;four cards, one flight"]:::block
   SAY["What does he SAY about&lt;br/&gt;sixteen vehicles in one sector?"]:::block
 
   subgraph REPORT ["Crew behaviour &mdash; everything here is downstream of the flight"]
@@ -825,7 +827,7 @@ flowchart LR
   end
 
   BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
-  THEATRE["Multi-theatre&lt;br/&gt;Kola has no SRTM above 60°N"]:::open
+  THEATRE["Multi-theatre&lt;br/&gt;approved, unmerged, builds user-run"]:::open
 
   SORTIE --> GBOUND --> GC5
   SORTIE --> POL
@@ -901,12 +903,12 @@ flowchart LR
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>Eight cards on <code>main</code>, still none heard in the air</b>
-            <p>Every quieting change merged since 2026-09-25 is still waiting on one flight: group
-              reporting and the 12&nbsp;m line-of-sight tolerance, the confirm band, the 2026-09-26
-              crew-behaviour fixes, the brain's first real model, the cohesion redesign,
-              <code>silence</code>, and the two fixes that stop the same units being announced
-              twice. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
+            <b>Four cards left on <code>main</code>, down from eight</b>
+            <p>Four were accepted outright on 2026-10-09 without a debrief &mdash; the 10&nbsp;km
+              player bubble, the 12&nbsp;m line-of-sight tolerance, the group lines that stopped
+              restating known members, and <code>silence</code>. What still wants ears: the confirm
+              band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, and the
+              cohesion redesign. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
               all of them reduce what you hear, and a genuine contact split immediately after a merge
               is indistinguishable from a merge echo at the speech layer, so it also goes quiet. That
               is an accepted cost on paper; whether it is ever <em>noticed</em> is a cockpit
@@ -1175,8 +1177,13 @@ flowchart LR
         <span class="who">world-model</span>
         <div class="what">
           <b>Multi-theatre support</b>
-          <p>Architecture already generalises through per-theatre registries. Kola is the real problem:
-            SRTM has no coverage above 60°N, so the elevation source must change.</p>
+          <p>Further along than this board showed. Architecture generalises through per-theatre
+            registries, Afghanistan is built and live-confirmed, and <b>Caucasus and Kola are
+            implemented and reviewer-approved</b> on <code>origin/feature/multi-theatre-caucasus-kola</code>
+            &mdash; unmerged, and never fetched locally, which is why this page described them as
+            unscoped. <b>Kola needs no new elevation source</b>: DEM3 covers it in the same
+            <code>.hgt</code> format the SRTM ingest already reads, and the files are on the Windows
+            box. What is left is a build per theatre, which only the user can run.</p>
         </div>
         <span class="chip open">Soon</span>
       </div>
@@ -1432,7 +1439,7 @@ const DETAIL = {
       { h: "Why it's effectively finished", p: "Every query surface the layers above it need is live. The last full-theatre rebuild validated both the junction-streaming fix and the OSM ingest split in one run — OSM now contributes landcover, coastline, water and named places, and never roads. DCS <code>.routes</code> stays authoritative for those. OSM landcover also just became the <em>shipping</em> answer for seeing through woods rather than a fallback: no DCS call sees trees." },
       { h: "The landform line: three detectors, and the third one holds", p: "M6's curvature classifier gave checkerboard noise; the marker-controlled watershed passed every check set for it and was then judged wrong by eye; geomorphons was chosen from rendered comparisons and is the one that shipped. Two defects the first theatre build exposed &mdash; no relief gate, and stored geometry 16x denser than a 90 m DEM justifies &mdash; were fixed, and your 2026-10-04 rebuild cleared all three acceptance blocks. <strong>The stored <code>ridge</code>/<code>valley</code> rows are now a layer later work can build on</strong>, which is the opposite of what this entry said four days ago. Nothing consumes them yet." },
       { h: "Latin-script place names, cleared on the same build", p: "<code>WM-B1</code>: named places stored OSM's raw <code>name</code>, which in Syria is frequently Arabic script &mdash; and DCS cannot render non-Latin-1 text, so those names reached the cockpit overlay as blanks. Body-layer was already dropping them at render time, which made the data usable while losing real information. Ingest now prefers <code>name:en</code>, then <code>int_name</code>, then <code>name</code>, keeping only what actually encodes as Latin-1, and records which tag won. Name-source counts landed exactly as predicted on the real build &mdash; ~12,926 via <code>name:en</code>, ~864 via <code>int_name</code>, 13,073 of 49,226 places affected. Riding one rebuild for both this and the landform pass is why the expensive geomorphons work was unparked when it was." },
-      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and it is add-entries-and-verify rather than a rewrite — projections and regions are per-theatre registries, not code forks. Per theatre you need verified projection parameters, a region bbox, and a hand-derived raster chart registration. Kola is the exception that needs thought: SRTM has no coverage above 60 degrees north, so its elevation source has to change." },
+      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and less of it is open than this entry implied. Afghanistan is built and live-confirmed; <strong>Caucasus and Kola are implemented and Reviewer-approved on an unmerged remote branch</strong>, with builds the user runs. Per theatre you still need verified projection parameters, a region bbox and a hand-derived raster chart registration. <strong>Kola is no longer the exception</strong>: the SRTM >60&deg;N gap was resolved on 2026-10-04 &mdash; DEM3 covers it in the same <code>.hgt</code> format the existing ingest reads, so no new elevation source is needed." },
       { h: "The elevation grid's future is now in question, and that is new", p: "Line of sight <strong>has moved</strong> to DCS as of 2026-10-09, which was the grid's strongest claimed consumer and is now gone; contact enrichment can use a unit's own DCS-reported altitude, which is exact; and the Mission Interpreter turns out to receive elevation as unread payload rather than reading it. Measured, so the size argument is not guessed at: the grid is 49 MB of a 608 MB store &mdash; about 8% &mdash; while OSM features are the bulk. <strong>The reason to do that work is quality, not disk.</strong>" },
       { h: "Unmeasured", p: "Full-theatre OSM parse time and peak memory were never measured — the validating build hit a warm cache and skipped the parse. Stage 5 of that pipeline also has pathological single-chunk stalls. Both are backlog, neither is a correctness gate." }
     ],
@@ -1591,7 +1598,7 @@ const DETAIL = {
 
   crewsortie: {
     kicker: "Waiting on you", title: "Eight cards on main, none flown", chip: ["block", "Sortie"],
-    facts: [["Branch", "main -- everything here is merged"], ["Oldest card", "2026-09-25, crew behaviour"], ["Newest", "2026-10-08, BL-11 log visibility"], ["Fly with", "--detection-trace"]],
+    facts: [["Branch", "main -- everything here is merged"], ["Accepted 2026-10-09", "bubble, LOS tolerance, group disclosure, silence"], ["Still unheard", "confirm band, 09-26 fixes, brain Stage 2, cohesion"], ["Fly with", "--detection-trace"]],
     sections: [
       { h: "What is waiting, and why it keeps growing", p: "Group reporting and the 12 m line-of-sight tolerance, the confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, the cohesion redesign, the <code>silence</code> command, and the two fixes that stop the same units being announced twice. All merged, none heard. Most were merged ahead of their flight at your direction &mdash; <em>\"so many things at this stage are intertwined that it's better to test to current HEAD\"</em> &mdash; which is the right call each time and is also exactly why eight cards now sit behind one flight." },
       { h: "The newest two are the reason to fly now", p: "Merge-echo suppression and the group-disclosure fix both <em>reduce</em> what you hear, and both carry the same accepted cost: a genuine split right after a merge is indistinguishable from an echo at the speech layer and also goes quiet. Every other item on this list fails loudly if it is wrong. These two fail silently, which makes them the hardest thing here to catch and the thing a flight is most needed for. The 17-of-34 suppression figure is a reconstruction from pipeline outputs, not a replay." },
@@ -1600,7 +1607,7 @@ const DETAIL = {
       { h: "Three things no flight here can judge", p: "<code>follow &lt;descriptor&gt;</code> still cannot pick the right contact &mdash; the validator's rule is right and currently unsatisfiable, so he will correctly ask rather than pick, and that is not a defect to report. The 12 m tolerance will also reveal units genuinely masked by a ridge by less than that: accepted knowingly, watch for it rather than test it. And sector fairness is explicitly not in any of this &mdash; \"all ten units to my left get identified\" is still expected to fail and must not be read as a regression." },
       { h: "The card that used to sit outside this set has flown", p: "The elevation-cost probe was flown alone on 2026-10-05 and answered both its questions &mdash; <code>land.getHeight</code> works through the bridge, and it <em>does</em> hitch the frame (<em>&ldquo;a small but annoying stutter every few seconds&rdquo;</em>). Worth carrying forward as a habit rather than a card: a second forgotten probe Hook produced another stutter on 2026-10-08, after three hypotheses had been refuted against log evidence while the real cause sat in the Hooks directory. Check that directory holds only the four shipped scripts before any sortie flown to measure anything." }
     ],
-    items: [["open","Merge-echo suppression + group disclosure"],["open","silence - one word, absolute quiet"],["open","Cohesion redesign - six delta branches by ear"],["open","Group reporting - one line per group"],["open","12 m LOS tolerance - the missed AAA"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
+    items: [["done","10 km player bubble - ACCEPTED 2026-10-09"],["done","Group disclosure - ACCEPTED 2026-10-09"],["done","silence - ACCEPTED 2026-10-09"],["done","12 m LOS tolerance - ACCEPTED 2026-10-09"],["open","Merge-echo suppression - the silent failure direction"],["open","Cohesion redesign - six delta branches by ear"],["open","Group reporting - one line per group"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
     src: "docs/acceptance/2026-10-05-contact-report-flood-sortie.md, 2026-10-04-silence-command.md, 2026-10-01-group-cohesion-sortie.md, 2026-09-29-group-reporting-sortie.md, 2026-09-29-los-tolerance-sortie.md, 2026-09-28-confirm-band-sortie.md, 2026-09-26-sortie-fixes-sortie.md"
   },
 
@@ -1702,12 +1709,12 @@ const DETAIL = {
     src: "body-layer/ROADMAP.md"
   },
   theatre: {
-    kicker: "world-model/", title: "Multi-theatre support", chip: ["open", "Needed soonish"],
-    facts: [["Raised", "2026-09-13"], ["Shape", "Add entries and verify, not a rewrite"], ["Hard case", "Kola"]],
+    kicker: "world-model/", title: "Multi-theatre support", chip: ["open", "Approved, unmerged, builds user-run"],
+    facts: [["Raised", "2026-09-13"], ["Afghanistan", "built + live-confirmed 2026-10-05"], ["Caucasus + Kola", "implemented, Reviewer APPROVED, unmerged"], ["Blocking", "a user-run build per theatre"]],
     sections: [
-      { h: "Why it's cheap", p: "The architecture already generalises: projections and regions are per-theatre registries, not per-theatre code forks." },
+      { h: "Why it's cheap, and how far it already got", p: "The architecture generalises: projections and regions are per-theatre registries, not per-theatre code forks. Afghanistan proved the pattern end to end (built, DoD-passed, projection live-confirmed, worst residual under 1 mm). <strong>Caucasus and Kola then followed on <code>origin/feature/multi-theatre-caucasus-kola</code> (<code>d5d0540</code>) &mdash; projections, region entries, beacons, towns, coordinate tests and <code>RUN.md</code> build steps, 359 insertions, Reviewer APPROVED.</strong> It is unmerged and exists only as a remote ref, which is exactly why this page and the orchestrator both kept calling multi-theatre unscoped backlog." },
       { h: "Per-theatre work", p: "Transverse Mercator projection parameters — fitted values exist for every theatre, but each needs live-DCS verification against real coordinate output rather than being trusted blind. A region bbox entry, which is mechanical. And raster chart registration for the F10 paper map, which was hand-derived from control points for Syria and is genuinely manual per theatre." },
-      { h: "Why Kola is different", p: "SRTM has no coverage above 60 degrees north. That is not a parameter change — the elevation source itself has to change for that theatre." }
+      { h: "Kola was supposed to be the hard case, and is not", p: "This entry said for weeks that SRTM has no coverage above 60&deg;N, so Kola's elevation source would have to change. <strong>That was retired on 2026-10-04 and this page kept asserting it</strong>: viewfinderpanoramas.org DEM3 covers the Kola area in the <em>same</em> <code>.hgt</code> format the SRTM ingest already reads (user-checked), so no new source and no new code path. The user confirms the required files are present on the Windows box for both remaining theatres. Worth recording as a page failure rather than a project one &mdash; <code>world-model/ROADMAP.md</code> carried the correction the whole time, and the page's own contract is that a disagreement means the page is wrong." }
     ],
     src: "world-model/ROADMAP.md"
   },
