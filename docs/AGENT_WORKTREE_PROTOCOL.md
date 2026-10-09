@@ -111,6 +111,26 @@ reported the sha, and nothing raced. Two frictions surfaced:
   checkout instead, nobody would have noticed. `agent-memory-path-gate.sh` now accepts any worktree
   root while still denying subproject-relative paths, including a subproject path nested inside a
   worktree.
+
+  **It recurred on 2026-10-09, and the sentence above is why it was not looked for.** "Accepts any
+  worktree root" was written of a fix that accepted exactly one *layout* —
+  `<project>/.claude/worktrees/<name>/` — and when rule 3 made every session take a worktree, the
+  convention the skills prescribe became the **sibling** `../<repo-name>-<name>`
+  (`.claude/skills/merge/SKILL.md`, `plans/all-work-in-worktrees/plan.md`). That layout was denied,
+  so a worktree created the documented way could not write agent memory at all. Found by hitting
+  it, again — not by the integrity audit that was running at the time, which read the gate and the
+  skills as separate files and agreed with each.
+
+  **The fix is to ask `git worktree list`, not to add a second prefix**, which is what this entry
+  should have said the first time: git is the only thing that knows where the worktrees are, so the
+  check cannot go stale the next time the convention moves — and it has now moved twice. The `git`
+  call runs after both string comparisons, so the ~16 ms it costs lands only on a path that looks
+  like agent memory and matched neither root; writes elsewhere are unaffected. Full account, with
+  the before/after case table and timings: `audits/system-integrity/`, finding 8.
+
+  **The transferable part: a fix described in general terms ("any worktree root") that is
+  implemented for one special case will not be re-examined when the general case arrives.** The
+  wording closed the question. Prefer describing what the code actually matches.
 - **Bash heredocs and `>>` redirection are refused inside a worktree** ("too complex to verify it
   stays inside the worktree"). Not a bug to fix — use the `Edit` and `Write` tools for file content
   there, which is better practice anyway. This one stayed in `AGENTS.md` as a one-line rule, because
