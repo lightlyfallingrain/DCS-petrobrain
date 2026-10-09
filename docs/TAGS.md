@@ -1,9 +1,19 @@
 # Tag vocabulary
 
 A closed vocabulary for the inline `#tag`s used in split roadmap/backlog entries (see
-`docs/DOC_CONVENTIONS.md`). Closed on purpose: `grep -rl '#needs-flight' */ROADMAP/ todo/backlog/`
+`docs/DOC_CONVENTIONS.md`). Closed on purpose: the find-the-set recipe
+
+```sh
+grep -rl '#needs-flight' --include='*.md' */ROADMAP/ todo/backlog/ todo/todo/ \
+  | grep -vE -- '-(roadmap|backlog|tasks)\.md$'
+```
+
 is only a trustworthy *negative* — "nothing is tagged this" really means nothing is — if nothing
-spells the same concept two ways. The gate in `.claude/scripts/` (added alongside the first
+spells the same concept two ways. Every split directory has to be named, or the negative is worth
+nothing: the copy of this recipe in `body-layer/ROADMAP/body-layer-roadmap.md` named two pointer
+files and omitted a whole subproject, and reported four real items as absent while exiting 0
+(review round 4, RF4-3). The `grep -v` drops index files, which match because they discuss the tag
+rather than carrying it. If you change this recipe, change that copy in the same commit. The gate in `.claude/scripts/` (added alongside the first
 conversion) checks every inline tag in a converted entry file against this list; an unlisted tag
 fails the gate rather than silently expanding the vocabulary.
 

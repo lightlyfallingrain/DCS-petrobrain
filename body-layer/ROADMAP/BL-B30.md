@@ -26,7 +26,7 @@
   instrument would have cost a sortie and the harness cost none.
 
   **What this does NOT close.** The 2.0 % overrun tail is entirely `describe_position`'s unit cost
-  (57–85 ms/call, identical cold or warm) and is `world-model`'s `M11`, not body-layer's. And the
+  (57–85 ms/call, identical cold or warm) and is world-model's [[WM-M11]], not body-layer's. And the
   sortie's **4.98 s p90 remains unexplained** — nothing in the CPU measurements reaches it; the
   candidates are [[BL-B33]] and [[BL-B32]], both across a subproject seam. **The median is fixed and the
   tail is not**, so the "every decay half-life and cadence constant was tuned against the wrong

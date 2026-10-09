@@ -234,7 +234,7 @@ the region name is needed. `gemerek-20km` has none; give it inputs explicitly li
 | `--beacons` | DCS `beacons.lua`: navigation beacons |
 | `--routes` | DCS `.routes` binary: road network (junction detection runs automatically on it) |
 | `--osm-pbf` | merged theatre `.osm.pbf` from job (a); takes precedence over `--osm-cache` |
-| `--osm-cache` | cached OSM overlay JSON (small regions only, M3's live-Overpass path) |
+| `--osm-cache` | cached OSM overlay JSON (small regions only, `WM-M3`'s live-Overpass path) |
 | `--srtm-dir` | directory of `.hgt` tiles, the primary elevation grid |
 | `--srtm-grid-spacing-m` | elevation grid cell spacing, default 1000 m |
 | `--srtm-tile` | a single `.hgt`, metadata-only delta stats for a probe grid |

@@ -111,7 +111,7 @@
   table built once offline over a finite catalogue is what stands between here and a real occluder
   layer. **That is a new workstream, not a tweak** — file it before starting it.
 
-  Costs settled across three flights: `getHeight` 0.8-1.1 us/point (a full 2,601-point M8 chunk is
+  Costs settled across three flights: `getHeight` 0.8-1.1 us/point (a full 2,601-point [[WM-M8]] chunk is
   2.0 ms), `isVisible` 10.6 us/ray. Scenery search is superlinear and is the one to watch: 126
   objects at 300 m costs 1 ms, 590 at 600 m costs **18 ms** — keep it at or below 300 m.
 

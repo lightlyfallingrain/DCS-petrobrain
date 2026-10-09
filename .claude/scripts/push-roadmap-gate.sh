@@ -6,7 +6,13 @@
 # that step was skipped. Fails open on any error or uncertainty -- this is a safety net, not a
 # hard requirement, and a script bug must never block a legitimate push.
 set -uo pipefail
-cd "$CLAUDE_PROJECT_DIR" || exit 0
+
+# Under `set -u`, `cd "$CLAUDE_PROJECT_DIR" || exit 0` aborts the shell at expansion time when the
+# variable is unset, never reaching its own `|| exit 0`. Still fail-open in effect for a hook, but
+# not by the mechanism the comment above promises -- so it is written the way the sibling gates in
+# this directory write it. (Review round 4, observations.)
+REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+[ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
 [ "$branch" != "main" ] && exit 0
