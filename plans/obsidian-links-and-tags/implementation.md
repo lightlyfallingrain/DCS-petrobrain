@@ -819,3 +819,126 @@ Mechanical gates (not subproject-specific, run repo-root):
   seven approved tags appear in it. Left as the regenerated file rather than hand-edited or
   deleted; its own header already says what to do with it next (delete unwanted rows, promote the
   rest by hand) and nothing here changes that guidance.
+
+## 2026-10-09 — Stage 2: `body-layer/ROADMAP.md` split (the stress test)
+
+### Implementation Summary
+
+Converted `body-layer/ROADMAP.md` (2431 lines, 68 checkbox entries, the highest-churn document
+in the repo) into one file per entry under `body-layer/ROADMAP/`, per the plan's Stage 2
+steps 1-5. `body-layer/ROADMAP.md` is now the 4-line pointer. Done mechanically with a
+line-range-extraction Python script (written to the scratchpad, not committed) rather than by
+retyping content by hand, specifically to avoid the transcription risk the task flagged as the
+highest-value check — every entry file's text is a verbatim slice of the original file's own
+lines, not a re-derived paraphrase.
+
+**Folding the debt list.** All 19 "Live acceptance debt" entries were folded into their Status
+counterpart (or minted standalone where no counterpart existed) rather than becoming separate
+entry files — reusing `#needs-flight` plus the index's grep recipe, per the plan's design. Two
+debt entries were pure cross-subproject pointers with no body-layer-owned content
+(`feature/dcs-driven-los` → world-model's own entry; `feature/spu8-intercom` → audio-adapter's
+`AA-3`) and were folded into the index's "Live acceptance" section as prose rather than minted as
+entries — there was nothing body-layer-specific left to put in a file once the pointer was
+followed.
+
+**Checkbox vs. flight-status, disentangled.** The source document used `[ ]` throughout the debt
+list to mean "not yet flown," conflating code-completion status with flight status. Converting,
+every entry's checkbox now reflects code-completion state (`[x]` once merged/DoD-passed) and
+`#needs-flight` carries the flight-debt separately — matching the pattern already established by
+Stage 1's `AA-2`/`AA-5` (`#status/done #needs-flight` on an entry whose code is finished but
+unflown). This was a judgement call, not mechanical: it resolves the "doubling" the plan's own
+"The debt-list entries are two different things" section predicted, but it does mean several
+entries' checkbox differs from the symbol the source document used for the same content.
+
+### The ID scheme, at full stress
+
+**Minted `BL-W1`…`BL-W38`, in document order** (first point in the document where each resulting
+entry's content appears) — not the plan's estimated ~27. The plan's figure assumed a tighter fold
+than turned out correct once every entry was actually read: several "debt-list items" (the
+2026-09-25 sortie-closure records, the F10-vocabulary closure, the "two things waiting on the
+user's machines" closure) are themselves distinct historical records with no separate Status
+entry to fold into, and each needed its own ID rather than disappearing into another entry.
+Reported as a discovery below, not silently absorbed — this is exactly the kind of "the plan's
+test-impact list is a hypothesis" gap the role brief asks to report.
+
+`BR-1`/`BR-2`: only `BR-1` exists in this file, as two stages (`BR-1.1`, `BR-1.2`); no bare `BR-1`
+parent file was minted, since neither stage's own content named a separate overview paragraph to
+put in one — the index groups them under a plain "BR-1" prose label instead, matching how
+`mission-interpreter`'s complete-with-no-further-action milestones are handled. `BL-B23` (already
+backlog-numbered) and the ten pre-existing bare `BL-<n>` milestones keep their own IDs unchanged.
+
+### Where I did NOT resolve a contradiction
+
+**One real contradiction found, flagged `**OPEN**`, not silently fixed**: `[[BL-W12]]` (group
+cohesion redesign)'s own source text says, in the same paragraph, both "Merged to main 2026-10-01
+as `ff7934e`" and "**Not merged as of this entry** — pending the user's acceptance call." Both
+sentences are reproduced verbatim in the entry file. I could resolve the underlying *fact*
+mechanically (`git merge-base --is-ancestor ff7934e HEAD` confirms it is merged — the "not merged"
+sentence is stale leftover text), and said so in the entry, but did not edit the contradiction out
+of the document itself, per the task's explicit instruction not to resolve a disagreement found
+during conversion.
+
+**Zero `**USER**` items.** The plan named `fix/contact-report-flood` as a "known case" of
+disagreement (its "doubling" section: a `[ ]` debt entry against an `[x]` Status entry for the
+same work). Read closely, the two records agree on every fact — both say "DoD PASSED, merged
+2026-10-05, not yet flown" — and the Status entry explicitly says "see the debt entry above," i.e.
+it knows it is the same record. That is the checkbox-convention doubling the previous section
+describes, not a factual disagreement, so it was folded without a flag. The same is true of the
+other five pairs the plan's "doubling" section names (`silence`, `fix/redundant-group-disclosure`,
+the position-belief-runaway fix, `feature/dcs-driven-los`): in every case the debt-list entry is
+simply the more recent of two time-ordered records (e.g. "ACCEPTED 2026-10-09" superseding an
+earlier "live acceptance still outstanding"), not a dispute about what happened. `BL-W12` above is
+the one case this document actually contains that meets the bar of "the same document asserts two
+different things" — found by reading every entry's full text rather than trusting the plan's named
+example, which turned out not to be one.
+
+### Corpus ceiling
+
+Already breached before this stage touched anything: `graph-corpus-files.sh` emitted 204 files
+against the 200 ceiling, from Stage 1 (audio-adapter) alone. Measured post-conversion count: 263.
+Raised the ceiling 200 → 300 in `graph-corpus-guard.sh`, with a comment recording the pre-existing
+breach, the measured count, and the expectation that Stage 3 (`body-layer/BACKLOG.md` +
+`todo/backlog.md`, ~77 more entry files per the plan) will need it raised again.
+
+### Read-cost measurement
+
+Session Start with body-layer active: old file 49,076 tokens (`wc -c`/4) → pointer (114) + index
+(1,692) + one median entry (565) ≈ 2,371 tokens — a 95% cut, larger than the plan's projected 78%
+across all subprojects combined, consistent with body-layer's `ROADMAP.md` having been the single
+largest file converted so far.
+
+### Checks
+
+- `.claude/scripts/roadmap-entry-consistency-gate.sh`: OK (after fixing one self-inflicted false
+  positive — the index's own prose example text `` [[link]] `` read as a real wikilink; reworded
+  to "a wikilink" in prose, and after adding the four `BL-W3`–`BL-W6` index rows I'd initially
+  omitted).
+- `.claude/scripts/roadmap-tag-vocabulary-gate.sh`: OK.
+- `.claude/scripts/doc-provenance-gate.sh`: OK (no provenance blocks added — out of this stage's
+  scope by instruction).
+- `push-roadmap-gate.sh`'s regex and `graphify-dirty-flag.sh`'s regex both confirmed matching
+  `body-layer/ROADMAP/*.md` paths directly (Stage 0's fixes were already in place on `main` before
+  this stage started; nothing to repair here).
+- `graphify-dirty-flag.sh` confirmed firing on a staged edit touching the new entry files (60
+  doc(s) changed recorded in `graphify-out/.needs_update`).
+- body-layer's own commands (from inside `body-layer/`, using the main checkout's `.venv` since
+  this worktree has none of its own — gitignored, not copied): `ruff format --check .` (1 file
+  flagged, `research/2026-10-05-security-audit.md`, confirmed pre-existing on `main` and untouched
+  by this stage), `ruff check .` (clean), `mypy src` (clean, 54 files), `pytest -q` (1551
+  passed / 4 xfailed) — all unchanged from baseline, as expected for a docs-only change.
+
+### Notable Discoveries
+
+- **The plan's estimate of 27 new IDs for this stage was off by 11** (38 minted) — see "The ID
+  scheme, at full stress" above. The gap is specifically in the debt-list fold: the plan's own
+  "~6 genuine duplicates" estimate for the whole debt list undercounted how many debt-list entries
+  are *not* duplicates of a Status entry at all, but self-contained historical records (sortie
+  closures, a vocabulary-closure note) that needed their own file regardless.
+- **The 68-checkbox count the task stated matched exactly** (19 debt-list + 49 Status), which is
+  a useful cross-check that no top-level entry was missed during extraction — confirmed
+  independently via `grep -n '^- \['`.
+- **A rebase-driven worktree mismatch was caught and corrected before any entry was written**: the
+  worktree's `HEAD` (`29217c0`) was a strict ancestor of the task's named tip (`b7faa4d`, 7
+  commits ahead, mostly Stage 1's own agent-memory/gate-tuning commits); fast-forwarded per
+  AGENTS.md rule 4 before reading anything, so none of this stage's work was done against the
+  stale copy the task warned a prior attempt had hit.

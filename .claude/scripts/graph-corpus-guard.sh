@@ -12,10 +12,20 @@
 # counts. This counts.
 #
 # Usage: .claude/scripts/graph-corpus-guard.sh <corpus-file> [max-files]
+#
+# Ceiling raised 200 -> 300, 2026-10-09, during the obsidian-links-and-tags Stage 2 conversion
+# (body-layer/ROADMAP.md split into body-layer/ROADMAP/). The ceiling was **already breached
+# before this stage touched anything**: the audio-adapter conversion (Stage 1) alone put the
+# curated corpus at 204 files, 4 over the old 200 ceiling, independently of this change. Measured
+# post-conversion count (this stage's own 58 new entry files + 1 index) is 263; 300 leaves ~14%
+# headroom rather than pre-raising for a future stage's growth, per this guard's own "raise it
+# deliberately, not in anticipation" rule. Expect this to need raising again at Stage 3
+# (body-layer/BACKLOG.md + todo/backlog.md, ~77 more entry files per
+# `plans/obsidian-links-and-tags/plan.md`).
 set -euo pipefail
 
 corpus="${1:-graphify-out/.corpus.txt}"
-max="${2:-200}"
+max="${2:-300}"
 
 if [ ! -f "$corpus" ]; then
     echo "graph-corpus-guard: no corpus file at '$corpus'." >&2

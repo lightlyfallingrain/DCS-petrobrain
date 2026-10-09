@@ -110,6 +110,31 @@ See `docs/TAGS.md` for the vocabulary. Two rules repeated here because they deci
 shape above: tag only what the ID and path do not already say, and tag status on the same line as
 its checkbox marker, never in frontmatter and never elsewhere in the entry.
 
+## `**OPEN**` and `**USER**` — a contradiction found during a split is carried, not resolved
+
+When two records being folded into one entry file disagree about whether the underlying work is
+actually done — not merely using different checkbox conventions for the same fact, but asserting
+different things — a converter does not pick a side. Carry both texts verbatim into the one entry
+file and mark the disagreement with one of two prose markers, inline, not as a tag (there is no
+`#status/*` spelling for "this is contested"):
+
+- **`**USER**`** — blocked on the user: a judgement only they can make, such as which of two
+  disagreeing records is right about what was actually flown. User direction, 2026-10-09: *"For
+  items that are waiting on me, flag them **USER**. That makes it clear and a different
+  subcategory of **OPEN**."*
+- **`**OPEN**`** — unresolved but not waiting on them; a later stage or a measurement can settle
+  it (including a converter's own mechanical check, such as `git merge-base --is-ancestor`, that
+  resolves the *fact* without being authorized to resolve the *document* — the point of not
+  silently fixing it in place is that the next reader sees the disagreement existed, not just its
+  resolution).
+
+**`**USER**` is a subcategory of `**OPEN**`, not a replacement.** Every `**USER**` item is also
+open; not every open item is waiting on the user. Do not apply `#needs-flight` to a contradicted
+entry while it carries either marker — tagging it picks a side before the contradiction is
+resolved. This is distinct from `#status/decision-needed` (`[?]`), which marks an entry wholly
+blocked on a decision from the outset, not a contradiction a conversion surfaced between two
+pre-existing records.
+
 ## Document provenance
 
 **The underlying question this answers: "how did we get here?"** — which document brought a
