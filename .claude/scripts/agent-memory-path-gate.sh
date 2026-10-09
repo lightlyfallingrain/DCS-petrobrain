@@ -7,6 +7,11 @@
 # commit-quality-gate.sh; this hook catches it before any work is written to
 # the wrong place rather than after a commit fails.
 #
+# THREE ROOTS ARE VALID, and the third is the general case that should have been
+# the second: the main checkout, the <project>/.claude/worktrees/<name>/ layout, and
+# ANY worktree `git worktree list` reports. See the two blocks below and the
+# 2026-10-09 note above the `git` check for why a hardcoded prefix kept being wrong.
+#
 # WORKTREES ARE A SECOND VALID ROOT (added 2026-09-21). Agents now run with
 # `isolation: "worktree"` (AGENTS.md, "Where work happens"), so their repo root
 # is $CLAUDE_PROJECT_DIR/.claude/worktrees/<name>/, and their memory correctly
@@ -94,5 +99,51 @@ case "$resolved" in
     ;;
 esac
 
-reason=$(printf 'Agent memory must live at <repo root>/.claude/agent-memory/<role>/. Valid roots are the main checkout (%s) and any agent worktree (%s<name>/.claude/agent-memory/). Wrong path: %s -- this looks like a subproject-relative path, which is the recurring mistake this gate exists to catch.' "$root" "$wt_prefix" "$file_path")
+# Valid: ANY worktree git itself reports (added 2026-10-09). The two checks above
+# accept the main checkout and the <project>/.claude/worktrees/<name>/ layout, and
+# between them they missed the layout this repo's own skills prescribe:
+# .claude/skills/merge/SKILL.md and plans/all-work-in-worktrees/plan.md both say
+# ../<repo-name>-<name>, a SIBLING of the root. So a worktree created the documented
+# way could not write agent memory at all, through Write or Edit -- which is the
+# same bind the 2026-09-21 fix above was written to remove, reappearing for the one
+# layout the documentation actually asks for. Found 2026-10-09 while fixing finding 7
+# of that day's integrity audit, by hitting it (audits/system-integrity/).
+#
+# Asking git is the fix rather than adding a third hardcoded prefix, because git is
+# the only thing that actually knows where the worktrees are: it cannot go stale when
+# the naming convention changes again, and it has changed twice. This is also why a
+# second prefix was the wrong shape in the first place.
+#
+# IT RUNS LAST, AND THAT IS DELIBERATE. This hook fires on every Write/Edit and the
+# 2026-09-27 performance review measured it in the ~18 ms band with no subprocess.
+# Every cheap test is above: a path that is not under .claude/agent-memory/ at all
+# returned at the top, and both hardcoded roots are pure string comparisons. Only a
+# path that looks like agent memory AND matched neither reaches the `git` call, so
+# the subprocess cost lands on the rare case, never on the common one. Measured
+# 2026-10-09, 20 calls each, before/after this change:
+#
+#   unrelated file (returns at the top)           9.1 -> 9.2 ms
+#   main checkout memory write (string compare)   9.7 -> 9.8 ms
+#   sibling worktree / deny (reaches git)        14.1 -> ~27-30 ms
+#
+# So the common paths are unchanged and a worktree agent's memory write pays ~16 ms
+# more than a string compare would -- against not being able to write it at all.
+#
+# This does not widen the mistake class the gate exists to catch: a subproject path
+# like body-layer/.claude/agent-memory/<role>/ is not a registered worktree and still
+# denies. The gate remains a lint, not the write boundary -- Claude Code's own
+# Write/Edit permissions are that, as the header says.
+if command -v git >/dev/null 2>&1; then
+    # --porcelain, so a worktree path containing spaces survives (plain `worktree
+    # list` pads the path with branch/sha columns).
+    while IFS= read -r wt; do
+        [ -n "$wt" ] || continue
+        wt_mem="$(normpath "$wt")/.claude/agent-memory/"
+        case "$resolved" in
+          "$wt_mem"*) exit 0 ;;
+        esac
+    done < <(git -C "$CLAUDE_PROJECT_DIR" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+fi
+
+reason=$(printf 'Agent memory must live at <repo root>/.claude/agent-memory/<role>/. Valid roots are the main checkout (%s), any worktree `git worktree list` reports (including the ../<repo-name>-<name> siblings that .claude/skills/merge/SKILL.md prescribes), and %s<name>/. Wrong path: %s -- this looks like a subproject-relative path, which is the recurring mistake this gate exists to catch. If this IS a worktree, check it is registered: `git worktree list`.' "$root" "$wt_prefix" "$file_path")
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}' "$(printf '%s' "$reason" | jq -Rs .)"
