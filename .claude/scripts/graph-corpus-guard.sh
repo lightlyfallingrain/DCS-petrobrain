@@ -13,6 +13,15 @@
 #
 # Usage: .claude/scripts/graph-corpus-guard.sh <corpus-file> [max-files]
 #
+# Ceiling raised 300 -> 420, 2026-10-09, during the obsidian-links-and-tags Stage 3 conversion
+# (body-layer/BACKLOG.md -> body-layer/ROADMAP/BL-B*.md, todo/backlog.md -> todo/backlog/, and
+# todo/todo.md -> todo/todo/). Measured post-conversion count: 369 — 46 + 35 + 24 entry files plus
+# two new indexes, against the 300 ceiling Stage 2 left. 420 leaves ~14% headroom, the same margin
+# Stage 2 chose, rather than pre-raising for Stages 4 and 5; those convert world-model/ROADMAP.md
+# (~35 entries), aircraft-layer/ROADMAP.md and mission-interpreter/ROADMAP.md (~21 between them)
+# and will need this raised once more.
+#
+# Previous note, kept because the pre-existing breach it records is the useful part:
 # Ceiling raised 200 -> 300, 2026-10-09, during the obsidian-links-and-tags Stage 2 conversion
 # (body-layer/ROADMAP.md split into body-layer/ROADMAP/). The ceiling was **already breached
 # before this stage touched anything**: the audio-adapter conversion (Stage 1) alone put the
@@ -25,7 +34,7 @@
 set -euo pipefail
 
 corpus="${1:-graphify-out/.corpus.txt}"
-max="${2:-300}"
+max="${2:-420}"
 
 if [ ! -f "$corpus" ]; then
     echo "graph-corpus-guard: no corpus file at '$corpus'." >&2

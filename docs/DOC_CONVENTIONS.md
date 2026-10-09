@@ -27,8 +27,27 @@ sections warn about for the subproject list itself, applied to this one.
   notes, depends on the path continuing to resolve to something. The sentinel is what lets a
   consumer script or agent tell a pointer apart from a real roadmap instead of reading four lines
   and reporting success against an empty one.
-- `todo/backlog.md` is the one exception to "shares its subproject's ROADMAP/" — there is no
-  `todo/ROADMAP.md`, so a split `todo/backlog.md` uses its own `todo/backlog/` directory.
+- `todo/` is the exception to "shares its subproject's ROADMAP/" — there is no `todo/ROADMAP.md`,
+  so each split file there uses its own directory named after itself: `todo/backlog.md` →
+  `todo/backlog/`, `todo/todo.md` → `todo/todo/`.
+
+### Index basenames have to be distinct spellings, and `todo/` is where that bites
+
+Obsidian resolves wikilinks by basename within one vault, so **no two files anywhere in the repo
+may share a basename** — which is the same reason an index is never `index.md`. Under `todo/` the
+constraint is tight, because the pointer files are already called `backlog.md` and `todo.md`:
+
+| source | entry directory | index |
+|---|---|---|
+| `todo/backlog.md` | `todo/backlog/` | `todo/backlog/todo-backlog.md` |
+| `todo/todo.md` | `todo/todo/` | `todo/todo/todo-tasks.md` |
+
+`todo-tasks.md` rather than `todo-todo.md`: both are free of collisions, and the first reads as a
+name instead of a stutter. **An index whose name is neither `*-roadmap.md` nor `*-backlog.md`
+needs its shape added to the consistency gate's index glob** —
+`roadmap-entry-consistency-gate.sh` finds indexes by filename pattern, so an unrecognised one makes
+every entry in that directory report as linked from zero indexes. `*-tasks.md` was added there for
+this reason.
 
 ## The ID scheme
 
@@ -47,6 +66,11 @@ more marker and one formatting rule:
   it is the separator in hundreds of existing prose mentions across `plans/`, `audits/` and
   research notes, and the ID is now also the filename and the link text, so changing it would
   make every one of those mentions un-greppable against the file that carries the content.
+- **`X-T<n>`** — `todo/todo.md`'s own items, minted 2026-10-09 by that file's conversion.
+  Deliberately not `X-B<n>`: `todo/backlog.md` already owns that space, and these are two files'
+  sequences. One ID space may not span two files' numbering, because the next-unused-number rule is
+  read per file and two readers would hand out the same number. `T` for todo; the entries are
+  `todo/todo/X-T<n>.md`.
 - **World-model's `M<n>` stays irregular** — milestones are bare `M<n>`, backlog is `WM-B<n>`,
   work items are `WM-W<n>`. Fixing the mismatch would mean renaming `M5` → `WM-5` across several
   hundred prose mentions that `docs/PROCESS.md` ("Superseding a decision") forbids rewriting.
@@ -103,6 +127,43 @@ enough; it is not a generated table of contents — see "TOC helper" below for t
 Non-entry prose that lived at the top or bottom of the original file (a subproject's "what this
 is" preamble, a trailing "Keeping this current" note) moves into the index as its preamble —
 it was never an entry and has nowhere else to go that keeps it next to the roadmap it describes.
+
+### Narrative orientation prose stays in the index. It is never shredded into entries
+
+**Added 2026-10-09, from `todo/todo.md`'s conversion, and it is a genuine addition rather than a
+restatement of the paragraph above.** That paragraph is about a preamble and a tail. This is about
+prose *between* entries, which the earlier conversions happened not to have:
+
+- **Section prose under a grouping heading** — *"Flown on `main` with the brain wired to Ollama …
+  the confirm-band fix was not in this flight"*, *"First flight of the o'clock scan loop. Six
+  findings; two share a root cause."* It says what the entries below it have in common, which is
+  not a property of any one of them.
+- **A dated state narrative** — a "where things stand" section, including items written as prose
+  bullets rather than checkboxes.
+- **The grouping headings themselves**, which carry provenance: *which* sortie produced *which*
+  finding. A flat list of entries loses that, and no entry can hold it, because it is the relation
+  between them.
+
+All of it belongs in the index, **verbatim**, and the headings become the index's sections. The
+reason is not tidiness: for a cleared session this prose is often the only thing in the repo that
+says where things stand, and distributing it across 24 files destroys it while appearing to
+preserve every word. A converter's instinct is to treat every bullet as an entry; resist it on
+anything that describes the set rather than a member of it.
+
+**The one case that does cross over, and it needs a decision rather than a rule**: a prose bullet
+that is itself a distinct outstanding action. `todo/todo.md`'s two *"Owed by the user, nothing else
+blocks them"* bullets were promoted to `[[X-T1]]`/`[[X-T2]]` with a `**USER**` flag, because they
+are real work that benefits from being linkable and greppable — and the index then **links** to
+them instead of repeating their text, so there is still exactly one copy. Promoting a bullet means
+minting its checkbox marker, which is the only text a conversion may add to a source line; say so
+in the entry.
+
+### Priority has to survive the split
+
+Where the source document's own job is to be read first — `todo/todo.md` is named by path in root
+`CLAUDE.md`'s Session Start step 2 and its Backlog Management section — **the index must make the
+prioritised items at least as prominent as they were.** A reader landing on the index must not have
+to open every entry to find out what is prioritised. Put them first, marked, above the narrative.
 
 ## Tags
 

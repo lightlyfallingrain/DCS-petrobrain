@@ -37,13 +37,19 @@ REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 
 FAIL=0
 
-# Discover every split directory: a */ROADMAP/ next to a pyproject.toml, plus todo/backlog/.
+# Discover every split directory: a */ROADMAP/ next to a pyproject.toml, plus the two under
+# todo/, which has no pyproject.toml and no ROADMAP.md of its own and so cannot be found by the
+# loop. todo/todo/ was added 2026-10-09 by the Stage 3 conversion of todo/todo.md; before that
+# this gate would have scanned todo/backlog/ and silently ignored the sibling directory next to
+# it -- a dangling link or an orphaned entry in todo/todo/ would have passed.
 DIRS=""
 for d in */pyproject.toml; do
     sub="${d%/pyproject.toml}"
     [ -d "$sub/ROADMAP" ] && DIRS="$DIRS $sub/ROADMAP"
 done
-[ -d todo/backlog ] && DIRS="$DIRS todo/backlog"
+for extra in todo/backlog todo/todo; do
+    [ -d "$extra" ] && DIRS="$DIRS $extra"
+done
 
 [ -z "$DIRS" ] && exit 0
 
@@ -90,7 +96,12 @@ for dir in $DIRS; do
     # zero is an orphan, more than one is a duplicate (both are defects).
     for id in $ids; do
         count=0
-        for idx in "$dir"/*-roadmap.md "$dir"/*-backlog.md; do
+        # Index filename shapes. `*-tasks.md` was added 2026-10-09 for todo/todo/todo-tasks.md:
+        # that directory's source document is neither a roadmap nor a backlog, and it cannot be
+        # called `todo-todo.md`/`todo.md` (basename collision in Obsidian's single-vault
+        # namespace). Without this glob its 24 entries would each have been reported as linked
+        # from zero indexes.
+        for idx in "$dir"/*-roadmap.md "$dir"/*-backlog.md "$dir"/*-tasks.md; do
             [ -f "$idx" ] || continue
             grep -qF "[[$id]]" "$idx" && count=$((count + 1))
         done
