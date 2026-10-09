@@ -317,11 +317,15 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
 
 ## Backlog Management
 
-`todo/todo.md` holds User priority tasks and session-scoped notes; `todo/backlog.md` holds the
-cross-cutting backlog (split 2026-09-27 — each edit used to re-extract the other into the
-knowledge graph). Between them they are the source of truth. States: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` decision needed · `[>]` deferred.
+`todo/todo/` holds User priority tasks and session-scoped notes, indexed by
+`todo/todo/todo-tasks.md`; `todo/backlog/` holds the cross-cutting backlog, indexed by
+`todo/backlog/todo-backlog.md` (separated 2026-09-27 — each edit used to re-extract the other into
+the knowledge graph — and split to one file per item on 2026-10-09). Between them they are the
+source of truth. `todo/todo.md` and `todo/backlog.md` still exist but are four-line pointers:
+reading one yields no items at all. States: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` decision needed · `[>]` deferred.
 
-- Read before starting work; prefer the User priority tasks at the top of the file
+- Read before starting work; prefer the User priority tasks, which the `todo/todo/todo-tasks.md`
+  index lists first and marks as such
 - Do not start `[?]` or `[>]` tasks without instruction
 - Update state as work progresses; do not delete tasks; do not exceed task scope
 
@@ -332,32 +336,48 @@ in conversation, a commit, or a plan without quoting its first sentence. The for
 `<prefix>-B<n>`, where the prefix is the subproject's own and `B` distinguishes a backlog item from a
 milestone — `BL-4` is a body-layer milestone, `BL-B4` a body-layer backlog item.
 
+**Every one of these spaces now lives in a split directory**, one file per item, with the old
+single document left behind as a four-line pointer. The directory is the only place an ID exists:
+
 | prefix | where |
 |---|---|
-| `BL-B<n>` | `body-layer/BACKLOG.md` |
-| `AC-B<n>` | `aircraft-layer/ROADMAP.md` |
-| `AA-B<n>` | `audio-adapter/ROADMAP/` (split; `audio-adapter/ROADMAP.md` is now a pointer) |
-| `WM-B<n>` | `world-model/ROADMAP.md` |
-| `X-B<n>` | `todo/backlog.md`, cross-cutting / unscoped |
+| `BL-B<n>` | `body-layer/ROADMAP/` (`body-layer/BACKLOG.md` is a pointer) |
+| `AC-B<n>` | `aircraft-layer/ROADMAP/` (`aircraft-layer/ROADMAP.md` is a pointer) |
+| `AA-B<n>` | `audio-adapter/ROADMAP/` (`audio-adapter/ROADMAP.md` is a pointer) |
+| `WM-B<n>` | `world-model/ROADMAP/` (`world-model/ROADMAP.md` is a pointer) |
+| `X-B<n>` | `todo/backlog/`, cross-cutting / unscoped (`todo/backlog.md` is a pointer) |
 
 `MI-B<n>` and `BR-B<n>` are reserved for mission-interpreter and brain-layer, neither of which has a
 Backlog section yet.
 
 **Two rules, and the second is the one that makes IDs worth having:**
 
-- **A new item takes the next unused number in its file.** Read the highest existing one rather than
-  counting items — the two differ as soon as anything is removed.
+- **A new item takes the next unused number in its space.** Do not read this off a document and do
+  not count items — run the command, against the directory the table names:
+
+  ```sh
+  ls <dir>/ | grep -oE '^[A-Z]+-B[0-9]+' | sort -V | tail -1
+  ```
+
+  Substitute `-W` or the milestone shape for the other ID spaces; `docs/DOC_CONVENTIONS.md` carries
+  the same recipe. **`sort -V` is load-bearing and the delimiter forms that look equivalent are
+  not.** `sort -t B -k2 -n` returns `BL-B9` against a real `BL-B46`, because the `BL-` prefix
+  contains the delimiter; `sort -t W -k2 -n` returns `WM-W9` against a real `WM-W12` for the same
+  reason. Both were measured on 2026-10-09, and the second was the form this repo had already
+  written down — so minting from it would have collided on the next `WM-W` item.
 - **Numbers are never reused and never renumbered**, including for items that are `[x]` done or
   rejected. An ID that silently comes to mean a different item is worse than no ID, because a commit
   message or plan citing the old meaning now reads as evidence for the new one. Done items keep their
   IDs in place for exactly this reason.
 
-An item that moves from a subproject's backlog to `todo/backlog.md` (or the reverse) takes a **new** ID
-in its destination and the old entry says where it went — the same reason: an ID belongs to one file's
-sequence, so carrying one across files would make two files' numbering collide.
+An item that moves from a subproject's backlog to `todo/backlog/` (or the reverse) takes a **new** ID
+in its destination and the old entry says where it went — the same reason: an ID belongs to one
+directory's sequence, so carrying one across would make two sequences collide.
 
 **A third marker, `<prefix>-W<n>`, is for work items that are neither a milestone nor a backlog
-item** — numbered from 1 per subproject, independent of both other spaces. A subproject's
-`ROADMAP.md` may also be split into one file per entry under `<subproject>/ROADMAP/`, with the
-original left as a 4-line pointer. Full scheme, the ID-only filename, the `[[ID]]` link form and
+item** — numbered from 1 per subproject, independent of both other spaces. Every subproject's
+`ROADMAP.md` is now split into one file per entry under `<subproject>/ROADMAP/`, with the
+original left as a 4-line pointer whose first line is `<!-- split-roadmap: see ROADMAP/ -->`.
+`.claude/scripts/roadmap-source.sh <path>` resolves a pointer to the files that actually hold the
+content, and passes a non-pointer through unchanged. Full scheme, the ID-only filename, the `[[ID]]` link form and
 the one-time Obsidian setup: `docs/DOC_CONVENTIONS.md`.

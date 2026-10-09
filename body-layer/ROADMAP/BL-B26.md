@@ -24,7 +24,7 @@
   correctly assigns to Architect: memoize `describe_position` per tick on a quantised `(x,z)`, and
   quantise the cache key. Full evidence: `body-layer/research/2026-10-05-performance-review.md`.
   World-model's own half of the cost — `nearest_feature` spending 73 % of `describe_position`
-  proving that 86 theatre-wide features are not nearby — is `world-model/ROADMAP.md`'s `M11`.
+  proving that 86 theatre-wide features are not nearby — is world-model's [[WM-M11]].
 
   **Order of magnitude, estimated rather than measured** (no live sortie log was available to the
   pass): ~15 ms/tick for 5 groups × 10 members. That is not alarming on its own, and the terrain

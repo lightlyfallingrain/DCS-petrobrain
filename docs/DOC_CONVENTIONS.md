@@ -27,6 +27,21 @@ sections warn about for the subproject list itself, applied to this one.
   notes, depends on the path continuing to resolve to something. The sentinel is what lets a
   consumer script or agent tell a pointer apart from a real roadmap instead of reading four lines
   and reporting success against an empty one.
+- **The sentinel's literal text is `<!-- split-roadmap: see ROADMAP/ -->` in all eight pointers,
+  including the two under `todo/`, where there is no `ROADMAP/` directory at all. That is correct
+  and must not be "adapted" to `see todo/`.** It is a machine-readable marker, matched as a fixed
+  string by every consumer that knows about it; making it descriptive per location would break all
+  of those at once and buy nothing a reader needs, since the four lines underneath say in prose
+  where the content went. Do not derive the destination directory from the sentinel's text —
+  derive it the way `roadmap-source.sh` does, from the pointer's own path.
+- **Resolve a pointer with `.claude/scripts/roadmap-source.sh <path>`** rather than by carrying a
+  prose caveat about the sentinel. It prints the index file that replaced the pointer (`--dir` for
+  the directory, `--entries` for every entry file, `--is-pointer` for a silent test) and passes a
+  non-pointer path straight through, so a consumer can pipe every roadmap path through it
+  unconditionally. This exists because the prose-caveat approach was tried and measurably failed:
+  eleven consumers each carried their own wording, and review round 4 found roughly half of every
+  such pair had been missed — a counting consumer reporting success off an empty read, and a
+  writing one told to record a merge into a file nothing reads.
 - `todo/` is the exception to "shares its subproject's ROADMAP/" — there is no `todo/ROADMAP.md`,
   so each split file there uses its own directory named after itself: `todo/backlog.md` →
   `todo/backlog/`, `todo/todo.md` → `todo/todo/`.
@@ -94,7 +109,30 @@ more marker and one formatting rule:
   `world-model/docs/M7_RUN_INSTRUCTIONS.md`, `M8_PROBE_STORE.md`, `M9_OSM_RUN_INSTRUCTIONS.md` are
   cited by path, and renaming them would break citations to buy nothing the convention asks for.
 
-  > **Superseded by the entry above.** This recorded `M<n>` as an accepted irregularity on a cost
+  **Which documents the rename reaches, stated as a rule rather than as the list that was swept.**
+  A document is rewritten to `WM-M<n>` if it asserts what is true **now**; it keeps the bare form if
+  it records what was true **then**. By that test:
+
+  | rewritten (live) | left bare (dated record) |
+  |---|---|
+  | every `*/ROADMAP/` entry and index, every `CLAUDE.md`, `AGENTS.md`, root `ROADMAP.md`, `docs/` (excluding the two directories opposite), `world-model/docs/`, `world-model/RUN.md`, `todo/` | `plans/`, `audits/`, `*/research/`, `.claude/agent-memory/`, `docs/acceptance/`, `docs/handoff/`, `NOTES.md` and every subproject `NOTES.md`, source, tests and tools |
+
+  `world-model/RUN.md` and `NOTES.md` were named on neither side when the rename was done, and the
+  rule places them on opposite sides, which is the useful part of writing it down. `RUN.md` tells
+  you which flags the pipeline has today, so a stale ID there is a stale instruction (it had one
+  bare `M3`, now `WM-M3`). `NOTES.md` is a harvest whose bullets cite the milestone each insight was
+  *earned in* — "Finding 1 of `M1` verification note" — so its 40 bare mentions are dated citations
+  and rewriting them would falsify the record, which is exactly what `docs/PROCESS.md`
+  ("Superseding a decision") forbids.
+
+  **Sweep with `(^|[^-A-Za-z0-9_])M[0-9]+([^A-Za-z0-9_]|$)`, not `\bM[0-9]+\b`.** Excluding `-` is
+  load-bearing: a word-boundary match hits the `M7` inside `WM-M7` and buries the dozen real
+  findings in some two hundred false ones. Expect two standing false positives the pattern cannot
+  avoid — a mission filename (`MI24-outpost-M03.miz`) and a weapon name (`Soldier M4 GRG`).
+
+  > **The bullet immediately BELOW this note is superseded by the entry above it, and is kept only
+  > for its tooling-tax argument. `M<n>` is not a live ID shape; nothing in the repo uses it.**
+  > That bullet recorded `M<n>` as an accepted irregularity on a cost
   > estimate that assumed the only available rename was `WM-5`. The user's `WM-M<n>` form was not
   > considered, and it is an order of magnitude cheaper for the reason given above. Kept because
   > the tooling-tax paragraph under it is the live argument against any *future* irregular ID.
@@ -139,7 +177,21 @@ more marker and one formatting rule:
   rebase or a redone conversion produces the same numbers, rather than depending on whatever order
   a converter happened to work in.
 - **The next unused number is read, never counted** (the same rule root `CLAUDE.md` states for
-  backlog IDs, applied to files): `ls <sub>/ROADMAP/ | grep -oE '^[A-Z]+-W[0-9]+' | sort -t W -k2 -n | tail -1`.
+  backlog IDs, applied to files):
+
+  ```sh
+  ls <sub>/ROADMAP/ | grep -oE '^[A-Z]+-W[0-9]+' | sort -V | tail -1
+  ```
+
+  **`sort -V`, not `sort -t W -k2 -n`, and this is not a style preference — the delimiter form was
+  written here first and it is wrong.** `-t W` splits on the literal `W`, which the `WM-` prefix
+  contains, so every `WM-W*.md` has the same empty second field and the tie falls back to a
+  lexicographic comparison: the recipe as published returned `WM-W9` against a real `WM-W12`, and
+  minting from it would have handed out `WM-W10`, colliding with an existing item. The `-B` form in
+  root `CLAUDE.md` had the same defect through `BL-` (`BL-B9` against a real `BL-B46`). Both
+  measured 2026-10-09, by running them rather than reading them. `sort -V` compares the digit runs
+  numerically wherever they sit in the string, so it is correct for every prefix and every one of
+  the three ID spaces.
 - **No ID is minted outside a conversion.** While a subproject's roadmap is mid-split, an
   un-IDed entry in the not-yet-converted original file stays un-IDed, or an interleaved commit on
   the same file could claim a number the conversion branch already assumed was free.

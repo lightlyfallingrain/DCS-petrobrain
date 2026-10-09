@@ -7,7 +7,14 @@
 # This docstring named three subprojects out of six until 2026-09-27, forty lines above a comment
 # recounting two prior audits of that exact defect. A reader trusts the docstring.
 set -uo pipefail
-cd "$CLAUDE_PROJECT_DIR" || exit 0
+
+# `cd "$CLAUDE_PROJECT_DIR" || exit 0` was the written form, and under `set -u` it never reached
+# its own `|| exit 0`: an unset variable aborts the shell at expansion time, before the `||` is
+# evaluated. The behaviour was still fail-open for a PreToolUse hook (a non-zero, non-2 exit is a
+# non-blocking error), but by accident rather than by the stated mechanism. This is the pattern
+# the sibling gates in this directory already use, and it also makes the script runnable by hand.
+REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+[ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 STAGED=$(git diff --cached --name-only)
 FAIL=0
@@ -136,6 +143,31 @@ luac5.1 not installed; needed to syntax-check staged DCS Lua before commit. Inst
     fi
 fi
 
+
+# Split entry documents (docs/DOC_CONVENTIONS.md): run the three convention gates when the commit
+# touches a split directory or the tag vocabulary. The convention doc said these "run before
+# committing a converted file" from the day it was written, while none of the three was wired to
+# anything -- so a dangling [[ID]], an orphaned entry, an unlisted tag or a stale provenance block
+# committed clean across 253 entry files and surfaced only when somebody clicked or grepped
+# (review round 4, RF4-2). A stated mechanical guarantee that does not exist is worse than no
+# guarantee, because it is relied on.
+#
+# Each gate scans the whole tree rather than only the staged paths, which is deliberate: an
+# orphaned entry and a dangling link are both relational defects, so a staged-paths-only check
+# would miss the half of each pair that did not change. Measured cost is under two seconds for
+# all three over 253 entries, so there is nothing to buy by narrowing it.
+#
+# The staged-path condition exists so a commit touching none of these paths is completely
+# unaffected -- this is a PreToolUse hook on every `git commit`, and a gate that fires on
+# unrelated commits is a gate that gets bypassed. A missing or non-executable gate script is
+# skipped rather than reported: this hook must stay fail-open on its own internal errors.
+if printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP/|^todo/(backlog|todo)/|^docs/TAGS\.md$'; then
+    for gate in roadmap-entry-consistency-gate roadmap-tag-vocabulary-gate doc-provenance-gate; do
+        gate_path=".claude/scripts/$gate.sh"
+        [ -x "$gate_path" ] || continue
+        run "$gate" "$gate_path"
+    done
+fi
 
 # Reject agent-memory files written under a subproject-relative path instead of repo-root
 # .claude/agent-memory/ (recurring mistake — see feedback_agent_memory_path_recurrence.md).

@@ -14,18 +14,25 @@ Cross-subproject links resolve too, now that every subproject is split: the whol
 Obsidian vault, so a wikilink here reaches `body-layer/ROADMAP/` and `todo/` entries as readily as
 this directory's own.
 
-**The ID space in this directory is deliberately irregular, and `docs/DOC_CONVENTIONS.md` records
-it rather than fixing it.** Milestones are bare `M<n>` (`WM-M0.md`…`WM-M11.md`), backlog items are
-`WM-B<n>`, and work items that are neither — a bug fix, a cross-subproject refactor, an
-optimization, the entries whose own text says *"no M-number"* — are `WM-W<n>`. Renaming `WM-M5` to
-`WM-5` would mean rewriting several hundred bare `WM-M5`/`WM-M7` prose mentions across `plans/` and
-`research/`, which `docs/PROCESS.md` forbids.
+**The ID space in this directory is regular**, like every other subproject's: milestones are
+`WM-M<n>` (`WM-M0.md`…`WM-M11.md`), backlog items are `WM-B<n>`, and work items that are neither —
+a bug fix, a cross-subproject refactor, an optimization, the entries whose own text says *"no
+M-number"* — are `WM-W<n>`. All three share this subproject's prefix.
+
+**One asymmetry to know about when searching.** Milestones were bare `M<n>` until 2026-10-09, and
+the dated record was deliberately left alone: there are 422 bare `M5`/`M7` mentions across `plans/`
+and `world-model/research/` and no `WM-M5`/`WM-M7` ones. `WM-M5` *contains* `M5`, so searching the
+bare form finds both the historical mentions and the live ID, while searching `WM-M5` finds only
+live documents. Search the bare form when you want the history. `docs/DOC_CONVENTIONS.md` has the
+full rationale.
 
 ## Live acceptance
 
 **Live acceptance debt.** A milestone or fix can pass DoD on fixture testing alone; this list is
-for the kind whose live-DCS acceptance was *deferred*, not waived, and hasn't been confirmed since
-(mirrors `body-layer/ROADMAP.md`'s section of the same name). Clear an entry only once a real
+for the kind whose live-DCS acceptance was *deferred*, not waived, and hasn't been confirmed since.
+(This used to say it mirrored a `body-layer/ROADMAP.md` section of the same name. That list no
+longer exists in any file: it was dissolved into a `#needs-flight` tag on each entry, which the
+recipe below finds mechanically.) Clear an entry only once a real
 sortie actually exercises it, and say which one.
 
 A merged, correct change with no dedicated sortie yet carries `#needs-flight` on its entry rather
@@ -34,8 +41,13 @@ than living in a hand-kept prose list — the mechanical replacement this split 
 current set across every converted subproject with:
 
 ```sh
-grep -rl '#needs-flight' */ROADMAP/ todo/backlog/ todo/todo/
+grep -rl '#needs-flight' --include='*.md' */ROADMAP/ todo/backlog/ todo/todo/ \
+  | grep -vE -- '-(roadmap|backlog|tasks)\.md$'
 ```
+
+Identical to the spelling in `docs/TAGS.md` and `body-layer/ROADMAP/body-layer-roadmap.md` on
+purpose; the `grep -v` drops index files, which match because they discuss the tag rather than
+carrying it.
 
 Those records are now five entries in their own right, each folded together with the Status or
 backlog entry it was paired with where it had one, so one piece of work has one file:

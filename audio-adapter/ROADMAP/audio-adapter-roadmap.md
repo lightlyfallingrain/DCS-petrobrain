@@ -51,8 +51,9 @@ and link form it follows. The index carries links and titles only; status lives 
 
 A few entries above carry a verified behaviour with no in-cockpit observable or dedicated sortie
 yet (`#needs-flight`): [[AA-2]] (poll-rate halving), [[AA-5]] (silence command phrase wiring, via
-the body-layer dispatcher). `grep -rl '#needs-flight' audio-adapter/ROADMAP/` finds the current
-set mechanically rather than by a hand-kept list — see
+the body-layer dispatcher). `grep -rl '#needs-flight' audio-adapter/ROADMAP/` finds this
+subproject's own set mechanically rather than by a hand-kept list; the repo-wide form, which is the
+one to use when asking what a sortie could clear, is in `docs/TAGS.md` — see
 `plans/obsidian-links-and-tags/plan.md`, "Trustworthy grep negatives over tags".
 
 [[AA-3]] is a related but different case — not debt, but an unresolved *contradiction* about

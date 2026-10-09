@@ -24,8 +24,18 @@ replacement this split exists to deliver — `plans/obsidian-links-and-tags/plan
 grep negatives over tags"). Find the current set with:
 
 ```sh
-grep -rl '#needs-flight' body-layer/ROADMAP/ todo/backlog/ world-model/ROADMAP.md aircraft-layer/ROADMAP.md
+grep -rl '#needs-flight' --include='*.md' */ROADMAP/ todo/backlog/ todo/todo/ \
+  | grep -vE -- '-(roadmap|backlog|tasks)\.md$'
 ```
+
+This is the same spelling `docs/TAGS.md` gives, and the two must stay identical — a recipe
+published in two indexes and correct in only one is the same defect twice. As first written here it
+named `world-model/ROADMAP.md` and `aircraft-layer/ROADMAP.md`, which are four-line pointers, and
+omitted audio-adapter altogether: it returned nine entries and **exited 0**, silently missing
+`[[AC-8]]`, `[[WM-W2]]`, `[[AA-2]]` and `[[AA-5]]`. Debt that a recipe reports as absent is worse
+than debt in a prose list, because the prose list at least looked like something somebody had to
+maintain. The `grep -v` drops the three index files, which match only because they discuss the tag.
+Measured 2026-10-09: 13 tagged entries across four subprojects.
 
 Two items from the former debt list point outside this subproject entirely and were never
 body-layer's own entries — kept here as plain pointers so a reader of this subproject's debt
