@@ -22,8 +22,25 @@ directory?**
   branches in-place would disturb whatever branch the session is mid-task on, and would race
   anything else operating in that checkout. A disposable worktree lets the merge happen without
   touching the current checkout at all. `AGENTS.md`'s "Where work happens" section states who owns
-  the main checkout and where agents run — read it there, because that division has been inverted
-  once already and the reasoning here depends on it.
+  the root and where agents run — read it there, because that division has been inverted twice and
+  the reasoning here depends on it.
+
+  **Revised 2026-10-09, and it changes this skill's main path: a disposable worktree cannot check
+  out `main` when the repo root already has it, which it now normally does.** Tested, not assumed:
+
+  ```
+  $ git worktree add <path> main
+  fatal: 'main' is already used by worktree at '/Users/sg/Code/DCS-petrobrain'
+  $ git fetch . HEAD:main          # the other obvious workaround
+  fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
+  ```
+
+  **So the merge runs in the root:** `git -C <root> merge --ff-only <branch>`, with the root on
+  `main` and `git -C <root> status --short` empty. It moves `main` forward without changing which
+  branch the root has checked out, so it does not take the root away from the user — the one defined
+  exception to rule 3. **If their tree is dirty, stop and ask**; they may have an input document in
+  progress, which is exactly what the root is for. A disposable worktree is still right for any
+  merge whose *target* is not checked out anywhere.
 
 ## In-place merge (active branch == branch being merged)
 

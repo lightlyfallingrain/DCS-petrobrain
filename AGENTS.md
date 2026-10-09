@@ -1,7 +1,10 @@
 ## General Rules
 
 - Follow `CLAUDE.md` as the primary project contract.
-## Where work happens: agents get worktrees, the main checkout is the user's
+## Where work happens: everything in a worktree, the repo root is the user's
+
+**All work happens in a worktree — agents and the main loop alike. The repo root belongs to the
+user.** Revised 2026-10-09 by user direction; see rule 3 for what changed and why.
 
 **Inverted 2026-09-21**, after the previous arrangement — agents in the shared checkout, side
 quests in a worktree — failed the way rules relying on main-loop discipline fail: the same race
@@ -25,7 +28,7 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    | **`NOTES.md` harvest** (Definition of Done) | worktree |
    | research notes, roadmap and `todo/` edits | worktree |
 
-   All of it is invisible to the main checkout, and `git worktree remove --force` destroys anything
+   All of it is invisible outside that worktree, and `git worktree remove --force` destroys anything
    uncommitted without warning. That nearly happened on the first isolated run: only the report was
    copied back, and it was luck that the agent had written no memory file that time.
 
@@ -34,8 +37,27 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    - **Instruct the agent, in its prompt, to commit everything it writes** inside the worktree — a
      detached-HEAD commit is fine, it is reachable by sha — and to **report the sha, the file list,
      and a clean `git status --porcelain`** in its final message.
-   - **Cherry-pick the sha**, then verify against the agent's own file list rather than assuming the
-     pick caught everything.
+   - **Prefer `git merge --ff-only worktree-agent-<id>`; cherry-pick only when that refuses.**
+     Agents fast-forward to the named tip before working (rule 4), so their branch is normally a
+     **descendant** of the feature branch and a fast-forward is available. Check it:
+
+     ```sh
+     git merge-base --is-ancestor <feature-branch> worktree-agent-<id>   # true => ff available
+     ```
+
+     **Why this is not a style choice.** A fast-forward preserves the agent's shas, so the branch
+     registers as merged and `git branch -d` works — which answers "has this been harvested?" with
+     git instead of bookkeeping. A cherry-pick rewrites the shas, the branch never registers as
+     merged, and that unanswerable question is what left 67 agent branches against 58 real ones in
+     September. Revised 2026-10-09; the whole of this session's harvests were cherry-picks under the
+     old wording, which was written when agents started at `origin/main` and a cherry-pick was the
+     only option.
+
+     **A fast-forward is only available if the main loop has not advanced the branch while the agent
+     held it.** If it has, the branch has diverged and cherry-pick is correct — that is a fallback,
+     not a failure. Prefer not to commit to a branch an agent is working on; check with
+     `git merge-base --is-ancestor` before you do.
+   - **Verify against the agent's own file list** rather than assuming the harvest caught everything.
    - **Only then remove the worktree**, with a plain `git worktree remove` — **never `--force`,
      which is now in the deny list** (`.claude/settings.json`).
    - **Then delete the agent's branch**, `git branch -D worktree-agent-<id>`, so that a branch's
@@ -67,15 +89,53 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    loop fast-forwards that into the feature branch afterwards. Trialled 2026-09-21 and **in
    force**; what the trial surfaced is in `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
-3. **The main checkout belongs to the main loop and the user.** This is the inversion: side quests
-   no longer need a worktree, because nothing else is using the checkout.
+3. **The repo root belongs to the user. The main loop takes a worktree too.** Revised 2026-10-09,
+   user direction:
+
+   > *"It would actually be more convenient for me if **all work** is done via worktrees. That would
+   > then free the root dir to be whatever branch I happen to need for testing. Or, most probably,
+   > `main` where I could also add user input documents without disturbing the ongoing agentic
+   > work."*
+
+   So: a feature's worktree is named after the feature (not `worktree-agent-<id>`), and it lives
+   until the feature merges. The user's own checkout is theirs to park wherever they like — usually
+   `main`, so they can drop a sortie-feedback document in or check out a branch to fly without
+   colliding with anything running.
+
+   **The one defined exception: merging into `main` happens in the root, because that is where
+   `main` is checked out.** Git allows no way around this, and both plausible workarounds were
+   tested rather than assumed:
+
+   ```
+   $ git worktree add <path> main
+   fatal: 'main' is already used by worktree at '/Users/sg/Code/DCS-petrobrain'
+   $ git fetch . HEAD:main
+   fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
+   ```
+
+   So the merge is `git -C <root> merge --ff-only <branch>` with the root on `main` and its tree
+   clean. **That is narrow on purpose**: it moves `main` forward, which is what a merge is, and it
+   does not change which branch the root has checked out — so it does not take the root away from
+   the user. Check `git -C <root> status --short` is empty first; if the user has work in progress
+   there, stop and ask rather than merging around it. `.claude/skills/merge/SKILL.md` carries the
+   procedure.
+
+   > **Superseded.** This read *"The main checkout belongs to the main loop and the user. This is the
+   > inversion: side quests no longer need a worktree, because nothing else is using the checkout."*
+   > That was true of agents-versus-main-loop and is **not** being reversed — agents still always get
+   > a worktree. What is removed is the *main loop's* share of the root, which the 2026-09-21
+   > inversion left in place only because nothing then needed it. The side-quest consequence is
+   > reversed with it: see "Why a feature branch's history still stays clean" below.
 
 4. **Name the commit the agent is meant to be looking at, and make the agent check it.** A
-   worktree is created at *some* commit, and nothing guarantees it is the one you mean. Git will not
-   check the same branch out twice, so when the target branch is already in the main checkout the
-   worktree lands on `main` — or on neither tip. Three roles each verified the wrong code before
-   this rule existed, and three consecutive dispatches landed stale as recently as 2026-10-09:
-   **assume a stale base, do not hope for a fresh one.**
+   worktree is created from **`origin/HEAD`** — the remote-tracking ref for the default branch — not
+   from the target branch and not from the dispatching session's HEAD. Established by reflog
+   2026-10-09 (`branch: Created from origin/main`), so **a stale base is the guaranteed starting
+   state for any dispatch whose target is not `origin/main`, which is every feature-branch dispatch
+   there will ever be.** Six consecutive dispatches that day landed stale, the worst 35 commits
+   behind; three roles had each verified the wrong code before this rule existed. **Assume a stale
+   base. Never hope for a fresh one.** Mechanism and the open question of whether
+   `worktree.baseRef` can change it: `plans/agent-stale-base/plan.md`.
 
    - **The dispatching prompt states the branch and the expected tip sha.** "Review the fix" is not
      an address. **It also names the input documents**, because a stale base is harmless for source
@@ -97,45 +157,72 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
    A `PreToolUse` hook on `Agent` (`agent-worktree-reminder.sh`, `agent-sha-gate.sh`) injects this
    at dispatch, because the moment it matters is the moment attention is on the task instead — the
-   same argument that made rule 1 structural. **Hooks themselves fire from whatever the main
-   checkout currently has**, so a hook fix does not take effect in a session parked on a branch that
-   predates it.
+   same argument that made rule 1 structural. **Hooks themselves fire from
+   `$CLAUDE_PROJECT_DIR/.claude/scripts/`, i.e. whatever the repo root currently has** — documented
+   and deliberate, so a hook fix on your branch does **not** take effect until it reaches the root's
+   branch. With the root now the user's and usually on `main`, that means **the active hooks are
+   main's hooks.** A session developing a hook cannot exercise it through the hook mechanism; run the
+   script directly instead. Being fixed, not accepted — `plans/all-work-in-worktrees/plan.md`.
 
    Incident record — the three burned roles, the eleven-commits-behind case, what each cost:
    `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
-### The main checkout's branch is a contract with the user
+### Naming the branch is the only channel, now that the root does not say it
 
-**The user tests on the main checkout. They do not operate in worktrees.** So the branch checked out
-there is not an implementation detail — it is how they know what they are flying.
+**The user tests in the repo root, and they check branches out there themselves** (*"no problem"*,
+2026-10-09). Nothing else moves that checkout.
 
-- **Leave the main checkout on the branch the user should test.** If work has just landed on a
-  feature branch, the main checkout stays on that branch until it merges.
 - **Name the branch, explicitly, whenever asking the user to test anything.** Every test card, every
   "can you fly this", every acceptance request states the branch and the checkout command. "It's
   ready" is not actionable if they cannot tell what to check out.
-- **Never leave the main checkout on a worktree branch or a detached HEAD.** Those are agent
-  scaffolding and mean nothing to the person flying the aircraft.
+
+  **This used to have a backstop and no longer does.** The rule before 2026-10-09 was *"leave the
+  main checkout on the branch the user should test"*, so the root's branch told them what to test
+  even when nobody said it. With the root theirs, that signal is gone — **naming the branch is the
+  whole of the channel.** Forgetting it now means they have nothing to go on. Observed the same day
+  the rule changed: their checkout sat on `main` for a 43-commit session, and the branch name was
+  the only thing that would have led them to any of it.
+- **Never leave a *worktree* on a detached HEAD at hand-off**, and never ask the user to look at a
+  `worktree-agent-<id>` branch. Those are scaffolding and mean nothing to the person flying the
+  aircraft.
+- **`git worktree list` is the honest answer to "what is in flight".** That is why agent worktrees
+  are removed at harvest and feature worktrees are not: a listed worktree should mean live work.
 
 ### Status: all four rules in force
 
-All four are in force; rule 2 was trialled on cones 2B (2026-09-21) and worked. One friction from
-that trial is operative and has no hook, so it stays here rather than moving to the record:
+All four are in force; rule 2 was trialled on cones 2B (2026-09-21) and worked. Two operative
+frictions have no hook and so stay here rather than moving to the record:
 
 - **Bash heredocs and `>>` redirection are refused inside a worktree.** Use the `Edit` and `Write`
   tools for file content there, which is better practice anyway. **Say this in an isolated agent's
   prompt**, or it will discover it mid-task and improvise.
+- **The git stash stack is shared across every worktree**, and more sessions in more worktrees makes
+  a bare `git stash` / `git stash pop` likelier to take someone else's work. Prefer a temporary WIP
+  commit to set work aside. If you must stash: `git stash push -u -m "<unique-tag>"`, capture the
+  sha immediately with `git stash list --format='%H %gs'`, restore with `git stash apply <sha>` —
+  never `pop` — and drop the entry afterwards, re-finding it by tag.
 
-The other — the agent-memory hook once denying the only correct path an isolated agent had — is
+The third — the agent-memory hook once denying the only correct path an isolated agent had — is
 fixed, and is in `docs/AGENT_WORKTREE_PROTOCOL.md` along with why a memory that is never written is
 the most expensive loss in this system.
 
 ### Why a feature branch's history still stays clean
 
-The original rule had a second, independent justification worth keeping: cross-cutting bookkeeping
-(skill edits, backlog notes, workflow-doc fixes) does not belong in a feature branch's commits. That
-still holds. With the main checkout free, the way to honour it is simply to commit such work on
-`main` directly rather than on the feature branch — no worktree needed, same outcome.
+Cross-cutting bookkeeping — skill edits, backlog notes, workflow-doc fixes — does not belong in a
+feature branch's commits. **That still holds; how to honour it changed on 2026-10-09.** There is no
+longer a main-loop session sitting in the root to commit such work directly, so it takes **its own
+worktree on its own branch**, named after the work, and merges on its own. One more worktree is
+cheap; `git worktree list` showing it is the point.
+
+> **Superseded.** This read *"With the main checkout free, the way to honour it is simply to commit
+> such work on `main` directly rather than on the feature branch — no worktree needed, same
+> outcome."* The root is no longer free — it is the user's — and committing to `main` from it would
+> move the branch under their feet, which is exactly what rule 3 now forbids.
+
+**The user may override this for a specific piece of work, and did so twice on 2026-10-09**
+(*"Use the same branch"*, *"Continue in this branch"*), putting cross-cutting convention edits onto
+a feature branch deliberately so there was one thing to review rather than several. Their call to
+make; the default stands.
 See `.claude/skills/merge/SKILL.md` for the worktree pattern as it applies to merging.
 - Prefer the simplest solution that satisfies correctness, performance, and architectural clarity.
 - Do not switch roles unnecessarily mid-task.

@@ -234,16 +234,55 @@ something the user must set up per session. If it needs a manual step every time
 to say what that step is, or the direction costs the user more friction than it removes. **Ask them
 how this session came to start where it did** rather than guessing.
 
-## Order of work
+## Order of work — DONE 2026-10-09, on `feature/doc-conventions-audio-adapter` by user direction
+(*"Do the plans/all-work-in-worktrees/plan.md change. Continue in this branch."*)
 
-1. Harvest the round-4 fixes (that agent is editing `CLAUDE.md`).
-2. Answer the question above.
-3. `AGENTS.md`: invert rule 3 as a recorded revision; rewrite "The main checkout's branch is a
-   contract with the user"; add the hook-development caveat and the `git stash` note.
-4. Root `CLAUDE.md` "Workflow": the bullet saying non-code cross-cutting work goes on `main` in the
-   main checkout needs rewording — under this scheme there is no main-checkout session to do it in.
-5. Re-read `.claude/skills/merge/SKILL.md`, which carries its own worktree pattern, and the six role
-   files' shared "Where things live" block.
+1. ~~Harvest the round-4 fixes.~~ Done.
+2. ~~Answer the open question.~~ Answered by the user: the *"do not `cd` to the root"* instruction
+   came from the session environment, not them. Starting a session in a worktree demonstrably works.
+3. ~~`AGENTS.md`.~~ Rule 3 inverted as a recorded revision with the superseded text under a pointer;
+   "The main checkout's branch is a contract with the user" rewritten as "Naming the branch is the
+   only channel, now that the root does not say it"; the `git stash` hazard added to Status beside
+   the heredoc one; the hook caveat rewritten as a defect being fixed rather than a cost accepted.
+   **Rule 1 also changed** — prefer `git merge --ff-only` over cherry-pick when the agent's branch
+   descends, with the `git merge-base --is-ancestor` check and the reason (shas preserved, so the
+   branch registers as merged and the harvested/unharvested question becomes git's to answer).
+   **Rule 4's cause corrected** to `origin/HEAD`, established by reflog, replacing the wrong
+   "lands on `main` because the branch is checked out elsewhere" explanation.
+4. ~~Root `CLAUDE.md` "Workflow".~~ Both bullets rewritten: cross-cutting work takes its own
+   worktree rather than being committed on `main` from the root.
+5. ~~`.claude/skills/merge/SKILL.md` and the consumers.~~ Plus `harvest-agent-commit/SKILL.md`
+   (ff-only first, cherry-pick as the fallback) and `test-card/SKILL.md` (the branch is now the only
+   channel, so omitting it leaves the user with nothing).
+
+### The thing this plan missed, found by testing the merge path
+
+**A disposable worktree cannot check out `main` when the root already has it — which it now normally
+does.** Both obvious workarounds refuse:
+
+```
+$ git worktree add <path> main
+fatal: 'main' is already used by worktree at '/Users/sg/Code/DCS-petrobrain'
+$ git fetch . HEAD:main
+fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
+```
+
+So `merge/SKILL.md`'s main path was broken by this change. **The merge now runs in the root** —
+`git -C <root> merge --ff-only <branch>`, with the root on `main` and its tree clean. That is the
+one defined exception to rule 3, and it is narrow on purpose: it moves `main` forward, which is what
+a merge is, and it does not change which branch the root has checked out, so it does not take the
+root away from the user. If their tree is dirty, stop and ask — they may have an input document in
+progress, which is what the root is for.
+
+### Still open after this change
+
+- **The hook-per-worktree fix** (`$CLAUDE_PROJECT_DIR` is deliberately root-fixed, so the active
+  hooks are the root's). The cheap test first — whether the hook process inherits the session's cwd,
+  which would let a shell-evaluated command resolve the worktree with no shim.
+- **The graph's code layer per worktree** — `graphify-ast-refresh.sh` writes to
+  `$CLAUDE_PROJECT_DIR`, and `gq.sh` borrows everything when a worktree has no graph at all.
+- **`worktree.baseRef`** — documented to exist, semantics of `"head"` untested, and the one probe
+  attempted was invalid (wrong settings location). `plans/agent-stale-base/plan.md` has the test.
 
 ## Not to be done
 
