@@ -163,13 +163,13 @@ Where possible, perception should come from Petrovich's actual DCS targeting/det
 ## World model acquisition: incremental, on-demand probing
 
 > **Status: proposed, not implemented.** Raised 2026-09-06, right after the World Model
-> Builder's M7 (full-theatre pipeline) completed. This section depends on an open technical
+> Builder's WM-M7 (full-theatre pipeline) completed. This section depends on an open technical
 > unknown (below) that should be resolved, likely by the Investigator agent, before any of this
 > gets designed further — do not start implementing against this section yet. See
 > `WORLD_MODEL_BUILDER.md`'s matching "Incremental, on-demand probe-tier data" section for the
 > storage/schema side of the same idea.
 
-Full-theatre live-mission probing (the thing M7 deliberately avoided for elevation by using SRTM
+Full-theatre live-mission probing (the thing WM-M7 deliberately avoided for elevation by using SRTM
 instead) is expensive, and mostly wasted effort: a player — especially flying a helicopter — is
 very unlikely to need probe-tier terrain resolution (fine elevation, `surface_type`, ridge/
 valley) across a whole theatre. Real sorties are geographically contained.
@@ -178,7 +178,7 @@ valley) across a whole theatre. Real sorties are geographically contained.
 theatre-wide coverage.
 
 - The World Model's base tier (roads, settlements, airfields, beacons, navaids — see
-  `WORLD_MODEL_BUILDER.md`) stays exactly as M7 built it: cheap, whole-theatre, one offline pass,
+  `WORLD_MODEL_BUILDER.md`) stays exactly as WM-M7 built it: cheap, whole-theatre, one offline pass,
   no reason to change.
 - The **probe tier** (elevation detail beyond SRTM, `surface_type`, ridge/valley) is instead
   filled incrementally, chunk by chunk, only for terrain the player has actually flown near.
@@ -187,13 +187,13 @@ theatre-wide coverage.
   probe for that chunk — and plausibly a look-ahead ring of chunks in the direction of travel, so
   the bubble grows ahead of the aircraft rather than always one step behind it. Write the result
   back into the persistent store; the known-coverage bubble grows outward as the player explores.
-- "Throttled" matters for the same reason M5/M7's terrain probes already use
+- "Throttled" matters for the same reason WM-M5/WM-M7's terrain probes already use
   `timer.scheduleFunction` chunking instead of one blocking loop (see
   `tools/dcs-mission-probe/README.md`'s note on `terrain_probe_*.lua`'s incremental-ladder
   pattern) — a burst of live `land.getHeight`/`land.getSurfaceType` calls mid-mission must not
   visibly impact game performance. Rate-limit probe calls per tick, same discipline, just
   triggered by player movement instead of a pre-planned grid walk.
-- Ridge/valley classification (M6's local Laplacian-curvature method) runs naturally per-chunk
+- Ridge/valley classification (WM-M6's local Laplacian-curvature method) runs naturally per-chunk
   once that chunk's elevation is available — no separate design needed, it already operates on a
   local grid neighborhood.
 

@@ -157,6 +157,31 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
   escalated, but it would have been worth catching before implementation began by actually
   reading `mission_phase.py` rather than trusting the context section's forward-reference.
 
+- **Accepted debt is only accepted once its unblock condition has been *executed*.** A declined
+  review fix can be the right call and still leave the project worse off, if the escape route it
+  names has never been run. `doc-provenance-gate.sh` was deliberately left unwired with a
+  carefully-argued comment, a reproducible counterfactual measurement, and an explicit exit — *"one
+  command, `.claude/scripts/doc-provenance-refresh.sh`, when the document-graph work unpauses."*
+  Running that command aborts `rc=1` on its first validated citation and writes nothing, so the
+  condition could never have been met as written; the debt was recorded as temporary while being
+  permanent. The reasoning for a departure gets scrutinised because it is an argument; the
+  one-line remedy attached to it reads as housekeeping and gets none. **Run the unblock command at
+  the moment the debt is accepted, and paste what it did** — the cost is one command, against a
+  caveat that otherwise expires silently (`plans/obsidian-links-and-tags/dod-check.md` §2).
+
+- **Generalising a hardcoded scope has two halves — discovery and resolution — and fixing one
+  reads as fixing both.** `doc_provenance.py`'s entry *discovery* was widened from a hardcoded
+  `audio-adapter/ROADMAP` to all seven split directories, verified by a measured 22→245 entry
+  count; the same file's *path resolution* kept `f"audio-adapter/research/{filename}"` as the
+  default for a bare `research/<file>.md` citation, so 17 citations now resolve confidently into
+  the wrong subproject. The widened half makes the symptom appear only *after* the fix, which
+  invites reading it as a new defect rather than the old one's remainder. When removing a
+  hardcoded scope, grep the whole module for the literal rather than the function — and where a
+  bare basename could exist under more than one subproject (`2026-10-05-security-audit.md` does),
+  a fixed prefix is unfixable by any default: it has to resolve relative to the citing document
+  and reject the ambiguous case rather than guess (`plans/obsidian-links-and-tags/dod-check.md`
+  §2c).
+
 ## Type Checking & Python Conventions
 
 - **`float ** float` returns `Any` under `mypy --strict` — use `math.pow()` instead.** The `**` exponentiation operator's overloads admit a `complex` result in general, so mypy cannot narrow the return type to `float` even when both operands are `float` and the result is mathematically `float`. Solution: `math.pow(0.5, x)` has an unambiguous `float -> float` signature in typeshed and passes strict checking without surprises. Lesson: any future exponentiation in this codebase should use `math.pow()` proactively rather than triggering a `no-any-return` error later (BL-3 implementation note).

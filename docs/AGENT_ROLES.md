@@ -164,3 +164,31 @@ Output: dated findings in the `research/` directory of whichever module the find
 - **Security**: plan review — dependency posture, design findings, verdict; deep analysis — dependency status (one line; "no dependency change" is the normal answer), code findings, verdict; risk matrix (probability × impact, options) for low-risk findings.
 - **Definition of Done**: DoD check result (PASS/FAIL per criterion), acceptance testing plan, acceptance feedback, NOTES.md entries added, merge readiness verdict.
 - **Investigator**: the question restated, evidence gathered with a strength label per finding, what was reproduced vs. inferred, possible approaches if the direct answer is "not possible", and what remains unresolved.
+
+---
+
+## Why two role-configuration decisions are the way they are
+
+Moved from root `CLAUDE.md` on 2026-10-09 under the criterion in
+`plans/always-loaded-compaction/plan.md`. `CLAUDE.md` keeps the live facts — `dod` runs on sonnet,
+`performance-reviewer` and `security` run once per feature before DoD — and this is the account of
+how each was arrived at, which is only needed when one of them is up for revision.
+
+### `dod` was raised from haiku to sonnet, 2026-09-20 (user direction)
+
+After a run of errors in its acceptance cards: commands that had never been executed, a card with
+no commands in it at all, and twice a fabricated example. **The cheap-final-gate saving was not
+worth a gate that reports work as verified when it was not.** Its own role file now carries the
+run-it-before-you-write-it rule alongside the model change, since the model was only half the
+problem. If a future cost pass considers downgrading the last gate again, this is the record of
+what that bought last time.
+
+### The blanket security/performance skip outlived its premise
+
+The rule before 2026-09-24 read *"skip both for now — an offline single-user local pipeline with no
+hot path and no untrusted-input surface"*. It was accurate when written and carried **no lapse
+condition**, which is the gap the 2026-09-22→2026-09-25 retro actually found: it stayed in force
+unexamined after the project grew a live DCS I/O pipeline, a LAN HTTP surface between subprojects,
+and inbound speech capture. **A standing exemption needs a stated condition for ending, or it
+outlives its premise silently** — that sentence is the transferable part, and it is kept in
+`CLAUDE.md` for that reason.

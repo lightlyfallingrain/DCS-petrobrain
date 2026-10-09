@@ -1,4 +1,4 @@
-# M7 full-theatre build — run instructions
+# WM-M7 full-theatre build — run instructions
 
 Per `plans/m7-full-theatre-pipeline/plan.md`'s "Execution boundary": nobody but the user
 builds the real full-theatre `syria-full.sqlite`. This doc is the required deliverable for
@@ -15,8 +15,8 @@ Stage 2 step 2 below); Stage 3 runs last, once both are in place.
 
 ## 1. Check the raw files are staged
 
-Stage 1 needs exactly the same three raw files M5 already used for `latakia-20km` — they are
-**whole-theatre files already, not region-clipped** (M5 found this incidentally: `.routes` is
+Stage 1 needs exactly the same three raw files WM-M5 already used for `latakia-20km` — they are
+**whole-theatre files already, not region-clipped** (WM-M5 found this incidentally: `.routes` is
 walked in full regardless of region bbox, and `towns.lua`/`beacons.lua` are parsed in full
 before being clipped). If you already built `latakia-20km`, you very likely already have these
 staged and **no new Windows/WSL round-trip is needed for Stage 1**:
@@ -27,11 +27,11 @@ ls world-model/data/raw/dcs/syria/map/beacons.lua
 ls world-model/data/raw/dcs/syria/roads/Syria.routes
 ```
 
-If any are missing, stage them the same way M5 did (read-only copy from the DCS installation's
+If any are missing, stage them the same way WM-M5 did (read-only copy from the DCS installation's
 `Mods/terrains/Syria/...`, via the `wsl-probe-sync` workflow in `world-model/WORKFLOW.md` if
 extracting fresh from the Windows machine, or a direct copy if you already have them).
 
-**No OSM cache is needed or used** — M7 drops OSM from scope entirely (see the plan's
+**No OSM cache is needed or used** — WM-M7 drops OSM from scope entirely (see the plan's
 clarification 2). Do not pass `--osm-cache` when building `syria-full`.
 
 ## 2. Run the build
@@ -52,7 +52,7 @@ Expect the `.routes` walk to take roughly the same wall time Stage 0's census me
 whole (unclipped) `towns.lua`/`beacons.lua` gazetteer.
 
 The build prints a per-`kind` feature count summary and skip notices for the layers Stage 1
-doesn't populate (`osm: skipped`, `probe: skipped`) — those are expected, not failures; M7
+doesn't populate (`osm: skipped`, `probe: skipped`) — those are expected, not failures; WM-M7
 Stage 2 fills in elevation/`surface_type` later, and OSM is out of scope for the whole
 milestone.
 
@@ -86,15 +86,15 @@ This checks the freshly-built `data/world-model/syria-full.sqlite` against:
   any real road), that's expected, not a failure.
 
 The script prints a JSON report to stdout. There is no automatic pass/fail exit code beyond the
-"store doesn't exist yet" case — read the report and use judgement, the same way M5's Stage 4
+"store doesn't exist yet" case — read the report and use judgement, the same way WM-M5's Stage 4
 validation note did.
 
 ## 4. Record the result
 
 Once you've run the build and the validation script, note the real numbers (feature counts,
 wall time, file size, validation output) — either directly in a new dated
-`world-model/research/` note (mirroring M5/M7 Stage 0's convention) or by reporting them back
-so they can be written up. This is the actual Definition-of-Done evidence for M7 Stage 1 — an
+`world-model/research/` note (mirroring WM-M5/WM-M7 Stage 0's convention) or by reporting them back
+so they can be written up. This is the actual Definition-of-Done evidence for WM-M7 Stage 1 — an
 agent-produced or agent-reported full-theatre store/count does not satisfy it, per the plan's
 "Execution boundary".
 
@@ -112,7 +112,7 @@ both). Two separate real actions are involved, in either order:
 Syria's padded bbox (31.19–38.01°N, 32.29–40.21°E, per
 `world-model/research/2026-09-05-m7-syria-theatre-extent.md`) spans roughly 7 degrees of
 latitude and 8 of longitude, so covering it needs on the order of several dozen 1x1-degree
-`.hgt` tiles — every tile whose 1-degree cell overlaps that lat/lon envelope. M4 Stage 2 already
+`.hgt` tiles — every tile whose 1-degree cell overlaps that lat/lon envelope. WM-M4 Stage 2 already
 sourced one tile (`N39E036.hgt`) from the viewfinderpanoramas.org no-login mirror (SRTM3, ~90m);
 fetch the remaining tiles from the same source (or SRTM1 if you want ~30m instead — `SrtmTile`
 handles either, deriving resolution from file size) and put them all in one directory, e.g.
@@ -124,7 +124,7 @@ the default storage spacing is now **500m** (raised from the original 1000m -- s
 `plans/terrain-feature-probing/plan.md` Stage 1/2 and
 `world-model/research/2026-09-29-terrain-feature-probing-spacing.md` for why; 1000m starved the
 terrain-semantics ridge/valley stage of usable relief), giving `syria-full`'s ~827x771 km bbox
-roughly 1,650 x 1,540 ≈ 2.5 million grid cells. SQLite handles millions of rows fine per M5's own
+roughly 1,650 x 1,540 ≈ 2.5 million grid cells. SQLite handles millions of rows fine per WM-M5's own
 findings, and this is a modest ~49 MB of `grid_sample` (4x the old 1000m default's 12.2 MB) —
 still cheap next to the store's other layers. Pass `--srtm-grid-spacing-m 1000` explicitly if you
 want the old, coarser tradeoff instead (e.g. for a quick timing test before a real run).
@@ -147,13 +147,13 @@ this flag):
 The build prints `srtm stats: SrtmIngestStats(...)` on success (`points_sampled`,
 `points_void_or_uncovered`, `tiles_used`) or `srtm: skipped` if `--srtm-dir` was omitted or had
 no `.hgt` files. `probe: skipped` and `terrain: skipped` are still expected here too — Stage 2
-does not run a full-grid DCS probe or M6's ridge/valley classifier (locked out of M7 entirely).
+does not run a full-grid DCS probe or WM-M6's ridge/valley classifier (locked out of WM-M7 entirely).
 
 ### 2c. Run the DCS live-probe spot-check mission
 
 Unlike Stage 1's vector layers, this step needs the actual installed DCS copy on the Windows
-machine — it is the one part of M7 that cannot be done from already-staged files. Run
-`tools/dcs-mission-probe/elevation_probe.lua` (unchanged from M4/M5 — see the plan's Stage 2:
+machine — it is the one part of WM-M7 that cannot be done from already-staged files. Run
+`tools/dcs-mission-probe/elevation_probe.lua` (unchanged from WM-M4/WM-M5 — see the plan's Stage 2:
 "no chunking/resumability redesign needed") against a **small, scattered point set spread
 across the theatre** — one or two points per major region/airbase cluster (e.g. near Damascus,
 Aleppo, Latakia, Beirut, and a few inland/mountain points), not a dense grid. Follow the
@@ -175,7 +175,7 @@ yet; it only reads the probe output file and the `.hgt` tiles directly:
 This prints a JSON report: per-point `dcs_probe_m`/`srtm_m`/`delta_m`, plus `mean_delta_m`/
 `median_delta_m`/`stddev_delta_m`/`min_delta_m`/`max_delta_m` across every point the probe and
 SRTM both cover (`points_skipped` counts any spot-check point outside the staged tiles'
-coverage). Compare the summary against M4's single-region Gemerek baseline (mean +13.89m,
+coverage). Compare the summary against WM-M4's single-region Gemerek baseline (mean +13.89m,
 stddev 28.02m) — the open question this step answers (per the plan's Risks section) is whether
 alignment quality is roughly uniform across the theatre or degrades with distance from
 Gemerek/the tmerc central meridian. Report it plainly either way; there is no automatic pass/
@@ -185,7 +185,7 @@ fail threshold here, the same as Stage 1's validator.
 
 Note the real SRTM ingest stats, the spot-check delta report, and (if it changed) the rebuilt
 `syria-full.sqlite`'s file size/wall time — same convention as Stage 1's step 4. This is the
-actual Definition-of-Done evidence for M7 Stage 2; an agent cannot produce it per the plan's
+actual Definition-of-Done evidence for WM-M7 Stage 2; an agent cannot produce it per the plan's
 "Execution boundary".
 
 ## Stage 3 — validation: wider control-point set + provenance at scale
@@ -194,8 +194,8 @@ Per the plan's Stage 3: a full `describe_position` correctness pass over a wider
 geographically-spread control-point set (coastal, mountainous, urban, desert — broader than
 Stage 1's four Damascus/Aleppo/Beirut/Latakia points), plus confirming `elevation`/
 `surface_type` provenance is never ambiguous about `"srtm"` vs `"dcs_probe"` at scale. This
-stage does **not** include the M5 roadnet resync audit — that's a separate follow-up task,
-tracked in the plan's "Deferred / Out of Scope", not part of M7.
+stage does **not** include the WM-M5 roadnet resync audit — that's a separate follow-up task,
+tracked in the plan's "Deferred / Out of Scope", not part of WM-M7.
 
 Run this once `syria-full.sqlite` has both its Stage 1 vector layers and Stage 2 SRTM elevation
 grid built (the earlier steps in this doc).
@@ -218,7 +218,7 @@ Stage 3 additions spread across terrain types the first four didn't cover:
   edge of the theatre.
 
 Each pairs a DCS-authoritative `(x, z)` from `beacons.lua` with an independently-published
-real-world ARP (Wikipedia/SkyVector — never that same beacon's own `positionGeo` field, per M1
+real-world ARP (Wikipedia/SkyVector — never that same beacon's own `positionGeo` field, per WM-M1
 Finding 2's non-circularity rule) — see `tests/control_points.py`'s docstrings for the exact
 sources.
 
@@ -242,17 +242,17 @@ report and use judgement, the same as Stages 1 and 2.
 ### 3b. Record the result
 
 Note the real coordinate-residual and provenance numbers — same convention as Stages 1 and 2's
-"record the result" steps. This is the actual Definition-of-Done evidence for M7 Stage 3; an
+"record the result" steps. This is the actual Definition-of-Done evidence for WM-M7 Stage 3; an
 agent cannot produce it per the plan's "Execution boundary".
 
 ## Stage 4 — perf: file size, rebuild time, `describe_position` latency at full-theatre scale
 
 Per the plan's Stage 4: `.sqlite` file size, full rebuild wall time, and `describe_position`
 latency, measured over a sample spread across the *whole* theatre rather than confined to one
-20 km box — mirroring M5 Stage 5's measurement format
+20 km box — mirroring WM-M5 Stage 5's measurement format
 (`world-model/research/2026-09-04-m5-stage5-perf.md`), scaled up. This is a measurement stage,
 not an optimization stage: SQLite+R\*Tree is not expected to be row-count-sensitive at
-full-theatre scale per M5's own numbers (a 3,266-road, 20×20 km store already answered
+full-theatre scale per WM-M5's own numbers (a 3,266-road, 20×20 km store already answered
 `describe_position` in tens-to-low-hundreds of milliseconds) — Stage 4 exists to catch it if
 that assumption is wrong, not because a problem is expected.
 
@@ -267,7 +267,7 @@ From `world-model/`, with the venv active:
 .venv/bin/python tools/measure_m7_stage4_perf.py sqlite-size --region syria-full
 ```
 
-Prints the real file's size in bytes/MB. Compare against M5's Latakia baseline — 8,982,528
+Prints the real file's size in bytes/MB. Compare against WM-M5's Latakia baseline — 8,982,528
 bytes (8.57 MB) for one 20×20 km region — to sanity-check the scale-up is roughly proportionate
 to the much larger theatre and its SRTM grid, not wildly disproportionate (which would suggest
 something is being duplicated or not clipped as expected).
@@ -287,8 +287,8 @@ steps):
     --srtm-dir data/raw/dem/syria-full/
 ```
 
-Compare against M5's Latakia baseline — 430.9 s (~7.2 min) for a 20×20 km region including a
-full `.routes` walk (the walk itself dominates build time regardless of region size, per M5
+Compare against WM-M5's Latakia baseline — 430.9 s (~7.2 min) for a 20×20 km region including a
+full `.routes` walk (the walk itself dominates build time regardless of region size, per WM-M5
 Stage 5's finding — `.routes` is walked in full either way). The full-theatre number should be
 close to that same `.routes`-walk-dominated figure plus whatever the (much larger) SRTM ingest
 adds — if it's dramatically higher, the SRTM ingest stage is the first place to look, not the
@@ -302,16 +302,16 @@ From `world-model/`, with the venv active:
 .venv/bin/python tools/measure_m7_stage4_perf.py latency --region syria-full
 ```
 
-Unlike M5 Stage 5's 100 points confined to one 20 km box, this samples every registered control
+Unlike WM-M5 Stage 5's 100 points confined to one 20 km box, this samples every registered control
 point for the theatre (`tests/control_points.py`'s full eight-point set, already spread across
 coastal/urban/desert/mountainous terrain) plus 300 points drawn uniformly across the *entire*
 `syria-full` bbox plus 40 points extended slightly past its edges (`--n-random`/`--n-boundary`
 override the counts if you want a bigger or smaller sample). Prints the same
-mean/median/p95/p99/min/max shape as M5's report.
+mean/median/p95/p99/min/max shape as WM-M5's report.
 
-Compare against M5's Latakia baseline: mean 89.0 ms, median 71.3 ms, p95 223.7 ms, p99
+Compare against WM-M5's Latakia baseline: mean 89.0 ms, median 71.3 ms, p95 223.7 ms, p99
 275.0 ms. A full-theatre store has vastly more rows for the R\*Tree index to search, but per
-M5's own conclusion an R\*Tree's query cost scales with how many candidate features fall near a
+WM-M5's own conclusion an R\*Tree's query cost scales with how many candidate features fall near a
 given point, not with the total table size — so latency in the same rough range (tens to a few
 hundred ms) is the expected, unremarkable result. If p99 comes back an order of magnitude
 higher (multi-second queries), that is the one finding this stage exists to catch — worth a
@@ -322,8 +322,8 @@ scan, not something to wave off as "full theatre is just slower."
 
 Note the real file size, rebuild wall time, and latency numbers — same convention as every
 earlier stage's "record the result" step, e.g. in a new dated `world-model/research/` note
-mirroring M5 Stage 5's and this plan's own Stage 0 census note. This is the actual
-Definition-of-Done evidence for M7 Stage 4, and for M7 as a whole — an agent cannot produce it
-per the plan's "Execution boundary". Once this is recorded and reviewed, M7 is ready for
+mirroring WM-M5 Stage 5's and this plan's own Stage 0 census note. This is the actual
+Definition-of-Done evidence for WM-M7 Stage 4, and for WM-M7 as a whole — an agent cannot produce it
+per the plan's "Execution boundary". Once this is recorded and reviewed, WM-M7 is ready for
 sign-off in `world-model/ROADMAP.md`/`todo/todo.md` (a decision for after you've seen these
 real numbers, not one made by the implementer).

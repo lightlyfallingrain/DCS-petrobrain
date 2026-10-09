@@ -7,7 +7,14 @@
 # This docstring named three subprojects out of six until 2026-09-27, forty lines above a comment
 # recounting two prior audits of that exact defect. A reader trusts the docstring.
 set -uo pipefail
-cd "$CLAUDE_PROJECT_DIR" || exit 0
+
+# `cd "$CLAUDE_PROJECT_DIR" || exit 0` was the written form, and under `set -u` it never reached
+# its own `|| exit 0`: an unset variable aborts the shell at expansion time, before the `||` is
+# evaluated. The behaviour was still fail-open for a PreToolUse hook (a non-zero, non-2 exit is a
+# non-blocking error), but by accident rather than by the stated mechanism. This is the pattern
+# the sibling gates in this directory already use, and it also makes the script runnable by hand.
+REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+[ -n "$REPO" ] && cd "$REPO" 2>/dev/null || exit 0
 
 STAGED=$(git diff --cached --name-only)
 FAIL=0
@@ -137,6 +144,50 @@ luac5.1 not installed; needed to syntax-check staged DCS Lua before commit. Inst
 fi
 
 
+# Split entry documents (docs/DOC_CONVENTIONS.md): run the three convention gates when the commit
+# touches a split directory or the tag vocabulary. The convention doc said these "run before
+# committing a converted file" from the day it was written, while none of the three was wired to
+# anything -- so a dangling [[ID]], an orphaned entry, an unlisted tag or a stale provenance block
+# committed clean across 253 entry files and surfaced only when somebody clicked or grepped
+# (review round 4, RF4-2). A stated mechanical guarantee that does not exist is worse than no
+# guarantee, because it is relied on.
+#
+# Each gate scans the whole tree rather than only the staged paths, which is deliberate: an
+# orphaned entry and a dangling link are both relational defects, so a staged-paths-only check
+# would miss the half of each pair that did not change. Measured cost is under two seconds for
+# all three over 253 entries, so there is nothing to buy by narrowing it.
+#
+# The staged-path condition exists so a commit touching none of these paths is completely
+# unaffected -- this is a PreToolUse hook on every `git commit`, and a gate that fires on
+# unrelated commits is a gate that gets bypassed. A missing or non-executable gate script is
+# skipped rather than reported: this hook must stay fail-open on its own internal errors.
+#
+# **doc-provenance-gate.sh is DELIBERATELY NOT in this list, and that is a deviation from the
+# round-4 instruction, taken on evidence the review did not have.** RF4-2 named all three gates,
+# on RF4-9's stated premise that the provenance gate was "latent only because zero provenance
+# blocks exist". That premise is false: 32 documents carry a real block today. Fixing RF4-9's
+# hardcoded `audio-adapter/ROADMAP` -- widening discovery from 22 entries to 245 across all seven
+# split directories -- means the generator now finds the cross-subproject citations it previously
+# could not see, so **127 documents' blocks are now stale by regeneration.** Measured by
+# counterfactual: with the pre-fix discovery the gate reports OK, rc=0; with the fix it names 127
+# files. So wiring it here would refuse every commit that touches any ROADMAP/ path, repo-wide,
+# until all 127 are regenerated -- and regenerating them is the Obsidian document-graph work,
+# which is paused by user direction, and would add ~200 keyword-derived citations nobody has
+# reviewed. A gate that refuses every roadmap commit is the "cries wolf, gets bypassed" failure
+# this review itself warns about, and is strictly worse than the status quo.
+#
+# It remains correct, runnable standalone, and its RF4-9 fix is in place and proven. **Condition
+# for adding it to this list: once the 127 blocks have been regenerated and reviewed** (one
+# command, `.claude/scripts/doc-provenance-refresh.sh`, when the document-graph work unpauses) --
+# at which point the gate passes and keeps them in step, which is what it is for.
+if printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP/|^todo/(backlog|todo)/|^docs/TAGS\.md$'; then
+    for gate in roadmap-entry-consistency-gate roadmap-tag-vocabulary-gate; do
+        gate_path=".claude/scripts/$gate.sh"
+        [ -x "$gate_path" ] || continue
+        run "$gate" "$gate_path"
+    done
+fi
+
 # Reject agent-memory files written under a subproject-relative path instead of repo-root
 # .claude/agent-memory/ (recurring mistake — see feedback_agent_memory_path_recurrence.md).
 STRAY_MEMORY=$(printf '%s\n' "$STAGED" | grep -E '^[^/]+/\.claude/agent-memory/' || true)
@@ -185,7 +236,7 @@ check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a rese
 ROADMAP_WARN=""
 DOD_CHECK_FILES=$(printf '%s\n' "$STAGED" | grep -E '^plans/[^/]+/dod-check\.md$' || true)
 if [ -n "$DOD_CHECK_FILES" ]; then
-    if ! printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP\.md$'; then
+    if ! printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP(\.md|/[^/]+\.md)$'; then
         ROADMAP_WARN="
   - dod-check.md staged, but no ROADMAP.md (root ROADMAP.md, or a subproject's, e.g.
     world-model/ROADMAP.md, aircraft-layer/ROADMAP.md, body-layer/ROADMAP.md) is touched in

@@ -1,4 +1,4 @@
-# M9 OSM (Geofabrik) full-theatre build — run instructions
+# WM-M9 OSM (Geofabrik) full-theatre build — run instructions
 
 **Superseded by `../RUN.md`** for the actual commands to run — that page is the current,
 consolidated job (a)/job (b) procedure and is kept up to date; this document is kept for its
@@ -28,7 +28,7 @@ mirrors `M7_RUN_INSTRUCTIONS.md`'s execution-boundary precedent.
 ## 0. Prerequisite: raw extracts already staged
 
 All 7 Geofabrik country `.osm.pbf` extracts (`data/raw/osm/*-260911.osm.pbf`) are already
-downloaded and gitignored — confirmed present during M9 implementation:
+downloaded and gitignored — confirmed present during WM-M9 implementation:
 
 ```
 cyprus-260911.osm.pbf                37 MB
@@ -100,7 +100,7 @@ country files itself).
 
 ## 4. Validate the real Syria-only extract first (already done in this session)
 
-Before running the full merge, M9 implementation validated `osm/pbf.py` directly against the
+Before running the full merge, WM-M9 implementation validated `osm/pbf.py` directly against the
 already-present `syria-260911.osm.pbf` (82 MB, one country, no clip needed since it is already
 theatre-relevant and small enough to parse whole):
 
@@ -147,7 +147,7 @@ Once Steps 2-3 above have produced `data/raw/osm/syria-theatre.osm.pbf`, run:
 ```
 
 (Include whichever of `--routes`/`--srtm-dir` your existing `syria-full.sqlite` build already
-uses — `--osm-pbf` is additive to M7's existing invocation, per `build.pipeline.build_region`'s
+uses — `--osm-pbf` is additive to WM-M7's existing invocation, per `build.pipeline.build_region`'s
 `osm_pbf_path` parameter taking precedence over `osm_cache_path` when both are given.)
 
 Expect a substantially longer OSM stage than the single-country Stage 4 run above (~60s parse +
@@ -169,12 +169,12 @@ throughout, is expected, not a bug.
 Measure and record:
 
 - Feature counts by `kind` (the CLI prints these), especially `settlement`/`water`/`named_place`
-  deltas versus M7's OSM-absent baseline (M7 dropped OSM from scope entirely).
-- `syria-full.sqlite` file size delta vs. M7's 461 MB baseline.
+  deltas versus WM-M7's OSM-absent baseline (WM-M7 dropped OSM from scope entirely).
+- `syria-full.sqlite` file size delta vs. WM-M7's 461 MB baseline.
 - `osm.pbf.load_features`'s `ways_skipped_unresolved_nodes` count — should be 0 or very small;
   a large number would mean `--strategy=smart` did not fully protect the Turkey/Syria border
   (see Step 2's note).
-- `describe_position` p99 latency delta vs. M7's already-flagged 803 ms tail (`tests/
+- `describe_position` p99 latency delta vs. WM-M7's already-flagged 803 ms tail (`tests/
   test_measure_m7_stage4_perf.py`'s measurement approach) — a real risk this milestone carries
   forward, not a formality.
 
@@ -196,7 +196,7 @@ rebuild deliberately without changing any of those, delete
 ## 6. Record the result
 
 Write a dated `world-model/research/` note (extract coverage, skip counts, store growth,
-query-latency delta) mirroring M5/M7's convention, and update `world-model/ROADMAP.md`'s M9
+query-latency delta) mirroring WM-M5/WM-M7's convention, and update `world-model/ROADMAP.md`'s WM-M9
 entry to done — see the plan's "Implementation Plan" step 6 and the root `CLAUDE.md`'s
 "Milestone Completion" checkpoint question (does this change what the next milestone,
 Mission Interpreter's MI-2, should assume — see the plan's "Second-order effect").

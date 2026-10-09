@@ -1,5 +1,10 @@
 # Push-to-talk gate: can Export.lua read a held cockpit control?
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-synthesis #speech-recognition #push-to-talk #cockpit-manipulation #intercom
+**Evidence for:** [[AA-4.5]]
+<!-- doc-provenance:end -->
+
 **Date:** 2026-09-19
 **DCS version:** 2.9.29.27278 (per `aircraft-layer/research/mi24p-command-surface.md`'s primary-
 source dump; this session did not run a live probe against it — see Unresolved)

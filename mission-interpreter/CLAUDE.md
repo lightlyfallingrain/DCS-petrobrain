@@ -4,7 +4,8 @@ Subproject instructions for Mission Interpreter. Augments the root `CLAUDE.md` -
 for overall Petrobrain architecture; this file adds stack/testing/structure specifics that apply
 only within `mission-interpreter/`.
 
-See `ROADMAP.md` in this directory for milestone status, `plans/mission-interpreter/plan.md` for
+See `ROADMAP/` in this directory for milestone status (one file per entry, indexed by
+`ROADMAP/mission-interpreter-roadmap.md`; `ROADMAP.md` is a four-line pointer), `plans/mission-interpreter/plan.md` for
 the plan this subproject was built from, and `docs/concept/MISSION_INTERPRETER.md` for the
 (draft/provisional) design rationale.
 

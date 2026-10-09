@@ -1,5 +1,10 @@
 # DCS install deep read — ED's detection model, and five questions that were waiting for this box
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-volume #push-to-talk #cockpit-manipulation #intercom
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
 **Date:** 2026-09-20
 **DCS version:** 2.9.29.27278 (build `20260826-084519`, read from `autoupdate.cfg` this session)
 **Theatre:** n/a for the detection model (engine-wide `Scripts/AI/`); terrain-generation finding

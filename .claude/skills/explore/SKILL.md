@@ -66,7 +66,7 @@ So, before opening the conversation, spend two or three minutes on:
 and then, because the graph does not cover everything:
 
 ```sh
-grep -rn "<key term>" todo/questions.md todo/backlog.md .claude/agent-memory/   # out of corpus
+grep -rn "<key term>" todo/questions.md todo/backlog/ todo/todo/ .claude/agent-memory/  # out of corpus
 grep -rn "<key term>" docs/acceptance/                                          # prior feedback
 ```
 

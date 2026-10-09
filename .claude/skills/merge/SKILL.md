@@ -22,8 +22,26 @@ directory?**
   branches in-place would disturb whatever branch the session is mid-task on, and would race
   anything else operating in that checkout. A disposable worktree lets the merge happen without
   touching the current checkout at all. `AGENTS.md`'s "Where work happens" section states who owns
-  the main checkout and where agents run — read it there, because that division has been inverted
-  once already and the reasoning here depends on it.
+  the root and where agents run — read it there, because that division has been inverted twice and
+  the reasoning here depends on it.
+
+  **Revised 2026-10-09, and it changes this skill's main path: a disposable worktree cannot check
+  out `main` when the repo root already has it, which it now normally does.** Tested, not assumed:
+
+  ```
+  $ git worktree add <path> main
+  fatal: 'main' is already used by worktree at '/Users/sg/Code/DCS-petrobrain'
+  $ git fetch . HEAD:main          # the other obvious workaround
+  fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
+  ```
+
+  **So the merge runs in the root:** `git -C <root> merge --no-ff <branch> -m "<message>"`, with the
+  root on `main` and `git -C <root> status --short` empty — the "In-place merge" path below, which is
+  now the normal one. (`--no-ff`, as always here; `--ff-only` belongs to agent harvests, not merges.) It moves `main` forward without changing which
+  branch the root has checked out, so it does not take the root away from the user — the one defined
+  exception to rule 3. **If their tree is dirty, stop and ask**; they may have an input document in
+  progress, which is exactly what the root is for. A disposable worktree is still right for any
+  merge whose *target* is not checked out anywhere.
 
 ## In-place merge (active branch == branch being merged)
 
@@ -39,14 +57,24 @@ directory?**
 5. Run the affected subproject(s)' full verification suite (format, lint, type check, test — see
    that subproject's CLAUDE.md) before finalizing, even if the branch passed its own checks before
    merging — the merge itself can introduce breakage neither branch's own tests would catch.
-6. **Update the roadmap before pushing.** The merged branch's subproject `ROADMAP.md` is the
-   source of truth for milestone status; root `ROADMAP.md`'s status table names every subproject
-   and links its roadmap, so read which file that is from there rather than from a list here —
-   mark the milestone done/merged (status, branch, merge
-   commit hash), fix any stale entry the merge makes wrong (e.g. a sibling item that said "pending
-   merge" or a blocked item this merge unblocks), and update root `ROADMAP.md`'s status table if
-   the subproject's overall phase status changed. Only touch `todo/todo.md` / `todo/backlog.md` if the branch also
-   affects a cross-cutting/unscoped item there. Commit this (a separate commit from the merge
+6. **Update the roadmap before pushing — and resolve the path before writing to it.** The merged
+   branch's subproject roadmap is the source of truth for milestone status; root `ROADMAP.md`'s
+   status table names every subproject and links its roadmap, so read which file that is from there
+   rather than from a list here. **Then run `.claude/scripts/roadmap-source.sh <that path>`**: every
+   subproject's `ROADMAP.md` is now a four-line pointer, and the milestone's real entry is one file
+   per entry under `<subproject>/ROADMAP/`. The resolver prints the index, `--dir` the directory,
+   and passes a non-pointer through unchanged, so running it is never wrong.
+
+   **Writing the done-entry into the pointer is the failure this step exists to prevent, happening
+   with every gate green.** The merge hash lands in a file nothing reads, the real entry stays open,
+   `roadmap-toc.sh` and `grep '#status/done'` still report it open, and `push-roadmap-gate.sh` is
+   satisfied because *a* `ROADMAP.md` was touched. So: mark the milestone done/merged (status,
+   branch, merge commit hash) **on its own entry file**, fix any stale entry the merge makes wrong
+   (e.g. a sibling item that said "pending merge" or a blocked item this merge unblocks), and update
+   root `ROADMAP.md`'s status table if the subproject's overall phase status changed — root
+   `ROADMAP.md` is not split and is edited directly. Only touch `todo/todo/` / `todo/backlog/` if
+   the branch also affects a cross-cutting/unscoped item there (`todo/todo.md` and
+   `todo/backlog.md` are pointers too). Commit this (a separate commit from the merge
    commit is fine — do not amend the merge commit). A merge is not finished until the roadmap
    reflects it, and it must go out in the *same push* as the merge itself, not a later,
    easy-to-forget follow-up.
@@ -70,11 +98,14 @@ directory?**
 7. **On conflict:** same as above.
 8. Run the affected subproject(s)' full verification suite **inside the worktree** before finalizing.
 9. `git commit` (if the merge didn't auto-commit, e.g. after manual conflict resolution).
-10. **Update the roadmap before pushing, inside the same worktree.** The merged branch's
-    subproject `ROADMAP.md` is the source of truth for milestone status — mark the milestone
-    done/merged (status, branch, merge commit hash), fix any stale entry the merge makes wrong, and
-    update root `ROADMAP.md`'s status table if the subproject's overall phase status changed. Only
-    touch `todo/backlog.md` if the branch also affects a cross-cutting/unscoped item there. Commit
+10. **Update the roadmap before pushing, inside the same worktree.** Same as step 6 above, including
+    the part that matters most: resolve the path with `.claude/scripts/roadmap-source.sh` before
+    writing, because `<subproject>/ROADMAP.md` is a four-line pointer and the milestone's entry is
+    its own file under `<subproject>/ROADMAP/`. Mark the milestone done/merged (status, branch,
+    merge commit hash) on that entry file, fix any stale entry the merge makes wrong, and
+    update root `ROADMAP.md`'s status table if the subproject's overall phase status changed (root
+    `ROADMAP.md` is not split). Only touch `todo/backlog/` if the branch also affects a
+    cross-cutting/unscoped item there. Commit
     this (separate commit from the merge commit is fine). A merge is not finished until the
     roadmap reflects it, and it must go out in the *same push* as the merge — not a later,
     easy-to-forget follow-up.

@@ -1,0 +1,151 @@
+# WM-M11 — Provenance out of the LOS primitive
+
+- [ ] **WM-M11 — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild.
+  NOT STARTED, filed 2026-10-05.** #status/open From the two whole-subproject passes run on `main` @ `19143fa`
+  after the first DCS-LOS sortie — `research/2026-10-05-security-audit.md` and
+  `research/2026-10-05-performance-review.md`, directed by
+  `aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`.
+
+  **Why a milestone and not backlog items**: three of these must land *with* the [[WM-B1]] + [[WM-B6]]
+  full-theatre rebuild or they cost a second one, and the rebuild is already committed.
+
+  **REVISED 2026-10-06 BY USER DIRECTION — the primitive is testing-only, which re-ranks this
+  milestone's own stages.** The user, reading the reports that produced it:
+
+  > *"As discussed when doing the DCS LOS change, world model LOS _must not be used_. It is to be a
+  > *testing* only tool, not for live flight. Not only because of performance, but especially for
+  > *correctness*."*
+
+  **CONFIRMED 2026-10-08 — the consumer is gone, not just going.** `body-layer`'s [[BL-11]] Stage 4
+  steps 3-4 shipped and DoD-passed (`feature/bl11-stage4-fail-closed`): `visibility.py`'s gate 4
+  now fails closed on `candidate.live_los_clear` alone, and `line_of_sight_clear` is re-exported
+  into that module's namespace unused by any call below it — kept importable only so
+  `test_visibility.py`'s negative-space tests can assert it is never invoked. Verified directly
+  (`grep -n "line_of_sight_clear" body-layer/src/perception/*.py`): the only remaining call sites
+  are the re-export, its own definition in `geometry.py`, and offline/fixture test code. **So
+  `line_of_sight_clear` is now a purely offline/testing-only primitive in practice, not just by
+  intent** — which is exactly what the user's direction below asked for, and what makes Stage 1's
+  bug below a fixture-correctness question rather than a live-correctness one. Three consequences
+  for the stages below, and the
+  correction is kept visible because the reports got this wrong in a specific, instructive way —
+  they proposed making a silent fallback *observable*, which is right for a fallback allowed to
+  exist and wrong for one that must not run:
+
+  - **Stage 1 still stands, and the bug is still real** — an offline test oracle that answers
+    "clear" when it has no data is worse than useless, because the tests built on it
+    ([[WM-B8]]'s fixture grid is the intended consumer) would silently pass. But its *urgency* drops
+    from "a live gate is lying to the pilot" to "a test oracle will lie to us".
+  - **Stage 2 keeps its priority for a different reason.** Deriving the tolerance from the store no
+    longer protects a live gate; it protects every *other* elevation consumer, and it is still
+    [[WM-B3]]'s literal mechanism. The 12 m constant itself is now out of the live path along with
+    its only caller, which the user had already said in
+    `docs/acceptance/2026-10-05-sortie-feedback.md`: *"becomes obsolete and incorrect. It may be
+    used in test code when LOS is simulated offline, but must not be used in actual code."*
+  - **Stages 3–5 are unaffected and become the milestone's centre of gravity** — they are about the
+    query layer, the build and the store, none of which depends on the LOS primitive's fate.
+    Stage 3 in particular is still rebuild-gated.
+
+  **Stage 1 — `line_of_sight_clear` cannot say where its answer came from, and returns `True` when
+  it knows nothing.** `query/line_of_sight.py:125-180` returns a bare `bool`: no source, no
+  tolerance, no record of how many samples were skipped. A sample with no elevation data
+  `continue`s, so **outside grid coverage (7.4 % void cells in `syria-full`) every sample can be
+  skipped and the function returns `True`** — "no evidence of terrain" rendered as "sightline
+  clear", which is the *admitting* value at the consumer. Its own docstring says absence must never
+  manufacture an outcome either way; the return type makes it do exactly that. The loss propagates
+  to all three consumers, including across the HTTP seam to mission-interpreter, and it is the
+  world-model half of body-layer's 77 %-silent-fallback finding ([[BL-B31]], [[BL-11]] Stage 4).
+
+  Note what makes this a real design lesson rather than an oversight: **provenance discipline in
+  this subproject is excellent and this function is the exception.** Thirteen `*Info` dataclasses
+  each carry `provenance` + `confidence` + `position_uncertainty_m`, and `grid_provenance()` exists
+  *specifically* so an SRTM grid is never reported as DCS-probed. The well-implemented sibling is
+  what made the gap invisible for a month.
+
+  **Stage 2 — the measured vertical error must live in the store, not in a research note (scopes
+  the open [[WM-B3]], does not replace it).** `build/validate.py:192`'s `compare_probe_to_srtm`
+  computes the DCS-vs-SRTM mean/stddev and its only caller **prints it to stdout for a human to
+  paste into a note**. `11.52` appears in this file and five research notes and in **zero lines of
+  code**, while `_TERRAIN_TOLERANCE_M = 12.0` (`query/line_of_sight.py:122`) is a hand-copy of it —
+  now applied unchanged to Afghanistan, whose error has never been measured (that build note's own
+  line 119: *"not attempted this session"*), and WM-M4's Gemerek measurement was **28.02 m stddev,
+  2.4× the number the constant is sized to**. Four steps, no schema bump: write the alignment
+  report into the elevation `grid` row's existing `stats_json`; add `grid_vertical_error_m()`
+  beside `grid_provenance()`; add `vertical_stddev_m` to `ElevationInfo`; have
+  `line_of_sight_clear` derive its tolerance from the store. A theatre built without a probe
+  cross-check then **cannot silently inherit another theatre's error budget**.
+
+  **Stage 3 — the two cheap query-layer fixes, and they must ride the rebuild.**
+  1. **`feature` has no index at all** beyond its implicit PK (`store/schema.py:47-60`).
+     `CREATE INDEX idx_feature_kind ON feature(kind, id)` costs 0.1 s and +2 MB and takes
+     `describe_position` 40.8 → 27.8 ms. **Adding it later costs another full rebuild.**
+  2. **`nearest_feature` spends 73 % of `describe_position` proving that 86 features are not
+     nearby.** `features_in_bbox` collects every R*Tree-overlapping id *regardless of kind*, then
+     kind-filters in a second query — so `ridge` (12 features theatre-wide), `valley` (12),
+     `airfield` (35) and `runway` (27) each exhaust all four `_EXPANDING_RADII_M`, the fourth being
+     a 60×60 km bbox: 29.8 ms of a 40.8 ms call. Holding those 86 resident is **0.296 ms total,
+     101× cheaper**, with a 91 ms one-time load. This is on body-layer's per-poll path via
+     `CalloutScheduler.tick`, so it compounds with [[BL-11]] Stage 3 — measure after both, not after
+     either.
+
+  **Stage 4 — the build is ~82 minutes, not 449 s, and two stages are 90 % of it.** [[WM-M7]]'s 449.3 s
+  figure predates WM-M9/WM-M10/geomorphons and used a **1000 m** grid; the current 500 m default is 4× the
+  cells. The authoritative figure is `research/2026-10-05-afghanistan-theatre-build.md`: terrain
+  semantics **2640.2 s (54 %)**, road junctions **1751.1 s (36 %)**, `.routes` walk 320.2 s, SRTM
+  grid 136.8 s, OSM overlay 85.9 s. Any rebuild plan sized against 449 s is wrong by an order of
+  magnitude, and [[WM-B1]] + [[WM-B6]] both bump cache-invalidation constants, so the forced rebuild
+  pays **every** stage cold.
+  - **The junction cost is a re-parse, not a scan.** `.routes` polylines are stored *unclipped*
+    (`build/ingest_roadnet.py:23`) at ~5,600 points / ~120 KB `geom_json` each, and
+    `build/ingest_junctions.py:211` calls `features_in_bbox(conn, ["road"], padded)` per 5 km chunk
+    — so each road is `json.loads`ed once per chunk its *bbox* overlaps. Afghanistan: 57,288 chunks
+    × ~11 roads ≈ **77 GB of JSON traffic**, which at 50–100 MB/s lands on the measured 1,751 s.
+    **Syria has 9.3× the roads.** Inverting the loop (one parse per road into a chunk-keyed vertex
+    table) should take it to tens of seconds.
+  - **No `PRAGMA` anywhere in `src/`** — `journal_mode=delete`, `synchronous=FULL` throughout.
+    Safe to relax for the base store and the OSM cache, both delete-and-recreate; **not** for
+    `terrain_cache`, whose resumability needs real durability.
+  - Two terrain-stage items worth ~800 s between them: `skeleton.thin()` allocates two
+    `(8,rows,cols)` **int64** stacks per sub-pass for values bounded by 8, and `_smooth_for_storage`
+    runs its deviation check on 16× the points *before* the decimation whose own check its docstring
+    says makes it redundant.
+
+  **Stage 5 — the fix-now security items that are not about provenance.**
+  - **A `.routes` route failing its own `_directions_plausible` check increments a counter and
+    falls through** (`query/routes.py:160-174`), becoming a `confidence={"geometry":"high"},
+    position_uncertainty_m=0.0` road. `store/container.py:51-59` documents that this already
+    happened — road `id=3711` in the Latakia store, caught by a *separate* validation pass, not by
+    the counter.
+  - **`check_schema_version` has exactly one caller and it is a write path**; `grep schema_version
+    body-layer/src` returns nothing, and `store/reader.py:402` asserts the opposite in a comment
+    ("which `check_schema_version` already refuses to open") — false on every read path.
+  - **`api/__main__.py:46` opens the authoritative store read-write** behind the `0.0.0.0` no-auth
+    socket, when `pipeline.open_region_db` already does it correctly. A typo'd `--db` silently
+    creates an empty store and the server starts cleanly.
+  - **`--srtm-grid-spacing-m` is unvalidated**: a negative value yields negative `n_rows`, zero
+    inserted samples, and a `grid` row written with `srtm_skipped=False` — a silently empty
+    elevation grid presented as built.
+
+  **Explicitly cleared, recorded so it is not re-raised**: no dynamic code execution anywhere in
+  `src/` (no `eval`/`exec`/`pickle`/shell/dynamic import); Lua is regex-parsed, never executed;
+  **no archive handling at all**, so no zip-slip surface; no secrets; SQL is not injectable (every
+  f-string is a placeholder count or a hardcoded schema literal); the **read-only-against-DCS
+  invariant holds on every current path** (`--out` is structurally separate from all nine input
+  flags, and no write target derives from a DCS path); `grid_sample` is optimally indexed; the
+  sqlite connection is long-lived, per-poll-thread and thread-affine with **no lock serializing the
+  tick**; `pyproj` transformers are `@cache`d; and the write path is already fast (`executemany`
+  would save 0.23 s of an 82-minute build, measured). `position_uncertainty_m=0.0` for DCS roads is
+  *correct* by project invariant, not an instance of the provenance finding.
+
+  **Measurement caveat that matters for ranking**: the performance pass's absolute numbers come from
+  a synthetic store 3–12× less clustered than real Syria. **WM-M7's committed 136.8 ms mean / 497.7 ms
+  p95 stays authoritative**; read the new figures as ratios. Verifying Stage 4's savings needs a
+  `syria-full` rebuild with per-stage timings, which **only the user can run** (execution-boundary
+  rule).
+
+  **Milestone completion question**: Stage 2 is the item that changes what comes next — until the
+  measured error lives in the store, every elevation consumer must choose between trusting the grid
+  as exact or hardcoding a constant copied from a research note, and this project has now paid for
+  that twice, three weeks apart, in the same gate. Stage 3's index decision also constrains
+  [[WM-B8]]: a *finer* fixture grid makes Stage 1's statement count **worse** and destroys the 6.8×
+  cell redundancy that makes a cheap per-poll memo work, so **[[WM-B8]] should not land before Stage
+  3 is decided.**
