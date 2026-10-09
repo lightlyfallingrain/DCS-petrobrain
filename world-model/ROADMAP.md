@@ -13,7 +13,16 @@ for the kind whose live-DCS acceptance was *deferred*, not waived, and hasn't be
 (mirrors `body-layer/ROADMAP.md`'s section of the same name). Clear an entry only once a real
 sortie actually exercises it, and say which one.
 
-- [ ] **`fix/los-elevation-tolerance` — `_TERRAIN_TOLERANCE_M = 12.0` added to
+- [x] **`fix/los-elevation-tolerance` — ACCEPTED 2026-10-09.** User, reviewing the status
+  page: *"LOS tolerance / grid error buried a unit -> accepted"*. Note what has also happened
+  underneath it since this entry was written: `BL-11` Stage 4 took world-model's primitive out
+  of the live path entirely (merge `b961977`), so the 12 m tolerance is now **offline/test-path
+  only by construction**, not merely narrowed. The acceptance closes the debt; the tolerance's
+  remaining consumers are fixtures.
+
+  Original entry, kept for the record:
+
+  - [ ] **`fix/los-elevation-tolerance` — `_TERRAIN_TOLERANCE_M = 12.0` added to
   `query.line_of_sight.line_of_sight_clear` (merged 2026-09-29), unflown.** **Narrowed 2026-10-05 by
   `X-B29`'s DoD gate**: once `feature/dcs-driven-los` lands, gate 4 never calls this primitive at all
   once a live DCS verdict exists for a unit (`candidate.live_los_clear is not None` short-circuits

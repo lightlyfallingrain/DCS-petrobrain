@@ -124,7 +124,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   noticed. Also flyable on the same sortie: `feature/silence-command` (merged, already on `main`)
   — the manual half of quieting the cockpit, this fix being the automatic half.
 
-- [ ] **`fix/redundant-group-disclosure` — DoD PASSED on fixtures 2026-10-05, merged the same day (`2ae34cc`), not
+- [x] **`fix/redundant-group-disclosure` — ACCEPTED 2026-10-09.** User, reviewing the status
+  page: *"Group lines stop restating known members -> accepted"*. The accepted cost named in its
+  own plan stands and was not separately judged: a genuine split immediately after a merge is
+  indistinguishable from a merge echo at the speech layer and also goes quiet. If that is ever
+  heard, it reopens as a defect rather than as this entry.
+
+  Original entry, kept for the record:
+
+  - [ ] **`fix/redundant-group-disclosure` — DoD PASSED on fixtures 2026-10-05, merged the same day (`2ae34cc`), not
   yet flown.** Silences a `belief.groups.Group`'s first disclosure when every member was already
   individually reported (directly or via the flood fix's merge-echo above), and speaks only the
   unreported delta otherwise. **Rides the same sortie as `fix/contact-report-flood` above rather
@@ -374,7 +382,16 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   components do not single-merge) read as intended in the cockpit rather than as noise or a
   miss. Clear this entry only once a real sortie exercises it, and say which one.
 
-- [ ] **`silence` command — DoD PASSED on fixtures/console only, 2026-10-04, unflown.**
+- [x] **`silence` command — ACCEPTED 2026-10-09.** User, reviewing the status page:
+  *"silence command / one word, absolute quiet -> accepted"*. Two of the three questions this
+  entry listed are therefore answered by acceptance rather than by measurement — one word of
+  acknowledgement is the right amount, and absolute silence is wanted. The third is **not**
+  closed by it and is worth keeping in view: whether absolute silence is still wanted once a
+  threat appears while muted. That case may simply not have occurred yet.
+
+  Original entry, kept for the record:
+
+  - [ ] **`silence` command — DoD PASSED on fixtures/console only, 2026-10-04, unflown.**
   `feature/silence-command`, tip `de6c530`. Deferred, not waived — the plan never scoped live
   acceptance out, and whether it works for the pilot is exactly the kind of thing fixtures
   cannot settle (unbenched recogniser accuracy on the three phrasings, whether one word of
@@ -1629,7 +1646,19 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   the standing reminder that a fixture pass and a flight pass are different claims.
 
 - [x] **Player bubble — 10 km computation-scope limit on ground/air detection. DONE, merged
-  2026-10-02.** `feature/player-bubble` (merge commit, see below), implementing `todo/todo.md`'s
+  2026-10-02. ACCEPTED by the user 2026-10-09**, in the strongest form this item can receive:
+
+  > *"seems to work, though I can't verify by flying. Accepted."*
+
+  **That caveat is the item's own design, not a gap in the acceptance.** Its DoD recorded *no live
+  acceptance owed* as a deliberate waiver rather than deferred debt, because the bubble has **no
+  in-cockpit observable**: `PLAYER_BUBBLE_RADIUS_M` (10 000 m) and `NAKED_EYE_RANGE_CAP_M` are the
+  same distance today, so nothing the pilot can hear changes whether the bound is enforced early or
+  late. The first moment it becomes observable is when the 9K113 sight's 20 km cone makes the two
+  diverge. So "can't verify by flying" is the correct and permanent state of affairs until then, and
+  accepting on that basis closes it honestly rather than leaving an entry open against a
+  confirmation that cannot exist.
+ `feature/player-bubble` (merge commit, see below), implementing `todo/todo.md`'s
   "Player bubble: 10 km, settled 2026-09-28" item — the user's own already-complete spec was the
   authoritative source, so no separate Architect `plan.md` was written for this one.
   `perception.association.filter_player_bubble()` (`PLAYER_BUBBLE_RADIUS_M`, 10 000 m, ownship-
