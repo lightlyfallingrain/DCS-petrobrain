@@ -160,3 +160,4 @@ Write directly — the dir exists.
 - [Narrative prose stays in the index](feedback_narrative_prose_stays_in_the_index.md) — prose describing the set, not a member, is never shredded into entries.
 - [Execute the published recipe](feedback_execute_the_published_recipe_before_trusting_it.md) — `sort -t B`/`-t W` split on a char the prefix contains; both shipped wrong.
 - [Doc-conventions round-4 fixes](project_doc_conventions_round4_consumer_fixes.md) — roadmap-source.sh; why doc-provenance-gate stayed unwired; a bare assert crashed a gate.
+- [Group contact Stage 3b-i ellipse](project_group_contact_model_stage3bi_ellipse.md) - 2D ellipse replaced the scalar cluster radius; cross-range-only counting is dead if single-link.

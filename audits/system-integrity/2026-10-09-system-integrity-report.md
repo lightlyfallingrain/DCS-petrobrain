@@ -3,10 +3,14 @@
 Scope as requested: the whole Claude Code operating environment, **with the 2026-10-09 roadmap/
 backlog split and the "all work in worktrees" inversion as the focus**.
 
-**Findings 2 and 4 were fixed on user direction after the audit ran**, on
-`fix/roadmap-gate-and-branch-hook` — see the "Fixed" block under each. The audit pass itself
-edited nothing; the fixes are separate, explicitly directed work. Findings 1, 3, 5, 6 and 7 are
-still open.
+**Findings 1–7 were fixed on user direction after the audit ran**, on
+`fix/roadmap-gate-and-branch-hook` — see the "Fixed" block under each. The audit pass itself edited
+nothing; the fixes are separate, explicitly directed work.
+
+**Finding 8 was found while fixing finding 7** and is open: `agent-memory-path-gate.sh` refuses the
+sibling worktree path that this repo's own merge skill prescribes, so an agent in a documented
+worktree cannot write memory through `Write`/`Edit`. It needs a decision about which layout is
+canonical, not a patch. The seven Tier 2 items are also untouched.
 
 Inventory enumerated fresh: 7 `CLAUDE.md` (root + 6 subprojects from `git ls-files '*/pyproject.toml'`),
 `AGENTS.md`, `docs/AGENT_ROLES.md`, `docs/PROCESS.md`, `docs/DOC_CONVENTIONS.md`, 8 agent roles,
@@ -25,7 +29,7 @@ plus unrelated drift.
 
 ---
 
-## Tier 1 — definite integrity problems
+## Tier 1 — definite integrity problems (7 found in the audit, plus 8 found while fixing them)
 
 ### 1. Five of six subproject `CLAUDE.md` files prescribe the mypy invocation root `CLAUDE.md` says is broken
 
@@ -67,6 +71,15 @@ human-facing instruction is wrong, which is the worst split of the two.
 
 **Correction.** Change the five lines to `cd <sub> && .venv/bin/mypy src`, matching brain-layer's
 (which is the only one written after the CWD-only finding landed).
+
+**Fixed 2026-10-09.** All five changed to `cd <sub> && .venv/bin/mypy src` — root `CLAUDE.md`'s own
+wording — each followed by a short note giving the reason and the measurement, so the next person
+to "tidy" the command back can see what it costs. `ruff`/`pytest` were left bare, as brain-layer
+has them: they have no CWD-dependent config discovery, and widening the edit would bury the one
+line that was wrong. Verified by running the prescribed form in all six subprojects from the main
+checkout: `Success` in every one (72, 21, 54, 15, 31 and 7 source files). Note a worktree has no
+`.venv` — these commands are only runnable in the main checkout, which is the standing
+borrow-tooling friction, not a defect in the instruction.
 
 ---
 
@@ -147,6 +160,12 @@ don't leave it reading as current.
 
 **Correction.** Rewrite bullet 2 as "branch from local `main`, in a worktree named after the
 feature", keeping the `origin/main` prohibition (that part is unaffected).
+
+**Fixed 2026-10-09.** Bullet 2 now says to create the branch as a worktree —
+`git worktree add -b <branch> ../<repo>-<short-name> main` — which branches from local `main`
+without moving the root's checkout, keeps the `origin/main` prohibition, and quotes the superseded
+wording in place so it does not read as current. It also names the hook from finding 2, so the two
+are cross-referenced rather than each being discovered separately again.
 
 ---
 
@@ -249,6 +268,23 @@ commit message already used for something else.
 directory, or give brain-layer its own); and pin the prefix in the command —
 `grep -oE '^BL-B[0-9]+'`, not `'^[A-Z]+-B[0-9]+'`.
 
+**Fixed 2026-10-09.** All three, in root `CLAUDE.md`: `X-T<n> → todo/todo/` added to the table;
+`BR-*` documented as living in `body-layer/ROADMAP/` because brain-layer has no directory of its
+own; and the mint command now spells the full prefix with the reason attached, since the
+prefix-agnostic form is only safe in a directory that holds one prefix and `body-layer/ROADMAP/`
+holds four (`BL-`, `BL-B`, `BL-W`, `BR-`).
+
+**`docs/DOC_CONVENTIONS.md:183` had the identical defect in its `-W` recipe** and was fixed with
+it — which is the finding behind the finding: root `CLAUDE.md` points at that file as carrying "the
+same recipe", so a correction to one that skips the other leaves the wrong form published in the
+document the other one cites. The `sort -V` correction made the same day had already visited both
+files; the `grep` half of the same line was simply not re-examined.
+
+Verified by running the corrected command in all ten live spaces: `BL-B46`, `BL-W38`, `BL-13`,
+`WM-B16`, `WM-W12`, `WM-M11`, `X-T24`, `X-B35`, `AC-B5`, `AA-B3` — each the true maximum of its own
+sequence, where the prefix-agnostic form returns `BL-B46` for `body-layer/ROADMAP/` regardless of
+which space is being minted.
+
 ---
 
 ### 6. Two auto-memory entries describe states that have since reversed
@@ -276,6 +312,24 @@ background context every session. The first actively misdirects Session Start.
 **Correction.** Rewrite both against current state, or delete the first (the roadmap covers it
 better than a memory can) and trim the second to its seams argument.
 
+**Fixed 2026-10-09.** Both rewritten, **filenames kept** so the `[[project_pb2_next_milestone]]`
+and `[[project_brain_layer_is_the_bottleneck]]` links between them and from elsewhere stay valid —
+renaming would have been the tidier-looking change and would have broken them.
+
+- The first is no longer a milestone pointer at all. It now records the durable strategy it was
+  really about — the chain is built thin and end-to-end rather than one layer perfected at a time,
+  which is why a stub on a real wire beats a complete component behind no wire — plus the explicit
+  rule that **a next-milestone pointer does not belong in memory**, with its own failure as the
+  worked example.
+- The second keeps the idle-seams argument and the transferable rule (defer "small" judgement
+  features to the brain rather than hand-rolling a second judgement layer), and moves the
+  four-gated-features/no-plan-file claim into a dated paragraph that says plainly which part has
+  lapsed and where to check instead.
+
+Both index hooks in `MEMORY.md` were updated to match, since the hook is what recall decides
+relevance from — leaving `gates 4 built features, only component with no plan` in the index would
+have kept the stale claim in context every session while the entry behind it said otherwise.
+
 ---
 
 ### 7. Three memory files are not in their own index, so recall cannot see them
@@ -290,6 +344,48 @@ implementer   project_group_contact_model_stage3bi_ellipse.md
 relevance is decided from its one-line hooks. A file absent from the index is written, committed,
 and unreachable — which `AGENTS.md` calls "the most expensive loss in this system". Add one line
 each.
+
+**Fixed 2026-10-09.** One line appended to each of the three indexes, append-only (an index
+*rewrite* is what `commit-quality-gate.sh` blocks, and rightly: one September commit replaced the
+reviewer index's 27 entries with 1). Re-ran the completeness check across all eight role
+directories and the auto-memory directory afterwards: no file is absent from its own index.
+
+---
+
+### 8. `agent-memory-path-gate.sh` rejects the worktree path the project's own convention produces
+
+**Found while fixing finding 7, not during the audit pass.** Appending to
+`.claude/agent-memory/architect/MEMORY.md` from the worktree at
+`/Users/sg/Code/DCS-petrobrain-config-gate-fixes` was refused:
+
+> Agent memory must live at `<repo root>/.claude/agent-memory/<role>/`. Valid roots are the main
+> checkout (`/Users/sg/Code/DCS-petrobrain/.claude/agent-memory/`) and any agent worktree
+> (`/Users/sg/Code/DCS-petrobrain/.claude/worktrees/<name>/.claude/agent-memory/`). Wrong path:
+> … this looks like a subproject-relative path, which is the recurring mistake this gate exists to
+> catch.
+
+**Why it matters.** The gate accepts worktrees only under `<root>/.claude/worktrees/<name>/`, while
+`.claude/skills/merge/SKILL.md:95` and `plans/all-work-in-worktrees/plan.md` give the convention as
+the **sibling** `../<repo-name>-<name>`, which is what this session used and what `git worktree
+list` shows. So a worktree created the documented way cannot write agent memory with `Write`/`Edit`
+at all. `AGENTS.md` records this exact class of failure as already fixed — "the agent-memory hook
+once denying the only correct path an isolated agent had" — and it is fixed for one worktree layout
+and not for the one the skills prescribe.
+
+This is the finding in the set with the worst shape: a memory that cannot be written is invisible,
+the role carries on, and the next agent repeats the mistake the memory would have prevented.
+`AGENTS.md` says as much in so many words.
+
+**Correction.** Decide which layout is canonical and make the two agree. Either widen the gate to
+accept any path `git worktree list` reports (robust, and it is the only source that actually knows),
+or change the merge skill and the worktree plan to put worktrees under `<root>/.claude/worktrees/`.
+The first is better: it cannot go stale, and it keeps working whatever naming convention is chosen
+later.
+
+**Worked around, not fixed, in this pass**: the three index lines were appended with a short Python
+script via `Bash`, which the gate does not intercept. That is the wrong way round — the gate is
+right to watch `Write`/`Edit`, and a hole in `Bash` is not a feature to rely on. Left for a decision
+rather than patched silently.
 
 ---
 

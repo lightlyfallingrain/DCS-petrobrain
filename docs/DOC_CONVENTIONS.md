@@ -180,8 +180,15 @@ more marker and one formatting rule:
   backlog IDs, applied to files):
 
   ```sh
-  ls <sub>/ROADMAP/ | grep -oE '^[A-Z]+-W[0-9]+' | sort -V | tail -1
+  ls <sub>/ROADMAP/ | grep -oE '^BL-W[0-9]+' | sort -V | tail -1   # the FULL prefix, not [A-Z]+
   ```
+
+  **Spell the prefix out.** `'^[A-Z]+-W[0-9]+'` was the published form and it is wrong for the same
+  structural reason the delimiter forms below are: one `ROADMAP/` directory holds more than one
+  prefix. `body-layer/ROADMAP/` holds `BL-`, `BL-B`, `BL-W` **and** `BR-` — brain-layer has no
+  directory of its own — so a prefix-agnostic pattern returns the maximum across all of them and
+  mints from the wrong sequence. Found 2026-10-09 (`audits/system-integrity/`, finding 5); it had
+  not fired yet only because no `BR-W` or `BR-B` item exists.
 
   **`sort -V`, not `sort -t W -k2 -n`, and this is not a style preference — the delimiter form was
   written here first and it is wrong.** `-t W` splits on the literal `W`, which the `WM-` prefix

@@ -32,9 +32,16 @@ See `README.md`, `ROADMAP/` (one file per entry, indexed by `ROADMAP/world-model
 ```sh
 ruff format world-model/src world-model/tests   # format
 ruff check world-model/src world-model/tests    # lint
-mypy world-model/src                             # type check (strict)
+cd world-model && .venv/bin/mypy src             # type check (strict) -- CWD-only config discovery, see below
 pytest world-model/tests -q                      # test
 ```
+
+**`mypy` must run from inside the subproject.** Its config discovery is CWD-only, so
+`mypy world-model/src` from the repo root silently drops `strict` and the CWD-relative `mypy_path`
+(root `CLAUDE.md`, "Subprojects"). Measured on world-model, 2026-10-09: the root form reports a
+phantom `scipy-stubs` import error on a tree that `cd world-model && .venv/bin/mypy src` calls
+clean. All five subprojects carried the broken form until then; `brain-layer/CLAUDE.md` did not,
+which is the shape to match.
 
 Run a single test: `pytest world-model/tests/path/to/test_file.py::test_name -q`.
 
