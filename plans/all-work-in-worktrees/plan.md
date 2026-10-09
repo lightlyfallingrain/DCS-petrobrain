@@ -120,12 +120,69 @@ as `hookrun.sh <name>.sh`, which reads the stdin JSON once, extracts `cwd`, reso
 root, and execs `<root>/.claude/scripts/<name>.sh` when it exists, replaying stdin. Hooks here
 already read stdin JSON with `jq` (`agent-sha-gate.sh:45`), so the mechanism is available.
 
-#### And the `origin/main` base may be configurable after all
+#### Documentation findings, 2026-10-09 — the user was right that the base is configurable
 
-The user's read is that it *"could be changed"*. `.claude/settings.json` holds only `permissions` and
-`hooks`, and nothing in it mentions a worktree base — but absence from this repo's settings is not
-evidence that no setting exists. Being established from the documentation before anything is built
-on the assumption that it cannot be.
+From a docs lookup against `code.claude.com/docs`. **Everything in this subsection is a relayed
+claim, not a verified one**, and one of them is being measured by probe right now (see below) because
+a plausible-sounding setting name is exactly the kind of thing a lookup invents.
+
+| question | documented answer |
+|---|---|
+| base of an `isolation: "worktree"` agent | `origin/HEAD` — the remote-tracking ref for the default branch. Claude Code fetches it if not fetched in 24h. **Documented and intended**, and the 34-commits-behind case is "expected when the feature branch hasn't been pushed" |
+| configurable? | **Yes, but project-wide only**: `worktree.baseRef` in `.claude/settings.json`, `"fresh"` (default, `origin/HEAD`) or `"head"` (local HEAD) |
+| per-dispatch base? | **No mechanism.** Cannot name a branch or sha for one agent |
+| pre-create a worktree for an Agent to use? | **No documented mechanism** |
+| `$CLAUDE_PROJECT_DIR` per-worktree? | **No — deliberately fixed**, with the docs giving the main-checkout hook script as the explicit example. Intended behaviour, not an oversight |
+| `cwd` in hook stdin? | **Yes**, a documented common field on every event, and it follows the session |
+| hook commands shell-evaluated? | **Yes** by default (shell form, `sh -c`); `"args": []` switches to exec form with no expansion |
+| per-worktree or per-branch `settings.json`? | **No supported mechanism.** A branch's own `.claude/settings.json` is readable only because it is in the tree; nothing prefers it |
+
+**`baseRef: "head"` is the whole question, and "local HEAD" is ambiguous in the one way that
+matters.** If it means the **dispatching session's** HEAD, it fixes the stale base outright. If it
+means the **project root's** HEAD, it is worthless under this plan — the user wants the root parked
+on `main`, so "head" would equal `main` and nothing would change. The documentation quote does not
+disambiguate, and `$CLAUDE_PROJECT_DIR` being deliberately root-fixed is weak evidence for the
+unhelpful reading.
+
+**Attempted measurement, INCONCLUSIVE — and the reason is a mistake worth recording.**
+`worktree.baseRef: "head"` was written to `.claude/settings.local.json` and a no-op probe agent
+dispatched. It came back at `29217c0` — `main`'s tip, unchanged, while the dispatching session was at
+`50dcea6`, 36 commits ahead. That looks like a clean negative and **is not one:**
+
+- The file was written to **this worktree's** `.claude/`, but settings are read from
+  `$CLAUDE_PROJECT_DIR/.claude/` — the project root, where no such file existed
+  (`ls` confirmed). **The setting was never in scope.** The docs' own point that
+  `$CLAUDE_PROJECT_DIR` is deliberately root-fixed is exactly what this got wrong, one paragraph
+  after quoting it.
+- Even correctly placed, settings are likely read at session start, so a mid-session write may not
+  take effect at all.
+
+So three confounds remain live: wrong location, load timing, and whether `worktree.baseRef` is a real
+key or an invention of the lookup. **Nothing has been learned about `baseRef` yet.**
+
+**The test that would settle it, and it needs the user or a fresh session:** put
+`{"worktree":{"baseRef":"head"}}` in **`/Users/sg/Code/DCS-petrobrain/.claude/settings.local.json`**
+(gitignored), start a **new** session in a worktree whose HEAD differs from the root's, dispatch a
+no-op probe, and read its `git rev-parse HEAD`. Root's HEAD → the setting is useless under this plan.
+Session's HEAD → it fixes the stale base outright. Unchanged `origin/HEAD` → the key is not real.
+The probe must be told **not** to fast-forward; the self-correction every other agent performs would
+destroy the measurement.
+
+Writing into the root's settings was deliberately **not** done here: it is the user's checkout and
+their configuration, and this plan is queued rather than in flight.
+
+**A cheaper alternative to the shim, worth testing before building one.** If the hook *process*
+inherits the session's cwd, then a hook command — which is shell-evaluated — can resolve the
+worktree itself with `$(git rev-parse --show-toplevel)`, no shim and no stdin parsing. Unknown
+currently: `commit-quality-gate.sh:10` explicitly `cd`s to `$CLAUDE_PROJECT_DIR`, which shows the
+scripts do not rely on cwd but says nothing about what cwd is. One `pwd`-logging hook answers it.
+Test this first; the shim is the fallback.
+
+**If the shim is needed, two cautions from the lookup.** It must write diagnostics to stderr only —
+anything on stdout prepends to the child's JSON and breaks the parse. And two things are *not*
+formally documented: that a hook may read stdin (every example does), and that exit codes and
+`additionalContext` pass through a wrapper unchanged. Both need a trivial echo-hook test before the
+shim carries real gates.
 
 > **Superseded by the three subsections above.** What follows treated the hook and graph behaviour as
 > consequences to live with. They are requirements. Kept because the mechanisms it describes are
