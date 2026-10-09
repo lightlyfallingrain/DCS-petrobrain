@@ -45,11 +45,12 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 Root `ROADMAP.md` is the entry point for what's done and what's next: it gives the cross-subproject
 status and links to **every** subproject's own `ROADMAP.md`, which is that subproject's source of
 truth for milestone status, decisions, and backlog — read those, don't infer status from this file.
-**Take the list of subprojects from that status table, never from this file**: subprojects are added
-as the architecture grows (`git ls-files '*/pyproject.toml'` is the mechanical check), and a list
-written here goes stale silently while reading as an instruction. That already happened — three were
-named here long after six existed, and four skills inherited the same three and could report PASS
-while never looking at half the repo.
+**Never take the list of subprojects from a list written in a file — take it from that status table
+or from `git ls-files '*/pyproject.toml'`.** This is the one enumeration rule, and it governs every
+section of this file rather than being restated per section. A written list goes stale silently
+while reading as an instruction: three were named here long after six existed, four skills
+inherited the same three and could report PASS while never looking at half the repo, and a list in
+this file has now gone stale **four** times. The mechanical check costs one command and cannot.
 `todo/todo.md` no longer duplicates milestone narrative; it only holds items not yet assigned to
 one subproject's roadmap (cross-cutting backlog, session-scoped notes) and User priority tasks.
 (Deliberately not restated here: two copies of the same fact drift out of sync as milestones
@@ -60,7 +61,7 @@ time.)
 
 Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory.
 
-**Take the list from root `ROADMAP.md`'s status table, or mechanically from `git ls-files '*/CLAUDE.md'`. It is deliberately not written out here**, and that is the same rule "Current priority" states above, applied to this section. It used to be a bulleted list of three subprojects, which stayed here unnoticed long after six existed — the exact failure the file warns about 40 lines earlier, in the section a reader may not have reached yet. A list in this file has now gone stale twice; the mechanical check costs one command and cannot.
+**The subproject list is not written here** — `git ls-files '*/CLAUDE.md'`, per the enumeration rule in "Current priority".
 
 A few subproject-specific pointers worth having by name, because they are not derivable from a directory listing: `world-model/docs/CONVENTIONS.md` (DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access), `aircraft-layer/WORKFLOW.md` (cross-machine deploy/run), and `plans/body-layer/plan.md` (the full BL milestone series, whose status lives in `body-layer/ROADMAP.md`).
 
@@ -70,18 +71,16 @@ Each subproject keeps its **own `.venv`**, and `ruff`/`mypy`/`pytest` are genera
 
 ## Agents
 
-The agent roles are whatever `.claude/agents/` currently holds — read that directory rather than a count written here. They are the template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus this project's own `investigator`. Each role's model is declared in its own file's frontmatter, which is the only place it is true; most are `claude-sonnet-5`. **`dod` was raised from `claude-haiku-4-5-20251001` to sonnet on
-2026-09-20** (user direction) after a run of errors in its acceptance cards — commands that had
-never been executed, a card with no commands in it at all, and twice a fabricated example. The
-cheap-final-gate saving was not worth a gate that reports work as verified when it was not; its own
-role file now carries the run-it-before-you-write-it rule alongside the model change, since the
-model was only half the problem. For architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
+The agent roles are whatever `.claude/agents/` currently holds — read that directory rather than a count written here. They are the template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus this project's own `investigator`. Each role's model is declared in its own file's frontmatter, which is the only place it is true; most are `claude-sonnet-5`. **`dod` runs on sonnet, not haiku** — raised 2026-09-20 (user
+direction) after a cheap final gate reported work as verified when it was not; `docs/AGENT_ROLES.md`
+has what that cost, for anyone tempted to downgrade the last gate to save money again. For
+architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
 
 **`performance-reviewer` and `security` run once per whole feature, immediately before DoD** — not mid-feature, and not once per stage of a multi-stage feature. Enabled 2026-09-24 (user direction, from the 2026-09-22→2026-09-25 retro), replacing the previous blanket skip.
 
 Scoping, in the user's own terms: this is for now a single-user, LAN-only project under active development, so this is one pass per feature rather than "both roles fully on everywhere" — deeper security and performance effort comes once the important milestones (brain and memory) are complete.
 
-The previous rule ("skip both for now — an offline single-user local pipeline with no hot path and no untrusted-input surface") was written when that description was true and carried **no lapse condition**, which is the gap the retro actually found: it stayed in force unexamined after the project grew a live 5 Hz DCS I/O pipeline, a LAN HTTP surface between subprojects, and inbound speech capture. A standing exemption needs a stated condition for ending, or it outlives its premise silently.
+**A standing exemption needs a stated condition for ending, or it outlives its premise silently.** That is the transferable lesson from how this one was arrived at — the previous blanket skip was accurate when written, carried no lapse condition, and stayed in force unexamined after the project grew the surfaces it had assumed away (`docs/AGENT_ROLES.md`). Apply it to any exemption, not just these two.
 
 **`investigator`** is this project's recon role, needed because much of the World Model Builder depends on unverified DCS internals (file formats, coordinate systems, scripting-API availability). It sits *before* Architect's plan is finalized, not in the Implementer→Reviewer→DoD chain: **Architect invokes it proactively whenever a plan would otherwise depend on an unverified DCS-internals claim** (see `.claude/agents/architect.md` step 2) — this is not a user-invocation-only role. It writes dated findings to the `research/` directory of whichever module the finding is about (e.g. `world-model/research/`, `aircraft-layer/research/`), per the format in `docs/concept/WORLD_MODEL_BUILDER.md`, and does not write pipeline code.
 
@@ -89,8 +88,9 @@ The previous rule ("skip both for now — an offline single-user local pipeline 
 
 1. Read root `ROADMAP.md` for the cross-subproject picture, then the `ROADMAP.md` of whichever
    subproject looks most active (its Status table row is the pointer).
-2. Read `todo/todo.md` for any User priority tasks, and `todo/backlog.md` for cross-cutting/unscoped
-   backlog items (split 2026-09-27).
+2. Read `todo/todo/todo-tasks.md` for any User priority tasks, and `todo/backlog/todo-backlog.md`
+   for cross-cutting/unscoped backlog items. (`todo/todo.md` and `todo/backlog.md` are now pointers
+   to those; both were split into one file per item on 2026-10-09 — `docs/DOC_CONVENTIONS.md`.)
 3. Identify the next actionable milestone (first non-done, non-deferred/blocked item in the
    relevant subproject's roadmap).
 4. Show that milestone and its subitems to the user.
@@ -111,13 +111,10 @@ it down.
   A branch whose name matches the milestone you are about to start means the work exists. Read its
   log and diff before writing a line of your own.
 
-  **The `grep -v` is not cosmetic.** Agents commit to `worktree-agent-<id>` branches, the harvest is
-  a cherry-pick (so they stay unmerged forever), and nothing used to delete them: by 2026-09-27
-  there were 67 of them against 58 real branches, and an unfiltered `head -20` showed 13 lines of
-  scaffolding with the only live feature branch buried among them. The 26 that were merged were
-  deleted that day and the handoff now deletes each one as its last step (`AGENTS.md`, rule 1), but
-  the 41 already-cherry-picked ones cannot be told apart from unharvested work, so they stay — and
-  the filter is what keeps this check readable while they do.
+  **The `grep -v` is not cosmetic.** 41 already-cherry-picked `worktree-agent-<id>` branches cannot
+  be told apart from unharvested work, so they stay; without the filter an unfiltered `head -20`
+  buried the only live feature branch among them. The handoff now deletes each one at harvest
+  (`AGENTS.md`, rule 1), so the backlog does not grow — see `docs/AGENT_WORKTREE_PROTOCOL.md`.
 - **Read that milestone's own `plans/<feature>/` directory in full** — `plan.md`, and `explore-notes.md`
   where one exists. The plan carries decisions with the user's own words attached, later milestones
   that constrain this one, and measurements already taken. A cleared session that skips this
@@ -153,62 +150,36 @@ the full reasoning.
 ### When to query it — observable moments, not "before concluding"
 
 This project's recurring failure is not missing documentation but failing to find documentation that
-already exists, and occasionally finding a superseded version instead.
-
-**The rule used to read "query it before concluding something is undocumented", and it was followed
-zero times on 2026-09-26/27** — across two whole-subproject audits, a four-finding sortie diagnosis,
-an architect pass, two review rounds, a DoD gate and a performance pass. The last real query predated
-the previous rebuild. The rule was not the problem. Its **trigger** was: "before concluding" names an
-internal state, so nothing can observe it failing, and a rule nobody can see being broken stays
-broken. `AGENTS.md` had already reached exactly this conclusion about the worktree rule — *"a rule
-that must be remembered at the exact moment attention is elsewhere will keep being broken. This one
-is structural instead."*
-
-So query it at these moments, each of which is a thing that visibly happens:
+already exists, and occasionally finding a superseded version instead. **The triggers below are all
+things that visibly happen**, because the rule's previous trigger named an internal state, nothing
+could observe it failing, and it was followed zero times across eight separate passes on
+2026-09-26/27.
 
 - **Before writing a plan**, or a diagnosis, or a research note.
 - **Before dispatching architect, debugger or investigator.** A `PreToolUse` hook on `Agent`
   (`.claude/scripts/graph-query-reminder.sh`) injects this at dispatch, and those three role files
-  carry it as a numbered procedure step rather than a closing note — it was a closing note before,
-  in two of the three, and that is part of why it never fired.
+  carry it as a numbered procedure step rather than a closing note.
 - **When the user asks whether something exists, is documented, or was already decided.**
-- **Before saying "there is no X" / "nothing covers Y" / "this has not been decided."** That sentence
-  is the observable form of the old trigger — if you are about to write it, you owe a query first.
-
-What went wrong concretely, so the cost is legible: a debugger dispatched onto the crossing-callout
-defect re-derived a mechanism that `plans/callout-outside-gaze/debug.md` had already diagnosed *and
-partly fixed*, finding it eventually by reading plans. One query would have opened with it.
+- **Before saying "there is no X" / "nothing covers Y" / "this has not been decided."** That
+  sentence is the observable form of the old trigger — if you are about to write it, you owe a
+  query first.
 
 **A miss means "not indexed yet", never "does not exist"** — the semantic layer lags the working
 tree, and `GRAPH_REPORT.md`'s mtime says by how much.
 
 ### Graph to find it, `grep` to prove it is gone
 
-**User direction, 2026-10-06, from the retro.** The graph goes first — that rule stands and is what
-the section above is for. But the sentence immediately above decides a second case against it, and
-the distinction is the verb:
+**User direction, 2026-10-06.** The graph goes first — that is what the section above is for. But
+the sentence immediately above decides a second case against it, and the distinction is the verb:
 
 | question | instrument | why |
 |---|---|---|
 | *"Where is this discussed? Was this decided?"* | **graph first**, then read the sources | discovery; a hit is authoritative and a miss costs one `grep` |
 | *"Does anywhere **still** assert X?"* | **`grep`**, authoritatively | completeness; needs a trustworthy **negative**, which the graph explicitly does not give |
 
-A correction sweep is the second kind. The graph's negatives are documented unreliable — that is
-the sentence above, in the project's own words — so "the graph found no remaining mention" is not
-evidence the claim is gone. Concretely, on 2026-10-06 the graph had been built 24 hours earlier
-while the intervening run wrote ~80 commits of documents: asking it whether a stale figure had been
-removed would have returned a confident, stale yes.
-
-**And `.claude/agent-memory/` is deliberately outside the corpus** — `graph-corpus-files.sh:25`,
-*"recalled automatically; not reference material"* — so a memory sweep is `grep`-only by
-construction, not by preference. Do not add memory to the corpus to fix this: it would double-index
-content that already arrives by recall and leak memory vocabulary into the graph's own terms, which
-is the same failure as the removed `graphify-corpus/` mirror.
-
-**Why this earns a rule.** The retro found a stale "5 Hz" figure corrected in one memory file and
-left asserted in four others — one of them another role's — propagating a rate that is 5× wrong, in
-a project where that same number had already produced an entire wrong backlog premise. *A per-file
-correction is not a correction.*
+A correction sweep is the second kind, so *"the graph found no remaining mention"* is not evidence
+the claim is gone. **`.claude/agent-memory/` is deliberately outside the corpus**, so a memory sweep
+is `grep`-only by construction — do not add memory to the corpus to fix that.
 
 ```sh
 .claude/scripts/gq.sh "<question>"   # query, then list the sources to read
@@ -216,19 +187,20 @@ graphify path "<node A>" "<node B>"  # shortest path between two concepts
 graphify explain "<node>"            # plain-language explanation
 ```
 
-**Use `gq.sh`, not `graphify query` directly — a PreToolUse hook enforces this.** The graph says *where* to look; it does not say what
-the text says. Edge annotations quote fragments, and a fragment can lose its tense — the first build
-cited "a standing no-omniscience violation" from a passage whose next sentence records the fix. The
-wrapper ends every answer with the source files already assembled, so reading them is one step
-rather than a decision, and re-renders annotations as `fragment@path` so they stop reading as
-claims. That is the mechanism; the rule on its own was forgotten within the hour it was written.
+**Use `gq.sh`, not `graphify query` directly — a PreToolUse hook enforces this.** The graph says
+*where* to look, not what the text says: edge annotations quote fragments, and a fragment can lose
+its tense. The wrapper assembles the sources and re-renders annotations as `fragment@path` so they
+read as coordinates rather than claims.
 
 Install the hooks once per clone: `.claude/scripts/install-git-hooks.sh`. They keep the graph's
-structural spine current per commit (AST over changed `.py`, ~1.5s, captures docstrings) and record
-that a semantic rebuild is owed when docs change. **The rebuild order at merge is load-bearing —
-documents first, graph second, merge third** — because a graph built from stale documents launders
-the staleness rather than merely lagging it. Rebuild after a merge with `/graph-refresh`. Full reasoning: `docs/PROCESS.md`, "Keeping the
-knowledge graph honest".
+structural spine current per commit (AST over changed `.py`, ~1.5s) and record that a semantic
+rebuild is owed when docs change. **Bring the documents current, then rebuild** — a graph built from
+stale documents launders the staleness rather than merely lagging it, returning the outdated claim
+with a citation and a confidence score attached. The merge can sit anywhere around those two; what
+must not happen is the rebuild being skipped. Rebuild with `/graph-refresh`.
+
+Why each of those earns a rule, and what the lapses cost: `docs/PROCESS.md`, "Keeping the knowledge
+graph honest".
 
 ## Verification
 
