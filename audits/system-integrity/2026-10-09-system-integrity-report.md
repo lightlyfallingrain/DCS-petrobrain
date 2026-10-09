@@ -7,10 +7,13 @@ backlog split and the "all work in worktrees" inversion as the focus**.
 `fix/roadmap-gate-and-branch-hook` — see the "Fixed" block under each. The audit pass itself edited
 nothing; the fixes are separate, explicitly directed work.
 
-**Finding 8 was found while fixing finding 7** and is open: `agent-memory-path-gate.sh` refuses the
-sibling worktree path that this repo's own merge skill prescribes, so an agent in a documented
-worktree cannot write memory through `Write`/`Edit`. It needs a decision about which layout is
-canonical, not a patch. The seven Tier 2 items are also untouched.
+**Finding 8 was found while fixing finding 7** and is also fixed, on
+`fix/agent-memory-path-gate`: `agent-memory-path-gate.sh` refused the sibling worktree path that
+this repo's own merge skill prescribes, so an agent in a documented worktree could not write memory
+through `Write`/`Edit` at all. It now asks `git worktree list` instead of matching a hardcoded
+prefix.
+
+**All eight Tier 1 findings are closed. The seven Tier 2 items are untouched.**
 
 Inventory enumerated fresh: 7 `CLAUDE.md` (root + 6 subprojects from `git ls-files '*/pyproject.toml'`),
 `AGENTS.md`, `docs/AGENT_ROLES.md`, `docs/PROCESS.md`, `docs/DOC_CONVENTIONS.md`, 8 agent roles,
@@ -382,10 +385,39 @@ or change the merge skill and the worktree plan to put worktrees under `<root>/.
 The first is better: it cannot go stale, and it keeps working whatever naming convention is chosen
 later.
 
-**Worked around, not fixed, in this pass**: the three index lines were appended with a short Python
-script via `Bash`, which the gate does not intercept. That is the wrong way round — the gate is
-right to watch `Write`/`Edit`, and a hole in `Bash` is not a feature to rely on. Left for a decision
-rather than patched silently.
+**Worked around, not fixed, in the pass that found it**: the three index lines were appended with a
+short Python script via `Bash`, which the gate does not intercept. That is the wrong way round — the
+gate is right to watch `Write`/`Edit`, and a hole in `Bash` is not a feature to rely on.
+
+**Fixed 2026-10-09**, user direction: widen as suggested. The gate now accepts **any worktree
+`git worktree list --porcelain` reports**, as a third root beside the main checkout and the legacy
+`<project>/.claude/worktrees/<name>/` prefix. Asking git rather than adding a third hardcoded prefix
+is the point: git is the only thing that actually knows where the worktrees are, so the check cannot
+go stale when the naming convention changes again — and it has changed twice, which is what made a
+prefix the wrong shape both times.
+
+- **`--porcelain`**, so a worktree path containing spaces survives; plain `worktree list` pads the
+  path with branch and sha columns.
+- **The `git` call runs last, and that is load-bearing.** This hook fires on every `Write`/`Edit`,
+  and a 2026-09-27 performance review put it in the ~18 ms band specifically because it spawns no
+  subprocess. Every cheap test stays above it: a path not under `.claude/agent-memory/` returns at
+  the top, and both hardcoded roots are string comparisons. Only a path that looks like agent memory
+  **and** matched neither reaches `git`. Measured, 20 calls each, before → after: unrelated file
+  9.1 → 9.2 ms, main-checkout memory write 9.7 → 9.8 ms, sibling-worktree or deny 14.1 → ~27–30 ms.
+  The common paths are unchanged; a worktree agent's memory write pays ~16 ms more than a string
+  compare, against not being able to write it at all.
+- **The mistake class is not widened.** `body-layer/.claude/agent-memory/<role>/` is not a
+  registered worktree and still denies, as do an unregistered sibling directory, a `..` escape, and
+  a two-segment worktree name. The gate stays a lint; `Write`/`Edit` permissions remain the real
+  boundary, as its own header says.
+- `commit-quality-gate.sh`'s companion check needed nothing: it tests *staged* paths, which are
+  repo-relative, so a worktree's location never reaches it.
+
+Verified with a nine-case table run against both the new gate and `main`'s: new passes 9/9; the old
+one fails exactly the registered-sibling case and nothing else, which is the before/after the fix
+claims. The hook could not be exercised through the hook mechanism from this branch —
+`$CLAUDE_PROJECT_DIR` is root-fixed, so the active hook is `main`'s until this merges — so the
+script was run directly, per `AGENTS.md` rule 4.
 
 ---
 
