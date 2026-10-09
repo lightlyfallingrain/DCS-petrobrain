@@ -15,6 +15,17 @@
 #      `audio-adapter/ROADMAP/` linked into it. The moment either changes, it fires on correct
 #      links, and a gate that cries wolf is a gate that gets bypassed (the parent plan's R4).
 #   2. Every entry file's name matches <ID>.md, where <ID> is the first token of its own H1.
+#
+# The ID shape, which is what tells an entry file from an index file in all three checks, is
+# `<PREFIX>-<n...>` OR a bare `M<n>` -- the second alternative added 2026-10-09 by the Stage 4
+# conversion of world-model/ROADMAP.md, whose milestones are bare `M0`...`M11` with no prefix
+# (docs/DOC_CONVENTIONS.md records that irregularity rather than fixing it, because renaming
+# `M5` to `WM-5` would mean rewriting several hundred prose mentions docs/PROCESS.md forbids
+# touching). Before this, `M5.md` matched no shape here: check 1 reported every `[[M5]]` link as
+# dangling -- loud, and caught -- but checks 2 and 3 SKIPPED all twelve files silently, so a
+# wrong H1 or an entry missing from the index would have passed. The ID shape is enumerated
+# explicitly rather than loosened to `^[A-Z]`, which would also match a stray `README.md` or
+# `RUN.md` dropped into one of these directories and start checking it as an entry.
 #   3. Every entry file appears in exactly one index (*-roadmap.md / *-backlog.md) in its
 #      directory, as a [[ID]] link -- an orphaned entry is as much a defect as a dangling link,
 #      and an entry linked from two indexes in the same directory (live once a subproject has
@@ -60,20 +71,20 @@ ALL_IDS=""
 for dir in $DIRS; do
     ALL_IDS="$ALL_IDS
 $(find "$dir" -maxdepth 1 -name '*.md' -exec basename {} .md \; \
-    | grep -E '^[A-Z]+-[A-Za-z0-9.]+$' || true)"
+    | grep -E '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || true)"
 done
 
 for dir in $DIRS; do
     # Known IDs for THIS directory only -- still needed for check 3, which is a per-directory
     # fact (an index only ever lists its own directory's entries). Check 1 below uses ALL_IDS.
     ids=$(find "$dir" -maxdepth 1 -name '*.md' -exec basename {} .md \; \
-        | grep -E '^[A-Z]+-[A-Za-z0-9.]+$' || true)
+        | grep -E '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || true)
 
     # Check 2: filename vs. own H1 first token.
     for f in "$dir"/*.md; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
-        printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue  # skip index files
+        printf '%s\n' "$base" | grep -qE '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || continue  # skip index files
         h1=$(grep -m1 '^# ' "$f" || true)
         h1_id=$(printf '%s' "$h1" | sed -E 's/^# +//' | awk '{print $1}')
         if [ "$h1_id" != "$base" ]; then

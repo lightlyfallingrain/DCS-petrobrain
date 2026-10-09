@@ -103,8 +103,12 @@ for dir in $DIRS; do
     for f in "$dir"/*.md; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
-        # Skip index files (not entries, and not subject to the tag-on-checkbox rule).
-        printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
+        # Skip index files (not entries, and not subject to the tag-on-checkbox rule). The
+        # second alternative is world-model's bare `M<n>` milestones, added 2026-10-09 -- without
+        # it this gate skipped all twelve of them silently, which is the wrong direction for a
+        # gate whose whole value is a trustworthy negative. See the sibling consistency gate's
+        # own header note for why the shape is enumerated rather than loosened to `^[A-Z]`.
+        printf '%s\n' "$base" | grep -qE '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || continue
         scan_file "$f"
     done
 done
