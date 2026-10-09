@@ -156,6 +156,42 @@ so they present as coordinates rather than claims. A rule that fires at the mome
 a rule in a document competes with every other line in that document — including, evidently, this
 one.
 
+### What it cost when the rule had an unobservable trigger
+
+Moved here from root `CLAUDE.md` on 2026-10-09 under the criterion in
+`plans/always-loaded-compaction/plan.md`. `CLAUDE.md` keeps the rules and the graph-versus-`grep`
+table; this is the evidence behind them, which `.claude/scripts/graph-query-reminder.sh` makes
+redundant at the point of use by firing on every architect/debugger/investigator dispatch.
+
+**The rule used to read "query it before concluding something is undocumented", and it was followed
+zero times on 2026-09-26/27** — across two whole-subproject audits, a four-finding sortie diagnosis,
+an architect pass, two review rounds, a DoD gate and a performance pass. The last real query
+predated the previous rebuild. The rule was not the problem. Its **trigger** was: "before
+concluding" names an internal state, so nothing can observe it failing, and a rule nobody can see
+being broken stays broken. `AGENTS.md` had already reached exactly this conclusion about the
+worktree rule — *"a rule that must be remembered at the exact moment attention is elsewhere will
+keep being broken. This one is structural instead."* That is why the triggers in `CLAUDE.md` are now
+all things that visibly happen, and why *"before saying 'there is no X'"* is one of them: that
+sentence is the observable form of the old trigger.
+
+**What it cost concretely.** A debugger dispatched onto the crossing-callout defect re-derived a
+mechanism that `plans/callout-outside-gaze/debug.md` had already diagnosed *and partly fixed*,
+finding it eventually by reading plans. One query would have opened with it.
+
+**Why the `grep` half earns its own rule** (user direction, 2026-10-06, from the retro). The retro
+found a stale "5 Hz" figure corrected in one memory file and left asserted in four others — one of
+them another role's — propagating a rate that is 5× wrong, in a project where that same number had
+already produced an entire wrong backlog premise. *A per-file correction is not a correction.* And
+the graph could not have proved the correction complete: it had been built 24 hours earlier while
+the intervening run wrote ~80 commits of documents, so asking it whether the stale figure was gone
+would have returned a confident, stale yes.
+
+**`.claude/agent-memory/` is deliberately outside the corpus** — `graph-corpus-files.sh`,
+*"recalled automatically; not reference material"* — so a memory sweep is `grep`-only by
+construction, not by preference. Do not add memory to the corpus to fix this: it would double-index
+content that already arrives by recall and leak memory vocabulary into the graph's own terms, which
+is the same failure as the removed `graphify-corpus/` mirror.
+
 ## Binary sources: images, PDFs, and anything grep cannot read
 
 A `.jpg`, a `.png` or a `.pdf` is invisible to search, to the knowledge graph, and to every agent

@@ -149,3 +149,51 @@ signal, and the change goes back.**
    strongest hook backing.
 3. `CLAUDE.md`'s six items, in the table's order.
 4. Re-measure the always-loaded total and record it here.
+
+## Result, 2026-10-09 — done, 17% not 26%
+
+| file | before | after |
+|---|---|---|
+| `CLAUDE.md` | 4,676 words / ~7,649 tok | 4,201 / ~6,906 |
+| `AGENTS.md` | 4,100 words / ~6,707 tok | 3,194 / ~5,072 |
+| **total** | **~14,357 tok** | **~11,979 tok — 17% off** |
+
+**`AGENTS.md` hit its estimate (906 words out against ~930 planned); `CLAUDE.md` did not (475
+against ~900).** The shortfall is one item: collapsing the duplicated stale-enumeration lesson was
+costed as deleting ~200 words, but the two copies did not say the same thing — "Current priority"
+framed it as *which subprojects exist*, "Subprojects" as *which have a nested `CLAUDE.md`*. Dropping
+one wholesale would have lost half the rule, so it was **consolidated** instead: the surviving copy
+was expanded to carry both, for a net saving of 43 words rather than 200. That is the criterion
+working against the estimate, which is the right way round.
+
+**Destinations**, all moved text verbatim:
+
+| from | to |
+|---|---|
+| `AGENTS.md` rules 1–4 incident record, the trial frictions, the inversion account | **`docs/AGENT_WORKTREE_PROTOCOL.md`** (new) |
+| `CLAUDE.md` graph-query lapse, the crossing-callout cost, the 5 Hz retro, the memory-corpus exclusion | `docs/PROCESS.md`, "Keeping the knowledge graph honest" |
+| `CLAUDE.md` `dod` model change, the lapsed blanket security/performance skip | `docs/AGENT_ROLES.md` |
+
+Verified mechanically: 18 of 18 distinctive removed passages are present in a destination file, and
+every `docs/`, `plans/` or `.claude/` path referenced from the two always-loaded files resolves.
+
+### Two corrections made in passing, both present-tense claims that had gone stale
+
+Neither is compaction; both are the staleness class the criterion predicts, found by reading the
+prose closely enough to compact it.
+
+- **`CLAUDE.md` asserted "the rebuild order at merge is load-bearing — documents first, graph
+  second, merge third".** `docs/PROCESS.md` had already revised exactly that sentence as an
+  overstatement: only documents-before-graph matters, and stating it as a rigid three-step sequence
+  "invited exactly the wrong trade the first time it was applied", holding up a merge for a
+  twenty-minute rebuild. The always-loaded file was still carrying the retired version.
+- **Session Start step 2 sent every session to `todo/todo.md` and `todo/backlog.md`**, which became
+  4-line pointers earlier the same day. Now points at `todo/todo/todo-tasks.md` and
+  `todo/backlog/todo-backlog.md` directly.
+
+### What to watch, per the safeguard
+
+Agent handoffs and session starts, for a week. The specific regressions this change could cause: a
+harvest that skips the `git rev-parse` tip check before `git branch -D` (rule 1 kept its evidence
+precisely because no hook fires there), and a session start that reads the roadmap without checking
+`git branch -v`. If either happens, revert — moved text is verbatim, so it is one command.

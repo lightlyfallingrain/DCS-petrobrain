@@ -3,12 +3,11 @@
 - Follow `CLAUDE.md` as the primary project contract.
 ## Where work happens: agents get worktrees, the main checkout is the user's
 
-**Changed 2026-09-21, after the same race condition occurred twice in one session.** The previous
-rule was the inverse — agents ran in the shared checkout and *side quests* went to a worktree — and
-it failed the way rules relying on main-loop discipline fail: the main loop did a bare
-`git checkout main` to write a document while an implementer was mid-task on a feature branch, twice,
-having quoted the rule at agents in between. A rule that must be remembered at the exact moment
-attention is elsewhere will keep being broken. This one is structural instead.
+**Inverted 2026-09-21**, after the previous arrangement — agents in the shared checkout, side
+quests in a worktree — failed the way rules relying on main-loop discipline fail: the same race
+happened twice in one session, with the rule quoted at agents in between. **A rule that must be
+remembered at the exact moment attention is elsewhere will keep being broken**, so these are
+structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
 ### The four rules
 
@@ -39,137 +38,71 @@ attention is elsewhere will keep being broken. This one is structural instead.
      pick caught everything.
    - **Only then remove the worktree**, with a plain `git worktree remove` — **never `--force`,
      which is now in the deny list** (`.claude/settings.json`).
-   - **Then delete the agent's branch**, `git branch -D worktree-agent-<id>`, once the cherry-pick is
-     verified against the agent's file list. Added 2026-09-27: nothing deleted them, and because the
-     harvest is a cherry-pick they never register as merged, so they accumulate permanently. There
-     were 67 against 58 real branches, which broke the Session Start state check (`CLAUDE.md` step 4,
-     now filtered) and — worse — left no way to tell a harvested branch from an unharvested one.
-     Deleting at harvest time makes the branch's existence mean "not yet harvested", which is the
-     signal the accumulation destroyed. The 41 already-ambiguous ones were left in place rather than
-     guessed at.
+   - **Then delete the agent's branch**, `git branch -D worktree-agent-<id>`, so that a branch's
+     existence means "not yet harvested". They never register as merged, because the harvest is a
+     cherry-pick, so nothing else retires them.
 
-     **Near-miss 2026-10-06, and it is the one hole in this rule: an agent can produce a *second*
-     commit after its report.** A Debugger delivered `0825415`, which was cherry-picked; it then sent
-     a follow-up message with `76c3550` — a docs-only correction it had made after reading a
-     measurement sent to it mid-run. The branch was deleted on the strength of the *first* harvest,
-     with the second commit unharvested, and it survived only because a deleted branch's objects are
-     still reachable until `gc`. It is now pinned at `refs/keep/debugger-17-correction`.
-
-     **So the check before `git branch -D` is not "did I cherry-pick its report's sha" but "is the
+     **The check before `git branch -D` is not "did I cherry-pick its report's sha" but "is the
      branch tip the sha I harvested".** One command:
 
      ```sh
      git rev-parse worktree-agent-<id>   # must equal the sha you picked
      ```
 
-     A mismatch means there is work you have not taken. This matters more as agents are messaged
-     mid-run — an agent that is still live can commit again after reporting, and nothing announces
-     it except the agent choosing to say so.
+     **A mismatch means there is work you have not taken.** An agent can commit *again* after
+     reporting — one did, and the branch was deleted on the strength of the first harvest, the
+     second commit surviving only because `gc` had not run. Nothing announces a second commit
+     except the agent choosing to say so, and messaging an agent mid-run makes it likelier.
 
-     `--force` is not needed, and that was established by testing rather than assumed: a plain
-     remove succeeds on a clean worktree, succeeds when the only leftovers are **gitignored** build
-     artifacts, and refuses only when genuinely untracked files are present. **That refusal is the
-     safety check** — it fires in exactly the case where something unaccounted-for would be
-     destroyed, so overriding it is always either losing work or papering over a missing
-     `.gitignore` entry.
-
-     The one artifact that ever forced it here was `*.egg-info/`, which agents generate by
-     `pip install -e .` and which no subproject `.gitignore` covered. Now they all do. If a plain
-     remove ever refuses again, **read what it names** and fix that, rather than reaching for the
-     flag: it is telling you about work you have not harvested, or an artifact that should be
-     ignored. A worktree whose directory has already been deleted externally needs
-     `git worktree prune`, not force.
+     If a plain `git worktree remove` ever refuses, **read what it names** and fix that rather than
+     reaching for `--force`: the refusal fires in exactly the case where something unaccounted-for
+     would be destroyed. Why it is denied, and the `*.egg-info/` case that once seemed to need it:
+     `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
    The failure mode is silent by construction: the report arrives, the work looks done, and the
    memory file that would have stopped the next agent repeating a mistake is simply gone.
 
 2. **Implementers also get a worktree**, with one extra handoff step. Git will not check the same
    branch out twice, so an implementer in a worktree commits to `worktree-agent-<id>`, and the main
-   loop fast-forwards that into the feature branch afterwards. Trialled and **in force** — see
-   "Status" below for what the trial surfaced and what it cost.
+   loop fast-forwards that into the feature branch afterwards. Trialled 2026-09-21 and **in
+   force**; what the trial surfaced is in `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
 3. **The main checkout belongs to the main loop and the user.** This is the inversion: side quests
    no longer need a worktree, because nothing else is using the checkout.
 
-4. **Name the commit the agent is meant to be looking at, and make the agent check it.** Added
-   2026-09-27, after the 2026-09-27 integrity audit found three roles had each been burned by the
-   same thing separately.
+4. **Name the commit the agent is meant to be looking at, and make the agent check it.** A
+   worktree is created at *some* commit, and nothing guarantees it is the one you mean. Git will not
+   check the same branch out twice, so when the target branch is already in the main checkout the
+   worktree lands on `main` — or on neither tip. Three roles each verified the wrong code before
+   this rule existed, and three consecutive dispatches landed stale as recently as 2026-10-09:
+   **assume a stale base, do not hope for a fresh one.**
 
-   A worktree is created at *some* commit, and until now nothing said which. Git will not check the
-   same branch out twice, so when the branch under review is already in the main checkout, the
-   worktree lands on `main` — which predates the work. The agent then verifies the wrong code and
-   reports a plausible result:
-
-   | role | what happened |
-   |---|---|
-   | Reviewer | worktree based on `main`, so `body-layer/src` on disk was pre-fix code; a probe compared the fix against itself (`fix/position-belief-runaway`, 2026-09-25) |
-   | Definition of Done | pytest in the worktree reported `1177/4` — exactly `main`'s baseline — against the branch's own `1192/4`. The gate would have passed on `main` |
-   | Performance Reviewer | the worktree's HEAD (`6b8a86e`) was not even an ancestor of the tip the task named (`cdb8c7f`); `git log` looked entirely plausible |
-
-   **Every one of those is a silent wrong-code verification**, and the only thing that caught them
-   was three separate agent-memory files — which means it was being *re-learned*, per role, rather
-   than prevented. So:
-
-   - **The dispatching prompt states the branch and the expected tip sha.** "Review the
-     fix" is not an address.
+   - **The dispatching prompt states the branch and the expected tip sha.** "Review the fix" is not
+     an address. **It also names the input documents**, because a stale base is harmless for source
+     and dangerous for inputs — the check is not "is the source the same" but "is everything I was
+     told to read present".
    - **The agent's first action is `git rev-parse HEAD`**, compared against that sha. A mismatch is
-     reported and the run stops there — it is never worked around silently.
-   - **When the tip is not checked out and cannot be** (it is in the main checkout), verify against
-     an isolated snapshot: `git archive <branch> | tar -x -C <scratch>`, and run every command with
-     `cwd` inside that tree's own subproject directory. `pyproject.toml`'s
-     `[tool.pytest.ini_options] pythonpath` resolves relative to pytest's own rootdir, so
-     `PYTHONPATH` alone does **not** redirect imports — that is the specific trap behind two of the
-     three rows above.
+     reported first, always, and never worked around silently.
+   - **Then, if and only if HEAD is a strict *ancestor* of the named tip and the tree is clean,
+     `git merge --ff-only <tip>` and say so in the report.** It cannot lose work and cannot pick up
+     anything the dispatcher did not name. **Anything else — diverged HEAD, unique commits, a dirty
+     tree — stops.**
+   - **When the tip cannot be checked out at all**, verify against an isolated snapshot:
+     `git archive <branch> | tar -x -C <scratch>`, running every command with `cwd` inside that
+     tree's own subproject directory. `pyproject.toml`'s `[tool.pytest.ini_options] pythonpath`
+     resolves relative to pytest's own rootdir, so `PYTHONPATH` alone does **not** redirect imports.
+     For a single *document*, `git show <tip>:<path>` works even when a checkout does not.
+   - **Agent tooling is only as current as the agent's base commit** — a fix being on `main` does
+     not mean an agent has it.
 
-   A `PreToolUse` hook on `Agent` (`.claude/scripts/agent-worktree-reminder.sh`) injects this at
-   dispatch, because the moment it matters is the moment attention is on the task instead — the
-   same argument that made rule 1 structural.
+   A `PreToolUse` hook on `Agent` (`agent-worktree-reminder.sh`, `agent-sha-gate.sh`) injects this
+   at dispatch, because the moment it matters is the moment attention is on the task instead — the
+   same argument that made rule 1 structural. **Hooks themselves fire from whatever the main
+   checkout currently has**, so a hook fix does not take effect in a session parked on a branch that
+   predates it.
 
-   **Observed 2026-10-06, and it is worse than "the worktree lands on `main`": a worktree can land
-   on a commit that is neither the named tip nor `main`'s current tip.** Two Architects dispatched
-   minutes apart both got `19143fa` — **eleven commits behind** the `dce2534` they were told to work
-   at — with clean trees and nothing unique. Both caught it because the prompt named a sha and they
-   checked; neither could `git reset --hard` to the target (denied by permissions), so one read every
-   input document through `git show <tip>:<path>` instead, which is the snapshot approach this rule
-   prescribes and is worth knowing works for *documents* even when a checkout does not.
-
-   **Two consequences that bite quietly:**
-
-   - **A stale base means the agent's tooling is stale too.** `gq.sh` was fixed that same day to let
-     a worktree borrow the main checkout's graph (`c33af2e`) — and the Architect based at `19143fa`
-     still got *"No graph yet"*, because the fix was not in its tree. A fix to agent tooling only
-     reaches agents whose base commit contains it, which is not the same thing as "it is on `main`".
-
-     **The same trap catches the main loop, via the checked-out branch.** Hooks run from
-     `$CLAUDE_PROJECT_DIR/.claude/scripts/`, i.e. **whatever the main checkout currently has** — so
-     while the main checkout sits on a feature branch that predates a hook fix, the *old* hook is
-     what fires. Observed 2026-10-06: a sha-gate fix was committed to `main` while the main checkout
-     was parked on `fix/los-hook-statics`, and the pre-fix gate stayed active in that session. If a
-     hook misbehaves right after you fixed it, check which branch the main checkout is on before
-     re-reading the script.
-   - **A stale base is harmless for source and dangerous for inputs.** Here
-     `git diff 19143fa dce2534 --stat` was docs and agent-memory only, so every `src` file read was
-     byte-identical — but those eleven commits included `plans/post-review-fixes/explore-notes.md`,
-     the agent's *primary input*, which simply did not exist in its tree. **So the check is not
-     "is the source the same", it is "is everything I was told to read present".** Name the input
-     documents in the prompt, and have the agent verify they exist rather than trusting a clean
-     `git diff --stat`.
-
-   **What to do about it, since three agents hit this in one night and each handled it
-   differently** (one read its inputs through `git show <tip>:<path>`, two fast-forwarded):
-
-   - **Report it first, always.** That part of the rule is what caught it all three times.
-   - **Then, if and only if the worktree's HEAD is a strict *ancestor* of the named tip and the tree
-     is clean, `git merge --ff-only <tip>` and say so in the report.** That is a correction, not a
-     workaround: it cannot lose work, it cannot pick up anything the dispatcher did not name, and it
-     puts the agent on exactly the commit it was asked about. Stopping dead instead wastes a whole
-     run on a condition that is trivially and safely correctable — especially overnight, when nobody
-     is awake to re-dispatch.
-   - **Anything else — a diverged HEAD, unique commits, a dirty tree — stops.** There the mismatch
-     means something unknown is going on, which is the case this rule was written for.
-   - `git reset --hard` is denied by this project's permissions, so `--ff-only` is the move; and
-     `git show <tip>:<path>` remains the way to read a *document* from the target tip when even
-     that is unavailable.
+   Incident record — the three burned roles, the eleven-commits-behind case, what each cost:
+   `docs/AGENT_WORKTREE_PROTOCOL.md`.
 
 ### The main checkout's branch is a contract with the user
 
@@ -186,24 +119,16 @@ there is not an implementation detail — it is how they know what they are flyi
 
 ### Status: all four rules in force
 
-Rule 2 was trialled on cones 2B (2026-09-21) and **worked** — the agent committed cleanly on its own
-branch, reported the sha, and nothing raced. Two frictions surfaced, both now handled:
+All four are in force; rule 2 was trialled on cones 2B (2026-09-21) and worked. One friction from
+that trial is operative and has no hook, so it stays here rather than moving to the record:
 
-- **The agent-memory hook denied the worktree path.** It allowed only
-  `$CLAUDE_PROJECT_DIR/.claude/agent-memory/`, so an isolated agent had no correct move: write into
-  the main checkout and violate rule 3, or skip the memory. 2B's implementer skipped it and
-  *reported the contradiction*, which is how it was found — had it silently written to the main
-  checkout instead, nobody would have noticed. `agent-memory-path-gate.sh` now accepts any worktree
-  root while still denying subproject-relative paths, including a subproject path nested inside a
-  worktree.
-- **Bash heredocs and `>>` redirection are refused inside a worktree** ("too complex to verify it
-  stays inside the worktree"). Not a bug to fix — use the `Edit` and `Write` tools for file content
-  there, which is better practice anyway. **Say this in an isolated agent's prompt**, or it will
-  discover it mid-task and improvise.
+- **Bash heredocs and `>>` redirection are refused inside a worktree.** Use the `Edit` and `Write`
+  tools for file content there, which is better practice anyway. **Say this in an isolated agent's
+  prompt**, or it will discover it mid-task and improvise.
 
-A memory that is never written is the most expensive loss in this system, because its entire purpose
-is to stop a later agent repeating a mistake. A hook that silently prevents one is worse than no
-hook.
+The other — the agent-memory hook once denying the only correct path an isolated agent had — is
+fixed, and is in `docs/AGENT_WORKTREE_PROTOCOL.md` along with why a memory that is never written is
+the most expensive loss in this system.
 
 ### Why a feature branch's history still stays clean
 
