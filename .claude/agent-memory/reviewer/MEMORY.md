@@ -157,6 +157,7 @@ itself carried three stacked copies of that warning until 2026-10-06; merged, no
 - [BL-11 Stage 4 coverage log round2 approved](project_bl11_stage4_fail_closed_coverage_log_round2_approved.md) - APPROVED; mutation-verified all 5 new tests + teardown.
 - [BL-11 Stage 4 round3 main-branch wiring approved](project_bl11_stage4_round3_main_branch_wiring_approved.md) - APPROVED; sources hoist, main()-driving tests, time-rebind pollution all reproduced.
 - [BL-11 Stage 4 round4 logging visibility fix approved](project_bl11_stage4_round4_logging_visibility_fix_approved.md) - APPROVED; caplog.at_level hides visibility gap; propagate=True left optional.
+- [Doc-conventions split consumer half-fixes](project_doc_conventions_split_consumer_half_fixes.md) - NEEDS REVISION; staged migration updated half of each consumer pair; shingle fidelity method.
 - [Obsidian links Stage1 review](project_obsidian_links_stage1_review.md) - APPROVED W/ MINOR; two gate gaps by.
 - [Obsidian gate fix round2](project_obsidian_gate_fix_round2_needs_revision.md) - NEEDS REVISION; fix introduced a false-negative.
 - [Obsidian gate round3 approved](project_obsidian_gate_round3_approved.md) - APPROVED; 3rd silent-degrade instance found, sized theoretical via grep.
