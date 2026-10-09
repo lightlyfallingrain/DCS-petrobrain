@@ -312,7 +312,7 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
 ## Workflow
 
 - One feature at a time. Commit in small logical steps.
-- **Always create and checkout a feature branch before starting any implementation task.** Name the branch after the feature using kebab-case (e.g., `feature/hyg-data-pipeline`, `fix/floating-origin-precision`). Never implement directly on `main`. **Always branch from local `main`** — checkout `main` first, then create the branch. Do not use `origin/main` as the branch point.
+- **Always create a feature branch before starting any implementation task.** Name the branch after the feature using kebab-case (e.g., `feature/hyg-data-pipeline`, `fix/floating-origin-precision`). Never implement directly on `main`. **Always branch from local `main`** — do not use `origin/main` as the branch point. **Create it as a worktree, not a checkout:** `git worktree add -b <branch> ../<repo>-<short-name> main` branches from local `main` without moving the root's own checkout, which is what the bullet below requires. (This bullet read *"checkout `main` first, then create the branch"* until 2026-10-09 — the pre-worktree procedure, and the one action the next-but-one bullet and `AGENTS.md` rule 3 now forbid. A `PreToolUse` hook refuses `git checkout -b` while the root is parked off `main` and names the worktree form instead; the stale wording and the hook that enforced it were found together by the 2026-10-09 integrity audit, findings 2 and 3.)
 - Do not merge without user approval.
 - Before starting, surface any ambiguous, contradicting, or missing information and ask for clarification.
 - **All work happens in a worktree — agents and the main loop alike — and the repo root belongs to the user.** Revised 2026-10-09 by user direction; see `AGENTS.md`, "Where work happens", rule 3. Read-mostly roles (Reviewer, DoD, Architect, Investigator) always take `isolation: "worktree"`; a feature's own worktree is named after the feature and lives until it merges. **The user parks the root wherever they like** — usually `main`, so they can add input documents or check out a branch to fly without colliding with anything running. **So naming the branch is the only way they learn what to test**: the root's branch no longer tells them, and that former backstop is gone. Name it in every test card and every acceptance request.
@@ -357,9 +357,19 @@ single document left behind as a four-line pointer. The directory is the only pl
 | `AA-B<n>` | `audio-adapter/ROADMAP/` (`audio-adapter/ROADMAP.md` is a pointer) |
 | `WM-B<n>` | `world-model/ROADMAP/` (`world-model/ROADMAP.md` is a pointer) |
 | `X-B<n>` | `todo/backlog/`, cross-cutting / unscoped (`todo/backlog.md` is a pointer) |
+| `X-T<n>` | `todo/todo/`, User priority tasks and session-scoped notes (`todo/todo.md` is a pointer) |
 
-`MI-B<n>` and `BR-B<n>` are reserved for mission-interpreter and brain-layer, neither of which has a
-Backlog section yet.
+`MI-B<n>` is reserved for mission-interpreter, which has no Backlog section yet.
+
+**brain-layer has no `ROADMAP/` of its own**: its milestones live in `body-layer/ROADMAP/`
+(`BR-1.1`, `BR-1.2` are there today), as root `ROADMAP.md`'s status table says, so `BR-B<n>` would
+be minted from that same directory. This matters for the first rule below rather than being
+bookkeeping trivia — see what the mint command does with two prefixes in one directory.
+
+**`X-T<n>` was missing from this table until 2026-10-09** while 24 live items used it, found by
+that date's integrity audit (finding 5). It is minted by `todo/todo/`'s own conversion and is the
+space Session Start step 2 sends you to, so leaving it out of the one table that claims to be
+authoritative is the whole defect.
 
 **Two rules, and the second is the one that makes IDs worth having:**
 
@@ -367,15 +377,25 @@ Backlog section yet.
   not count items — run the command, against the directory the table names:
 
   ```sh
-  ls <dir>/ | grep -oE '^[A-Z]+-B[0-9]+' | sort -V | tail -1
+  ls <dir>/ | grep -oE '^BL-B[0-9]+' | sort -V | tail -1     # the FULL prefix, not [A-Z]+
   ```
 
-  Substitute `-W` or the milestone shape for the other ID spaces; `docs/DOC_CONVENTIONS.md` carries
-  the same recipe. **`sort -V` is load-bearing and the delimiter forms that look equivalent are
-  not.** `sort -t B -k2 -n` returns `BL-B9` against a real `BL-B46`, because the `BL-` prefix
-  contains the delimiter; `sort -t W -k2 -n` returns `WM-W9` against a real `WM-W12` for the same
-  reason. Both were measured on 2026-10-09, and the second was the form this repo had already
-  written down — so minting from it would have collided on the next `WM-W` item.
+  Substitute the space you are minting in — `WM-B`, `X-T`, `WM-W`, or the milestone shape.
+  `docs/DOC_CONVENTIONS.md` carries the same recipe.
+
+  **Two ways this command has been got wrong, both measured, both silent:**
+
+  - **Spell the prefix out. `'^[A-Z]+-B[0-9]+'` is wrong**, because one directory holds more than
+    one prefix: `body-layer/ROADMAP/` holds `BL-`, `BL-B`, `BL-W` **and** `BR-` today. The
+    prefix-agnostic form returns the maximum across all of them, so the first `BR-B<n>` filed
+    there makes a `BL-B` mint read a `BR-B` number and vice versa — a collision, which breaks the
+    never-reuse rule below in the one way that rule exists to prevent. Found 2026-10-09 (integrity
+    audit, finding 5); it had not yet fired only because no `BR-B` item exists.
+  - **`sort -V` is load-bearing and the delimiter forms that look equivalent are not.**
+    `sort -t B -k2 -n` returns `BL-B9` against a real `BL-B46`, because the `BL-` prefix contains
+    the delimiter; `sort -t W -k2 -n` returns `WM-W9` against a real `WM-W12` for the same reason.
+    Both measured 2026-10-09, and the second was the form this repo had already written down — so
+    minting from it would have collided on the next `WM-W` item.
 - **Numbers are never reused and never renumbered**, including for items that are `[x]` done or
   rejected. An ID that silently comes to mean a different item is worse than no ID, because a commit
   message or plan citing the old meaning now reads as evidence for the new one. Done items keep their

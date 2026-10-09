@@ -112,9 +112,16 @@ run on a machine with no model on it.
 ```sh
 ruff format audio-adapter/src audio-adapter/tests   # format
 ruff check audio-adapter/src audio-adapter/tests    # lint
-mypy audio-adapter/src                            # type check (strict)
+cd audio-adapter && .venv/bin/mypy src            # type check (strict) -- CWD-only config discovery, see below
 pytest audio-adapter/tests -q                     # test
 ```
+
+**`mypy` must run from inside the subproject.** Its config discovery is CWD-only, so
+`mypy audio-adapter/src` from the repo root silently drops `strict` and the CWD-relative `mypy_path`
+(root `CLAUDE.md`, "Subprojects"). Measured on world-model, 2026-10-09: the root form reports a
+phantom `scipy-stubs` import error on a tree that `cd world-model && .venv/bin/mypy src` calls
+clean. All five subprojects carried the broken form until then; `brain-layer/CLAUDE.md` did not,
+which is the shape to match.
 
 Run a single test: `pytest audio-adapter/tests/test_file.py::test_name -q`.
 
