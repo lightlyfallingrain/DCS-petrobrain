@@ -35,8 +35,9 @@ directory?**
   fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
   ```
 
-  **So the merge runs in the root:** `git -C <root> merge --ff-only <branch>`, with the root on
-  `main` and `git -C <root> status --short` empty. It moves `main` forward without changing which
+  **So the merge runs in the root:** `git -C <root> merge --no-ff <branch> -m "<message>"`, with the
+  root on `main` and `git -C <root> status --short` empty — the "In-place merge" path below, which is
+  now the normal one. (`--no-ff`, as always here; `--ff-only` belongs to agent harvests, not merges.) It moves `main` forward without changing which
   branch the root has checked out, so it does not take the root away from the user — the one defined
   exception to rule 3. **If their tree is dirty, stop and ask**; they may have an input document in
   progress, which is exactly what the root is for. A disposable worktree is still right for any

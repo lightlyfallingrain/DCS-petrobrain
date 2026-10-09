@@ -113,12 +113,17 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/…/DCS-petrobrain'
    ```
 
-   So the merge is `git -C <root> merge --ff-only <branch>` with the root on `main` and its tree
-   clean. **That is narrow on purpose**: it moves `main` forward, which is what a merge is, and it
+   So the merge is `git -C <root> merge --no-ff <branch> -m "<message>"` with the root on `main` and
+   its tree clean — **`--no-ff`, not `--ff-only`**: this project wants a real merge commit
+   summarising the branch, and never a squash or a rebase of `main`
+   (`.claude/skills/merge/SKILL.md`). The `--ff-only` preference in rule 1 is for harvesting an
+   *agent* branch, which is a different operation; conflating the two is a mistake this rule made
+   on its first writing.
+
+   **The exception is narrow on purpose**: it moves `main` forward, which is what a merge is, and it
    does not change which branch the root has checked out — so it does not take the root away from
-   the user. Check `git -C <root> status --short` is empty first; if the user has work in progress
-   there, stop and ask rather than merging around it. `.claude/skills/merge/SKILL.md` carries the
-   procedure.
+   the user. Check `git -C <root> status --short` is empty first; if they have work in progress
+   there, stop and ask rather than merging around it.
 
    > **Superseded.** This read *"The main checkout belongs to the main loop and the user. This is the
    > inversion: side quests no longer need a worktree, because nothing else is using the checkout."*
