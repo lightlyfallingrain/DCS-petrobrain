@@ -11,7 +11,7 @@ recon this plan was built against.
 **Renamed from `srs-adapter` on 2026-09-20.** DCS-SRS was dropped as a planned dependency for
 outbound audio — Slice 1 already posts synthesized WAV to the aircraft-layer collector, which
 plays it via `winsound`, and never wired an `DCS-SR-ExternalAudio.exe` call. The rename tracks
-that reality; SRS ICS injection (Slice 2, "Next" in `ROADMAP.md`) remains the plan for going over
+that reality; SRS ICS injection (Slice 2, "Next" in `ROADMAP/audio-adapter-roadmap.md`) remains the plan for going over
 the real DCS-SRS product, and every mention of the literal DCS-SRS product elsewhere in this file
 is unchanged — only this subproject's own name, module (`audio_adapter`), classes
 (`AudioAdapterClient`/`AudioAdapterError`), CLI flag (`--audio-adapter-url`), and paths moved.
@@ -42,7 +42,8 @@ exception).
   than speculative. Read the addenda, not just the Findings section. ICS is also the *only*
   acceptable target (user constraint): the player stays on the mission frequency and the SPU-8
   selects one source at a time, so frequency injection is rejected rather than held as a fallback.
-  See `ROADMAP.md` in this directory for that slice's full requirements, including the
+  See `ROADMAP/` in this directory (one file per entry, indexed by
+  `ROADMAP/audio-adapter-roadmap.md`; `ROADMAP.md` is a four-line pointer) for that slice's full requirements, including the
   always-available-regardless-of-selector property it has to satisfy.
 
 **Inbound speech (Slice 3, `plans/inbound-speech/plan.md`, Stages 1-3 landed)**: recognises the

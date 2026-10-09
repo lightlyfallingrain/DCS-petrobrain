@@ -101,10 +101,17 @@ one start while its live acceptance is still outstanding. That is deliberate, no
 
 - **Never block a merge on live acceptance** that the user cannot currently perform. Say what is
   verified, say what is not, and let the work continue.
-- **Record the outstanding item in the subproject's live-acceptance debt list** (see
-  `body-layer/ROADMAP.md`'s "Live acceptance debt" section) rather than in a one-off note. That
-  list exists precisely because this caveat kept being logged and never tracked as accumulating
-  risk — it was added after a retro found exactly that.
+- **Record the outstanding item by putting `#needs-flight` on the entry itself**, in the owning
+  subproject's `ROADMAP/` directory, rather than in a one-off note. There is no longer a
+  live-acceptance debt *list* to add a line to: this instruction used to name
+  `body-layer/ROADMAP.md`'s "Live acceptance debt" section, and that section now exists in no file
+  — the list was dissolved into a per-entry tag on 2026-10-09, and `body-layer/ROADMAP.md` is a
+  four-line pointer, so following the old wording would have meant either a one-off note (the
+  exact failure the rule was added after a retro to prevent) or creating a section inside a pointer
+  where nothing reads it. Resolve the entry's directory with
+  `.claude/scripts/roadmap-source.sh --dir <subproject>/ROADMAP.md` if you are unsure, and never
+  write into the pointer itself. The find-the-set recipe is in `docs/TAGS.md`; the tag is what
+  makes the debt mechanically countable, which the prose list never was.
 - **Distinguish deferred from waived.** A milestone whose plan deliberately scopes live testing out
   is done. A milestone whose live test is merely *pending the next sortie* is debt, and belongs on
   the list until a real flight clears it — naming which sortie cleared it.
@@ -190,7 +197,7 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 8. Commit all staged changes with a message summarizing the feature
 9. **Merge via the `/merge` skill's disposable-worktree pattern (`.claude/skills/merge/SKILL.md`), never `git checkout main` in the current directory.** `AGENTS.md`'s "Where work happens" states who owns the main checkout and where agents run — read it there rather than here, because that division has been inverted once already (2026-09-21) and this step's justification depends on it. The short version: **the main checkout's branch is a contract with the user**, who tests on it and does not operate in worktrees, so a bare `git checkout main` takes the branch they were told to fly out from under them. A disposable worktree merges without touching it at all. Steps: `git fetch origin main`, `git worktree add ../<repo>-merge-<name> main`, `cd` into it, `git merge --no-ff <featurebranch> -m "Merge <featurebranch>: <one-line feature summary>"`, re-run the touched subproject(s)' verification inside the worktree, then `git worktree remove` when done.
 10. Verify the merge succeeded with `git log --oneline -5` (in the worktree, before removing it).
-11. Update the relevant roadmap: the merged feature's subproject `ROADMAP.md` is the source of truth for milestone status. **Find it from root `ROADMAP.md`'s status table, never from a list written here** — the enumeration defect this replaces (three subprojects named while six exist) has now recurred four times in this repo, most recently in the commit gate that itself warns about it — mark the milestone `[x]`, write a real done-entry (what was built, key decisions, live-acceptance results, second-order effects on the next milestone), and update that subproject's `BACKLOG.md` if this feature closes or raises a backlog item (body-layer's backlog moved out of its ROADMAP.md on 2026-09-27; new items take the next unused `BL-B<n>`, never a reused one). Update root `ROADMAP.md`'s status table too if the subproject's overall phase status changed. Only touch `todo/backlog.md` if this feature also affects a cross-cutting/unscoped item there (`X-B<n>` ids, same never-reuse rule). Stage and commit this update (separate commit from the merge, or amend into the merge-summary commit — either is fine) — **this must land in the same push as the merge**, not a later follow-up (this was skipped across several 2026-09-10 merges — BL-3/BL-4/BL-5 all shipped without a roadmap update, caught later by an integrity check — do not repeat that).
+11. Update the relevant roadmap: the merged feature's subproject roadmap is the source of truth for milestone status. **Find it from root `ROADMAP.md`'s status table, never from a list written here** — the enumeration defect this replaces (three subprojects named while six exist) has now recurred four times in this repo, most recently in the commit gate that itself warns about it. **Then resolve that path before writing to it: every subproject's `ROADMAP.md` is now a four-line pointer, and the content lives in one file per entry under `<subproject>/ROADMAP/`.** `.claude/scripts/roadmap-source.sh <path>` gives the index and `--dir <path>` the directory; a non-pointer passes through unchanged, so it is safe to run on whatever the status table named. Writing a done-entry into the pointer is the specific way this goes wrong silently — the entry file stays open, `grep '#status/done'` still reports it open, and `push-roadmap-gate.sh` is satisfied because *a* `ROADMAP.md` was touched. Mark the milestone `[x]` **on its own entry file**, write a real done-entry there (what was built, key decisions, live-acceptance results, second-order effects on the next milestone), and update that subproject's backlog entries if this feature closes or raises one (body-layer's backlog moved out of its `ROADMAP.md` on 2026-09-27 and into `body-layer/ROADMAP/` on 2026-10-09; new items take the next unused `BL-B<n>` — read it with the command in root `CLAUDE.md`, never from a document). Update root `ROADMAP.md`'s status table too if the subproject's overall phase status changed; that file is not split and is edited directly. Only touch `todo/backlog/` if this feature also affects a cross-cutting/unscoped item there (`X-B<n>` ids, same never-reuse rule). Stage and commit this update (separate commit from the merge, or amend into the merge-summary commit — either is fine) — **this must land in the same push as the merge**, not a later follow-up (this was skipped across several 2026-09-10 merges — BL-3/BL-4/BL-5 all shipped without a roadmap update, caught later by an integrity check — do not repeat that).
 
 Report to the user:
 - DoD: PASSED
@@ -275,8 +282,12 @@ backlog ids existed on the branch under test (they existed only on `main`). Had 
 trusted, the natural roadmap edit would have conflicted on the exact line two branches both
 rewrote.
 
-**Before building on a status claim in your prompt, check it**: the owning `ROADMAP.md`/`BACKLOG.md`
-row, on the ref it is claimed about. A sha in the prompt is now gated mechanically
+**Before building on a status claim in your prompt, check it**: the owning entry file, on the ref it
+is claimed about. That is `<subproject>/ROADMAP/<ID>.md`, not `<subproject>/ROADMAP.md` or
+`BACKLOG.md` — both of those are four-line pointers, and reading one yields no rows at all, which
+would make every status claim look unverifiable rather than false.
+`.claude/scripts/roadmap-source.sh --entries <path>` lists the files that do carry rows. A sha in
+the prompt is now gated mechanically
 (`.claude/scripts/agent-sha-gate.sh`); a *status* claim cannot be, so it is yours to verify.
 
 ## Run every command you put in an acceptance card

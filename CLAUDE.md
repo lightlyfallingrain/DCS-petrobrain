@@ -43,16 +43,25 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 ## Current priority
 
 Root `ROADMAP.md` is the entry point for what's done and what's next: it gives the cross-subproject
-status and links to **every** subproject's own `ROADMAP.md`, which is that subproject's source of
+status and links to **every** subproject's own roadmap, which is that subproject's source of
 truth for milestone status, decisions, and backlog — read those, don't infer status from this file.
+**Each of those is a directory, `<subproject>/ROADMAP/`, one file per entry with an index at
+`<subproject>/ROADMAP/<subproject>-roadmap.md`. `<subproject>/ROADMAP.md` is a four-line pointer**
+whose first line is `<!-- split-roadmap: see ROADMAP/ -->`; reading it yields no entries and
+writing to it puts the content where nothing reads it.
+`.claude/scripts/roadmap-source.sh <path>` resolves either form (`--dir`, `--entries`,
+`--is-pointer`) and passes a non-pointer straight through, so it is safe to run on whatever the
+status table named. Same for `body-layer/BACKLOG.md`, `todo/todo.md` and `todo/backlog.md`.
 **Never take the list of subprojects from a list written in a file — take it from that status table
 or from `git ls-files '*/pyproject.toml'`.** This is the one enumeration rule, and it governs every
 section of this file rather than being restated per section. A written list goes stale silently
 while reading as an instruction: three were named here long after six existed, four skills
 inherited the same three and could report PASS while never looking at half the repo, and a list in
 this file has now gone stale **four** times. The mechanical check costs one command and cannot.
-`todo/todo.md` no longer duplicates milestone narrative; it only holds items not yet assigned to
-one subproject's roadmap (cross-cutting backlog, session-scoped notes) and User priority tasks.
+`todo/` no longer duplicates milestone narrative; it only holds items not yet assigned to
+one subproject's roadmap (cross-cutting backlog, session-scoped notes) and User priority tasks —
+in `todo/todo/` and `todo/backlog/`, indexed by `todo/todo/todo-tasks.md` and
+`todo/backlog/todo-backlog.md`.
 (Deliberately not restated here: two copies of the same fact drift out of sync as milestones
 complete — see the roadmap files' own "Keeping this current" note for how that's enforced at merge
 time.)
@@ -63,7 +72,7 @@ Each major component under this repo may carry its own `<subproject>/CLAUDE.md` 
 
 **The subproject list is not written here** — `git ls-files '*/CLAUDE.md'`, per the enumeration rule in "Current priority".
 
-A few subproject-specific pointers worth having by name, because they are not derivable from a directory listing: `world-model/docs/CONVENTIONS.md` (DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access), `aircraft-layer/WORKFLOW.md` (cross-machine deploy/run), and `plans/body-layer/plan.md` (the full BL milestone series, whose status lives in `body-layer/ROADMAP.md`).
+A few subproject-specific pointers worth having by name, because they are not derivable from a directory listing: `world-model/docs/CONVENTIONS.md` (DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access), `aircraft-layer/WORKFLOW.md` (cross-machine deploy/run), and `plans/body-layer/plan.md` (the full BL milestone series, whose status lives in `body-layer/ROADMAP/`).
 
 **Module independence**: each subproject should be able to run on its own, with its own venv/dependencies. **body-layer ↔ world-model is the sole exception** — body-layer imports world-model's `query`/`coordinates` packages in-process (not over HTTP), a deliberate coupling because the two are treated as a pair, at least for now (see `plans/body-layer/plan.md` "Seams" and `body-layer/CLAUDE.md` "Tech stack"). Do not introduce a similar in-process cross-subproject import elsewhere without the same explicit justification — the default is HTTP/JSON across a subproject boundary (as aircraft-layer ↔ body-layer already does), not a shared import.
 
@@ -86,8 +95,9 @@ Scoping, in the user's own terms: this is for now a single-user, LAN-only projec
 
 ## Session Start
 
-1. Read root `ROADMAP.md` for the cross-subproject picture, then the `ROADMAP.md` of whichever
-   subproject looks most active (its Status table row is the pointer).
+1. Read root `ROADMAP.md` for the cross-subproject picture, then the `ROADMAP/` index of whichever
+   subproject looks most active — `<subproject>/ROADMAP/<subproject>-roadmap.md` (its Status table
+   row says which subproject). **Not `<subproject>/ROADMAP.md`**, which is a four-line pointer.
 2. Read `todo/todo/todo-tasks.md` for any User priority tasks, and `todo/backlog/todo-backlog.md`
    for cross-cutting/unscoped backlog items. (`todo/todo.md` and `todo/backlog.md` are now pointers
    to those; both were split into one file per item on 2026-10-09 — `docs/DOC_CONVENTIONS.md`.)
@@ -132,8 +142,9 @@ was simply never checked. `git branch` costs one second and would have caught it
 
 ## Milestone Completion
 
-Before marking a milestone done in a subproject's `ROADMAP.md` (whichever one owns it — root
-`ROADMAP.md`'s status table lists them all), answer one question in the DoD report or the
+Before marking a milestone done — on its own entry file under `<subproject>/ROADMAP/`, never in
+`<subproject>/ROADMAP.md`, which is a pointer; whichever subproject owns it, root
+`ROADMAP.md`'s status table lists them all — answer one question in the DoD report or the
 roadmap update itself: does this milestone's completion change what the next milestone should be,
 or invalidate an assumption downstream milestones rely on? One line is enough — this is the
 project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.

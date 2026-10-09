@@ -7,9 +7,27 @@ type: user-invocable
 Regenerate `docs/status/petrobrain-status.html` from the roadmap files and republish it to its
 existing artifact URL. Usage: `/status-page`.
 
-**The page is a view, never a source of truth.** Every fact on it is derived from the roadmap files
-plus `todo/todo.md`, `todo/backlog.md` and each subproject's `BACKLOG.md`. If the page and a roadmap disagree, **the page is wrong** — fix the page, never
+**The page is a view, never a source of truth.** Every fact on it is derived from the roadmap and
+backlog entry files. If the page and a roadmap disagree, **the page is wrong** — fix the page, never
 the roadmap. `docs/status/README.md` states this contract; do not weaken it.
+
+**Resolve every source path before reading it, and do it once, here, rather than per row.** Eight
+documents in this repo — every subproject's `ROADMAP.md`, `body-layer/BACKLOG.md`, `todo/todo.md`
+and `todo/backlog.md` — are four-line pointers carrying
+`<!-- split-roadmap: see ROADMAP/ -->`, with the content in one file per entry under a sibling
+directory. Reading a pointer yields no items, and **this skill's own non-zero-forward-item
+backstop does not catch that**: it passed while 104 backlog and todo items were omitted, because
+the sources that were read correctly supplied enough nodes to clear the assertion. So:
+
+```sh
+.claude/scripts/roadmap-source.sh --entries <path>   # every entry file behind a source
+.claude/scripts/roadmap-source.sh <path>             # the index that replaced a pointer
+```
+
+A non-pointer path passes through unchanged, so pipe every path the status table gives you through
+the resolver rather than deciding which ones need it. Count checkbox states across the **entry
+files**, not the indexes — an index carries links and titles, and its status line is a summary, so
+counting it both double-counts and under-counts.
 
 **Get the list of roadmaps from root `ROADMAP.md`'s status table, not from memory and not from this
 file.** It names every subproject and links its roadmap, so it stays correct as subprojects are
@@ -43,10 +61,10 @@ three graphs" is state and does not.
 
 | Page element | Source |
 |---|---|
-| The five counters (`.count`) | Count `- [x]` / `- [~]` / `- [ ]` / `- [>]` across every roadmap. "Await hardware" is hand-identified: items a roadmap explicitly blocks on the user's own hardware or on a sortie. |
-| Subsystem cards (`.sys`, one per subproject) | That subproject's `ROADMAP.md` — its status line, its next actionable item, and a progress fraction that is a judgement call, not a computed ratio. **Where `ROADMAP.md` carries the sentinel `<!-- split-roadmap: see ROADMAP/ -->`, it is a 4-line pointer, not the source — read its `ROADMAP/<subproject>-roadmap.md` index instead.** Reading the pointer itself yields an empty-but-well-formed page that still exits clean; see the non-zero-item assertion below. |
+| The five counters (`.count`) | Count `- [x]` / `- [~]` / `- [ ]` / `- [>]` across every **resolved** roadmap and backlog source — i.e. the entry files `roadmap-source.sh --entries` lists, for every path including `todo/todo.md` and `todo/backlog.md`. Omitting the two `todo/` sources and `body-layer/BACKLOG.md` drops 46 `BL-B*` + 34 `X-B*` + 24 `X-T*` = 104 items, which is how this went wrong. "Await hardware" is hand-identified: items a roadmap explicitly blocks on the user's own hardware or on a sortie. |
+| Subsystem cards (`.sys`, one per subproject) | That subproject's resolved roadmap — its status line, its next actionable item, and a progress fraction that is a judgement call, not a computed ratio. The status line and narrative live in the `ROADMAP/<subproject>-roadmap.md` index; per-item status lives on the entry files. Reading the pointer itself yields an empty-but-well-formed page that still exits clean. |
 | The Mermaid dependency map (`#graph-deps`) | The gating relationships stated in the roadmaps ("gated on", "needs a sortie", "deliberately last"). Node classes are `done`/`active`/`open`/`hold`/`block`. Shows *how the project got here* — it includes done work. |
-| The forward-only map (`#graph-upcoming`) | Every `- [ ]` / `- [~]` / `- [>]` across all roadmaps and backlogs (`*/BACKLOG.md`, `todo/backlog.md`) plus `todo/todo.md`. **Nothing done appears.** See "The forward-only map" below. |
+| The forward-only map (`#graph-upcoming`) | Every `- [ ]` / `- [~]` / `- [>]` across all resolved roadmap and backlog entry files, `todo/backlog/` and `todo/todo/` included. **Nothing done appears.** See "The forward-only map" below. |
 | "Waiting on you, not on code" (`.callout`) | Items that cannot advance without the user — hardware, a sortie, or a decision. This section is the page's most useful part; keep it honest and short. |
 | Open work rows (`.row`) | Milestone-level open items. Not every backlog entry — the board stays legible by staying selective. |
 | Drawer detail (`const DETAIL`) | The *reasoning* in each roadmap entry: why a constraint exists, what an earlier pass got wrong. **This is the part a kanban card cannot hold and the reason this format was chosen.** Do not reduce entries to status restatements. |
@@ -61,8 +79,8 @@ It answers a different question from the map above it: not *how did we get here*
 front of us, and what has to happen first*.
 
 **Build it from the state markers**, not from prose: `- [ ]`, `- [~]` and `- [>]` across every
-roadmap, every `BACKLOG.md`, plus `todo/todo.md` and `todo/backlog.md`. A done item appearing here is a bug — the whole point is that the eye
-is not asked to filter.
+resolved roadmap and backlog entry file, `todo/todo/` and `todo/backlog/` included. A done item
+appearing here is a bug — the whole point is that the eye is not asked to filter.
 
 **Group into subgraphs by chain.** Read the current page for the groups it last used, then ask
 whether they still hold — a grouping earns its place only when the chains genuinely barely touch,
@@ -95,7 +113,11 @@ regeneration reveals nothing new, say less rather than padding.
   above, the forward-only map or a subsystem card would have zero open/in-progress items, stop and
   say so rather than publish — that is the signature of a roadmap having been read as its own
   4-line pointer instead of the `ROADMAP/` index it points to, and a page that regenerates clean
-  from a stub is a silent PASS, not a correct one.
+  from a stub is a silent PASS, not a correct one. **Know what this assertion does not catch:** it
+  is a floor over the whole map, so it clears as soon as *any* source was read correctly. It passed
+  while three of eight sources were read as pointers and 104 items were missing. A zero means
+  something is certainly wrong; a non-zero means nothing. Resolving every path (top of this file) is
+  the real protection, and this is the backstop for when that is skipped.
 - **Update the date** in the masthead eyebrow.
 
 ## Design constraints — do not drift from these

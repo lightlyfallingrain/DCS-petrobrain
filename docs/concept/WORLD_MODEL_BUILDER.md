@@ -533,7 +533,7 @@ This needs three things the current schema/pipeline don't have:
    and that must stay distinguishable from "never asked," per this project's absence-as-absence
    convention already used in `query/describe.py`).
 3. **Upsert-into-existing-store support.** `build.pipeline`'s `build_region` currently deletes
-   and recreates the whole `.sqlite` on every invocation (see `todo/todo.md`'s "Incremental
+   and recreates the whole `.sqlite` on every invocation (see `todo/todo/`'s "Incremental
    per-layer pipeline builds" backlog item, raised during WM-M7 DoD acceptance testing for a
    different reason — dev-workflow convenience). This proposal needs the same underlying
    capability, just with a second trigger: a running Petrobrain Runtime session writing newly

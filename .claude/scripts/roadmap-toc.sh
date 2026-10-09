@@ -22,9 +22,12 @@ for dir in "$@"; do
     for f in "$dir"/*.md; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
-        # Skip index files -- they are not entries.
-        # Entry-ID shape, index files excluded. The bare `M<n>` alternative is world-model's
-        # milestone space (2026-10-09); without it this helper listed none of M0...M11.
+        # Entry-ID shape, index files excluded. ONE alternative, not two: the comment here
+        # described a bare `M<n>` alternative for world-model's milestone space after it had been
+        # removed, which the pattern beneath it contradicts. It was live for part of 2026-10-09
+        # and went away when the user renamed those IDs to `WM-M<n>`. All three consumers of this
+        # shape (this file and the two gates) now spell it the same way, which is the property
+        # worth protecting -- see docs/DOC_CONVENTIONS.md on the tooling cost of an irregular ID.
         printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
         title=$(awk '/^# /{sub(/^# [A-Za-z0-9.-]+ — /, ""); print; exit}' "$f")
         # An odd number of fence delimiters means the file has an unclosed fence -- fail loudly

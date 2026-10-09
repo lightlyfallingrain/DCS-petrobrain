@@ -77,26 +77,59 @@ def repo_root() -> Path:
 
 def id_sort_key(entry_id: str) -> list:
     """Sort key giving AA-1 < AA-1.1 < ... < AA-1.6 < AA-2 < ... < AA-B1 < AA-B2, independent
-    of filesystem listing order -- entry ids are not purely numeric (AA-B1 mixes a letter in)."""
+    of filesystem listing order -- entry ids are not purely numeric (AA-B1 mixes a letter in).
+
+    Each dotted part becomes a uniform (leading letters, digits, trailing letters) triple. The
+    trailing group exists because a suffixed id is digits-then-letter, not letters-then-digits:
+    `BL-5a` and `MI-5b` are both real on disk, and `^([A-Za-z]*)(\\d*)$` does not match either.
+    That was an `assert m is not None` with no message, so the whole gate died on an
+    AssertionError naming nothing -- harmless while this function only ever saw
+    `audio-adapter/ROADMAP/`, which has no suffixed id, and immediately fatal once discovery was
+    widened to all seven directories (review round 4, RF4-9). The regex below is total: every
+    part matches, so no filename can crash a gate whose job is to report problems rather than
+    become one.
+    """
     prefix, _, rest = entry_id.partition("-")
     key: list = [prefix]
     for part in rest.split("."):
-        m = re.match(r"^([A-Za-z]*)(\d*)$", part)
-        assert m is not None
-        letters = m.group(1) or ""
+        m = re.match(r"^([A-Za-z]*)(\d*)([A-Za-z0-9]*)$", part)
+        assert m is not None, f"unreachable: the pattern is total, but {part!r} did not match"
+        leading = m.group(1) or ""
         digits = int(m.group(2)) if m.group(2) else 0
-        key.append((letters, digits))
+        trailing = m.group(3) or ""
+        key.append((leading, digits, trailing))
     return key
 
 
+def split_entry_dirs(root: Path) -> list[Path]:
+    """Every split entry directory on disk: a */ROADMAP/ beside a pyproject.toml, plus the two
+    under todo/, which has no pyproject.toml and so cannot be found by the glob.
+
+    DISCOVERED, NOT ENUMERATED, and this is the mechanical copy of
+    roadmap-entry-consistency-gate.sh's own loop rather than a second spelling of it. find_entries
+    hardcoded `audio-adapter/ROADMAP` -- correct when audio-adapter was the only converted
+    subproject in Stage 1, never generalised through Stages 2-5. Measured 2026-10-09: it returned
+    22 entries, prefix AA only, against 253 across seven directories, so six of the seven were
+    invisible and the gate's own "a generated [[ID]] that does not resolve to a real entry file"
+    check would have REJECTED a correct [[BL-11]], [[WM-M5]] or [[X-B29]] citation. Latent only
+    because no provenance block exists yet; it fires on the first one written.
+    """
+    dirs = [
+        root / sub / "ROADMAP"
+        for sub in sorted(p.parent.name for p in root.glob("*/pyproject.toml"))
+    ]
+    dirs += [root / "todo" / "backlog", root / "todo" / "todo"]
+    return [d for d in dirs if d.is_dir()]
+
+
 def find_entries(root: Path) -> list[tuple[str, Path]]:
-    """Every real entry file under audio-adapter/ROADMAP/ (the index excluded), sorted by id."""
-    roadmap_dir = root / "audio-adapter" / "ROADMAP"
+    """Every real entry file in every split directory (index files excluded), sorted by id."""
     entries = []
-    for f in roadmap_dir.glob("*.md"):
-        entry_id = f.stem
-        if ENTRY_ID_RE.match(entry_id):
-            entries.append((entry_id, f))
+    for roadmap_dir in split_entry_dirs(root):
+        for f in roadmap_dir.glob("*.md"):
+            entry_id = f.stem
+            if ENTRY_ID_RE.match(entry_id):
+                entries.append((entry_id, f))
     entries.sort(key=lambda pair: id_sort_key(pair[0]))
     return entries
 

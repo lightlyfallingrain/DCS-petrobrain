@@ -103,11 +103,14 @@ for dir in $DIRS; do
     for f in "$dir"/*.md; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
-        # Skip index files (not entries, and not subject to the tag-on-checkbox rule). The
-        # second alternative is world-model's bare `M<n>` milestones, added 2026-10-09 -- without
-        # it this gate skipped all twelve of them silently, which is the wrong direction for a
-        # gate whose whole value is a trustworthy negative. See the sibling consistency gate's
-        # own header note for why the shape is enumerated rather than loosened to `^[A-Z]`.
+        # Skip index files (not entries, and not subject to the tag-on-checkbox rule). There is
+        # ONE alternative in this pattern, not two: the comment here described a second one for
+        # world-model's bare `M<n>` milestones long after it was removed, which the code beneath
+        # it plainly contradicts. That widening existed for part of 2026-10-09 and went away when
+        # the user renamed those IDs to `WM-M<n>`. The episode's real lesson is in the sibling
+        # consistency gate's header -- a silent skip is the wrong direction for a gate whose whole
+        # value is a trustworthy negative -- along with why the shape stays enumerated rather than
+        # loosened to `^[A-Z]`.
         printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
         scan_file "$f"
     done
@@ -126,14 +129,22 @@ done
 # narrower check.
 candidates=$(grep -rl '<!-- doc-provenance:start -->' --include='*.md' . 2>/dev/null \
     | grep -vE '^\./\.claude/|^\./\.git/' | sed 's|^\./||' | sort -u)
-for f in $candidates; do
+# Iterated line by line, not as `for f in $candidates`: that form word-splits, so a path with a
+# space in it would silently become two non-existent paths, each skipped by the `[ -f ]` guard
+# below -- a false negative in a gate whose value is a trustworthy negative. Unreachable with
+# today's filenames, which is exactly why it would not be noticed when it stops being unreachable.
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
     [ -f "$f" ] || continue
     real_block=$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } { print }' "$f" \
         | sed -E 's/`[^`]*`//g' \
         | grep -c '<!-- doc-provenance:start -->')
     [ "$real_block" -gt 0 ] || continue
     scan_file "$f"
-done
+# Process substitution, NOT a pipe. `printf ... | while` runs the loop in a subshell, so every
+# FAIL=1 that scan_file sets inside it would be discarded at the `done` and the gate would exit 0
+# with findings already printed to stderr -- the one outcome worse than not checking at all.
+done < <(printf '%s\n' "$candidates")
 
 [ "$FAIL" -eq 0 ] && echo "roadmap-tag-vocabulary-gate: OK"
 exit "$FAIL"
