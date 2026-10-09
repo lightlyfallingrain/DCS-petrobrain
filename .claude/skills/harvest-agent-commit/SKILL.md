@@ -56,11 +56,20 @@ or `git reflog`. That happened once here and was close to unrecoverable.
 
 Three cases:
 
-- **The target branch is checked out in the main checkout, and you are in the main checkout.**
-  Plain `git cherry-pick <sha>`.
-- **The commit is a strict descendant of the target branch's tip.** `git merge --ff-only <sha>`.
-- **The target branch is checked out *somewhere else*** (another worktree). Git refuses a second
-  checkout. Make a temporary worktree in the scratchpad, fast-forward there, remove it:
+- **The commit is a strict descendant of the target branch's tip — check first, and prefer this.**
+  `git merge --ff-only <sha>`. It preserves the agent's shas, so its branch registers as merged and
+  `git branch -d` works, which answers "has this been harvested?" with git rather than bookkeeping.
+  Agents fast-forward to the named tip before working, so this is the normal case:
+
+  ```sh
+  git merge-base --is-ancestor <target-branch> <sha>   # true => fast-forward available
+  ```
+- **It is not a descendant** (the branch moved while the agent worked). `git cherry-pick <sha>` —
+  a fallback, not a failure, but it rewrites shas and the agent branch will never register as
+  merged. Prefer not to commit to a branch an agent is working on.
+- **The target branch is checked out *somewhere else*** (another worktree — now the normal case,
+  since all work happens in one). Git refuses a second checkout. Make a temporary worktree in the
+  scratchpad, fast-forward there, remove it:
 
   ```sh
   git worktree add <scratchpad>/ff <target-branch>
@@ -69,8 +78,8 @@ Three cases:
   ```
 
 **Check which branch you actually landed on before and after.** A cherry-pick aimed at a feature
-branch while the main checkout sits on `main` lands on `main`. That is usually harmless for DoD
-bookkeeping and wrong for anything else — `git log --oneline -1` costs nothing.
+branch, run from a checkout sitting on something else, lands on that something else — and the repo
+root is usually on `main`. `git log --oneline -1` costs nothing.
 
 ### 4. Verify against the agent's own file list, not against the pick
 

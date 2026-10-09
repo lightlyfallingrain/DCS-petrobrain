@@ -26,11 +26,16 @@ unusable at the controls.
 
 ## What a card must contain
 
-**The branch, first.** The user tests in the main checkout and does not use worktrees, so the card
-must open with which branch to check out and the command to do it — `git checkout <branch>`. Work
-that has not merged yet lives somewhere specific, and "it's ready" is not actionable if they cannot
-tell what to check out. This is the most common thing a card can silently omit, because whoever
-writes it already knows the answer.
+**The branch, first.** The user tests in the repo root and does not use worktrees, so the card must
+open with which branch to check out and the command to do it — `git checkout <branch>`. Work that
+has not merged yet lives somewhere specific, and "it's ready" is not actionable if they cannot tell
+what to check out. This is the most common thing a card can silently omit, because whoever writes it
+already knows the answer.
+
+**Since 2026-10-09 this has no backstop.** The root used to be left on the branch under test, so it
+told the user what to check out even when a card forgot to. All work now happens in worktrees and the
+root is theirs (`AGENTS.md` rule 3), so **the card is the only channel.** Omitting the branch now
+leaves them with nothing.
 
 **Setup, verbatim and verified.** Every command exactly as it must be typed, with the paths and
 flags this repository uses today. Run them, or mark them unverified. This role has a documented
