@@ -149,6 +149,8 @@ Write directly — the dir exists.
 - [BL-11 Stage 4 fail-closed blast radius](project_bl11_stage4_fail_closed_test_blast_radius.md) — plan's per-file counts didn't sum to its own total; 4 more files hid the same gap.
 - [monkeypatch module attr, not shared stdlib](feedback_monkeypatch_module_attr_not_shared_stdlib.md) — `mod.time.sleep` patch leaks across threads; rebind the name in `mod` instead.
 - [BL-11 Stage 4 logging visibility fix](project_bl11_stage4_logging_visibility_fix.md) — lastResort=WARNING ate INFO; scope the fix to one named logger, not basicConfig.
+- [Obsidian links Stages 4-5 final](project_obsidian_links_stage4_5_final.md) — bare `M<n>` broke 3 gates' ID regex half-silently; fold order sets apparent status.
+- [Enumerate every bullet, not every checkbox](feedback_enumerate_every_bullet_not_every_checkbox.md) — a checkbox-shaped count mis-counted an item list both ways in one week.
 - [Obsidian-links Stage 2: body-layer split](project_obsidian_links_stage2_body_layer.md) — script-assisted extraction; plan's ID/disagreement predictions were both wrong, re-derive by reading.
 - [Obsidian-links Stage 0/1 audio-adapter](project_obsidian_links_stage1_audio_adapter.md) — root .obsidian tracked unexpectedly.
 - [Obsidian gate class fixes](project_obsidian_gate_class_fixes.md) — exactly-one-index count; strip code/URL before tag scan; LLM-prompt "assertion" isn't a mechanical check.

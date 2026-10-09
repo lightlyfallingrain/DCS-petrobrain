@@ -13,6 +13,23 @@
 #
 # Usage: .claude/scripts/graph-corpus-guard.sh <corpus-file> [max-files]
 #
+# Ceiling raised 420 -> 520, 2026-10-09, by the obsidian-links-and-tags Stages 4 and 5
+# conversion (world-model/ROADMAP.md -> world-model/ROADMAP/, aircraft-layer/ROADMAP.md ->
+# aircraft-layer/ROADMAP/, mission-interpreter/ROADMAP.md -> mission-interpreter/ROADMAP/).
+# Measured post-conversion count: 434 -- 40 + 13 + 9 entry files plus three new indexes, 65 more
+# than Stage 3's 369, against the 420 ceiling Stage 3 left.
+#
+# **This is the last conversion, so the headroom is sized for ongoing growth rather than for a
+# next stage.** Every subproject's roadmap and backlog is now split; nothing is left to convert,
+# so from here the corpus grows only as new entries are written. 520 is ~86 files / ~20% over the
+# measured 434, which at this plan's own estimated ~+50 entry files/year
+# (plans/obsidian-links-and-tags/plan.md, "Grooming") is somewhere upwards of eighteen months
+# before anyone has to look at this number again -- and still nowhere near the failure this guard
+# exists to catch, which was 1182 files, roughly 3x any ceiling in this range. The previous three
+# raises each deliberately left ~14% for exactly one known-coming stage; that reasoning has run
+# out of stages, which is why this one is wider on purpose rather than by drift.
+#
+# Previous note, kept for the staged-conversion history:
 # Ceiling raised 300 -> 420, 2026-10-09, during the obsidian-links-and-tags Stage 3 conversion
 # (body-layer/BACKLOG.md -> body-layer/ROADMAP/BL-B*.md, todo/backlog.md -> todo/backlog/, and
 # todo/todo.md -> todo/todo/). Measured post-conversion count: 369 — 46 + 35 + 24 entry files plus
@@ -34,7 +51,7 @@
 set -euo pipefail
 
 corpus="${1:-graphify-out/.corpus.txt}"
-max="${2:-420}"
+max="${2:-520}"
 
 if [ ! -f "$corpus" ]; then
     echo "graph-corpus-guard: no corpus file at '$corpus'." >&2
