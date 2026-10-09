@@ -225,7 +225,12 @@ check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
 check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
 
 # Warn (never block) when a commit adds/modifies a plans/*/dod-check.md without also touching a
-# ROADMAP.md (root or any subproject's) in the same commit. This is the missing-roadmap-entry
+# roadmap ENTRY FILE (<subproject>/ROADMAP/<ID>.md, or root ROADMAP.md -- the repo's only unsplit
+# roadmap) in the same commit. A write into a <subproject>/ROADMAP.md POINTER does not count; it
+# changes nothing a reader or a `grep` will find, and accepting it was the hole the 2026-10-09
+# integrity audit found in this check and in push-roadmap-gate.sh (finding 4). The pointer-aware
+# decision is roadmap-source.sh's, not a regex's, so the two gates cannot drift apart and a tenth
+# split document needs no edit here. This is the missing-roadmap-entry
 # gap: it recurred three times, each time caught reactively by a reviewer noticing (cross-linked
 # in reviewer memory as m10-junction-review and group-detectability-roadmap-lag) rather than
 # mechanically. Warn rather than hard-block: DoD's own report commit legitimately lands *before*
@@ -233,14 +238,34 @@ check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a rese
 # CLAUDE.md "Milestone Completion" and root ROADMAP.md "Keeping this current") -- a hard block
 # here would misfire on that common, correct case and train people to bypass the gate, which is
 # worse than the gap it's meant to close.
+ROADMAP_RESOLVER="$REPO/.claude/scripts/roadmap-source.sh"
+roadmap_entry_touched() {
+    local path
+    while read -r path; do
+        [ -n "$path" ] || continue
+        case "$path" in
+            ROADMAP/*.md|*/ROADMAP/*.md) return 0 ;;
+            ROADMAP.md|*/ROADMAP.md)
+                [ -f "$path" ] || continue
+                [ -x "$ROADMAP_RESOLVER" ] || return 0
+                # --is-pointer exits 0 if it IS a pointer (so it does not count), 1 if it is not.
+                "$ROADMAP_RESOLVER" --is-pointer "$path" >/dev/null 2>&1 || return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 ROADMAP_WARN=""
 DOD_CHECK_FILES=$(printf '%s\n' "$STAGED" | grep -E '^plans/[^/]+/dod-check\.md$' || true)
 if [ -n "$DOD_CHECK_FILES" ]; then
-    if ! printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP(\.md|/[^/]+\.md)$'; then
+    if ! printf '%s\n' "$STAGED" | roadmap_entry_touched; then
         ROADMAP_WARN="
-  - dod-check.md staged, but no ROADMAP.md (root ROADMAP.md, or a subproject's, e.g.
-    world-model/ROADMAP.md, aircraft-layer/ROADMAP.md, body-layer/ROADMAP.md) is touched in
-    this commit:
+  - dod-check.md staged, but no roadmap entry file is touched in this commit. The entry is
+    <subproject>/ROADMAP/<ID>.md (find the directory with
+    '.claude/scripts/roadmap-source.sh --dir <subproject>/ROADMAP.md'); root ROADMAP.md also
+    counts and is the only roadmap you edit directly. A <subproject>/ROADMAP.md pointer does
+    not count. Staged dod-check:
 $(printf '%s\n' "$DOD_CHECK_FILES" | sed 's/^/      /')"
     fi
 fi
@@ -318,8 +343,8 @@ The artifact is committed either way -- this is a reminder, not a gate. Write th
 
 The commit proceeds either way -- this is a reminder, not a gate. If this dod-check is not yet
 merged/complete, updating the roadmap in a later commit (e.g. at merge time) is expected and
-fine; if the milestone this dod-check covers is actually done, update the relevant ROADMAP.md
-now so it doesn't silently drift stale."
+fine; if the milestone this dod-check covers is actually done, update its own entry file under
+<subproject>/ROADMAP/ now so it doesn't silently drift stale."
     fi
     printf '{"continue":true,"systemMessage":%s}' "$(printf '%s' "$WARN_MSG" | jq -Rs .)"
 fi
