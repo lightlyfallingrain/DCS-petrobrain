@@ -104,7 +104,9 @@ Group model, contact-report flood and the tick-cost/LOS workstream:
 - [[BL-W36]] — Group reporting — the disclosure ladder
 - [[BL-W12]] — Group cohesion redesign
 - [[BL-W37]] — Player bubble — 10 km computation-scope limit
-- [[BL-B23]] — `ContactStore` never pruned
+- `BL-B23` — `ContactStore` never pruned — a backlog item, so it is linked from
+  `body-layer-backlog.md` rather than from here (an entry belongs to exactly one index); named in
+  plain prose at its place in this sequence because it is part of this workstream's story
 - [[BL-W13]] — `silence` command
 - [[BL-W1]] — Contact-report flood (merge-echo callout suppression)
 - [[BL-W2]] — Redundant group disclosure
@@ -117,9 +119,11 @@ Ahead:
 
 ## Backlog (body-layer)
 
-**Lives in `body-layer/BACKLOG.md` on 2026-09-27** — items keep their `BL-B<n>` ids. That file
-stays separate (not part of this split) so editing one does not re-extract the other into the
-knowledge graph.
+**Split 2026-09-27 out of this roadmap, converted to per-entry files 2026-10-09** — items keep
+their `BL-B<n>` ids. The entry files now sit in this same directory, distinguished only by the `-B`
+in their ID, with their own index at `body-layer/ROADMAP/body-layer-backlog.md`; the per-file
+knowledge-graph extraction cost that motivated the original split is what the per-entry split takes
+further. `body-layer/BACKLOG.md` remains as a pointer so historical references keep resolving.
 
 ## Rejected
 
