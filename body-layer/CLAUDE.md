@@ -23,7 +23,8 @@ HTTP client, a text-only logger) plus its one concrete `PerceptionSource`,
 channel dead and one real detection-existence channel (HelperAI's `list_indication`) alive, so
 this is a hybrid design (real detection gate + `LoGetWorldObjects`-derived geometry via
 `perception.association`), not a choice between two originally-anticipated tiers.
-**Current BL-x milestone status: see `ROADMAP.md`** (this directory), not this file — status
+**Current BL-x milestone status: see `ROADMAP/`** (this directory) — one file per entry, indexed by
+`ROADMAP/body-layer-roadmap.md`; `ROADMAP.md` itself is a four-line pointer. Not this file — status
 changes faster than this doc gets touched.
 
 **The surface is *commands*, not "F10 commands."** `CrewConsole.handle_command`

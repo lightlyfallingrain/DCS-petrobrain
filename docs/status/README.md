@@ -12,18 +12,27 @@ Published as a private artifact:
 backlog files. If this page and a roadmap disagree, **the page is wrong** — fix the page, never the
 roadmap, and never treat the page as the record of what happened.
 
-**Take the `ROADMAP.md` list mechanically, not from this file**: `git ls-files '*ROADMAP.md'`. At
+**Take the list mechanically, not from this file**: `git ls-files '*ROADMAP.md'`. At
 the time of writing that is root plus `world-model/`, `aircraft-layer/`, `body-layer/`,
 `mission-interpreter/` and `audio-adapter/` — six files, and the same enumeration rule root
-`CLAUDE.md` states for subprojects applies here for the same reason. Two things that list does
-*not* contain, and both have been missed before:
+`CLAUDE.md` states for subprojects applies here for the same reason. Three things that list does
+*not* contain, and all three have been missed before:
 
+- **Five of those six files are four-line pointers, not roadmaps.** Only root `ROADMAP.md` still
+  holds its own content; every subproject's was split into one file per entry under
+  `<subproject>/ROADMAP/` on 2026-10-09, leaving a pointer carrying
+  `<!-- split-roadmap: see ROADMAP/ -->`. So `git ls-files '*ROADMAP.md'` returns almost nothing
+  readable, and reading its results yields a well-formed empty page.
+  **Resolve each path first — `.claude/scripts/roadmap-source.sh --entries <path>`** lists the
+  files that carry the items, and passes a non-pointer through unchanged.
 - **`brain-layer/` has no roadmap file.** It is a real subproject with its own `pyproject.toml`,
-  and its status is tracked inside `body-layer/ROADMAP.md`. Looking for `brain-layer/ROADMAP.md`
+  and its status is tracked inside `body-layer/ROADMAP/`. Looking for `brain-layer/ROADMAP.md`
   finds nothing and must not be read as "nothing to report".
-- **Backlog items are not in the roadmaps.** `body-layer/BACKLOG.md` (`BL-B<n>`) and
-  `todo/backlog.md` (`X-B<n>`) are separate files, and several of the page's open-work rows come
-  only from them. `todo/todo.md` carries User priority tasks and session-scoped notes.
+- **Backlog and todo items are not in the roadmaps**, and `git ls-files '*ROADMAP.md'` does not
+  name them at all. They are `body-layer/BACKLOG.md` → `body-layer/ROADMAP/` (`BL-B<n>`),
+  `todo/backlog.md` → `todo/backlog/` (`X-B<n>`) and `todo/todo.md` → `todo/todo/` (`X-T<n>`, User
+  priority tasks and session-scoped notes) — all three pointers too, and 104 of the page's items
+  come only from them.
 
 This is the same discipline the roadmaps already apply to each other (root `ROADMAP.md`: a
 disagreement between roadmap files is "a bug in the update discipline, not ambiguity to guess

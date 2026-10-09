@@ -496,24 +496,24 @@ Keep raw extracted data separate from derived data so the database can be rebuil
 
 ## Incremental, on-demand probe-tier data (post-M7, proposed)
 
-> **Status: proposed, not implemented.** Raised 2026-09-06 after M7 (full-theatre pipeline)
+> **Status: proposed, not implemented.** Raised 2026-09-06 after WM-M7 (full-theatre pipeline)
 > completed. Depends on an open question in `PETROBRAIN_RUNTIME.md` ("World model acquisition:
 > incremental, on-demand probing") that must be resolved first. Recorded here because it changes
 > a storage/schema assumption this section otherwise leaves implicit.
 
-M7 split the theatre's data into two cost tiers, though the split wasn't named explicitly at the
+WM-M7 split the theatre's data into two cost tiers, though the split wasn't named explicitly at the
 time:
 
 - **Base tier** — roads, settlements, airfields, beacons, navaids. Cheap: parsed directly from
-  DCS-native files (`.routes`, `towns.lua`, `beacons.lua`), no live-mission access needed. M7
+  DCS-native files (`.routes`, `towns.lua`, `beacons.lua`), no live-mission access needed. WM-M7
   builds this whole-theatre in one pass (~450s for Syria) and there is no reason to make it
   incremental — it is already cheap at full scale.
-- **Probe tier** — elevation, `surface_type`, and M6's derived ridge/valley classification. The
+- **Probe tier** — elevation, `surface_type`, and WM-M6's derived ridge/valley classification. The
   only tier that ever needs a live DCS mission probe (`land.getHeight`/`land.getSurfaceType`),
-  which is comparatively expensive and slow. M7 sidesteps this for elevation specifically by
+  which is comparatively expensive and slow. WM-M7 sidesteps this for elevation specifically by
   using SRTM (an external DEM) as the full-theatre baseline instead of a live probe grid — but
   `surface_type` and ridge/valley have no such external substitute, and stay theatre-wide
-  `"unavailable"` in the M7 build as a result (see
+  `"unavailable"` in the WM-M7 build as a result (see
   `world-model/research/2026-09-06-m7-stages-1-2-3-full-build-results.md`).
 
 The proposal: rather than ever running one theatre-wide live probe for the probe tier (expensive,
@@ -533,20 +533,20 @@ This needs three things the current schema/pipeline don't have:
    and that must stay distinguishable from "never asked," per this project's absence-as-absence
    convention already used in `query/describe.py`).
 3. **Upsert-into-existing-store support.** `build.pipeline`'s `build_region` currently deletes
-   and recreates the whole `.sqlite` on every invocation (see `todo/todo.md`'s "Incremental
-   per-layer pipeline builds" backlog item, raised during M7 DoD acceptance testing for a
+   and recreates the whole `.sqlite` on every invocation (see `todo/todo/`'s "Incremental
+   per-layer pipeline builds" backlog item, raised during WM-M7 DoD acceptance testing for a
    different reason — dev-workflow convenience). This proposal needs the same underlying
    capability, just with a second trigger: a running Petrobrain Runtime session writing newly
    probed chunks into a store that already exists, not only a developer re-running one layer.
 
-Ridge/valley classification (M6) fits this well without new work: it is already a local
+Ridge/valley classification (WM-M6) fits this well without new work: it is already a local
 discrete-Laplacian computation over a chunk's own elevation grid (`src/terrain/`), so running it
 per-arriving-chunk instead of once over a whole pre-built region is a scope reduction, not a
 redesign.
 
 This is about avoiding **probe cost** (live DCS-mission calls are the expensive step), not
 runtime memory — SQLite + R*Tree already answers `describe_position` via spatial index without
-loading the whole store, established by M5/M7's own latency measurements. Do not motivate this
+loading the whole store, established by WM-M5/WM-M7's own latency measurements. Do not motivate this
 change by a memory-footprint argument; it doesn't hold.
 
 Suggested conceptual layout:

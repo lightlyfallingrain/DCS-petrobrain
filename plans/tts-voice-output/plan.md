@@ -1,3 +1,8 @@
+<!-- doc-provenance:start -->
+**Topics:** #audio-playback #speech-synthesis #intercom
+**Decision for:** [[AA-1]]
+<!-- doc-provenance:end -->
+
 ### Goal
 
 Make Petrovich's already-generated `OutgoingSpeech`/`CrewConsole` text audible to the player via

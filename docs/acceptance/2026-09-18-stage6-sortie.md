@@ -1,5 +1,10 @@
 # Stage 6 acceptance sortie — flight card
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-synthesis
+**Flight for:** [[AA-1.6]]
+<!-- doc-provenance:end -->
+
 > **CLOSED 2026-09-25 by user direction — never flown as written, answered block by block by later
 > sorties.** Not a pass and not a skip: every question on this card was eventually answered, but by
 > five different flights rather than the one this card planned. The verdicts, in the user's own

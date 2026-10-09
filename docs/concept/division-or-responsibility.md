@@ -6,7 +6,7 @@ Layers:
 - aircraft = DCS I/O + API for exposing DCS data and possible commands to DCS
 - memory = what has happended, what has been observed
 
-Think microservice architechture. That tould naturally balance load on multiple processor cores or computers. DCS takes up all the GPU, a local LLM cannot run on the same computer. My MacBook Pro M1 32GB RAM would be the computer running LLM with Ollama. My Windows computer (with DCS on it) has a lot of disk space, my Mac does not. LAN only, except possible cloud LLM.
+Think microservice architechture. That tould naturally balance load on multiple processor cores or computers. DCS takes up all the GPU, a local LLM cannot run on the same computer. My MacBook Pro WM-M1 32GB RAM would be the computer running LLM with Ollama. My Windows computer (with DCS on it) has a lot of disk space, my Mac does not. LAN only, except possible cloud LLM.
 
 ## aircraft layer
 - sensor / sensory input and output, i.e. data from DCS and commands to DCS

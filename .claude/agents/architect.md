@@ -37,7 +37,10 @@ This file describes **the role**. The project's current shape comes from, in ord
 
 - **The orchestrator's prompt** — what *this* task is, and which branch and subproject it concerns.
 - **Root `ROADMAP.md`** — which subprojects exist and which is active.
-- **`<subproject>/ROADMAP.md`** — that subproject's milestone status; its own source of truth.
+- **`<subproject>/ROADMAP/`** — that subproject's milestone status; its own source of truth. One
+  file per entry, with an index at `<subproject>/ROADMAP/<subproject>-roadmap.md`.
+  **`<subproject>/ROADMAP.md` is a four-line pointer**, so reading it tells you nothing and
+  writing to it is worse — `.claude/scripts/roadmap-source.sh <path>` resolves either form.
 - **Root and per-subproject `CLAUDE.md`** — structure, commands, conventions.
 
 If your task needs to know what exists, read those. Do not trust a structure cached in a role
@@ -137,7 +140,7 @@ If there are no open decisions, omit that section. Keep the plan concise — it 
 - **Do not write large amounts of implementation code** — small illustrative snippets are acceptable if they clarify a design point
 - **Do not introduce new abstractions** unless you can name a clear duplication they remove
 - **Do not expand scope silently** — if the request implies additional work, surface it explicitly
-- **Do not start tasks marked `[?]` in todo/todo.md** — flag them and ask for clarification
+- **Do not start tasks marked `[?]` in `todo/todo/`** (indexed by `todo/todo/todo-tasks.md`; `todo/todo.md` is a pointer) — flag them and ask for clarification
 - **Consult NOTES.md** mentally when reasoning about areas where prior issues have been recorded (framework quirks, performance pitfalls, known workarounds)
 
 ---
@@ -250,8 +253,11 @@ false** — the item had been `[x]` since 2026-10-02, and the real blocker was o
 recognition, which lives in a different subproject and gates on a different milestone. The plan was
 corrected, but only incidentally.
 
-**Check every status claim in your brief against the owning subproject's `ROADMAP.md`/`BACKLOG.md`
-row before designing around it.** Root `ROADMAP.md`'s status table says which subproject owns what.
+**Check every status claim in your brief against the owning entry file before designing around
+it** — that is `<subproject>/ROADMAP/<ID>.md`, not `<subproject>/ROADMAP.md` or `BACKLOG.md`, both
+of which are four-line pointers that carry no rows at all
+(`.claude/scripts/roadmap-source.sh --entries <path>` lists the files that do). Root `ROADMAP.md`'s
+status table says which subproject owns what, and is itself not split.
 The orchestrator's prose is an input, not a source.
 
 ## Find N in the repo before accepting "N is more than we need"

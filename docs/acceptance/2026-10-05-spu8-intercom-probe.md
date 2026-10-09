@@ -1,5 +1,10 @@
 # SPU-8 intercom read/write probe
 
+<!-- doc-provenance:start -->
+**Topics:** #audio-volume #cockpit-manipulation #intercom
+**Flight for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
 **Branch: none yet** — this is reconnaissance for Audio-adapter Slice 2
 (`audio-adapter/ROADMAP.md`), not a feature branch. There is nothing to check out; this probe runs
 against your current DCS install directly, no code changes deployed. Findings:

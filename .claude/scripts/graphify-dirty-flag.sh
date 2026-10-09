@@ -38,7 +38,7 @@ changed=$(git diff --cached --name-only 2>/dev/null) || exit 0
 # to an archived plan or to agent memory is correctly ignored here.
 relevant=$(printf '%s\n' "$changed" | grep -E '\.md$' \
     | grep -vE '^(plans/archive/|\.claude/agent-memory/|\.claude/worktrees/)' \
-    | grep -E '^(docs/|todo/|CLAUDE\.md|AGENTS\.md|ROADMAP\.md|NOTES\.md|[^/]+/(CLAUDE|ROADMAP)\.md|[^/]+/research/|plans/inbound-speech/)' ) || true
+    | grep -E '^(docs/|todo/|CLAUDE\.md|AGENTS\.md|ROADMAP\.md|NOTES\.md|[^/]+/(CLAUDE|ROADMAP|BACKLOG)\.md|[^/]+/ROADMAP/[^/]+\.md|[^/]+/research/|plans/inbound-speech/)' ) || true
 
 [ -z "$relevant" ] && exit 0
 

@@ -1,4 +1,4 @@
-# M8 — the probe store
+# WM-M8 — the probe store
 
 Per `plans/m8-incremental-store/plan.md`. Short by design — the plan itself carries the full
 rationale; this doc is the "two-file model, lifecycle, backup/sync" deliverable the plan calls
@@ -24,7 +24,7 @@ and exists for this.
 
 - **Base store** (`store/`): roads, settlements, airfields, beacons, navaids, whatever
   whole-theatre elevation/`surface_type` grid a build supplied (SRTM or a stored DCS probe run)
-  — everything M1–M7 built. Untouched by M8.
+  — everything WM-M1–WM-M7 built. Untouched by WM-M8.
 - **Probe store** (`probe_store/`): fine elevation and `surface_type` accumulated chunk by chunk
   via `build.pipeline.add_probe_chunk`, plus a tri-state coverage record (`unqueried` /
   `queried_with_data` / `queried_void`) per `(kind, chunk_ix, chunk_iz)`. Chunks are 5,000 m

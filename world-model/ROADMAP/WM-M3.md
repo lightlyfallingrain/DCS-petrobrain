@@ -1,0 +1,3 @@
+# WM-M3 — OSM overlay
+
+- [x] **WM-M3 — OSM overlay.** #status/done Small OSM region around the known location, transformed into DCS/raster space. Diagnostic overlay, quantify displacement. Done: `src/osm/` (Overpass API fetch + in-memory parse), `tools/inspect_osm_overlay.py` diagnostic overlay CLI, control-point + transform tests, held-out Gemerek validation. Expected ~5.2 km z-axis displacement observed (consistent with WM-M1/WM-M2 residual), OSM coverage non-trivial (96 highways, 17 buildings), attribution rendered onto output PNG. Spatial-storage choice deferred to WM-M5 (no DB needed yet). See `research/2026-09-03-m3-osm-overlay.md`.

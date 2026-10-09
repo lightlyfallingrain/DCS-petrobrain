@@ -1,5 +1,10 @@
 # Voice command sortie — Stages 4 and 5
 
+<!-- doc-provenance:start -->
+**Topics:** #speech-recognition #push-to-talk #intercom
+**Flight for:** [[AA-4.6]]
+<!-- doc-provenance:end -->
+
 **Branch: `feature/inbound-speech-stage4`.** Both stages are on it, stacked, plus the spoken-vocabulary
 fixes already merged to main.
 

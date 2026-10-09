@@ -1,5 +1,10 @@
 # SPU-8 intercom write path — can code set arg 664 (operator intercom power) from the pilot's seat?
 
+<!-- doc-provenance:start -->
+**Topics:** #cockpit-manipulation #intercom
+**Evidence for:** [[AA-3]]
+<!-- doc-provenance:end -->
+
 **Date:** 2026-10-05
 **DCS version:** 2.9.29.27278, static read this session (install at `/mnt/f/Games/DCS World/`,
 read-only, reachable from this environment — not the Windows-only machine earlier sessions assumed;
