@@ -56,6 +56,81 @@ rather than quietly dropping the sentence.
 Also: *"Never leave the main checkout on a worktree branch or a detached HEAD"* survives unchanged
 and matters **more**, since the main loop will no longer be there to notice.
 
+### User corrections, 2026-10-09 — three of this plan's costs are not acceptable, they are work
+
+The first draft of this plan listed the hook and graph consequences as costs to be accepted. The
+user rejected two of them and corrected a third:
+
+> *"`29217c0 worktree-agent-…@{1}: branch: Created from origin/main` -> **this could be changed**"*
+>
+> *"you'd check branches out yourself -> **no problem**"*
+>
+> *"Hooks become consistently main's hooks -> **is problem. Hooks should fire wherever work is being
+> done**"*
+>
+> *"The shared graph becomes main's graph -> **same as hook, graph should reflect what is being
+> worked on**"*
+>
+> *"with an instruction not to cd to the root -> **that was not me. I instructed to continue in same
+> branch, that's different.**"*
+
+And then, refining the graph requirement:
+
+> *"graph - for docs main's state is ok, but for code the graph should be up to date with what the
+> agent is working on"*
+
+**The last correction matters for the record:** the instruction not to `cd` to the repository root
+came from the session environment, not from the user. Their *"use the same branch"* was about the
+branch, not the directory. So nothing the user said ever required the main loop to stay out of the
+root — the plan below stands on their actual preference, which is that the root be theirs.
+
+#### The graph split is already the project's own line, and the artifacts already support it
+
+`graphify-ast-refresh.sh`'s own header states the division: **"structure per commit, meaning per
+merge."** The AST layer is cheap — measured 1.56s over all 141 Python files — and runs post-commit;
+the semantic layer needs an LLM and runs at merge. That maps exactly onto the user's requirement:
+**borrow main's semantic/doc layer, build the code layer per worktree.**
+
+On disk the layers are already separate files: `graphify-out/.graphify_ast_incremental.json` is
+distinct from `graphify-out/graph.json`. So this needs no new graph architecture, just two path
+fixes:
+
+1. **`graphify-ast-refresh.sh:28-29` resolves `${CLAUDE_PROJECT_DIR:-…}` and `cd`s to it**, so a
+   commit made in a worktree refreshes the **main checkout's** AST layer, not its own. It must
+   resolve the committing worktree's root instead. It also bails at line 33 when there is no
+   `graphify-out/graph.json`, which is always true in a fresh worktree — so it must be able to
+   create a code-only layer there rather than exiting.
+2. **`gq.sh:48` treats "no local `graph.json`" as "borrow everything"**, including code structure.
+   It should borrow main's *semantic* graph while preferring a local AST increment, so a query in a
+   worktree gets main's documents and the worktree's code.
+
+Note the git hooks themselves are shared — there is one `.git/hooks`, so a commit in any worktree
+already fires them. The defect is purely where the script writes.
+
+**Honest scope note:** this branch's diff against `main` is documents only, no `.py` touched, so a
+stale code layer has not actually bitten yet. It would on the first code branch, which is most of
+them.
+
+#### Hooks firing from the wrong branch is a defect to fix, not a cost to accept
+
+Superseded reasoning is kept below for the mechanism it records. The user's requirement is that a
+session working in a worktree on branch X gets branch X's hook scripts. Whether Claude Code supports
+that directly is being established; if not, the fallback is a dispatcher shim — every hook registered
+as `hookrun.sh <name>.sh`, which reads the stdin JSON once, extracts `cwd`, resolves that worktree's
+root, and execs `<root>/.claude/scripts/<name>.sh` when it exists, replaying stdin. Hooks here
+already read stdin JSON with `jq` (`agent-sha-gate.sh:45`), so the mechanism is available.
+
+#### And the `origin/main` base may be configurable after all
+
+The user's read is that it *"could be changed"*. `.claude/settings.json` holds only `permissions` and
+`hooks`, and nothing in it mentions a worktree base — but absence from this repo's settings is not
+evidence that no setting exists. Being established from the documentation before anything is built
+on the assumption that it cannot be.
+
+> **Superseded by the three subsections above.** What follows treated the hook and graph behaviour as
+> consequences to live with. They are requirements. Kept because the mechanisms it describes are
+> accurate and are what any fix has to work against.
+
 ### Hooks become predictable instead of varying
 
 Hooks execute from `$CLAUDE_PROJECT_DIR/.claude/scripts/`, i.e. whatever the root has checked out —
