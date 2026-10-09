@@ -23,7 +23,9 @@ for dir in "$@"; do
         [ -f "$f" ] || continue
         base=$(basename "$f" .md)
         # Skip index files -- they are not entries.
-        printf '%s\n' "$base" | grep -qE '^[A-Z]+-[A-Za-z0-9.]+$' || continue
+        # Entry-ID shape, index files excluded. The bare `M<n>` alternative is world-model's
+        # milestone space (2026-10-09); without it this helper listed none of M0...M11.
+        printf '%s\n' "$base" | grep -qE '^([A-Z]+-[A-Za-z0-9.]+|M[0-9]+(\.[0-9]+)?)$' || continue
         title=$(awk '/^# /{sub(/^# [A-Za-z0-9.-]+ — /, ""); print; exit}' "$f")
         # An odd number of fence delimiters means the file has an unclosed fence -- fail loudly
         # rather than let the fence-stripping below silently swallow every tag for the rest of
