@@ -92,7 +92,12 @@ for d in */pyproject.toml; do
     sub="${d%/pyproject.toml}"
     [ -d "$sub/ROADMAP" ] && DIRS="$DIRS $sub/ROADMAP"
 done
-[ -d todo/backlog ] && DIRS="$DIRS todo/backlog"
+# todo/ has no pyproject.toml, so its split directories are named here. todo/todo/ joined
+# 2026-10-09 with the Stage 3 conversion; see the sibling consistency gate's own note on why the
+# loop above cannot find either of them.
+for extra in todo/backlog todo/todo; do
+    [ -d "$extra" ] && DIRS="$DIRS $extra"
+done
 
 for dir in $DIRS; do
     for f in "$dir"/*.md; do

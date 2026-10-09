@@ -942,3 +942,324 @@ largest file converted so far.
   commits ahead, mostly Stage 1's own agent-memory/gate-tuning commits); fast-forwarded per
   AGENTS.md rule 4 before reading anything, so none of this stage's work was done against the
   stale copy the task warned a prior attempt had hit.
+
+---
+
+## 2026-10-09 — Stage 3: `body-layer/BACKLOG.md`, `todo/backlog.md` and `todo/todo.md`
+
+### Implementation Summary
+
+Three entry-list documents converted to one file per entry, using Stage 2's method unchanged:
+every entry file's body is a **verbatim line-range slice** of its source, extracted by a Python
+script written to the scratchpad (not committed), never retyped. The only text a conversion added
+to a source line was one `#status/*` tag after the leading bold span, plus — in exactly two cases,
+both recorded below — a `[ ]` checkbox marker on a source bullet that had none.
+
+| source | entries | directory | index | pointer |
+|---|---|---|---|---|
+| `body-layer/BACKLOG.md` (1543 lines) | 46 | `body-layer/ROADMAP/BL-B*.md` | `body-layer/ROADMAP/body-layer-backlog.md` | yes |
+| `todo/backlog.md` (1169 lines) | 34 | `todo/backlog/X-B*.md` | `todo/backlog/todo-backlog.md` | yes |
+| `todo/todo.md` (472 lines) | 24 | `todo/todo/X-T*.md` | `todo/todo/todo-tasks.md` | yes |
+
+**Zero new `BL-B<n>` and zero new `X-B<n>` were minted** — fewer than the plan's "two new IDs
+total" for this stage, and fewer than the task's "at most one each". Both would-be mints turned out
+to be an existing entry's own superseded text rather than a new item; see "Mints" below. 24 `X-T<n>`
+were minted, which is a new ID space rather than an extension of an existing one.
+
+### The full ID mapping
+
+**`body-layer/BACKLOG.md` → `body-layer/ROADMAP/<ID>.md`.** Every item already carried its ID, so
+the mapping is the identity on 46 IDs (`BL-B1`…`BL-B46`) with two structural exceptions:
+
+- **`BL-B34` holds two checkbox blocks.** The source had `BL-B34` (`[x]`, resolved 2026-10-06)
+  immediately followed by a block headed `BL-B34 (original text)` (`[ ]`) — the same ID twice,
+  deliberately, because the resolution contradicted the original finding's premise. The filename is
+  the ID alone, so both blocks live in `BL-B34.md` in source order with their original states
+  untouched. This was the plan's one candidate for a `BL-B47` mint; it is not a separate item.
+- **`BL-B23` was reconciled, not extracted.** Stage 2 had already created
+  `body-layer/ROADMAP/BL-B23.md` from `body-layer/ROADMAP.md`'s own `BL-B23` row. See "The one
+  reconciliation" below.
+
+Source-order note: the source listed `BL-B30` and `BL-B31` ahead of `BL-B29`, and `BL-B29` sits
+between `BL-B31` and `BL-B32`. Nothing was renumbered; the index lists numerically and says so.
+
+**`todo/backlog.md` → `todo/backlog/<ID>.md`.** Identity on 34 IDs (`X-B1`…`X-B34`). `X-B31` sits
+in the source between `X-B4` and `X-B5` because it falls out of `X-B4`; the index preserves that
+placement under the 2026-09-25 heading and explains why. `X-B27` holds two checkbox blocks (see
+"Mints").
+
+**`todo/todo.md` → `todo/todo/X-T<n>.md`**, minted in document order:
+
+| ID | source lines | state | title |
+|---|---|---|---|
+| `X-T1` | 25–29 | `[ ]` | Fly the contact/terrain sortie — **USER** |
+| `X-T2` | 30–32 | `[ ]` | `/explore` the location-fragment rewrite — **USER** |
+| `X-T3` | 58–63 | `[x]` | Player bubble: unit detection bounded to 10 km |
+| `X-T4` | 71–110 | `[ ]` | Grouping is the priority — every unit gets its own callout |
+| `X-T5` | 111–132 | `[ ]` | Free text reaches the brain and comes back "Unable" |
+| `X-T6` | 142–149 | `[~]` | Crossings are announced for contacts he cannot see |
+| `X-T7` | 150–160 | `[~]` | Binoculars are barely used |
+| `X-T8` | 161–211 | `[~]` | The confirm band asks a question nothing can answer |
+| `X-T9` | 212–221 | `[x]` | "full scan" vs "scan full" — no defect |
+| `X-T10` | 244–253 | `[x]` | Route crew-text speech callouts to the in-game overlay |
+| `X-T11` | 254 | `[x]` | Create the integrity audit skill |
+| `X-T12` | 255–257 | `[x]` | Claude workflow changes — auto-advance and autonomy criteria |
+| `X-T13` | 258–265 | `[x]` | Roadmap restructure, 2026-09-10 |
+| `X-T14` | 266–279 | `[x]` | Enable `performance-reviewer` and `security` in the sequence |
+| `X-T15` | 283–334 | `[>]` | Model the 9K113 Raduga-Sh as a selectable optic |
+| `X-T16` | 338–354 | `[x]` | Probe the mission-sandbox bridge |
+| `X-T17` | 358–380 | `[x]` | Remove `F10_SCAN_RADIUS_M` and make a sector scan unbounded |
+| `X-T18` | 381–401 | `[>]` | Anchored limited scan |
+| `X-T19` | 407–415 | `[x]` | Show where Petrovich is looking |
+| `X-T20` | 416–433 | `[x]` | Scan and Watch must be standing modes |
+| `X-T21` | 434–439 | `[x]` | Callouts must not be backlogged |
+| `X-T22` | 440–456 | `[x]` | Aggregate repetitive callouts |
+| `X-T23` | 457–463 | `[ ]` | No identification on a very close pass |
+| `X-T24` | 464–466 | `[ ]` | 16 s flank revisit |
+
+### Mints: both candidates were an existing entry's own superseded text
+
+The plan budgeted one mint per backlog file. Both turned out not to be items, and the reason is the
+same shape in each case — a source entry that keeps its own earlier text in place, introduced by a
+sentence saying so:
+
+- **`todo/backlog.md`'s un-IDed checkbox at line 844** (*"Measure the line-of-sight call rate per
+  poll before considering a world-model service split"*) is immediately preceded by `X-B27`'s own
+  closing line: *"Original item follows, kept because its reasoning is what the decision rests
+  on."* It is `X-B27`'s pre-decision form, so it was folded into `X-B27.md` as a second block with
+  its `[ ]` state untouched, and **no `X-B35` was minted**. The highest `X-B<n>` is still `X-B34`.
+- **`body-layer/BACKLOG.md`'s `BL-B34 (original text)`** is the same pattern made explicit in the
+  heading itself. No `BL-B47` was minted.
+
+**The lesson for Stages 4 and 5**, since world-model's roadmap is known to carry duplicated debt
+entries: *count un-IDed blocks only after reading the line above them.* A naive count of
+`^- \[` lines against the ID list reports one mint owed in each of these files, and in both cases
+minting would have created a second ID for text that is already an entry's own history — which the
+never-renumber rule then makes permanent.
+
+### The one reconciliation: `BL-B23`
+
+`body-layer/ROADMAP/BL-B23.md` already existed (Stage 2, from `body-layer/ROADMAP.md`'s own row).
+`body-layer/BACKLOG.md` carried its own `BL-B23`. **The two agree on every fact** — `[x]`, fixed on
+`fix/contact-store-pruning`, merged 2026-10-02, same mechanism, same 403 ms → 1.4 ms result — so
+there is no contradiction and **no flag was added**.
+
+They are not duplicates either, because each holds material the other does not: the roadmap's copy
+has the sign-off trail, the acceptance-boundary reasoning and the milestone-completion answer; the
+backlog's copy has the full pre-fix measurement sweep (22→1200 contacts), the fix-shape reasoning as
+written *before* the fix, and the player-bubble interaction note. **Both are kept verbatim**, the
+backlog's appended below the roadmap's, with a prose note at the junction saying which came from
+where and why neither was dropped. Keeping only "the fuller text" would have lost real content in
+either direction.
+
+One consequence: `BL-B23` is now a backlog entry living in a directory with two indexes, and the
+consistency gate requires exactly one index link per entry. Its `[[BL-B23]]` row was removed from
+`body-layer-roadmap.md` and replaced with a plain-prose mention at the same position in that
+workstream's sequence, so the narrative order survives without a second link.
+
+### `**USER**` items, and the one judgement call behind them
+
+**Two `**USER**` entries, both new and both from `todo/todo.md`'s *"Owed by the user, nothing else
+blocks them"* section:**
+
+- **[[X-T1]] — Fly the contact/terrain sortie.** Card
+  `https://claude.ai/artifact/VJZnmdF3aqxhVGZea3iKN4`, branch `main`. Covers contact-flood
+  suppression, group-disclosure silence and the `"next valley"` terrain qualifier, whose half *"has
+  never been confirmed heard"*.
+- **[[X-T2]] — `/explore` the location-fragment rewrite** (item 1 of
+  `plans/sortie-2026-10-05-refinements/`) before anything is built.
+
+**Neither was a checkbox item in the source** — both were prose bullets. The task's stated exception
+allowed promoting them, and I did, for three reasons: they are real outstanding work rather than
+orientation; they are the highest-priority items in the file that root `CLAUDE.md` sends every
+session to; and as prose inside a dated narrative they were neither linkable nor greppable by ID.
+Promoting each required minting its `[ ]` marker, which is the only text added to the source bullet,
+and each entry says so in its own body. The index **links** to them rather than repeating their
+text, so there is still exactly one copy — including in the *"Owed by the user"* paragraph itself,
+which now reads as two links.
+
+**Zero `**OPEN**` items.** No source entry in any of the three files contradicted itself or another
+record. `BL-B23`'s two copies agree (above), and `BL-B34`/`X-B27`'s two blocks are an item and its
+own superseded text, which the source labels as such — that is a time-ordered record, not a dispute,
+the same distinction Stage 2 drew for the five pairs the plan had named.
+
+### Judgement calls on `todo/todo.md`, each recorded because none was mechanical
+
+1. **Narrative orientation prose stayed in the index, verbatim.** The preamble, the `## User
+   priority tasks` framing, the whole `### Where things stand, 2026-10-05 end of day` section, the
+   `### Where the state of play lives — not here` section, the per-section prose under three sortie
+   headings, and the `## Cross-cutting / unscoped backlog` tail. 68 of the source's 399 non-blank
+   lines are this material; all 68 are in the index. This is now written into
+   `docs/DOC_CONVENTIONS.md` as a rule, because it is the first conversion that had prose *between*
+   entries rather than only a preamble and a tail.
+2. **Section headings became index sections**, preserving which sortie produced which finding —
+   information that is a relation between entries and so cannot live in any one of them.
+3. **Priority items are first and marked.** Root `CLAUDE.md`'s Session Start step 2 and its Backlog
+   Management section both send every session here for User priority tasks, so the index opens with
+   the two `**USER**` items, then a one-line pointer to the next open ones, before any narrative.
+4. **The index is `todo-tasks.md`, not `todo-todo.md`.** Both avoid collision; the first reads as a
+   name rather than a stutter. This required adding `*-tasks.md` to the consistency gate's index
+   glob — see "Consumer scripts" below.
+5. **Five `[x]` items at source lines 244–279 had no heading of their own**, sitting under the
+   state-of-play section with a blank-line gap. Grouped in the index under a new `### Done —
+   process and workflow items` heading, with a note saying the heading is the conversion's and not
+   the source's.
+6. **Four entries have no bold lead at all** (`X-T10`–`X-T13` are plain `- [x] prose` rows). Their
+   `#status/*` tag went at the end of the checkbox's own physical line, which still satisfies the
+   convention's "same line as its checkbox marker" rule.
+
+### Fidelity accounting
+
+Verified mechanically: a multiset comparison of every non-blank line of each original (read from
+`git show HEAD:<path>`) against the new corpus, with inserted `#status/*` tags stripped. Every
+original line is either present verbatim or named below.
+
+| source | non-blank lines | not carried verbatim | what they are |
+|---|---|---|---|
+| `body-layer/BACKLOG.md` | 1308 | **12** | H1, the three-paragraph split rationale, the two ID-rule paragraphs — all rewritten into the index preamble, and the rationale additionally into the pointer |
+| `todo/backlog.md` | 983 | **17** | H1, preamble (5 paragraphs), and the three `### Added <date>` headings — headings became index sections, preamble rewritten into index + pointer |
+| `todo/todo.md` | 399 | **12** | H1; the `../ROADMAP.md` preamble line (now `../../ROADMAP.md`, one directory deeper); `**Owed by the user…**` (now two links); six lines whose backticked `BL-B26`–`BL-B31`/`X-B29` mentions became `[[wikilinks]]`; the tail's closing sentence, extended to name the new backlog index |
+
+**No entry body was paraphrased.** The 12/17/12 lines above are all index or pointer prose, where
+the convention requires rewriting (a preamble describing "this file" has to describe the new shape),
+plus the wikilink conversions.
+
+**95 cross-references linked** across the three new sets, by script, restricted to IDs that resolve
+to a real entry file in a converted directory — so mentions of `WM-B8`, `M11`, `AC-B5` and the like
+stayed plain prose, per the convention.
+
+### Consumer scripts: two needed fixing, three did not
+
+Checked each script's own globs against the real new paths rather than assuming recursion:
+
+| script | `body-layer/ROADMAP/BL-B*.md` | `todo/backlog/*.md` | `todo/todo/*.md` | action |
+|---|---|---|---|---|
+| `graph-corpus-files.sh` | covered (`find "$sub/ROADMAP"`) | covered (`find todo`) | covered (`find todo`) | none |
+| `graphify-dirty-flag.sh` | covered (`[^/]+/ROADMAP/[^/]+\.md`) | covered (`^todo/`) | covered (`^todo/`) | none |
+| `push-roadmap-gate.sh` | covered | **not matched** | **not matched** | none — see below |
+| `roadmap-entry-consistency-gate.sh` | covered | covered | **missed entirely** | fixed |
+| `roadmap-tag-vocabulary-gate.sh` | covered | covered | **missed entirely** | fixed |
+
+- **`push-roadmap-gate.sh` deliberately unchanged.** Its pattern is
+  `(^|/)ROADMAP(\.md|/[^/]+\.md)$`, which never matched `todo/backlog.md` or `todo/todo.md` either
+  — the gate's job is "a *subproject roadmap* was touched in the same push as a feature merge", and
+  the `todo/` files were never that. Verified by running the real pattern over the real paths rather
+  than reading it. One incidental gain: moving body-layer's backlog into `ROADMAP/` means
+  `body-layer/ROADMAP/BL-B1.md` now satisfies the gate, which `body-layer/BACKLOG.md` did not.
+- **`roadmap-entry-consistency-gate.sh`** discovered `*/ROADMAP` plus a hardcoded `todo/backlog`,
+  so `todo/todo/` was invisible: a dangling link or an orphaned entry there would have passed
+  silently. Now both `todo/` directories are named in one loop. Its index glob also gained
+  `*-tasks.md`; without that, all 24 `X-T` entries would have reported as linked from zero indexes.
+- **`roadmap-tag-vocabulary-gate.sh`** had the same hardcoded `todo/backlog` and the same fix.
+
+**Both fixes were proven by mutation, not by a passing run** (a gate that silently skips a directory
+also passes):
+
+| mutation | gate output | restored |
+|---|---|---|
+| `[[X-T999]]` + `[[BL-B999]]` appended to `todo/todo/X-T24.md` | both reported dangling, exit 1 | `shasum` back to `4820f8e…` |
+| `- [[X-T21]]` row deleted from `todo-tasks.md` | `X-T21.md is not linked from any index`, exit 1 | `shasum` back to `947bc6f…` |
+| `#topic/not-in-vocabulary` appended to `todo/todo/X-T24.md` | `tag … not listed in docs/TAGS.md`, exit 1 | `shasum` back to `4820f8e…` |
+
+### Corpus ceiling
+
+`graph-corpus-files.sh` emits **369** files post-conversion (104 new entry files + 2 new indexes
+against Stage 2's 263). Ceiling raised **300 → 420** in `graph-corpus-guard.sh`, with the measured
+count and the ~14% headroom recorded in its own comment — the same margin Stage 2 chose, and
+deliberately not pre-raised for Stages 4 and 5, which will need it raised once more. Guard
+re-run: `graph-corpus-guard: OK — 369 files (ceiling 420)`.
+
+All three new directory shapes confirmed present in the emitted corpus: 46 `body-layer/ROADMAP/BL-B*`,
+35 `todo/backlog/*`, 25 `todo/todo/*`.
+
+### Read-cost measurement
+
+Bytes/4, pointer + index + **median** entry against the whole original file:
+
+| source | before | after | saving |
+|---|---|---|---|
+| `body-layer/BACKLOG.md` | 28,408 | 2,078 (pointer 232 + index 1,498 + median entry 348) | **93%** |
+| `todo/backlog.md` | 21,372 | 2,088 (206 + 1,420 + 462) | **90%** |
+| `todo/todo.md` | 9,090 | 2,720 (206 + 2,261 + 253) | **70%** |
+| all three | 58,870 | 6,886 | **88%** |
+
+The plan projected "another 45.5k tokens off the common read" for the first two; measured is 45.6k.
+`todo/todo.md`'s 70% is the lowest of the five files converted so far, and for a structural reason
+worth recording: its index is 2,261 tokens, **larger than its median entry by a factor of nine**,
+because the orientation narrative that has to stay in the index is a quarter of the document. A
+file that is mostly narrative does not split as profitably as one that is mostly entries — which is
+a reason to keep splitting entry lists and not to go looking for narrative documents to split.
+
+### Checks
+
+- `.claude/scripts/roadmap-entry-consistency-gate.sh`: **OK**
+- `.claude/scripts/roadmap-tag-vocabulary-gate.sh`: **OK**
+- `.claude/scripts/doc-provenance-gate.sh`: **OK** (zero provenance blocks added — out of scope by
+  instruction; a pass with zero blocks is the expected result)
+- `.claude/scripts/graph-corpus-guard.sh`: **OK**, 369/420
+- `bash -n` on all three edited scripts: clean
+- body-layer, from inside `body-layer/` using the main checkout's `.venv` (this worktree has none —
+  gitignored):
+  - `ruff format --check .`: **1 file would be reformatted** — `research/2026-10-05-security-audit.md`,
+    the known pre-existing one. Confirmed as `main`'s: `git diff --stat main --` on that path is
+    empty, i.e. the file is byte-identical to `main` (`29217c0`) and untouched by this stage.
+  - `ruff check .`: **All checks passed**
+  - `mypy src`: **Success: no issues found in 54 source files**
+  - `pytest -q`: **1551 passed, 4 xfailed** — identical to Stage 2's baseline, as expected for a
+    docs-only change.
+
+### Places that name `todo/todo.md` or `todo/backlog.md` by path
+
+**Not edited** — the pointers keep every one of them resolving, and root `CLAUDE.md`/`AGENTS.md` are
+the user's to reword. Listed so that decision can be made from a complete set:
+
+| file | lines | what it says |
+|---|---|---|
+| `CLAUDE.md` | 53, 92, 348, 369, 383 | "Current priority"; Session Start step 2; Backlog Management opener; the `X-B<n>` prefix table; the moves-between-files rule |
+| `.claude/scripts/session-start.sh` | 17, 66 | the injected Session Start reminder's step 2 |
+| `.claude/scripts/status-page-refresh.sh` | 89 | names `todo/todo.md` among the page's sources |
+| `.claude/scripts/graph-corpus-files.sh` | 60 | a comment about the case-insensitive `*/BACKLOG.md` glob |
+| `.claude/skills/merge/SKILL.md` | 48, 77 | "only touch `todo/todo.md` / `todo/backlog.md` if …" |
+| `.claude/skills/status-page/SKILL.md` | 11, 49, 64 | the page's source list and the forward-only map |
+| `.claude/skills/explore/SKILL.md` | 69 | the out-of-corpus `grep` recipe |
+| `.claude/skills/integrity-audit/SKILL.md` | 3, 28, 65 | its description and read list |
+| `.claude/agents/architect.md` | 3, 140 | its description; *"do not start tasks marked `[?]` in todo/todo.md"* |
+| `.claude/agents/dod.md` | 193 | "only touch `todo/backlog.md` if …" |
+| `docs/status/README.md` | 25, 26 | which file carries which ids |
+
+`AGENTS.md` itself contains **no** by-path reference to either file (the task expected one; `grep`
+found none). The two highest-value rewordings, if the user wants any, are `CLAUDE.md:92` and
+`.claude/scripts/session-start.sh:66` — both tell every session to *read* `todo/todo.md`, which now
+means reading a pointer and following it one hop.
+
+### Notable Discoveries
+
+- **The dangerous consumer gap was the one the task predicted and the gate did not report.** Both
+  link gates discovered split directories as `*/ROADMAP` next to a `pyproject.toml` plus a
+  hardcoded `todo/backlog`. `todo/todo/` matched neither, so the gates would have passed while
+  never looking at 25 files — the exact "a gate that silently skips is worse than a failing one"
+  shape. A passing run was no evidence either way; only the mutation was.
+- **An index whose basename fits no existing pattern is a silent orphan generator.** Check 3 of the
+  consistency gate finds indexes by globbing `*-roadmap.md` / `*-backlog.md`. An index named
+  anything else makes every entry in its directory report "linked from zero indexes" — loudly, in
+  that case, which is the good direction. Worth knowing before Stages 4 and 5 invent a name.
+- **Two of the three files' "next mint" was already taken by an entry's own history.** Recorded
+  above as a rule for later stages. The tell is a sentence immediately above the un-IDed block:
+  *"Original item follows"*, *"Original text follows"*, or an explicit `(original text)` in the
+  bold lead.
+- **A mostly-narrative document splits at 70%, not 90%+.** `todo/todo.md`'s index is nine times its
+  median entry. The plan's per-file saving estimates assume an entry-dense file; that assumption is
+  visible for the first time here and should temper expectations for any future document that is
+  more prose than list.
+- **`body-layer/ROADMAP/` now holds two indexes, and "exactly one index per entry" became load-bearing
+  for the first time.** The gate's check 3 is per-directory by design and fired correctly on
+  `BL-B23`'s double listing. Stage 2 could not have exercised this, since the directory had only one
+  index then. Any future subproject that splits both a roadmap and a backlog into one directory
+  will hit the same thing with any entry its roadmap narrative wants to mention.
+- **The worktree's `HEAD` was again a strict ancestor of the named tip** (`29217c0` vs
+  `4b08b52`, 1 commit behind — Stage 2's own harvest). Fast-forwarded per AGENTS.md rule 4 before
+  reading anything. Worth noting that the stale commit did not contain
+  `plans/obsidian-links-and-tags/implementation.md`, `docs/DOC_CONVENTIONS.md` or
+  `body-layer/ROADMAP/` at all — i.e. none of this stage's primary inputs existed in the tree as
+  created. That is the "a stale base is dangerous for inputs" case AGENTS.md records, met for the
+  second time.
