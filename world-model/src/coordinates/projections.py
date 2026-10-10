@@ -71,4 +71,36 @@ THEATRE_PROJECTIONS: dict[str, TmercParams] = {
         ),
         confidence="confirmed",
     ),
+    "Caucasus": TmercParams(
+        central_meridian=33,
+        false_easting=-99517.0,
+        false_northing=-4998115.0,
+        scale_factor=0.9996,
+        lat_0=0,
+        source=(
+            "pydcs (github.com/pydcs/dcs) parameters (-99516.9999999732, "
+            "-4998114.999999984), rounded; independently reproduced by a fit "
+            "against all 164 Beacons.lua position/positionGeo pairs (rounded "
+            "values: rms 0.039m, max 0.066m). Not yet checked against a live "
+            "coord.LOtoLL probe -- see "
+            "world-model/research/2026-10-05-kola-caucasus-theatre-recon.md."
+        ),
+        confidence="provisional",
+    ),
+    "Kola": TmercParams(
+        central_meridian=21,
+        false_easting=-62702.0,
+        false_northing=-7543625.0,
+        scale_factor=0.9996,
+        lat_0=0,
+        source=(
+            "pydcs (github.com/pydcs/dcs) parameters (-62702.00000000087, "
+            "-7543624.999999979), rounded; reproduced by a fit against all 69 "
+            "beacons.lua pairs (rounded values: rms 0.036m, max 0.057m; the "
+            "unrounded fit's own ~0.11m floor is unexplained, see the note). "
+            "Not yet checked against a live coord.LOtoLL probe -- see "
+            "world-model/research/2026-10-05-kola-caucasus-theatre-recon.md."
+        ),
+        confidence="provisional",
+    ),
 }

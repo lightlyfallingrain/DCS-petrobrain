@@ -161,3 +161,4 @@ itself carried three stacked copies of that warning until 2026-10-06; merged, no
 - [Obsidian links Stage1 review](project_obsidian_links_stage1_review.md) - APPROVED W/ MINOR; two gate gaps by.
 - [Obsidian gate fix round2](project_obsidian_gate_fix_round2_needs_revision.md) - NEEDS REVISION; fix introduced a false-negative.
 - [Obsidian gate round3 approved](project_obsidian_gate_round3_approved.md) - APPROVED; 3rd silent-degrade instance found, sized theoretical via grep.
+- [Caucasus Kola registration approved](project_caucasus_kola_registration_approved.md) - APPROVED; re-derive registry numbers against real DCS install, not the note.

@@ -33,6 +33,7 @@ EXPECTED_TOWN_COUNT: dict[str, int] = {
     "Syria": 1182,
     "Afghanistan": 1225,
     "Caucasus": 1759,
+    "Kola": 787,
 }
 
 _TABLE_START = "towns = {"
