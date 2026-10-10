@@ -37,6 +37,5 @@
   build on the discriminate prompt's `BECAUSE` evidence, and this stage's live sortie is the first
   chance to learn whether the 7-token, no-slot `CLASSIFY_COMMAND_VOCABULARY` (deliberately narrowed
   from an alternative ~43-token version the folded-in branch had built) under-serves real
-  utterances before either downstream piece is built further. This entry flips to `[x]`/merged on
-  merge, per the roadmap-discipline rule below.
+  utterances before either downstream piece is built further.
 
