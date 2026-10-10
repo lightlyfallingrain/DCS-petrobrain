@@ -58,6 +58,5 @@
   main's 1177/4 — verified against an isolated `git archive` of the branch tip, not the working
   checkout, per the standing pytest/PYTHONPATH trap memory). Reviewer and Security both APPROVED
   after their respective required fixes were applied and re-reviewed. **Live acceptance
-  outstanding** — card at `docs/acceptance/2026-09-25-position-belief-sortie.md`. This entry
-  flips to `[x]`/merged on merge, per the roadmap-discipline rule below.
+  outstanding** — card at `docs/acceptance/2026-09-25-position-belief-sortie.md`.
 

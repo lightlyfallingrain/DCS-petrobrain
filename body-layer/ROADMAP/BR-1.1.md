@@ -30,6 +30,5 @@
   `docs/acceptance/2026-09-25-brain-layer-stage1-sortie.md`);
   with no real model behind the wire, the only judgeable things are whether the cockpit stays
   responsive while the brain "thinks," whether stand-by timing lands right, and whether hearing
-  Petrovich answer at all (instead of silence) feels right. This entry flips to `[x]`/merged on
-  merge, per the roadmap-discipline rule below.
+  Petrovich answer at all (instead of silence) feels right.
 
