@@ -1935,10 +1935,16 @@ def _is_air_defence(facts: dict[str, object]) -> bool:
     strict widening, enumerated rather than argued**: `parent_class_of`
     (via `classification._op_class_of`) early-returns any non-default
     `OP_*` string and otherwise delegates to `profile_for`, so it agrees
-    with the old lookup everywhere the old lookup resolved. Checked
-    across all 10 declared `op_class` values and all 128 keyword entries
-    in `perception.object_model`: **0 verdicts lost, 4 gained** --
-    exactly `OP_SRSAM`, `OP_MRSAM`, `OP_LRSAM`, `OP_SPAAG`.
+    with the old lookup everywhere the old lookup resolved. Re-run
+    2026-10-10 over **1060 distinct candidate values**: all 10 declared
+    `op_class` values, all 131 keyword entries in `perception.
+    object_model` (`_KEYWORD_PROFILES` 70 + `_REPORTING_NAME_KEYWORD_
+    PROFILES` 61), and all 595 real DCS type names in `perception.
+    reporting_names`' mapping plus its reporting-name values. Each value
+    resolved both ways (`object_model.profile_for(v).op_class` vs
+    `classification.parent_class_of(v)`) and tested for `AIR_DEFENSE_OP_
+    CLASSES` membership: **0 verdicts lost, 4 gained** -- exactly
+    `OP_SRSAM`, `OP_MRSAM`, `OP_LRSAM`, `OP_SPAAG`.
     (`OP_ZU23` was already covered by accident, because the literal
     string matches that table's own `"zu23"` keyword.)
 

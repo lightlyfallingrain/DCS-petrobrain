@@ -43,8 +43,12 @@ class-level vocabulary into a type-name resolver.
 
 **The switch is a strict widening, enumerated rather than argued.**
 `classification._op_class_of` early-returns any non-default `OP_*` string and otherwise delegates to
-`profile_for`, so it agrees with the old lookup everywhere the old lookup resolved. Checked across
-all 10 declared `op_class` values and all 128 keyword entries in `perception.object_model`:
+`profile_for`, so it agrees with the old lookup everywhere the old lookup resolved. Enumerated over
+**1060 distinct candidate values** — all 10 declared `op_class` values, all **131** keyword entries
+in `perception.object_model` (`_KEYWORD_PROFILES` 70 + `_REPORTING_NAME_KEYWORD_PROFILES` 61), and
+all **595** real DCS type names in `perception.reporting_names`' mapping plus its reporting-name
+values. Each resolved both ways — `object_model.profile_for(v).op_class` against
+`classification.parent_class_of(v)` — and tested for `AIR_DEFENSE_OP_CLASSES` membership:
 
 - **0 air-defence verdicts lost.**
 - **4 gained:** `OP_SRSAM`, `OP_MRSAM`, `OP_LRSAM`, `OP_SPAAG`.
@@ -198,3 +202,86 @@ audio-adapter, run to confirm untouched: **255 passed / 1 skipped**, matching ba
 - No new constant introduced; `AIR_DEFENSE_OP_CLASSES` was reused.
 - `BL-B47`'s own entry file is absent from this worktree, as expected — it was filed on
   `chore/file-bl13-review-findings`.
+
+---
+
+## Round 2 — Reviewer's one required fix: the cited keyword-entry count
+
+`plans/air-defence-class-level/review.md` "Required Fixes" item 1. Documentation only; **no code
+change**, and `_is_air_defence`'s body is byte-identical to round 1.
+
+### What was wrong
+
+Three places cited *"all 128 keyword entries in `perception.object_model`"*. There is no 128 in that
+module. The real figure is **131**, and more importantly the sentence did not say *which* tables it
+had counted, which is what made the error unresolvable by the next reader.
+
+### Re-run, not copied
+
+The enumeration was re-executed from scratch rather than the Reviewer's figures being transcribed —
+a script in the scratchpad importing from this worktree's own `src/` (asserted: `object_model.
+__file__` resolved to `…/agent-ae7f3106d19607b03/body-layer/src/perception/object_model.py`), run
+with the root checkout's `body-layer/.venv/bin/python` and `PYTHONPATH=src:../world-model/src`.
+
+| quantity | measured |
+|---|---|
+| `len(_KEYWORD_PROFILES)` | **70** |
+| `len(_REPORTING_NAME_KEYWORD_PROFILES)` | **61** |
+| total keyword entries | **131** |
+| `len(reporting_names._load_mapping())` | **595** |
+| declared `op_class` values | **10** (`OP_ARMORED`, `OP_GROUPSOMETHING`, `OP_INFANTRY`, `OP_LRSAM`, `OP_MRSAM`, `OP_SHIP`, `OP_SPAAG`, `OP_SRSAM`, `OP_TRUCK`, `OP_ZU23`) |
+| candidate values, raw / **unique** | 1331 / **1060** |
+| verdicts **lost** (`profile_for` air defence, `parent_class_of` not) | **0** |
+| verdicts **gained** | **4** — `OP_LRSAM`, `OP_MRSAM`, `OP_SPAAG`, `OP_SRSAM` |
+
+Candidate set = both keyword tables' keys + the 10 `op_class` values + every key *and* every value
+of the 595-row `reporting_names` mapping, deduplicated. Each value was resolved both ways
+(`object_model.profile_for(v).op_class` against `classification.parent_class_of(v)`) and tested for
+`AIR_DEFENSE_OP_CLASSES` membership; the script exits non-zero unless lost is empty and gained is
+exactly those four, and it exited 0.
+
+**Agrees with the Reviewer on every figure** — 1060 candidates, 595 mapping rows, 131 entries,
+0 lost / exactly 4 gained. So the conclusion is unchanged and strictly stronger than round 1
+claimed: the widening was verified over 1060 values, not the ~141 round 1 actually covered.
+
+### Files Changed (round 2)
+
+- `body-layer/src/belief/speech.py` — `_is_air_defence` docstring: 128 → 131, with the table split
+  (70 + 61), the 595 mapping rows, the 1060-value candidate set and the two resolver expressions
+  that were compared. Docstring only.
+- `body-layer/tests/test_speech.py` — same correction in
+  `test_is_air_defence_still_recognises_a_type_level_belief`'s docstring.
+- `plans/air-defence-class-level/implementation.md` — same correction in "The boundary decision",
+  plus this section.
+- `.claude/agent-memory/implementer/project_bl_b47_air_defence_class_level.md` — the same figure was
+  wrong in memory, which is the copy that would have propagated the error to a future task.
+
+### Tests Added (round 2)
+
+**None.** The enumeration covered all 1060 values and found nothing the existing 21 tests miss: the
+5 class-level params, the 4 type-level params and the 8 negatives already bracket every distinct
+behaviour the sweep exhibits (early-return `OP_*`, keyword delegation, the default bucket, and
+unresolvable free text). A test asserting "0 lost / 4 gained" would have to either re-import the
+predicate it is checking — the trap in
+[[feedback_equivalence_test_must_own_its_reference_arithmetic]] — or hard-code the two tables,
+making it a change detector on `object_model` rather than a guard on this predicate.
+
+### Checks (round 2)
+
+- body-layer — `ruff format --check src tests`: pass · `ruff check .`: pass · `mypy src`: pass ·
+  `pytest`: **1632 passed, 4 xfailed** (baseline, unchanged)
+- audio-adapter — `ruff check .`: pass · `mypy src`: pass · `pytest`: **255 passed, 1 skipped**
+  (baseline, unchanged)
+
+### Notable Discoveries (round 2)
+
+- **`object_model` has two keyword tables and the wrong figure came from treating it as one.** The
+  second pass (`_REPORTING_NAME_KEYWORD_PROFILES`, 61 entries) runs only when the raw-type pass
+  misses, so a `len()` on the first table alone reads as "the keyword table" and is 54% of it. Any
+  count cited against that module has to name both.
+- **The widest honest candidate set for a `profile_for`-vs-lattice comparison is the
+  `reporting_names` mapping, not the keyword tables.** The tables are *keywords* — substrings — so
+  enumerating them tests the matcher against its own vocabulary. The 595 mapping keys are real DCS
+  type names and its values are real reporting names, which is what the predicate actually sees at
+  runtime. That is 1060 of the 1060 candidates minus ~141, and it is where a trade would have shown
+  up if one existed.

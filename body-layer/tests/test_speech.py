@@ -2756,9 +2756,13 @@ def test_is_air_defence_still_recognises_a_type_level_belief(type_name: str) -> 
     fabricated one would answer `False` and read as a gap in the fix
     rather than as a bad fixture.
 
-    Enumerated rather than argued: across all 10 declared `op_class`
-    values and all 128 keyword entries in `perception.object_model`, the
-    switch loses 0 air-defence verdicts and gains 4."""
+    Enumerated rather than argued, re-run 2026-10-10 over 1060 distinct
+    candidate values -- all 10 declared `op_class` values, all 131
+    keyword entries in `perception.object_model` (`_KEYWORD_PROFILES` 70
+    + `_REPORTING_NAME_KEYWORD_PROFILES` 61), and all 595 real DCS type
+    names in `perception.reporting_names`' mapping plus its
+    reporting-name values: the switch loses 0 air-defence verdicts and
+    gains 4."""
     assert _is_air_defence(_classified_facts(type_name, SpecificityLevel.TYPE)) is True
 
 

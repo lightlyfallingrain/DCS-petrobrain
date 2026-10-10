@@ -13,9 +13,15 @@ default bucket. Fixed by routing through `_summary_op_class` (`classification.pa
 **The load-bearing structural fact, reusable beyond this fix:**
 `classification._op_class_of` is a **strict superset** of `object_model.profile_for` — it
 early-returns any non-default `OP_*` string and otherwise delegates to `profile_for`. So switching a
-predicate from the latter to the former can only widen, never trade. Measured across all 10 declared
-`op_class` values and all 128 keyword entries: **0 verdicts lost, 4 gained.** Worth checking whether
+predicate from the latter to the former can only widen, never trade. Measured over 1060 distinct
+candidate values — all 10 declared `op_class` values, all **131** keyword entries
+(`_KEYWORD_PROFILES` 70 + `_REPORTING_NAME_KEYWORD_PROFILES` 61) and all **595** DCS type names in
+`reporting_names`' mapping plus its values: **0 verdicts lost, 4 gained.** Worth checking whether
 any *other* predicate still resolves a believed classification through `profile_for`.
+
+**The first write of this said "128 keyword entries"** and the Reviewer caught it: `len()` of only
+one of `object_model`'s two keyword tables plus a miscount. See
+[[feedback_cite_what_was_counted_not_just_how_many]].
 
 **`OP_ZU23` resolves through `profile_for` by accident** — the literal class name matches that
 table's own `"zu23"` keyword. So 4 of the 5 air-defence classes were broken and one was not. This is
