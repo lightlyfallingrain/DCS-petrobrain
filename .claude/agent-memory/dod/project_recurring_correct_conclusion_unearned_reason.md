@@ -36,7 +36,18 @@ exactly like a verified one in an acceptance card. This is the same failure as n
 was never executed — see [[feedback_verify_roadmap_prose_claims]], which is the narrower
 grep-the-"filed in X"-claims version of this pattern.
 
-**Occurrence count: 1st time filed as a pattern, but five instances within one branch**, which is
-why it is filed now rather than waiting for a second feature. If it appears on another branch,
-consider raising it at Architect/Reviewer stage as an explicit "state what would falsify this
-reason" step rather than catching it round by round.
+**Occurrence count: 2nd feature.** Filed on `feature/bl11-tick-cost` (five instances in one
+branch); recurred on `feature/bl13-crew-query-path` (2026-10-10) with **three more**, each caught by
+a Reviewer round rather than by the round that wrote it:
+
+| claim | what the code/data says |
+|---|---|
+| `relative` resolves "via `belief.attention`'s re-export" | no such re-export; `crew_console.py` imports `perception.gaze`'s public alias directly. Conclusion (same object) survives |
+| the legacy `report_*` tokens are "referenced by `LEGACY_F10_TOKENS` ordering" | that tuple holds seventeen `scan_*`/`watch_*`/`cancel_*` entries and **no** `report_*` — it never did. Retention still justified by four other consumers |
+| *"'mostly' needs at least one unclassified contact, so the count is never one"* | both halves false and measured: two *classified* contacts of different classes fire the hedge, and a count of one is reachable |
+
+The tell held exactly as predicted: all three cite a consumer, an importer, or a reachable state —
+each one grep or one render away. **This is now the single most-repeated finding class in this
+repo's reviews**, and it is being caught at Reviewer rather than prevented at Implementer. Worth
+raising as an explicit Implementer-stage habit — *when you write "because X", say what would make X
+false* — rather than a third branch's worth of rounds.
