@@ -219,3 +219,51 @@ all, and the keeper-eligibility silence shipped untested.
 skip the rule that matters. It also does not reach the one failure of drift: a test that could
 legitimately go red when written and became tautological later, when the code it imported was
 rewritten underneath it — for that, an equivalence test must not import its own subject.
+
+## When you write "because X", say what would make X false
+
+**Added 2026-10-11 by user direction**, after `BL-13`'s DoD reported *"correct conclusion, unearned
+reason"* on its second consecutive feature: five instances on `feature/bl11-tick-cost`, three more
+across `BL-13`'s three review rounds. **Every one was caught at Reviewer, and every one was one
+`grep` or one render from falsification before it was written.** The decision each comment defended
+was right; the reason given for it was not.
+
+What the three looked like, because the shape is more useful than the count:
+
+- a docstring citing a **`belief.attention` re-export that does not exist** — the import is direct,
+  and the two names are the same object, which is a *stronger* guarantee than the one claimed;
+- a comment asserting `LEGACY_F10_TOKENS` **references the legacy report tokens**. It holds
+  seventeen scan/watch/cancel tokens and no `report_*` token, and never did;
+- a comment saying a state is **unreachable** when it is reachable — found by *running* the
+  renderer, which produced the sentence the comment said could not occur.
+
+**So, before committing a comment or docstring that justifies something: name the one command that
+would prove it wrong, and run that command.** `grep` for the symbol you say is imported. Call the
+function you say returns the default. Render the branch you say cannot fire. If you cannot state
+what would falsify the claim, you do not yet know whether it is true — delete the reason and keep
+the decision, which costs a reader nothing and misleads nobody.
+
+**Why this is not pedantry about comments.** A wrong reason attached to a right decision is worse
+than no reason, because it is load-bearing for the *next* change: the reader who has to modify that
+code trusts the stated mechanism, and the first thing they do is reason from it. Two of the three
+above were justifications for *not* doing something, which is precisely the kind of claim nobody
+re-derives.
+
+### State the decomposition, not the total
+
+Same failure, numeric form, and the remedy is concrete. The sole required fix on the one-line
+`BL-B47` change was a count in prose: *"all 128 keyword entries in `perception.object_model`"*. The
+real figure is **131** — `_KEYWORD_PROFILES` 70 plus `_REPORTING_NAME_KEYWORD_PROFILES` 61. There
+are **two** keyword tables, the second running only when the first misses, so a `len()` on the one
+that reads as *"the keyword table"* is 54% of the population. 128 was neither table nor their sum.
+
+**A bare total is an assertion; a decomposition is a reproducible measurement.** Writing
+`70 + 61 = 131` tells the next reader what was counted, so a figure that disagrees later is
+distinguishable as *"the table grew"* rather than costing them an hour deciding whether the original
+was wrong. It also catches your own slips while you write: the same round's `10` declared
+`op_class` values is only checkable because the text says where they come from — harvesting them
+from the two profile tables alone gives **9**, the tenth being `DEFAULT_OP_CLASS`, which appears in
+neither table.
+
+So: when you cite a measurement, cite **what you counted and how**, not just how many. This is the
+seventh instance of a count-in-prose being the only defect on an otherwise clean change.
