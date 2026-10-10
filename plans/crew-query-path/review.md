@@ -389,3 +389,164 @@ rather than trusted; both reported counterfactuals reproduced; the guard's deriv
 directions and each of the nine new cases tied to a mutation that fails it; all five optional-claim
 corrections re-established at the source; and the one finding above measured by running the renderer
 rather than by reading it.
+
+---
+
+# Round 3 — Reviewer on the fix for the Security deep analysis's required finding
+
+Diff under review: **`6ec99f1..153efc0`**, one commit (*"Speak freshness for a stale SAM, not only
+when everything is stale"*) on `feature/bl13-crew-query-path`. Worktree HEAD was `e2e2164` (stale, as
+assumed), a strict ancestor; fast-forwarded to `153efc0` and verified by `git rev-parse`. All five
+input documents present and read in full. Rounds 1–2 (`a44401e`) and the two report documents
+(`985978b`, `6ec99f1`) were not re-reviewed.
+
+The whole round-3 diff is **purely additive — 612 insertions, zero deletions anywhere**, which
+settles most of the regression list mechanically rather than by inspection.
+
+### Review Summary
+
+`plans/crew-query-path/security.md`'s required fix 1 is **closed**, and closed in the shape the
+user's decision calls for rather than the shape the finding suggested. The marker fires for a stale
+air-defence contact in a mixed-staleness scene, survives both budget drops, names the oldest stale
+air-defence contact, and states an age that is true at every age it can be spoken at. The two
+divergences from the brief (its own named subject instead of an apposition; the rounded-minute rung
+instead of the user's literal phrase) are both correct, and both were flagged by the implementer
+rather than buried.
+
+**Claims verified independently, not read:**
+
+1. **The marker fires on the finding's own scene and is non-droppable.** Reproduced: the
+   1-fresh-plus-3-stale scene renders *"About twelve units, 1 o'clock through 4 o'clock, inside 2
+   kilometres, and one short range SAM, one long range SAM. The air defence is a couple minutes
+   old."* with `"Still checking"` and `"mostly"` both absent — i.e. after both drops fired.
+   Non-droppability proven by **mutation, not by reading the call site**: gating the append behind
+   `with_deferral` (counterfactual 3, the one that matters) gives **5 failed, 1606 passed**,
+   including the security-measured scene. The finding is reproduced by the perturbation and absent
+   without it. `shasum src/belief/speech.py` = `fd36e5a6…` before and after, byte-identical,
+   `git status --porcelain` empty.
+2. **The divergence from the brief is the right shape.** Confirmed at the source, not accepted:
+   `_summary_air_defence_clause` skips an `op_class` equal to `dominant_op_class`
+   (`speech.py:726`), so the clause genuinely is *absent* in the folded-dominant case — the
+   `"Two short range SAMs, at 2 o'clock, inside 2 kilometres."` scene has nothing to hang an
+   apposition on, and the new test covers exactly that. And the clause enumerates every in-scope
+   air-defence tier including fresh ones, so an apposition on it would hedge a contact seen a second
+   ago. Naming its own subject is correct. "Appended in every budget candidate" does make it
+   non-droppable — the loop is `((True, True), (False, True), (False, False))` and the append sits
+   above the `with_deferral` guard in all three.
+3. **The age phrase is true at every reachable age, and no constant was added.** Brute-forced
+   `_spoken_age_phrase` over the whole reachable range (16.1 s → 160 s at 0.1 s steps) against the
+   real `decay` values (`OBSERVED_WINDOW_S` = 16.0, `LOST_THRESHOLD_S` = 120.0): rungs flip at
+   **30.1 s** (→ *"about a minute old"*), **90.0 s** (→ *"a couple minutes old"*) and **150.1 s**
+   (unreachable from the pull path). No rung states a false age; the user's own phrase is preserved
+   on 90–120 s, which is the band he spoke it about. The function introduces **no named constant** —
+   only `round(ago_s / 60.0)` — and `decay.py` is absent from the diff.
+   It also cannot speak a floor-value age: `_is_stale` returns `False` for a non-numeric
+   `last_seen_ago_s`, so `oldest_ago_s` can never still be its `0.0` initialiser when `op_classes`
+   is non-empty. The `isinstance` re-check inside the loop is therefore redundant but harmless.
+4. **It names the oldest, not `stale[0]`.** `oldest_ago_s = max(...)` over the stale air-defence
+   subset, with a test that would say *"under a minute old"* if it under-claimed. The deferral
+   clause's `stale[0]` is untouched and still arbitrary — correctly out of scope, since it is no
+   longer load-bearing as a freshness signal.
+5. **Counterfactual 1 re-run as well as 3**, because a selectivity guard that no test defends is a
+   comment: dropping the `AIR_DEFENSE_OP_CLASSES` membership test gives **3 failed**, and the
+   accepted-trade test is one of them, red for the stated reason. So the trade is asserted as an
+   intention, not left implicit.
+6. **`BL-B47` does not reach the pull path — confirmed at the source, not from the report.**
+   Measured in the reviewed tree: `classification.parent_class_of("OP_SRSAM")` → `"OP_SRSAM"`, while
+   `object_model.profile_for("OP_SRSAM").op_class` → `"OP_GROUPSOMETHING"`. The new clause goes
+   through `_summary_op_class` (the lattice walk), so a `class`-level SAM belief *is* recognised;
+   a marker built on `_is_air_defence` would have been silently dead in the one scene it exists for.
+   `_is_air_defence` is untouched by the diff. This was the most consequential thing to check and it
+   holds.
+
+**Nothing regressed.** Zero deletions in the diff is the proof for most of it: `decay.py`,
+`belief/groups.py` and `speech._is_air_defence` are absent from the diff; Decision D's
+`_callout_may_speak` exclusion, Q1's band filter, Q2's mutation-verified air-defence regression and
+both mirror-pair membership tests are byte-unchanged; `render_report`/`REPORT_MAX_GROUPS` still
+present and unused; Stage 4/5 absent. **Zero existing tests modified** — confirmed mechanically
+(`git diff --numstat` shows `246 0` on `tests/test_speech.py`), so rounds 1–2's cases are exactly as
+I left them.
+
+**Checks re-run in the worktree** with the root checkout's venv binaries, cwd inside each
+subproject: body-layer `ruff format --check` (118 files), `ruff check`, `mypy src` (54 files) all
+clean, **1611 passed / 4 xfailed**; audio-adapter `ruff check`, `mypy src` (15 files) clean,
+**255 passed / 1 skipped**. The **+7** is exactly the seven new cases: the diff adds 7 `def test_`
+and removes none, and the one that loops asserts three ages inside a single case.
+
+**Performance constraint honoured.** The clause is computed once before `_assemble`, not per
+candidate, and is one extra O(n) pass. Measured directly at the sortie's 52-contact scale:
+**11 µs**, against `performance.md`'s 0.034 ms/query for everything BL-13 added and the 352 ms of
+pre-existing warm-cache enrichment the same poll body already pays. Nothing per-contact is added
+beyond that pass, and nothing new reaches the per-poll push path.
+
+**Plan Decision D's new note is accurate and does not overstate.** Every factual claim in it checks
+out (the 120 s/16 s asymmetry, the all-stale-only firing, the quote verbatim, the never-dropped
+placement, the unchanged prefix). It says plainly that some stale belief is now spoken as present
+tense *as an accepted trade*, which is what a later reader needs in order to tell a decision from a
+defect, and it is explicit that *"or otherwise decision-relevant"* is left unbuilt rather than
+implying the user scoped it to air defence alone. `implementation.md` Discovery 15 carries the one
+candidate (a moving contact, four `POSITION_HALF_LIFE_S` old) to the user as a question. Correct
+handling.
+
+### Required Fixes
+
+None.
+
+### Judgement for the record — 28 words against a 25-word budget, and two never-dropped clauses
+
+**Acceptable as it stands.** Confirmed by measurement: the finding's scene renders at **28 words**
+and the simpler fresh-infantry-plus-stale-LRSAM scene at exactly **25**. The overrun is 3 words, in
+the final candidate, absorbed by the pre-existing *"a too-long pointer beats no answer"* floor that
+round 1 already established and that is documented at the loop. The growth is bounded — both
+never-dropped clauses are air-defence-driven, so the worst case is pointer + tier list + one marker,
+with no unbounded path.
+
+**What it implies if the budget is later halved** (plan Q3, still open with the user, and
+`REPORT_SUMMARY_MAX_WORDS`'s own comment anticipating ~13): at 13 words the pointer alone — count,
+direction, band — is already 11–13 words, and the marker is a further 7–8. Every stale-air-defence
+answer would then overrun by roughly half, which means the constant would no longer be a budget on
+the summary at all, only on its droppable tail. So halving is not a tuning change that can be
+applied to this code as written; it forces a choice the user owns: a shorter marker form (an
+apposition reopens the fresh-tier hedging problem this round correctly avoided), or redocumenting
+the constant as a droppable-tail budget, or deciding which of pointer-versus-honesty yields in a
+hover. **Recommend that paragraph be the input to Q3** rather than rediscovered by whoever lowers
+the number. Not a fix now.
+
+### Optional Refinements
+
+- **The collective subject can over-claim staleness about a fresh tier.** With three distinct
+  air-defence tiers in scope, two stale and one fresh, the marker falls through to *"The air defence
+  is a couple minutes old."* — hedging the tier seen a second ago. Reachable but rare (it needs
+  three tiers in one band-filtered query), and it errs in the **safe** direction: over-hedging costs
+  a little precision, never the pilot's safety. Not worth a branch unless the user hears it.
+  (optional)
+- `OP_SPAAG` and `OP_ZU23` both display *"AAA"*, so one stale of each is two distinct `op_classes`
+  and falls to *"The air defence is…"* where *"The AAA is…"* would read better. Cosmetic. (optional)
+- The new Decision D note cites *"(Decision 6, Q2)"*. Q2 is local to this plan; "decision 6" is
+  `plans/post-review-fixes/explore-notes.md` item 6 (air-defence classes as the exception), which is
+  how `speech.py` cites its siblings elsewhere — but inside a plan whose own decisions are lettered
+  A–E, a bare "Decision 6" sends a reader looking in the wrong file. One path would fix it.
+  (optional)
+
+### Verdict
+
+**APPROVED.**
+
+The Security deep analysis's one required finding is closed, verified by reproducing the finding
+through mutation rather than by reading the fix. No required fixes. Next step is DoD.
+
+As in rounds 1 and 2, nothing here claims the feature "runs" — no agent can reach a live DCS
+session. What is covered is the matcher, the slot validation, the five filters, the summary wording
+including the selective freshness marker, and both seams, by **255** audio-adapter and **1611**
+body-layer tests. The pilot's acceptance step is a sortie on **`feature/bl13-crew-query-path`**:
+the D13 answer shape, whether the marker reads naturally over the intercom, and plan Q3 (whether 25
+words is too long in a hover) which is still open.
+
+### Review Confidence
+
+**Full read.** Every changed line of the round-3 diff read. Both gates re-run from the worktree
+rather than trusted. Three of the implementer's claims re-established by running code rather than
+reading it — counterfactuals 3 and 1 reproduced with the checksum confirmed byte-identical
+afterwards, the age ladder brute-forced across its whole reachable range against the real `decay`
+values, and the `parent_class_of`-versus-`profile_for` divergence measured in the reviewed tree. The
+word counts and the clause's per-query cost are measured, not estimated.

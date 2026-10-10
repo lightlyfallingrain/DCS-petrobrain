@@ -164,3 +164,4 @@ itself carried three stacked copies of that warning until 2026-10-06; merged, no
 - [Caucasus Kola registration approved](project_caucasus_kola_registration_approved.md) - APPROVED; re-derive registry numbers against real DCS install, not the note.
 - [BL-13 crew query path review](project_bl13_crew_query_path_review.md) - CHANGES REQUIRED; mass-noun fixtures masked a plural bug; infantry EAGER bridges 6 km.
 - [BL-13 round2 approved](project_bl13_crew_query_path_round2_approved.md) - APPROVED; break a derived guard set in BOTH directions, not just per-entry.
+- [BL-13 round3 selective freshness approved](project_bl13_round3_selective_freshness_approved.md) - APPROVED; zero-deletion diff settles a regression list; an honesty marker's failure mode is a false age.
