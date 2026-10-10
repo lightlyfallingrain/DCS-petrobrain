@@ -166,3 +166,5 @@ Write directly — the dir exists.
 - [A guard fixture must not pick a degenerate case](feedback_guard_fixture_must_not_pick_a_degenerate_case.md) — mass-noun classes made "One trucks" invisible to 3 tests; derive the set from the table.
 - [An honesty marker can be a new false claim](feedback_an_honesty_marker_can_be_a_new_false_claim.md) — the user's hedge was true only at the age they were shown; check the input range.
 - [BL-13 selective freshness marker](project_bl13_selective_freshness_marker.md) — a hedge on a suppressible clause is dead; two air-defence predicates, one works class-level.
+- [BL-B47 air defence class level](project_bl_b47_air_defence_class_level.md) — _op_class_of is a strict superset of profile_for; OP_ZU23 resolved by accident.
+- [Fixing a defect falsifies the prose that documented it](feedback_fixing_a_defect_falsifies_the_prose_that_documented_it.md) — 3 docstrings asserted the bug in present tense; none was in the task list.

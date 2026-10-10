@@ -27,6 +27,7 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     Event,
 )
+from belief.groups import AIR_DEFENSE_OP_CLASSES
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import (
     REPORT_SUMMARY_MAX_WORDS,
@@ -35,6 +36,7 @@ from belief.speech import (
     _contact_report_text,
     _format_range_km,
     _group_composition_clause,
+    _is_air_defence,
     _plural_unit_type_display,
     _respell_for_tts,
     _round_enrichment_fragment,
@@ -989,10 +991,12 @@ def test_render_report_summary_marks_a_stale_sam_the_air_defence_clause_skips() 
     -- and the stale SAM would be spoken as present tense with no signal.
 
     Also the case `BL-B47` would have killed: `_summary_op_class` resolves
-    `"OP_SRSAM"` through the lattice, where `_is_air_defence` goes through
-    `object_model.profile_for` and does **not** recognise a `class`-level
-    SAM at all. A marker built on that predicate would be silently dead in
-    exactly this scene."""
+    `"OP_SRSAM"` through the lattice, where `_is_air_defence` used to go
+    through `object_model.profile_for` and did **not** recognise a
+    `class`-level SAM at all, so a marker built on that predicate would
+    have been silently dead in exactly this scene. `BL-B47` is now fixed
+    and the predicate resolves through the lattice too -- this test still
+    pins the marker to `_summary_op_class`, which is its mechanism."""
     facts_list = [
         _summary_facts(op_class="OP_SRSAM", last_seen_ago_s=100.0, contact_id="C_1"),
         _summary_facts(op_class="OP_SRSAM", contact_id="C_2"),
@@ -2710,6 +2714,97 @@ def test_render_group_disclosure_new_class_arrival_is_a_delta() -> None:
     assert speech.text == "Armor, in the group."
 
 
+def _classified_facts(value: str, level: SpecificityLevel) -> dict[str, object]:
+    """The minimal `facts` shape `_is_air_defence` reads -- just the
+    `classification` sub-dict, since that is the only key it touches."""
+    return {"classification": {"value": value, "level": int(level)}}
+
+
+@pytest.mark.parametrize("op_class", sorted(AIR_DEFENSE_OP_CLASSES))
+def test_is_air_defence_recognises_a_class_level_belief(op_class: str) -> None:
+    """**The `BL-B47` case, and the one the predicate got wrong.** A belief
+    held at *class* level carries the `OP_*` string itself, which is what a
+    contact holds before it is identified to type -- at range, most of the
+    time.
+
+    Before the fix `_is_air_defence` resolved through `object_model.
+    profile_for`, which keyword-matches *type* designations, so four of
+    these five fell into the default bucket and were not air defence to
+    this predicate at all: measured, `profile_for("OP_SRSAM")` and
+    `profile_for("OP_LRSAM")` were both `OP_GROUPSOMETHING`. Only
+    `OP_ZU23` passed, and by accident -- the literal string matches
+    `perception.object_model`'s own `"zu23"` keyword entry.
+
+    Parametrised over `AIR_DEFENSE_OP_CLASSES` itself rather than a
+    hand-copied list, so a class added to that set is covered here
+    without anyone remembering to add it."""
+    assert _is_air_defence(_classified_facts(op_class, SpecificityLevel.CLASS)) is True
+
+
+@pytest.mark.parametrize(
+    "type_name",
+    ["SA-6 Kub LN", "ZSU-23-4 Shilka", "Osa 9A33 ln", "S-300PS 40B6M tr"],
+)
+def test_is_air_defence_still_recognises_a_type_level_belief(type_name: str) -> None:
+    """The coverage that already worked, pinned so the `BL-B47` widening
+    cannot be a trade. `parent_class_of` delegates to `profile_for` for
+    anything that is not an `OP_*` string, so these resolve by the same
+    keyword match as before.
+
+    Every designation here is a real entry in `perception.object_model`'s
+    own keyword table, not a plausible-looking DCS type name -- a
+    fabricated one would answer `False` and read as a gap in the fix
+    rather than as a bad fixture.
+
+    Enumerated rather than argued: across all 10 declared `op_class`
+    values and all 128 keyword entries in `perception.object_model`, the
+    switch loses 0 air-defence verdicts and gains 4."""
+    assert _is_air_defence(_classified_facts(type_name, SpecificityLevel.TYPE)) is True
+
+
+@pytest.mark.parametrize(
+    ("value", "level"),
+    [
+        ("OP_TRUCK", SpecificityLevel.CLASS),
+        ("OP_ARMORED", SpecificityLevel.CLASS),
+        ("OP_INFANTRY", SpecificityLevel.CLASS),
+        ("BMP-2", SpecificityLevel.TYPE),
+        ("OP_GROUPSOMETHING", SpecificityLevel.CLASS),
+        ("ground", SpecificityLevel.PRESENCE),
+        ("unknown", SpecificityLevel.UNKNOWN),
+        ("Slava cruiser is not a ground unit", SpecificityLevel.TYPE),
+    ],
+)
+def test_is_air_defence_rejects_a_non_air_defence_belief(
+    value: str, level: SpecificityLevel
+) -> None:
+    """The negative half of the bar. A widened predicate that answered
+    `True` for everything would pass every test above, so the gain is only
+    meaningful alongside these: the default bucket, the unresolvable free
+    text, and the three non-air-defence classes all still answer `False`.
+
+    `"OP_GROUPSOMETHING"` is the interesting one -- `parent_class_of`
+    early-returns a non-default `OP_*` string, so the default bucket's own
+    name has to be excluded explicitly rather than falling out of the
+    `OP_` prefix test."""
+    assert _is_air_defence(_classified_facts(value, level)) is False
+
+
+def test_is_air_defence_answers_false_for_facts_without_a_classification() -> None:
+    """The one behavioural side effect of routing through `_summary_op_
+    class`: a `facts` dict with no (or a non-dict) `classification` now
+    answers `False` where it used to raise `KeyError`/`AssertionError`.
+
+    Strictly more lenient, and no caller relies on the raise -- both
+    push-path call sites check `_classification_level(facts)` first, which
+    would raise there instead. Pinned so the leniency is a recorded
+    decision rather than an accident of delegation."""
+    assert _is_air_defence({}) is False
+    assert _is_air_defence({"classification": None}) is False
+    assert _is_air_defence({"classification": {}}) is False
+    assert _is_air_defence({"classification": {"value": ""}}) is False
+
+
 def test_render_group_disclosure_air_defence_repeat_arrival_is_a_delta() -> None:
     """ "More air defence is always news" (Correction 2) -- a second instance
     of an *already-known* air-defence class still speaks a delta, unlike an
@@ -2749,6 +2844,104 @@ def test_render_group_disclosure_air_defence_repeat_arrival_is_a_delta() -> None
     # zsu" worked example (`plans/group-cohesion-redesign/explore-notes-
     # delta-taxonomy.md`).
     assert speech.text == "ZSU-23-4 Shilka, in the group."
+
+
+def test_render_group_disclosure_class_level_air_defence_repeat_arrival_is_a_delta() -> (
+    None
+):
+    """**The `BL-B47` case on the push path, call site 1 of 2** (the
+    new-arrival branch). Identical in shape to the type-level test above,
+    which is the point: that one passed throughout, because `"ZSU-23-4
+    Shilka"` is a *type* designation `object_model.profile_for` matched.
+
+    Hold the same belief at *class* level and the old predicate saw
+    `OP_SRSAM` fall into the default bucket, so `is_air_defence_repeat`
+    was `False`, so a second SAM joining a group that already had one was
+    **silent** -- the exact scene "more air defence is always news"
+    (Correction 2) exists to speak, in the state a contact is actually in
+    before it is identified to type."""
+    store = _store_with_direct_contacts(
+        [
+            _direct_contact(
+                "CONTACT_1",
+                0.0,
+                0.0,
+                class_raw="OP_SRSAM",
+                level=SpecificityLevel.CLASS,
+            ),
+            _direct_contact(
+                "CONTACT_2",
+                10.0,
+                0.0,
+                class_raw="OP_TRUCK",
+                level=SpecificityLevel.CLASS,
+            ),
+        ]
+    )
+    group = store.groups[0]
+    _mark_spoken_as_rendered(store, group, now_sim=0.0)
+
+    new_sam = _direct_contact(
+        "CONTACT_3", 20.0, 0.0, class_raw="OP_SRSAM", level=SpecificityLevel.CLASS
+    )
+    store._contacts[new_sam.id] = new_sam  # type: ignore[attr-defined]
+    store._groups.reconcile(list(store._contacts.values()), now_sim=1.0)  # type: ignore[attr-defined]
+    group = store.groups[0]
+    assert new_sam.id in group.member_contact_ids
+
+    speech = render_group_disclosure(store, group, now_sim=1.0)
+
+    assert speech is not None
+    assert speech.text == "Short range SAM, in the group."
+
+
+def test_render_group_disclosure_class_level_air_defence_among_unreported_is_a_delta() -> (
+    None
+):
+    """**The `BL-B47` case on the push path, call site 2 of 2** (the
+    `never_spoken_partially_covered` branch -- a group whose members were
+    each announced individually, so the grouping itself is not news).
+
+    Two SAMs already reported, a third never reported. Its class is
+    already known among the reported pair, so only
+    `is_air_defence_repeat` can carry it -- and with the old predicate it
+    could not, making the whole call return `None`. This is the second
+    call site, tested separately because the two branches build
+    `known_classes` from different member sets and a fix to one would not
+    have shown up in the other."""
+    store, group = _cohering_group_store(
+        [("OP_SRSAM", 2), ("OP_SRSAM", 2), ("OP_SRSAM", 2)]
+    )
+    member_ids = sorted(group.member_contact_ids)
+    already_reported = frozenset(member_ids[:2])
+
+    speech = render_group_disclosure(
+        store, group, now_sim=0.0, already_reported_contact_ids=already_reported
+    )
+
+    assert speech is not None
+    assert speech.text == "Short range SAM, in the group."
+
+
+def test_render_group_disclosure_non_air_defence_among_unreported_is_silent() -> None:
+    """The bound on the call site above. Same shape, same branch, a
+    non-air-defence class: three trucks, two already reported, so the
+    third's class is already known and nothing carries it. Silent --
+    "one more truck makes no difference" still holds.
+
+    Without this, call site 2's air-defence test would also pass under a
+    predicate that answered `True` for everything."""
+    store, group = _cohering_group_store(
+        [("OP_TRUCK", 2), ("OP_TRUCK", 2), ("OP_TRUCK", 2)]
+    )
+    member_ids = sorted(group.member_contact_ids)
+    already_reported = frozenset(member_ids[:2])
+
+    speech = render_group_disclosure(
+        store, group, now_sim=0.0, already_reported_contact_ids=already_reported
+    )
+
+    assert speech is None
 
 
 def test_render_group_disclosure_non_air_defence_repeat_arrival_is_silent() -> None:
