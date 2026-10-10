@@ -979,3 +979,39 @@ two functions that must agree (2026-09-19).
   captures the real stream (`capsys`, or a subprocess) with no `caplog` level override at all —
   that is the only way to tell "the call fires" from "the call is visible"
   (`plans/bl11-stage4-fail-closed/dod-check.md`, implementation.md round 4).
+- **A keyword table can be entirely correct and still be the wrong resolver for its caller — the
+  defect is the lookup choice, not the table's contents.** Distinct from the namespace-mismatch
+  entry above (where the table's own keywords were unreachable): here
+  `perception.object_model.profile_for` is right about everything it claims, but it keyword-matches
+  DCS *type* designations, and `speech._is_air_defence` was handing it a **believed classification**,
+  which at class level carries an `OP_*` lattice string instead. Measured,
+  `profile_for("OP_SRSAM")` and `profile_for("OP_LRSAM")` both fell into the default bucket, so four
+  of the five air-defence classes were not air defence to that predicate at all — on the push path,
+  for the one class the project singles out as the difference between a threat you can fly around
+  and one you cannot, and in the state a contact holds *before* identification, i.e. most of the
+  time at range. `OP_LRSAM` was silent for months behind a function that read as obviously correct.
+  **What hid it was coincidental coverage, not a missing test:** `OP_ZU23` worked by accident,
+  because the literal string `"OP_ZU23"` happens to match that table's own `"zu23"` keyword, so any
+  test sampling the set's members would have found nothing wrong as long as it sampled that one.
+  The fix was to resolve through `classification.parent_class_of` — the lattice walk the pull path
+  already used, so push and pull now agree by construction rather than by coincidence — and to
+  parametrise the test over `AIR_DEFENSE_OP_CLASSES` *itself* rather than a hand-picked sample.
+  Lesson: when a predicate takes a value from one vocabulary and resolves it through a table keyed
+  on another, the two being non-interchangeable is invisible at the call site; and when
+  parametrising over a set, check whether a *passing* member passes for the right reason, because
+  one coincidentally-working member masks the whole set (`BL-B47`,
+  `plans/air-defence-class-level/`).
+- **An ad-hoc probe that reconstructs a pipeline instead of driving it will skip the production
+  gate, and inflate every number it reports.** On `BL-B47` the Reviewer's and the Security
+  reviewer's *first* churn probes independently made the same error: both measured callout
+  repetition without applying the scheduler's real suppression check
+  (`content_signature == belief_group.last_spoken_signature → continue`, `callouts.py:1190`,
+  re-checked at `:1221`), and both got counts inflated enough to change the conclusion. Each was
+  caught only by re-running through the actual gate. Two independent parties building the same wrong
+  instrument is the signal: the error is not carelessness but that a hand-built probe naturally
+  contains the steps you are thinking about and omits the ones you are not — and a suppression check
+  is exactly what you are not thinking about when measuring how often something fires. Lesson: when
+  measuring the rate of a user-visible behaviour, drive the real entry point and assert the probe
+  reproduces a known-quiet baseline first (here: steady state is one line then silence for 19
+  ticks). A probe that cannot reproduce silence cannot be trusted about noise
+  (`plans/air-defence-class-level/security.md` §3, `review.md`).
