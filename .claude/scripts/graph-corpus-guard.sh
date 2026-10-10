@@ -13,6 +13,22 @@
 #
 # Usage: .claude/scripts/graph-corpus-guard.sh <corpus-file> [max-files]
 #
+# NOT A HOOK, AND THAT IS DELIBERATE -- recorded 2026-10-09 because that day's
+# integrity audit flagged it as the one doc-graph gate whose running depends on
+# someone following a document. Its two siblings
+# (roadmap-entry-consistency-gate.sh, roadmap-tag-vocabulary-gate.sh) are invoked
+# mechanically by commit-quality-gate.sh because what they guard changes on every
+# commit. The corpus does not: it changes only when a rebuild regenerates it, and
+# the only caller that can be wrong about it is /graph-refresh, which runs this as
+# a step (.claude/skills/graph-refresh/SKILL.md). A commit-time hook would have no
+# corpus to check and would fire on commits that cannot affect one. If a rebuild
+# ever starts happening outside that skill, wire it there rather than here.
+#
+# Count dropped 436 -> 428 on 2026-10-09 when graph-corpus-files.sh stopped
+# indexing the eight split POINTERS (root ROADMAP.md is not one and stays). Not a
+# ceiling change -- the entry files they point at were already in the corpus, so
+# only the redirect stubs left.
+#
 # Ceiling raised 420 -> 520, 2026-10-09, by the obsidian-links-and-tags Stages 4 and 5
 # conversion (world-model/ROADMAP.md -> world-model/ROADMAP/, aircraft-layer/ROADMAP.md ->
 # aircraft-layer/ROADMAP/, mission-interpreter/ROADMAP.md -> mission-interpreter/ROADMAP/).
