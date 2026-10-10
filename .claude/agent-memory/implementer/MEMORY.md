@@ -162,3 +162,4 @@ Write directly — the dir exists.
 - [Doc-conventions round-4 fixes](project_doc_conventions_round4_consumer_fixes.md) — roadmap-source.sh; why doc-provenance-gate stayed unwired; a bare assert crashed a gate.
 - [Group contact Stage 3b-i ellipse](project_group_contact_model_stage3bi_ellipse.md) - 2D ellipse replaced the scalar cluster radius; cross-range-only counting is dead if single-link.
 - [BR-1 Stage 2 duplicate-branch findings](project_br1_stage2_duplicate_branch_findings.md) — PICK unreachable from a bare ambiguous reference (provable); real-model latency ~5x D6's probe figure.
+- [BL-13 crew query path](project_bl13_crew_query_path.md) — a full-roster renderer leaks any upstream filter; parent_class_of != profile_for.
