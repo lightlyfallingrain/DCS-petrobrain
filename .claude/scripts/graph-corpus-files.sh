@@ -92,4 +92,31 @@ ACTIVE_PLAN="${GRAPH_ACTIVE_PLAN:-plans/inbound-speech}"
     find "$ACTIVE_PLAN" -name '*.md' 2>/dev/null
 } | grep -vE '^(\.claude/worktrees/|plans/archive/|graphify-corpus/|graphify-out/)' \
   | sort -u \
-  | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done
+  | while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        # Drop the split POINTERS (added 2026-10-09). The loops above deliberately
+        # list both a split document's old filename and its ROADMAP/ directory,
+        # because following the directory is what stopped the split dropping
+        # content out of the corpus. But the old filename is now a four-line
+        # redirect, and indexing it adds nothing except its own redirect text --
+        # so a query can return a pointer as a source, and "see ROADMAP/" leaks
+        # into the graph's vocabulary as if it were content. The entry files it
+        # points at are already in the corpus by the line above, so nothing is
+        # lost by excluding it. Eight pointers were being indexed; root ROADMAP.md
+        # is not a pointer and stays. Found by the 2026-10-09 integrity audit.
+        #
+        # roadmap-source.sh is the authority rather than a list of eight names,
+        # for the same reason the commit gates defer to it: a ninth split document
+        # needs no edit here. If the resolver is missing, the file is KEPT --
+        # for a corpus, including something stale is the recoverable direction
+        # and silently dropping content is the one this script exists to prevent.
+        case "$f" in
+            *ROADMAP.md|*BACKLOG.md|todo/todo.md|todo/backlog.md)
+                if [ -x .claude/scripts/roadmap-source.sh ] \
+                   && .claude/scripts/roadmap-source.sh --is-pointer "$f" >/dev/null 2>&1; then
+                    continue
+                fi
+                ;;
+        esac
+        printf '%s\n' "$f"
+    done
