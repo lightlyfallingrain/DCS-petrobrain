@@ -432,6 +432,18 @@ _BEARING_REPORT_TOKENS: dict[str, Sector] = {
     "report_bearing_nw": "NW",
 }
 
+#: `_SECTOR_SCAN_LABELS` inverted -- the compass *word* a slotted
+#: `report`'s `sector` slot carries (`audio_adapter.vocabulary.
+#: SECTOR_WORDS`, this seam's hand-synced mirror) back onto the `Sector`
+#: literal everything here already speaks. Derived rather than written out
+#: a second time, so the two cannot drift from each other on this side;
+#: `test_crew_console.py` asserts its membership against the eight words
+#: audio-adapter sends, which is what catches a drift across the seam
+#: (`plans/crew-query-path/plan.md` Decision E).
+_SECTOR_FOR_WORD: dict[str, Sector] = {
+    word: sector for sector, word in _SECTOR_SCAN_LABELS.items()
+}
+
 #: At most this many groups are spoken in one report, joined into one
 #: utterance (`plans/voice-command-completeness/plan.md` Decision 1b) --
 #: an uncalibrated placeholder pending a live sortie's judgment on whether
@@ -532,6 +544,23 @@ def _describe_token_for_confirm(
         if isinstance(follow_range_km, int):
             parts.append(f"{follow_range_km} km")
         return f"follow {' '.join(parts)}" if parts else "follow"
+    if token == "report":
+        # The slotted crew query's readback (`plans/crew-query-path/
+        # plan.md`), modelled on the `follow` branch above: compose the
+        # heard slots back into the phrase the pilot would recognise as
+        # his own, in the order decision 12 gives them -- *what*, *where*,
+        # *how far*. A slot this version does not yet filter on is still
+        # read back, because the confirm prompt's job is to expose a
+        # mishearing, and hiding a word Petrovich heard would defeat it.
+        report_parts: list[str] = []
+        for slot_name in ("descriptor", "clock", "sector", "relative", "band"):
+            value = slots.get(slot_name) if slots is not None else None
+            if slot_name == "clock":
+                if isinstance(value, int) and value in _CLOCK_REPORT_LABELS:
+                    report_parts.append(f"{_CLOCK_REPORT_LABELS[value]} o'clock")
+            elif isinstance(value, str):
+                report_parts.append(value)
+        return f"report {' '.join(report_parts)}" if report_parts else "report"
     bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
     if token in ("scan_bearing_deg", "report_bearing_deg") and isinstance(
         bearing_degrees, int
@@ -568,6 +597,12 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "scan_bearing_deg",
         "report_bearing_deg",
         "report_all",
+        # The slotted crew query (`plans/crew-query-path/plan.md`). Like
+        # `scan_bearing_deg`/`report_bearing_deg` above it is included even
+        # though every slot is optional: a zero-slot `report` is a legal
+        # whole-scene query, and audio-adapter resolves a bare "report" to
+        # `report_all` anyway, so this token only ever arrives with slots.
+        "report",
         "watch_nearest",
         "watch_nearest_air_defence",
         "follow",
@@ -1152,6 +1187,8 @@ class CrewConsole:
                 lines = self._handle_report(
                     now_sim, sector=_nearest_sector(bearing_degrees)
                 )
+        elif token == "report":
+            lines = self._handle_slotted_report(now_sim, slots)
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
@@ -1584,6 +1621,43 @@ class CrewConsole:
             relative_clock_hour=relative_clock_hour,
         )
         return [render_scan_readback(sector_label).text]
+
+    def _handle_slotted_report(
+        self, now_sim: float, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """`report|describe [<what>] [<where>] [<how far>]` -- the slotted
+        crew query's one dispatch branch (`plans/crew-query-path/plan.md`
+        Decision A, user decision 12). Reads the slots audio-adapter parsed
+        and calls `_handle_report`; the answer itself is that method's job,
+        unchanged.
+
+        **Every slot is validated, and an unrecognised value is dropped
+        rather than refused.** Slots arrive as JSON over the HTTP seam
+        (Decision E), so nothing here can assume a well-formed value --
+        this is the same graceful-degradation posture `bearing_degrees`
+        already takes in `handle_command`, and the honest failure for a
+        query is a wider answer, never silence. Mutual exclusion between
+        the three *where* slots is audio-adapter's (it returns a detected
+        recognition error before body-layer ever sees the token), so this
+        side only has to pick one if a non-adapter caller sends two: the
+        order below is clock, then sector, then relative, matching the
+        *where* precedence decision 12 states ("typically clock hand").
+
+        **Stage 1 reads `clock` and `sector` only**; `descriptor`,
+        `relative` and `band` are parsed and sent by audio-adapter already
+        and are deliberately ignored here until Stage 2 gives them a
+        filter. An ignored slot widens the answer, which is why shipping
+        the channel before the filters is safe."""
+        clock: int | None = None
+        sector: Sector | None = None
+        if slots is not None:
+            raw_clock = slots.get("clock")
+            if isinstance(raw_clock, int) and raw_clock in _CLOCK_REPORT_LABELS:
+                clock = raw_clock
+            raw_sector = slots.get("sector")
+            if isinstance(raw_sector, str):
+                sector = _SECTOR_FOR_WORD.get(raw_sector)
+        return self._handle_report(now_sim, clock=clock, sector=sector)
 
     def _handle_report(
         self,

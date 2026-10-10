@@ -16,7 +16,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Self
+from typing import Self, cast
 
 import pytest
 
@@ -3404,6 +3404,143 @@ def test_report_speaks_an_already_spoken_group_in_full(
     lines = console.handle_command("report_all", now_sim=1.0)
 
     assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
+
+
+# --- the slotted crew query (plans/crew-query-path/plan.md, BL-13) ---
+
+
+def test_slotted_report_sector_words_mirror_audio_adapters_table() -> None:
+    """This side of the `SECTOR_WORDS` <-> `_SECTOR_FOR_WORD` hand-synced
+    mirror (`plans/crew-query-path/plan.md` Decision E -- body-layer cannot
+    import `audio-adapter`, so the eight words are written down twice).
+    audio-adapter's `test_vocabulary.py` asserts the same membership
+    against its own table; between them, a word added or renamed on either
+    side fails a test rather than a sortie.
+
+    Spelled out literally rather than derived from `_SECTOR_SCAN_LABELS`:
+    deriving it would make this test agree with that table by
+    construction, which is exactly the agreement the seam does *not*
+    guarantee."""
+    from belief.crew_console import _SECTOR_FOR_WORD
+
+    assert set(_SECTOR_FOR_WORD) == {
+        "north",
+        "northeast",
+        "east",
+        "southeast",
+        "south",
+        "southwest",
+        "west",
+        "northwest",
+    }
+    assert _SECTOR_FOR_WORD["north"] == "N"
+    assert _SECTOR_FOR_WORD["southwest"] == "SW"
+
+
+def test_slotted_report_with_no_slots_answers_the_whole_scene(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero-slot `report` is a legal whole-scene query. audio-adapter
+    resolves a bare "report" to `report_all` before this token is ever
+    minted, so this is the defensive case (a non-adapter caller, or every
+    slot dropped as unrecognised) -- and it must answer, not refuse."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report", now_sim=0.0) == ["Clear."]
+
+
+def test_slotted_report_clock_matches_the_legacy_clock_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 1's channel test: the slotted token with a `clock` slot
+    answers exactly what `report_clock_3` answers. Driven through
+    `handle_command` twice on the same store so the two paths are compared
+    against each other rather than against a transcribed string -- the
+    claim is equivalence, and a pinned string would only test one side."""
+    store = ContactStore()
+    store.ingest(
+        [_observation_at(obs_id="OBS_E", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    legacy = console.handle_command("report_clock_3", now_sim=0.0)
+    slotted = console.handle_command("report", now_sim=0.0, slots={"clock": 3})
+
+    assert slotted == legacy
+    assert slotted == ["BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."]
+
+
+def test_slotted_report_sector_matches_the_legacy_bearing_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `sector` slot's half of the same claim, including the
+    rear-hemisphere carve-out: `report south` with a north-facing ownship
+    must refuse exactly as `report_bearing_s` does, never answer
+    "clear"."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert console.handle_command("report", now_sim=0.0, slots={"sector": "north"}) == [
+        "North, clear."
+    ]
+    assert console.handle_command("report", now_sim=0.0, slots={"sector": "south"}) == [
+        "Can't see south."
+    ]
+
+
+def test_slotted_report_drops_an_unrecognised_slot_value_rather_than_refusing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slots arrive as JSON over the HTTP seam, so no value can be
+    assumed well-formed. A garbage `sector`, an out-of-hemisphere `clock`
+    and a wrong-typed value each widen the answer instead of producing a
+    refusal or an exception -- the same graceful degradation
+    `bearing_degrees` already has, and the honest failure for a *query*."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    for slots in (
+        {"sector": "nowhere"},
+        {"clock": 6},
+        {"clock": "three"},
+        {"sector": 90},
+    ):
+        assert console.handle_command(
+            "report", now_sim=0.0, slots=cast("dict[str, int | str]", slots)
+        ) == ["Clear."], slots
+
+
+def test_slotted_report_is_dispatched_and_describable() -> None:
+    """The two registrations a new token needs beyond its handler:
+    membership in `DISPATCHED_COMMAND_TOKENS` (which is what routes a
+    confirm-band answer and a brain-layer reply to it at all), and a
+    `_describe_token_for_confirm` readback that is not the raw token
+    name."""
+    assert "report" in DISPATCHED_COMMAND_TOKENS
+    assert "report" not in NO_RETURN_VALUE_COMMAND_TOKENS
+    assert _describe_token_for_confirm("report") == "report"
+    assert _describe_token_for_confirm("report", {"relative": "left"}) == "report left"
+    assert _describe_token_for_confirm("report", {"clock": 2}) == "report two o'clock"
+    assert (
+        _describe_token_for_confirm("report", {"descriptor": "armor", "clock": 2})
+        == "report armor two o'clock"
+    )
+
+
+def test_slotted_report_confirm_readback_names_a_slot_it_cannot_yet_filter_on() -> None:
+    """The confirm prompt's job is to expose a mishearing, so it reads
+    back every slot Petrovich heard -- including `band`, which Stage 1
+    does not yet filter on. Hiding a word he heard would defeat the
+    prompt; this is the same reasoning that makes `report_bearing_deg`
+    read back the *sector* it will act on rather than the raw number."""
+    assert (
+        _describe_token_for_confirm("report", {"clock": 2, "band": "near"})
+        == "report two o'clock near"
+    )
 
 
 def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(

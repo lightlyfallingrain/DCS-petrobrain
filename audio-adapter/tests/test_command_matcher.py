@@ -9,8 +9,11 @@ needs genuinely tied ratios rather than "two similar-looking phrases"."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+import command_matcher
 from command_matcher import (
     MATCH_FLOOR,
     SEPARATION_MIN,
@@ -46,16 +49,28 @@ def test_verb_floor_and_match_floor_are_the_measured_bench_cutoff() -> None:
 
 def test_exact_phrase_hits_every_token_family() -> None:
     """One canonical phrase from each of the vocabulary's shapes -- a
-    plain command, a compass scan, a watch/cancel legacy token, a clock
-    report -- all resolve at `match_ratio=1.0`, verb-anchored, unambiguous."""
+    plain command, a compass scan, a watch/cancel legacy token, a bare
+    report -- all resolve at `match_ratio=1.0`, verb-anchored, unambiguous.
+
+    **`"report east"` and `"report three o'clock"` used to be two of these
+    cases and are deliberately gone** (`plans/crew-query-path/plan.md`
+    Decision A, Stage 1): the slotted report branch now sits in front of
+    the phrase table, so both resolve to the `report` token carrying a
+    parsed slot instead of to `report_bearing_e`/`report_clock_3`. That is
+    the whole point of the change rather than a regression -- the legacy
+    tokens stay in `vocabulary.TOKENS` for the F10 path, the bench corpus
+    and body-layer's dispatch, but voice no longer reaches them. Their new
+    outcome is pinned by `TestSlottedReport.test_legacy_report_forms_now_
+    resolve_to_the_slotted_token` below, so the move cannot go unnoticed.
+    Bare `"report"` keeps this test's report-family coverage, and is the
+    one report form that must still resolve to a legacy token."""
     cases = {
         "scan left": "scan_left",
         "watch nearest": "watch_nearest",
         "watch nearest air defence": "watch_nearest_air_defence",
         "cancel task": "cancel_task",
         "scan north": "scan_bearing_n",
-        "report east": "report_bearing_e",
-        "report three o'clock": "report_clock_3",
+        "report": "report_all",
         # Stage 5 (plans/voice-command-completeness/plan.md Decision 5) --
         # the new ownship-relative o'clock scan family, matched the same
         # way its report-family sibling already is above.
@@ -665,3 +680,205 @@ class TestDescribeSynonym:
             "the scribe wrote it down",
         ):
             assert match_transcript(phrase).token != "report_all", phrase
+
+
+# --- the slotted crew query (plans/crew-query-path/plan.md Decision A,
+# Stage 1) -- `report|describe [what] [where] [how far]` ---
+
+
+class TestSlottedReport:
+    """`report|describe [<what>] [<where>] [<how far>]`, every slot
+    optional, resolving to the single `report` token with its slots parsed.
+
+    Every case here was measured against `match_transcript` **before** the
+    feature was written (`plans/crew-query-path/plan.md`, "What I measured
+    before designing"), so each one is a regression against a real
+    observed outcome rather than a guess about one."""
+
+    def test_report_left_is_not_report_east(self) -> None:
+        """`BL-B28`, and the measurement that reframed it. `"report left"`
+        resolved to `token='report_bearing_e'` at ratio **0.75** with
+        `ambiguous=True` -- *report east*, a silent wrong-direction match,
+        not the "missing right-hand form" the backlog item described.
+        `"left"` landed on `"east"` purely because `"report left"` and
+        `"report east"` differ in one of two words."""
+        result = match_transcript("report left")
+        assert result.token == "report"
+        assert result.slots == {"relative": "left"}
+        assert result.ambiguous is False
+        # The specific wrong answer this closes. Asserted by name because
+        # "not a cardinal" is the claim, and a future reordering that
+        # reopened it would otherwise just look like a different token.
+        assert result.token != "report_bearing_e"
+
+    def test_report_right_resolves_symmetrically(self) -> None:
+        """The other half of `BL-B28`: `"report right"` measured
+        `token=None`, ratio 0.0 -- a say-again where `"report left"` got a
+        confident wrong direction. Both now resolve, and to the same
+        frame."""
+        result = match_transcript("report right")
+        assert result.token == "report"
+        assert result.slots == {"relative": "right"}
+
+    def test_no_relative_form_can_resolve_to_a_cardinal(self) -> None:
+        """Stage 1's stated acceptance criterion, over all four relative
+        words and both verbs: none of them may land on a `report_bearing_*`
+        token."""
+        for verb in ("report", "describe"):
+            for word in ("left", "right", "ahead", "full"):
+                result = match_transcript(f"{verb} {word}")
+                assert result.token == "report", (verb, word)
+                assert result.slots == {"relative": word}, (verb, word)
+
+    def test_describe_is_a_substitutable_verb_not_just_an_anchor(self) -> None:
+        """What `0caa39e` left undone. `"describe"` shipped 2026-10-05 as a
+        bare `report_all` phrasing, which made it *anchorable* but not
+        *substitutable*: `"describe two o'clock near"` came back
+        `token=None` while `"report two o'clock near"` worked. Every
+        slotted form must now resolve identically under either verb."""
+        for form in (
+            "left",
+            "two o'clock",
+            "north",
+            "armor north",
+            "group near",
+            "two o'clock near",
+        ):
+            report = match_transcript(f"report {form}")
+            describe = match_transcript(f"describe {form}")
+            assert report.token == "report", form
+            assert describe.token == report.token, form
+            assert describe.slots == report.slots, form
+
+    def test_each_slot_parses_on_its_own(self) -> None:
+        cases: list[tuple[str, dict[str, int | str]]] = [
+            ("report armor", {"descriptor": "armor"}),
+            ("report two o'clock", {"clock": 2}),
+            ("report north", {"sector": "north"}),
+            ("report left", {"relative": "left"}),
+            ("report near", {"band": "near"}),
+        ]
+        for text, expected in cases:
+            result = match_transcript(text)
+            assert result.token == "report", text
+            assert result.slots == expected, text
+
+    def test_all_three_slot_kinds_together(self) -> None:
+        result = match_transcript("report armor two o'clock near")
+        assert result.token == "report"
+        assert result.slots == {"descriptor": "armor", "clock": 2, "band": "near"}
+
+    def test_the_band_was_already_being_heard_and_discarded(self) -> None:
+        """Measured finding 3: `"report 2 o'clock close"` resolved to
+        `report_clock_2` at 0.75 -- the extra word cost score but cleared
+        `MATCH_FLOOR`, so the *where* worked and the *how far* was dropped
+        without trace. The band slot is therefore not new recognition
+        surface, it is stopping a silent drop. `"close"` is a `near`
+        synonym and a digit `"2"` reaches the clock parser as `"two"`."""
+        result = match_transcript("report 2 o'clock close")
+        assert result.token == "report"
+        assert result.slots == {"clock": 2, "band": "near"}
+
+    def test_two_where_slots_are_a_detected_error_not_a_guess(self) -> None:
+        """`clock`/`sector`/`relative` all answer *where*; a transcript
+        carrying two is a recognition failure, not a conjunction. The
+        outcome is deliberately the shape `parse_bearing`'s illegal-bearing
+        branch already uses -- `token=None, verb_anchored=True` -- which
+        earns a "say again" rather than a silent pick of one frame."""
+        for text in (
+            "report left north",
+            "report two o'clock north",
+            "describe two o'clock left",
+        ):
+            result = match_transcript(text)
+            assert result.token is None, text
+            assert result.verb_anchored is True, text
+            assert result.ambiguous is False, text
+
+    def test_a_band_alongside_two_where_slots_still_rejects(self) -> None:
+        """The exclusion is over the three *where* slots only -- a band
+        present as well must not rescue the transcript."""
+        result = match_transcript("report left north near")
+        assert result.token is None
+        assert result.verb_anchored is True
+
+    def test_zero_slot_report_still_falls_through_to_report_all(self) -> None:
+        """The one report form that must *not* reach the slotted token:
+        the legacy flat command, under all five of its phrasings."""
+        for text in (
+            "report",
+            "report contacts",
+            "what do you see",
+            "describe",
+            "describe contacts",
+        ):
+            result = match_transcript(text)
+            assert result.token == "report_all", text
+            assert result.slots is None, text
+
+    def test_legacy_report_forms_now_resolve_to_the_slotted_token(self) -> None:
+        """The behaviour change `test_exact_phrase_hits_every_token_family`
+        used to pin the other way (see that test's docstring). This is not
+        purely additive: `"report east"`/`"report three o'clock"` are
+        shipped forms whose resolved token changes. The legacy tokens stay
+        reachable from the F10 path and body-layer's dispatch; voice now
+        routes them through the slot."""
+        east = match_transcript("report east")
+        assert east.token == "report"
+        assert east.slots == {"sector": "east"}
+        clock = match_transcript("report three o'clock")
+        assert clock.token == "report"
+        assert clock.slots == {"clock": 3}
+
+    def test_numeric_bearings_still_take_the_bearing_branch(self) -> None:
+        """The bearing branch runs ahead of both slot branches, so
+        `report_bearing_deg` is untouched -- and `"bearing"` is not a slot
+        word, so the report branch would not have claimed it anyway."""
+        result = match_transcript(bearing_phrase("report", 320))
+        assert result.token == "report_bearing_deg"
+        assert result.slots == {"bearing_degrees": 320}
+
+    def test_follow_branch_is_tried_before_the_report_branch(self) -> None:
+        """Branch order is load-bearing and is pinned here rather than
+        left to the comment that explains it. `"follow"`/`"report"` are far
+        apart under `SequenceMatcher`, so the two do not contend today --
+        but the follow branch's own comment records this collision class
+        (a clock-only `"follow two o'clock"` scoring against `"report two
+        o'clock"`), and the shared `clock` slot means a reordering would
+        send one verb's utterance to the other's handler."""
+        assert match_transcript("follow two o'clock").token == "follow"
+        assert match_transcript("report two o'clock").token == "report"
+        # The source order itself, so moving the report branch above the
+        # follow branch fails here and not only in a cockpit.
+        source = (Path(command_matcher.__file__)).read_text(encoding="utf-8")
+        assert source.index("_parse_follow_slots(text)") < source.index(
+            "_parse_report_slots(text)"
+        )
+
+    def test_adversarial_sentences_do_not_falsely_fire_a_report(self) -> None:
+        """The report branch runs on every transcript whose first word
+        fuzzy-matches `report`/`describe`, which includes ordinary English
+        ("report says otherwise", and "scribe" sits a 0.857 ratio from
+        "describe"). None of them carries a slot word, so none may
+        resolve."""
+        for text in (
+            "report says otherwise",
+            "report quietly",
+            "describe the mission to me",
+            "the scribe wrote it down",
+            "describing the situation",
+        ):
+            result = match_transcript(text)
+            assert result.token is None, text
+
+    def test_a_landmark_where_degrades_rather_than_saying_again(self) -> None:
+        """Stage 5's deferred landmark slot: a spoken `"report south of
+        <place>"` must not become a say-again while it is unbuilt.
+        Measured outcome is slightly better than the plan predicted -- it
+        does not degrade to a *bare* report but to the `south` sector,
+        because "south" is a cardinal word the new parser legitimately
+        hears. Honest either way: the pilot gets a directional report
+        rather than a refusal."""
+        result = match_transcript("report south of gemerek")
+        assert result.token == "report"
+        assert result.slots == {"sector": "south"}
