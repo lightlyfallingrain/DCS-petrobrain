@@ -13,7 +13,9 @@ this repo's own merge skill prescribes, so an agent in a documented worktree cou
 through `Write`/`Edit` at all. It now asks `git worktree list` instead of matching a hardcoded
 prefix.
 
-**All eight Tier 1 findings are closed. The seven Tier 2 items are untouched.**
+**All eight Tier 1 findings are closed.** The seven Tier 2 items were taken on 2026-10-10
+(`fix/integrity-tier2`): six changed, one — brain-layer's missing `ROADMAP/` — answered with a
+recorded decision not to change it, and one was a healthy-state record with nothing to do.
 
 Inventory enumerated fresh: 7 `CLAUDE.md` (root + 6 subprojects from `git ls-files '*/pyproject.toml'`),
 `AGENTS.md`, `docs/AGENT_ROLES.md`, `docs/PROCESS.md`, `docs/DOC_CONVENTIONS.md`, 8 agent roles,
@@ -423,11 +425,25 @@ script was run directly, per `AGENTS.md` rule 4.
 
 ## Tier 2 — possible improvements
 
+**All six actionable items were done 2026-10-10**, user direction (*"do tier 2 fixes"*), on
+`fix/integrity-tier2`. Each carries a **Done** line. One was answered with a decision rather than a
+change and says so; the seventh entry was a healthy-state record with nothing to do.
+
 - **Nine pointer files are still in the graph corpus** (`graph-corpus-files.sh` output: every
   `<sub>/ROADMAP.md`, `body-layer/BACKLOG.md`, both `todo/` pointers, plus root `ROADMAP.md` which
   belongs). A query can return a four-line redirect as a source. Harmless next to the pre-split
   staleness risk and the guard's count is comfortable (436/520), but the eight pointers contribute
   nothing but their own redirect text to the graph's vocabulary.
+
+  **Done.** `graph-corpus-files.sh` now drops a listed file that
+  `roadmap-source.sh --is-pointer` accepts. Deferring to the resolver rather than excluding eight
+  names means a ninth split document needs no edit — the same reason the commit gates defer to it.
+  The loops still list both the old filename *and* the `ROADMAP/` directory, deliberately: following
+  the directory is what stopped the split dropping content, and that stays. **If the resolver is
+  missing the file is kept** — for a corpus, including something stale is the recoverable direction,
+  and silently dropping content is the failure this script exists to prevent. Measured 436 → 428,
+  exactly the eight pointers; root `ROADMAP.md` is not a pointer and stays; all 254 entry files
+  (193 `ROADMAP/`, 25 `todo/todo/`, 36 `todo/backlog/`) still present; guard passes 428/520.
 
 - **The SubagentStop skill-gap detector's premise is stale.** Its prompt tells the subagent to run
   `grep -h '^description:' $CLAUDE_PROJECT_DIR/.claude/skills/*.md` and states "Every `<name>.md`
@@ -437,12 +453,29 @@ script was run directly, per `AGENTS.md` rule 4.
   premise it asserts is the identical one recorded as a *rejection reason* in
   `skill-candidates.md`'s 2026-09-09 `test-and-commit-cycle` entry.
 
+  **Done.** The dead glob is gone and the layout sentence now says what is true — every
+  subdirectory is a skill, a flat `.claude/skills/<name>.md` is not discoverable and
+  `skill-layout-gate.sh` refuses one, so expect none. **The substantive point is kept**: a skill the
+  user invokes by typing `/<name>` never appears as a `Skill`-tool call, so the absence of one is
+  not evidence the capability is missing — that is the sentence stopping the detector re-flagging
+  covered patterns, and it was the reason the stale paragraph survived. Verified: the corrected
+  `grep` returns 29 descriptions for 29 skill directories, and every one has a `description:` line.
+
 - **`agent-worktree-reminder.sh`'s injected text predates rule 3.** It reports "Main checkout is
   currently `<branch>` @ `<sha>`" and explains that "when the branch under review is already in the
   main checkout the worktree lands on main". The mechanism (git refuses a second checkout of one
   branch) is unchanged and the advice still works, but the branch under review now normally sits in
   a *feature worktree*, and "the main checkout" is the user's. Worth rewording so the reason stays
   checkable.
+
+  **Done.** The injected text now leads with **assume a stale base** — a worktree is created from
+  `origin/HEAD`, so any dispatch whose target is not `origin/main` starts behind by default, which
+  is the actual mechanism and the one rule 4 rests on. The root is described as the user's checkout,
+  parked wherever they like, explicitly *not* a base to reason from, with the branch under review
+  living in its own worktree. Two things were added while the text was open: the `--ff-only`
+  recovery that rule 4 permits when HEAD is a strict ancestor, and the instruction to name the input
+  documents, not just the source — a stale base is harmless for source and dangerous for inputs.
+  Verified by running the hook on a reviewer dispatch and reading the rendered `additionalContext`.
 
 - **`/new-feature` has no worktree step.** Step 2 stops on a dirty tree and step 3 runs
   `git checkout -b` in the current checkout — correct before 2026-10-09, and now dependent on the
@@ -451,16 +484,42 @@ script was run directly, per `AGENTS.md` rule 4.
   framing. Note it will also be refused by the hook in finding 2 whenever the user parks the root
   off `main`.
 
+  **Done.** Step 2 is now `git worktree add -b feature/<name> ../<repo-name>-<name> main`, step 3
+  is `cd` into it, and **the root is not touched at all** — no `git status` on it, no asking the
+  user to commit or stash there, no `checkout`. A worktree needs none of that: it starts clean from
+  `main` whatever state the root is in, which is the point of rule 3 rather than a workaround for
+  it. The skill now carries a short "why a worktree, not a checkout" section, the frontmatter
+  description no longer says `todo.md` (a pointer), and the branch-naming obligation is restated,
+  since the root's branch no longer tells the user what to test.
+
 - **brain-layer has no `ROADMAP/` of its own.** Root `ROADMAP.md`'s table routes it to body-layer's
   and says so explicitly, so nothing is lost today — but it is the one `pyproject.toml` subproject
   the enumeration rule finds and the roadmap enumeration does not, which is the shape of the defect
   that rule exists to prevent. Connected to finding 5.
+
+  **Decided, not changed.** brain-layer keeps tracking alongside body-layer and gets no `ROADMAP/`
+  of its own. Root `ROADMAP.md`'s status table already states this as a project decision, so the
+  gap was never an oversight to correct — and the concrete hazard it created, two ID prefixes
+  sharing one directory, is closed by finding 5's mint-command fix rather than needing the
+  directory split. Giving brain-layer its own directory would mean moving `BR-1.1`/`BR-1.2`,
+  minting a new index, and updating the table and the graph corpus, to remove a hazard already
+  removed. Local and reversible, so it is recorded here and not escalated — if `BR` grows past a
+  couple of entries it is worth revisiting, and that is the condition to watch.
 
 - **`graph-corpus-guard.sh` has no caller but skill prose** (`graph-refresh/SKILL.md:48`), unlike
   `roadmap-entry-consistency-gate.sh` and `roadmap-tag-vocabulary-gate.sh`, which
   `commit-quality-gate.sh:184` runs mechanically. Deliberate as far as this audit can tell — the
   corpus only changes on a rebuild — but it is the one doc-graph gate whose running depends on
   someone following a document.
+
+  **Done, as a recorded decision rather than a new hook.** The guard's own header now says why it
+  is not one: its two siblings run from `commit-quality-gate.sh` because what they guard changes on
+  every commit, whereas the corpus changes only when a rebuild regenerates it, so a commit-time hook
+  would have no corpus to check and would fire on commits that cannot affect one. The condition that
+  would change the answer is named — *if a rebuild ever starts happening outside `/graph-refresh`,
+  wire it there* — which is the lapse condition root `CLAUDE.md` requires of any standing exemption.
+  The 436 → 428 count change from the pointer fix above is recorded there too, so the next person
+  reading the ceiling history is not left wondering.
 
 - **Healthy, recorded so it is not re-checked:** `skill-candidates.md` has zero open `##`
   candidates and nine resolved entries with reasons — the backlog-accumulation signal this audit
