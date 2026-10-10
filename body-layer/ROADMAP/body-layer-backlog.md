@@ -85,6 +85,14 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B44]] — Remove the detection lines below the eyesight graph
 - [[BL-B45]] — The `"Safe from <threat>"` close-out call
 - [[BL-B46]] — `logger`'s own logger propagates
+- [[BL-B47]] — `_is_air_defence` cannot recognise a class-level SAM
+- [[BL-B48]] — Infantry is an unbounded cohesion bridge between non-infantry contacts
+- [[BL-B49]] — A narrow `report` query is priced as `report_all`
+- [[BL-B50]] — Group callout suppression is defeated by any two alternating lines
+- [[BL-B51]] — Three copies of the air-defence class set, one drift guard
+- [[BL-B52]] — The wake word strips the slots off a `report` command
+- [[BL-B53]] — The *what* slot takes seven singular words, and the user's own examples miss
+- [[BL-B54]] — `report six o'clock` answers about eight o'clock
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
