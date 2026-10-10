@@ -860,6 +860,252 @@ def test_render_report_summary_keeps_a_dominant_air_defence_class_when_the_claus
     assert speech.text.count("long range SAM") == 1
 
 
+# --- selective freshness (`plans/crew-query-path/security.md` required
+# fix 1; user decision 2026-10-10, "only hedge what matters") ---
+
+
+def test_render_report_summary_marks_a_stale_air_defence_contact() -> None:
+    """The user's own illustrative shape: a stale SAM alongside fresh
+    contacts carries a freshness marker, where before the fix the whole
+    answer was flat present tense because one contact was fresh.
+
+    *"Freshness is spoken only when a stale contact is air defence or
+    otherwise decision-relevant."* (User, 2026-10-10.)"""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
+        ),
+        _summary_facts(
+            op_class="OP_LRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_LR"
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text == (
+        "About eight units, 1 o'clock through 3 o'clock, inside 2 kilometres, "
+        "and one long range SAM. The long range SAM is a couple minutes old."
+    )
+
+
+def test_render_report_summary_marks_the_scene_the_security_finding_measured() -> None:
+    """**The exact scene `plans/crew-query-path/security.md` was written
+    about** -- one contact refreshed in the current scan cycle, three last
+    seen about two minutes ago, two of them air defence. Its measured
+    output was:
+
+    > *"About twelve units, mostly infantry, 1 o'clock through 4 o'clock,
+    > inside 2 kilometres, and one short range SAM, one long range SAM."*
+    > -- 22 words, no freshness signal anywhere.
+
+    The pilot was told a SAM is at 3 o'clock inside 2 km in the same
+    register used for something seen a second ago. Now the marker is
+    there, and it is there **after both budget drops have fired** -- the
+    deferral and the dominant class are gone and the marker is not, which
+    is the whole substance of the finding (the only previous hedge was the
+    first thing the budget dropped)."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF_FRESH"
+        ),
+        _summary_facts(
+            op_class="OP_INFANTRY",
+            clock=2,
+            count=(3, 4.0),
+            last_seen_ago_s=118.0,
+            contact_id="C_INF_STALE",
+        ),
+        _summary_facts(
+            op_class="OP_SRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_SR"
+        ),
+        _summary_facts(
+            op_class="OP_LRSAM", clock=4, last_seen_ago_s=119.0, contact_id="C_LR"
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text == (
+        "About twelve units, 1 o'clock through 4 o'clock, inside 2 kilometres, "
+        "and one short range SAM, one long range SAM. "
+        "The air defence is a couple minutes old."
+    )
+    # Both drops fired -- so the marker is demonstrably not riding in a
+    # droppable part of the answer.
+    assert "Still checking" not in speech.text
+    assert "mostly" not in speech.text
+    # Both tiers still named (Q2 undisturbed), and the pointer intact.
+    assert "one short range SAM" in speech.text
+    assert "one long range SAM" in speech.text
+    assert "1 o'clock through 4 o'clock" in speech.text
+
+
+def test_render_report_summary_does_not_mark_a_stale_non_air_defence_contact() -> None:
+    """**The explicit trade the user accepted, asserted as a trade.** His
+    words: *"a stale truck passes unqualified. Shortest answers, but it
+    means accepting that some stale belief is spoken as present tense."*
+
+    So the same scene shape as
+    `test_render_report_summary_marks_a_stale_air_defence_contact` with a
+    truck in the SAM's place must produce **no** freshness marker at all
+    -- only the deferral clause it already had. Asserted on the whole
+    string rather than on an absent fragment, so a marker arriving in any
+    wording fails this."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
+        ),
+        _summary_facts(
+            op_class="OP_TRUCK", clock=2, last_seen_ago_s=119.0, contact_id="C_TRUCK"
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text == (
+        "About eight units, mostly infantry, 1 o'clock through 2 o'clock, "
+        "inside 2 kilometres. Still checking the truck group."
+    )
+    assert "old" not in speech.text
+
+
+def test_render_report_summary_marks_a_stale_sam_the_air_defence_clause_skips() -> None:
+    """**The case a marker attached to `_summary_air_defence_clause`
+    itself would have missed entirely.** When air defence *is* the
+    dominant class that clause is suppressed as a duplicate (and here the
+    class folds into the count), so there is nothing to hang a marker off
+    -- and the stale SAM would be spoken as present tense with no signal.
+
+    Also the case `BL-B47` would have killed: `_summary_op_class` resolves
+    `"OP_SRSAM"` through the lattice, where `_is_air_defence` goes through
+    `object_model.profile_for` and does **not** recognise a `class`-level
+    SAM at all. A marker built on that predicate would be silently dead in
+    exactly this scene."""
+    facts_list = [
+        _summary_facts(op_class="OP_SRSAM", last_seen_ago_s=100.0, contact_id="C_1"),
+        _summary_facts(op_class="OP_SRSAM", contact_id="C_2"),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text == (
+        "Two short range SAMs, at 2 o'clock, inside 2 kilometres. "
+        "The short range SAM is a couple minutes old."
+    )
+
+
+def test_render_report_summary_does_not_say_freshness_twice_when_all_stale() -> None:
+    """The all-stale prefix is unchanged by the fix and is not doubled by
+    the marker -- the prefix already qualifies the whole answer, so adding
+    a marker would say the same thing twice (the reason
+    `_summary_deferral_clause` declines in the same case). The user asked
+    for the all-stale case to stay as it was."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY",
+            clock=1,
+            count=(6, 8.0),
+            last_seen_ago_s=119.0,
+            contact_id="C_INF",
+        ),
+        _summary_facts(
+            op_class="OP_LRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_LR"
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text == (
+        "Last I saw, about eight units, mostly infantry, "
+        "1 o'clock through 3 o'clock, inside 2 kilometres, and one long range SAM."
+    )
+    assert "old" not in speech.text
+
+
+def test_render_report_summary_age_marker_is_true_at_every_age() -> None:
+    """**The marker's own failure mode is a fresh false claim dressed as
+    honesty.** Speaking the user's *"a couple minutes old"* about a
+    contact seen twenty seconds ago would be worse than the silence the
+    fix replaced, so the sub-minute and one-minute cases get their own
+    words rather than being rounded into his phrase.
+
+    Rungs come off a rounded minute count with no named threshold, which
+    is why this asserts the wording at three ages rather than the
+    boundaries."""
+    for ago_s, expected in (
+        (20.0, "under a minute old"),
+        (40.0, "about a minute old"),
+        (119.0, "a couple minutes old"),
+    ):
+        facts_list = [
+            _summary_facts(
+                op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
+            ),
+            _summary_facts(
+                op_class="OP_LRSAM", clock=3, last_seen_ago_s=ago_s, contact_id="C_LR"
+            ),
+        ]
+        speech = render_report_summary(
+            facts_list,
+            band_label="inside 2 kilometres",
+            stale_window_s=_STALE_WINDOW_S,
+        )
+        assert speech.text.endswith(f"The long range SAM is {expected}."), (
+            ago_s,
+            speech.text,
+        )
+
+
+def test_render_report_summary_age_marker_names_the_oldest_stale_contact() -> None:
+    """The age is the **oldest** stale air-defence contact's, never the
+    first one found. `_summary_deferral_clause`'s `stale[0]` is
+    `get_contacts` order -- i.e. arbitrary, and in the measured case the
+    *least* stale -- which the security finding named as part of why that
+    clause was not a freshness mechanism. A hedge must not under-claim.
+
+    Two short-range SAMs, one seen twenty seconds ago and one two minutes
+    ago, in that order: under-claiming would say "under a minute old"."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY", clock=1, count=(6, 8.0), contact_id="C_INF"
+        ),
+        _summary_facts(
+            op_class="OP_SRSAM", clock=2, last_seen_ago_s=20.0, contact_id="C_RECENT"
+        ),
+        _summary_facts(
+            op_class="OP_SRSAM", clock=3, last_seen_ago_s=119.0, contact_id="C_OLD"
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text.endswith("The short range SAMs are a couple minutes old.")
+
+
 def test_render_contact_report_returns_none_for_unknown_contact() -> None:
     store = ContactStore()
     assert render_contact_report(store, "CONTACT_999", now_sim=0.0) is None

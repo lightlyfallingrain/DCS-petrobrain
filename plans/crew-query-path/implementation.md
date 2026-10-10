@@ -354,3 +354,144 @@ audio-adapter:
     That is existing deliberate behaviour and is untouched, but it means the set of classes a fold
     guard must cover and the set a *display table* guard must cover are not the same set — worth
     knowing before anyone writes the next one.
+
+---
+
+## Round 3 — the Security deep analysis's one required fix: selective freshness
+
+### Implementation Summary
+
+`plans/crew-query-path/security.md`'s required fix 1: the summary's freshness qualifier fired only
+when **every** in-scope contact was stale, so one contact refreshed in the current scan cycle spoke
+a two-minute-old SAM as flat present tense. The user's wording call — *"Freshness is spoken only
+when a stale contact is air defence or otherwise decision-relevant; a stale truck passes
+unqualified. Shortest answers, but it means accepting that some stale belief is spoken as present
+tense."* — makes the fix **selective**, not a blanket hedge.
+
+Built: `speech._summary_air_defence_freshness_clause`, appended inside `_assemble` **in every budget
+candidate**, which is what makes it non-droppable. The all-stale `"Last I saw"` prefix is unchanged,
+and suppresses the marker (as `_summary_deferral_clause` already does, same reason). A stale truck
+gets nothing.
+
+Three decisions worth naming:
+
+1. **Membership is `_summary_op_class` + `AIR_DEFENSE_OP_CLASSES`, not `_is_air_defence`.**
+   `BL-B47` makes the latter dead for a `class`-level SAM belief, which is exactly the scene the
+   marker exists for. `_summary_air_defence_clause` already tested membership the correct way, so
+   the fix inherited the right predicate rather than needing a change — verified live, not assumed
+   (see Discovery 12).
+2. **The subject is named explicitly** (`"The long range SAM is a couple minutes old."`) rather
+   than appended as an apposition on the air-defence clause. Two reasons, both load-bearing: that
+   clause names every air-defence tier in scope *including fresh ones*, so an apposition would
+   hedge a contact seen a second ago; and the clause is **absent** whenever air defence is the
+   dominant class (suppressed as a duplicate), in which case there is nothing to hang a marker off
+   at all.
+3. **The age is a rounded-minute rung with no named threshold** (`_spoken_age_phrase`), and the
+   oldest stale air-defence contact's, never the first found. See Discovery 13 on why the user's
+   own phrase could not simply be used at every age.
+
+No new constant; `decay.py` untouched; `decay.OBSERVED_WINDOW_S` still arrives as the caller's
+`stale_window_s`. One extra O(n) pass over the in-scope facts, computed **once** outside `_assemble`
+(it does not vary by candidate), so nothing per-contact is added to the query path beyond that —
+`plans/crew-query-path/performance.md`'s constraint.
+
+### Files Changed
+
+- `body-layer/src/belief/speech.py` — new `_spoken_age_phrase` and
+  `_summary_air_defence_freshness_clause`; `render_report_summary` computes the clause once (skipped
+  when `all_stale`) and `_assemble` appends it in every candidate, above the droppable deferral.
+  `render_report_summary`'s docstring gains the narrowing of *"Freshness is spoken, not implied"*
+  with the user's words attached.
+- `body-layer/tests/test_speech.py` — seven new cases (below). **No existing test modified**: the
+  security finding's gap left no test behind to change, and every pre-existing staleness fixture
+  happens to use a non-air-defence class, so the selective marker does not reach any of them.
+- `plans/crew-query-path/plan.md` — a note under Decision D recording the narrowing, quoting the
+  user, and saying plainly that some stale belief is now spoken as present tense as an accepted
+  trade. A later reader finding the gap must be able to tell a decision from a defect.
+
+### Tests Added
+
+All in `body-layer/tests/test_speech.py`, confirmed by name in unfiltered `-v` output:
+
+- `test_render_report_summary_marks_a_stale_air_defence_contact` — the user's illustrative shape:
+  fresh infantry + a stale LRSAM produces the marker.
+- `test_render_report_summary_marks_the_scene_the_security_finding_measured` — the finding's own
+  1-fresh-plus-3-stale scene, reproduced; asserts the exact sentence **and** that both budget drops
+  fired while the marker remained, which is the finding's actual substance.
+- `test_render_report_summary_does_not_mark_a_stale_non_air_defence_contact` — the accepted trade,
+  asserted as a trade: same scene shape with a truck produces no marker.
+- `test_render_report_summary_marks_a_stale_sam_the_air_defence_clause_skips` — the folded-dominant
+  case, where the air-defence clause is suppressed and a marker attached *to that clause* would
+  have been missing entirely. Also the `BL-B47` case.
+- `test_render_report_summary_does_not_say_freshness_twice_when_all_stale` — the all-stale prefix
+  unchanged and not doubled.
+- `test_render_report_summary_age_marker_is_true_at_every_age` — the three reachable rungs at 20 s,
+  40 s, 119 s.
+- `test_render_report_summary_age_marker_names_the_oldest_stale_contact` — the age is the oldest
+  stale air-defence contact's, not `stale[0]`'s.
+
+**Three counterfactuals executed, not reasoned about** (checksum `fd36e5a6…` on
+`src/belief/speech.py` before and after each, verified identical at the end):
+
+| perturbation | result |
+|---|---|
+| drop the `AIR_DEFENSE_OP_CLASSES` membership guard | 3 failed — the non-air-defence test red *for the stated reason* (`"The truck is a couple minutes old."` appears), plus two pre-existing tests, confirming the guard is the only thing keeping them green |
+| remove the `all_stale` suppression | 1 failed — the all-stale test, and only it |
+| gate the marker behind `with_deferral`, i.e. make it droppable | 5 failed — including the security-measured scene, which is the finding reproduced exactly |
+
+The negative-space tests therefore have a demonstrated red, which is the only thing that
+distinguishes "the marker correctly stayed silent" from "the marker never ran".
+
+### Checks
+
+body-layer:
+
+- ruff format src tests: **pass** (118 files unchanged)
+- ruff check .: **pass**
+- mypy src: **pass** (54 files)
+- pytest: **pass** — **1611 passed, 4 xfailed** (baseline 1604/4; +7 is exactly the seven new cases)
+
+audio-adapter (untouched by the diff; run to confirm):
+
+- ruff check .: **pass**
+- mypy src: **pass** (15 files)
+- pytest: **pass** — 255 passed, 1 skipped (matches baseline)
+
+### Notable Discoveries
+
+12. **`BL-B47` does not bite here, and the reason is that the clause this fix builds beside had
+    already dodged it on purpose.** `_summary_air_defence_clause` tests membership through
+    `_summary_op_class` (a `classification.parent_class_of` lattice walk) rather than through
+    `_is_air_defence` (which goes via `object_model.profile_for`, a *type*-name keyword match that
+    returns the default bucket for `"OP_SRSAM"`). Its own docstring says so. So the selective hedge
+    inherits a predicate that *does* recognise a class-level SAM — verified by a test that renders a
+    scene whose only air-defence belief is class-level `"OP_SRSAM"` and gets the marker. Had the
+    fix reached for the obvious `_is_air_defence`, it would have been silently dead in the one scene
+    it exists for, with every test still green.
+
+13. **The user's own phrase could not be used at every age, and using it would have made the fix
+    worse than the silence it replaced.** *"A couple minutes old"* is their wording, from a scene
+    at ~119 s — but the stale window is 16 s and in-scope runs to 120 s, so the same phrase would
+    have been spoken about a contact seen twenty seconds ago. A false freshness claim dressed as an
+    honesty marker is a worse outcome than the unqualified sentence, so `_spoken_age_phrase` rounds
+    to minutes and keeps their phrase for the rung where it is true, with its own words below that.
+    The rungs fall out of `round(ago_s / 60)` rather than from named thresholds, so no staleness
+    constant was added.
+
+14. **The marker pushes answers past `REPORT_SUMMARY_MAX_WORDS` in the scene the finding measured,
+    and that is the designed outcome rather than a regression.** That scene renders at 28 words:
+    the marker buys itself room by forcing the deferral and then the dominant class out, and there
+    is deliberately nothing below count/direction/band to drop. The pre-existing
+    "keeps the pointer when nothing else fits" case already establishes that a too-long pointer
+    beats no answer. If the budget is later halved to ~13 words as `REPORT_SUMMARY_MAX_WORDS`'s own
+    comment anticipates, this marker is one of the things that will need re-reading — it is now a
+    second never-dropped clause alongside the air-defence one.
+
+15. **"Or otherwise decision-relevant" was left unbuilt, deliberately, and there is one candidate
+    worth the user's opinion.** Position is the fastest-decaying attribute in `decay.py`
+    (`POSITION_HALF_LIFE_S` = 30 s, against 60 s for motion, 180 s for general area and 600 s for
+    identity), and a contact believed to be *moving* is the case where that matters most: a
+    two-minute-old "moving" belief is four position half-lives old, so its clock position is the
+    thing most likely to be wrong while being spoken in present tense. Not built — it is not air
+    defence and inventing the taxonomy was explicitly out of scope — but flagged as a question
+    rather than left unsaid.

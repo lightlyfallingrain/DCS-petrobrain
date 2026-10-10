@@ -164,3 +164,5 @@ Write directly — the dir exists.
 - [BR-1 Stage 2 duplicate-branch findings](project_br1_stage2_duplicate_branch_findings.md) — PICK unreachable from a bare ambiguous reference (provable); real-model latency ~5x D6's probe figure.
 - [BL-13 crew query path](project_bl13_crew_query_path.md) — a full-roster renderer leaks any upstream filter; parent_class_of != profile_for; infantry bridges cohesion unboundedly.
 - [A guard fixture must not pick a degenerate case](feedback_guard_fixture_must_not_pick_a_degenerate_case.md) — mass-noun classes made "One trucks" invisible to 3 tests; derive the set from the table.
+- [An honesty marker can be a new false claim](feedback_an_honesty_marker_can_be_a_new_false_claim.md) — the user's hedge was true only at the age they were shown; check the input range.
+- [BL-13 selective freshness marker](project_bl13_selective_freshness_marker.md) — a hedge on a suppressible clause is dead; two air-defence predicates, one works class-level.

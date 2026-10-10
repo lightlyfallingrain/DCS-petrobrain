@@ -794,6 +794,111 @@ def _is_stale(facts: dict[str, object], stale_window_s: float) -> bool:
     return float(ago_s) > stale_window_s
 
 
+def _spoken_age_phrase(ago_s: float) -> str:
+    """How old a remembered contact is, in the register the user chose:
+    *"a couple minutes old"*.
+
+    **Rungs off a rounded minute count, with no named thresholds**, so
+    every rung is true at every age inside it -- which is the whole point
+    of the marker and the one way it could be worse than silence. Speaking
+    *"a couple minutes old"* about a contact seen twenty seconds ago would
+    be a fresh false claim dressed as honesty, so the sub-minute and
+    one-minute cases get their own words rather than being rounded into
+    the user's phrase.
+
+    The `> 2` rung is unreachable from the pull path today -- `_report_
+    scope` drops `certainty == "lost"`, so in-scope ages cap at `decay.
+    LOST_THRESHOLD_S` (120 s) and `round(120/60)` is 2. It exists so that
+    widening that bound produces a longer sentence rather than a wrong
+    one."""
+    minutes = round(ago_s / 60.0)
+    if minutes <= 0:
+        return "under a minute old"
+    if minutes == 1:
+        return "about a minute old"
+    if minutes == 2:
+        return "a couple minutes old"
+    return f"about {_spoken_number(minutes)} minutes old"
+
+
+def _summary_air_defence_freshness_clause(
+    facts_list: Sequence[dict[str, object]], stale_window_s: float
+) -> str | None:
+    """*"The long range SAM is a couple minutes old."* -- the **selective**
+    freshness marker, for a stale *air-defence* contact in a scene that is
+    not wholly stale.
+
+    **User decision 2026-10-10, in his own words: "Freshness is spoken
+    only when a stale contact is air defence or otherwise
+    decision-relevant; a stale truck passes unqualified. Shortest answers,
+    but it means accepting that some stale belief is spoken as present
+    tense."** The trade is deliberate: a stale truck gets no marker, and
+    that is the accepted cost of the shortest answer, not an oversight.
+    `plans/crew-query-path/plan.md` Decision D carries the same note.
+
+    It exists because `render_report_summary`'s *all*-stale prefix is the
+    only freshness signal the first implementation had, and in-scope runs
+    to `decay.LOST_THRESHOLD_S` (120 s) while the stale window is one scan
+    cycle (16 s) -- so one contact refreshed in the current cycle stripped
+    the qualifier off a two-minute-old SAM
+    (`plans/crew-query-path/security.md`, required fix 1, measured).
+
+    **Membership is `_summary_op_class` + `AIR_DEFENSE_OP_CLASSES`, the
+    same test `_summary_air_defence_clause` uses and deliberately not
+    `_is_air_defence`** -- that predicate resolves through `object_model.
+    profile_for`, which keyword-matches *type* names, so a `class`-level
+    SAM belief (`"OP_LRSAM"`) is not recognised as air defence at all
+    (`BL-B47`). A marker built on it would be dead in exactly the scene
+    this one exists for.
+
+    **Age is the *oldest* stale air-defence contact's**, never the first
+    one found: the hedge must not under-claim, and `_summary_deferral_
+    clause`'s `stale[0]` -- `get_contacts` order, i.e. arbitrary -- is one
+    of the things the security finding named.
+
+    Returns `None` when no in-scope air-defence contact is stale. The
+    *wholly*-stale case is the caller's to exclude: the `"Last I saw"`
+    prefix already covers the whole answer there, and saying both would
+    say the same thing twice (`_summary_deferral_clause` declines for the
+    same reason)."""
+    op_classes: list[str] = []
+    oldest_ago_s = 0.0
+    for facts in facts_list:
+        if not _is_stale(facts, stale_window_s):
+            continue
+        op_class = _summary_op_class(facts)
+        if op_class is None or op_class not in AIR_DEFENSE_OP_CLASSES:
+            continue
+        op_classes.append(op_class)
+        ago_s = facts.get("last_seen_ago_s")
+        if isinstance(ago_s, (int, float)):
+            oldest_ago_s = max(oldest_ago_s, float(ago_s))
+    if not op_classes:
+        return None
+    age = _spoken_age_phrase(oldest_ago_s)
+    # The subject is named explicitly rather than left as an apposition on
+    # the air-defence clause ("..., and one long range SAM, a couple
+    # minutes old"), because that clause names *every* air-defence tier in
+    # scope -- fresh ones included -- so an apposition would hedge a
+    # contact seen a second ago. Naming the subject also means the marker
+    # reads correctly in the case where there is no air-defence clause at
+    # all to hang off: when air defence is the dominant class the clause
+    # is suppressed as a duplicate, and a stale SAM would otherwise be
+    # marked nowhere.
+    if len(op_classes) == 1:
+        word = _OP_CLASS_DISPLAY.get(op_classes[0])
+        if word:
+            return f"The {_respell_for_tts(word)} is {age}."
+    elif len(set(op_classes)) == 1:
+        plural = _OP_CLASS_DISPLAY_PLURAL.get(op_classes[0])
+        if plural:
+            return f"The {_respell_for_tts(plural)} are {age}."
+    # Several tiers, or a class with no display word: one collective
+    # subject rather than a list, which would cost more budget than the
+    # clause that already named the tiers.
+    return f"The air defence is {age}."
+
+
 def render_report_summary(
     facts_list: list[dict[str, object]],
     *,
@@ -834,6 +939,20 @@ def render_report_summary(
     the no-omniscience invariant's grip on a *pull* (Decision D). Note
     what this is not: it is not a filter. A contact Petrovich believes in
     is reported **qualified**, never withheld, however long ago he saw it.
+
+    **In the *mixed* case it is spoken selectively, which is a user
+    decision and not an omission.** In-scope runs to `decay.
+    LOST_THRESHOLD_S` (120 s) while `stale_window_s` is one scan cycle
+    (16 s), so one contact refreshed in the current cycle leaves the rest
+    unqualified by that prefix -- and the first implementation had no
+    other freshness signal (`plans/crew-query-path/security.md`, required
+    fix 1). His call, 2026-10-10: *"Freshness is spoken only when a stale
+    contact is air defence or otherwise decision-relevant; a stale truck
+    passes unqualified. Shortest answers, but it means accepting that some
+    stale belief is spoken as present tense."* So a stale air-defence
+    contact gets `_summary_air_defence_freshness_clause`, in the part of
+    the answer the budget never drops; a stale truck gets nothing beyond
+    the deferral it already had.
 
     **The drop order when the parts exceed `REPORT_SUMMARY_MAX_WORDS` is
     specified, not incidental**: the deferral clause goes first, then the
@@ -897,6 +1016,14 @@ def render_report_summary(
     clock_clause = _summary_clock_clause(facts_list)
     deferral_clause = _summary_deferral_clause(facts_list, stale_window_s)
     all_stale = all(_is_stale(facts, stale_window_s) for facts in facts_list)
+    # Computed once, outside `_assemble`: it does not depend on which
+    # candidate the budget settles on, because it is in no candidate's
+    # droppable part.
+    freshness_clause = (
+        None
+        if all_stale
+        else _summary_air_defence_freshness_clause(facts_list, stale_window_s)
+    )
 
     def _assemble(with_deferral: bool, with_class: bool) -> str:
         parts = [count_clause]
@@ -931,6 +1058,16 @@ def render_report_summary(
         else:
             sentence = sentence[:1].upper() + sentence[1:]
         text = f"{sentence}."
+        # **Appended in every candidate, which is what makes it
+        # non-droppable.** It sits above the deferral deliberately: the
+        # deferral is the first thing the budget drops, and the security
+        # finding's whole substance is that the only honesty marker in the
+        # mixed-staleness scene was the droppable one. Its words *do*
+        # count against `REPORT_SUMMARY_MAX_WORDS`, so it buys itself room
+        # by pushing the deferral and then the dominant class out -- which
+        # is the intended order, not a side effect.
+        if freshness_clause is not None:
+            text = f"{text} {freshness_clause}"
         if with_deferral and deferral_clause is not None:
             text = f"{text} {deferral_clause}"
         return text
