@@ -979,3 +979,29 @@ two functions that must agree (2026-09-19).
   captures the real stream (`capsys`, or a subprocess) with no `caplog` level override at all —
   that is the only way to tell "the call fires" from "the call is visible"
   (`plans/bl11-stage4-fail-closed/dod-check.md`, implementation.md round 4).
+- **A fixture can be realistic, assert the right thing, and still be unable to fail — because the
+  *value* it picked makes the two outcomes identical.** A third shape alongside the two already
+  recorded above (a floor no fixture can breach; a fabricated string that matches by construction):
+  BL-13's summary-wording guards all used `OP_ARMORED`/`OP_INFANTRY`, whose plural display word
+  *equals* the singular, so `assert "One armor" in text` passed identically whether the code chose
+  the singular or the plural table. A real defect — *"One trucks"*, *"One short range SAMs"*, on the
+  single-contact scene that is the most common thing a report ever answers — survived three review
+  rounds and reached the audio channel's doorstep behind a green guard. The fix was not a new
+  assertion but a new fixture *value*: a class whose plural actually inflects, plus a derived
+  exhaustiveness test over the display tables so the next `OP_*` class fails a test rather than
+  escaping the guard. Lesson: when a test distinguishes two code paths, check that its chosen input
+  makes them produce *different* output — a parametrisation whose cases all collapse to one outcome
+  is a guard in name only (`plans/crew-query-path/review.md` round 1 required fix).
+- **An honesty marker can itself state a false claim, when its wording is fixed and the window it
+  describes is wide.** BL-13's freshness hedge had to speak the age of a remembered contact, and the
+  user's own phrase for it was *"a couple minutes old"* — said about a ~119 s scene. But the window
+  the marker covers runs from the stale threshold (16 s, one scan cycle) to the lost threshold
+  (120 s), so the same fixed phrase would have been spoken about a contact seen twenty seconds ago.
+  A false freshness claim dressed as an honesty marker is a worse outcome than the unqualified
+  sentence it replaced, because it spends the pilot's trust in the mechanism that exists to earn it.
+  The resolution was rungs off `round(ago_s / 60)` — *"under a minute"* / *"about a minute"* /
+  *"a couple minutes"* — keeping the user's wording for the band he actually spoke it about, and
+  adding no staleness constant. Lesson: a qualifier quoted from one observed scene is calibrated to
+  that scene; before fixing its wording, brute-force it across the whole range of values it can be
+  spoken at and check that every one of them is true (`plans/crew-query-path/implementation.md`
+  Discovery 13, round 3 review's age-ladder sweep).

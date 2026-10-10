@@ -16,12 +16,13 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Self
+from typing import Self, cast
 
 import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
+from belief.attention import RelativeSector, Sector
 from belief.audio_client import AudioAdapterError
 from belief.brain_client import BrainLayerClient
 from belief.classification import PRESENCE_CLASS
@@ -34,7 +35,7 @@ from belief.crew_console import (
     _describe_token_for_confirm,
     _nearest_sector,
 )
-from belief.decay import LOST_THRESHOLD_S
+from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
@@ -3003,7 +3004,17 @@ def test_report_all_without_enrichment_reports_not_configured() -> None:
 
 def test_report_all_speaks_a_known_contact(monkeypatch: pytest.MonkeyPatch) -> None:
     """The test that would fail if `report_all`'s dispatch were removed --
-    and pins the spoken output, not just that something was said."""
+    and pins the spoken output, not just that something was said.
+
+    **The expected text changed with BL-13 Stage 3** (`plans/
+    crew-query-path/plan.md` Decision C, user decision 13): the answer is
+    a summary, not a per-contact enumeration. It used to read
+    `"BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."` -- note
+    what the summary drops and why. The type name goes because the summary
+    speaks the *class* bucket (`parent_class_of`), the enrichment
+    parenthetical goes because a pointer does not need a landmark to aim
+    a look, and the exact range becomes a band. What survives is count,
+    direction and band, which is the pointer."""
     store = ContactStore()
     store.ingest(
         [_observation_at(obs_id="OBS_1", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0)],
@@ -3014,7 +3025,7 @@ def test_report_all_speaks_a_known_contact(monkeypatch: pytest.MonkeyPatch) -> N
 
     lines = console.handle_command("report_all", now_sim=0.0)
 
-    assert lines == ["BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."]
+    assert lines == ["One armor, at 3 o'clock, inside 2 kilometres."]
 
 
 def test_report_all_drops_a_lost_contact(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3078,7 +3089,10 @@ def test_report_clock_3_finds_the_matching_contact(
     # -- only the 3 o'clock contact must be named.
     lines = console.handle_command("report_clock_3", now_sim=0.0)
 
-    assert lines == ["BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."]
+    # Summary wording since BL-13 Stage 3; the clock-scoping claim this
+    # test exists for is unchanged -- only one of the two contacts is in
+    # the answer, and the count says so.
+    assert lines == ["One armor, at 3 o'clock, inside 2 kilometres."]
 
 
 def test_report_bearing_n_with_no_contact_and_forward_heading_says_clear(
@@ -3124,7 +3138,10 @@ def test_report_bearing_s_still_reports_a_contact_believed_to_be_there(
 
     lines = console.handle_command("report_bearing_s", now_sim=0.0)
 
-    assert lines == ["BMP-2, 6 o'clock, 1 kilometre near Jableh (~200 metres)."]
+    # Summary wording since BL-13 Stage 3. The claim is unchanged and is
+    # the one that matters here: the contact is *named*, so only the
+    # absence claim is withheld for the rear hemisphere.
+    assert lines == ["One armor, at 6 o'clock, inside 2 kilometres."]
 
 
 def _enrichment_context_with_heading(
@@ -3222,20 +3239,37 @@ def test_report_bearing_deg_without_a_bearing_says_say_again(
     ]
 
 
-def test_report_all_groups_and_truncates_multiple_contacts(
+def test_report_all_summarises_rather_than_truncating_multiple_contacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Optional refinement, `plans/voice-command-completeness/review.md`:
-    `group_facts`'s bucketing and `render_report`'s `REPORT_MAX_GROUPS`
-    truncation are each unit-tested in isolation (`test_callouts.py`,
-    `test_speech.py`) but never driven together through the real
-    `_handle_report` dispatch path -- the reviewer verified this seam
-    correct by hand, once, with a throwaway script; this pins it. Four
-    distinct classification types, each due east at a different range,
-    never share a `(unit word, range word)` bucket, so each forms its own
-    singleton group -- four groups, capped at `REPORT_MAX_GROUPS` (3),
-    ordered nearest-first (`report_priority`'s equal-attention-rank
-    tiebreak), with a trailing "And more."."""
+    """**This test's original subject no longer exists on this path, and
+    that is the change rather than a regression.** It was named
+    `test_report_all_groups_and_truncates_multiple_contacts` and pinned
+    `group_facts`' bucketing driven together with `render_report`'s
+    `REPORT_MAX_GROUPS` cap through the real dispatch -- four contacts
+    becoming three sentences plus `"And more."`. BL-13 Stage 3 replaced
+    the pull site's enumeration with one summary (`plans/
+    crew-query-path/plan.md` Decision C), which has no per-group cap to
+    truncate at: the whole scene folds into a count, a dominant class, a
+    span and a band, so four contacts cost the same breath as two.
+
+    `render_report`/`REPORT_MAX_GROUPS` are deliberately left in place and
+    still unit-tested in `test_speech.py`, because reverting the summary
+    has to stay a one-call-site change until the user has flown it.
+
+    What this test keeps is the reason it was written: the seam is driven
+    end to end through the real dispatch, over a scene of four contacts of
+    four classes at four ranges, rather than trusting the renderer's unit
+    tests.
+
+    Three of the four are armour-family (BMP-2/T-72/BTR-70) and the fourth
+    is a `"ZSU-23-4"`, which `classification.parent_class_of` does **not**
+    resolve -- measured while updating this test, and consistent with this
+    fixture's own existing note that the ZSU falls back to
+    `GROUP_REPORTING_UNKNOWN_SIZE_M`. So the fourth contact is
+    unclassified rather than air defence, the answer hedges with "mostly",
+    and no air-defence clause is due. Q2's carve-out is tested separately,
+    with a type the lattice actually resolves."""
     store = ContactStore()
     store.ingest(
         [
@@ -3276,46 +3310,44 @@ def test_report_all_groups_and_truncates_multiple_contacts(
     # contacts are all 7 m vehicles (BMP-2/T-72/BTR-70 keyword-match; the
     # ZSU-23-4 falls back to `belief.groups.GROUP_REPORTING_UNKNOWN_SIZE_M`,
     # also 7 m), so the backstop is `20.0 * 7.0 = 140` m -- well under their
-    # 1 km spacing. They no longer cohere into one `Group`, so this test is
-    # naturally about `group_facts`'s report-space bucketing and `REPORT_
-    # MAX_GROUPS` truncation alone, as intended.
+    # 1 km spacing. They therefore stay four separate contacts rather than
+    # cohering into one `Group`, which is what makes this a four-contact
+    # scene at all. (The clause that used to end this comment -- "so this
+    # test is naturally about `group_facts`'s report-space bucketing and
+    # `REPORT_MAX_GROUPS` truncation alone" -- was true of the test this
+    # replaced; the docstring above says what it is about now.)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     lines = console.handle_command("report_all", now_sim=0.0)
 
-    assert lines == [
-        (
-            "BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres). "
-            "T-72, 3 o'clock, 2 kilometres near Jableh (~200 metres). "
-            "BTR-70, 3 o'clock, 3 kilometres near Jableh (~200 metres). "
-            "And more."
-        )
-    ]
+    assert lines == ["Four units, mostly armor, at 3 o'clock, inside 5 kilometres."]
+    # One utterance, and nothing was dropped for want of room: the four
+    # contacts are all accounted for in the count, where the old answer
+    # spoke three of them and said "And more."
+    assert len(lines) == 1
+    assert "and more" not in lines[0].lower()
 
 
-def test_report_speaks_a_persisted_group_through_render_group_full_disclosure(
+def test_report_speaks_a_persisted_group_as_one_counted_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`plans/group-reporting/plan.md` Stage 4 design, section 6:
-    `_handle_report` resolves each in-scope contact's `belief.groups.Group`
-    and speaks it once via `render_group_full_disclosure` -- the same
-    always-full-roster renderer the "report" pull path needs, rather than
-    the older `group_facts`/`render_group_report` report-space bucketing,
-    once a real group exists. Three same-type contacts a few metres apart
-    cohere into one `Group` on `store.tick`; the report names all three as
-    one line, not three separate `"BMP-2, ..."` reports.
+    """Three same-type contacts a few metres apart cohere into one `Group`
+    on `store.tick`, and the report is **one** answer naming all three,
+    not three separate reports.
 
-    Named and checked against `render_group_full_disclosure`, not `render_
-    group_disclosure` -- that was this test's own staleness (`plans/
-    group-cohesion-redesign/review.md`, Optional Refinement): production code
-    was changed to call `render_group_full_disclosure` for this path, but
-    this test still named and called `render_group_disclosure` directly,
-    and passed only because the group here has never been spoken, where
-    the two functions' output coincides. It gave no regression coverage
-    for the actual case the split exists for -- see `test_report_speaks_
-    an_already_spoken_group_in_full`, below, which marks the group spoken
-    first so the two renderers would disagree if `_handle_report` ever
-    silently reverted to the taxonomy-gated one."""
+    **Renamed from `..._through_render_group_full_disclosure`, because that
+    renderer is no longer how this path answers** (`plans/crew-query-path/
+    plan.md` Decision C, BL-13 Stage 3): the summary is computed from the
+    in-scope facts, so group cohesion no longer decides the *shape* of the
+    answer at all -- three contacts are three contacts whether or not a
+    `Group` formed. The property this test protects survives the change
+    and is still worth pinning: the pull path accounts for every in-scope
+    contact exactly once.
+
+    Its sibling, `test_report_speaks_an_already_spoken_group_in_full`,
+    carries the half that was about the renderer split -- see that test's
+    own docstring for why the pull path must not inherit the push path's
+    delta gate."""
     store = ContactStore()
     store.ingest(
         [
@@ -3336,29 +3368,44 @@ def test_report_speaks_a_persisted_group_through_render_group_full_disclosure(
 
     lines = console.handle_command("report_all", now_sim=0.0)
 
-    expected = render_group_full_disclosure(
+    # Used to be `[render_group_full_disclosure(...).text]`, i.e. "Three
+    # BMP-2, 3 o'clock, 1 kilometre." The count is still three and the
+    # direction still three o'clock; the type name becomes the class
+    # bucket, as everywhere else the summary speaks.
+    assert lines == ["Three armor, at 3 o'clock, inside 2 kilometres."]
+    # The push-path renderer still works and still speaks the full roster
+    # -- it is simply no longer what answers a pull. Asserted so that
+    # "the pull path changed" cannot be confused with "the group renderer
+    # broke".
+    pushed = render_group_full_disclosure(
         store, store.groups[0], now_sim=0.0, enrichment=console.enrichment
     )
-    assert expected is not None
-    assert lines == [expected.text]
-    assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
+    assert pushed is not None
+    assert pushed.text == "Three BMP-2, 3 o'clock, 1 kilometre."
 
 
 def test_report_speaks_an_already_spoken_group_in_full(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The case `test_report_speaks_a_persisted_group_through_render_
-    group_full_disclosure` could not cover: a group that has *already*
+    """The case its sibling could not cover: a group that has *already*
     spoken (so `render_group_disclosure`'s delta taxonomy would return a
     delta clause, or `None`, depending on what changed since) must still
-    get the full roster from "report" -- the pull path's whole reason for
-    not sharing a function with the push path (`render_group_full_
-    disclosure`'s own docstring). Marks the group spoken via the same
+    get a full answer from "report" -- **the push path's throttle must
+    never reach the pull path.** Marks the group spoken via the same
     `render_group_disclosure` + `mark_group_spoken` sequence `belief.
     callouts.CalloutScheduler.tick` uses, then confirms a second,
     unchanged-membership `render_group_disclosure` call would go silent
     (proving the taxonomy really would gate this) while `"report"` still
-    names the whole group."""
+    answers in full.
+
+    **The claim outlived the mechanism it was written against.** It used
+    to hold because `_handle_report` called the always-full-roster
+    renderer rather than the taxonomy-gated one; since BL-13 Stage 3 it
+    holds because the summary is computed from facts and consults no
+    spoken-signature state at all. The same sentence, protected by a
+    different construction -- and still worth a test, because Decision D
+    is the standing instruction that D11's own observability work must not
+    start filtering this path (`plans/crew-query-path/plan.md`)."""
     store = ContactStore()
     store.ingest(
         [
@@ -3403,7 +3450,145 @@ def test_report_speaks_an_already_spoken_group_in_full(
     console = CrewConsole(store=store, enrichment=enrichment)
     lines = console.handle_command("report_all", now_sim=1.0)
 
-    assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
+    # All three contacts, after the push path has gone silent about them.
+    assert lines == ["Three armor, at 3 o'clock, inside 2 kilometres."]
+
+
+# --- the slotted crew query (plans/crew-query-path/plan.md, BL-13) ---
+
+
+def test_slotted_report_sector_words_mirror_audio_adapters_table() -> None:
+    """This side of the `SECTOR_WORDS` <-> `_SECTOR_FOR_WORD` hand-synced
+    mirror (`plans/crew-query-path/plan.md` Decision E -- body-layer cannot
+    import `audio-adapter`, so the eight words are written down twice).
+    audio-adapter's `test_vocabulary.py` asserts the same membership
+    against its own table; between them, a word added or renamed on either
+    side fails a test rather than a sortie.
+
+    Spelled out literally rather than derived from `_SECTOR_SCAN_LABELS`:
+    deriving it would make this test agree with that table by
+    construction, which is exactly the agreement the seam does *not*
+    guarantee."""
+    from belief.crew_console import _SECTOR_FOR_WORD
+
+    assert set(_SECTOR_FOR_WORD) == {
+        "north",
+        "northeast",
+        "east",
+        "southeast",
+        "south",
+        "southwest",
+        "west",
+        "northwest",
+    }
+    assert _SECTOR_FOR_WORD["north"] == "N"
+    assert _SECTOR_FOR_WORD["southwest"] == "SW"
+
+
+def test_slotted_report_with_no_slots_answers_the_whole_scene(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero-slot `report` is a legal whole-scene query. audio-adapter
+    resolves a bare "report" to `report_all` before this token is ever
+    minted, so this is the defensive case (a non-adapter caller, or every
+    slot dropped as unrecognised) -- and it must answer, not refuse."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report", now_sim=0.0) == ["Clear."]
+
+
+def test_slotted_report_clock_matches_the_legacy_clock_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 1's channel test: the slotted token with a `clock` slot
+    answers exactly what `report_clock_3` answers. Driven through
+    `handle_command` twice on the same store so the two paths are compared
+    against each other rather than against a transcribed string -- the
+    claim is equivalence, and a pinned string would only test one side."""
+    store = ContactStore()
+    store.ingest(
+        [_observation_at(obs_id="OBS_E", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    legacy = console.handle_command("report_clock_3", now_sim=0.0)
+    slotted = console.handle_command("report", now_sim=0.0, slots={"clock": 3})
+
+    assert slotted == legacy
+    assert slotted == ["One armor, at 3 o'clock, inside 2 kilometres."]
+
+
+def test_slotted_report_sector_matches_the_legacy_bearing_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `sector` slot's half of the same claim, including the
+    rear-hemisphere carve-out: `report south` with a north-facing ownship
+    must refuse exactly as `report_bearing_s` does, never answer
+    "clear"."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert console.handle_command("report", now_sim=0.0, slots={"sector": "north"}) == [
+        "North, clear."
+    ]
+    assert console.handle_command("report", now_sim=0.0, slots={"sector": "south"}) == [
+        "Can't see south."
+    ]
+
+
+def test_slotted_report_drops_an_unrecognised_slot_value_rather_than_refusing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slots arrive as JSON over the HTTP seam, so no value can be
+    assumed well-formed. A garbage `sector`, an out-of-hemisphere `clock`
+    and a wrong-typed value each widen the answer instead of producing a
+    refusal or an exception -- the same graceful degradation
+    `bearing_degrees` already has, and the honest failure for a *query*."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    for slots in (
+        {"sector": "nowhere"},
+        {"clock": 6},
+        {"clock": "three"},
+        {"sector": 90},
+    ):
+        assert console.handle_command(
+            "report", now_sim=0.0, slots=cast("dict[str, int | str]", slots)
+        ) == ["Clear."], slots
+
+
+def test_slotted_report_is_dispatched_and_describable() -> None:
+    """The two registrations a new token needs beyond its handler:
+    membership in `DISPATCHED_COMMAND_TOKENS` (which is what routes a
+    confirm-band answer and a brain-layer reply to it at all), and a
+    `_describe_token_for_confirm` readback that is not the raw token
+    name."""
+    assert "report" in DISPATCHED_COMMAND_TOKENS
+    assert "report" not in NO_RETURN_VALUE_COMMAND_TOKENS
+    assert _describe_token_for_confirm("report") == "report"
+    assert _describe_token_for_confirm("report", {"relative": "left"}) == "report left"
+    assert _describe_token_for_confirm("report", {"clock": 2}) == "report two o'clock"
+    assert (
+        _describe_token_for_confirm("report", {"descriptor": "armor", "clock": 2})
+        == "report armor two o'clock"
+    )
+
+
+def test_slotted_report_confirm_readback_names_a_slot_it_cannot_yet_filter_on() -> None:
+    """The confirm prompt's job is to expose a mishearing, so it reads
+    back every slot Petrovich heard -- including `band`, which Stage 1
+    does not yet filter on. Hiding a word he heard would defeat the
+    prompt; this is the same reasoning that makes `report_bearing_deg`
+    read back the *sector* it will act on rather than the raw number."""
+    assert (
+        _describe_token_for_confirm("report", {"clock": 2, "band": "near"})
+        == "report two o'clock near"
+    )
 
 
 def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(
@@ -3920,3 +4105,724 @@ def test_follow_readback_survives_the_confirm_round_trip(
         now_sim=1.0,
     )
     assert store.contacts[0].attention == "watch"
+
+
+# --- the slotted query's filter slots (plans/crew-query-path/plan.md
+# Decision B, Stage 2) ---
+
+
+def _in_scope(
+    console: CrewConsole,
+    now_sim: float = 0.0,
+    *,
+    clock: int | None = None,
+    sector: Sector | None = None,
+    descriptor: str | None = None,
+    relative: RelativeSector | None = None,
+    band: str | None = None,
+) -> set[str]:
+    """The raw class words of the contacts one query is in scope for.
+
+    **Asserted against the scope, not the spoken sentence, deliberately.**
+    The enumerated answer goes through `render_group_full_disclosure`,
+    whose rule is to name a group's *full roster*, so an in-scope contact
+    pulls its out-of-scope group-mates into the text -- measured: three
+    contacts at two o'clock at 1/3/7 km cohere into one `Group` and
+    `report two o'clock near` says "Armor, truck and infantry". A spoken
+    assertion would therefore be testing `belief.groups`' cohesion, not
+    the filter. Stage 3's summary (`render_report_summary`) is computed
+    from this same in-scope set, which is what removes the leak -- see
+    `test_slotted_report_summary_does_not_leak_an_out_of_scope_group_
+    member`."""
+    scope = console._report_scope(
+        now_sim,
+        clock=clock,
+        sector=sector,
+        descriptor=descriptor,
+        relative=relative,
+        band=band,
+    )
+    words: set[str] = set()
+    for facts in scope.facts:
+        contact_id = facts["id"]
+        assert isinstance(contact_id, str)
+        contact = console.store.contact(contact_id)
+        assert contact is not None
+        assert contact.last_class_raw is not None
+        words.add(contact.last_class_raw)
+    return words
+
+
+def test_report_band_bounds_mirror_audio_adapters_band_names() -> None:
+    """This side of the `BAND_WORDS` <-> `_REPORT_BAND_BOUNDS_M` mirror
+    (Decision E): the three band *names* cross the seam, the metres do
+    not. audio-adapter's `test_vocabulary.py` asserts the same three names
+    against its own synonym table. The boundaries are decision 12's own
+    numbers and are asserted here because they are this feature's only two
+    new constants."""
+    from belief.crew_console import _REPORT_BAND_BOUNDS_M
+
+    assert set(_REPORT_BAND_BOUNDS_M) == {"near", "medium", "far"}
+    assert _REPORT_BAND_BOUNDS_M["near"] == (0.0, 2000.0)
+    assert _REPORT_BAND_BOUNDS_M["medium"] == (2000.0, 5000.0)
+    assert _REPORT_BAND_BOUNDS_M["far"] == (5000.0, float("inf"))
+
+
+def _three_banded_contacts(now_sim: float = 0.0) -> ContactStore:
+    """One contact per band, all at two o'clock: armor at 1 km (near),
+    truck at 3 km (medium), infantry at 7 km (far)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_NEAR",
+                t_sim=now_sim,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_MEDIUM",
+                t_sim=now_sim,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_FAR",
+                t_sim=now_sim,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                clock=2,
+                range_m=7000.0,
+            ),
+        ],
+        now_sim=now_sim,
+    )
+    store.tick(now_sim=now_sim)
+    return store
+
+
+def test_slotted_report_band_filters_rather_than_sorts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Q1, answered by the user 2026-10-08: **"filter."** The band narrows
+    the answer, it does not merely order it -- so a contact outside the
+    named band is *absent* from the scope, not merely later in it. Three
+    contacts, one per band; each query admits exactly one, and the
+    unfiltered query admits all three, which is the contrast that makes
+    "filter, not sort" checkable."""
+    store = _three_banded_contacts()
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, band="near") == {"OP_ARMORED"}
+    assert _in_scope(console, band="medium") == {"OP_TRUCK"}
+    assert _in_scope(console, band="far") == {"OP_INFANTRY"}
+    assert _in_scope(console) == {"OP_ARMORED", "OP_TRUCK", "OP_INFANTRY"}
+
+
+def test_slotted_report_band_boundary_is_lower_inclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A contact at exactly 2 000 m is `medium`, not `near` -- the bounds
+    are `lo <= range < hi`, so the two bands cannot both claim it and
+    neither can drop it. Decision 12 words it as *near <2 km / medium
+    2-5 km*, which is this comparison exactly."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_EDGE",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=2000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, band="near") == set()
+    assert _in_scope(console, band="medium") == {"OP_ARMORED"}
+    # And the empty-scope answer really is spoken, not merely an empty set.
+    assert console.handle_command("report", now_sim=0.0, slots={"band": "near"}) == [
+        "Clear."
+    ]
+
+
+def test_slotted_report_descriptor_excludes_only_a_known_wrong_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision B's three-way verdict, as a filter. `report armor` keeps
+    the armor **and** the unclassified dot -- *"he is pointing at a thing
+    he believes is armour, matching it is right"* -- and drops only the
+    truck, which is positively something else."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=12,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_DOT",
+                t_sim=0.0,
+                classification_raw="ground",
+                classification_level=0,
+                clock=12,
+                range_m=5000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    # The dot keeps its raw class word ("ground"); it is in scope for
+    # *every* descriptor, which is the whole point of the middle verdict.
+    assert _in_scope(console, descriptor="armor") == {"OP_ARMORED", "ground"}
+    assert _in_scope(console, descriptor="truck") == {"OP_TRUCK", "ground"}
+    assert _in_scope(console, descriptor="sam") == {"ground"}
+
+
+def test_slotted_report_descriptor_can_empty_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The filter has to be able to exclude everything, or "filter" is not
+    what it is doing. A scene of nothing but trucks answers `report ship`
+    with the empty answer, not with the trucks."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, descriptor="ship") == set()
+    assert console.handle_command(
+        "report", now_sim=0.0, slots={"descriptor": "ship"}
+    ) == ["Clear."]
+    # Unfiltered, the same scene is not empty -- so the empty answer came
+    # from the filter and not from an empty store.
+    assert _in_scope(console) == {"OP_TRUCK"}
+
+
+def test_slotted_report_group_descriptor_keeps_its_cardinality_meaning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`"group"` is not a classification -- it means `cardinality.lo > 1`,
+    the same branch `_descriptor_score` has always had. A singleton armor
+    contact is therefore excluded from `report group` while a plural one
+    is kept, and the class word has nothing to do with either outcome."""
+    from belief.cardinality import cardinality_belief_from_bucket_name
+
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_SINGLE",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_MANY",
+                t_sim=0.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                clock=3,
+                range_m=1000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    plural = next(c for c in store.contacts if c.last_class_raw == "OP_INFANTRY")
+    plural.cardinality = cardinality_belief_from_bucket_name(
+        "OP_TO5UNITS", established_sim=0.0
+    )
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, descriptor="group") == {"OP_INFANTRY"}
+    # The class word decides nothing here: `report armor` admits the
+    # singleton armour and not the plural infantry, the exact opposite
+    # split, over the same two contacts.
+    assert _in_scope(console, descriptor="armor") == {"OP_ARMORED"}
+
+
+def test_slotted_report_relative_uses_the_same_wedge_table_as_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision B: `relative` resolves through `perception.gaze`'s
+    `(center, half_width)` table -- the same one `attention.project_
+    relative_area` reads -- so `report left` and `scan left` agree on what
+    "left" means by construction rather than by coincidence.
+
+    Ownship faces north. A contact dead ahead (relative 0) is in `ahead`
+    and `full` and in neither side wedge; one at two o'clock (relative
+    +60) is in `right` and `full` but not `ahead` or `left`.
+
+    **Both are placed clear of every wedge edge on purpose.** The first
+    attempt put the second contact at one o'clock -- relative +30, which
+    is `ahead`'s exact half-width, so it was admitted by the
+    `> half_width` comparison and the test read as a filter failure when
+    it was a boundary. Edge behaviour is a separate question from "do the
+    two frames agree", and mixing them makes a failure unreadable."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_AHEAD",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_RIGHT",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, relative="ahead") == {"OP_ARMORED"}
+    assert _in_scope(console, relative="right") == {"OP_TRUCK"}
+    assert _in_scope(console, relative="left") == set()
+    assert _in_scope(console, relative="full") == {"OP_ARMORED", "OP_TRUCK"}
+    # The empty side speaks the absence rather than refusing it -- see
+    # `test_every_relative_sector_is_inside_the_cockpit_mask`.
+    assert console.handle_command(
+        "report", now_sim=0.0, slots={"relative": "left"}
+    ) == ["Left, clear."]
+
+
+def test_every_relative_sector_is_inside_the_cockpit_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The enumeration the `render_no_view` guard promises, checked rather
+    than asserted in prose: all four `RelativeSector`s are forward of
+    `rear_cutoff_deg`, so the no-view branch cannot fire for a relative
+    query today. It is applied anyway, so that widening the wedge table or
+    offering a rear sector fails here instead of silently answering
+    "left, clear" about something Petrovich cannot see.
+
+    This is why the companion assertion below matters: a relative query
+    with an empty scene must answer `render_clear`, which is the observable
+    consequence of the whole enumeration being inside the mask."""
+    from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
+    from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
+
+    rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
+    assert len(RELATIVE_SECTORS) == 4
+    for relative in RELATIVE_SECTORS:
+        center, _half_width = SECTOR_WEDGE_DEG[relative]
+        assert abs(center) < rear_cutoff_deg, relative
+
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    for relative in RELATIVE_SECTORS:
+        lines = console.handle_command(
+            "report", now_sim=0.0, slots={"relative": relative}
+        )
+        assert lines[0].endswith(", clear."), (relative, lines)
+        assert "can't see" not in lines[0].lower(), relative
+
+
+def test_slotted_report_clock_filter_spans_one_hour_either_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision B's widening, and **a behaviour change to the shipped
+    `report_clock_*` commands**: the filter was an exact hour and is now
+    +/- `callouts.CALLOUT_GROUP_CLOCK_SPAN_HOURS`, because a pilot saying
+    "two o'clock" means *around* two and D13's answer speaks a span.
+
+    One contact at three o'clock. Querying two o'clock now finds it
+    (delta 1, inside the span) and one o'clock still does not (delta 2) --
+    so the test shows both the widening and its bound, rather than only
+    that something got wider. Reads the constant rather than the literal
+    1, so a retune moves the test with the code; the three/one o'clock
+    *contrast* is what pins the behaviour."""
+    from belief.callouts import CALLOUT_GROUP_CLOCK_SPAN_HOURS
+
+    assert CALLOUT_GROUP_CLOCK_SPAN_HOURS == 1
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_3",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=3,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, clock=3) == {"OP_ARMORED"}
+    assert _in_scope(console, clock=2) == {"OP_ARMORED"}
+    assert _in_scope(console, clock=4) == {"OP_ARMORED"}
+    assert _in_scope(console, clock=1) == set()
+    assert _in_scope(console, clock=12) == set()
+    # Through the shipped legacy token too, since this is a change to its
+    # behaviour and not only to the new one's.
+    assert "armor" in console.handle_command("report_clock_2", now_sim=0.0)[0].lower()
+    assert console.handle_command("report_clock_1", now_sim=0.0) == [
+        "One o'clock, clear."
+    ]
+
+
+def test_slotted_report_combines_a_where_and_a_how_far(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The slots are independent filters, so a query carrying two narrows
+    by both -- `"describe two o'clock near"`, decision 12's own example.
+    The medium contact at the same clock is excluded by the band, and the
+    near contact at a different clock by the clock span."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_WANTED",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TOO_FAR",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=4000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_WRONG_WAY",
+                t_sim=0.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                clock=9,
+                range_m=1000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, clock=2, band="near") == {"OP_ARMORED"}
+    # Each slot is doing its own share of the narrowing: drop either one
+    # and the contact it excluded comes back.
+    assert _in_scope(console, clock=2) == {"OP_ARMORED", "OP_TRUCK"}
+    assert _in_scope(console, band="near") == {"OP_ARMORED", "OP_INFANTRY"}
+
+
+def test_slotted_report_does_not_filter_by_where_petrovich_is_looking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision D, and the sentence that exists so D11's work does not
+    silently break this one: **`contacts._callout_may_speak` must not be
+    applied to the pull path.** A query is the pilot asking; belief is
+    already perception-bounded, so a contact he believes in is reported
+    *qualified*, never withheld because the aircraft has since turned
+    away.
+
+    Driven by making the contact stale enough that the push path's own
+    observability/eligibility reasoning would have something to say about
+    it -- `certainty` has fallen to `estimated`, past `OBSERVED_WINDOW_S`
+    and past `POSITION_HALF_LIFE_S` -- and asserting the report still
+    names it."""
+    from belief.decay import OBSERVED_WINDOW_S, POSITION_HALF_LIFE_S
+
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_REMEMBERED",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    later = POSITION_HALF_LIFE_S + 1.0
+    assert later > OBSERVED_WINDOW_S
+    store.tick(now_sim=later)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert _in_scope(console, later, clock=2) == {"OP_ARMORED"}
+    lines = console.handle_command("report", now_sim=later, slots={"clock": 2})
+    assert lines != ["Two o'clock, clear."]
+    # Reported *qualified*, which is the honest shape -- not withheld.
+    assert lines == ["Last I saw, one armor, at 2 o'clock, inside 2 kilometres."]
+
+
+# --- the summary answer at the pull site (Decision C, Stage 3) ---
+
+
+def test_slotted_report_summary_does_not_leak_an_out_of_scope_group_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**The defect Stage 3 closes, and the reason Stage 2's filter tests
+    assert the scope rather than the sentence.**
+
+    `render_group_full_disclosure` names a group's *full roster* by
+    design, so while the pull site enumerated groups, a filtered query
+    whose scope held one member of a group spoke that group's
+    out-of-scope members too: these three contacts cohere into one
+    `Group`, and `report two o'clock near` answered *"Armor, truck and
+    infantry, 2 o'clock, 1 kilometre."* -- naming a truck at 3 km and
+    infantry at 7 km to a pilot who asked about *near*.
+
+    The summary is computed from the in-scope facts, so it cannot leak by
+    construction. The group is asserted to actually exist, because
+    without it this test would pass while exercising nothing."""
+    store = _three_banded_contacts()
+    assert len(store.groups) == 1, "fixture must reproduce the cohering group"
+    assert len(store.groups[0].member_contact_ids) == 3
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command(
+        "report", now_sim=0.0, slots={"clock": 2, "band": "near"}
+    )
+
+    assert lines == ["One armor, at 2 o'clock, inside 2 kilometres."]
+    assert "truck" not in lines[0].lower()
+    assert "infantry" not in lines[0].lower()
+    # And the group renderer itself is untouched -- it still speaks every
+    # member, which is correct for the push path it belongs to.
+    pushed = render_group_full_disclosure(
+        store, store.groups[0], now_sim=0.0, enrichment=console.enrichment
+    )
+    assert pushed is not None
+    for word in ("armor", "truck", "infantry"):
+        assert word in pushed.text.lower(), word
+
+
+def test_slotted_report_band_label_follows_the_query_then_the_furthest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The distance clause says how far out the pilot has to look.
+
+    When the query named a band, that band bounds the answer -- he asked
+    about *near*, so the clause is "inside 2 kilometres" even though the
+    only contact in scope sits at 1 km. Unfiltered, it is bucketed from
+    the **furthest** in-scope contact, never the nearest: the near edge
+    would under-state where things are, which is the one direction a
+    pointer must not be wrong in."""
+    store = _three_banded_contacts()
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert (
+        "inside 2 kilometres"
+        in console.handle_command("report", now_sim=0.0, slots={"band": "near"})[0]
+    )
+    assert (
+        "beyond 5 kilometres"
+        in console.handle_command("report", now_sim=0.0, slots={"band": "far"})[0]
+    )
+    # Unfiltered: the furthest contact is at 7 km, so the whole-scene
+    # answer reaches beyond five, not "inside 2" from the nearest.
+    assert "beyond 5 kilometres" in console.handle_command("report_all", now_sim=0.0)[0]
+
+
+def test_slotted_report_band_labels_are_derived_from_the_filter_bounds() -> None:
+    """The number the summary says and the number the filter applies are
+    the same number, because the labels are derived from
+    `_REPORT_BAND_BOUNDS_M` rather than written out beside it. A retuned
+    boundary therefore moves both or neither -- there is no third place
+    for "2 kilometres" to go stale in."""
+    from belief.crew_console import _REPORT_BAND_BOUNDS_M, _REPORT_BAND_LABELS
+
+    assert set(_REPORT_BAND_LABELS) == set(_REPORT_BAND_BOUNDS_M)
+    assert _REPORT_BAND_LABELS["near"] == "inside 2 kilometres"
+    assert _REPORT_BAND_LABELS["medium"] == "inside 5 kilometres"
+    assert _REPORT_BAND_LABELS["far"] == "beyond 5 kilometres"
+
+
+def test_slotted_report_freshness_window_is_the_decay_modules_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live call site passes `decay.OBSERVED_WINDOW_S` -- the
+    project's existing "how long since a look is still fresh" bound -- so
+    no second staleness constant was introduced (`plans/crew-query-path/
+    plan.md` Decision D; `decay.py` is read-only in this plan).
+
+    Driven across the boundary rather than by reading the constant back:
+    the same scene answers unqualified just inside the window and
+    qualified just outside it. The window is read from `decay` to place
+    the two probes, never to assert the wording."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    fresh = console.handle_command(
+        "report", now_sim=OBSERVED_WINDOW_S - 1.0, slots={"clock": 2}
+    )
+    stale = console.handle_command(
+        "report", now_sim=OBSERVED_WINDOW_S + 1.0, slots={"clock": 2}
+    )
+
+    assert "Last I saw" not in fresh[0]
+    assert stale[0].startswith("Last I saw,")
+
+
+# --- the shared descriptor verdict (Decision B) ---
+
+
+def _facts_with_classification(
+    level: str | None, value: str | None
+) -> dict[str, object]:
+    """The two `facts` keys `descriptor_verdict` reads, with nothing else
+    -- the predicate is a pure function of them, so a whole `ContactStore`
+    would only obscure which input decided the verdict."""
+    if level is None:
+        return {}
+    return {"classification": {"level": level, "value": value}}
+
+
+def test_descriptor_verdict_three_outcomes() -> None:
+    """The predicate `_descriptor_score` and the report filter now share
+    (Decision B, and D10's intended target). Three outcomes rather than a
+    boolean, because the middle one decides real behaviour: an
+    unclassified contact is neither a match nor a mismatch."""
+    from belief.crew_console import descriptor_verdict
+
+    assert (
+        descriptor_verdict("armor", _facts_with_classification("class", "OP_ARMORED"))
+        == "match"
+    )
+    assert (
+        descriptor_verdict("armor", _facts_with_classification("class", "OP_TRUCK"))
+        == "wrong"
+    )
+    assert (
+        descriptor_verdict("armor", _facts_with_classification("presence", "ground"))
+        == "unclassified"
+    )
+    assert descriptor_verdict("armor", _facts_with_classification(None, None)) == (
+        "unclassified"
+    )
+    # A `sam` descriptor spans all three tiers deliberately -- the spoken
+    # vocabulary is coarser than `speech._OP_CLASS_DISPLAY`'s three SAM
+    # words, since a pilot saying "SAM" has not resolved the tier.
+    for tier in ("OP_SRSAM", "OP_MRSAM", "OP_LRSAM"):
+        assert (
+            descriptor_verdict("sam", _facts_with_classification("class", tier))
+            == "match"
+        ), tier
+
+
+def test_descriptor_verdict_group_reads_cardinality_not_classification() -> None:
+    from belief.crew_console import descriptor_verdict
+
+    plural: dict[str, object] = {"cardinality": {"lo": 3, "hi": 5.0}}
+    singleton: dict[str, object] = {"cardinality": {"lo": 1, "hi": 1.0}}
+    assert descriptor_verdict("group", plural) == "match"
+    # `"wrong"`, not `"unclassified"`: cardinality is always held, so a
+    # contact that is not plural is positively not a group.
+    assert descriptor_verdict("group", singleton) == "wrong"
+    assert descriptor_verdict("group", {}) == "wrong"
+    # And it ignores the class entirely, in both directions.
+    armour_plural: dict[str, object] = {
+        "cardinality": {"lo": 3, "hi": 5.0},
+        "classification": {"level": "class", "value": "OP_ARMORED"},
+    }
+    assert descriptor_verdict("group", armour_plural) == "match"
+
+
+def test_descriptor_score_maps_the_shared_verdict_onto_its_weights(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_descriptor_score` is now the verdict-to-weight mapping and
+    nothing else. Pinned against the three weights directly, so moving
+    the lattice walk back into the method (or changing what one verdict
+    scores) fails here -- `follow`'s own resolver tests cover the scoring
+    *use*, not this mapping."""
+    from belief.crew_console import (
+        W_FOLLOW_DESC_UNKNOWN,
+        W_FOLLOW_DESC_WRONG,
+    )
+
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert (
+        console._descriptor_score(
+            "armor", _facts_with_classification("class", "OP_ARMORED")
+        )
+        == 0.0
+    )
+    assert (
+        console._descriptor_score(
+            "armor", _facts_with_classification("presence", "ground")
+        )
+        == W_FOLLOW_DESC_UNKNOWN
+    )
+    assert (
+        console._descriptor_score(
+            "armor", _facts_with_classification("class", "OP_TRUCK")
+        )
+        == W_FOLLOW_DESC_WRONG
+    )
+    assert W_FOLLOW_DESC_UNKNOWN != W_FOLLOW_DESC_WRONG

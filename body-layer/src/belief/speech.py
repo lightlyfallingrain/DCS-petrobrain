@@ -199,6 +199,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from belief.attention import Attention, effective_attention
+from belief.classification import parent_class_of
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -494,6 +495,592 @@ def render_report(group_texts: list[str], truncated: bool) -> OutgoingSpeech:
     text = " ".join(group_texts)
     if truncated:
         text += " And more."
+    return OutgoingSpeech(text=text, template="contact_report")
+
+
+#: The slotted query's answer length budget, in words (`plans/
+#: crew-query-path/plan.md` Decision C).
+#:
+#: **Derived from the answer the user chose, not guessed.** Two mock
+#: answers to *"describe 2 o'clock near"* were put side by side -- **A**
+#: enumerating every group, **B** summarising and deferring -- and he took
+#: B: *"B. I can also look myself, so a summary is good, I then know where
+#: and what to look for."* (decision 13, `plans/post-review-fixes/
+#: explore-notes.md` §8). This is mock B's own length, rounded up, which
+#: through `callouts.speech_duration_s` (`MIN_UTTERANCE_S + words /
+#: SPEECH_RATE_WPS`) is about 10.6 s of talking.
+#:
+#: **It is calibrated against a mock read on the ground, not against a
+#: flight** (that plan's Risks, and its queued Q3). Ten seconds is a long
+#: time in a hover, so this may need roughly halving to ~13 words, which
+#: still carries count, direction and band. A later tuner lowering it is
+#: contradicting a mock, not a measurement -- which is exactly why the
+#: **drop order is specified** in `render_report_summary` rather than left
+#: to wherever a formatter happens to truncate.
+REPORT_SUMMARY_MAX_WORDS: Final[int] = 25
+
+
+def _summary_op_class(facts: dict[str, object]) -> str | None:
+    """The `OP_*` bucket `facts`' believed classification resolves to, or
+    `None` when the claim has not resolved that far (presence/unknown, or
+    the object model's default bucket).
+
+    **Goes through `classification.parent_class_of`, not `object_model.
+    profile_for`.** The two are not interchangeable here and the
+    difference is measured: `profile_for` keyword-matches *type* names, so
+    `profile_for("BMP-2")` is `OP_ARMORED` but `profile_for("OP_ARMORED")`
+    and `profile_for("OP_SRSAM")` both fall through to the default bucket.
+    A `class`-level belief holds the `OP_*` value itself, so the lattice
+    walk is the only lookup that resolves both forms -- and it is the one
+    `plans/crew-query-path/plan.md` Decision C names and the one
+    `crew_console.descriptor_verdict` already uses, so the summary's
+    classes and the filter's classes agree by construction.
+
+    It also returns `None` for every unresolved value on its own
+    (`"ground"`, `"unknown"`, `"OP_GROUPSOMETHING"`), which is why there
+    is no separate lattice-level check: "has not resolved to a bucket" and
+    "is the default bucket" are the same answer to a summary."""
+    classification = facts.get("classification")
+    if not isinstance(classification, dict):
+        return None
+    value = classification.get("value")
+    if not isinstance(value, str) or not value:
+        return None
+    return parent_class_of(value)
+
+
+def _spoken_number(value: int) -> str:
+    """A number word for TTS, or the numeral above twelve.
+
+    Shares `_SPOKEN_NUMBERS` with `_cardinality_phrase`'s earned-precision
+    branch deliberately -- a number word is a number word, and a second
+    table would be two places to disagree about "eleven". One is added
+    here because a count of exactly one is sayable in a summary ("One
+    truck") where `_cardinality_phrase` has nothing to say about it."""
+    if value == 1:
+        return "one"
+    return _SPOKEN_NUMBERS.get(value, str(value))
+
+
+def _unit_word(count: int) -> str:
+    """`"unit"`/`"units"`, agreeing with the number actually spoken.
+
+    **All three of `_summary_count_clause`'s branches go through this, and
+    the enumeration is the point.** Each branch used to write its own
+    noun, and only the exact-total branch inflected: the open-ended one
+    said *"at least one units"* and the midpoint one *"about one units"*
+    (reachable when a `cardinality` interval's `lo` is zero, since the
+    midpoint floors at one). Three noun sites is three places to
+    disagree; one is none."""
+    return "unit" if count == 1 else "units"
+
+
+def _summary_count_clause(facts_list: Sequence[dict[str, object]]) -> tuple[str, int]:
+    """The summary's leading count clause, **and the number it speaks**.
+
+    The second element is not bookkeeping: `render_report_summary` folds
+    a single in-scope class into this clause by substituting the unit
+    noun, and the display word it substitutes has to agree with the
+    number already spoken here ("One truck", not "One trucks"). Only this
+    function knows which of the three branches ran and therefore what
+    that number is, so it returns it rather than letting the caller
+    re-derive it from the string.
+
+    Sums each in-scope contact's `cardinality` interval, **treating an
+    absent `cardinality` key as exactly one**. That is not a fallback: a
+    contact with no count claim is still one thing Petrovich believes in,
+    and `tools._cardinality_facts` omits the key precisely when the claim
+    is the lattice root ("no cardinality claim at all"), which is the
+    ordinary case for a single vehicle.
+
+    Three shapes, in descending honesty about what is known: an exact
+    total speaks the number; an open-ended one (`hi` is infinite) says
+    *"at least"*; anything else hedges with *"about"* on the interval's
+    midpoint -- which is where decision 13's own *"About eight units"*
+    comes from."""
+    total_lo = 0
+    total_hi = 0.0
+    for facts in facts_list:
+        cardinality = facts.get("cardinality")
+        lo = 1
+        hi = 1.0
+        if isinstance(cardinality, dict):
+            raw_lo = cardinality.get("lo")
+            raw_hi = cardinality.get("hi")
+            if isinstance(raw_lo, int):
+                lo = raw_lo
+            if isinstance(raw_hi, (int, float)):
+                hi = float(raw_hi)
+        total_lo += lo
+        total_hi += hi
+    if math.isinf(total_hi):
+        return f"at least {_spoken_number(total_lo)} {_unit_word(total_lo)}", total_lo
+    if total_lo == total_hi:
+        return f"{_spoken_number(total_lo)} {_unit_word(total_lo)}", total_lo
+    midpoint = max(1, round((total_lo + total_hi) / 2))
+    return f"about {_spoken_number(midpoint)} {_unit_word(midpoint)}", midpoint
+
+
+#: Clock hour -> signed offset from the nose, 12 o'clock = 0, positive
+#: clockwise. What makes a *span* well defined on a circle: sorting hours
+#: by this orders them left-to-right across the windscreen, so min..max is
+#: the arc the pilot would sweep rather than an arithmetic accident
+#: ("eleven through one" is a 2-hour span, not a 10-hour one).
+_CLOCK_SIGNED_OFFSET: Final[dict[int, int]] = {
+    hour: (hour if hour <= 6 else hour - 12) for hour in range(1, 13)
+}
+
+
+def _summary_clock_clause(facts_list: Sequence[dict[str, object]]) -> str | None:
+    """The bearing span -- `"at 2 o'clock"` when every in-scope contact
+    shares one hour, `"1 o'clock through 2 o'clock"` otherwise, `None`
+    when no contact has a clock position at all.
+
+    **Numerals, not number words**, matching every report line this crew
+    already speaks (`_contact_report_text`'s `", {clock_position}
+    o'clock"`, `render_group_report`'s composition clause). Decision 13's
+    mock spells them out, but it was prose in a plan; the shipped register
+    is numerals, and one answer sounding different from every other is a
+    worse outcome than diverging from a mock's typography."""
+    hours: set[int] = set()
+    for facts in facts_list:
+        relative_now = facts.get("relative_now")
+        if not isinstance(relative_now, dict):
+            continue
+        hour = relative_now.get("clock_position")
+        if isinstance(hour, int) and hour in _CLOCK_SIGNED_OFFSET:
+            hours.add(hour)
+    if not hours:
+        return None
+    ordered = sorted(hours, key=lambda hour: _CLOCK_SIGNED_OFFSET[hour])
+    if len(ordered) == 1:
+        return f"at {ordered[0]} o'clock"
+    return f"{ordered[0]} o'clock through {ordered[-1]} o'clock"
+
+
+def _dominant_op_class(facts_list: Sequence[dict[str, object]]) -> str | None:
+    """The summary's *mostly* class, or `None` when nothing in scope has
+    resolved to one.
+
+    **Weighted by believed unit count, not by contact count**, and the
+    difference is not academic: decision 13's own example is one contact
+    holding six-to-eight infantry alongside one truck, which by contacts
+    is a 1-1 tie and by units is six-to-one. "Mostly" is a claim about
+    what the pilot will see, and he sees units.
+
+    **The tie-break is explicit because the obvious implementation is
+    not deterministic.** `max(set(op_classes), key=op_classes.count)`
+    iterates a set, so a genuine tie resolves by hash order -- it picked a
+    different class across runs while this was being written, and since
+    the dominant class is suppressed from the air-defence clause, that
+    silently decided whether a SAM got named. Ties here break on the class
+    name, which is arbitrary but stable and visible."""
+    weights: dict[str, int] = {}
+    for facts in facts_list:
+        op_class = _summary_op_class(facts)
+        if op_class is None:
+            continue
+        units = 1
+        cardinality = facts.get("cardinality")
+        if isinstance(cardinality, dict):
+            lo = cardinality.get("lo")
+            if isinstance(lo, int) and lo > 0:
+                units = lo
+        weights[op_class] = weights.get(op_class, 0) + units
+    if not weights:
+        return None
+    return min(weights.items(), key=lambda item: (-item[1], item[0]))[0]
+
+
+def _summary_air_defence_clause(
+    facts_list: Sequence[dict[str, object]], dominant_op_class: str | None
+) -> str | None:
+    """Air defence, named individually even when everything else
+    aggregates -- **Q2, answered by the user 2026-10-08: "air defense
+    survives."**
+
+    The reasoning is `_OP_CLASS_DISPLAY`'s own, and it is the project's
+    standing test applied to a summary: *the difference between a
+    short-range and a long-range SAM is the difference between a threat
+    you can fly around and one you cannot*. A summary that renders seven
+    infantry and one SAM as "mostly infantry" has failed the pilot it
+    exists to serve. Consistent with decision 6, which already makes air
+    defence the exception elsewhere.
+
+    Skipped when air defence *is* the dominant class, since the
+    dominant-class clause has already named it and saying it twice spends
+    budget on nothing. Names each distinct tier, because collapsing the
+    three to "SAM" is the exact flattening the display table refuses.
+
+    **Membership is tested on `_summary_op_class`, not via
+    `_is_air_defence`**, though the two read the same
+    `belief.groups.AIR_DEFENSE_OP_CLASSES` set. `_is_air_defence` resolves
+    through `object_model.profile_for`, which keyword-matches type names:
+    measured, `profile_for("OP_SRSAM")` is the default bucket, so a
+    *class*-level SAM belief -- precisely the case this clause exists for
+    -- would not be recognised. See `_summary_op_class`'s own note."""
+    counts: dict[str, int] = {}
+    for facts in facts_list:
+        op_class = _summary_op_class(facts)
+        if op_class is None or op_class == dominant_op_class:
+            continue
+        if op_class not in AIR_DEFENSE_OP_CLASSES:
+            continue
+        counts[op_class] = counts.get(op_class, 0) + 1
+    if not counts:
+        return None
+    # `"and one short range SAM"`, never `"and a ..."`. The indefinite
+    # article would have to agree with the following word's sound, and
+    # `_OP_CLASS_DISPLAY`'s own vocabulary makes that a real bug rather
+    # than a nicety: `"a AAA"` is wrong written, and wrong again spoken,
+    # since `_respell_for_tts` turns that word into "triple A". A count
+    # word sidesteps the agreement entirely and is the register the rest
+    # of this module already speaks in.
+    phrases: list[str] = []
+    for op_class, count in counts.items():
+        if count == 1:
+            word = _OP_CLASS_DISPLAY.get(op_class)
+            if word:
+                phrases.append(f"one {_respell_for_tts(word)}")
+            continue
+        plural = _OP_CLASS_DISPLAY_PLURAL.get(op_class)
+        if plural:
+            phrases.append(f"{_spoken_number(count)} {_respell_for_tts(plural)}")
+    if not phrases:
+        return None
+    return "and " + ", ".join(phrases)
+
+
+def _summary_deferral_clause(
+    facts_list: Sequence[dict[str, object]], stale_window_s: float
+) -> str | None:
+    """*"Still checking the truck group."* -- **at most one**, for a
+    contact Petrovich has not looked at inside `stale_window_s`.
+
+    This is the honest half of a summary: a summary can be vague where an
+    enumeration would have to either lie or hedge four times (decision
+    13's own argument), and the deferral is where the vagueness is
+    declared rather than hidden. It is deliberately not emitted when
+    *everything* in scope is stale -- the freshness qualifier already
+    covers the whole answer then, and deferring to it as well would say
+    the same thing twice.
+
+    `stale_window_s` is `decay.OBSERVED_WINDOW_S` at the only call site.
+    Passed in rather than imported so this module keeps its one-way
+    dependency on `decay` through the caller, and so a test can state the
+    window it means instead of inheriting a tuned default."""
+    stale = [facts for facts in facts_list if _is_stale(facts, stale_window_s)]
+    if not stale or len(stale) == len(facts_list):
+        return None
+    op_class = _summary_op_class(stale[0])
+    if op_class is None:
+        return "Still checking one more."
+    # The **singular** display word, because `"group"` is already doing
+    # the pluralising: decision 13's own wording is *"the truck group"*,
+    # and `_OP_CLASS_DISPLAY_PLURAL` would make it "the trucks group".
+    word = _OP_CLASS_DISPLAY.get(op_class)
+    if not word:
+        return "Still checking one more."
+    return f"Still checking the {_respell_for_tts(word)} group."
+
+
+def _is_stale(facts: dict[str, object], stale_window_s: float) -> bool:
+    """Whether this contact was last seen longer ago than
+    `stale_window_s`. Reads `facts["last_seen_ago_s"]`, which
+    `tools._contact_facts` always populates."""
+    ago_s = facts.get("last_seen_ago_s")
+    if not isinstance(ago_s, (int, float)):
+        return False
+    return float(ago_s) > stale_window_s
+
+
+def _spoken_age_phrase(ago_s: float) -> str:
+    """How old a remembered contact is, in the register the user chose:
+    *"a couple minutes old"*.
+
+    **Rungs off a rounded minute count, with no named thresholds**, so
+    every rung is true at every age inside it -- which is the whole point
+    of the marker and the one way it could be worse than silence. Speaking
+    *"a couple minutes old"* about a contact seen twenty seconds ago would
+    be a fresh false claim dressed as honesty, so the sub-minute and
+    one-minute cases get their own words rather than being rounded into
+    the user's phrase.
+
+    The `> 2` rung is unreachable from the pull path today -- `_report_
+    scope` drops `certainty == "lost"`, so in-scope ages cap at `decay.
+    LOST_THRESHOLD_S` (120 s) and `round(120/60)` is 2. It exists so that
+    widening that bound produces a longer sentence rather than a wrong
+    one."""
+    minutes = round(ago_s / 60.0)
+    if minutes <= 0:
+        return "under a minute old"
+    if minutes == 1:
+        return "about a minute old"
+    if minutes == 2:
+        return "a couple minutes old"
+    return f"about {_spoken_number(minutes)} minutes old"
+
+
+def _summary_air_defence_freshness_clause(
+    facts_list: Sequence[dict[str, object]], stale_window_s: float
+) -> str | None:
+    """*"The long range SAM is a couple minutes old."* -- the **selective**
+    freshness marker, for a stale *air-defence* contact in a scene that is
+    not wholly stale.
+
+    **User decision 2026-10-10, in his own words: "Freshness is spoken
+    only when a stale contact is air defence or otherwise
+    decision-relevant; a stale truck passes unqualified. Shortest answers,
+    but it means accepting that some stale belief is spoken as present
+    tense."** The trade is deliberate: a stale truck gets no marker, and
+    that is the accepted cost of the shortest answer, not an oversight.
+    `plans/crew-query-path/plan.md` Decision D carries the same note.
+
+    It exists because `render_report_summary`'s *all*-stale prefix is the
+    only freshness signal the first implementation had, and in-scope runs
+    to `decay.LOST_THRESHOLD_S` (120 s) while the stale window is one scan
+    cycle (16 s) -- so one contact refreshed in the current cycle stripped
+    the qualifier off a two-minute-old SAM
+    (`plans/crew-query-path/security.md`, required fix 1, measured).
+
+    **Membership is `_summary_op_class` + `AIR_DEFENSE_OP_CLASSES`, the
+    same test `_summary_air_defence_clause` uses and deliberately not
+    `_is_air_defence`** -- that predicate resolves through `object_model.
+    profile_for`, which keyword-matches *type* names, so a `class`-level
+    SAM belief (`"OP_LRSAM"`) is not recognised as air defence at all
+    (`BL-B47`). A marker built on it would be dead in exactly the scene
+    this one exists for.
+
+    **Age is the *oldest* stale air-defence contact's**, never the first
+    one found: the hedge must not under-claim, and `_summary_deferral_
+    clause`'s `stale[0]` -- `get_contacts` order, i.e. arbitrary -- is one
+    of the things the security finding named.
+
+    Returns `None` when no in-scope air-defence contact is stale. The
+    *wholly*-stale case is the caller's to exclude: the `"Last I saw"`
+    prefix already covers the whole answer there, and saying both would
+    say the same thing twice (`_summary_deferral_clause` declines for the
+    same reason)."""
+    op_classes: list[str] = []
+    oldest_ago_s = 0.0
+    for facts in facts_list:
+        if not _is_stale(facts, stale_window_s):
+            continue
+        op_class = _summary_op_class(facts)
+        if op_class is None or op_class not in AIR_DEFENSE_OP_CLASSES:
+            continue
+        op_classes.append(op_class)
+        ago_s = facts.get("last_seen_ago_s")
+        if isinstance(ago_s, (int, float)):
+            oldest_ago_s = max(oldest_ago_s, float(ago_s))
+    if not op_classes:
+        return None
+    age = _spoken_age_phrase(oldest_ago_s)
+    # The subject is named explicitly rather than left as an apposition on
+    # the air-defence clause ("..., and one long range SAM, a couple
+    # minutes old"), because that clause names *every* air-defence tier in
+    # scope -- fresh ones included -- so an apposition would hedge a
+    # contact seen a second ago. Naming the subject also means the marker
+    # reads correctly in the case where there is no air-defence clause at
+    # all to hang off: when air defence is the dominant class the clause
+    # is suppressed as a duplicate, and a stale SAM would otherwise be
+    # marked nowhere.
+    if len(op_classes) == 1:
+        word = _OP_CLASS_DISPLAY.get(op_classes[0])
+        if word:
+            return f"The {_respell_for_tts(word)} is {age}."
+    elif len(set(op_classes)) == 1:
+        plural = _OP_CLASS_DISPLAY_PLURAL.get(op_classes[0])
+        if plural:
+            return f"The {_respell_for_tts(plural)} are {age}."
+    # Several tiers, or a class with no display word: one collective
+    # subject rather than a list, which would cost more budget than the
+    # clause that already named the tiers.
+    return f"The air defence is {age}."
+
+
+def render_report_summary(
+    facts_list: list[dict[str, object]],
+    *,
+    band_label: str,
+    stale_window_s: float,
+) -> OutgoingSpeech:
+    """The slotted query's answer: **one summary utterance whose job is to
+    aim the pilot's eyes** (`plans/crew-query-path/plan.md` Decision C,
+    user decision 13).
+
+    *"About eight units, mostly infantry, 1 o'clock through 2 o'clock,
+    inside 2 kilometres. Still checking the truck group."*
+
+    The pilot has eyes; the copilot's answer is a **pointer** -- enough to
+    aim a look, not a transfer of the picture. His own words: *"B. I can
+    also look myself, so a summary is good, I then know where and what to
+    look for."* It costs less time to say, which matters in a hover, and
+    it degrades gracefully where an enumeration would have to lie or hedge
+    four times.
+
+    **Computed from the in-scope facts, never from rendered texts.** That
+    is what makes it immune to the leak `crew_console._render_report_
+    lines` documents: `render_group_full_disclosure` names a group's full
+    roster, so the enumerated answer speaks group-mates a filter
+    excluded. Aggregates over the filtered set cannot.
+
+    `band_label` is the caller's, the same division of labour
+    `render_clear`/`render_no_view` already follow -- the metre boundaries
+    are a command-vocabulary fact (`crew_console._REPORT_BAND_BOUNDS_M`)
+    and this function only formats what it is handed. `stale_window_s` is
+    `decay.OBSERVED_WINDOW_S` at the live call site: the project's
+    existing "how long since a look is still fresh" bound, reused rather
+    than joined by a second staleness constant.
+
+    **Freshness is spoken, not implied.** When *every* in-scope contact
+    is older than `stale_window_s` the whole answer is prefixed *"Last I
+    saw, "* -- a remembered contact must be spoken as remembered, which is
+    the no-omniscience invariant's grip on a *pull* (Decision D). Note
+    what this is not: it is not a filter. A contact Petrovich believes in
+    is reported **qualified**, never withheld, however long ago he saw it.
+
+    **In the *mixed* case it is spoken selectively, which is a user
+    decision and not an omission.** In-scope runs to `decay.
+    LOST_THRESHOLD_S` (120 s) while `stale_window_s` is one scan cycle
+    (16 s), so one contact refreshed in the current cycle leaves the rest
+    unqualified by that prefix -- and the first implementation had no
+    other freshness signal (`plans/crew-query-path/security.md`, required
+    fix 1). His call, 2026-10-10: *"Freshness is spoken only when a stale
+    contact is air defence or otherwise decision-relevant; a stale truck
+    passes unqualified. Shortest answers, but it means accepting that some
+    stale belief is spoken as present tense."* So a stale air-defence
+    contact gets `_summary_air_defence_freshness_clause`, in the part of
+    the answer the budget never drops; a stale truck gets nothing beyond
+    the deferral it already had.
+
+    **The drop order when the parts exceed `REPORT_SUMMARY_MAX_WORDS` is
+    specified, not incidental**: the deferral clause goes first, then the
+    dominant-class clause. Count, direction and band are the pointer, and
+    the pointer is the whole product. The air-defence clause survives both
+    drops (Q2) -- the budget absorbs it by dropping the deferral, exactly
+    as the user's answer says.
+
+    An empty `facts_list` is a caller error: the empty answer is
+    `render_clear`/`render_no_view`, which say different things, and only
+    the caller knows which."""
+    assert facts_list, "the empty answer is render_clear/render_no_view's"
+
+    count_clause, spoken_count = _summary_count_clause(facts_list)
+    dominant_op_class = _dominant_op_class(facts_list)
+    classified = [facts for facts in facts_list if _summary_op_class(facts) is not None]
+    single_class = dominant_op_class is not None and all(
+        _summary_op_class(facts) == dominant_op_class for facts in classified
+    )
+
+    # One class in scope folds into the count ("Three armor"); several
+    # keep the hedged "mostly", which is the clause the budget drops
+    # second. Folding requires *every* in-scope contact to be that class:
+    # an unclassified dot alongside three tanks makes "Four armor" a claim
+    # Petrovich does not hold, so that scene hedges instead.
+    class_clause: str | None = None
+    folded_dominant = False
+    if dominant_op_class is not None:
+        plural = _OP_CLASS_DISPLAY_PLURAL.get(dominant_op_class)
+        if single_class and len(classified) == len(facts_list):
+            # **The folded word agrees with the number the count clause
+            # just spoke**, which is why `_summary_count_clause` hands it
+            # back. Six of the ten display classes genuinely inflect --
+            # `OP_TRUCK`, the three SAM tiers, `OP_SHIP`, and
+            # `OP_GROUPSOMETHING` (whose singular is "group" and plural
+            # "contacts", a different word rather than a suffix) -- so a
+            # count of one folded through the plural table says "One
+            # trucks". The four that do not inflect are the mass nouns
+            # and acronyms (`OP_ARMORED`, `OP_INFANTRY`, the two AAA
+            # classes), and every fold test written before this used one
+            # of them, which is why nothing caught it. Same singular
+            # table, same `count == 1` reasoning, as
+            # `_summary_air_defence_clause`'s own branch.
+            display = (
+                _OP_CLASS_DISPLAY.get(dominant_op_class)
+                if spoken_count == 1
+                else plural
+            )
+            if display:
+                display = _respell_for_tts(display)
+                count_clause = count_clause.replace(" units", f" {display}").replace(
+                    " unit", f" {display}"
+                )
+                folded_dominant = True
+        elif plural:
+            # The hedge stays plural unconditionally: "mostly" is a claim
+            # about a mix, which needs at least one unclassified contact
+            # alongside the classified ones, so the count is never one.
+            class_clause = f"mostly {_respell_for_tts(plural)}"
+
+    clock_clause = _summary_clock_clause(facts_list)
+    deferral_clause = _summary_deferral_clause(facts_list, stale_window_s)
+    all_stale = all(_is_stale(facts, stale_window_s) for facts in facts_list)
+    # Computed once, outside `_assemble`: it does not depend on which
+    # candidate the budget settles on, because it is in no candidate's
+    # droppable part.
+    freshness_clause = (
+        None
+        if all_stale
+        else _summary_air_defence_freshness_clause(facts_list, stale_window_s)
+    )
+
+    def _assemble(with_deferral: bool, with_class: bool) -> str:
+        parts = [count_clause]
+        names_dominant = with_class and class_clause is not None
+        if names_dominant:
+            assert class_clause is not None
+            parts.append(class_clause)
+        if clock_clause is not None:
+            parts.append(clock_clause)
+        parts.append(band_label)
+        # **Recomputed per candidate, not once.** The air-defence clause
+        # skips a tier the dominant-class clause has already named -- but
+        # that clause is the second thing the budget drops, and dropping
+        # it would then leave an air-defence contact named *nowhere*.
+        # Measured while writing this: a scene whose modal class was
+        # `OP_LRSAM` lost the long-range SAM from the answer entirely,
+        # which is precisely the failure Q2 exists to prevent. When the
+        # class clause is not in this candidate, nothing is suppressed.
+        #
+        # `folded_dominant` counts as naming it: when the class folded
+        # into the count ("Three short range SAMs") it is inside a clause
+        # the budget never drops, so suppressing the duplicate is safe.
+        air_defence_clause = _summary_air_defence_clause(
+            facts_list,
+            dominant_op_class if (names_dominant or folded_dominant) else None,
+        )
+        if air_defence_clause is not None:
+            parts.append(air_defence_clause)
+        sentence = ", ".join(parts)
+        if all_stale:
+            sentence = f"Last I saw, {sentence}"
+        else:
+            sentence = sentence[:1].upper() + sentence[1:]
+        text = f"{sentence}."
+        # **Appended in every candidate, which is what makes it
+        # non-droppable.** It sits above the deferral deliberately: the
+        # deferral is the first thing the budget drops, and the security
+        # finding's whole substance is that the only honesty marker in the
+        # mixed-staleness scene was the droppable one. Its words *do*
+        # count against `REPORT_SUMMARY_MAX_WORDS`, so it buys itself room
+        # by pushing the deferral and then the dominant class out -- which
+        # is the intended order, not a side effect.
+        if freshness_clause is not None:
+            text = f"{text} {freshness_clause}"
+        if with_deferral and deferral_clause is not None:
+            text = f"{text} {deferral_clause}"
+        return text
+
+    for with_deferral, with_class in ((True, True), (False, True), (False, False)):
+        text = _assemble(with_deferral, with_class)
+        if len(text.split()) <= REPORT_SUMMARY_MAX_WORDS:
+            break
+    # The last candidate (no deferral, no class clause) is spoken even if
+    # it still overruns: count, direction and band are the pointer, and a
+    # too-long pointer beats no answer. There is deliberately nothing
+    # below it to drop -- the budget trims what is explanatory, never what
+    # aims a look.
     return OutgoingSpeech(text=text, template="contact_report")
 
 

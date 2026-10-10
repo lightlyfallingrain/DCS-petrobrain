@@ -143,6 +143,32 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # descriptor x nine hours x twenty ranges cross-product is in the
         # hundreds, far past what a closed grammar can list.
         "follow",
+        # `report|describe [<what>] [<where>] [<how far>]` -- the slotted
+        # crew query (`plans/crew-query-path/plan.md` Decision A, user
+        # decision 12 of `plans/post-review-fixes/explore-notes.md`), the
+        # same shape `follow` above already has and for the same reason:
+        # 9 clock hours x 8 cardinals x 3 relative x 3 bands x 7
+        # descriptors is in the thousands, far past what a closed grammar
+        # can list. `descriptor`/`clock` reuse `parse_descriptor`/
+        # `parse_clock` verbatim; `sector`/`relative`/`band` get the three
+        # parsers added below.
+        #
+        # **The legacy `report_all`/`report_clock_*`/`report_bearing_*`/
+        # `report_bearing_deg` tokens stay**, and four separate consumers
+        # are why. **Not `LEGACY_F10_TOKENS`** -- the plan's Decision A
+        # said so and this comment inherited it, but that tuple holds the
+        # scan/watch/cancel tokens and has never held a `report_*` one,
+        # so the legacy report families are not reachable from the F10
+        # menu at all. What does reach them: `TOKENS` membership, which
+        # is what the STT bench corpus iterates to print its record-these
+        # prompts (`tools/stt_bench.py`'s `_print_prompts`); body-layer's
+        # `_CLOCK_REPORT_TOKENS`/`_BEARING_REPORT_TOKENS` dispatch tables
+        # and its `DISPATCHED_COMMAND_TOKENS` pinned test; the brain's
+        # structured replies (`belief/brain_reply.py`); and the
+        # typed-console path (`belief/voice_commands.py`). Retiring them
+        # is a separate job. A zero-slot `"report"`/`"describe"` still
+        # falls through to `report_all` through the ordinary phrase table.
+        "report",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -405,6 +431,26 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # by the ordinary phrase table before this token's fallback path is
     # ever reached.
     "follow": ("follow",),
+    # The slotted crew query. Like `follow`, the slots are parsed
+    # (`command_matcher.py`'s report-slot branch), never enumerated here --
+    # these five phrasings are **recogniser bias hints only** (this
+    # module's docstring: `PHRASES` is the prompt/grammar bias list, and
+    # is deliberately not exhaustive), chosen to cover one example of each
+    # slot shape: relative, clock + band, descriptor + cardinal, and the
+    # `describe` verb on two of them so the corpus measures both verbs.
+    #
+    # **Bare `"report"`/`"describe"` are deliberately absent here** -- they
+    # belong to `report_all` above and must keep resolving there (a
+    # zero-slot query is still "report everything"). Adding either would
+    # also collide in `normalized_phrase_index`, which raises rather than
+    # letting one token silently shadow the other.
+    "report": (
+        "report left",
+        "report right",
+        "describe two o'clock near",
+        "report armor north",
+        "describe group far",
+    ),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
@@ -832,6 +878,121 @@ def parse_descriptor(text: str) -> str | None:
     for descriptor in DESCRIPTOR_WORDS:
         if descriptor in words:
             return descriptor
+    return None
+
+
+#: The two verbs the slotted `report` token admits (`plans/crew-query-path/
+#: plan.md` Decision A) -- both fuzzy-tested at `command_matcher.VERB_FLOOR`,
+#: so **every** slotted form works under either verb. `"describe"` shipped
+#: 2026-10-05 as a bare `report_all` phrasing only; listing it here is what
+#: makes it a substitutable verb rather than merely an anchorable one.
+_REPORT_VERBS: tuple[str, ...] = ("report", "describe")
+
+
+def report_verbs() -> tuple[str, ...]:
+    """`_REPORT_VERBS`, for `command_matcher.py`'s report branch. A
+    function rather than a re-exported name so the table has exactly one
+    home, matching `DESCRIPTOR_WORDS`' own single-home posture."""
+    return _REPORT_VERBS
+
+
+#: The `where` slot's cardinal half -- the same eight compass words
+#: `report_bearing_*`/`scan_bearing_*` already spell out, as a *slot*
+#: rather than eight enumerated tokens. Hand-synced with body-layer's
+#: `belief.crew_console._SECTOR_SCAN_LABELS` (module independence -- see
+#: `DESCRIPTOR_WORDS`' identical note); a test on each side asserts its own
+#: table's membership so a drift fails a test rather than a sortie.
+SECTOR_WORDS: tuple[str, ...] = (
+    "north",
+    "northeast",
+    "east",
+    "southeast",
+    "south",
+    "southwest",
+    "west",
+    "northwest",
+)
+
+
+def parse_sector_word(text: str) -> str | None:
+    """The cardinal `where` slot -- the first `SECTOR_WORDS` member found
+    anywhere in the normalised transcript, or `None`.
+
+    Matched **word by word against the whole word**, never as a substring:
+    `normalize_for_match` has already folded `"north east"` onto
+    `"northeast"`, and a substring test would let `"north"` match inside
+    `"northeast"` and resolve the wrong sector. (This project has shipped
+    that exact bug once before, in a coverage floor's bare-substring
+    scan.) `SECTOR_WORDS` order is the tie-break, as in
+    `parse_descriptor`."""
+    words = set(normalize_for_match(text).split())
+    for sector in SECTOR_WORDS:
+        if sector in words:
+            return sector
+    return None
+
+
+#: The `where` slot's ownship-relative half -- **this is `BL-B28`**
+#: (`plans/crew-query-path/plan.md`'s first measured finding: there is no
+#: `report_left`/`report_right` token at all, so `"report left"` resolved
+#: to `report_bearing_e` at ratio 0.75 -- *report east*). The four values
+#: are exactly body-layer's `perception.gaze.RelativeSector` literals, the
+#: same table `belief.attention.project_relative_area` reads, so
+#: `report left` and `scan left` agree on what "left" means by
+#: construction. Hand-synced mirror, like `SECTOR_WORDS` above.
+RELATIVE_WORDS: tuple[str, ...] = ("left", "right", "ahead", "full")
+
+
+def parse_relative_word(text: str) -> str | None:
+    """The ownship-relative `where` slot -- the first `RELATIVE_WORDS`
+    member found anywhere in the normalised transcript, or `None`. Whole-word
+    matching and `RELATIVE_WORDS` order as the tie-break, exactly as
+    `parse_sector_word` above."""
+    words = set(normalize_for_match(text).split())
+    for relative in RELATIVE_WORDS:
+        if relative in words:
+            return relative
+    return None
+
+
+#: The `how far` slot's spoken vocabulary -> band name. Several spoken forms
+#: per band because this is the slot the pilot phrases most loosely, and
+#: the multi-word forms decision 12 gives (*"close in"*, *"medium
+#: distance"*, *"far out"*) are all discriminated by their **first** word,
+#: so a single word-level table covers them without a phrase matcher.
+#:
+#: The band *boundaries* (2 km / 5 km) are body-layer's, not this module's
+#: -- a recogniser has no business knowing metres. `BAND_WORDS`' values are
+#: the three band names that cross the seam; body-layer's
+#: `belief.crew_console._REPORT_BAND_BOUNDS_M` is the hand-synced mirror
+#: holding the numbers, with a membership test on each side.
+#:
+#: **`"close"` is the one collision worth measuring** (`plans/
+#: crew-query-path/plan.md`'s Risks): it is phonetically near `"clock"`,
+#: which the clock slot also consumes. Unbenched on this user's voice, like
+#: every token added without re-recording the corpus.
+BAND_WORDS: dict[str, str] = {
+    "near": "near",
+    "close": "near",
+    "medium": "medium",
+    "mid": "medium",
+    "far": "far",
+    "distant": "far",
+    "long": "far",
+}
+
+
+def parse_band(text: str) -> str | None:
+    """The `how far` slot -- the band of the first `BAND_WORDS` key found
+    in the normalised transcript, in **transcript order** (unlike
+    `parse_descriptor`/`parse_sector_word`, whose tie-break is their own
+    table's order: a band has several synonyms per value, so "whichever
+    the pilot said first" is the only ordering that means anything).
+    `None` if no band word is present."""
+    for word in normalize_for_match(text).split():
+        band = BAND_WORDS.get(word)
+        if band is not None:
+            return band
     return None
 
 

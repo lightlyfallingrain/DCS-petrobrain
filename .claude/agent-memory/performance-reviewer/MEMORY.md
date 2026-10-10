@@ -37,4 +37,6 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Enrichment cache axes](project_enrichment_cache_axes.md) — the 50 m grid key is per contact_id: fixes across-poll misses, can never touch the N-members multiplier; Stage 3a not subsumed.
 - [Benchmarks must be able to fail](feedback_benchmarks_must_be_able_to_fail.md) — build a mutate-and-assert-it-breaks probe into every harness before quoting any number from it.
 - [Watch-tag amplification](project_watch_tag_amplification.md) — "watch" gates event *emission*, so tagging N contacts multiplies tick describes; a 50m per-tick memo gives zero relief for group members (8/8 cells).
+- [Report-query enrichment dominates](project_report_query_enrichment_dominates.md) — get_contacts pays 63ms/contact semantic + 6.8ms uncached divide per contact BEFORE any filter; cache not warmed by the poll.
+- [Slot branch beats phrase table](project_slot_branch_beats_phrase_table.md) — audio-adapter's phrase table is the expensive part (684us); a slot branch in front of it is 4-7x cheaper, not a new cost.
 - [Doc-conventions gate scaling](project_doc_conventions_gate_scaling.md) — split-roadmap gates measured linear to 400 entries, none wired automatically; real NOW risk is the 200-file graph-corpus ceiling, already at 198/200 after one subproject.

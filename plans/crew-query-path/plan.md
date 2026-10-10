@@ -197,6 +197,28 @@ other places, and only those two:
    is already the project's "how long since a look is still fresh" bound. Reuse it; do not add a
    staleness constant.
 
+> **Narrowed 2026-10-10 by user decision — "Freshness is spoken" is *selective*, not universal.**
+> `plans/crew-query-path/security.md`'s required fix 1 found that point 2 above, as built, fires only
+> when **every** in-scope contact is stale — and in-scope runs to `decay.LOST_THRESHOLD_S` (120 s)
+> while the stale window is one scan cycle (16 s), so one contact refreshed in the current cycle
+> stripped the qualifier off a two-minute-old SAM. That is a gap in this decision's argument rather
+> than an implementation slip: nothing here noticed the partial case is the common one.
+>
+> Asked how a report should carry mixed staleness, the user chose:
+>
+> > *"Freshness is spoken only when a stale contact is air defence or otherwise decision-relevant; a
+> > stale truck passes unqualified. Shortest answers, but it means accepting that some stale belief
+> > is spoken as present tense."*
+>
+> So the implemented shape is: a stale **air-defence** contact carries a freshness marker
+> (`speech._summary_air_defence_freshness_clause`), placed in the part of the answer the word budget
+> never drops; the all-stale `"Last I saw"` prefix is unchanged; a stale truck gets no marker.
+> **Some stale belief is therefore spoken as present tense, deliberately** — that is the accepted
+> trade for the shortest answer, not a defect, and a later reader finding it must be able to tell
+> the difference. *"Or otherwise decision-relevant"* is left deliberately open: only the air-defence
+> case is implemented, because that is the class this project already treats as standing-exceptional
+> (Decision 6, Q2).
+
 **Explicitly: `contacts._callout_may_speak` must NOT be applied to the pull path.** D11 extends that
 gate to every *callout* kind, and a later implementer working D11 will be tempted to apply it
 uniformly. Belief survives the aircraft turning away, and the pilot asked the question — filtering

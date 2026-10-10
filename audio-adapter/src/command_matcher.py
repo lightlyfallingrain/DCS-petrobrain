@@ -94,10 +94,14 @@ from vocabulary import (
     TOKENS,
     normalize_for_match,
     normalized_phrase_index,
+    parse_band,
     parse_bearing,
     parse_clock,
     parse_descriptor,
     parse_range_km,
+    parse_relative_word,
+    parse_sector_word,
+    report_verbs,
 )
 
 #: The floor `_phrase_match_ratio`'s word-sequence score must clear for a
@@ -276,6 +280,16 @@ _BEARING_TOKEN_VERBS: dict[str, str] = {
 #: mishearings the whole point of `VERB_FLOOR` is to admit.
 _FOLLOW_VERB = "follow"
 
+#: The slotted `report` token's two verbs (`vocabulary.report_verbs`),
+#: fuzzy-matched for the same reason `_FOLLOW_VERB` is: `verb` here is
+#: already a possibly-misheard first word.
+_REPORT_VERBS: tuple[str, ...] = report_verbs()
+
+#: The three slots that all answer *where* (`plans/crew-query-path/plan.md`
+#: Decision A). A transcript carrying two of them is a recognition
+#: failure, not a conjunction -- see `_where_slot_count`.
+_WHERE_SLOT_NAMES: tuple[str, ...] = ("clock", "sector", "relative")
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -442,6 +456,52 @@ def _parse_follow_slots(text: str) -> dict[str, int | str] | None:
     return slots if slots else None
 
 
+def _parse_report_slots(text: str) -> dict[str, int | str] | None:
+    """The slotted crew query's five optional slots (`plans/
+    crew-query-path/plan.md` Decision A), parsed against the *raw* `text`
+    exactly as `_parse_follow_slots` above does and for the same reason.
+
+    `descriptor` and `clock` reuse `vocabulary.parse_descriptor`/
+    `parse_clock` **verbatim** -- the same two parsers `follow` uses, which
+    is what makes `"report group near"` and `"report armor north"` work
+    without any new recognition surface. `sector`/`relative`/`band` are
+    this feature's three new parsers.
+
+    Returns `None` when nothing resolves, so a zero-slot `"report"`/
+    `"describe"` falls through to the ordinary phrase table and lands on
+    `report_all` as it always has. Mutual exclusion between the three
+    *where* slots is the caller's (`match_transcript`'s) decision, not
+    this parser's: it is a policy about what to do with a detected
+    recognition error, and the same split `parse_bearing`'s three-way
+    outcome already follows."""
+    slots: dict[str, int | str] = {}
+    descriptor = parse_descriptor(text)
+    if descriptor is not None:
+        slots["descriptor"] = descriptor
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    sector = parse_sector_word(text)
+    if sector is not None:
+        slots["sector"] = sector
+    relative = parse_relative_word(text)
+    if relative is not None:
+        slots["relative"] = relative
+    band = parse_band(text)
+    if band is not None:
+        slots["band"] = band
+    return slots if slots else None
+
+
+def _where_slot_count(slots: dict[str, int | str]) -> int:
+    """How many of `_WHERE_SLOT_NAMES` are present. Two or more means the
+    transcript named the direction twice in incompatible frames
+    ("report left north"), which `match_transcript` turns into the
+    *detected* error shape (`token=None, verb_anchored=True`) rather than
+    guessing which one was meant."""
+    return sum(1 for name in _WHERE_SLOT_NAMES if name in slots)
+
+
 def match_transcript(text: str) -> MatchResult:
     """Normalise -> verb anchor -> (bearing slot | phrase match) ->
     separation check. See module and `MatchResult` docstrings for the
@@ -491,6 +551,33 @@ def match_transcript(text: str) -> MatchResult:
         if follow_slots is not None:
             return MatchResult(
                 token="follow", match_ratio=1.0, verb_anchored=True, slots=follow_slots
+            )
+
+    # The slotted crew query (`plans/crew-query-path/plan.md` Decision A),
+    # tried before the generic phrase table for the identical reason the
+    # `follow` branch above is -- and **after** `follow`, an order that is
+    # load-bearing and pinned by a test: `"follow"` and `"report"` are far
+    # apart under `SequenceMatcher` so the two branches do not contend
+    # today, but the follow branch's own comment records this collision
+    # class and a reordering must fail a test rather than a sortie.
+    #
+    # A zero-slot `"report"`/`"describe"`/`"report contacts"`/`"what do
+    # you see"` parses to no slots here and falls through to the phrase
+    # table, landing on `report_all` exactly as before.
+    if any(
+        difflib.SequenceMatcher(None, verb, report_verb).ratio() >= VERB_FLOOR
+        for report_verb in _REPORT_VERBS
+    ):
+        report_slots = _parse_report_slots(text)
+        if report_slots is not None:
+            if _where_slot_count(report_slots) > 1:
+                # Two *where* slots in incompatible frames -- a detected
+                # recognition error, deliberately the same shape an
+                # illegal bearing returns, so the caller asks rather than
+                # picking one (see `_where_slot_count`).
+                return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
+            return MatchResult(
+                token="report", match_ratio=1.0, verb_anchored=True, slots=report_slots
             )
 
     heard_words = tuple(words)

@@ -91,15 +91,21 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Final, TextIO
+from typing import Final, Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import _SECTOR_CENTER_DEG, SECTORS, RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_reply import validate_brain_reply
-from belief.callouts import CalloutScheduler, group_facts, report_priority
+from belief.callouts import (
+    CALLOUT_GROUP_CLOCK_SPAN_HOURS,
+    CalloutScheduler,
+    group_facts,
+    report_priority,
+)
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
+from belief.decay import OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
     BrainClient,
@@ -122,6 +128,7 @@ from belief.speech import (
     render_no_view,
     render_readback,
     render_report,
+    render_report_summary,
     render_say_again,
     render_scan_readback,
     render_silence_ack,
@@ -156,6 +163,7 @@ from belief.voice_commands import (
     classify_yes_no,
 )
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
+from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
 from perception.geometry import GeoPosition, angular_delta_deg
 from perception.source import OwnshipState
 
@@ -432,6 +440,58 @@ _BEARING_REPORT_TOKENS: dict[str, Sector] = {
     "report_bearing_nw": "NW",
 }
 
+#: `_SECTOR_SCAN_LABELS` inverted -- the compass *word* a slotted
+#: `report`'s `sector` slot carries (`audio_adapter.vocabulary.
+#: SECTOR_WORDS`, this seam's hand-synced mirror) back onto the `Sector`
+#: literal everything here already speaks. Derived rather than written out
+#: a second time, so the two cannot drift from each other on this side;
+#: `test_crew_console.py` asserts its membership against the eight words
+#: audio-adapter sends, which is what catches a drift across the seam
+#: (`plans/crew-query-path/plan.md` Decision E).
+_SECTOR_FOR_WORD: dict[str, Sector] = {
+    word: sector for sector, word in _SECTOR_SCAN_LABELS.items()
+}
+
+#: The slotted query's `how far` slot -> `(lo, hi)` slant-range bounds in
+#: metres, from decision 12's own numbers: *near* < 2 km, *medium* 2-5 km,
+#: *far* 5 km+. The 2 000 / 5 000 boundaries are **the only two constants
+#: this feature introduces** besides `speech.REPORT_SUMMARY_MAX_WORDS`
+#: (`plans/crew-query-path/plan.md`'s constant inventory) -- everything else
+#: reuses a table or bound that already existed.
+#:
+#: **The band filters, it does not merely sort** (Q1, user 2026-10-08:
+#: *"filter"*). A tank at 2.1 km goes unmentioned to a pilot who asked
+#: about *near*; he can ask a wider band, and shorter answers were the
+#: point of the whole feature.
+#:
+#: Hand-synced mirror of `audio_adapter.vocabulary.BAND_WORDS`' three band
+#: names (Decision E) -- the spoken synonyms live on that side, since a
+#: recogniser has no business knowing metres, and the numbers live here,
+#: since the adapter has no business knowing ranges. Each side tests its
+#: own table's membership.
+_REPORT_BAND_BOUNDS_M: dict[str, tuple[float, float]] = {
+    "near": (0.0, 2000.0),
+    "medium": (2000.0, 5000.0),
+    "far": (5000.0, float("inf")),
+}
+
+#: The spoken form of each band, for `speech.render_report_summary`'s
+#: `band_label` -- *"inside 2 kilometres"* for a bounded band, *"beyond 5
+#: kilometres"* for the open one. **Derived from `_REPORT_BAND_BOUNDS_M`
+#: rather than written out**, so the number the summary says and the
+#: number the filter applies cannot drift apart: a retuned boundary
+#: changes both or neither. `crew_console` picking the label and `speech`
+#: only formatting it is the division of labour `render_clear`/
+#: `render_no_view` already follow.
+_REPORT_BAND_LABELS: dict[str, str] = {
+    band: (
+        f"beyond {int(lo_m / 1000)} kilometres"
+        if hi_m == float("inf")
+        else f"inside {int(hi_m / 1000)} kilometres"
+    )
+    for band, (lo_m, hi_m) in _REPORT_BAND_BOUNDS_M.items()
+}
+
 #: At most this many groups are spoken in one report, joined into one
 #: utterance (`plans/voice-command-completeness/plan.md` Decision 1b) --
 #: an uncalibrated placeholder pending a live sortie's judgment on whether
@@ -439,6 +499,86 @@ _BEARING_REPORT_TOKENS: dict[str, Sector] = {
 #: "Decisions Requiring User Input" item 3), isolated here so retuning it
 #: never touches `_handle_report`'s own logic.
 REPORT_MAX_GROUPS: Final[int] = 3
+
+
+@dataclass(frozen=True, slots=True)
+class ReportScope:
+    """What one report is *about* -- `CrewConsole._report_scope`'s result
+    (`plans/crew-query-path/plan.md` Decision B/C).
+
+    `facts` is the in-scope contacts' `belief.tools` fact dicts, in
+    `get_contacts` order (most-recently-seen first). The other two answer
+    the question an *empty* `facts` raises, which is not the same question:
+    `direction_label` is the lowercase spoken phrase for the direction
+    asked about (`None` for a query that named no direction), and
+    `rear_hemisphere` says whether that direction is one the cockpit mask
+    makes unseeable -- in which case the honest answer is `render_no_view`
+    rather than `render_clear`. Absence of belief is not absence of
+    things."""
+
+    facts: list[dict[str, object]]
+    direction_label: str | None
+    rear_hemisphere: bool
+
+
+#: `descriptor_verdict`'s three outcomes. Named rather than booleans
+#: because the middle one is the whole point: an unclassified contact is
+#: neither a match nor a mismatch, and collapsing it onto either is what
+#: this verdict exists to stop.
+DescriptorVerdict = Literal["match", "unclassified", "wrong"]
+
+
+def descriptor_verdict(descriptor: str, facts: dict[str, object]) -> DescriptorVerdict:
+    """Whether `facts` answers to the spoken `descriptor` -- the shared
+    three-way verdict behind both `follow`'s scoring and the slotted
+    query's filtering (`plans/crew-query-path/plan.md` Decision B).
+
+    Extracted from `CrewConsole._descriptor_score`, which now maps this
+    verdict onto its weights and nothing else. **Both callers must read one
+    predicate**: `report <descriptor>` and `follow <descriptor>` are the
+    same resolution problem one step along -- same descriptor vocabulary,
+    same lattice walk -- differing only in filter-versus-score, and D10's
+    structured-candidate work is meant to improve this function rather than
+    `_resolve_follow_target`, so that it improves both at once instead of
+    improving one and diverging from the other (that plan's second-order
+    effect 1).
+
+    - `"match"` -- the held classification resolves, through `belief.
+      classification.parent_class_of`, into the `OP_*` set this descriptor
+      names. `"group"` is not a classification at all and keeps its own
+      meaning: `cardinality.lo > 1`.
+    - `"unclassified"` -- presence-level or no classification claim held.
+      Decision 2b-iii's judgement, which D13's graceful-degradation rule
+      repeats: *"he is pointing at a thing he believes is armour --
+      matching it is right"*. So `follow` penalises it only lightly and
+      the report **includes** it, hedged in the wording.
+    - `"wrong"` -- a different, *known* class. Only this verdict excludes.
+    """
+    if descriptor == "group":
+        cardinality = facts.get("cardinality")
+        if isinstance(cardinality, dict):
+            lo = cardinality.get("lo")
+            if isinstance(lo, int) and lo > 1:
+                return "match"
+        # Deliberately `"wrong"`, not `"unclassified"`: cardinality is
+        # always held (the lattice's root stands in for "no claim"), so a
+        # contact that is not plural is positively not a group rather than
+        # merely unresolved.
+        return "wrong"
+    classification = facts.get("classification")
+    if not isinstance(classification, dict):
+        return "unclassified"
+    level = classification.get("level")
+    if not isinstance(level, str) or level not in _KNOWN_CLASS_LEVELS:
+        return "unclassified"
+    value = classification.get("value")
+    if not isinstance(value, str):
+        return "unclassified"
+    if parent_class_of(value) in _FOLLOW_DESCRIPTOR_OP_CLASSES.get(
+        descriptor, frozenset()
+    ):
+        return "match"
+    return "wrong"
 
 
 def _clock_delta(a: int, b: int) -> int:
@@ -532,6 +672,23 @@ def _describe_token_for_confirm(
         if isinstance(follow_range_km, int):
             parts.append(f"{follow_range_km} km")
         return f"follow {' '.join(parts)}" if parts else "follow"
+    if token == "report":
+        # The slotted crew query's readback (`plans/crew-query-path/
+        # plan.md`), modelled on the `follow` branch above: compose the
+        # heard slots back into the phrase the pilot would recognise as
+        # his own, in the order decision 12 gives them -- *what*, *where*,
+        # *how far*. A slot this version does not yet filter on is still
+        # read back, because the confirm prompt's job is to expose a
+        # mishearing, and hiding a word Petrovich heard would defeat it.
+        report_parts: list[str] = []
+        for slot_name in ("descriptor", "clock", "sector", "relative", "band"):
+            value = slots.get(slot_name) if slots is not None else None
+            if slot_name == "clock":
+                if isinstance(value, int) and value in _CLOCK_REPORT_LABELS:
+                    report_parts.append(f"{_CLOCK_REPORT_LABELS[value]} o'clock")
+            elif isinstance(value, str):
+                report_parts.append(value)
+        return f"report {' '.join(report_parts)}" if report_parts else "report"
     bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
     if token in ("scan_bearing_deg", "report_bearing_deg") and isinstance(
         bearing_degrees, int
@@ -568,6 +725,12 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "scan_bearing_deg",
         "report_bearing_deg",
         "report_all",
+        # The slotted crew query (`plans/crew-query-path/plan.md`). Like
+        # `scan_bearing_deg`/`report_bearing_deg` above it is included even
+        # though every slot is optional: a zero-slot `report` is a legal
+        # whole-scene query, and audio-adapter resolves a bare "report" to
+        # `report_all` anyway, so this token only ever arrives with slots.
+        "report",
         "watch_nearest",
         "watch_nearest_air_defence",
         "follow",
@@ -1152,6 +1315,8 @@ class CrewConsole:
                 lines = self._handle_report(
                     now_sim, sector=_nearest_sector(bearing_degrees)
                 )
+        elif token == "report":
+            lines = self._handle_slotted_report(now_sim, slots)
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
@@ -1343,33 +1508,22 @@ class CrewConsole:
 
     def _descriptor_score(self, descriptor: str, facts: dict[str, object]) -> float:
         """The descriptor term of `_resolve_follow_target`'s score --
-        `"group"` reads `facts["cardinality"]` (the user's own example
-        word, `cardinality.lo > 1`), every other descriptor reads the
-        classification lattice through `_FOLLOW_DESCRIPTOR_OP_CLASSES`.
         `0.0` on an exact match, `W_FOLLOW_DESC_UNKNOWN` when the contact
         is presence-level/unclassified (Decision 2b-iii: "he is pointing
         at a thing he *believes* is armour -- matching it is right"),
-        `W_FOLLOW_DESC_WRONG` when it is a *different*, known class."""
-        if descriptor == "group":
-            cardinality = facts.get("cardinality")
-            if isinstance(cardinality, dict):
-                lo = cardinality.get("lo")
-                if isinstance(lo, int) and lo > 1:
-                    return 0.0
-            return W_FOLLOW_DESC_WRONG
-        classification = facts.get("classification")
-        if not isinstance(classification, dict):
-            return W_FOLLOW_DESC_UNKNOWN
-        level = classification.get("level")
-        if not isinstance(level, str) or level not in _KNOWN_CLASS_LEVELS:
-            return W_FOLLOW_DESC_UNKNOWN
-        value = classification.get("value")
-        if not isinstance(value, str):
-            return W_FOLLOW_DESC_UNKNOWN
-        if parent_class_of(value) in _FOLLOW_DESCRIPTOR_OP_CLASSES.get(
-            descriptor, frozenset()
-        ):
+        `W_FOLLOW_DESC_WRONG` when it is a *different*, known class.
+
+        **The verdict itself now lives in the module-level `descriptor_
+        verdict`**, shared with the slotted query's filter (`plans/
+        crew-query-path/plan.md` Decision B) -- this method is the
+        verdict-to-weight mapping and nothing else. Do not reintroduce the
+        lattice walk here; see that function's docstring for why one
+        predicate rather than two."""
+        verdict = descriptor_verdict(descriptor, facts)
+        if verdict == "match":
             return 0.0
+        if verdict == "unclassified":
+            return W_FOLLOW_DESC_UNKNOWN
         return W_FOLLOW_DESC_WRONG
 
     def _resolve_follow_target(
@@ -1585,22 +1739,128 @@ class CrewConsole:
         )
         return [render_scan_readback(sector_label).text]
 
+    def _handle_slotted_report(
+        self, now_sim: float, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """`report|describe [<what>] [<where>] [<how far>]` -- the slotted
+        crew query's one dispatch branch (`plans/crew-query-path/plan.md`
+        Decision A, user decision 12). Reads the slots audio-adapter parsed
+        and calls `_handle_report`; the answer itself is that method's job,
+        unchanged.
+
+        **Every slot is validated, and an unrecognised value is dropped
+        rather than refused.** Slots arrive as JSON over the HTTP seam
+        (Decision E), so nothing here can assume a well-formed value --
+        this is the same graceful-degradation posture `bearing_degrees`
+        already takes in `handle_command`, and the honest failure for a
+        query is a wider answer, never silence. Mutual exclusion between
+        the three *where* slots is audio-adapter's (it returns a detected
+        recognition error before body-layer ever sees the token), so this
+        side only has to pick one if a non-adapter caller sends two: the
+        order below is clock, then sector, then relative, matching the
+        *where* precedence decision 12 states ("typically clock hand").
+
+        Each slot is validated against the table that owns its values on
+        this side -- `_FOLLOW_DESCRIPTOR_OP_CLASSES` (plus `"group"`, which
+        is not a classification), `_CLOCK_REPORT_LABELS`' forward hours,
+        `_SECTOR_FOR_WORD`, `RELATIVE_SECTORS`, `_REPORT_BAND_BOUNDS_M` --
+        so a drift across the seam drops a slot and widens the answer
+        rather than raising mid-query."""
+        descriptor: str | None = None
+        clock: int | None = None
+        sector: Sector | None = None
+        relative: RelativeSector | None = None
+        band: str | None = None
+        if slots is not None:
+            raw_descriptor = slots.get("descriptor")
+            if isinstance(raw_descriptor, str) and (
+                raw_descriptor in _FOLLOW_DESCRIPTOR_OP_CLASSES
+                or raw_descriptor == "group"
+            ):
+                descriptor = raw_descriptor
+            raw_clock = slots.get("clock")
+            if isinstance(raw_clock, int) and raw_clock in _CLOCK_REPORT_LABELS:
+                clock = raw_clock
+            raw_sector = slots.get("sector")
+            if isinstance(raw_sector, str):
+                sector = _SECTOR_FOR_WORD.get(raw_sector)
+            raw_relative = slots.get("relative")
+            if isinstance(raw_relative, str) and raw_relative in RELATIVE_SECTORS:
+                # No `cast` needed and `mypy --strict` rejects one as
+                # redundant: a membership test against a tuple of
+                # `Literal`s narrows `str` to `RelativeSector` on its own.
+                relative = raw_relative
+            raw_band = slots.get("band")
+            if isinstance(raw_band, str) and raw_band in _REPORT_BAND_BOUNDS_M:
+                band = raw_band
+        return self._handle_report(
+            now_sim,
+            clock=clock,
+            sector=sector,
+            descriptor=descriptor,
+            relative=relative,
+            band=band,
+        )
+
     def _handle_report(
         self,
         now_sim: float,
         *,
         clock: int | None = None,
         sector: Sector | None = None,
+        descriptor: str | None = None,
+        relative: RelativeSector | None = None,
+        band: str | None = None,
     ) -> list[str]:
         """`report_all`/`report_clock_<p>`/`report_bearing_<compass>`/
         `report_bearing_deg` (the last reduced to `sector` by
-        `handle_command` before this is ever called) -- `plans/
-        voice-command-completeness/plan.md` Decision 1: **a read of current
-        belief and nothing else.** No `AttentionArea`, no `PendingIntent`,
-        no gaze change, no `aircraft_client` call -- "report is always
-        about current belief. Scan tells to go look" (user, 2026-09-23).
-        At most one of `clock`/`sector` is set by the caller; neither set
-        means `report_all`.
+        `handle_command` before this is ever called), and the slotted
+        `report|describe [<what>] [<where>] [<how far>]` query via
+        `_handle_slotted_report` -- `plans/voice-command-completeness/
+        plan.md` Decision 1: **a read of current belief and nothing else.**
+        No `AttentionArea`, no `PendingIntent`, no gaze change, no
+        `aircraft_client` call -- "report is always about current belief.
+        Scan tells to go look" (user, 2026-09-23). At most one of
+        `clock`/`sector`/`relative` is set (all three answer *where*);
+        none set and no other slot means `report_all`.
+
+        **The three slot filters** (`plans/crew-query-path/plan.md`
+        Decision B), each reusing a table or bound that already existed:
+
+        - `descriptor` -- the shared `descriptor_verdict`. **An
+          unclassified contact is included**, which is the same judgement
+          `_descriptor_score` already records: he is pointing at a thing
+          he *believes* is armour, and matching it is right. Only a
+          positively-wrong known class is excluded.
+        - `relative` -- `perception.gaze.SECTOR_WEDGE_DEG`, imported
+          directly from that module (there is no `belief.attention`
+          re-export to go looking for). It is the public alias bound to
+          the *same object* as the private
+          `_RELATIVE_SECTOR_WEDGE_DEG` that
+          `attention.project_relative_area` reads, so `report left` and
+          `scan left` agree on what "left" means by construction --
+          identity, not two tables kept in step.
+        - `band` -- `_REPORT_BAND_BOUNDS_M` against `relative_now
+          ["range_m"]`, which `relative_geometry` already returns.
+
+        **The clock filter is a span, not an equality.** It was an exact
+        hour; it is now +/- `callouts.CALLOUT_GROUP_CLOCK_SPAN_HOURS`,
+        which is already documented as *"two reports whose clock positions
+        are this close read as the same direction to a listener"* -- the
+        project's existing answer to this exact question, so there is no
+        second constant. A pilot saying "two o'clock" means *around* two,
+        and D13's answer form speaks a bearing *span*. **This is a
+        behaviour change to the shipped `report_clock_*` commands**, not
+        purely additive: more contacts land in scope per query.
+
+        **`contacts._callout_may_speak` is deliberately NOT applied here**
+        (Decision D). That gate belongs to the *push* path and D11 extends
+        it to every callout kind; applying it to a *pull* would answer
+        "nothing there" about a contact Petrovich genuinely believes in,
+        just because the aircraft has since turned away. Belief is already
+        perception-bounded, so presence claims are safe regardless of
+        where he is currently looking. The honest shape is **report it,
+        qualified** ("last I saw"), never **withhold it**.
 
         **Source of facts, in order** (Decision 1's numbered steps):
         `belief.tools.get_contacts`, then drop `certainty == "lost"`
@@ -1635,18 +1895,150 @@ class CrewConsole:
         if self.enrichment is None:
             return ["no world-model connection configured"]
 
+        scope = self._report_scope(
+            now_sim,
+            clock=clock,
+            sector=sector,
+            descriptor=descriptor,
+            relative=relative,
+            band=band,
+        )
+        facts_list = scope.facts
+
+        if not facts_list:
+            if scope.rear_hemisphere:
+                assert scope.direction_label is not None
+                return [render_no_view(scope.direction_label).text]
+            return [render_clear(scope.direction_label).text]
+
+        # Decision C: the answer is one summary utterance, not the
+        # per-group enumeration -- *"B. I can also look myself, so a
+        # summary is good, I then know where and what to look for."*
+        #
+        # **`_render_report_lines` and `render_report`/`REPORT_MAX_GROUPS`
+        # stay in place, unused by this path, deliberately** (that plan's
+        # Decision C): if the summary reads too thin in the air,
+        # reverting is this one call site, and that has to stay true
+        # until the user has flown it. Do not delete them.
+        #
+        # **But a revert is not free, and this is the comment a reverter
+        # reads first, so it says so here**: swapping back to
+        # `_render_report_lines` reintroduces the group-roster leak that
+        # Stage 3 closed -- a *filtered* query whose scope catches one
+        # member of a cohered group speaks that group's out-of-scope
+        # members too, because `render_group_full_disclosure` names the
+        # full roster by design. `_render_report_lines`' own docstring has
+        # the measurement (`report two o'clock near` answering *"Armor,
+        # truck and infantry"* for a 1/3/7 km group). So reverting is one
+        # call site **and** either accepting that leak or filtering the
+        # roster; it is not one line on its own.
+        return [
+            render_report_summary(
+                facts_list,
+                band_label=self._band_label_for(facts_list, band),
+                stale_window_s=OBSERVED_WINDOW_S,
+            ).text
+        ]
+
+    def _band_label_for(
+        self, facts_list: list[dict[str, object]], band: str | None
+    ) -> str:
+        """The summary's distance clause.
+
+        When the query named a band, that band's own label -- the pilot
+        asked about *near*, so *"inside 2 kilometres"* is what bounds the
+        answer. Otherwise it is bucketed from the **furthest** in-scope
+        contact (`plans/crew-query-path/plan.md` Decision C's table), since
+        the clause's job is to say how far out the pilot has to look: the
+        near edge would under-state where things are."""
+        if band is not None:
+            return _REPORT_BAND_LABELS[band]
+        max_range_m = 0.0
+        for facts in facts_list:
+            relative_now = facts.get("relative_now")
+            if not isinstance(relative_now, dict):
+                continue
+            range_m = relative_now["range_m"]
+            assert isinstance(range_m, float)
+            max_range_m = max(max_range_m, range_m)
+        for candidate, (lo_m, hi_m) in _REPORT_BAND_BOUNDS_M.items():
+            if lo_m <= max_range_m < hi_m:
+                return _REPORT_BAND_LABELS[candidate]
+        # Unreachable: the three bands tile [0, inf). Kept as the honest
+        # fallback rather than an assert, because a report must answer.
+        return _REPORT_BAND_LABELS["far"]
+
+    def _report_scope(
+        self,
+        now_sim: float,
+        *,
+        clock: int | None,
+        sector: Sector | None,
+        descriptor: str | None,
+        relative: RelativeSector | None,
+        band: str | None,
+    ) -> ReportScope:
+        """Which contacts a report is *about*, plus how to answer when that
+        set is empty -- `_handle_report`'s filtering half, pulled out as a
+        named seam (`plans/crew-query-path/plan.md` Decision B/C).
+
+        Two reasons it is its own method rather than a block inside
+        `_handle_report`. First, Decision C's summary is computed from
+        **the in-scope facts, not from texts**, so the in-scope set has to
+        be a thing a caller can hold. Second, it is the only honest way to
+        test a filter: the spoken answer goes through
+        `render_group_full_disclosure`, whose rule is to name a group's
+        *full roster*, so an in-scope contact drags its out-of-scope
+        group-mates into the text and a filter's effect is not readable
+        off the sentence at all."""
+        assert self.enrichment is not None
+        heading = self.enrichment.ownship.heading_true_deg
+        rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
         direction_label: str | None = None
         rear_hemisphere = False
+        # The *where* wedge, as `(absolute center, half-width)` in true
+        # degrees, or `None` for a query that names no compass/relative
+        # direction. `sector` keeps its existing +/-45; `relative` reads
+        # the shared wedge table and projects it onto the current heading
+        # exactly as `attention.project_relative_area` does, so the two
+        # cannot disagree about where "left" is.
+        wedge: tuple[float, float] | None = None
         if clock is not None:
             direction_label = f"{_CLOCK_REPORT_LABELS[clock]} o'clock"
         elif sector is not None:
             direction_label = _SECTOR_SCAN_LABELS[sector]
-            heading = self.enrichment.ownship.heading_true_deg
-            relative_deg = angular_delta_deg(_SECTOR_CENTER_DEG[sector], heading)
-            rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
-            rear_hemisphere = relative_deg >= rear_cutoff_deg
+            center = _SECTOR_CENTER_DEG[sector]
+            wedge = (center, 45.0)
+            rear_hemisphere = angular_delta_deg(center, heading) >= rear_cutoff_deg
+        elif relative is not None:
+            direction_label = _RELATIVE_SCAN_LABELS[relative]
+            relative_center, half_width = SECTOR_WEDGE_DEG[relative]
+            center = (heading + relative_center) % 360.0
+            wedge = (center, half_width)
+            # `render_no_view` extended to `relative` (`plans/
+            # crew-query-path/plan.md` Decision D) -- the absence claim is
+            # withheld for a direction the cockpit mask makes impossible,
+            # whichever frame named it.
+            #
+            # **Enumerated, because today it can never fire and that must
+            # stay visible:** all four `RelativeSector`s are body-relative
+            # and forward by construction -- `ahead` (0 +/- 30), `left`
+            # (-60 +/- 30), `right` (+60 +/- 30), `full` (0 +/- 90) -- so
+            # the widest reaches 90 degrees relative, well inside the
+            # 130-degree `rear_cutoff_deg`. The check is applied anyway
+            # rather than hardcoded `False`, so that widening the wedge
+            # table (or offering a rear sector, which `gaze.py` currently
+            # declines to) cannot silently start claiming "left, clear"
+            # about something Petrovich cannot see. `test_crew_console.py`
+            # pins both halves: the four sectors are inside the mask, and
+            # a relative query answers `render_clear`.
+            #
+            # Compared on the wedge *center*, exactly as the `sector`
+            # branch above does with its own +/-45 -- one rule for both
+            # frames rather than a second, edge-based one here.
+            rear_hemisphere = angular_delta_deg(center, heading) >= rear_cutoff_deg
 
-        center_deg = _SECTOR_CENTER_DEG[sector] if sector is not None else None
+        band_bounds = _REPORT_BAND_BOUNDS_M[band] if band is not None else None
         facts_list: list[dict[str, object]] = []
         for result in get_contacts(self.store, now_sim, enrichment=self.enrichment):
             facts = result["facts"]
@@ -1655,21 +2047,52 @@ class CrewConsole:
             relative_now = facts.get("relative_now")
             if not isinstance(relative_now, dict):
                 continue
-            if clock is not None and relative_now["clock_position"] != clock:
-                continue
-            if center_deg is not None:
+            if clock is not None:
+                actual_clock = relative_now["clock_position"]
+                assert isinstance(actual_clock, int)
+                if _clock_delta(clock, actual_clock) > CALLOUT_GROUP_CLOCK_SPAN_HOURS:
+                    continue
+            if wedge is not None:
                 bearing_deg = relative_now["bearing_deg"]
                 assert isinstance(bearing_deg, float)
-                if angular_delta_deg(bearing_deg, center_deg) > 45.0:
+                center_deg, half_width_deg = wedge
+                if angular_delta_deg(bearing_deg, center_deg) > half_width_deg:
                     continue
+            if band_bounds is not None:
+                range_m = relative_now["range_m"]
+                assert isinstance(range_m, float)
+                lo_m, hi_m = band_bounds
+                if not lo_m <= range_m < hi_m:
+                    continue
+            if descriptor is not None and descriptor_verdict(descriptor, facts) == (
+                "wrong"
+            ):
+                continue
             facts_list.append(facts)
 
-        if not facts_list:
-            if rear_hemisphere:
-                assert direction_label is not None
-                return [render_no_view(direction_label).text]
-            return [render_clear(direction_label).text]
+        return ReportScope(
+            facts=facts_list,
+            direction_label=direction_label,
+            rear_hemisphere=rear_hemisphere,
+        )
 
+    def _render_report_lines(
+        self, facts_list: list[dict[str, object]], now_sim: float
+    ) -> list[str]:
+        """`_handle_report`'s rendering half -- the per-group enumeration
+        this command has always spoken, unchanged.
+
+        **Known limitation, closed by Stage 3** (`plans/crew-query-path/
+        plan.md` Decision C): `render_group_full_disclosure` names a
+        group's *full roster* by design, so a filtered query whose scope
+        includes one member of a group has that group's out-of-scope
+        members spoken too. Measured: three contacts at two o'clock at
+        1/3/7 km cohere into one `Group`, and `report two o'clock near`
+        then says *"Armor, truck and infantry"*. Correct for the
+        unfiltered report this renderer was written for; wrong once there
+        is a filter. Decision C's summary replaces it with aggregates over
+        the in-scope facts, which cannot leak by construction."""
+        assert self.enrichment is not None
         # `plans/group-reporting/plan.md` Stage 4 design, section 6: a
         # contact already in this report's scope may belong to a real,
         # persisted `belief.groups.Group` -- resolve those first and speak

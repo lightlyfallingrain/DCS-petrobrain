@@ -24,5 +24,16 @@ which reads exactly like "this is cheap".
   it. (`bench_tick.py` — the re-based deadline must be measurably far from the queueing one.)
 - **Instrumented harness:** assert each counter is non-zero before reading it, and assert the
   system under test actually did the work (contacts founded, cache consulted).
+- **Injected-regression probe, the most generally useful one:** wrap the function under test in a
+  version that burns a known amount of time, assert the harness's own reported figure rises by that
+  amount, then restore it and assert the baseline comes back. Used on BL-13 (2026-10-10): a `+1 ms`
+  `parse_band` moved `match_transcript` by +1798 µs, and `+20 µs/contact` in `descriptor_verdict`
+  moved `_report_scope` from 0.017 to 1.068 ms. Patch at the **calling** module's name, per the trap
+  above.
+- **Also assert the fixture is not degenerate**, which is a different failure from a blind timer.
+  On BL-13 a plausible Syria grid gave `terrain_divide_qualifier` **0/52 positions with a divide**,
+  so the number measured was the empty-result path; the probe caught it only because it counted
+  non-`None` results. Count the thing the measurement is supposed to exercise, do not assume the
+  fixture exercises it. (The implementer role hit the same class and wrote it up separately.)
 
 Related: [[feedback_stale_worktree_check_first]].

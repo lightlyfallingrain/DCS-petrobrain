@@ -12,21 +12,28 @@ behave as `stt_engine.py`/`tools/stt_bench.py` need them to.
 from __future__ import annotations
 
 from vocabulary import (
+    BAND_WORDS,
     DESCRIPTOR_WORDS,
     LEGACY_F10_TOKENS,
     LEGAL_BEARINGS_DEG,
     PHRASES,
+    RELATIVE_WORDS,
     ROUTING_TOKENS,
+    SECTOR_WORDS,
     TOKENS,
     VOICE_ONLY_TOKENS,
     bearing_digits,
     bearing_phrase,
     normalize_for_match,
     normalized_phrase_index,
+    parse_band,
     parse_bearing,
     parse_clock,
     parse_descriptor,
     parse_range_km,
+    parse_relative_word,
+    parse_sector_word,
+    report_verbs,
     spoken_phrases,
     to_gbnf,
     token_for_phrase,
@@ -374,3 +381,163 @@ def test_parse_descriptor_matches_the_closed_set() -> None:
 
 def test_parse_descriptor_returns_none_for_an_unrecognised_word() -> None:
     assert parse_descriptor("follow the helicopter") is None
+
+
+# --- the slotted crew query's three new parsers and its mirror tables
+# (plans/crew-query-path/plan.md Decision A / Decision E) ---
+
+
+def test_report_token_exists_and_is_voice_only() -> None:
+    """`PHRASES`/`TOKENS` parity for the new token is already covered
+    structurally (`test_every_token_has_phrases`, plus `vocabulary.py`'s
+    own import-time assertion). What this adds is that it landed in the
+    right group: it has no F10 button, so it must not be in
+    `LEGACY_F10_TOKENS`."""
+    assert "report" in VOICE_ONLY_TOKENS
+    assert "report" not in LEGACY_F10_TOKENS
+    assert "report" in TOKENS
+    assert PHRASES["report"]
+
+
+def test_bare_report_phrasings_stay_with_report_all() -> None:
+    """A zero-slot query must keep resolving to the flat legacy command,
+    so neither bare verb may appear among the slotted token's phrasings --
+    and `normalized_phrase_index` raises rather than letting one shadow
+    the other, which this exercises by calling it."""
+    assert "report" not in PHRASES["report"]
+    assert "describe" not in PHRASES["report"]
+    index = normalized_phrase_index()
+    assert index["report"] == "report_all"
+    assert index["describe"] == "report_all"
+
+
+def test_report_verbs_are_report_and_describe() -> None:
+    """Both verbs, in this one table, is what makes `"describe"` a
+    substitutable verb rather than merely an anchorable one -- the gap
+    `0caa39e` left (`plans/crew-query-path/plan.md`, measured finding 2)."""
+    assert report_verbs() == ("report", "describe")
+
+
+def test_report_phrasings_cover_both_verbs_and_every_slot_shape() -> None:
+    """The phrasings are recogniser bias hints, so what matters is
+    coverage of the *shapes* the bench should measure, not exhaustiveness:
+    both verbs, and at least one example each of relative, clock, cardinal,
+    descriptor and band."""
+    phrasings = PHRASES["report"]
+    assert any(p.startswith("report ") for p in phrasings)
+    assert any(p.startswith("describe ") for p in phrasings)
+    assert any(any(w in p.split() for w in RELATIVE_WORDS) for p in phrasings)
+    assert any("o'clock" in p for p in phrasings)
+    assert any(any(w in p.split() for w in SECTOR_WORDS) for p in phrasings)
+    assert any(any(w in p.split() for w in DESCRIPTOR_WORDS) for p in phrasings)
+    assert any(any(w in p.split() for w in BAND_WORDS) for p in phrasings)
+
+
+def test_sector_words_are_exactly_the_eight_compass_directions() -> None:
+    """This side of the `SECTOR_WORDS` <-> `belief.crew_console.
+    _SECTOR_SCAN_LABELS` hand-synced mirror (Decision E). body-layer
+    asserts the same membership against its own table; a drift then fails
+    a test on whichever side changed, rather than during a sortie."""
+    assert set(SECTOR_WORDS) == {
+        "north",
+        "northeast",
+        "east",
+        "southeast",
+        "south",
+        "southwest",
+        "west",
+        "northwest",
+    }
+    assert len(SECTOR_WORDS) == 8
+
+
+def test_relative_words_are_exactly_the_four_relative_sectors() -> None:
+    """This side of the `RELATIVE_WORDS` <-> `perception.gaze.
+    RELATIVE_SECTORS` mirror. The four values are body-layer's
+    `RelativeSector` literals verbatim, which is what lets a slot value
+    cross the seam as JSON with no translation table."""
+    assert set(RELATIVE_WORDS) == {"left", "right", "ahead", "full"}
+
+
+def test_band_words_name_exactly_three_bands() -> None:
+    """This side of the `BAND_WORDS` <-> `belief.crew_console.
+    _REPORT_BAND_BOUNDS_M` mirror. The *boundaries* (2 km / 5 km) are
+    deliberately not here -- a recogniser has no business knowing metres --
+    so what this side owns is the three band names and their synonyms."""
+    assert set(BAND_WORDS.values()) == {"near", "medium", "far"}
+
+
+def test_parse_sector_word_reads_each_compass_word() -> None:
+    for word in SECTOR_WORDS:
+        assert parse_sector_word(f"report {word}") == word
+
+
+def test_parse_sector_word_does_not_match_inside_a_longer_word() -> None:
+    """Whole-word matching, not substring. `"north"` sits inside
+    `"northeast"`/`"northwest"`, and a substring scan would resolve the
+    wrong sector for both -- a bug this project has shipped once already
+    (a coverage floor's bare-substring scan matching inside longer
+    codes)."""
+    assert parse_sector_word("report northeast") == "northeast"
+    assert parse_sector_word("report northwest") == "northwest"
+    assert parse_sector_word("report southeast") == "southeast"
+
+
+def test_parse_sector_word_accepts_a_split_compass_spelling() -> None:
+    """`normalize_for_match` folds `"north east"`/`"north-east"` onto the
+    solid form before this parser sees it, so a recogniser's spacing
+    cannot cost a slot."""
+    assert parse_sector_word("report north east") == "northeast"
+    assert parse_sector_word("report South-West") == "southwest"
+
+
+def test_parse_sector_word_returns_none_without_a_compass_word() -> None:
+    assert parse_sector_word("report two o'clock near") is None
+
+
+def test_parse_relative_word_reads_each_relative_sector() -> None:
+    for word in RELATIVE_WORDS:
+        assert parse_relative_word(f"report {word}") == word
+
+
+def test_parse_relative_word_returns_none_without_a_relative_word() -> None:
+    assert parse_relative_word("report north") is None
+
+
+def test_parse_band_reads_every_spoken_form() -> None:
+    for word, band in BAND_WORDS.items():
+        assert parse_band(f"report two o'clock {word}") == band
+
+
+def test_parse_band_reads_the_multi_word_forms_decision_12_gives() -> None:
+    """*"close in"*, *"medium distance"*, *"far out"* -- all discriminated
+    by their first word, which is why a word-level table is enough and no
+    phrase matcher is needed here."""
+    assert parse_band("report two o'clock close in") == "near"
+    assert parse_band("report two o'clock medium distance") == "medium"
+    assert parse_band("report two o'clock far out") == "far"
+
+
+def test_parse_band_takes_the_first_band_word_the_pilot_said() -> None:
+    """Transcript order, not table order: a band has several synonyms per
+    value, so "whichever came first" is the only tie-break that means
+    anything. (Contrast `parse_descriptor`/`parse_sector_word`, where one
+    word per value makes table order the natural tie-break.)"""
+    assert parse_band("report near far") == "near"
+    assert parse_band("report far near") == "far"
+
+
+def test_parse_band_returns_none_without_a_band_word() -> None:
+    assert parse_band("report two o'clock") is None
+
+
+def test_band_words_do_not_collide_with_any_other_slot_vocabulary() -> None:
+    """The five slot vocabularies must stay disjoint, or one transcript
+    word would fill two slots and the *where* mutual-exclusion check would
+    start firing on a single spoken direction."""
+    assert not set(BAND_WORDS) & set(DESCRIPTOR_WORDS)
+    assert not set(BAND_WORDS) & set(SECTOR_WORDS)
+    assert not set(BAND_WORDS) & set(RELATIVE_WORDS)
+    assert not set(DESCRIPTOR_WORDS) & set(SECTOR_WORDS)
+    assert not set(DESCRIPTOR_WORDS) & set(RELATIVE_WORDS)
+    assert not set(SECTOR_WORDS) & set(RELATIVE_WORDS)
