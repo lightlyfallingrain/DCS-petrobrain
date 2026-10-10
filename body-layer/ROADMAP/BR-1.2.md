@@ -23,11 +23,19 @@
   its own — reasoned from transport measurements plus D6's 32.7 s worst-case generation figure,
   never observed live. DoD gate: both subprojects' full command sets re-run from a fresh worktree
   checkout (brain-layer 45 passed, body-layer 1292 passed/4 xfailed, ruff and `mypy --strict` clean
-  in both) — matching every prior role's claimed counts. **Nothing in this feature has ever talked
-  to a real model** — the sandbox every agent on this branch ran in has no route to
+  in both) — matching every prior role's claimed counts. **Nothing *on this branch* has ever talked
+  to a real model** — the sandbox every agent on `feature/brain-layer-stage2` ran in has no route to
   `127.0.0.1:11434`, so all verification (including the fold's own regression tests) ran against a
   fake HTTP server or, for the DoD gate's own live spot-check, `StubDecider` again (proving the
-  live-check tool's wire mechanics, not a real model's output). **Live acceptance outstanding** —
+  live-check tool's wire mechanics, not a real model's output). **Corrected 2026-10-10: this
+  sentence read "Nothing in this feature has ever talked to a real model", which is false of the
+  milestone.** The duplicate implementation, `feature/br1-stage2`, did run
+  `qwen3:4b-instruct-2507-q4_K_M` on 2026-09-25 — measured discriminate 318 ms / classify 132 ms
+  (means of 5, warm, `num_ctx=2048`), and reproduced a real-model failure mode: the model quoted
+  the whole transcript as its `BECAUSE` and D10 degraded it to `ASK` every time. So the gates have
+  been exercised against real model output; what has not happened is the flight. Harvested into
+  `.claude/agent-memory/implementer/project_br1_stage2_duplicate_branch_findings.md` and
+  `[[BR-B1]]` before that branch was retired. **Live acceptance outstanding** —
   card at `docs/acceptance/2026-09-25-brain-layer-stage2-sortie.md`, published as its own artifact
   (https://claude.ai/artifact/VPYm5D44Z98kuEk3ErwbD1) since it needs Ollama running with the model
   pulled in addition to the usual three-process setup, a real branch checkout rather than `main`,

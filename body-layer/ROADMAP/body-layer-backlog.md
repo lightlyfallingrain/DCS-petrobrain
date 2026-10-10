@@ -86,6 +86,14 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B45]] — The `"Safe from <threat>"` close-out call
 - [[BL-B46]] — `logger`'s own logger propagates
 
+**Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
+its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
+`ROADMAP.md`'s status table says the same about its milestones). They keep their own `BR-B<n>`
+sequence — mint from `grep -oE '^BR-B[0-9]+'`, never the prefix-agnostic `[A-Z]+-B`, which would
+return this directory's `BL-B` maximum instead.
+
+- [[BR-B1]] — The wider `CLASSIFY_COMMAND_VOCABULARY` the duplicate Stage 2 branch built
+
 ## Two entries worth knowing about before you read them
 
 - **`BL-B23` carries two records, both verbatim.** Its entry file was created by the Stage 2
