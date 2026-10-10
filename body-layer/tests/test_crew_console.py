@@ -3310,9 +3310,12 @@ def test_report_all_summarises_rather_than_truncating_multiple_contacts(
     # contacts are all 7 m vehicles (BMP-2/T-72/BTR-70 keyword-match; the
     # ZSU-23-4 falls back to `belief.groups.GROUP_REPORTING_UNKNOWN_SIZE_M`,
     # also 7 m), so the backstop is `20.0 * 7.0 = 140` m -- well under their
-    # 1 km spacing. They no longer cohere into one `Group`, so this test is
-    # naturally about `group_facts`'s report-space bucketing and `REPORT_
-    # MAX_GROUPS` truncation alone, as intended.
+    # 1 km spacing. They therefore stay four separate contacts rather than
+    # cohering into one `Group`, which is what makes this a four-contact
+    # scene at all. (The clause that used to end this comment -- "so this
+    # test is naturally about `group_facts`'s report-space bucketing and
+    # `REPORT_MAX_GROUPS` truncation alone" -- was true of the test this
+    # replaced; the docstring above says what it is about now.)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     lines = console.handle_command("report_all", now_sim=0.0)

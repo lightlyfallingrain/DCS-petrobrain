@@ -1832,10 +1832,14 @@ class CrewConsole:
           `_descriptor_score` already records: he is pointing at a thing
           he *believes* is armour, and matching it is right. Only a
           positively-wrong known class is excluded.
-        - `relative` -- `perception.gaze._RELATIVE_SECTOR_WEDGE_DEG` via
-          `belief.attention`'s re-export, the same `(center, half_width)`
-          table `attention.project_relative_area` reads, so `report left`
-          and `scan left` agree on what "left" means by construction.
+        - `relative` -- `perception.gaze.SECTOR_WEDGE_DEG`, imported
+          directly from that module (there is no `belief.attention`
+          re-export to go looking for). It is the public alias bound to
+          the *same object* as the private
+          `_RELATIVE_SECTOR_WEDGE_DEG` that
+          `attention.project_relative_area` reads, so `report left` and
+          `scan left` agree on what "left" means by construction --
+          identity, not two tables kept in step.
         - `band` -- `_REPORT_BAND_BOUNDS_M` against `relative_now
           ["range_m"]`, which `relative_geometry` already returns.
 
@@ -1916,6 +1920,18 @@ class CrewConsole:
         # Decision C): if the summary reads too thin in the air,
         # reverting is this one call site, and that has to stay true
         # until the user has flown it. Do not delete them.
+        #
+        # **But a revert is not free, and this is the comment a reverter
+        # reads first, so it says so here**: swapping back to
+        # `_render_report_lines` reintroduces the group-roster leak that
+        # Stage 3 closed -- a *filtered* query whose scope catches one
+        # member of a cohered group speaks that group's out-of-scope
+        # members too, because `render_group_full_disclosure` names the
+        # full roster by design. `_render_report_lines`' own docstring has
+        # the measurement (`report two o'clock near` answering *"Armor,
+        # truck and infantry"* for a 1/3/7 km group). So reverting is one
+        # call site **and** either accepting that leak or filtering the
+        # roster; it is not one line on its own.
         return [
             render_report_summary(
                 facts_list,

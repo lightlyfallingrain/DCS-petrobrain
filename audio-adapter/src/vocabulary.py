@@ -154,12 +154,20 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # parsers added below.
         #
         # **The legacy `report_all`/`report_clock_*`/`report_bearing_*`/
-        # `report_bearing_deg` tokens stay** -- they are referenced by
-        # `LEGACY_F10_TOKENS` ordering, by the STT bench corpus (whose
-        # prompts are built from `PHRASES`), and by body-layer's
-        # `DISPATCHED_COMMAND_TOKENS` pinned test. Retiring them is a
-        # separate job. A zero-slot `"report"`/`"describe"` still falls
-        # through to `report_all` through the ordinary phrase table.
+        # `report_bearing_deg` tokens stay**, and four separate consumers
+        # are why. **Not `LEGACY_F10_TOKENS`** -- the plan's Decision A
+        # said so and this comment inherited it, but that tuple holds the
+        # scan/watch/cancel tokens and has never held a `report_*` one,
+        # so the legacy report families are not reachable from the F10
+        # menu at all. What does reach them: `TOKENS` membership, which
+        # is what the STT bench corpus iterates to print its record-these
+        # prompts (`tools/stt_bench.py`'s `_print_prompts`); body-layer's
+        # `_CLOCK_REPORT_TOKENS`/`_BEARING_REPORT_TOKENS` dispatch tables
+        # and its `DISPATCHED_COMMAND_TOKENS` pinned test; the brain's
+        # structured replies (`belief/brain_reply.py`); and the
+        # typed-console path (`belief/voice_commands.py`). Retiring them
+        # is a separate job. A zero-slot `"report"`/`"describe"` still
+        # falls through to `report_all` through the ordinary phrase table.
         "report",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))

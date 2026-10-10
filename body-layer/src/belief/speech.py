@@ -562,8 +562,29 @@ def _spoken_number(value: int) -> str:
     return _SPOKEN_NUMBERS.get(value, str(value))
 
 
-def _summary_count_clause(facts_list: Sequence[dict[str, object]]) -> str:
-    """The summary's leading count clause.
+def _unit_word(count: int) -> str:
+    """`"unit"`/`"units"`, agreeing with the number actually spoken.
+
+    **All three of `_summary_count_clause`'s branches go through this, and
+    the enumeration is the point.** Each branch used to write its own
+    noun, and only the exact-total branch inflected: the open-ended one
+    said *"at least one units"* and the midpoint one *"about one units"*
+    (reachable when a `cardinality` interval's `lo` is zero, since the
+    midpoint floors at one). Three noun sites is three places to
+    disagree; one is none."""
+    return "unit" if count == 1 else "units"
+
+
+def _summary_count_clause(facts_list: Sequence[dict[str, object]]) -> tuple[str, int]:
+    """The summary's leading count clause, **and the number it speaks**.
+
+    The second element is not bookkeeping: `render_report_summary` folds
+    a single in-scope class into this clause by substituting the unit
+    noun, and the display word it substitutes has to agree with the
+    number already spoken here ("One truck", not "One trucks"). Only this
+    function knows which of the three branches ran and therefore what
+    that number is, so it returns it rather than letting the caller
+    re-derive it from the string.
 
     Sums each in-scope contact's `cardinality` interval, **treating an
     absent `cardinality` key as exactly one**. That is not a fallback: a
@@ -593,12 +614,11 @@ def _summary_count_clause(facts_list: Sequence[dict[str, object]]) -> str:
         total_lo += lo
         total_hi += hi
     if math.isinf(total_hi):
-        return f"at least {_spoken_number(total_lo)} units"
+        return f"at least {_spoken_number(total_lo)} {_unit_word(total_lo)}", total_lo
     if total_lo == total_hi:
-        unit = "unit" if total_lo == 1 else "units"
-        return f"{_spoken_number(total_lo)} {unit}"
+        return f"{_spoken_number(total_lo)} {_unit_word(total_lo)}", total_lo
     midpoint = max(1, round((total_lo + total_hi) / 2))
-    return f"about {_spoken_number(midpoint)} units"
+    return f"about {_spoken_number(midpoint)} {_unit_word(midpoint)}", midpoint
 
 
 #: Clock hour -> signed offset from the nose, 12 o'clock = 0, positive
@@ -827,7 +847,7 @@ def render_report_summary(
     the caller knows which."""
     assert facts_list, "the empty answer is render_clear/render_no_view's"
 
-    count_clause = _summary_count_clause(facts_list)
+    count_clause, spoken_count = _summary_count_clause(facts_list)
     dominant_op_class = _dominant_op_class(facts_list)
     classified = [facts for facts in facts_list if _summary_op_class(facts) is not None]
     single_class = dominant_op_class is not None and all(
@@ -843,15 +863,36 @@ def render_report_summary(
     folded_dominant = False
     if dominant_op_class is not None:
         plural = _OP_CLASS_DISPLAY_PLURAL.get(dominant_op_class)
-        if plural:
-            plural = _respell_for_tts(plural)
-            if single_class and len(classified) == len(facts_list):
-                count_clause = count_clause.replace(" units", f" {plural}").replace(
-                    " unit", f" {plural}"
+        if single_class and len(classified) == len(facts_list):
+            # **The folded word agrees with the number the count clause
+            # just spoke**, which is why `_summary_count_clause` hands it
+            # back. Six of the ten display classes genuinely inflect --
+            # `OP_TRUCK`, the three SAM tiers, `OP_SHIP`, and
+            # `OP_GROUPSOMETHING` (whose singular is "group" and plural
+            # "contacts", a different word rather than a suffix) -- so a
+            # count of one folded through the plural table says "One
+            # trucks". The four that do not inflect are the mass nouns
+            # and acronyms (`OP_ARMORED`, `OP_INFANTRY`, the two AAA
+            # classes), and every fold test written before this used one
+            # of them, which is why nothing caught it. Same singular
+            # table, same `count == 1` reasoning, as
+            # `_summary_air_defence_clause`'s own branch.
+            display = (
+                _OP_CLASS_DISPLAY.get(dominant_op_class)
+                if spoken_count == 1
+                else plural
+            )
+            if display:
+                display = _respell_for_tts(display)
+                count_clause = count_clause.replace(" units", f" {display}").replace(
+                    " unit", f" {display}"
                 )
                 folded_dominant = True
-            else:
-                class_clause = f"mostly {plural}"
+        elif plural:
+            # The hedge stays plural unconditionally: "mostly" is a claim
+            # about a mix, which needs at least one unclassified contact
+            # alongside the classified ones, so the count is never one.
+            class_clause = f"mostly {_respell_for_tts(plural)}"
 
     clock_clause = _summary_clock_clause(facts_list)
     deferral_clause = _summary_deferral_clause(facts_list, stale_window_s)

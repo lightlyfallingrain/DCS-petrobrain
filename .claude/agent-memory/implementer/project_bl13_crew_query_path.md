@@ -1,6 +1,6 @@
 ---
 name: bl13-crew-query-path
-description: BL-13 Stages 1-3 (slotted report/describe) — the group full-roster leak through a filter, non-deterministic modal class, and parent_class_of vs profile_for.
+description: BL-13 Stages 1-3 (slotted report/describe) — the group full-roster leak through a filter, non-deterministic modal class, parent_class_of vs profile_for, infantry as an unbounded cohesion bridge, and the singular/plural count fold.
 metadata:
   type: project
 ---
@@ -42,10 +42,34 @@ altogether. Fix: recompute the suppression per budget candidate. **An unconditio
 probe passed against the full original test set** — the interaction of two independently-tested
 rules had no coverage. Worth probing wherever a conditional mention meets a conditional drop.
 
-**`belief.groups` cohesion is erratic at test-fixture scales** — two contacts 2 km apart did not
-group, two at clock 12 and clock 3 did, three at 1/3/7 km did. Do not build a fixture that depends
-on a group *not* forming.
+**~~`belief.groups` cohesion is erratic at test-fixture scales~~ — CORRECTED by the review, and the
+real behaviour is worse than "erratic".** It is deterministic, and traceable to
+`_OP_CLASS_COHESION_BACKSTOP`: `OP_INFANTRY` is `EAGER`, which drops the absolute backstop to
+`math.inf` for a pair where **either** member is infantry. So **an infantry contact acts as an
+unbounded bridge that merges non-infantry contacts** — armour at 1 km and a truck at 3 km do not
+cohere alone, but add an infantry contact at 7 km and all three become one group. That is why the
+observations looked random. Standing advice unchanged (do not build a fixture that depends on a group
+*not* forming) but the reason is now known; filed as a body-layer backlog item.
 
 **`ruff format .` rewrites Python code blocks inside Markdown** (it reformatted
 `body-layer/research/2026-10-05-security-audit.md`). Run each subproject's own documented form
 (`ruff format src tests`), which is narrower than the `.` the orchestrator's prompt may give.
+
+**Round 2 (the review's required fix).** The summary's count-clause fold spoke a plural noun against
+a singular count — *"One trucks"*. General lesson extracted to
+[[feedback-guard-fixture-must-not-pick-a-degenerate-case]]; two things specific to this module:
+
+- **`_summary_count_clause` had three noun sites and only one inflected.** The review named one
+  (`"at least one units"`); enumerating the function found a second (`"about one units"`, via a
+  floored midpoint when a `cardinality` interval's `lo` is zero). They are now one `_unit_word`
+  helper whose docstring carries the enumeration, so a fourth cannot be added quietly.
+- **A renderer that substitutes a word into an already-built clause needs the number handed to it.**
+  `_summary_count_clause` now returns `tuple[str, int]` — clause plus the number it spoke — because
+  only it knows which branch ran, and re-deriving the number from the rendered string would be a
+  second place to disagree.
+
+**The worktree has no `.venv`.** Use the main checkout's binaries by absolute path
+(`/Users/sg/Code/DCS-petrobrain/<subproject>/.venv/bin/...`) with `cwd` inside the worktree's own
+subproject directory. Also: the worktree sandbox **refuses a compound Bash command whose program
+name is a shell variable** (`V=.../bin && $V/ruff ...`) as unverifiable — run the gates as separate
+plain commands with the path spelled out.

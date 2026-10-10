@@ -233,3 +233,124 @@ run.
 
 9. **mypy narrows a `str` to a `Literal` union on a membership test against a tuple of literals**,
    and `--strict` then rejects an explanatory `cast` as redundant.
+
+---
+
+## Round 2 — the Reviewer's required fix and its four optional corrections
+
+Reviewed at `44cb1db`. Worktree HEAD was `e2e2164`, a strict ancestor, tree clean —
+fast-forwarded with `git merge --ff-only 44cb1db`. `review.md`, `plan.md` and this log all present
+and read in full. Stage 4 and Stage 5 remain out of scope, and so do both of the review's
+out-of-scope findings (the `_is_air_defence` class-level SAM gap, the infantry-as-unbounded-bridge
+cohesion behaviour) — neither `belief/groups.py` nor `_is_air_defence` was touched. `decay.py`
+untouched; no new constant.
+
+### Files Changed
+
+- `body-layer/src/belief/speech.py` — the required fix. Three changes, one defect:
+  - **`_summary_count_clause` now returns `tuple[str, int]`** — the clause *and* the number it
+    speaks. The caller substitutes a display word into that clause, so it has to know which of the
+    three branches ran; re-deriving the number from the rendered string would be the second place to
+    disagree.
+  - **New `_unit_word(count)`**, the single `"unit"`/`"units"` site. **This is wider than the
+    review named, deliberately**: it named the open-ended branch (`"at least one units"`), but
+    enumerating all three noun sites in the function found the midpoint branch has the same defect
+    (`"about one units"`, reachable whenever a `cardinality` interval's `lo` is zero, since
+    `max(1, round(...))` floors the midpoint at one). Only the exact-total branch had ever
+    inflected, which is exactly why the inconsistency survived. One noun site, not three.
+  - **The fold picks `_OP_CLASS_DISPLAY` when the spoken count is one**, `_OP_CLASS_DISPLAY_PLURAL`
+    otherwise — the same table and the same `count == 1` reasoning
+    `_summary_air_defence_clause` already uses, rather than a third mechanism. The `"mostly"` hedge
+    is now in an `elif` and stays unconditionally plural: it requires at least one *unclassified*
+    contact alongside the classified ones, so its count is never one.
+- `body-layer/src/belief/crew_console.py` — two comment corrections (review observations 1 and 4).
+  The `relative` filter's docstring named a `belief.attention` re-export that does not exist;
+  verified at the source — `crew_console.py:166` imports `SECTOR_WEDGE_DEG` directly from
+  `perception.gaze`, and `attention.py:78` imports the private `_RELATIVE_SECTOR_WEDGE_DEG` for
+  itself rather than re-exporting anything. The conclusion was right for the wrong reason, and the
+  corrected wording says *identity* (`gaze.py:155` binds the public alias to the same object), not
+  two tables kept in step. Separately, the revert note at the pull site now says what a revert
+  costs: `_render_report_lines` documents the group-roster leak thoroughly but the pull-site comment
+  is what a reverter reads *first*, and it claimed reverting "is this one call site" with no mention
+  that a *filtered* query reverted to the enumeration speaks out-of-scope group-mates.
+- `audio-adapter/src/vocabulary.py` — review observation 2, verified before rewriting rather than
+  taken from the report. `LEGACY_F10_TOKENS` holds seventeen scan/watch/cancel tokens and no
+  `report_*` token, so the legacy report families are not reachable from the F10 menu at all and the
+  "referenced by `LEGACY_F10_TOKENS` ordering" clause (inherited verbatim from the plan's Decision
+  A) is false. The four consumers that *do* justify retention were each checked at the source and
+  are now named: `TOKENS` membership, which `tools/stt_bench.py`'s `_print_prompts` iterates to
+  build the bench corpus; body-layer's `_CLOCK_REPORT_TOKENS`/`_BEARING_REPORT_TOKENS` and its
+  `DISPATCHED_COMMAND_TOKENS` pinned test; `belief/brain_reply.py`; `belief/voice_commands.py`.
+- `body-layer/tests/test_crew_console.py` — review observation 3. The stale clause inside the
+  rewritten truncation test is replaced; the cohesion-backstop arithmetic in the same comment is
+  correct and kept, and the deleted clause is quoted in place with a note that it described the test
+  this one replaced.
+- `body-layer/tests/test_speech.py` — four new tests (nine cases).
+
+### Tests Added
+
+- `test_singular_fold_openings_cover_every_inflecting_display_class` — pins the guard's own breadth.
+  `_INFLECTING_OP_CLASSES` is **derived from the two display tables** (every class whose plural word
+  differs from its singular) and asserted equal to the parametrised case table, so a class added to
+  the object model later fails this test instead of silently escaping the guard.
+- `test_render_report_summary_speaks_a_singular_noun_for_a_count_of_one` — six parametrised cases,
+  asserting the full answer string. Parametrised rather than single-cased because the review's point
+  is that the *class choice* is load-bearing, and a one-class guard is one rename away from being
+  back on a mass noun. `OP_GROUPSOMETHING` is in the table with its own expectation
+  (`"One unit"` — it never reaches the fold, because `_summary_op_class` reads "is the default
+  bucket" and "has not resolved to a bucket" as the same answer) rather than filtered out: a class
+  filtered out of a guard is a class nobody is watching.
+- `test_render_report_summary_agrees_the_unit_noun_on_an_open_ended_count` — the `"at least"`
+  branch at `lo == 1`, both folded (`"At least one truck"`) and unfolded (`"At least one unit"`),
+  since the fold is a substitution *after* the clause is built. The existing
+  `test_render_report_summary_says_at_least_for_an_open_ended_count` exercises the same branch at
+  `lo == 4` over `OP_ARMORED`, so it could not have caught either.
+- `test_render_report_summary_agrees_the_unit_noun_on_a_hedged_count_of_one` — the `"about"`
+  branch's floored midpoint. This is the site the review did not name and the enumeration found.
+
+**Both counterfactuals were executed, not reasoned about.** `speech.py` was copied to the scratchpad
+and restored by `shasum` (`31e4675a…`) each time, never by eye and never with `git checkout --`:
+
+| perturbation | result |
+|---|---|
+| fold forced back to `display = plural` (the pre-fix path) | **6 failed, 133 passed** — the five inflecting fold cases plus the folded half of the open-ended test, each with the exact `"One long range SAMs"`-shaped diff |
+| `_unit_word` forced to `return "units"` | **3 failed, 136 passed** — `OP_GROUPSOMETHING`, the open-ended test, the hedged-midpoint test |
+
+`test_render_report_summary_collapses_a_single_hour` (the review's *"One armor"* example) **passed
+under both**, which is the review's claim about it reproduced rather than accepted: it was never a
+guard on this.
+
+### Checks
+
+body-layer (`src tests` form — `ruff format .` rewrites Python blocks inside Markdown and touches an
+unrelated research note; mypy run from inside the subproject, config discovery being CWD-only):
+
+- ruff format src tests: **pass** (1 file reformatted — line-wrapping of the new conditional
+  expression only)
+- ruff check .: **pass**
+- mypy src: **pass** (54 files)
+- pytest: **pass** — 1604 passed, 4 xfailed (baseline 1595/4; +9 is exactly the nine new cases)
+
+audio-adapter:
+
+- ruff format src tests: **pass** (29 files unchanged)
+- ruff check .: **pass**
+- mypy src: **pass** (15 files)
+- pytest: **pass** — 255 passed, 1 skipped (matches baseline)
+
+### Notable Discoveries
+
+10. **The midpoint branch had the same singular/plural defect as the open-ended one, and nothing
+    reported it.** The review enumerated two noun sites; the function had three. Writing the guard
+    for the one that was named would have left `"About one unit"` wrong, reachable through a
+    `cardinality` interval whose `lo` is zero. Enumerating the containing unit rather than the named
+    site is what found it, and `_unit_word`'s docstring now carries that enumeration next to the
+    code so a fourth site cannot be added quietly.
+
+11. **`OP_GROUPSOMETHING` is the one display class whose singular and plural are different *words*,
+    and it never reaches the fold.** `"group"` versus `"contacts"` — not a suffix. It is filtered
+    out upstream by `_summary_op_class`, which treats the default bucket and an unresolved
+    classification as the same answer, so a lone `OP_GROUPSOMETHING` belief speaks `"One unit"`.
+    That is existing deliberate behaviour and is untouched, but it means the set of classes a fold
+    guard must cover and the set a *display table* guard must cover are not the same set — worth
+    knowing before anyone writes the next one.

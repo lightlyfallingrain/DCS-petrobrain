@@ -403,6 +403,111 @@ def test_render_report_summary_folds_one_class_into_the_count() -> None:
     assert "mostly" not in speech.text
 
 
+#: Every display class whose plural word differs from its singular -- the
+#: only classes on which a count-of-one fold can be wrong, and therefore
+#: the only ones that can guard it. **Derived from the two tables rather
+#: than written out**, so a class added to the object model later changes
+#: this set and fails the membership test below, instead of quietly
+#: escaping the guard.
+_INFLECTING_OP_CLASSES = frozenset(
+    op_class
+    for op_class, singular in speech_module._OP_CLASS_DISPLAY.items()
+    if speech_module._OP_CLASS_DISPLAY_PLURAL[op_class] != singular
+)
+
+#: The opening a count of one must speak, per inflecting class.
+_SINGULAR_FOLD_OPENINGS: dict[str, str] = {
+    "OP_TRUCK": "One truck",
+    "OP_SRSAM": "One short range SAM",
+    "OP_MRSAM": "One medium range SAM",
+    "OP_LRSAM": "One long range SAM",
+    "OP_SHIP": "One ship",
+    # The object model's default bucket never reaches the fold at all:
+    # `_summary_op_class` reads "is the default bucket" and "has not
+    # resolved to a bucket" as the same answer to a summary, so a lone
+    # `OP_GROUPSOMETHING` belief keeps the generic unit noun rather than
+    # folding to its "group"/"contacts" pair. Named here with its own
+    # expectation rather than filtered out of the set -- a class filtered
+    # out of a guard is a class nobody is watching.
+    "OP_GROUPSOMETHING": "One unit",
+}
+
+
+def test_singular_fold_openings_cover_every_inflecting_display_class() -> None:
+    """The guard below is only as broad as this table, so the table is
+    pinned against the display tables it is drawn from."""
+    assert set(_SINGULAR_FOLD_OPENINGS) == _INFLECTING_OP_CLASSES
+
+
+@pytest.mark.parametrize(
+    ("op_class", "expected_opening"), sorted(_SINGULAR_FOLD_OPENINGS.items())
+)
+def test_render_report_summary_speaks_a_singular_noun_for_a_count_of_one(
+    op_class: str, expected_opening: str
+) -> None:
+    """A single believed contact speaks a singular noun -- *"One truck"*,
+    never *"One trucks"*.
+
+    **The class choice is load-bearing, and that is the whole reason this
+    test exists separately from
+    `test_render_report_summary_collapses_a_single_hour` and
+    `..._folds_one_class_into_the_count`.** Both of those assert a fold
+    over `OP_ARMORED`/`OP_INFANTRY`, whose plural display word *equals*
+    its singular (`"armor"`, `"infantry"` are mass nouns), so each
+    asserted `"One armor"` and passed while the fold was substituting
+    `_OP_CLASS_DISPLAY_PLURAL`'s value unconditionally. The defect was
+    invisible to every test in the suite for exactly that reason. This
+    one runs over the classes whose plural genuinely inflects, and the
+    set is derived from the tables so the next class added cannot slip
+    past it.
+
+    A single contact is also the commonest scene a `report` answers, and
+    the pilot hears it through TTS -- so this is the wording most often
+    spoken, not an edge case."""
+    speech = render_report_summary(
+        [_summary_facts(op_class=op_class)],
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == f"{expected_opening}, at 2 o'clock, inside 2 kilometres."
+
+
+def test_render_report_summary_agrees_the_unit_noun_on_an_open_ended_count() -> None:
+    """The *"at least"* branch inflects too, folded or not.
+
+    It is the branch that wrote its own noun and so never agreed with its
+    own number (`"at least one units"`); the exact-total branch two lines
+    below it had always been correct, which is what made the inconsistency
+    easy to miss. Both forms are asserted here because the fold happens
+    *after* the clause is built, so each is a separate substitution."""
+    folded = render_report_summary(
+        [_summary_facts(op_class="OP_TRUCK", count=(1, math.inf))],
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert folded.text == "At least one truck, at 2 o'clock, inside 2 kilometres."
+
+    unfolded = render_report_summary(
+        [_summary_facts(op_class=None, count=(1, math.inf))],
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert unfolded.text == "At least one unit, at 2 o'clock, inside 2 kilometres."
+
+
+def test_render_report_summary_agrees_the_unit_noun_on_a_hedged_count_of_one() -> None:
+    """The *"about"* branch's midpoint floors at one (`max(1, ...)`), so a
+    `lo`-of-zero interval reaches it with a count of one and has to say
+    *"About one unit"*. The third noun site, and the one that needed
+    enumerating rather than waiting to be reported."""
+    speech = render_report_summary(
+        [_summary_facts(op_class=None, count=(0, 1.0))],
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == "About one unit, at 2 o'clock, inside 2 kilometres."
+
+
 def test_render_report_summary_hedges_a_mixed_scene() -> None:
     facts_list = [
         _summary_facts(contact_id="CONTACT_1"),
