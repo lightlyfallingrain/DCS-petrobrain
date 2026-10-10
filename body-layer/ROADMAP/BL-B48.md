@@ -33,6 +33,23 @@
   rather than a separate fix. Flagging it here so the number exists and the measurements are not
   re-derived.
 
+  **Answered 2026-10-11 by the [[BL-12]] Architect amendment** (`plans/group-contact-identity/
+  plan.md`, amendment A2): **BL-12's model does not dissolve it — it amplifies it**, so this entry
+  is a blocking prerequisite rather than a citation. Three reasons, measured: a 6 km cluster's
+  remembered `centroid_uncertainty_m` is the members' own position RMS and says nothing about the
+  cluster's extent, so one membership flip moves the centroid **1,667 m** in a tick against a
+  displacement bound of ~15 m — every flip founds a new group, defeating BL-12's whole promise;
+  BL-12's planned group heading derives from that same centroid displacement and would be
+  fabricated; and the spoken-identity line is the pilot-facing form of this entry's own
+  no-believable-bearing point. The amendment also records a **second, previously unrecorded fault**
+  in the same function: with the absolute backstop at `inf`, the relative test
+  (`3 × median(nearest-neighbour gap)`) cannot reject *any* pair at n = 2, which is why
+  `armor + infantry` merges at any separation. Smallest correct fix measured there: require **both**
+  members `EAGER` in `_pair_backstop_m` (mirroring rule 1's existing mixed-installation
+  fall-through) — all three scenes above resolve, infantry-to-infantry thresholds bit-identical.
+  Whether that reading of *"ok to merge infantry too eagerly"* is the intended one is queued for the
+  user as the amendment's Q-A.
+
   **Why BL-13 was immune**, which is a point in favour of its Decision C: the summary renderer
   aggregates over the *filtered* contact set rather than over group rosters, so an over-wide group
   cannot drag out-of-scope contacts into a pull answer. The enumerated push path has no such

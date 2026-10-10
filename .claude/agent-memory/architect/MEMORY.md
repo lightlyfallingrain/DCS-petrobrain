@@ -78,3 +78,5 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [BL-11 Stage 4 fail-closed plan](project_bl11_stage4_fail_closed_plan.md) — measured 70-test blast radius, 3 shared fixture factories fix ~68 of them; coverage counter deliberately not DetectionTraceCollector-shaped.
 - [Doc graph tag hub sizing](project_doc_graph_tag_hub_sizing.md) — graphify under-recalls ~10x vs grep for doc topics; hub size is the only working lever (count it); consistency gate's per-directory ID scope is a live bug.
 - [Terrain feature probing](project_terrain_feature_probing.md) - redesigned around ridge/valley knowledge, not LOS; M8's add_probe_chunk was already built, zero callers.
+- [BL-12 amendment findings](project_bl12_amendment_findings.md) — persistence amplifies an upstream defect it cannot see; a merged fix does not reach an open plan naming the old function; group id stability ≠ roster stability.
+- [Reproduce the threshold arithmetic](feedback_reproduce_the_threshold_arithmetic.md) — run the thresholded decision with real constants, candidate beside current, and always include a row the fix must not change.
