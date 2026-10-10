@@ -105,6 +105,7 @@ from belief.callouts import (
 )
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
+from belief.decay import OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
     BrainClient,
@@ -127,6 +128,7 @@ from belief.speech import (
     render_no_view,
     render_readback,
     render_report,
+    render_report_summary,
     render_say_again,
     render_scan_readback,
     render_silence_ack,
@@ -471,6 +473,23 @@ _REPORT_BAND_BOUNDS_M: dict[str, tuple[float, float]] = {
     "near": (0.0, 2000.0),
     "medium": (2000.0, 5000.0),
     "far": (5000.0, float("inf")),
+}
+
+#: The spoken form of each band, for `speech.render_report_summary`'s
+#: `band_label` -- *"inside 2 kilometres"* for a bounded band, *"beyond 5
+#: kilometres"* for the open one. **Derived from `_REPORT_BAND_BOUNDS_M`
+#: rather than written out**, so the number the summary says and the
+#: number the filter applies cannot drift apart: a retuned boundary
+#: changes both or neither. `crew_console` picking the label and `speech`
+#: only formatting it is the division of labour `render_clear`/
+#: `render_no_view` already follow.
+_REPORT_BAND_LABELS: dict[str, str] = {
+    band: (
+        f"beyond {int(lo_m / 1000)} kilometres"
+        if hi_m == float("inf")
+        else f"inside {int(hi_m / 1000)} kilometres"
+    )
+    for band, (lo_m, hi_m) in _REPORT_BAND_BOUNDS_M.items()
 }
 
 #: At most this many groups are spoken in one report, joined into one
@@ -1888,7 +1907,50 @@ class CrewConsole:
                 return [render_no_view(scope.direction_label).text]
             return [render_clear(scope.direction_label).text]
 
-        return self._render_report_lines(facts_list, now_sim)
+        # Decision C: the answer is one summary utterance, not the
+        # per-group enumeration -- *"B. I can also look myself, so a
+        # summary is good, I then know where and what to look for."*
+        #
+        # **`_render_report_lines` and `render_report`/`REPORT_MAX_GROUPS`
+        # stay in place, unused by this path, deliberately** (that plan's
+        # Decision C): if the summary reads too thin in the air,
+        # reverting is this one call site, and that has to stay true
+        # until the user has flown it. Do not delete them.
+        return [
+            render_report_summary(
+                facts_list,
+                band_label=self._band_label_for(facts_list, band),
+                stale_window_s=OBSERVED_WINDOW_S,
+            ).text
+        ]
+
+    def _band_label_for(
+        self, facts_list: list[dict[str, object]], band: str | None
+    ) -> str:
+        """The summary's distance clause.
+
+        When the query named a band, that band's own label -- the pilot
+        asked about *near*, so *"inside 2 kilometres"* is what bounds the
+        answer. Otherwise it is bucketed from the **furthest** in-scope
+        contact (`plans/crew-query-path/plan.md` Decision C's table), since
+        the clause's job is to say how far out the pilot has to look: the
+        near edge would under-state where things are."""
+        if band is not None:
+            return _REPORT_BAND_LABELS[band]
+        max_range_m = 0.0
+        for facts in facts_list:
+            relative_now = facts.get("relative_now")
+            if not isinstance(relative_now, dict):
+                continue
+            range_m = relative_now["range_m"]
+            assert isinstance(range_m, float)
+            max_range_m = max(max_range_m, range_m)
+        for candidate, (lo_m, hi_m) in _REPORT_BAND_BOUNDS_M.items():
+            if lo_m <= max_range_m < hi_m:
+                return _REPORT_BAND_LABELS[candidate]
+        # Unreachable: the three bands tile [0, inf). Kept as the honest
+        # fallback rather than an assert, because a report must answer.
+        return _REPORT_BAND_LABELS["far"]
 
     def _report_scope(
         self,

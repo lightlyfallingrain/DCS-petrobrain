@@ -29,6 +29,7 @@ from belief.events import (
 )
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import (
+    REPORT_SUMMARY_MAX_WORDS,
     UrgentCall,
     _cardinality_phrase,
     _contact_report_text,
@@ -49,6 +50,7 @@ from belief.speech import (
     render_no_view,
     render_readback,
     render_report,
+    render_report_summary,
     render_say_again,
     render_stand_by,
     render_unable,
@@ -271,6 +273,486 @@ def test_render_report_joins_group_texts_into_one_utterance() -> None:
 def test_render_report_appends_and_more_when_truncated() -> None:
     speech = render_report(["BMP-2, 3 o'clock, 1 kilometre."], True)
     assert speech.text == "BMP-2, 3 o'clock, 1 kilometre. And more."
+
+
+# --- render_report_summary (plans/crew-query-path/plan.md Decision C,
+# user decision 13 -- "answers summarise, they do not enumerate") ---
+
+#: Wide enough that nothing in these fixtures is stale unless the fixture
+#: says so, and stated rather than imported so the staleness tests read
+#: against a window they name. The live call site passes `decay.
+#: OBSERVED_WINDOW_S`; what this module tests is the *wording* a window
+#: produces, not the window's value.
+_STALE_WINDOW_S = 16.0
+
+
+def _summary_facts(
+    *,
+    op_class: str | None = "OP_ARMORED",
+    clock: int = 2,
+    range_m: float = 1000.0,
+    count: tuple[int, float] | None = None,
+    last_seen_ago_s: float = 0.0,
+    contact_id: str = "CONTACT_1",
+) -> dict[str, object]:
+    """One in-scope contact's facts, with only the keys the summary
+    reads. A dict rather than a `ContactStore` on purpose: this renderer
+    is a pure function of the aggregate, so building real belief would
+    only make it unclear which input produced which clause."""
+    facts: dict[str, object] = {
+        "id": contact_id,
+        "classification": {
+            "level": "class" if op_class else "presence",
+            "value": op_class if op_class else "ground",
+        },
+        "last_seen_ago_s": last_seen_ago_s,
+        "relative_now": {
+            "clock_position": clock,
+            "range_m": range_m,
+            "bearing_deg": float(clock * 30 % 360),
+        },
+    }
+    if count is not None:
+        facts["cardinality"] = {"lo": count[0], "hi": count[1]}
+    return facts
+
+
+def test_render_report_summary_is_the_answer_the_user_chose() -> None:
+    """Decision 13's mock B, which is the answer the user picked over an
+    enumeration: *"About eight units, mostly infantry, one o'clock
+    through two o'clock, inside two kilometres. Still checking the truck
+    group."*
+
+    Reproduced with the one deliberate divergence recorded in
+    `_summary_clock_clause`: **numerals for clock hours**, matching every
+    other report line this crew speaks. Mock B was prose in a plan; one
+    answer typographically unlike all the others is the worse outcome."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY",
+            clock=1,
+            range_m=1200.0,
+            count=(6, 8.0),
+            contact_id="CONTACT_INF",
+        ),
+        _summary_facts(
+            op_class="OP_TRUCK",
+            clock=2,
+            range_m=1800.0,
+            count=(1, 1.0),
+            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+            contact_id="CONTACT_TRUCK",
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert speech.text == (
+        "About eight units, mostly infantry, 1 o'clock through 2 o'clock, "
+        "inside 2 kilometres. Still checking the truck group."
+    )
+    assert speech.template == "contact_report"
+
+
+def test_render_report_summary_collapses_a_single_hour() -> None:
+    """`"at 2 o'clock"` rather than `"2 o'clock through 2 o'clock"`."""
+    speech = render_report_summary(
+        [_summary_facts()],
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == "One armor, at 2 o'clock, inside 2 kilometres."
+
+
+def test_render_report_summary_spans_the_arc_not_the_arithmetic() -> None:
+    """A span is an arc across the windscreen, not a numeric range.
+    Eleven and one o'clock are two hours apart *through the nose*, and the
+    answer has to say so -- `"11 o'clock through 1 o'clock"`. Sorting the
+    raw hours would have said "1 o'clock through 11 o'clock", a 10-hour
+    span pointing the pilot the wrong way round."""
+    facts_list = [
+        _summary_facts(clock=11, contact_id="CONTACT_L"),
+        _summary_facts(clock=1, contact_id="CONTACT_R"),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert "11 o'clock through 1 o'clock" in speech.text
+
+
+def test_render_report_summary_folds_one_class_into_the_count() -> None:
+    """With a single class in scope the class word goes *with* the count
+    (`"Three armor"`), and the hedged `"mostly"` is reserved for a mixed
+    scene -- saying "mostly armor" about an all-armour scene would hedge a
+    claim that is not hedged."""
+    facts_list = [
+        _summary_facts(contact_id=f"CONTACT_{i}", count=(1, 1.0)) for i in range(3)
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == "Three armor, at 2 o'clock, inside 2 kilometres."
+    assert "mostly" not in speech.text
+
+
+def test_render_report_summary_hedges_a_mixed_scene() -> None:
+    facts_list = [
+        _summary_facts(contact_id="CONTACT_1"),
+        _summary_facts(contact_id="CONTACT_2"),
+        _summary_facts(op_class="OP_TRUCK", contact_id="CONTACT_3"),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert (
+        speech.text == "Three units, mostly armor, at 2 o'clock, inside 2 kilometres."
+    )
+
+
+def test_render_report_summary_counts_an_unclassified_contact_as_one_unit() -> None:
+    """An absent `cardinality` key means "no count claim", which for a
+    summary means exactly one thing believed in -- not zero, and not a
+    reason to omit it. A presence-level dot therefore still occupies a
+    unit of the count while contributing no class."""
+    facts_list = [
+        _summary_facts(contact_id="CONTACT_1"),
+        _summary_facts(op_class=None, contact_id="CONTACT_DOT"),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text.startswith("Two units, mostly armor,")
+
+
+def test_render_report_summary_says_at_least_for_an_open_ended_count() -> None:
+    """An interval open at the top (`hi` is infinite) must not be
+    presented as a midpoint -- there is no midpoint to take, and "about"
+    would claim a bound Petrovich does not hold. The class still folds
+    into the count, as in any single-class scene."""
+    speech = render_report_summary(
+        [_summary_facts(count=(4, float("inf")))],
+        band_label="beyond 5 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == "At least four armor, at 2 o'clock, beyond 5 kilometres."
+
+
+def test_render_report_summary_names_air_defence_among_a_majority() -> None:
+    """**Q2, user 2026-10-08: "air defense survives."** Seven infantry and
+    one SAM must not summarise as "mostly infantry" and stop there -- the
+    difference between a short-range and a long-range SAM is the
+    difference between a threat you can fly around and one you cannot
+    (`_OP_CLASS_DISPLAY`'s own note), so the one that matters is named
+    even as a minority of one."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY", count=(7, 7.0), contact_id="CONTACT_INF"
+        ),
+        _summary_facts(op_class="OP_SRSAM", contact_id="CONTACT_SAM"),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == (
+        "Eight units, mostly infantry, at 2 o'clock, inside 2 kilometres, "
+        "and one short range SAM."
+    )
+
+
+def test_render_report_summary_names_each_air_defence_tier_apart() -> None:
+    """The three SAM tiers are spoken apart, never collapsed to "SAM" --
+    the flattening `_OP_CLASS_DISPLAY` exists to refuse."""
+    facts_list = [
+        _summary_facts(op_class="OP_INFANTRY", count=(5, 5.0), contact_id="C_INF"),
+        _summary_facts(op_class="OP_SRSAM", contact_id="C_SR"),
+        _summary_facts(op_class="OP_LRSAM", contact_id="C_LR"),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert "one short range SAM, one long range SAM" in speech.text
+
+
+def test_render_report_summary_does_not_name_air_defence_twice() -> None:
+    """When air defence *is* the dominant class the class clause has
+    already named it, and repeating it would spend budget on nothing."""
+    facts_list = [
+        _summary_facts(op_class="OP_SRSAM", contact_id=f"C_{i}") for i in range(3)
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == ("Three short range SAMs, at 2 o'clock, inside 2 kilometres.")
+    assert speech.text.count("short range SAM") == 1
+
+
+def test_render_report_summary_never_says_a_before_a_vowel_or_an_acronym() -> None:
+    """`"and a AAA"` is wrong written and wrong spoken (`_respell_for_tts`
+    turns that word into "triple A"). The clause uses a count word
+    instead, which sidesteps article agreement entirely -- so no
+    air-defence phrasing may contain a bare indefinite article."""
+    facts_list = [
+        _summary_facts(op_class="OP_INFANTRY", count=(5, 5.0), contact_id="C_INF"),
+        _summary_facts(op_class="OP_ZU23", contact_id="C_AAA"),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert "and one triple A." in speech.text
+    assert " a AAA" not in speech.text
+    assert " a triple A" not in speech.text
+
+
+def test_render_report_summary_qualifies_a_wholly_remembered_answer() -> None:
+    """Decision D's freshness half: a remembered contact must be spoken as
+    remembered. When *every* in-scope contact is older than
+    `stale_window_s` the whole answer carries the qualifier.
+
+    **It qualifies, it never withholds.** The contact is still named and
+    still counted -- filtering the pilot's own query by how recently
+    Petrovich looked is exactly what Decision D forbids."""
+    facts_list = [
+        _summary_facts(contact_id="C_1", last_seen_ago_s=_STALE_WINDOW_S + 1.0),
+        _summary_facts(contact_id="C_2", last_seen_ago_s=_STALE_WINDOW_S * 10),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text == "Last I saw, two armor, at 2 o'clock, inside 2 kilometres."
+    # Named, not withheld.
+    assert "armor" in speech.text
+    assert "two" in speech.text
+
+
+def test_render_report_summary_does_not_qualify_a_fresh_answer() -> None:
+    """The counterpart, so the qualifier is not simply always present:
+    the same scene seen just now carries no "Last I saw"."""
+    facts_list = [
+        _summary_facts(contact_id="C_1", last_seen_ago_s=_STALE_WINDOW_S - 1.0),
+        _summary_facts(contact_id="C_2", last_seen_ago_s=0.0),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert "Last I saw" not in speech.text
+    assert speech.text == "Two armor, at 2 o'clock, inside 2 kilometres."
+
+
+def test_render_report_summary_defers_at_most_one_stale_group() -> None:
+    """A partly-stale scene defers, rather than hedging every clause: the
+    fresh majority is stated plainly and the one thing he has not looked
+    at recently is named as outstanding. Two stale contacts still produce
+    **one** deferral clause."""
+    facts_list = [
+        _summary_facts(contact_id="C_FRESH"),
+        _summary_facts(
+            op_class="OP_TRUCK",
+            contact_id="C_STALE_1",
+            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+        ),
+        _summary_facts(
+            op_class="OP_TRUCK",
+            contact_id="C_STALE_2",
+            last_seen_ago_s=_STALE_WINDOW_S + 2.0,
+        ),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text.endswith("Still checking the truck group.")
+    assert speech.text.count("Still checking") == 1
+
+
+def test_render_report_summary_does_not_defer_when_everything_is_stale() -> None:
+    """The qualifier already covers the whole answer then, so a deferral
+    would say the same thing twice."""
+    facts_list = [
+        _summary_facts(contact_id="C_1", last_seen_ago_s=_STALE_WINDOW_S + 1.0),
+    ]
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+    assert speech.text.startswith("Last I saw,")
+    assert "Still checking" not in speech.text
+
+
+def test_render_report_summary_drops_the_deferral_before_the_class_clause() -> None:
+    """The drop order is specified rather than left to a truncating
+    formatter (Decision C): **deferral first, then the dominant class.**
+    Count, direction and band are the pointer, and the pointer is the
+    whole product.
+
+    Driven by a scene whose full answer overruns
+    `REPORT_SUMMARY_MAX_WORDS` by exactly the deferral and no more: two
+    air-defence tiers named individually (Q2, which survives both drops)
+    plus a stale truck. 22 words with the class clause and without the
+    deferral, 27 with it -- so the first drop is sufficient, and the class
+    clause surviving is what pins the *order* rather than merely showing
+    that something was dropped. (A third tier was tried first and pushed
+    the no-deferral form to 26, which dropped the class too and made the
+    test unable to tell the order.)"""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_INFANTRY", count=(9, 11.0), clock=11, contact_id="C_INF"
+        ),
+        _summary_facts(op_class="OP_SRSAM", clock=12, contact_id="C_SR"),
+        _summary_facts(op_class="OP_MRSAM", clock=1, contact_id="C_MR"),
+        _summary_facts(
+            op_class="OP_TRUCK",
+            clock=2,
+            contact_id="C_STALE",
+            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert len(speech.text.split()) <= REPORT_SUMMARY_MAX_WORDS
+    # Deferral dropped...
+    assert "Still checking" not in speech.text
+    # ...and the dominant class kept, which is what pins the order rather
+    # than merely "something was dropped".
+    assert "mostly infantry" in speech.text
+    # Q2's carve-out survives the drop, which is the whole reason the
+    # deferral goes first.
+    assert "one short range SAM" in speech.text
+    assert "one medium range SAM" in speech.text
+    # And the pointer is intact.
+    assert "11 o'clock through 2 o'clock" in speech.text
+    assert "inside 2 kilometres" in speech.text
+
+
+def test_render_report_summary_keeps_the_pointer_when_nothing_else_fits() -> None:
+    """The last candidate is spoken even if it still overruns: there is
+    deliberately nothing below count/direction/band to drop. Five
+    air-defence contacts of three tiers, all named (Q2), force that
+    state."""
+    facts_list = [
+        _summary_facts(op_class="OP_SRSAM", clock=10, contact_id="C_1"),
+        _summary_facts(op_class="OP_MRSAM", clock=11, contact_id="C_2"),
+        _summary_facts(op_class="OP_LRSAM", clock=12, contact_id="C_3"),
+        _summary_facts(op_class="OP_SPAAG", clock=1, contact_id="C_4"),
+        _summary_facts(
+            op_class="OP_INFANTRY", count=(11, 15.0), clock=2, contact_id="C_5"
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="beyond 5 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    assert "Still checking" not in speech.text
+    assert "mostly" not in speech.text
+    assert "10 o'clock through 2 o'clock" in speech.text
+    assert "beyond 5 kilometres" in speech.text
+    # Every tier still named -- the budget never trims what aims a look
+    # or what the pilot has to fly around.
+    for tier in ("short range SAM", "medium range SAM", "long range SAM", "triple A"):
+        assert tier in speech.text, tier
+
+
+def test_render_report_summary_rejects_an_empty_scope() -> None:
+    """The empty answer is `render_clear`/`render_no_view`, which say
+    different things, and only the caller knows which -- so an empty
+    `facts_list` is a caller error rather than a summary of nothing."""
+    with pytest.raises(AssertionError):
+        render_report_summary(
+            [], band_label="inside 2 kilometres", stale_window_s=_STALE_WINDOW_S
+        )
+
+
+def test_render_report_summary_keeps_a_dominant_air_defence_class_when_the_clause_drops() -> (
+    None
+):
+    """**The one case where the two budget rules and Q2 collide, and it
+    was a real bug.**
+
+    The air-defence clause skips a tier the dominant-class clause has
+    already named, to avoid saying it twice. But the dominant-class clause
+    is the budget's *second* drop -- so when it goes and the dominant
+    class happens to be air defence, that tier was named nowhere at all.
+    Measured: a five-contact scene whose modal class was `OP_LRSAM`
+    answered without any mention of a long-range SAM.
+
+    This scene reproduces it. The dominant class is `OP_LRSAM` (four
+    believed units against one each of three other things), the scene is
+    mixed so the class is a *clause* rather than folded into the count,
+    and three other air-defence tiers plus a deferral push the answer past
+    `REPORT_SUMMARY_MAX_WORDS` far enough that both drops fire.
+
+    The fix recomputes the air-defence clause per budget candidate, so
+    nothing is suppressed once the clause that would have named it is
+    gone. The assertion is deliberately about the *tier word*, not about
+    length: a shorter answer that has lost the long-range SAM is the
+    failure, not the goal."""
+    facts_list = [
+        _summary_facts(
+            op_class="OP_LRSAM", count=(4, 4.0), clock=11, contact_id="C_LR"
+        ),
+        _summary_facts(op_class="OP_SRSAM", clock=12, contact_id="C_SR"),
+        _summary_facts(op_class="OP_MRSAM", clock=1, contact_id="C_MR"),
+        _summary_facts(op_class="OP_SPAAG", clock=1, contact_id="C_AAA"),
+        _summary_facts(
+            op_class="OP_TRUCK",
+            clock=2,
+            contact_id="C_STALE",
+            last_seen_ago_s=_STALE_WINDOW_S + 1.0,
+        ),
+    ]
+
+    speech = render_report_summary(
+        facts_list,
+        band_label="inside 2 kilometres",
+        stale_window_s=_STALE_WINDOW_S,
+    )
+
+    # Both drops fired...
+    assert "Still checking" not in speech.text
+    assert "mostly" not in speech.text
+    # ...and the dominant tier is still named, by the air-defence clause
+    # that previously suppressed it.
+    assert "one long range SAM" in speech.text
+    # The other tiers too, so this is not passing because suppression was
+    # simply turned off everywhere.
+    for tier in ("short range SAM", "medium range SAM", "triple A"):
+        assert tier in speech.text, tier
+    # Named once, not twice -- the duplicate the suppression exists to
+    # prevent must not come back.
+    assert speech.text.count("long range SAM") == 1
 
 
 def test_render_contact_report_returns_none_for_unknown_contact() -> None:
