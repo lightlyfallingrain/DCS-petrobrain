@@ -4,14 +4,19 @@
 https://claude.ai/artifact/9HbtGBzw9hLXNCTqLeVoRp — this file stays the source of truth and the
 card is generated from it.
 
-**Branch: `feature/bl13-crew-query-path`** (tip `3b1d1df`).
+**Branch: `main`** (merged 2026-10-11 — `6f04671` BL-13, `1063f2a` the `BL-B47` air-defence fix).
 
 ```sh
-cd /Users/sg/Code/DCS-petrobrain && git checkout feature/bl13-crew-query-path
+cd /Users/sg/Code/DCS-petrobrain && git checkout main
 ```
 
 The repo root is your checkout and nothing else moves it, so the branch name above is the only
 thing that leads you to this work.
+
+> **This line said `feature/bl13-crew-query-path` until the merge, and that was a real defect in
+> this card**, caught by `BL-B47`'s DoD rather than by reading: that branch does **not** contain the
+> air-defence fix in the second half of this card, so following it would have meant judging the
+> air-defence callouts against the broken predicate. Both are on `main` now.
 
 **What you are judging:** whether a *summary* answer beats the enumeration it replaced — and
 whether 10 seconds of Petrovich talking is too long in a hover.
@@ -261,3 +266,50 @@ and enriches *every* contact before any filter applies — measured at ~352 ms a
 with a warm cache, ~3.6 s cold. If asking four questions in a minute makes perception or callouts
 feel like they stutter, that is `BL-B49` and it is already filed; say so and it gets priority rather
 than a diagnosis from scratch.
+
+---
+
+## Also on this sortie — `BL-B47`, a class-level SAM is now air defence
+
+Same checkout as above (`main`). No new flag, no new process.
+
+**What you are judging:** a contact believed to be a SAM *before* it is identified to type — which
+at range is most of the time — now gets air-defence treatment in a group callout where it was
+silent. Nothing else changed.
+
+**What nobody here could check:** everything below the ground check. Nothing has talked to a live
+DCS session. Whether the callout arrives at the right *moment* is only observable in the cockpit —
+**UNVERIFIED**.
+
+### Ground check (real output, run before the merge)
+
+```
+$ cd body-layer && PYTHONPATH=src:../world-model/src .venv/bin/python -c 'from belief.speech import _is_air_defence as f; from belief.groups import AIR_DEFENSE_OP_CLASSES as A; from perception.object_model import profile_for as p
+for c in sorted(A): print(c, "was", p(c).op_class in A, "now", f({"classification": {"value": c, "level": 2}}))'
+OP_LRSAM was False now True
+OP_MRSAM was False now True
+OP_SPAAG was False now True
+OP_SRSAM was False now True
+OP_ZU23 was True now True
+```
+
+Four of the five SAM/AAA classes were invisible to the push-path predicate. `OP_ZU23` worked only
+because its literal string happened to match the keyword table's own `"zu23"` entry — which is why
+no test caught the other four.
+
+### In the air — **UNVERIFIED**
+
+1. **A SAM seen at range, before identification.** Fly within naked-eye range of a SAM site in a
+   group with other vehicles, far enough that it is not identified to type. **Expect:** the group
+   callout names the air defence. **Before this fix it was silent on it.**
+2. **A SAM that stays in a group you have already been told about.** **Expect:** it is still
+   mentioned when it re-arrives, where a non-air-defence repeat would not be — *"more air defence is
+   always news"* is the rule being tested.
+3. **The thing to listen for, and the known risk. Does it repeat too much?** This fix adds a new
+   reason for a group line to be re-spoken. If you hear the same air-defence line cycling on
+   consecutive calls, that is `BL-B50` (the callout ratchet) and it is worth saying so — it is
+   already filed, and a sortie log showing group membership flipping tick-to-tick is exactly the
+   evidence that makes it blocking-priority rather than backlog.
+4. **Nothing should have gone quiet.** Structurally this change can only *add* speech, never remove
+   it. If anything you used to hear is now missing, that contradicts the analysis and is the most
+   important thing you could report.
