@@ -1,0 +1,39 @@
+# BL-B48 — Infantry is an unbounded cohesion bridge between non-infantry contacts
+
+- [ ] **BL-B48 — `belief.groups` drops the absolute cohesion backstop to `math.inf` for any pair where
+  *either* member is infantry, so an infantry contact bridges non-infantry contacts without bound.** #status/open
+  Found by the Reviewer during [[BL-13]], 2026-10-10. Pre-existing, **live on the push path today**,
+  and nothing in BL-13 caused it.
+
+  **It was first reported as "cohesion is erratic at fixture scales" and that was wrong.** It is
+  deterministic, and the truth is worse than erratic — which is why this entry exists rather than a
+  note about flaky fixtures. `OP_INFANTRY` is `EAGER`, and the eager path replaces the absolute
+  distance backstop with `inf` for a pair where either member is infantry. Measured on the BL-13
+  branch:
+
+  ```
+  armor@1km + truck@3km                 -> 0 groups
+  armor@1km + infantry@7km              -> one group, 6 km across
+  armor@1km + truck@3km + infantry@7km  -> one group of three
+  ```
+
+  So armour and a truck 2 km apart stay separate, but adding an infantry contact at 7 km merges all
+  three into one group spanning 6 km.
+
+  **Why this is wider than the direction that produced it.** The user's own words were *"ok to merge
+  infantry too eagerly"* — a statement about **infantry**, and a reasonable one: a dismounted squad
+  is not usefully counted individually. Merging **armour** across 6 km because an infantry contact
+  sits between them is not what that grants, and a group 6 km across has no single believable
+  bearing, range or disclosure line. The eagerness is being applied to the pair rather than to the
+  infantry.
+
+  **Bearing on [[BL-12]].** BL-12 is the milestone that redesigns group identity and continuity, so
+  this should be read *before* that plan is finalised rather than fixed independently — it may be
+  that BL-12's own model dissolves it, in which case this entry is the measurement BL-12 should cite
+  rather than a separate fix. Flagging it here so the number exists and the measurements are not
+  re-derived.
+
+  **Why BL-13 was immune**, which is a point in favour of its Decision C: the summary renderer
+  aggregates over the *filtered* contact set rather than over group rosters, so an over-wide group
+  cannot drag out-of-scope contacts into a pull answer. The enumerated push path has no such
+  protection.

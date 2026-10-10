@@ -85,6 +85,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B44]] — Remove the detection lines below the eyesight graph
 - [[BL-B45]] — The `"Safe from <threat>"` close-out call
 - [[BL-B46]] — `logger`'s own logger propagates
+- [[BL-B47]] — `_is_air_defence` cannot recognise a class-level SAM
+- [[BL-B48]] — Infantry is an unbounded cohesion bridge between non-infantry contacts
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
