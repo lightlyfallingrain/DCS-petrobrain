@@ -69,6 +69,38 @@ def test_afghanistan_beacon_fit_self_consistency() -> None:
     assert residual_m <= 0.2
 
 
+# One beacons.lua position/positionGeo pair per provisional theatre, read
+# from the installed terrain files on 2026-10-05. Same self-consistency-only
+# caveat as the Afghanistan test above: beacons.lua's positionGeo is DCS's
+# own projection output, so this checks the registered parameters reproduce
+# it, not geodetic accuracy. Each stays `confidence="provisional"` until a
+# live coord_probe.lua run -- see world-model/research/2026-10-05-kola-
+# caucasus-theatre-recon.md.
+PROVISIONAL_BEACON_POINTS = [
+    # Kola/beacons.lua airfield18_0 (IVALO, ILS_GLIDESLOPE)
+    ("Kola", "Ivalo", 81308.664063, 198170.28125, 68.613852, 27.420317),
+    # Kola/beacons.lua airfield3_0 (kemi, ILS_GLIDESLOPE) -- the far south
+    ("Kola", "Kemi", -242473.234375, 101148.359375, 65.789776, 24.582205),
+    # Caucasus/Beacons.lua airfield29_0 (Tbilisi-Lochini, ILS_FAR_HOMER)
+    ("Caucasus", "Tbilisi", -312185.40625, 892170.1875, 41.703274, 44.909623),
+]
+
+
+@pytest.mark.parametrize(
+    ("theatre", "name", "x", "z", "lat", "lon"),
+    PROVISIONAL_BEACON_POINTS,
+    ids=[f"{p[0]}-{p[1]}" for p in PROVISIONAL_BEACON_POINTS],
+)
+def test_provisional_theatre_beacon_self_consistency(
+    theatre: str, name: str, x: float, z: float, lat: float, lon: float
+) -> None:
+    """The fits' measured max residual is ~0.07m; 0.2m is the same bound
+    the Afghanistan beacon test uses, and a wrong central meridian or
+    false origin misses by kilometres."""
+    got_lat, got_lon = dcs_to_wgs84(theatre, x, z)
+    assert haversine_distance_m(got_lat, got_lon, lat, lon) <= 0.2
+
+
 # DCS coord.LOtoLL output on the Afghanistan terrain, 2026-10-05
 # (tools/dcs-mission-probe/coord_probe.lua; raw file
 # data/raw/dcs/2026-10-05/coord_probe_output.json, gitignored). Spread over
