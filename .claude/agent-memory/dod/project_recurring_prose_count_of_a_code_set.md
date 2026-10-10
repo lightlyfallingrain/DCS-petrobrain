@@ -1,6 +1,6 @@
 ---
 name: recurring-prose-count-of-a-code-set
-description: 6th+ occurrence of a prose enumeration/count of a set that lives in code being wrong; fix is to derive it by import at writing time, at Architect/Implementer not Reviewer.
+description: 7th occurrence of a prose enumeration/count of a set that lives in code being wrong; derive it by import at writing time and state the decomposition, not the total — at Architect/Implementer, not Reviewer.
 metadata:
   type: project
 ---
@@ -41,6 +41,20 @@ corpus is as enumerable as a code set and gets checked far less often, because a
 `plans/` does not feel like a measurement. The same branch also published two counts of its own
 gate's output that were off by one (127 vs a real 126) in three separate files, by counting the
 word `cited` in `awk '{print $3}'` output as a filename.
+
+**7th occurrence, `fix/air-defence-class-level` (2026-10-10, `BL-B47`) — and it shows the remedy
+that actually works.** The Reviewer's *sole* required fix on a one-line code change was a prose
+count: the enumeration cited "all 128 keyword entries in `perception.object_model`" where the real
+figure is **131**. So a feature whose code was approved first time still took a second round purely
+for a number — more evidence the check belongs at Implementer, not Reviewer. What is new is the
+*form* of the correction: the fixed text states **what was counted**, not just the total
+(`_KEYWORD_PROFILES` 70 + `_REPORTING_NAME_KEYWORD_PROFILES` 61 = 131), and that is what let the
+DoD pass re-derive it independently and catch a second, subtler figure in the same sentence — "all
+10 declared `op_class` values" is only 10 if you include `object_model.DEFAULT_OP_CLASS`, which
+appears in neither profile table; harvesting from the tables alone gives 9 and a total of 1059
+rather than 1060. A bare total would have made that unresolvable without guessing the author's
+method. **So: state the decomposition, not the total.** It converts an unverifiable assertion into a
+reproducible measurement, which is the whole point.
 
 **Added to how to apply:** a prose *negative* ("no X remains", "nothing still asserts Y") is the
 highest-risk form, because it is the one a reader cannot falsify by reading further — and root

@@ -712,13 +712,18 @@ def _summary_air_defence_clause(
     budget on nothing. Names each distinct tier, because collapsing the
     three to "SAM" is the exact flattening the display table refuses.
 
-    **Membership is tested on `_summary_op_class`, not via
-    `_is_air_defence`**, though the two read the same
-    `belief.groups.AIR_DEFENSE_OP_CLASSES` set. `_is_air_defence` resolves
-    through `object_model.profile_for`, which keyword-matches type names:
-    measured, `profile_for("OP_SRSAM")` is the default bucket, so a
-    *class*-level SAM belief -- precisely the case this clause exists for
-    -- would not be recognised. See `_summary_op_class`'s own note."""
+    **Membership is tested on `_summary_op_class`**, which resolves a
+    *class*-level SAM belief (`"OP_SRSAM"`) as well as a type-level one
+    -- precisely the case this clause exists for. See `_summary_op_
+    class`'s own note on why the lattice walk and not `object_model.
+    profile_for`.
+
+    This was originally written as "not via `_is_air_defence`", because
+    that predicate did go through `profile_for` and so could not see a
+    class-level SAM at all. `BL-B47` fixed it (2026-10-10) to resolve
+    through this same helper, so the two now agree by construction. The
+    direct call here is kept: it is the mechanism, and was never a
+    workaround for the predicate."""
     counts: dict[str, int] = {}
     for facts in facts_list:
         op_class = _summary_op_class(facts)
@@ -844,12 +849,16 @@ def _summary_air_defence_freshness_clause(
     (`plans/crew-query-path/security.md`, required fix 1, measured).
 
     **Membership is `_summary_op_class` + `AIR_DEFENSE_OP_CLASSES`, the
-    same test `_summary_air_defence_clause` uses and deliberately not
-    `_is_air_defence`** -- that predicate resolves through `object_model.
-    profile_for`, which keyword-matches *type* names, so a `class`-level
-    SAM belief (`"OP_LRSAM"`) is not recognised as air defence at all
-    (`BL-B47`). A marker built on it would be dead in exactly the scene
-    this one exists for.
+    same test `_summary_air_defence_clause` uses.** It resolves a
+    `class`-level SAM belief (`"OP_LRSAM"`) as well as a type-level one,
+    which is the scene this marker exists for.
+
+    When written, this said "deliberately not `_is_air_defence`", because
+    that predicate went through `object_model.profile_for` and could not
+    see a class-level SAM at all -- a marker built on it would have been
+    dead here. `BL-B47` (2026-10-10) repointed the predicate at this same
+    helper, so the hazard is gone; the direct call stays because it is
+    the mechanism, not a detour around a broken one.
 
     **Age is the *oldest* stale air-defence contact's**, never the first
     one found: the hedge must not under-claim, and `_summary_deferral_
@@ -1907,19 +1916,47 @@ def _is_air_defence(facts: dict[str, object]) -> bool:
     """Whether `facts`' believed classification resolves to one of
     `belief.groups.AIR_DEFENSE_OP_CLASSES` -- the delta taxonomy's
     "more air defence is always news" test (`plans/
-    group-cohesion-redesign/plan.md` §4 Correction 2). Reads `perception.
-    object_model.profile_for` on the classification's raw value, the same
-    no-omniscience lookup `_identification_lead`/`belief.groups.
-    _representative_size_m` already use for a believed classification --
-    never a DCS `object_type`."""
-    classification = facts["classification"]
-    assert isinstance(classification, dict)
-    value = classification.get("value")
-    if not isinstance(value, str) or not value:
-        return False
-    from perception import object_model
+    group-cohesion-redesign/plan.md` §4 Correction 2). Reads the
+    classification's raw *believed* value, never a DCS `object_type`.
 
-    return object_model.profile_for(value).op_class in AIR_DEFENSE_OP_CLASSES
+    **Resolves via `_summary_op_class` (so, `classification.
+    parent_class_of`), not `object_model.profile_for` -- this is the
+    `BL-B47` fix (2026-10-10).** `profile_for` keyword-matches *type*
+    designations, so a belief held at *class* level carries an `OP_*`
+    string that matches nothing and fell into the default bucket:
+    measured, `profile_for("OP_SRSAM")` and `profile_for("OP_LRSAM")`
+    were both `OP_GROUPSOMETHING`, so a class-level SAM was not air
+    defence to this predicate at all. A class-level belief is what a
+    contact holds *before* it is identified to type, which at range is
+    most of the time -- so the gap was silent on the push path for the
+    one thing `_OP_CLASS_DISPLAY` calls out as mattering most.
+
+    **The two resolvers are not interchangeable and the switch is a
+    strict widening, enumerated rather than argued**: `parent_class_of`
+    (via `classification._op_class_of`) early-returns any non-default
+    `OP_*` string and otherwise delegates to `profile_for`, so it agrees
+    with the old lookup everywhere the old lookup resolved. Re-run
+    2026-10-10 over **1060 distinct candidate values**: all 10 declared
+    `op_class` values, all 131 keyword entries in `perception.
+    object_model` (`_KEYWORD_PROFILES` 70 + `_REPORTING_NAME_KEYWORD_
+    PROFILES` 61), and all 595 real DCS type names in `perception.
+    reporting_names`' mapping plus its reporting-name values. Each value
+    resolved both ways (`object_model.profile_for(v).op_class` vs
+    `classification.parent_class_of(v)`) and tested for `AIR_DEFENSE_OP_
+    CLASSES` membership: **0 verdicts lost, 4 gained** -- exactly
+    `OP_SRSAM`, `OP_MRSAM`, `OP_LRSAM`, `OP_SPAAG`.
+    (`OP_ZU23` was already covered by accident, because the literal
+    string matches that table's own `"zu23"` keyword.)
+
+    Reusing `_summary_op_class` rather than minting a second lattice walk
+    is deliberate: it is what the pull path's `_summary_air_defence_
+    clause` and `crew_console.descriptor_verdict` already use, so push
+    and pull now agree on what air defence is by construction instead of
+    by coincidence. The one behavioural side effect is that a `facts`
+    dict with no (or a non-dict) `classification` now answers `False`
+    where it used to raise -- strictly more lenient, and no caller relies
+    on the raise (both check `_classification_level` first)."""
+    return _summary_op_class(facts) in AIR_DEFENSE_OP_CLASSES
 
 
 def _nearest_clock_position(member_facts: Sequence[dict[str, object]]) -> int | None:
