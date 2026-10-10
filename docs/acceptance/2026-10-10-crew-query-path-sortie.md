@@ -1,5 +1,9 @@
 # Sortie card — BL-13, the crew query path (`report` / `describe`)
 
+**Published as an artifact for reading in the cockpit:**
+https://claude.ai/artifact/9HbtGBzw9hLXNCTqLeVoRp — this file stays the source of truth and the
+card is generated from it.
+
 **Branch: `feature/bl13-crew-query-path`** (tip `3b1d1df`).
 
 ```sh
