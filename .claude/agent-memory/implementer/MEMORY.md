@@ -161,3 +161,4 @@ Write directly — the dir exists.
 - [Execute the published recipe](feedback_execute_the_published_recipe_before_trusting_it.md) — `sort -t B`/`-t W` split on a char the prefix contains; both shipped wrong.
 - [Doc-conventions round-4 fixes](project_doc_conventions_round4_consumer_fixes.md) — roadmap-source.sh; why doc-provenance-gate stayed unwired; a bare assert crashed a gate.
 - [Group contact Stage 3b-i ellipse](project_group_contact_model_stage3bi_ellipse.md) - 2D ellipse replaced the scalar cluster radius; cross-range-only counting is dead if single-link.
+- [BR-1 Stage 2 duplicate-branch findings](project_br1_stage2_duplicate_branch_findings.md) — PICK unreachable from a bare ambiguous reference (provable); real-model latency ~5x D6's probe figure.
