@@ -30,12 +30,19 @@ and marked, because root `CLAUDE.md`'s Session Start step 2 and its Backlog Mana
 send every session to this file for User priority tasks — so the priority items have to be visible
 on the index without opening anything.
 
+- [[X-T25]] — Compact the agent-memory indexes — **FIRST TASK OF THE NEXT SESSION** (user direction
+  2026-10-11: queued deliberately, ahead of resuming [[BL-12]]; two indexes are at the read limit
+  and six agents in one session correctly declined to fix it)
 - [[X-T1]] — Fly the contact/terrain sortie — **USER**
 - [[X-T2]] — `/explore` the location-fragment rewrite — **USER**
 
 Next open items, not blocked on the user: [[X-T4]] (grouping is the priority), [[X-T5]] (free text
 comes back "Unable"), [[X-T23]] (no identification on a very close pass), [[X-T24]] (16 s flank
 revisit), and the three in-progress crew-behaviour findings [[X-T6]], [[X-T7]], [[X-T8]].
+
+**In flight, not on this list:** [[BL-12]] Stage 0 is built, reviewed and fixed on
+`feature/bl12-group-contact-identity`, and still owes Security, Performance and DoD before it can
+merge. Stage 1 has not started. Resume there *after* [[X-T25]].
 
 **Questions waiting on you live in `todo/questions.md`** (new 2026-10-06) — created when you asked
 for input to be queued rather than asked. Two open as of this writing, neither blocking.
