@@ -38,6 +38,23 @@
 # will not be checked. That is the right trade -- this is a backstop for an
 # error that already has a human-readable symptom, not a completeness claim,
 # and a gate that cries wolf over arithmetic is a gate people route around.
+#
+# **Third exemption, added 2026-10-11: an agent id, which is never a commit.**
+# This gate blocked an isolated Architect from delegating at all, because an
+# agent's own worktree is `.claude/worktrees/agent-<id>` and its branch is
+# `worktree-agent-<id>` -- and an id like `a13b4c404c93895dc` is 17 word-bounded
+# hex characters with both a digit and a letter, matching the rule above
+# exactly. So **any prompt naming the directory the agent is working in was
+# refused**, which is precisely the prompt an isolated agent writes when it
+# delegates. It read the documents itself and nothing was lost, but the
+# capability was gone and the error message said "not an object in this
+# repository", which is true and useless.
+#
+# Stripping `agent-<hex>` before extracting candidates covers both forms, since
+# `worktree-agent-<id>` contains `agent-<id>`. It cannot mask a real sha unless
+# someone writes `agent-<sha>`, which is not a form anything here uses for a
+# commit -- and this gate is a backstop for an error that still has a
+# human-readable symptom, not a completeness claim.
 set -uo pipefail
 
 input=$(cat)
@@ -49,8 +66,11 @@ REPO="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 [ -n "$REPO" ] || exit 0
 cd "$REPO" 2>/dev/null || exit 0
 
-# Candidates: word-bounded 7-40 hex runs with at least one digit AND one a-f.
+# Candidates: word-bounded 7-40 hex runs with at least one digit AND one a-f,
+# after removing `agent-<hex>` ids -- an agent's own worktree path and branch
+# name, which are never commits. See the third exemption in the header.
 candidates=$(printf '%s' "$prompt" \
+    | sed -E 's/agent-[0-9a-f]{7,40}//g' \
     | grep -oE '\b[0-9a-f]{7,40}\b' \
     | grep -E '[0-9]' \
     | grep -E '[a-f]' \
