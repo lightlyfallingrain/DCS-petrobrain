@@ -2023,13 +2023,16 @@ def test_watch_nearest_air_defence_resolves_through_the_one_shared_set() -> None
     air_defence_class_in_the_object_model` with the set itself, so it is
     not duplicated.
 
-    What stays here is this command's own wiring: the predicate behind
-    "watch nearest air defence" must read the shared set rather than a
-    local copy, which is the thing the consolidation is for. Asserted
-    through `_believed_air_defence` across the set's own boundary -- a
-    class in the set is air defence to this command, and a profiled class
-    outside it is not -- rather than by comparing the imported name to
-    itself."""
+    What stays here is this command's own wiring, asserted as an
+    equivalence rather than as a provenance claim: the predicate behind
+    "watch nearest air defence" agrees with `AIR_DEFENSE_OP_CLASSES`
+    across that set's own boundary in **both** directions -- a class in
+    the set is air defence to this command, and a profiled class outside
+    it is not. **It cannot distinguish reading the shared set from
+    reading an identical local copy**, and does not claim to -- no test
+    asserts that, only `BL-B51`'s grep over `src`/`tests`/`tools` did.
+    What this one buys is that the command's verdict tracks the set's
+    *contents*, which is what breaks first if either side drifts."""
     console_predicate = CrewConsole._believed_air_defence
 
     def verdict(value: str) -> bool:

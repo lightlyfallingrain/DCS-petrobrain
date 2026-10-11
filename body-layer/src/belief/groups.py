@@ -315,6 +315,75 @@ GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
 #:   bounds is a *spoken* extent, which is metres, and because the only
 #:   class that reaches it has one size.
 #:
+#: **Every cross-check above that is a *spacing* is true geometry; the cap
+#: is applied to *believed* spacing, and that omits the dominant error
+#: term.** `_cluster_contacts` compares `contact.position.x`/`.z` -- the
+#: fused belief, explicitly not uncertainty-budgeted (its own docstring).
+#: Of the five bullets above, **three** are spacings and all three are
+#: ground truth -- the p95 342 m nearest-neighbour and the median 236 m
+#: cluster-to-cluster are reduced from a belief-truth log **deduplicated
+#: by `object_id`** (`plans/post-review-fixes/explore-notes.md` §2), i.e.
+#: keyed to distinct real objects, so the per-contact scatter this cap
+#: actually sees is deduplicated out of them; and the 260 m pair is a
+#: fixture whose two positions are written as literals (0.0 and 260.0),
+#: with no noise applied. The remaining **two** (the clock hour, the
+#: unit-widths currency) are conversions of the 500 m itself and contain
+#: no spacing at all. The omitted term is `perception.estimation`'s
+#: `sigma_down_m = RANGE_FRACTIONAL_SIGMA * true_range_m`, with
+#: `RANGE_FRACTIONAL_SIGMA = 0.17`. For two independently observed,
+#: genuinely co-located contacts the *believed* separation therefore
+#: carries `sigma_delta = 0.17 * sqrt(2) * R = 0.2404 R` -- the
+#: decomposition, not a lumped figure: **338 m at 1 406 m, 818 m at
+#: 3 403 m** (the two ranges below). So a real, tight infantry pair can
+#: fail this cap on belief noise alone, in the *under*-merging direction
+#: the *"ok to merge infantry too eagerly"* grant exists to avoid. It is
+#: bounded rather than permanent: fusion shrinks the error roughly as
+#: 1/sqrt(looks), so it is a several-second delay in grouping, which
+#: `_cluster_contacts`' own docstring already accepts as *"a human
+#: copilot needing a moment"*.
+#:
+#: **The band where that can actually be reached is binoculars raised,
+#: ~1.4-3.4 km** -- not a 2-7 km gradient, because infantry
+#: (`ObjectTypeProfile(size_m=1.8)`, `perception.object_model`) cannot be
+#: held at longer ranges by any *implemented* optic. Running
+#: `perception.visibility.tier_ranges(presence_size_m=1.8,
+#: recognition_extent_m=1.8, ...)` against the real constants gives four
+#: presence ceilings, each a quotient and a multiplier rather than a
+#: quoted number:
+#:
+#: - **600 m** unaided, as a lone mark: 1.8 / `LOWRES_ANGULAR_RADIUS_RAD`
+#:   0.003.
+#: - **1 406 m** unaided, once group-admitted: 1.8 /
+#:   `RESOLUTION_ANGULAR_RADIUS_RAD` 0.00128.
+#: - **1 452 m** and **3 403 m** -- those two times
+#:   `optics.BINOCULAR_OPTIC.presence_range_mult` 2.42.
+#:
+#: (`NAKED_EYE_RANGE_CAP_M` 10 000 m does not bind at any of them.) **The
+#: 9K113 is not implemented at all** -- `perception.optics` declares only
+#: `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`, the sight having been deferred
+#: entirely by the user's scope cut of 2026-09-20 -- so the optic that
+#: could see infantry at multiple kilometres does not exist in this code.
+#: Below ~1.4 km, `sigma_delta` is <= 338 m, inside this cap.
+#:
+#: **Accepted by the user's decision of 2026-10-11, not overlooked**
+#: (`docs/acceptance/2026-10-11-infantry-detectability-feedback.md`):
+#:
+#:   > *"infantry is the least important unit type of combat units. It's
+#:   > good to have it in, but since it can only be seen at close range,
+#:   > we only really need to consider it at close range."*
+#:
+#: So the cap stays at 500 m and the band is documented rather than tuned
+#: for. **It must not be retuned to cover it**: widening it would loosen
+#: every close-range infantry pair, where the geometry above is sound, to
+#: buy the least important class one band under a deliberately raised
+#: optic. The *error model* is what should change -- `[[BL-B55]]`:
+#: `perception.estimation.naked_eye_sigma_m(true_range_m)` takes range
+#: only, at one call site (`perception/naked_eye_source.py`), so a
+#: binocular look already sees 2.42x further while being believed no more
+#: precisely than the naked eye. `estimation.py` is optic-blind while
+#: `visibility.py` is optic-aware; that asymmetry is the defect, and this
+#: cap sits downstream of it.
+#:
 #: **Equal to `GROUP_REPORTING_INSTALLATION_COHESION_CAP_M` by coincidence,
 #: not by derivation, and the two must stay separate constants.** That one
 #: is 500 m because real S-75/S-125 launcher spacing is ~60-230 m
@@ -323,10 +392,20 @@ GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
 #: move the other -- the same reason `GROUP_REPORTING_MIN_MEMBERS` is not
 #: `perception.group_salience.GROUP_MIN_MEMBERS` (module docstring).
 #:
-#: **What would falsify it**, both observable only once a group-identity
-#: trace line exists (BL-12 Stage 1, amendment A4): two infantry groups the
-#: pilot thinks of separately, under 500 m apart, spoken as one; or a real
-#: infantry group more than 500 m across that stops being reported at all.
+#: **What would falsify it.** The first two are observable only once a
+#: group-identity trace line exists (BL-12 Stage 1, amendment A4): two
+#: infantry groups the pilot thinks of separately, under 500 m apart,
+#: spoken as one; or a real infantry group more than 500 m across that
+#: stops being reported at all.
+#:
+#: **A third observation is *not* a verdict on this number, and must not
+#: be read as one**: infantry at range reported individually for several
+#: seconds before pairing, where before this cap existed they paired
+#: immediately. That is the believed-separation noise above -- it is
+#: attributable to **the range and the raised optic**, not to the cap's
+#: value, and it resolves itself as fusion tightens the estimate.
+#: Retuning the 500 m in response to it would be treating `[[BL-B55]]`'s
+#: optic-blind error model as a cohesion problem.
 GROUP_REPORTING_EAGER_COHESION_CAP_M: Final[float] = 500.0
 
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
