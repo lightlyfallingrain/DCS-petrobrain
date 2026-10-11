@@ -94,6 +94,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B53]] — The *what* slot takes seven singular words, and the user's own examples miss
 - [[BL-B54]] — `report six o'clock` answers about eight o'clock
 - [[BL-B55]] — Position uncertainty is optic-blind, and the 9K113 slice depends on it
+- [[BL-B56]] — A fourth copy of the air-defence vocabulary, outside the new guard
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
