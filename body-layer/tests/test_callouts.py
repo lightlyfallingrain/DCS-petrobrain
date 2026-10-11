@@ -889,31 +889,35 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     counted from *its own* arrival -- polled here every second, the way
     `logger.py`'s poll loop actually calls `drain_events`.
 
-    **Rewritten for `plans/group-cohesion-redesign/plan.md`'s infantry
-    `EAGER` release (user-confirmed, 2026-10-01: "the infantry pair now
-    merges") -- confirmed by running this fixture, not guessed, and the
-    actual result is wider than a literal "the infantry pair merges"
-    reading.** `OP_INFANTRY` dropping its backstop entirely (`belief.groups.
-    CohesionBackstop.EAGER`) does not only merge infantry with infantry:
-    single-link chaining means an infantry-involving edge with *no*
-    backstop at all can bridge two *non*-infantry members that would not
-    themselves clear the ordinary backstop (`belief.groups`'s own
-    `_cluster_contacts` docstring already documents this "convoy coheres
-    end-to-end" property; `tests/test_groups.py::test_infantry_eager_
-    policy_bridges_a_non_infantry_pair_that_would_not_merge_alone` pins it
-    directly at the smallest scale). In this fixture's own geometry (every
-    detection within a few hundred metres of every other, only ~7 contacts
-    in the whole scene), that bridging pulls the first three infantry
-    (`OBS_1`/`OBS_2`/`OBS_3`), the BTR-70, and the truck into *one* five-
-    member group once the truck differentiates at t=8 -- not a bounded
-    infantry-only pair/triple. The two infantry arriving later (`OBS_5`/
-    `OBS_6`, t=12) then join that same existing group *silently*: a repeat
-    of an already-known non-air-defence class (infantry) is exactly the
-    delta taxonomy's "one more makes no difference" branch (`plans/
-    group-cohesion-redesign/plan.md` §4) -- their own `CONTACT_DETECTED`
-    events are also suppressed once grouped (`belief/callouts.py`'s own
-    docstring: only `CONTACT_DETECTED`/`CONTACT_REACQUIRED` are filtered
-    for a grouped contact), so nothing is ever spoken for them.
+    **Rewritten a second time for `BL-B48` / BL-12 Stage 0a
+    (2026-10-11) -- line 3 changed and line 4 is new. Read off a run, not
+    predicted.** The previous rewrite (for `plans/group-cohesion-redesign/
+    plan.md`'s infantry `EAGER` release, user-confirmed 2026-10-01: "the
+    infantry pair now merges") recorded a result wider than that sentence:
+    with `_pair_backstop_m` dropping the absolute backstop whenever
+    *either* member was infantry, single-link chaining let an unbounded
+    infantry edge bridge two *non*-infantry members that could not clear
+    the ordinary backstop themselves, so the first three infantry, the
+    BTR-70 and the truck became **one five-member group** and spoke as
+    *"BTR-70 and truck, in 1 o'clock group."*
+
+    That bridging is `BL-B48`, and Stage 0a requires **both** members
+    `EAGER`. The mixed infantry/armour and infantry/truck edges are now
+    bounded, so no bridge exists, and the fixture's seven detections
+    resolve into **two infantry-only pairs** instead of one five-member
+    group (dumped from the run): `CONTACT_1`/`CONTACT_3`, the two
+    12-o'clock infantry at 0.5 km, and `CONTACT_6`/`CONTACT_7`, the two
+    2-o'clock infantry from t=12. `CONTACT_2` -- the 1-o'clock infantry
+    individually announced as line 1 -- joins neither: infantry-infantry
+    pairs still have no absolute backstop, so its exclusion is the
+    *relative* test's doing, not Stage 0a's.
+
+    The spoken total is still four lines, and the still-four is the point
+    of this test rather than an incidental: it is the group *content* that
+    changed, not the flood control. Measured timings, one line per
+    detection window: t=0, t=4, t=9, t=14. The 2-o'clock pair (founded
+    t=12) says nothing inside the polling window; that is recorded as
+    observed and no mechanism is claimed for it here.
 
     **Unaffected by `plans/contact-report-flood/plan.md` Stage 1's
     `CONTACT_DETECTED` merge-echo suppression (confirmed by running this
@@ -929,22 +933,17 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     not predicted from the mechanism alone. This test pins the real,
     current behaviour.
 
-    **Line 3's wording changed under `plans/redundant-group-disclosure/
-    plan.md` (2026-10-05) -- confirmed by running this fixture, not
-    guessed.** The five-member group's own first disclosure used to
-    always speak the full roster ("Three infantry, BTR-70 and truck, 1
-    o'clock, very close."), even though one of its members (`CONTACT_2`,
-    the 1-o'clock infantry) had already been individually announced as
-    line 1. That line's own `OP_INFANTRY` classification is now a *known*
-    class by the time the group first speaks -- the identical "one more
-    of an already-known class makes no difference" rule branch 4 already
-    applies to a later arrival (`render_group_disclosure`'s own
-    docstring, branch 1's partially-covered sub-case) -- so the other two
-    infantry (`CONTACT_1`/`CONTACT_3`, never themselves spoken, grouped
-    from the instant they were founded) are silently folded in rather than
-    re-announced, and the group's opening line now names only what is
-    genuinely new relative to what was already said: the BTR-70 and the
-    truck."""
+    **The `plans/redundant-group-disclosure/plan.md` (2026-10-05) note
+    that used to close this docstring described the five-member group's
+    line and no longer applies to anything this fixture renders.** It
+    recorded that the group's first disclosure stopped speaking the full
+    roster -- *"Three infantry, BTR-70 and truck, 1 o'clock, very
+    close."* -- and named only what was new relative to line 1, because
+    one member (`CONTACT_2`) had already been announced individually.
+    That five-member group was the `BL-B48` bridge, so the behaviour is
+    still live in `render_group_disclosure` but is no longer exercised
+    here. `tests/test_speech.py` is where that renderer's
+    already-reported rule is pinned directly."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
@@ -1109,8 +1108,16 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     assert spoken == [
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
-        "BTR-70 and truck, in 1 o'clock group.",
         "unit 12 o'clock, very close is truck.",
+        "Pair of infantry, 12 o'clock, 0.5 kilometres.",
+    ]
+    # The grouping itself, asserted beside the sentences: Stage 0a's whole
+    # effect on this fixture is that the five-member bridge is gone and two
+    # infantry-only pairs stand in its place. Without this, the four-line
+    # count above would still pass over a single five-member group.
+    assert sorted(sorted(g.member_contact_ids) for g in store.groups) == [
+        ["CONTACT_1", "CONTACT_3"],
+        ["CONTACT_6", "CONTACT_7"],
     ]
 
 

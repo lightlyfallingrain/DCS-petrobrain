@@ -204,9 +204,23 @@ class CohesionBackstop(Enum):
 #: *"Ok to merge infantry too eagerly. Infantry is the least detectable and
 #: also least important of unit types."* (`plans/group-undermerging/
 #: explore-notes.md`). Not extended to any other class. `EAGER` fires for a
-#: pair when **either** member resolves to `OP_INFANTRY` -- the error this
-#: policy accepts (over-merging infantry) is asymmetric and cheap; nothing
-#: else gets the same latitude.
+#: pair only when **both** members resolve to `OP_INFANTRY` -- the error
+#: this policy accepts (over-merging infantry) is asymmetric and cheap;
+#: nothing else gets the same latitude, including the *other* member of a
+#: pair that happens to contain infantry.
+#:
+#: **It read `either` member until 2026-10-11, and that was `BL-B48`**
+#: (BL-12 Stage 0a). An infantry contact then bridged non-infantry
+#: contacts without bound, because the eagerness was being applied to the
+#: pair rather than to the infantry: measured on this tree,
+#: `armor@1km + truck@3km` correctly stayed two separate things (pair
+#: threshold 130 m against a 2,000 m gap) while adding `infantry@7km`
+#: merged all three into one group 6,000 m across. A group that wide has no
+#: single believable bearing or range, which is the pilot-facing form of
+#: the defect. The `both` reading keeps the user's sentence literally true
+#: about infantry and nothing else: infantry-to-infantry thresholds and
+#: unions are unchanged (`test_infantry_eagerness_is_bit_identical_
+#: for_an_infantry_only_scene`).
 _OP_CLASS_COHESION_BACKSTOP: Final[dict[str, CohesionBackstop]] = {
     "OP_INFANTRY": CohesionBackstop.EAGER,
 }
@@ -349,10 +363,15 @@ def _pair_backstop_m(
        installation component, one not) falls through to the ordinary
        rule below -- an installation cap is only meaningful when both
        members are plausibly parts of the same site.
-    2. **Either** member's `op_class` has an `EAGER` cohesion policy
+    2. **Both** members' `op_class` have an `EAGER` cohesion policy
        (`_OP_CLASS_COHESION_BACKSTOP`, today only `OP_INFANTRY`): no
        backstop at all (`math.inf`) -- the relative/density test alone
-       decides.
+       decides. A **mixed** pair (one eager member, one not) falls through
+       to the ordinary rule below, for the same reason rule 1 does it: the
+       eagerness was granted to a *kind of thing*, and a cap that only one
+       member qualifies for is not a statement about the pair. See the
+       module docstring's `_OP_CLASS_COHESION_BACKSTOP` note on what the
+       `any`-member reading cost (`BL-B48`).
     3. Otherwise, the ordinary unit-widths backstop
        (`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * mean(size_i, size_j)`).
 
@@ -367,7 +386,7 @@ def _pair_backstop_m(
     backstop_j = _OP_CLASS_COHESION_BACKSTOP.get(
         profile_j.op_class, _DEFAULT_COHESION_BACKSTOP
     )
-    if CohesionBackstop.EAGER in (backstop_i, backstop_j):
+    if backstop_i is CohesionBackstop.EAGER and backstop_j is CohesionBackstop.EAGER:
         return math.inf
     return GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * (0.5 * (size_i + size_j))
 

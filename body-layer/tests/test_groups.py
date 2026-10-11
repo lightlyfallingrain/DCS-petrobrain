@@ -8,6 +8,8 @@ faster-to-read test."""
 
 from __future__ import annotations
 
+import math
+
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.groups import (
@@ -19,8 +21,12 @@ from belief.groups import (
     GROUP_REPORTING_UNKNOWN_SIZE_M,
     CohesionBackstop,
     GroupStore,
+    _pair_backstop_m,
+    _profile_for_contact,
+    _representative_size_m,
 )
 from belief.position_belief import Covariance2D, PositionEstimate
+from perception import object_model
 
 
 def _contact(
@@ -412,21 +418,28 @@ def test_non_infantry_pair_at_the_identical_geometry_still_does_not_merge() -> N
     assert store.groups == []
 
 
-def test_infantry_eager_policy_bridges_a_non_infantry_pair_that_would_not_merge_alone() -> (
+def test_infantry_no_longer_bridges_a_non_infantry_pair_that_would_not_merge_alone() -> (
     None
 ):
-    """A real, documented consequence of single-link chaining plus the
-    infantry release, found while verifying this implementation against
-    `tests/test_callouts.py::test_2c_transcript_fixture_renders_four_
-    lines_not_seven`'s rewritten fixture: an infantry contact sitting
-    between two *non*-infantry contacts that would not themselves clear
-    the ordinary backstop can still bridge them into one group, because
-    each infantry-involving edge has no backstop at all. This is not a
-    bug -- `_cluster_contacts`'s own docstring already documents single-
-    link chaining letting a convoy cohere end-to-end even when its full
-    span would not -- but it is worth pinning directly at the smallest
-    scale that shows it, since it is easy to assume `EAGER` only ever
-    affects infantry-infantry pairs."""
+    """**Inverted for `BL-B48` (BL-12 Stage 0a), and this test used to
+    assert the defect.** It was written to pin single-link chaining plus
+    the `any`-member `EAGER` reading: an infantry contact sitting between
+    two *non*-infantry contacts that would not themselves clear the
+    ordinary backstop bridged them into one group, because each
+    infantry-involving edge had no backstop at all.
+
+    That bridging is what `BL-B48` is, and at sortie scales it is not
+    small -- the same mechanism merged armour at 1 km with infantry at
+    7 km into one group 6,000 m across (`test_armor_and_distant_infantry_
+    do_not_merge` below). Requiring **both** members `EAGER` makes a mixed
+    pair fall through to the ordinary unit-widths backstop, so the
+    truck-infantry edges are now bounded (`20.0 * mean(6.0, 1.8) = 78.0`
+    m, under the 115 m gap) and nothing merges.
+
+    Single-link chaining itself is unchanged and still lets a convoy
+    cohere end-to-end past its own span (`_cluster_contacts`'s docstring);
+    what changed is that an unbounded edge is no longer available to chain
+    *through*."""
     store = GroupStore()
     # truck<->truck gap is 230 m, past the 120 m OP_TRUCK backstop --
     # confirmed they would NOT merge directly (see the previous test's own
@@ -440,9 +453,140 @@ def test_infantry_eager_policy_bridges_a_non_infantry_pair_that_would_not_merge_
 
     store.reconcile(contacts, now_sim=0.0)
 
+    assert store.groups == []
+
+
+# --- Stage 0a: the eagerness is infantry-pair-only (BL-B48) -----------------
+# `plans/group-contact-identity/plan.md` amendment A2 / Q-A, answered by the
+# user 2026-10-11: *"ok to merge infantry too eagerly"* does not extend to
+# bridging non-infantry contacts. The four scenes below are that answer's
+# own acceptance table, at the amendment's own measured geometry.
+
+
+def test_armor_and_truck_two_kilometres_apart_stay_separate() -> None:
+    """The control row: no infantry in the scene at all, so Stage 0a
+    cannot have touched it. Armour at 1 km and a truck at 3 km are 2,000 m
+    apart against a pair backstop of `20.0 * mean(7.0, 6.0) = 130.0` m --
+    correctly two separate things before the change and after it."""
+    store = GroupStore()
+    contacts = [
+        _contact("ARMOR", 1000.0, 0.0, class_raw="T-72B"),
+        _contact("TRUCK", 3000.0, 0.0, class_raw="Ural-375"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_armor_and_distant_infantry_do_not_merge() -> None:
+    """`BL-B48`'s headline measurement, at its own geometry: armour at
+    1 km and infantry at 7 km -- 6,000 m apart -- formed **one group
+    6,000 m across** under the `any`-member reading, and the relative test
+    could not reject it either, because at n = 2 both nearest-neighbour
+    gaps *are* the pair's own distance, so `relative_threshold =
+    3 x 6,000 = 18,000` m exceeded the gap by design. With the absolute
+    backstop restored for a mixed pair (`20.0 * mean(7.0, 1.8) = 88.0` m),
+    the pair is rejected on the backstop and no group forms."""
+    store = GroupStore()
+    contacts = [
+        _contact("ARMOR", 1000.0, 0.0, class_raw="T-72B"),
+        _contact("INFANTRY", 7000.0, 0.0, class_raw="Infantry AK"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_infantry_does_not_bridge_armor_and_truck_at_sortie_scale() -> None:
+    """The compound case, and the one that showed the defect was not a
+    fixture-scale curiosity: armour at 1 km, a truck at 3 km and infantry
+    at 7 km became **one group of three, 6,000 m across**, even though the
+    armour/truck pair on its own correctly stayed separate (first test
+    above). All three pairs are now bounded -- 130 m, 88 m and
+    `20.0 * mean(6.0, 1.8) = 78.0` m against gaps of 2,000 m, 6,000 m and
+    4,000 m."""
+    store = GroupStore()
+    contacts = [
+        _contact("ARMOR", 1000.0, 0.0, class_raw="T-72B"),
+        _contact("TRUCK", 3000.0, 0.0, class_raw="Ural-375"),
+        _contact("INFANTRY", 7000.0, 0.0, class_raw="Infantry AK"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_infantry_only_scene_keeps_identical_thresholds_and_unions() -> None:
+    """The regression guard that makes Stage 0a a correction rather than a
+    policy change: *"ok to merge infantry too eagerly"* is left literally
+    true about infantry.
+
+    Asserted as thresholds, not only as the resulting union, because the
+    union alone would still pass if the backstop had merely become large.
+    Every pair in an infantry-only scene still has `_pair_backstop_m ==
+    math.inf`, and `pair_threshold = min(relative_threshold, inf) ==
+    relative_threshold`; `relative_threshold` is computed from positions
+    alone and never reads a backstop, so every pair's threshold is
+    bit-identical to the pre-Stage-0a value. The three contacts 30 m apart
+    therefore form the one 60 m-extent group they always did."""
+    store = GroupStore()
+    contacts = [
+        _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+        _contact("I2", 30.0, 0.0, class_raw="Infantry AK"),
+        _contact("I3", 60.0, 0.0, class_raw="Infantry AK"),
+    ]
+    profiles = [_profile_for_contact(c) for c in contacts]
+    sizes = [_representative_size_m(p) for p in profiles]
+    for i in range(len(contacts)):
+        for j in range(i + 1, len(contacts)):
+            assert (
+                _pair_backstop_m(profiles[i], profiles[j], sizes[i], sizes[j])
+                == math.inf
+            ), (contacts[i].id, contacts[j].id)
+
+    store.reconcile(contacts, now_sim=0.0)
+
     groups = store.groups
     assert len(groups) == 1
-    assert groups[0].member_contact_ids == frozenset({"TRUCK_1", "INFANTRY", "TRUCK_2"})
+    assert groups[0].member_contact_ids == frozenset({"I1", "I2", "I3"})
+
+
+def test_a_mixed_infantry_pair_falls_through_exactly_as_a_mixed_installation_pair_does() -> (
+    None
+):
+    """Stage 0a's precedent, asserted as the equivalence it claims rather
+    than as prose: `_pair_backstop_m`'s rule 1 already makes a *mixed*
+    installation pair fall through to the ordinary unit-widths backstop,
+    and rule 2 now does the same for a mixed eager pair. Both mixed pairs
+    return the ordinary `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS *
+    mean(size)` value, computed here from the sizes rather than written
+    out, so a retuning of that constant cannot make this test lie."""
+    infantry = _profile_for_contact(_contact("I", 0.0, 0.0, class_raw="Infantry AK"))
+    truck = _profile_for_contact(_contact("T", 0.0, 0.0, class_raw="Ural-375"))
+    s125 = _profile_for_contact(_contact("S", 0.0, 0.0, class_raw="s-125"))
+    osa = _profile_for_contact(_contact("O", 0.0, 0.0, class_raw="osa"))
+
+    assert infantry.op_class == "OP_INFANTRY"
+    assert s125.installation_component and not osa.installation_component
+
+    def ordinary(
+        a: object_model.ObjectTypeProfile, b: object_model.ObjectTypeProfile
+    ) -> float:
+        size_a, size_b = _representative_size_m(a), _representative_size_m(b)
+        return GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * (0.5 * (size_a + size_b))
+
+    mixed_eager = _pair_backstop_m(
+        infantry, truck, _representative_size_m(infantry), _representative_size_m(truck)
+    )
+    mixed_installation = _pair_backstop_m(
+        s125, osa, _representative_size_m(s125), _representative_size_m(osa)
+    )
+
+    assert mixed_eager == ordinary(infantry, truck)
+    assert mixed_installation == ordinary(s125, osa)
 
 
 # --- Stage 2: kind-coherence for air-defence installations ------------------
