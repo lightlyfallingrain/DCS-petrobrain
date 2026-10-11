@@ -168,5 +168,7 @@ itself carried three stacked copies of that warning until 2026-10-06; merged, no
 - [BL-B47 air defence class level review](project_bl_b47_air_defence_class_level_review.md) - APPROVED W/ MINOR; three oscillation probes settled a scope argument.
 - ["Widens, not creates": remove the mechanism](feedback_widens_not_creates_remove_the_mechanism.md) - build the hazard scenario with the new mechanism reverted.
 - [A literal pin is not a drift guard](feedback_a_literal_pin_is_not_a_drift_guard.md) - `== frozenset({literals})` cannot notice the source module growing; mutate the source.
+- [BL-12 Stage 0 round2 approved](project_bl12_stage0_round2_approved.md) - APPROVED; my own two figures were wrong; a dedup key proved no truth-provenance.
+- [Tabulate only reachable rows](feedback_tabulate_only_reachable_rows.md) - check the detectability envelope per row before tabulating a defect across a range sweep.
 - [Calibration: true vs believed geometry](feedback_calibration_true_vs_believed_geometry.md) - spacing evidence is ground truth; the gate compares beliefs at 0.24*R of noise.
 - [BL-12 Stage 0 review](project_bl12_stage0_review.md) - APPROVED w/ doc-only required fix; 3-variant monkeypatch table, 4 mutations.

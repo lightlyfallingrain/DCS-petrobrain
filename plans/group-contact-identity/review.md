@@ -355,3 +355,251 @@ cap's value when the cause is the range.
 - Both subprojects' full check suites re-run; the +11 test delta derived from the diff.
 
 Nothing was spot-checked.
+
+---
+---
+
+# Round 2 — review of the fix round (`a673512`)
+
+**Appended 2026-10-11. Round 1 above is unchanged.** This round reviews the single commit at
+`feature/bl12-group-contact-identity`'s tip, *"Record that the eager cohesion cap is calibrated on
+true spacing"* — round 1's one required fix, its two optional observations, and the A6 plan
+amendment.
+
+## Verdict
+
+**APPROVED.** No required fixes. One substantive optional refinement (§7) and two cosmetic ones.
+
+The required fix is answered, and answered better than it was asked: **two of the figures in round 1
+were wrong, and this round corrected them rather than transcribing them.** My *"all four
+cross-checks are ground truth"* was a miscount of a five-bullet block, and the 2–7 km tabulation
+described a regime no infantry contact can occupy. Both corrections are verified below.
+
+## Provenance of this review
+
+- `git rev-parse HEAD` on dispatch: **`8b7686fc`** — `main`, **diverged** from the branch, not
+  behind it. Merge base `6daeec6`; `main` carries two `agent-sha-gate` commits the branch does not,
+  and the branch carries eleven `main` does not. Reported rather than worked around, and **no
+  `--ff-only` was attempted** (it was unavailable by definition).
+- Verified against a **detached checkout of `a673512`** (`git checkout --detach`), tree clean. Import
+  resolution proved to the worktree's own tree, not the root checkout's:
+  `belief.groups` resolves to
+  `/Users/sg/Code/DCS-petrobrain/.claude/worktrees/agent-a1ae3f9caff590a4a/body-layer/src/belief/groups.py`.
+- **The cherry-pick was verified, not assumed.** `git show 0f1bd9b --format=""` and
+  `git show a673512 --format=""` are **byte-identical** patches. The tree difference between the two
+  commits is exactly `BL-B56.md` + the backlog index — the orchestrator's own entry — so the
+  implementer's content came across whole.
+
+## Checks — re-run, exactly at baseline
+
+| subproject | format | lint | mypy | tests |
+|---|---|---|---|---|
+| body-layer | 118 files already formatted | pass | no issues, 54 files | **1643 passed, 4 xfailed** |
+| audio-adapter | — | pass | no issues, 15 files | **255 passed, 1 skipped** |
+
+Both exactly the stated baseline.
+
+## Claim-by-claim verification
+
+### 1. "Documentation only" — re-established structurally, and strictly stronger than claimed
+
+I did not credit the test count, which is the implementer's own point. Instead I extracted both
+touched `.py` files at `e20ea2f` and `a673512` with `git archive` and compared their ASTs with
+**every docstring node removed entirely** — stronger than the implementer's "docstring constants
+blanked", because a changed numeric constant anywhere would survive the strip and show up.
+
+- `body-layer/src/belief/groups.py` → **AST_EQUAL**
+- `body-layer/tests/test_crew_console.py` → **AST_EQUAL**
+- `GROUP_REPORTING_EAGER_COHESION_CAP_M: Final[float] = 500.0` on **both** sides.
+
+One refinement to the implementer's framing: in `groups.py` the new prose is `#:` *comments*, which
+never enter the AST at all, so AST equality there proves no code moved but was never at risk from
+the prose. In `test_crew_console.py` it is a real docstring, and the strip is what makes the
+comparison meaningful. The conclusion holds either way: **prose only, no number, no code path.**
+
+The commit touches six files, and the two `.py` files are the only source/test files among them.
+
+### 2a. The five-bullet count and classification — correct, and round 1 was wrong
+
+Counted from `groups.py:293-318`. Five bullets:
+
+| bullet | spacing? | provenance |
+|---|---|---|
+| clock hour, `2·tan(15°)·R` = 0.536 R | **no** | a conversion of the 500 m |
+| the 260 m infantry pair | yes | fixture, positions literal |
+| nearest-neighbour p95 **342 m** | yes | reduced from the sortie log |
+| cluster-to-cluster median **236 m** | yes | ibid. |
+| unit-widths currency, 500 / 1.8 = 277.8 | **no** | a conversion of the 500 m |
+
+**Three spacings, two conversions, five bullets.** The implementer's count and classification are
+right and my round-1 *"every one of the four cross-checks"* was a miscount — it counted the block as
+four and treated all four as measurements. The correction is recorded in the docstring in the form a
+later reader can check.
+
+Sub-claims both verified:
+- `plans/post-review-fixes/explore-notes.md:146` does say *"deduplicated by `object_id`"*, with
+  p95 342 m at `:155` and median 236 m at `:171`.
+- `tests/test_groups.py:401-402` writes the pair as `_contact("C1", 0.0, 0.0, …)` and
+  `_contact("C2", 260.0, 0.0, …)` — **literals, no noise applied.** Proved, not read off the
+  docstring.
+
+### 2b. `σ_Δ` — 338 m, not 336 m; the brief's figure was 1,400 rounded first
+
+Re-derived from the real constant rather than from the docstring:
+
+- `perception.estimation.RANGE_FRACTIONAL_SIGMA = 0.17`; `0.17 × √2 = 0.240416`.
+- × **1406.25 m** → **338.1 m** ✔ (× 1,400 m → 336.6 m — which is exactly where the brief's
+  *"≤ ~336 m"* came from: the ceiling rounded to 1,400 before multiplying).
+- × **3403.1 m** → **818.2 m** ✔
+
+Both docstring figures are right and both of the brief's corrections to itself are confirmed.
+
+### 3. The four infantry presence ceilings — re-run through `tier_ranges`, all four match
+
+Run against the real constants with `cwd` inside the worktree's `body-layer/`. Note the keyword is
+`group_salient`, not `group_admitted`:
+
+```
+unaided   group_salient=False -> presence=  600.00
+unaided   group_salient=True  -> presence= 1406.25
+binocular group_salient=False -> presence= 1452.00
+binocular group_salient=True  -> presence= 3403.12
+```
+
+Matches 600.0 / 1406.2 / 1452.0 / 3403.1 exactly. `NAKED_EYE_RANGE_CAP_M = 10000.0` **binds at none
+of them**, as claimed. Infantry `size_m=1.8` confirmed at `perception/object_model.py:229`.
+`vars(optics)` holds exactly two `Optic` instances — `UNAIDED_OPTIC`, `BINOCULAR_OPTIC` — so **the
+9K113 really is absent from the code**, which is the whole basis for retiring my 5 km and 7 km rows.
+
+### 4. The killed claim — confirmed dead, and the gap is real
+
+The round's first rewording attributed a no-duplicate-copy property to a companion test. Confirmed
+that was correctly abandoned:
+
+- `tests/test_classification.py:304` —
+  `test_air_defence_classes_cover_every_air_defence_class_in_the_object_model` asserts
+  `air_defence_by_name <= AIR_DEFENSE_OP_CLASSES`. It is an **`object_model` coverage guard**; it
+  says nothing about where any consumer reads the set from.
+- The actual companion, `:358`
+  `test_the_drift_guard_fires_on_a_new_air_defence_class_and_a_pin_would_not`, asserts the
+  **`<=`-versus-`==` direction** property. Also not a no-duplicate-copy claim.
+- **Proved the negative by grep**, not by the graph: no `is AIR_DEFENSE_OP_CLASSES` identity
+  assertion anywhere in `src`/`tests`/`tools` (an identity check is the one cheap thing that *would*
+  distinguish the shared set from an identical local copy), and no source-scanning test among the
+  nine files that read files at all touches the air-defence vocabulary.
+
+So the revised docstring is accurate: **no test asserts no-duplicate-copy; only `BL-B51`'s grep
+did.** See §7 — I think this now wants filing.
+
+### 5. The third falsification criterion — present, correct, and pilot-observable
+
+`groups.py:398-407`. It reads as a non-verdict (*"is **not** a verdict on this number, and must not
+be read as one"*), attributes the effect to the range and the raised optic, and says it self-resolves
+as fusion tightens. All three are right:
+
+- The arithmetic supports the attribution. σ_Δ exceeds the 500 m cap only beyond R ≈ 2,080 m, and
+  infantry cannot be held past 1,406 m unaided — so any sighting of this effect **is** binoculars at
+  range, by construction.
+- *"before this cap existed they paired immediately"* is true, and for the reason the same block
+  already gives: the cap replaced `math.inf`, and at n = 2 the relative test cannot reject any pair,
+  so two infantry formed one group at any separation.
+- It is observable by ear: individual contact reports, then a pairing a few seconds later.
+
+### 6. The A6 plan amendment — reads as settled, not as a second condition
+
+`plans/group-contact-identity/plan.md:281`. It states the guard is **unconditional, not a fallback**,
+says the Q-A/Q-B condition is settled, and gives the reason the guard is needed *with* 0b rather than
+instead of it. Verified the cited evidence: `test_the_eager_cap_still_chains_a_long_infantry_line`
+exists (`tests/test_groups.py:640`) and does pin four infantry at 400 m spacing — 3 gaps × 400 m =
+1,200 m, 2.4 of `_format_range_km`'s 500 m buckets.
+
+The row still opens *"Unchanged, **conditional on Stage 0**"*, but that is Stage 4's dependency on
+Stage 0 having shipped, which is a different and still-accurate statement — not a surviving
+condition on the guard. It reads as settled.
+
+## What must not have regressed — checked
+
+- **Only six files touched**, two of them `.py`. `belief/groups.py`'s logic is AST-identical (§1);
+  `decay.py`, `belief/speech.py` and the BL-13 pull path are **not in the diff at all**, so
+  `_is_air_defence` cannot have moved.
+- **`crew_console.py:291` is untouched.** Read at the tip: `"sam": frozenset({"OP_SRSAM",
+  "OP_MRSAM", "OP_LRSAM"})`, `"aaa": frozenset({"OP_SPAAG", "OP_ZU23"})` — still the fourth copy,
+  still set-equal to `AIR_DEFENSE_OP_CLASSES` in union, correctly left for `BL-B56`.
+- **No Stage 1 work**: no new files, and nothing matching a trace line.
+- `body-layer/STRUCTURE.md` still has **no `groups.py` entry**; `BL-B48`, `BL-B51` and `BL-12` are
+  all still `#status/open`. Both correctly deferred to merge.
+- Spot-verified four of the implementer's own falsification-table rows: `naked_eye_sigma_m` has one
+  definition (`estimation.py:98`, range-only) and one call site (`naked_eye_source.py:949`); exactly
+  two `Final[Optic]` declarations; the *"copilot needing a moment"* phrase is really inside
+  `_cluster_contacts`' docstring.
+
+## 7. Optional refinements
+
+**1. (Substantive) The "so" clause under the 342 m / 236 m figures is not supported by the fact it
+cites, and I could not settle it either way.** The docstring argues the two log figures are ground
+truth *because* the log was **deduplicated by `object_id`** — *"keyed to distinct real objects, so
+the per-contact scatter this cap actually sees is deduplicated out of them."* Deleting the mechanism
+and asking whether the conclusion still holds: **it does not follow.** `BeliefTruthRow`
+(`src/belief_truth_log.py:122`) carries **both** `true_x`/`true_z` **and** `believed_x`/`believed_z`,
+keyed by `object_id`. Deduplicating *believed* positions by `object_id` would remove duplicate
+*contacts* for one object — the churn the explore note names — while leaving each surviving belief's
+own error fully intact. The dedup key therefore proves the rows are one-per-object; it does not prove
+the positions are truth.
+
+The truth reading is very probably correct, and the explore note's *"nearest-neighbour spacing,
+distinct objects"* points that way. But **the field is named nowhere and the reduction script was not
+retained** (`plans/post-review-fixes/` holds only `explore-notes.md`), so I could not prove it. The
+260 m fixture I *did* prove, which makes the asymmetry visible: one of the three spacings is
+demonstrated, two are inferred.
+
+Why it is optional rather than required: the band conclusion is unaffected. Even on the belief
+reading, those figures were measured at that sortie's short ranges, where σ_Δ is small, and the
+1.4–3.4 km binocular band stands either way. **The fix is one clause** — either name the field
+(`true_x`/`true_z`) or hedge the provenance and say the reduction was not kept.
+
+**2. The stated coverage gap should be filed, not only stated.** §4's finding is now written into a
+test docstring — *"no test asserts that, only `BL-B51`'s grep over `src`/`tests`/`tools` did"* — and
+filed nowhere. A gap recorded only in prose is the lesser version of the exact thing this round did
+well everywhere else: making an accepted edge distinguishable from an oversight. It is **live, not
+theoretical**: `BL-B56` documents a fourth copy existing right now, and the failure path is
+`BL-B47`'s months of silence — re-introduce a local copy, the equivalence test still passes because
+the copy is identical that day, then `object_model` grows, the `<=` guard fires on the consolidated
+set, someone updates it, and the copy drifts unseen. The cheapest guard is an identity assertion
+(`is AIR_DEFENSE_OP_CLASSES`) at each consumer, which is the one thing that distinguishes shared set
+from identical copy. **This is pre-existing — `BL-B51` left it, this round did not introduce it** —
+which is why it is a backlog entry and not a fix to this commit. *Not filed by me:* the session ends
+at this verdict, so it is carried in the handoff below for the next session to mint.
+
+**3. (Cosmetic) Two drifted line numbers in `implementation.md`'s falsification table.** It cites the
+*"copilot needing"* phrase at line 567; it is at **570**. And it reports `naked_eye_sigma_m` as
+having *"one prose mention"*, which this round's own edit made **two** (`association_over_time.py:167`
+and the new `groups.py:380`). Both substantive claims hold; only the coordinates slipped.
+
+**4. (Cosmetic) The cap's comment block has roughly doubled**, from ~56 lines to ~134 for one
+constant. I am **not** calling this out as bloat: the content is load-bearing (a quoted user
+decision, a mechanism, a band, a do-not-retune instruction) and it matches the convention every
+neighbouring constant in this module follows. Worth one note only because `σ_Δ ≈ 0.24·R` now appears
+in four places — but three of those are **dated records** (round 1 above, the acceptance document,
+and this section) which by this project's own convention do not get swept, leaving `groups.py` and
+`BL-B55` as the only two present-tense copies, and `BL-B55` cross-references rather than restates.
+**No action.**
+
+## Review confidence
+
+**Full read.** Nothing spot-checked. What was re-established independently rather than credited:
+
+- Both touched files AST-compared across `e20ea2f`→`a673512` with **all** docstrings stripped, from
+  two `git archive` extractions — not from the test count.
+- The cherry-pick proved content-identical to `0f1bd9b` by byte-comparing the two patches.
+- The five-bullet block counted and classified from source.
+- `tier_ranges` **run** over both optics × both salience values; all four ceilings matched.
+- `0.17 × √2` taken from the live constant; 338.1 / 818.2 recomputed, and the brief's 336 m
+  diagnosed as 1,400-rounded-first.
+- The 260 m fixture's literal positions read from the test.
+- The no-duplicate-copy gap proved absent by **grep** (no identity assertion, no source-scanning
+  air-defence test) rather than inferred — per this project's graph-to-find/grep-to-prove split.
+- Both check suites re-run from the detached tip.
+
+**The one thing I could not settle** is optional refinement 1: whether the 342 m / 236 m figures were
+reduced from `true_*` or `believed_*`. The reduction script does not exist in the repo and the field
+is named in no document. Flagged rather than asserted in either direction.
