@@ -8,14 +8,16 @@ faster-to-read test."""
 
 from __future__ import annotations
 
-import math
+import pytest
 
+import belief.groups as groups_module
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.groups import (
     AIR_DEFENSE_OP_CLASSES,
     GROUP_PROXIMITY_GAP_RATIO,
     GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS,
+    GROUP_REPORTING_EAGER_COHESION_CAP_M,
     GROUP_REPORTING_INSTALLATION_COHESION_CAP_M,
     GROUP_REPORTING_MIN_MEMBERS,
     GROUP_REPORTING_UNKNOWN_SIZE_M,
@@ -371,6 +373,10 @@ def test_constants_are_the_stated_assumptions() -> None:
     assert GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS == 20.0
     assert GROUP_REPORTING_UNKNOWN_SIZE_M == 7.0
     assert GROUP_REPORTING_INSTALLATION_COHESION_CAP_M == 500.0
+    # BL-12 Stage 0b. Equal to the installation cap by coincidence, from
+    # unrelated evidence -- see that constant's docstring, and
+    # `test_the_eager_cap_and_the_installation_cap_do_not_move_together`.
+    assert GROUP_REPORTING_EAGER_COHESION_CAP_M == 500.0
     assert AIR_DEFENSE_OP_CLASSES == frozenset(
         {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
     )
@@ -526,12 +532,19 @@ def test_infantry_only_scene_keeps_identical_thresholds_and_unions() -> None:
 
     Asserted as thresholds, not only as the resulting union, because the
     union alone would still pass if the backstop had merely become large.
-    Every pair in an infantry-only scene still has `_pair_backstop_m ==
-    math.inf`, and `pair_threshold = min(relative_threshold, inf) ==
-    relative_threshold`; `relative_threshold` is computed from positions
-    alone and never reads a backstop, so every pair's threshold is
-    bit-identical to the pre-Stage-0a value. The three contacts 30 m apart
-    therefore form the one 60 m-extent group they always did."""
+    Every pair in an infantry-only scene gets the eager backstop, and the
+    relative threshold here (`3.0 * 30 = 90` m) is far tighter than it, so
+    `pair_threshold == min(90, eager cap) == relative_threshold` for every
+    pair -- and `relative_threshold` is computed from positions alone and
+    never reads a backstop, so every pair's threshold is bit-identical to
+    the pre-Stage-0 value. The three contacts 30 m apart therefore form
+    the one 60 m-extent group they always did.
+
+    **The eager backstop is `GROUP_REPORTING_EAGER_COHESION_CAP_M` here,
+    not `math.inf`** -- it was `math.inf` through Stage 0a and became
+    finite at Stage 0b. The assertion reads the constant rather than the
+    number, so retuning the cap cannot make this test lie; what it pins is
+    that the *relative* test is what binds at this spacing."""
     store = GroupStore()
     contacts = [
         _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
@@ -544,14 +557,157 @@ def test_infantry_only_scene_keeps_identical_thresholds_and_unions() -> None:
         for j in range(i + 1, len(contacts)):
             assert (
                 _pair_backstop_m(profiles[i], profiles[j], sizes[i], sizes[j])
-                == math.inf
+                == GROUP_REPORTING_EAGER_COHESION_CAP_M
             ), (contacts[i].id, contacts[j].id)
+    # The relative test is what binds at 30 m spacing, which is the claim
+    # the docstring rests the bit-identical result on.
+    assert GROUP_PROXIMITY_GAP_RATIO * 30.0 < GROUP_REPORTING_EAGER_COHESION_CAP_M
 
     store.reconcile(contacts, now_sim=0.0)
 
     groups = store.groups
     assert len(groups) == 1
     assert groups[0].member_contact_ids == frozenset({"I1", "I2", "I3"})
+
+
+# --- Stage 0b: a group gets a maximum extent (the finite eager cap) --------
+# `plans/group-contact-identity/plan.md` amendment Q-B, answered by the user
+# 2026-10-11. Calibration only -- the mechanism (which pairs are eager at
+# all) is Stage 0a above and is unchanged by these.
+
+
+def test_two_infantry_five_kilometres_apart_no_longer_form_a_group() -> None:
+    """The case Stage 0a deliberately left open, and the reason a finite
+    cap was asked for.
+
+    An infantry-infantry pair is still eager, so Stage 0a did not touch
+    it; and at n = 2 the relative test cannot reject anything, because
+    both nearest-neighbour gaps *are* the pair's own distance, so
+    `relative_threshold = 3 x 5,000 = 15,000` m. With the eager backstop
+    at `math.inf` there was no third gate, so two infantry formed one
+    group at any separation whatsoever -- and infantry is often the only
+    class held at range, which is why this was not a corner case.
+    `GROUP_REPORTING_EAGER_COHESION_CAP_M` is that third gate."""
+    store = GroupStore()
+    contacts = [
+        _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+        _contact("I2", 5000.0, 0.0, class_raw="Infantry AK"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_the_eager_cap_is_the_only_gate_at_two_contacts() -> None:
+    """Driven across the cap rather than asserted against it: at n = 2 the
+    relative test is vacuous (see the test above), so the cap is the sole
+    boundary and the pair's behaviour flips across it. Both probes are
+    placed from the constant, so a retuned cap moves them with it -- the
+    assertion is that a boundary exists and is this one, not that it sits
+    at 500 m.
+
+    This is also why the 260 m pair in `test_infantry_pair_merges_eagerly_
+    past_the_ordinary_backstop` still merges: it is inside the cap, with
+    margin."""
+    inside = GROUP_REPORTING_EAGER_COHESION_CAP_M - 1.0
+    outside = GROUP_REPORTING_EAGER_COHESION_CAP_M + 1.0
+
+    near_store = GroupStore()
+    near_store.reconcile(
+        [
+            _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+            _contact("I2", inside, 0.0, class_raw="Infantry AK"),
+        ],
+        now_sim=0.0,
+    )
+    far_store = GroupStore()
+    far_store.reconcile(
+        [
+            _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+            _contact("I2", outside, 0.0, class_raw="Infantry AK"),
+        ],
+        now_sim=0.0,
+    )
+
+    assert len(near_store.groups) == 1
+    assert near_store.groups[0].member_contact_ids == frozenset({"I1", "I2"})
+    assert far_store.groups == []
+
+
+def test_the_eager_cap_still_chains_a_long_infantry_line() -> None:
+    """The cap bounds a *pair*, not a group's total span, and that is
+    deliberate -- single-link chaining letting a convoy cohere end to end
+    past its own extent is `_cluster_contacts`'s own documented property
+    and is not what Stage 0b narrows. Four infantry at 400 m spacing span
+    1,200 m, above the cap, and still form one group because every
+    *neighbour* gap is inside it.
+
+    So "a group gets a maximum extent" is honoured per link, not per
+    cluster. If a sortie shows a chained infantry line being spoken as one
+    thing at an unbelievable width, the fix is a cluster-extent rule, not
+    a smaller cap -- recorded here so the distinction is not rediscovered
+    as a defect."""
+    store = GroupStore()
+    contacts = [
+        _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+        _contact("I2", 400.0, 0.0, class_raw="Infantry AK"),
+        _contact("I3", 800.0, 0.0, class_raw="Infantry AK"),
+        _contact("I4", 1200.0, 0.0, class_raw="Infantry AK"),
+    ]
+    assert 400.0 < GROUP_REPORTING_EAGER_COHESION_CAP_M < 1200.0
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"I1", "I2", "I3", "I4"})
+
+
+def test_the_eager_cap_and_the_installation_cap_do_not_move_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """They hold the same number today -- 500 m -- and were derived from
+    unrelated evidence: the installation cap from real S-75/S-125 launcher
+    spacing (`body-layer/research/2026-10-01-sam-site-geometry.md`), the
+    eager cap from the spoken range bucket. Equal values from unequal
+    reasons is exactly the situation where one gets silently retuned
+    through the other.
+
+    Driven by mutation rather than by comparing the two numbers, which
+    would pass whether or not the paths are wired separately: moving the
+    eager cap must move the infantry pair's backstop and leave the
+    installation pair's alone, and vice versa."""
+    infantry = _profile_for_contact(_contact("I", 0.0, 0.0, class_raw="Infantry AK"))
+    s125 = _profile_for_contact(_contact("S", 0.0, 0.0, class_raw="s-125"))
+
+    def backstops() -> tuple[float, float]:
+        return (
+            _pair_backstop_m(
+                infantry,
+                infantry,
+                _representative_size_m(infantry),
+                _representative_size_m(infantry),
+            ),
+            _pair_backstop_m(
+                s125, s125, _representative_size_m(s125), _representative_size_m(s125)
+            ),
+        )
+
+    eager_before, installation_before = backstops()
+
+    monkeypatch.setattr(groups_module, "GROUP_REPORTING_EAGER_COHESION_CAP_M", 1234.0)
+    eager_moved, installation_held = backstops()
+    assert eager_moved == 1234.0
+    assert installation_held == installation_before
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        groups_module, "GROUP_REPORTING_INSTALLATION_COHESION_CAP_M", 4321.0
+    )
+    eager_held, installation_moved = backstops()
+    assert installation_moved == 4321.0
+    assert eager_held == eager_before
 
 
 def test_a_mixed_infantry_pair_falls_through_exactly_as_a_mixed_installation_pair_does() -> (

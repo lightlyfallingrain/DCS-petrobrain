@@ -190,17 +190,21 @@ GROUP_REPORTING_UNKNOWN_SIZE_M: Final[float] = 7.0
 
 #: Per-class cohesion backstop policy (`plans/group-cohesion-redesign/
 #: plan.md` §2) -- `STRICT` is today's unit-widths backstop (the default for
-#: every class not named in `_OP_CLASS_COHESION_BACKSTOP`); `EAGER` drops the
-#: absolute backstop entirely, leaving only the relative/density test. Not a
-#: bool: a third policy (e.g. a looser-but-still-bounded backstop) is a
-#: plausible future addition, and an enum names the two existing values
-#: rather than leaving `eager: bool` to be read as "the only other option."
+#: every class not named in `_OP_CLASS_COHESION_BACKSTOP`); `EAGER` replaces
+#: it with the far looser flat `GROUP_REPORTING_EAGER_COHESION_CAP_M`. Not a
+#: bool: a third policy is a plausible future addition, and an enum names
+#: the two existing values rather than leaving `eager: bool` to be read as
+#: "the only other option."
+#:
+#: **`EAGER` meant no backstop at all (`math.inf`) until 2026-10-11**
+#: (BL-12 Stage 0b). It is now looser-but-bounded, which is the third
+#: policy this comment anticipated, arrived at from the other direction.
 class CohesionBackstop(Enum):
     STRICT = "strict"
     EAGER = "eager"
 
 
-#: `OP_INFANTRY` only, no backstop at all -- user direction 2026-10-01,
+#: `OP_INFANTRY` only -- user direction 2026-10-01,
 #: *"Ok to merge infantry too eagerly. Infantry is the least detectable and
 #: also least important of unit types."* (`plans/group-undermerging/
 #: explore-notes.md`). Not extended to any other class. `EAGER` fires for a
@@ -219,8 +223,10 @@ class CohesionBackstop(Enum):
 #: single believable bearing or range, which is the pilot-facing form of
 #: the defect. The `both` reading keeps the user's sentence literally true
 #: about infantry and nothing else: infantry-to-infantry thresholds and
-#: unions are unchanged (`test_infantry_eagerness_is_bit_identical_
-#: for_an_infantry_only_scene`).
+#: unions were unchanged by Stage 0a (`tests/test_groups.py::test_infantry_
+#: only_scene_keeps_identical_thresholds_and_unions`). Stage 0b then moved
+#: them deliberately, as a calibration -- see `GROUP_REPORTING_EAGER_
+#: COHESION_CAP_M`.
 _OP_CLASS_COHESION_BACKSTOP: Final[dict[str, CohesionBackstop]] = {
     "OP_INFANTRY": CohesionBackstop.EAGER,
 }
@@ -264,6 +270,72 @@ AIR_DEFENSE_OP_CLASSES: Final[frozenset[str]] = frozenset(
 #: still governs everything, this is not an unconditional "any two
 #: installation parts anywhere merge" rule.
 GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
+
+#: Flat cap, metres, on inter-member spacing for a pair where **both**
+#: members' `op_class` has an `EAGER` cohesion policy (today: two infantry)
+#: -- BL-12 Stage 0b, `plans/group-contact-identity/plan.md` amendment A2's
+#: Q-B, answered by the user 2026-10-11 (*"a group gets a maximum
+#: extent"*).
+#:
+#: **A stated assumption, not a measurement** -- same posture as
+#: `GROUP_PROXIMITY_GAP_RATIO` and `GROUP_REPORTING_COHESION_GAP_UNIT_
+#: WIDTHS`, and the user judges it in the air. What it replaced was
+#: `math.inf`, which is why a finite figure is needed at all: with no
+#: absolute backstop the relative test *cannot reject any pair at n = 2*,
+#: because both nearest-neighbour gaps are then the pair's own distance, so
+#: `GROUP_PROXIMITY_GAP_RATIO * median(gap) >= gap` always. Two infantry
+#: therefore formed one group at **any** separation, and infantry is often
+#: the only class held at range.
+#:
+#: **Derived from the resolution of the sentence the group is spoken in.**
+#: `belief.speech._format_range_km` rounds a spoken range to the nearest
+#: 0.5 km (verified by running it: 2 750 m, 3 000 m and 3 249 m all say
+#: *"3 kilometres"*; 3 251 m says *"3.5 kilometres"*), so *"that group, two
+#: o'clock, three kilometres"* is a claim with 500 m of resolution. A group
+#: wider than that contains members the same renderer would place in
+#: different buckets, which is the point at which the sentence stops being
+#: true of all of them. This module reads nothing speech-shaped at runtime
+#: (module docstring) and does not import `speech` -- the 500 m is
+#: transcribed from that renderer's rounding step, not looked up.
+#:
+#: Cross-checks against figures already in the repo, all of which this cap
+#: clears or deliberately does not:
+#:
+#: - **The clock hour.** One 30-degree clock bucket is `2 * tan(15 deg) * R`
+#:   = 0.536 R wide, so a 500 m extent sits inside a single clock hour from
+#:   R >= 933 m outward. Below that it can straddle two, which is accepted:
+#:   inside a kilometre the pilot can see the thing himself.
+#: - **The infantry pair `EAGER` was introduced for** is 260 m apart
+#:   (`tests/test_groups.py::test_infantry_pair_merges_eagerly_past_the_
+#:   ordinary_backstop`, the geometry the pre-`group-cohesion-redesign`
+#:   pinned test forbade). Admitted, with 1.9x margin.
+#: - **Measured nearest-neighbour spacing** between distinct objects on the
+#:   one flown sortie reduced for this: median 16 m, p75 55 m, p95 342 m
+#:   (`plans/post-review-fixes/explore-notes.md` §2). Admitted at p95.
+#: - **Measured cluster-to-cluster separation** on that same data is median
+#:   236 m at a 100 m single link, p75 378 m (ibid.) -- *under* this cap, so
+#:   two clusters a denser rule would keep apart can still merge here. That
+#:   is the latitude *"ok to merge infantry too eagerly"* actually granted,
+#:   and it is why this cap is only reached by an infantry-infantry pair.
+#: - **In this module's own unit-widths currency** it is 500 / 1.8 = 277.8
+#:   infantry unit widths, against `GROUP_REPORTING_COHESION_GAP_UNIT_
+#:   WIDTHS`'s 20. Stated in metres rather than unit widths because what it
+#:   bounds is a *spoken* extent, which is metres, and because the only
+#:   class that reaches it has one size.
+#:
+#: **Equal to `GROUP_REPORTING_INSTALLATION_COHESION_CAP_M` by coincidence,
+#: not by derivation, and the two must stay separate constants.** That one
+#: is 500 m because real S-75/S-125 launcher spacing is ~60-230 m
+#: (`body-layer/research/2026-10-01-sam-site-geometry.md`); this one is
+#: 500 m because that is the spoken range bucket. Retuning either must not
+#: move the other -- the same reason `GROUP_REPORTING_MIN_MEMBERS` is not
+#: `perception.group_salience.GROUP_MIN_MEMBERS` (module docstring).
+#:
+#: **What would falsify it**, both observable only once a group-identity
+#: trace line exists (BL-12 Stage 1, amendment A4): two infantry groups the
+#: pilot thinks of separately, under 500 m apart, spoken as one; or a real
+#: infantry group more than 500 m across that stops being reported at all.
+GROUP_REPORTING_EAGER_COHESION_CAP_M: Final[float] = 500.0
 
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
 
@@ -364,9 +436,12 @@ def _pair_backstop_m(
        rule below -- an installation cap is only meaningful when both
        members are plausibly parts of the same site.
     2. **Both** members' `op_class` have an `EAGER` cohesion policy
-       (`_OP_CLASS_COHESION_BACKSTOP`, today only `OP_INFANTRY`): no
-       backstop at all (`math.inf`) -- the relative/density test alone
-       decides. A **mixed** pair (one eager member, one not) falls through
+       (`_OP_CLASS_COHESION_BACKSTOP`, today only `OP_INFANTRY`): the flat
+       `GROUP_REPORTING_EAGER_COHESION_CAP_M`, far looser than the ordinary
+       rule but finite (it was `math.inf` until BL-12 Stage 0b -- see that
+       constant on why an infinite value made the relative test unable to
+       reject anything at n = 2). A **mixed** pair (one eager member, one
+       not) falls through
        to the ordinary rule below, for the same reason rule 1 does it: the
        eagerness was granted to a *kind of thing*, and a cap that only one
        member qualifies for is not a statement about the pair. See the
@@ -387,7 +462,7 @@ def _pair_backstop_m(
         profile_j.op_class, _DEFAULT_COHESION_BACKSTOP
     )
     if backstop_i is CohesionBackstop.EAGER and backstop_j is CohesionBackstop.EAGER:
-        return math.inf
+        return GROUP_REPORTING_EAGER_COHESION_CAP_M
     return GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * (0.5 * (size_i + size_j))
 
 
@@ -434,7 +509,8 @@ def _cluster_contacts(
     found no live symptom this mechanism actually needed to fix. **This
     finding does not generalise to `OP_INFANTRY` post-dating this
     investigation** -- `plans/group-cohesion-redesign/plan.md` later made
-    exactly that class `EAGER` (no backstop at all) by deliberate user
+    exactly that class `EAGER` (then: no backstop at all; since BL-12
+    Stage 0b, `GROUP_REPORTING_EAGER_COHESION_CAP_M`) by deliberate user
     direction, not by retuning this uncertainty question; the two are
     unrelated fixes to the same test's old pinned behaviour.
 
