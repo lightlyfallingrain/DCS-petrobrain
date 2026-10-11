@@ -103,7 +103,7 @@ from belief.callouts import (
     group_facts,
     report_priority,
 )
-from belief.classification import parent_class_of
+from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import ContactStore
 from belief.decay import OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
@@ -242,28 +242,30 @@ _RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
 #: half of the F10 scan vocabulary. Token suffixes match `Sector`'s own
 #: literals lowercased, so this table is also how the token string is
 #: parsed (no separate regex needed).
-#: The `OP_*` buckets that count as air defence for the F10 "Watch ->
-#: Nearest Air Defence" item, resolved via `belief.classification.
-#: parent_class_of`. Exactly the air-defence entries in
-#: `perception.object_model`'s profile table: the two gun systems
-#: (`OP_SPAAG` Shilka, `OP_ZU23`) and the two SAM tiers (`OP_SRSAM` for
-#: SA-3/8/9/13/15, `OP_MRSAM` for SA-6). Kept here rather than in
-#: `object_model` because "which classes a *crew command* treats as air
-#: defence" is a command-vocabulary question, not a property of the object
-#: model -- a future `watch armour` would add its own set the same way.
+#: A local `_AIR_DEFENCE_OP_CLASSES` was declared here until 2026-10-11 --
+#: a hand-enumerated copy, British spelling -- and is now
+#: `belief.classification.AIR_DEFENSE_OP_CLASSES`, the one copy
+#: (`BL-B51`). Its `<=` drift guard moved with it, from
+#: `tests/test_crew_console.py` to `tests/test_classification.py`, so this
+#: module's own tests no longer carry the only mechanism that could notice
+#: `object_model` growing.
 #:
-#: **`OP_LRSAM` was missing here until 2026-09-24**, so "watch nearest air
-#: defence" silently could not select an S-300 -- the one emitter the vision
-#: calibration found visible out to 8.89 km, i.e. the single contact this
-#: command most needed to return. The omission was drift, not a decision:
-#: this set was written when `object_model`'s profile table genuinely had no
-#: long-range SAM entry, and the comment above ("exactly the air-defence
-#: entries in `perception.object_model`") stayed true only until that table
-#: gained one. A set enumerated by hand against another module's contents
-#: has no mechanism to notice when that module grows.
-_AIR_DEFENCE_OP_CLASSES: frozenset[str] = frozenset(
-    {"OP_SPAAG", "OP_ZU23", "OP_SRSAM", "OP_MRSAM", "OP_LRSAM"}
-)
+#: **The reason this copy existed is recorded because it still holds**:
+#: "which classes a *crew command* treats as air defence" is a
+#: command-vocabulary question and not a property of the object model, so
+#: `object_model` was the wrong home for it. The lattice module is the
+#: right one -- the set is resolved through `parent_class_of`, which lives
+#: there. A future `watch armour` would still declare its own set rather
+#: than reaching into `object_model`.
+#:
+#: **`OP_LRSAM` was missing from this copy until 2026-09-24**, so "watch
+#: nearest air defence" silently could not select an S-300 -- the one
+#: emitter the vision calibration found visible out to 8.89 km, i.e. the
+#: single contact this command most needed to return. That is the drift
+#: `BL-B51` is about: the copy was written when `object_model`'s profile
+#: table genuinely had no long-range SAM entry, and a set enumerated by
+#: hand against another module's contents has no mechanism to notice when
+#: that module grows.
 
 #: The classification lattice levels at which an air-defence claim is
 #: actually *known* rather than guessed -- `belief.classification.
@@ -1332,8 +1334,8 @@ class CrewConsole:
         docstring). A contact is air defence here only if Petrovich's held
         claim has actually resolved that far: the claim's lattice level must
         be `class` or `type` (`_KNOWN_CLASS_LEVELS`), and its value must
-        resolve through `belief.classification.parent_class_of` into
-        `_AIR_DEFENCE_OP_CLASSES`.
+        resolve through `belief.classification.parent_class_of` into that
+        module's `AIR_DEFENSE_OP_CLASSES` (the one copy, `BL-B51`).
 
         A `presence`-level contact -- "something is there", the naked-eye
         channel's `lowres` tier -- is therefore **never** matched, even if
@@ -1352,7 +1354,7 @@ class CrewConsole:
         value = classification.get("value")
         if not isinstance(value, str):
             return False
-        return parent_class_of(value) in _AIR_DEFENCE_OP_CLASSES
+        return parent_class_of(value) in AIR_DEFENSE_OP_CLASSES
 
     def _nearest_contact_id(
         self,

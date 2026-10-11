@@ -199,7 +199,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from belief.attention import Attention, effective_attention
-from belief.classification import parent_class_of
+from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -213,7 +213,7 @@ from belief.events import (
     CONTACT_REACQUIRED,
     Event,
 )
-from belief.groups import AIR_DEFENSE_OP_CLASSES, Group
+from belief.groups import Group
 from belief.threat import envelope_for
 from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
@@ -1914,7 +1914,7 @@ def _is_differentiated(member_facts: Sequence[dict[str, object]]) -> bool:
 
 def _is_air_defence(facts: dict[str, object]) -> bool:
     """Whether `facts`' believed classification resolves to one of
-    `belief.groups.AIR_DEFENSE_OP_CLASSES` -- the delta taxonomy's
+    `belief.classification.AIR_DEFENSE_OP_CLASSES` -- the delta taxonomy's
     "more air defence is always news" test (`plans/
     group-cohesion-redesign/plan.md` §4 Correction 2). Reads the
     classification's raw *believed* value, never a DCS `object_type`.
@@ -2365,7 +2365,7 @@ def render_group_disclosure(
     4. **A newly arrived, differentiated member is worth announcing** --
        either its class was not already known among the group's
        *continuing* members (a genuinely new class joining), or it belongs
-       to `belief.groups.AIR_DEFENSE_OP_CLASSES` (another instance of an
+       to `belief.classification.AIR_DEFENSE_OP_CLASSES` (another instance of an
        already-known air-defence class still counts as news, Correction 2,
        *"more air defense does make a difference"*): a delta clause
        composing just the newly-worth-announcing arrivals via `_group_

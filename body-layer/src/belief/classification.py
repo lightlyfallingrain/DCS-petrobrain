@@ -167,6 +167,57 @@ def new_classification_belief(
     )
 
 
+#: The air-defence `OP_*` class families -- the **one** copy, `BL-B51`.
+#:
+#: **It lived in three places with one drift guard between them until
+#: 2026-10-11** (`belief.groups.AIR_DEFENSE_OP_CLASSES`,
+#: `belief.crew_console._AIR_DEFENCE_OP_CLASSES`,
+#: `eyesight_view._AIR_DEFENCE_CLASSES`), each enumerated by hand against
+#: `perception.object_model`'s profile tables, and only `crew_console`'s
+#: had a test that could notice those tables growing. That drift already
+#: cost real coverage once: `OP_LRSAM` went unrecognised for months, which
+#: is what `BL-B47` fixed.
+#:
+#: **It lives here because every consumer resolves through this module's
+#: own `parent_class_of`/`_op_class_of`**, not through
+#: `object_model.profile_for` -- `BL-B47`'s boundary decision, which is
+#: load-bearing rather than tidiness: `_op_class_of` early-returns any
+#: non-default `OP_*` string, so a *class*-level belief (which is what a
+#: contact holds before it is identified to type, i.e. most of the time at
+#: range) carries the `OP_*` value itself and matches no keyword. Four of
+#: the five classes below fail a `profile_for`-based test at class level.
+#: `crew_console`'s own comment argued against homing this in
+#: `object_model` -- "which classes a *crew command* treats as air defence
+#: is a command-vocabulary question" -- and that argument holds; this is
+#: the lattice module, not the object model.
+#:
+#: Membership: the air-defence `op_class` buckets `object_model` actually
+#: declares -- `OP_SRSAM`/`OP_MRSAM`/`OP_LRSAM` (SAM systems),
+#: `OP_SPAAG`/`OP_ZU23` (gun-based AAA). Hand-authored, same posture as
+#: every other vocabulary table here, and **guarded by a `<=` test derived
+#: from both of `object_model`'s keyword tables**
+#: (`tests/test_classification.py::test_air_defence_classes_cover_every_
+#: air_defence_class_in_the_object_model`). A `== frozenset({literals})`
+#: pin, which two of the three old copies effectively were, is a change
+#: *detector*: it fires when someone edits the set and stays silent when
+#: the object model grows underneath it, which is the only direction that
+#: loses coverage.
+#:
+#: Spelled `DEFENSE` rather than the `DEFENCE` the two retired copies and
+#: this project's usual British spelling used, because keeping the name
+#: means `belief.speech` changes only its import line. Counted by `grep`
+#: over that file: **4 code references** (1 import + 3 uses, in
+#: `_summary_air_defence_clause`, `_summary_air_defence_freshness_clause`
+#: and `_is_air_defence`) and **4 docstring mentions**, two of them inside
+#: `_is_air_defence`, which `BL-13` fixed the day before. Line numbers are
+#: deliberately not cited: `ruff`'s import sort moved the import during
+#: this very change. The spelling is the one thing about this set not worth
+#: a sweep of that path.
+AIR_DEFENSE_OP_CLASSES: Final[frozenset[str]] = frozenset(
+    {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
+)
+
+
 def parent_class_of(value: str) -> str | None:
     """The `OP_*` class `value` resolves to: a level-3 value's parent class,
     or a level-2 value's own class (a no-op through the same resolver), or

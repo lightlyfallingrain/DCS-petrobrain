@@ -25,10 +25,9 @@ from belief import enrichment as enrichment_module
 from belief.attention import RelativeSector, Sector
 from belief.audio_client import AudioAdapterError
 from belief.brain_client import BrainLayerClient
-from belief.classification import PRESENCE_CLASS
+from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import (
-    _AIR_DEFENCE_OP_CLASSES,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -51,7 +50,6 @@ from belief.voice_commands import (
     CONFIRM_LATE_ANSWER_GRACE_S,
     CONFIRM_WINDOW_S,
 )
-from perception import object_model
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -1980,9 +1978,12 @@ def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
 def test_watch_nearest_air_defence_selects_a_long_range_sam(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression, 2026-09-24: `OP_LRSAM` was absent from
-    `_AIR_DEFENCE_OP_CLASSES`, so an S-300 -- long-range SAM, unambiguously
-    air defence -- could never be selected by "watch nearest air defence".
+    """Regression, 2026-09-24: `OP_LRSAM` was absent from the air-defence
+    class set -- then `crew_console`'s own local `_AIR_DEFENCE_OP_CLASSES`,
+    since `BL-B51` the shared `belief.classification.
+    AIR_DEFENSE_OP_CLASSES` -- so an S-300, long-range SAM and
+    unambiguously air defence, could never be selected by "watch nearest
+    air defence".
 
     This is the worst contact to have missed. The vision calibration found
     the S-300's tracking-radar mast detectable out to 8.89 km, further than
@@ -2016,38 +2017,32 @@ def test_watch_nearest_air_defence_selects_a_long_range_sam(
     assert tank.attention == "normal"
 
 
-def test_air_defence_classes_cover_every_air_defence_class_in_the_object_model() -> (
-    None
-):
-    """Guards the drift that caused the `OP_LRSAM` omission above, rather
-    than only the one instance of it.
+def test_watch_nearest_air_defence_resolves_through_the_one_shared_set() -> None:
+    """`BL-B51`: the `<=` drift guard that used to live here moved to
+    `tests/test_classification.py::test_air_defence_classes_cover_every_
+    air_defence_class_in_the_object_model` with the set itself, so it is
+    not duplicated.
 
-    `_AIR_DEFENCE_OP_CLASSES` is enumerated by hand against
-    `perception.object_model`'s profile table, and nothing connects the two:
-    when that table gained a long-range SAM entry, this set had no way to
-    notice. `object_model` carries no structural air-defence marker to
-    derive the set from (an `ObjectTypeProfile` is a size and an `op_class`,
-    nothing more), so this test matches on the `OP_*` naming instead -- any
-    class whose name says SAM or names a gun system must be covered.
+    What stays here is this command's own wiring: the predicate behind
+    "watch nearest air defence" must read the shared set rather than a
+    local copy, which is the thing the consolidation is for. Asserted
+    through `_believed_air_defence` across the set's own boundary -- a
+    class in the set is air defence to this command, and a profiled class
+    outside it is not -- rather than by comparing the imported name to
+    itself."""
+    console_predicate = CrewConsole._believed_air_defence
 
-    If a future profile entry introduces an air-defence class this pattern
-    does not catch, that is a signal to give `object_model` a real marker,
-    not to loosen the assertion."""
-    profiled_classes = {
-        profile.op_class
-        for _keyword, profile in (
-            *object_model._KEYWORD_PROFILES,
-            *object_model._REPORTING_NAME_KEYWORD_PROFILES,
+    def verdict(value: str) -> bool:
+        return console_predicate(
+            cast(CrewConsole, None),
+            {"classification": {"level": "class", "value": value}},
         )
-    }
-    air_defence_by_name = {
-        op_class
-        for op_class in profiled_classes
-        if op_class.endswith("SAM") or op_class in {"OP_SPAAG", "OP_ZU23"}
-    }
 
-    assert air_defence_by_name, "naming heuristic matched nothing -- it has gone stale"
-    assert air_defence_by_name <= _AIR_DEFENCE_OP_CLASSES
+    for op_class in sorted(AIR_DEFENSE_OP_CLASSES):
+        assert verdict(op_class), op_class
+    for op_class in ("OP_ARMORED", "OP_TRUCK", "OP_INFANTRY"):
+        assert op_class not in AIR_DEFENSE_OP_CLASSES
+        assert not verdict(op_class), op_class
 
 
 def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(

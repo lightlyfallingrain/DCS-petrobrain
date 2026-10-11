@@ -17,7 +17,11 @@ import pytest
 
 from belief import enrichment as enrichment_module
 from belief import speech as speech_module
-from belief.classification import SpecificityLevel, new_classification_belief
+from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
+    SpecificityLevel,
+    new_classification_belief,
+)
 from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
@@ -27,7 +31,6 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     Event,
 )
-from belief.groups import AIR_DEFENSE_OP_CLASSES
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import (
     REPORT_SUMMARY_MAX_WORDS,

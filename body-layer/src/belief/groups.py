@@ -232,28 +232,20 @@ _OP_CLASS_COHESION_BACKSTOP: Final[dict[str, CohesionBackstop]] = {
 }
 _DEFAULT_COHESION_BACKSTOP: Final[CohesionBackstop] = CohesionBackstop.STRICT
 
-#: Air-defence `op_class` families, shared by two independent questions that
-#: must not be merged into one flag (`plans/group-cohesion-redesign/
-#: plan.md` §1/§4's Correction 2):
+#: `AIR_DEFENSE_OP_CLASSES` was declared here until 2026-10-11 and now
+#: lives in `belief.classification`, the one copy (`BL-B51`) -- see that
+#: constant's own docstring for why the lattice module is its home.
 #:
-#: - `belief.groups._cluster_contacts`'s installation-cap selection (below)
-#:   asks a narrower question -- both members' `profile.installation_
-#:   component is True` -- and does NOT use this set at all.
-#: - `belief.speech.render_group_disclosure`'s delta taxonomy asks a
-#:   broader one: is a *newly arrived* member's class air-defence at all,
-#:   regardless of whether it is a fixed installation component or a
-#:   single-vehicle SHORAD system, because "more air defence is always
-#:   news" applies to both (an Osa joining a group that already has a
-#:   Shilka is news for exactly this reason).
-#:
-#: Membership: the air-defence `op_class` buckets `perception.object_model`
-#: actually declares -- `OP_SRSAM`/`OP_MRSAM`/`OP_LRSAM` (SAM systems),
-#: `OP_SPAAG`/`OP_ZU23` (gun-based AAA). A hand-authored guess, same posture
-#: as every other vocabulary table in this codebase -- not re-derived from
-#: flown evidence.
-AIR_DEFENSE_OP_CLASSES: Final[frozenset[str]] = frozenset(
-    {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
-)
+#: It was never read by this module, which is worth saying because it sat
+#: next to the installation cap below and the two ask different questions
+#: (`plans/group-cohesion-redesign/plan.md` §1/§4's Correction 2):
+#: `_cluster_contacts`'s installation-cap selection asks the narrower
+#: "`profile.installation_component is True` on both members" and does not
+#: use the class set at all, while `belief.speech.render_group_disclosure`'s
+#: delta taxonomy asks the broader "is a newly arrived member's class air
+#: defence at all", because "more air defence is always news" applies to a
+#: single-vehicle SHORAD system as much as to a fixed site (an Osa joining
+#: a group that already has a Shilka is news for exactly this reason).
 
 #: Flat cap, metres, on inter-member spacing for a pair where **both**
 #: members are fixed air-defence-installation components (`profile.

@@ -14,7 +14,6 @@ import belief.groups as groups_module
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.groups import (
-    AIR_DEFENSE_OP_CLASSES,
     GROUP_PROXIMITY_GAP_RATIO,
     GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS,
     GROUP_REPORTING_EAGER_COHESION_CAP_M,
@@ -367,7 +366,13 @@ def test_constants_are_the_stated_assumptions() -> None:
     GROUP_MIN_MEMBERS`'s 3 -- see module docstring for why they differ.
     `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` is 20.0, not `perception.
     group_salience.GROUP_COHESION_GAP_UNIT_WIDTHS`'s 10.0 -- same reason,
-    different currency, see module docstring."""
+    different currency, see module docstring.
+
+    **`AIR_DEFENSE_OP_CLASSES` was pinned here and is not any more**: it
+    moved to `belief.classification` as `BL-B51`'s one copy, and its `==`
+    form was the change detector that consolidation exists to replace.
+    `tests/test_classification.py` now holds both the `<=` drift guard and
+    the `==`-is-not-a-guard companion."""
     assert GROUP_PROXIMITY_GAP_RATIO == 3.0
     assert GROUP_REPORTING_MIN_MEMBERS == 2
     assert GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS == 20.0
@@ -377,9 +382,6 @@ def test_constants_are_the_stated_assumptions() -> None:
     # unrelated evidence -- see that constant's docstring, and
     # `test_the_eager_cap_and_the_installation_cap_do_not_move_together`.
     assert GROUP_REPORTING_EAGER_COHESION_CAP_M == 500.0
-    assert AIR_DEFENSE_OP_CLASSES == frozenset(
-        {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
-    )
 
 
 # --- Stage 1: per-class cohesion policy (the infantry release) --------------
