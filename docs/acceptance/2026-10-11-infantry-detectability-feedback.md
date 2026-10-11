@@ -57,11 +57,33 @@ exactly the user's point.
    (`BL-B48`, the plan amendment, the Stage 0 review) each reasoned from the 6 km figure without
    anyone checking whether a pilot could be in that scene.
 
-## Still open — for the `/explore` conversation this capture is owed
+## Answered the same day, by the user
 
-- Does the cap stay at 500 m given the band is 1.4–3.4 km rather than 2–7 km?
-- Should the falsification criterion name the band and the raised binoculars, rather than "at
-  range"?
-- Does the 9K113's absence change what infantry grouping is *for* at range — i.e. is grouping
-  infantry at 2–3.4 km under binoculars a case worth tuning for at all, or is the honest answer
-  that infantry is a sub-1.5 km phenomenon until the 9K113 slice exists?
+Asked whether infantry at 2–3.4 km under binoculars is a case worth tuning for:
+
+> *"infantry is the least important unit type of combat units. It's good to have it in, but since
+> it can only be seen at close range, we only really need to consider it at close range.*
+>
+> *The 9K113 case is different because it can detect any units much further away, but then with the
+> tighter FOV, also real and believed location should be fairly close even at distance."*
+
+**So the cap stays at 500 m and the band is documented, not tuned for.** Infantry is a close-range
+phenomenon by the pilot's own ranking as well as by the arithmetic above, and at close range
+`σ_Δ ≈ 0.24·R` is inside the cap — ≤ ~336 m at the 1.4 km unaided group-admitted limit. The
+1.4–3.4 km binocular band is where the cap could under-merge a real infantry pair, and the decision
+is to accept that rather than widen the cap for the least important unit type.
+
+**The second half is a design finding, not a scoping note, and is filed as [[BL-B55]].** The 9K113's
+tighter FOV *should* mean better localisation at range — and that is not modelled anywhere:
+`estimation.py`'s `naked_eye_sigma_m(true_range_m)` takes range only, with no optic parameter, at a
+single call site. It is live today, since a binocular look already sees 2.42× further while being
+believed no more precisely than the naked eye. It is also a **prerequisite for the 9K113 slice**:
+give a sight that resolves units at 8 km a naked-eye error model and the pilot hears a
+precise-sounding range wrong by ~1.4 km, which inverts the *"precision is not omniscience"* property
+`plans/precise-position-belief/` was built to establish.
+
+One correction worth keeping, because the first reading was wrong in the direction that would have
+mis-scheduled the work: threading the optic into the error model looked like a trip across the
+perception/belief seam, and is not — `self.optic` is already an attribute of
+`naked_eye_source` (it is passed to `check_visibility` eleven lines away), so it is one parameter at
+one call site.
