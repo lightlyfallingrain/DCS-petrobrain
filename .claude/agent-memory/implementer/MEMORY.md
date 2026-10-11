@@ -169,3 +169,4 @@ Write directly — the dir exists.
 - [BL-B47 air defence class level](project_bl_b47_air_defence_class_level.md) — _op_class_of is a strict superset of profile_for; OP_ZU23 resolved by accident.
 - [Cite what was counted, not just how many](feedback_cite_what_was_counted_not_just_how_many.md) — object_model has two keyword tables; a bare "128" cost a round.
 - [Fixing a defect falsifies the prose that documented it](feedback_fixing_a_defect_falsifies_the_prose_that_documented_it.md) — 3 docstrings asserted the bug in present tense; none was in the task list.
+- [BL-12 Stage 0 cohesion](project_bl12_stage0_cohesion.md) — a fixture cohered only via the defect; spoken-range rounding is a calibration source.
