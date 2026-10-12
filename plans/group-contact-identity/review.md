@@ -1249,3 +1249,140 @@ backlog item rather than asserted). Everything else in this round — both resol
 the growth-rate counterfactual, the 2C fixture's new expectation, both plan-unlisted test fixes, and
 every check number — was verified directly: mutated and reran, or re-derived independently and
 compared, not read off the log and trusted.
+
+---
+
+# Round 7 — BL-12 Stage 3.5, the group-cohesion admission gate (`BL-B58`)
+
+**Branch `feature/bl12-group-contact-identity`, tip `005309c`.** HEAD at dispatch was `cb39159`
+(a strict ancestor of `005309c`), tree clean — fast-forwarded with `git merge --ff-only 005309c`.
+Four commits reviewed: `7946c8d` (fold_displacement_m provenance), `57f67d0` (the admission gate),
+`c6e24c1` (2C fixture rewrite), `005309c` (log/roadmap/memory).
+
+## What was reproduced, not just read
+
+- **Commit 1 behaviour-neutrality.** Archived `7946c8d` to an isolated snapshot
+  (`git archive 7946c8d | tar -x`) and ran `pytest` from inside that snapshot's `body-layer`:
+  **1677 passed / 4 xfailed**, matching the claim exactly (1676 baseline + the one new provenance
+  test). The new test (`test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_record`)
+  pins all three branches named in the plan: zero before any fold, written and **accumulated**
+  (not replaced) across two folds, reset to `0.0` on an unambiguous continuity-resolved record.
+- **Commit 2's per-commit number.** Archived `57f67d0` the same way: **1682 passed / 4 xfailed**,
+  with exactly one expected failure (`test_2c_transcript_fixture_renders_four_lines_not_seven`,
+  the old name, failing because the fixture now renders 3 lines not 4) — matching the claim.
+  `test_the_eager_cap_still_chains_a_long_infantry_line` ran green at this commit, confirmed by
+  running it in isolation; the diff hunk for that function shows only its closing line touched
+  (new tests inserted after it), so it is unmodified, not merely passing.
+- **The ordering claim (`self._groups` read before reassignment).** Grepped `groups.py` directly:
+  `prior_rosters = [group.member_contact_ids for group in self._groups.values()]` at line 1219,
+  `self._groups = new_groups` at line 1378, nothing mutates `self._groups` between them.
+  `member_contact_ids` is `frozenset[str]` (line 523). Confirmed `ingest` runs before `tick` each
+  poll in the one place that matters, `logger.py`'s poll loop (`store.ingest(...)` at line 547,
+  `store.tick(...)` at line 557) — so a fold's provenance is visible to the very tick the
+  absorption would occur on, exactly as claimed.
+- **Trying to break "the gate structurally cannot evict or found."** Reasoned through every
+  shape I could construct and could not break it: prior co-members always take the ordinary,
+  unaffected rule (so an existing group's internal links are never touched by the gate), and
+  `fold_displacement_m >= 0` always, so the gate can only *increase* a measured gap for
+  non-co-member pairs — never admit more than the ordinary rule would, never force a merge.
+  A vetoed admission therefore either leaves a contact a singleton (dropped by
+  `GROUP_REPORTING_MIN_MEMBERS`, reported individually — exactly the claimed shape) or splits a
+  larger candidate cluster into pieces, each of which still contains its own full prior roster
+  (since those internal links are untouched) and so still overlaps and inherits that roster's id
+  via `reconcile` phase 1 — never phase 3 (found). I could not construct a case where the gate's
+  veto causes an existing member to drop out of its own group, or causes a previously-nonexistent
+  group to come into being. **Mutation confirms the load-bearing half of this claim directly**:
+  removing the "prior co-members get the ordinary rule" branch (always applying the admission
+  inflation) breaks Rows A, B and F — i.e. Row A's own assertion depends on `CONTACT_1`/`CONTACT_2`
+  (both carrying large fold budgets, both prior co-members) staying linked despite their own
+  budgets, which is exactly the exemption property under test. Restored cleanly afterward
+  (`git checkout -- src/belief/groups.py`, verified clean).
+- **The six-row table, measured directly.** Re-ran probe 3 (`probe_b58_candidate.py`, unmodified)
+  from inside `body-layer`: output matches `implementation.md`'s paste byte-for-byte, including
+  every `gap`/`eff`/`thresh` and `cur -> new` verdict, and Rows C/D/E print `INVARIANT ROW:
+  IDENTICAL`. Re-ran probe 1 (`probe_b58_geometry.py`, the one-line signature fix) directly: t=15's
+  `CONTACT_1-CONTACT_4` prints `81.9 gap 88.0 backstop 88.0 thresh LINK` — byte-identical to the
+  plan's own numbers. Re-ran probe 2 (`probe_b58_second_incident.py`, unmodified — drives the real
+  `ContactStore.tick()`/`GroupStore.reconcile()` pipeline) directly: `GROUP_1
+  members=['CONTACT_1', 'CONTACT_3'] air_defence=[]` after the fold and at t=30 — matching
+  `implementation.md` exactly, confirming the gate holds end-to-end through the real pipeline, not
+  just the isolated predicate, and that `CONTACT_2`'s eviction (`BL-B59`) is still live in the same
+  run.
+- **The probe signature fix did not change what probe 1 measures.** The diff is a one-line call
+  update passing `[]` for the new `prior_rosters` parameter, with a comment stating the probe's
+  purpose (raw geometry, independent of the gate) is unchanged — confirmed by re-running it and
+  getting the plan's own pre-implementation numbers back exactly.
+- **The 2C fixture's new expectation, re-derived independently.** Mutated `_cluster_contacts`'s
+  admission branch to `effective_gap = gap` (gate disabled) and reran
+  `test_2c_transcript_fixture_renders_three_lines_not_seven`: it fails, reverting to the old
+  four-line output (`"BTR-70, in 1 o'clock group."` reappears) — the test bites, it is not a
+  decorative re-assertion of whatever the run happened to produce. Restored cleanly, reran clean.
+
+## The three user decisions — verified in the files, not just the log
+
+1. **`fold_displacement_m` resets on the next unambiguous record, no half-life, no new constant.**
+   Confirmed in `contacts.py`'s diff: `contact.fold_displacement_m = 0.0` on both the continuity
+   branch and the `len(passing) == 1` branch; no new constant appears anywhere in the diff or
+   `mypy`/`ruff` output.
+2. **`BL-B59` filed out of BL-12 and prioritised next, not parked unprioritised.**
+   `body-layer/ROADMAP/BL-B59.md`'s own header states this disposition in the user's terms
+   ("out of `BL-12`'s Stage 3.5, and prioritised next — not parked unprioritised... should be taken
+   up next, not left in the general backlog") and the entry records the post-fix probe 2 re-run
+   confirming the eviction half is still live against the shipped code, not just the pre-fix
+   measurement.
+3. **The 2C fixture's 3-line drop, accepted "as recommended, but recheck with BL-B50."**
+   `body-layer/ROADMAP/BL-B50.md`'s recheck note is present, in the right place, and states the
+   actual condition — that a fold-driven *admission* no longer producing flipping on this fixture
+   is not evidence that `BL-B59`'s *eviction* mechanism won't reopen it, and names the concrete
+   re-check ("re-run the 2C fixture... once `BL-B59` is live") rather than a vague "check later."
+
+## Checks — measured, not accepted
+
+**body-layer/** (the only subproject touched — confirmed via
+`git diff --stat 7932fb3..005309c -- audio-adapter aircraft-layer world-model brain-layer
+mission-interpreter`, empty):
+
+- `ruff format --check src tests`: pass (120 files already formatted)
+- `ruff check src tests`: pass, no findings
+- `cd body-layer && mypy src` (strict, CWD-local): pass, 55 source files, no issues
+- `pytest -q`: **1683 passed, 4 xfailed** — matches the claim exactly
+- `audio-adapter`: ran it rather than accepted the "untouched" claim — **255 passed, 1 skipped**,
+  matching the stated baseline
+- `/invariant-check`: all mechanical checks PASS (no-omniscience boundary, module independence, no
+  `sys.path` smuggling, `BINOCULAR_RANGE_MULTIPLIER` has not returned, no stray `print()` in
+  `perception`/`belief` core, no bare `except`); the only WARN rows (7 swallowed exceptions, 4
+  `type: ignore`) are pre-existing and untouched by this stage's diff
+
+## Required Fixes
+
+None. The provenance field, the gate, and the fixture rewrite each do exactly what the plan and
+the implementation log claim, verified by re-running the plan's own probes directly, by mutation
+on both the co-member exemption and the fixture's new expectation, and by independent archive
+snapshots at each intermediate commit rather than trusting the implementer's per-commit numbers.
+All three user decisions landed in the files where they will actually be read, in the user's own
+terms.
+
+## Optional Refinements
+
+1. **Row F's property ("single-link routes around one tainted member") is measured on one
+   synthetic armour triple**, as the plan's own Risks section states. Worth a second scene if a
+   real sortie ever shows a tainted member with no clean path — not a defect in what shipped.
+2. **The "repeat folds accumulate" semantics (commit 1) is a stated assumption, not measured
+   against a real repeat-fold incident** — same posture as `BL-B58`'s own open sub-questions in
+   the prior round. Low risk: the accumulate path is pinned by a direct test (two folds, no
+   intervening clean look), it just hasn't been seen in a live incident yet.
+
+## Verdict
+
+**APPROVED.**
+
+## Review Confidence
+
+**Full read.** Every number in this round's checks table was run directly rather than accepted
+from the implementation log: per-commit pytest counts via isolated `git archive` snapshots, all
+three probes re-run and compared byte-for-byte against `implementation.md`'s paste, the co-member
+exemption and the fixture's new expectation both confirmed by mutation (not just by reading the
+assertion), and the "cannot evict or found" claim tested both by construction (reasoning through
+candidate counterexamples) and by mutation of the one branch that makes it true. The two items
+left as optional refinements are the same two sub-questions the plan itself states as open and
+unmeasured, not new gaps found this round.
