@@ -44,6 +44,12 @@ family as `LOST_THRESHOLD_S`/`OBJECT_ID_MEMORY_S` above, not part of the
 fold *rule* itself, and this keeps every named-seconds constant this module
 promises to hold in one table.
 
+`GROUP_REIDENTIFY_WINDOW_S` (`plans/group-contact-identity/plan.md` Stage 1)
+joins this table for the same reason -- a named-seconds window, derived
+from `POSITION_HALF_LIFE_S` rather than independently chosen -- even though
+its consumer (`belief.groups.GroupStore.reconcile`) lives in a different
+module; see its own docstring below.
+
 All functions here are pure functions of `(contact, now_sim)` -- no ticker,
 no mutation, no wall-clock. `ContactStore.tick` (`contacts.py`) is the only
 caller that turns `certainty_of`'s result into a state change.
@@ -68,12 +74,29 @@ if TYPE_CHECKING:
 #: claim's `established_sim`.
 IDENTITY_HALF_LIFE_S: Final[float] = 600.0
 
-#: Fastest-decaying attribute: the exact perceived position. Chosen as the
-#: order-of-magnitude time a ground vehicle needs to move roughly its own
-#: uncertainty radius at `belief.position_belief.GATE_GROWTH_RATE_MPS`
-#: (20 m/s) -- i.e. "trust the exact spot for about half a minute, then
-#: start hedging." This is the one half-life `certainty_of` below actually
-#: uses to separate "tracked" from "estimated".
+#: Fastest-decaying attribute: the exact perceived position. Originally
+#: chosen as the order-of-magnitude time a ground vehicle needs to move
+#: roughly its own uncertainty radius at `belief.position_belief.
+#: GATE_GROWTH_RATE_MPS` (20 m/s) -- i.e. "trust the exact spot for about
+#: half a minute, then start hedging."
+#:
+#: **That derivation no longer holds** (`plans/group-contact-identity/
+#: plan.md` Stage 2b). `GATE_GROWTH_RATE_MPS` is no longer the growth rate
+#: actually applied to any contact's covariance: `belief.position_belief.
+#: plausible_speed_mps` now supplies a per-`op_class` rate (2.0-15.0 m/s;
+#: 0.0 for an entrenched installation), and `GATE_GROWTH_RATE_MPS` survives
+#: only as Stage 2a's pre-calibration mechanism default and `belief.
+#: groups`' empty-composition defensive fallback -- it is no longer the
+#: figure this half-life was derived from for any real contact.
+#:
+#: The **value** (30.0) is left exactly as it was -- both assertions below
+#: still hold, and no sortie evidence says it is wrong. This note exists so
+#: the stale derivation does not keep reading as the reason the value is
+#: what it is; recalibrating it against the new per-class rates is future
+#: work, not this commit's.
+#:
+#: This is the one half-life `certainty_of` below actually uses to
+#: separate "tracked" from "estimated".
 POSITION_HALF_LIFE_S: Final[float] = 30.0
 
 #: Medium decay: which way it was moving. Slower than exact position (a
@@ -218,6 +241,26 @@ LOST_THRESHOLD_S: Final[float] = 120.0
 #: enough; the two are conceptually distinct claims that happen to share a
 #: value for now, not permanently coupled.
 OBJECT_ID_MEMORY_S: Final[float] = IDENTITY_HALF_LIFE_S
+
+#: `plans/group-contact-identity/plan.md` Stage 1 -- how long a persisted
+#: `belief.groups.Group` is *kept*, properties frozen, after the reconcile
+#: at which a cluster last actually matched it (`Group.last_observed_sim`),
+#: before `GroupStore.reconcile`'s expire phase drops it. This is what makes
+#: Stage 1's property-match phase possible at all: before this window
+#: existed, an unobserved group was dropped on the very next reconcile,
+#: so a cluster returning under fresh member-contact-ids (member-id
+#: replacement, D4/D5/D7) always founded a new group, never recovered the
+#: old one.
+#:
+#: **Derived, not chosen independently**: 2x `POSITION_HALF_LIFE_S` (30.0),
+#: bounded by decision 10's own scope line ("the belief layer keeps
+#: seconds-to-a-minute; `BL-8` takes the rest") -- a group should not be
+#: re-identifiable for materially longer than the position belief itself
+#: stays "tracked" rather than "estimated". Past this window, re-
+#: identification is `BL-8`'s horizon by decision, not by cost (`plans/
+#: group-contact-identity/plan.md` amendment A2's matching-predicate
+#: table, test 1).
+GROUP_REIDENTIFY_WINDOW_S: Final[float] = 2.0 * POSITION_HALF_LIFE_S
 
 #: The certainty lifecycle ladder. Four levels, evaluated top-down in
 #: `certainty_of` (first match wins) rather than as independent predicates:

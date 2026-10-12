@@ -1,5 +1,20 @@
 # BL-B50 — Group callout suppression is defeated by any two alternating lines
 
+> **Recheck note added 2026-10-12 (BL-12 Stage 3.5, `BL-B58` decision 3).** The cohesion
+> admission gate landed this stage and dropped `tests/test_callouts.py`'s 2C fixture from four
+> spoken lines to three -- `test_2c_transcript_fixture_renders_four_lines_not_seven` renamed to
+> `..._renders_three_lines_not_seven`, line 4 ("BTR-70, in 1 o'clock group.") gone, `GROUP_1`
+> settled at `{CONTACT_1, CONTACT_2, CONTACT_3}` instead of absorbing `CONTACT_4` (the BTR-70). The
+> user accepted this as correct (silence beats a wrong member) **on the condition that it be
+> rechecked here**: this stage removes one source of consecutive-tick membership flipping (a
+> fold-driven *admission*) but leaves the sibling eviction path (`[[BL-B59]]`) live, and a
+> fold-driven admission this fixture no longer exhibits is not evidence that *all*
+> consecutive-tick flipping in this fixture's shape is gone -- `BL-B59`'s own probe shows the
+> *eviction* half still firing on a structurally similar scene. **When this item is taken up,
+> re-run the 2C fixture (and any sortie trace available by then) and confirm whether the three-line
+> result is stable across consecutive ticks, or whether `BL-B59`'s eviction mechanism reopens
+> flipping on this exact fixture once it is live for longer than this fixture's own window.**
+
 - [ ] **BL-B50 — `belief.callouts`' group suppression is a one-slot signature plus a speak-only
   membership-snapshot refresh, and any two alternating group lines defeat both.** #status/open
   Found during [[BL-B47]]'s fix, 2026-10-10, and **measured by the Reviewer** rather than reasoned

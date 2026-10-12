@@ -11,6 +11,397 @@ this plan's; §4 (D10) is the seam with `BL-8`.
 
 ---
 
+# Amendment — 2026-10-11
+
+**Status: the plan below is not re-planned and its decisions are not re-decided.** This section
+brings it current against five days of merges and measurements, per `docs/PROCESS.md`
+("Superseding a decision") — the superseded passages stay in place with a pointer to their
+replacement here. Everything in the body that this section does not name still stands.
+
+Written against `feature/bl12-group-contact-identity` at `6daeec6` (= `main`, 2026-10-11).
+**Nothing here is an implementation change; Stage 1 has not been started.**
+
+**Everything measured below was run, not reasoned.** Two probes against the real tree, through
+`body-layer/.venv`'s interpreter: a reproduction of `BL-B48`'s cohesion arithmetic with a candidate
+fix beside it, and an enumeration of the air-defence resolution paths. The commands and their
+output are in this amendment where the number decides something.
+
+---
+
+## A1 — Both stated prerequisites have landed. Confirmed, with one number corrected.
+
+The body's "Interaction with already-merged and in-flight work" says *"Land `BL-11` Stage 2 first,
+or accept a measurable regression"* and that Stage 3 *"governs whether Stage 5 is affordable at
+all"*. **Both conditions are now satisfied.** Verified on this tip:
+
+| claimed prerequisite | state |
+|---|---|
+| `group_salient_ids` hoist | **landed** — `body-layer/src/perception/group_salience.py` exists |
+| `@cache` on `profile_for` | **landed** — `perception/object_model.py:557`, `functools.cache` imported at `:68` |
+| `describe_position` memo | **landed** — `WorldEnrichmentCache`, `belief/enrichment.py:668`, keyed on `contact_id` plus a 50 m cell |
+
+So the dependency is discharged: Stage 1's per-reconcile `composition` pass rides the `profile_for`
+cache, and the regression the body warned about cannot occur.
+
+**One number in the body's reasoning is weaker than written, and it does not change the
+conclusion.** The hoist measured **5.1×, not the predicted 8.1×** (`plans/bl11-tick-cost/
+performance-review.md` — that review's one required change was a docstring correcting exactly this
+claim). The remaining 1.6× is located and **declined**: `BL-B40` records it as 1.1 ms in situ, so
+1.6× would save ~0.4 ms of a 12.6 ms poll against a 1,000 ms budget, and the ratio **saturates at
+5.1× from ~2,500 pairs upward** — a bigger mission does not make it grow back. Nothing in this plan
+needs the declined remainder.
+
+**One number is stronger than written.** The body's Stage 5 hard constraint cites
+`describe_position` at **51.6 ms median**; the `BL-11` pass measures **84.6 ms per call in situ**
+and 57.4 ms standalone, and found every call shape costs the same (same position ×20, 1 m apart,
+within one 50 m cell — no internal memo, so a cache hit saves the full unit cost). The argument
+against a per-group-per-tick road query is therefore **stronger**, not weaker.
+
+Current poll cost for sizing anything in this plan: **12.6 ms median work, 1.000 s realised period,
+2.0 % of polls overrunning 1.0 s** — and every one of those overruns is a single
+`describe_position` spike, which is a `query.describe` question and not body-layer's.
+
+---
+
+## A2 — `BL-B48`: BL-12 does not dissolve the infantry bridge. It amplifies it, and the fix belongs before Stage 1.
+
+**This is the pass's main finding and the body does not cover it.** The body's Risks section names
+`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` (20.0) and `GROUP_PROXIMITY_GAP_RATIO` (3.0) as
+uncalibrated assumptions *"upstream of everything here"* and says *"not this plan's to fix"*.
+`BL-B48` is a third and sharper instance, and that disposal no longer holds for it.
+
+### The mechanism, reproduced
+
+`_cluster_contacts` (`belief/groups.py:375`) is single-link union-find with
+`pair_threshold = min(relative_threshold, pair_backstop)`, where `relative_threshold = gap_ratio ×
+median(nearest-neighbour gap)` and `_pair_backstop_m` (`:336`) returns `math.inf` when **either**
+member's `op_class` is `EAGER` (today only `OP_INFANTRY`).
+
+Reproduced exactly, real profiles, real constants (`GAP_RATIO=3.0`, `UNIT_WIDTHS=20.0`,
+`MIN_MEMBERS=2`; sizes `T-72B` 7.0 m, `Ural-375` 6.0 m, `Infantry AK` 1.8 m):
+
+| scene | relative threshold | current (`any`-EAGER) |
+|---|---|---|
+| armor@1 km + truck@3 km | 6,000 m | 0 groups (pair backstop 130 m beats the 2,000 m gap) |
+| armor@1 km + infantry@7 km | 18,000 m | **one group, extent 6,000 m** |
+| armor@1 km + truck@3 km + infantry@7 km | 6,000 m | **one group of three, extent 6,000 m** |
+
+**Two independent faults compound**, and only naming both explains the numbers:
+
+1. **The eagerness is applied to the pair, not to the infantry** — `BL-B48`'s own reading, and
+   `_pair_backstop_m`'s `in (backstop_i, backstop_j)` is literally where it happens.
+2. **With the absolute backstop gone, the relative test cannot reject anything at n = 2.** With two
+   contacts, both nearest-neighbour gaps equal the pair's own distance, so
+   `relative_threshold = 3 × d ≥ d` *always*. Measured as the 18,000 m row above. This is why
+   `armor@1km + infantry@7km` merges at any separation whatsoever, and it is not noted anywhere in
+   the repo.
+
+### Does BL-12's model dissolve it? No — three ways it makes it worse
+
+Stage 1 reconciles *remembered groups against observed clusters*. **It does not produce the
+clusters**, so every new field it remembers is an aggregate over whatever `_cluster_contacts`
+handed it.
+
+1. **Stage 1's displacement test (test 5) is the plan's only geometric gate, and a 6 km cluster
+   breaks it — measured.** `centroid_uncertainty_m` is specified as *RMS of members'
+   `position.radius_m()`*, which captures each member's own position uncertainty and says **nothing
+   about the cluster's 6 km extent**. Dropping the bridging infantry for one tick moves the
+   remembered centroid **1,667 m** (measured on the three-member scene above). Against Stage 2b's
+   fastest row — truck at 15 m/s — and a 1.0 s poll, test 5's bound is ~15 m plus slack. So **every
+   membership flip in a bridged group fails the displacement test and founds a new group.** Stage
+   1's central promise — group identity survives — fails precisely on the groups `BL-B48` produces,
+   and it fails *silently*, as a founding rather than an error.
+2. **Stage 4's heading would be fabricated.** `heading_deg` is specified as derived from centroid
+   displacement between successive reconciles of the same group id, smoothed over N = 5. On a
+   bridged group the input signal is membership flipping, not motion — kilometre-scale steps with no
+   relation to where anything is going. Stage 4 exists to avoid exactly this: the body rejects
+   `enrichment.motion_when_seen` because *"a single noisy percept can flip the reported
+   direction"*, then proposes a source whose noise is two orders of magnitude larger.
+3. **Decision 7 is unspeakable at that extent.** `BL-B48` states it directly and it is the pilot-
+   facing form of the whole problem: *"a group 6 km across has no single believable bearing, range
+   or disclosure line."* D7's line — *"that column, now 2 o'clock, three kilometres, still moving
+   north on the road"* — is a claim about a thing in one place. Three of its four facts are false
+   for a 6 km group, and Stage 1 is what makes Petrovich say them with the confidence of continuity.
+
+**So: fix it first.** Not because `BL-B48` is urgent on its own — it is live today and has been
+tolerated — but because Stage 1 converts it from an over-wide group into a *persistent, spoken,
+geometrically-asserted* over-wide group, and Stage 4 then attaches a direction to it.
+
+### The smallest correct fix, and it is one word
+
+**Require *both* members to be `EAGER`**, i.e. `_pair_backstop_m`'s
+`if CohesionBackstop.EAGER in (backstop_i, backstop_j)` becomes an `and` over the two. A mixed
+infantry/non-infantry pair then falls through to the ordinary unit-widths backstop.
+
+**It is precedented in the function it edits**, by the same plan that introduced `EAGER`. Rule 1 of
+`_pair_backstop_m`'s own docstring already says: *"A **mixed** pair (one installation component, one
+not) falls through to the ordinary rule below — an installation cap is only meaningful when both
+members are plausibly parts of the same site."* The identical argument applies here, which is why
+this is a correction rather than a new policy: an eager cap is only meaningful when both members are
+the kind of thing eagerness was granted for.
+
+**Measured, same probe, candidate rule beside the current one:**
+
+| scene | current | both-EAGER |
+|---|---|---|
+| armor@1 km + truck@3 km | 0 groups | 0 groups (unchanged) |
+| armor@1 km + infantry@7 km | one group, 6,000 m | **0 groups** (mixed pair → backstop 88 m) |
+| armor + truck + infantry | one group of three, 6,000 m | **0 groups** (all three pairs rejected) |
+| three infantry at 30 m spacing | one group, extent 60 m | **one group, extent 60 m — byte-identical thresholds and unions** |
+
+All three `BL-B48` cases resolve; infantry-to-infantry eager merging is untouched, which is what
+*"ok to merge infantry too eagerly"* actually granted. It is a **mechanism** change with no
+calibration, so it is one commit under `body-layer/CLAUDE.md`'s "Mechanism and calibration never
+share a commit".
+
+### What this fix does *not* close, and why it is the user's call
+
+Fault 2 above survives: **two infantry contacts form a group at any separation**, because an
+infantry-infantry pair still has `backstop = inf` and the relative test is vacuous at n = 2. After
+the fix, an infantry-only group of two spanning kilometres is still reachable — and infantry is
+often the only class held at range, so this is not a corner. A finite eager cap would close it, but
+the number is a calibration the user owns, so it is **Q-A below**, not a decision taken here.
+
+### New Stage 0, blocking
+
+> **Stage 0 — bound a group's extent before anything remembers one.** Two commits, in order:
+> **0a (mechanism)** `_pair_backstop_m` requires both members `EAGER`; acceptance is the four-row
+> table above, with the three-infantry row asserted bit-identical. **0b (calibration, gated on
+> Q-A)** a finite eager cap replacing `math.inf`.
+> Belongs **before Stage 1**, for the three reasons above. `tests/test_groups.py`'s
+> `test_constants_are_the_stated_assumptions` gains any new constant from 0b.
+
+---
+
+## A3 — Test 3 and Stage 3 branch 1 reintroduce the defect `BL-B47` fixed yesterday. Measured.
+
+**Found in this pass; nobody flagged it.** This is the plan's one gate where the body says ambiguity
+must *not* resolve toward memory, because a wrongly-continued SAM **suppresses** a threat warning.
+
+The body specifies both air-defence checks as resolving through `_profile_for_contact`
+(`groups.py:304`) → `object_model.profile_for(contact.last_class_raw)`:
+
+- Stage 1's `air_defence_composition` — *"the subset of `composition` whose `op_class` is in
+  `AIR_DEFENSE_OP_CLASSES`"*, and `composition` is built via `_profile_for_contact`.
+- Stage 3 branch 1 — *"any passing candidate's `last_class_raw` resolves to an `op_class` in
+  `AIR_DEFENSE_OP_CLASSES`"*.
+
+`profile_for` keyword-matches DCS **type** designations. A classification held at **class** level
+carries the `OP_*` string itself and matches nothing. That is precisely `BL-B47`, merged
+2026-10-10 as `1063f2a`. Enumerated against the real tables on this tip:
+
+```
+last_class_raw         profile_for().op_class  in ADOC?  _op_class_of()  in ADOC?
+SA-6 Kub LN            OP_MRSAM               True      OP_MRSAM        True
+OP_SRSAM               OP_GROUPSOMETHING      False     OP_SRSAM        True
+OP_MRSAM               OP_GROUPSOMETHING      False     OP_MRSAM        True
+OP_LRSAM               OP_GROUPSOMETHING      False     OP_LRSAM        True
+OP_SPAAG               OP_GROUPSOMETHING      False     OP_SPAAG        True
+OP_ZU23                OP_ZU23                True      OP_ZU23         True
+```
+
+**Four of the five air-defence classes fail the plan's carve-out at class level.** `OP_ZU23` passes
+*by accident* — the literal string matches that table's own `"zu23"` keyword, which `BL-B47`'s
+implementation log documents as a coincidence. And a class-level belief is what a contact holds
+*before* it is identified to type, which at range is most of the time.
+
+**Correction to the plan**: both air-defence resolutions read
+`belief.classification._op_class_of` / `parent_class_of`, not `object_model.profile_for` — the
+lattice side, which is where a *believed classification* belongs. This is `BL-B47`'s own boundary
+decision applied to the two new consumers this plan adds, and it is a strict widening (that fix
+enumerated 1,060 candidate values: 0 verdicts lost, 4 gained).
+
+`composition` itself still goes through `_profile_for_contact`, which is correct — it needs
+`installation_component` and `size_m`, which only a profile carries. Only the **air-defence
+membership test** moves.
+
+**Fold `BL-B51` into Stage 0 or Stage 1 rather than leaving it separate.** `BL-B51` records three
+copies of the air-defence set with one `<=` drift guard between them, and says explicitly: *"Worth
+doing before or alongside anything that widens the air-defence treatment further."* This plan adds
+the fourth and fifth consumers of that set, both inside the gate whose failure suppresses a warning.
+`groups.AIR_DEFENSE_OP_CLASSES` is the guard-less copy the plan keys on today.
+
+*(Separate and pre-existing, noted so it is not rediscovered as this plan's doing:
+`_representative_size_m` treats `op_class == DEFAULT_OP_CLASS` as "no real match" and substitutes
+`GROUP_REPORTING_UNKNOWN_SIZE_M`, so a class-level SAM belief is sized as unknown. Correct as an
+honest default; not this plan's to change.)*
+
+---
+
+## A4 — The group-identity trace line is part of Stage 1, not a suggestion
+
+The body's Risks section says *"Consider a group-identity line in the sortie trace before flying
+Stage 1, or the first evidence will be the pilot noticing a wrong 'that column'."* **Promote it to
+Stage 1's first commit.** Four reasons, and the first is the decisive one:
+
+1. **D5 is a rate claim, and the rate is currently unmeasurable.** The user accepted false
+   continuity because *"it's the unusual occurence"*. That acceptance is conditional on rarity — if
+   phase 2 fires often, the premise of his own decision has failed and he would want to know. There
+   is no instrument that could tell him.
+2. **The plan already concedes this argument once.** Test 6's ambiguity counter is *"part of the
+   design and not an optional observable"* for exactly the same reason. The phase-2 match itself is
+   the larger surface.
+3. **`BL-B50`'s lapse condition is otherwise unevaluable.** Security attached *"blocking-priority if
+   a sortie log shows membership flipping on consecutive ticks"* — no log records group rosters, so
+   that condition cannot currently fire either way. One trace line serves both items.
+4. **The alternative first evidence is a wrong spoken line in flight**, which is the failure class
+   this project has repeatedly had to fix from sortie feedback rather than from tests.
+
+Minimum fields, and note the third is the one `BL-B48` would have been caught by:
+`group_id`, which phase resolved it (`overlap` / `property` / `found` / `expired`), the roster,
+the centroid, **the cluster's extent**, and `composition`. Nothing logs extent today.
+
+---
+
+## A5 — Interaction rows added
+
+These extend the body's "Interaction with already-merged and in-flight work".
+
+| item | state | interaction |
+|---|---|---|
+| **`BL-13`** (crew query path) | **merged 2026-10-11, `6f04671`** | Its summary renderer aggregates over the **filtered contact set** and never walks a group roster, so it is immune to `BL-B48` by construction while the push path's `render_group_full_disclosure` is not. **This concentrates BL-12's value on the push path and should sharpen its scope, not widen it** — do not add group identity to the pull answer in this plan. Separately: D7's spoken line is a **push-path output**, so it does not need to fit BL-13's *input* slot schema; that schema is what the brain layer targets for questions, which is a different seam. `plans/crew-query-path/plan.md` "Not touched, deliberately" names `groups.py`, so there is no file conflict. |
+| **`BL-B47`** (class-level SAM) | **merged 2026-10-11, `1063f2a`** | See **A3**. Changes this plan's air-defence resolution path from `profile_for` to the classification lattice. Not optional — as written, the plan reintroduces the fixed defect inside its own safety gate. |
+| **`BL-B48`** (infantry cohesion bridge) | open, live on the push path | See **A2**. Becomes blocking **Stage 0**. BL-12 does not dissolve it. |
+| **`BL-B49`** (narrow `report` priced as `report_all`) | open, Architect-owned | Independent of Stages 1–4 and 6 (its own entry says closing `BL-B48` will not change its cost either way). **It does gate Stage 5**: Stage 5 would add a fourth `describe_position` consumer at 84.6 ms in situ, while `BL-B49` is still choosing between three mitigations for the existing three. Two plans independently adding callers to that call is the thing to avoid — a further argument for A6's Stage 5 disposition. |
+| **`BL-B50`** (group callout suppression ratchet) | open | **Stage 1 does not fix it, and the distinction matters: Stage 1 stabilises the group *id*, not the *roster*.** `reconcile` recomputes clusters every tick, so members are always the current cluster's members; phase 2 hands a cluster an existing id, it does not stabilise who is in it. The ratchet's only required ingredient is membership flipping on consecutive ticks, which is unchanged. What Stage 1 *does* change is that `last_spoken_*` now survives instead of being reset by re-founding, which reduces total group lines without closing the mechanism. **Stage 0 is what defuses it in practice** — `BL-B50`'s own text says *"`EAGER` infantry cohesion producing a group 6 km across is precisely the input that makes membership flip tick-to-tick"* and *"fix either and the other stops mattering much"*. So evaluate its lapse condition after **Stage 0 + Stage 3**, not after Stage 1. |
+| **`BL-B51`** (three copies of the air-defence set) | open | See **A3**. This plan adds the 4th and 5th consumers of the set, inside the gate whose failure suppresses a warning. Fold the one-set-plus-`<=`-guard consolidation into Stage 0/1. |
+
+---
+
+## A6 — Stage order and boundaries, re-checked
+
+**One stage is added, none is dropped, and the existing boundaries survive the re-check.**
+
+| stage | change |
+|---|---|
+| **0 (new)** | Bound group extent — `_pair_backstop_m` both-EAGER (0a), finite eager cap if the user wants it (0b). **Blocking, before Stage 1.** |
+| **1** | Unchanged in shape. Three corrections: the trace line becomes its **first commit** (A4); the air-defence test reads the classification lattice (A3); the prerequisite note is discharged (A1). |
+| **2a / 2b** | Unchanged. The split is right and `body-layer/CLAUDE.md`'s rule requires it. |
+| **3** | Unchanged in shape; branch 1's air-defence predicate corrected per A3. |
+| **3.5 (new)** | **The cohesion admission gate — `BL-B58`. Blocking, before Stage 4.** Own plan document: `plans/group-cohesion-admission-gate/plan.md` (see **A9**). |
+| **4** | Unchanged, **conditional on Stage 0 and now also on Stage 3.5** (A9). Without a bounded extent its heading input is membership noise (A2.2). **The speech-time extent guard is unconditional, not a fallback** — do not speak a heading or a single bearing for a group wider than one believable bearing. (Corrected 2026-10-11, Stage 0 review observation 1. This read *"if Q-A declines 0b, Stage 4 needs an extent guard at speech time instead"*. Q-A/Q-B were **accepted** and 0b shipped, so the condition is settled — but 0b caps a *pair*, not a cluster, and single-link chaining still permits a 1.2 km span: `tests/test_groups.py::test_the_eager_cap_still_chains_a_long_infantry_line` pins four infantry at 400 m spacing, 3 gaps × 400 m = 1,200 m, as one group. Against `_format_range_km`'s 500 m bucket that is 2.4 buckets wide, so the guard is needed *with* 0b rather than instead of it. It is also the natural consumer of the `extent` field A4's trace line already requires.) |
+| **5** | **Recommendation unchanged and now stronger.** The body's effort/value read used 51.6 ms; the real figure is 84.6 ms in situ, and `BL-B49` is unresolved on the same call. Keep the cheap anisotropic stand-in as a *proposal*, move the graph corridor to `BL-8`. Still Q1 for the user. |
+| **6** | Unchanged, still last. Its stated precondition (Stages 1 and 3 in first) is unaffected. |
+
+**Why Stage 0 is not simply folded into Stage 1.** It is upstream of it, it is independently
+testable and mergeable, and it is the one change on this branch that is **worth flying on its own**
+— it is live on the push path today and fixing it needs none of BL-12's new state.
+
+---
+
+## A7 — Corrections to specific claims in the body
+
+| passage | correction |
+|---|---|
+| Interaction, `BL-11` Stage 2 bullet — *"Land `BL-11` Stage 2 first, or accept a measurable regression"* | **Discharged.** Landed; see A1. Also: the hoist is 5.1×, not the 8.1× the module docstring claimed before `BL-11`'s performance pass corrected it. |
+| Interaction, `BL-11` Stage 3 bullet | **Discharged.** `WorldEnrichmentCache` landed, 89.7 % hit rate within a callout tick, from a measured 0 %. |
+| Stage 5 hard constraint — *"51.6 ms median on `syria-full`"* | **84.6 ms per call in situ**, 57.4 ms standalone median; every call shape costs the same. The constraint is stronger. |
+| Risks — *"Knowledge-graph query returned 'No graph yet'… so the graph step produced nothing"* | **No longer true.** `.claude/scripts/gq.sh` answered from the main checkout's graph (10,915 nodes, 565 reached). It surfaced the modules and functions this amendment cites — `GroupStore`, `render_group_disclosure`, `group_membership_state`, `group_callout_member_id`, `contacts_plausibly_same`, `WorldEnrichmentCache` — and **no prior plan document that was not already in hand**, so the body's "prior work found by reading plans directly" conclusion stands on its evidence. Today's merges are not in the semantic layer yet. |
+| Risks — `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` / `GROUP_PROXIMITY_GAP_RATIO` *"not this plan's to fix"* | **Narrowed, not reversed.** Still true for the two constants' *calibration*. **False for `BL-B48`**, which is a composition defect in the same function and is now Stage 0. A second, unrecorded instance is named in A2: the relative test cannot reject any pair at n = 2 when the absolute backstop is infinite. |
+
+---
+
+## A8 — The user's decisions are intact, and what now cuts against them
+
+**D3–D10 are untouched by this amendment.** D5's inversion and its stated error preference —
+*"If a new group is mistakes as existing group, it's the unusual occurence and I can live with that
+easier than new group beliefs popping up all the time"* — stand exactly as written, and nothing
+here re-decides them.
+
+**One piece of evidence cuts against a decision and is flagged rather than resolved.** The user's
+*"ok to merge infantry too eagerly"* (which produced `_OP_CLASS_COHESION_BACKSTOP`) is being applied
+to **pairs**, so it currently merges armour across 6 km. Whether that was meant is his call, not
+this plan's — **Q-A**. The recommendation (both-EAGER) is the reading that keeps his sentence
+literally true about infantry and nothing else, but it is a recommendation.
+
+---
+
+## A9 — Stage 3.5: the cohesion admission gate (`BL-B58`), planned separately
+
+**Added 2026-10-12, after Stages 0–3 landed.** Stage 3's within-group fold moves a contact's fused
+position; the next tick's clustering can absorb a previously-separate, correctly-identified contact.
+`BL-B58` is the finding. The user chose **option 3 — fix at source in clustering** (over speech-time
+suppression and a displacement bound), because *"group membership is what the rest of BL-12 and
+BL-14 build on — a wrong member poisons heading, composition and attack-run alignment, not just one
+spoken line."*
+
+**The plan is `plans/group-cohesion-admission-gate/plan.md`**, its own document because it spans
+`contacts.py` as well as `groups.py` and carries its own staging and open decisions. What that pass
+established, which matters to this plan's own text:
+
+- **`BL-B58`'s sketched check is a measured no-op.** The absorbing edge already clears
+  `_pair_backstop_m` — 81.9 m against 88.0 m. The cause is a **219 m single-tick fold displacement**,
+  and it persists, so no tick-local rule fixes it. The gate therefore carries provenance
+  (`Contact.fold_displacement_m`), not geometry.
+- **A cluster-extent bound cannot be the instrument here.** The wrong four-member cluster and the
+  correct three-member one have **identical extent, 329.9 m**. This does **not** retire A6's Stage 4
+  extent guard, which answers a different question (spoken width) and is still required.
+- **A second independent incident is reproduced**, and **with an air-defence member absorbed**:
+  `air_defence_composition` goes `[]` → `[('OP_SPAAG', 1)]`, persistently — both sub-questions
+  `BL-B58` left open are now closed by measurement rather than deferred.
+- **A sibling defect was found in the same run and is `BL-B59`**: the same fold drift **evicts** a
+  real member, by shifting the median nearest-neighbour gap and tightening the relative threshold.
+  That is the direction that can *suppress* an air-defence report, and it is out of Stage 3.5's scope
+  by design.
+
+**Stage 4's dependency widens**: it is now gated on Stage 3.5 as well as Stage 0, for the reason A2.2
+already gives — its heading input is membership noise, and §2 of that plan puts a number on it
+(one tick, no motion, a 132 m member displacement plus a simultaneous absorption and eviction).
+
+---
+
+## A10 — BL-12 ends at Stage 4. Stage 5 is skipped; Stage 6 is deferred.
+
+**User direction, 2026-10-12**, after Stage 4 was approved. BL-12's merged scope is **Stages 0, 0a,
+0b, 1, 2a, 2b, 3, 3.5 and 4**, and nothing further.
+
+- **Stage 5 (road-following, D9) — skipped entirely, not partially built.** The effort/value read
+  recommended taking the cheap anisotropic half now and moving the graph corridor to `BL-8`; the
+  user took **the whole of D9 to `BL-8`**, the cheap half included. So Stage 1's displacement bound
+  stays **isotropic**, no `Group` field caches a road axis, and this milestone adds no new
+  `describe_position` caller — which also leaves `BL-B49` untouched by it. Anything written as
+  though the anisotropic stand-in had landed should assume an isotropic bound instead.
+- **Stage 6 (shorten `OBJECT_ID_MEMORY_S` to the 60 s belief horizon, D3's bound) — deferred, not
+  rejected.** Its stated prerequisite is satisfied (Stages 1 and 3 are in), so this is a scheduling
+  choice, not a blocked one. **The omniscience shortcut it would close stays live**: object-id
+  continuity is still trusted across a ten-minute gap, which D3 forbids, and the contact-count
+  change the stage would produce remains unmeasured. Whoever takes it up should re-measure against
+  the same sortie logs, per the stage's own text.
+
+**Consequence for the claim this milestone makes.** Group identity now survives losing sight for up
+to `GROUP_REIDENTIFY_WINDOW_S`, but beyond that window re-identification still goes through
+object-id rather than the group predicate until Stage 6 lands — so the no-omniscience boundary this
+plan argues for is **not yet fully closed at the long horizon**. State that plainly rather than
+letting the merged milestone imply otherwise.
+
+**The bare `"Group."` disclosure stays** (user direction, same day). An over-wide, unclassified group
+speaks the composition word alone, with no bearing, range or heading, because the extent guard
+removes all three. The alternatives offered were silence and a bearing-arc/range-span form; the user
+kept current behaviour, so the arc form is **not** backlogged from here.
+
+---
+
+## Questions for the user — new in this amendment
+
+These are in addition to the body's Q1–Q6, which all still stand.
+
+- **Q-A (blocking Stage 1) — does *"ok to merge infantry too eagerly"* extend to merging armour
+  across 6 km?** Measured: `armor@1km + truck@3km` is correctly two separate things; add
+  `infantry@7km` and all three become one group 6 km wide. Recommendation: **no** — apply the
+  eagerness to infantry pairs only (one word, precedented by the installation rule in the same
+  function, infantry-to-infantry behaviour bit-identical). If he agrees, Stage 0a goes in before
+  Stage 1.
+- **Q-B — should a group have a maximum extent at all?** Even after Q-A, two infantry contacts form
+  one group at *any* separation, because the relative test cannot reject a pair at n = 2 once the
+  absolute backstop is infinite. A finite eager cap (in metres, or as a multiple of the ordinary
+  unit-widths backstop) would close it. His number, his call — and the pilot-facing version of the
+  question is: *at what width does "that group, two o'clock, three kilometres" stop being true?*
+- **Q-C — is the group-identity sortie trace line accepted as part of Stage 1** rather than a
+  suggestion? It is the only way the rarity his D5 preference rests on becomes checkable, and it
+  also makes `BL-B50`'s lapse condition evaluable. Cost: one JSONL line per reconcile.
+
+---
+
 ### What already exists, and what the churn mechanism actually is
 
 Read before designing anything here, because three of the four mechanisms D4/D5 appear to ask for
@@ -98,6 +489,10 @@ ambiguity rule is then a second, smaller change (Stage 3) that stops the churn a
 
 ### Implementation Plan
 
+> **Amended 2026-10-11 — a blocking Stage 0 precedes Stage 1.** See the amendment's **A2**: the
+> clusters Stage 1 reconciles over can be 6 km wide (`BL-B48`), which breaks Stage 1's displacement
+> test and Stage 4's heading. Stage 0 bounds group extent first.
+
 Each stage is independently testable and mergeable. The no-omniscience check is stated per stage
 because every stage in this plan reads believed classification (`Contact.last_class_raw` →
 `object_model.profile_for`), which is the sanctioned path (`groups.py:304` `_profile_for_contact`),
@@ -147,7 +542,7 @@ threshold's provenance is labelled.
 |---|---|---|---|
 | 1 | elapsed window | `now_sim - group.last_observed_sim <= GROUP_REIDENTIFY_WINDOW_S` (**60.0 s**) | **derived** — 2 × `POSITION_HALF_LIFE_S` (30.0), and bounded by D10's "seconds to a minute". Past it, nothing here matches; that is `BL-8`'s horizon by decision, not by cost. |
 | 2 | kind coherence (hard) | `group.installation == observed.installation` | **user direction**, D4: *"Different type of group, e.g. AAA installment (especially entrenced = not capable of movememnt) would be different than other units that are nearby."* Keyed on the existing `installation_component` field — no new vocabulary. |
-| 3 | air-defence confirmation (hard) | if either side's `air_defence_composition` is non-empty, require **equality** of both sides' `air_defence_composition` | **user direction**, D6. This is the one gate where ambiguity does *not* resolve toward the remembered group: positive confirmation is required, because `threat.envelope_for` keys the danger call on believed classification, so a wrongly-continued SAM **suppresses the warning** rather than mislabelling a contact. |
+| 3 | air-defence confirmation (hard) — **resolution path superseded, see amendment A3: read `classification._op_class_of`, not `profile_for`, or four of five air-defence classes fail this gate at class level (measured)** | if either side's `air_defence_composition` is non-empty, require **equality** of both sides' `air_defence_composition` | **user direction**, D6. This is the one gate where ambiguity does *not* resolve toward the remembered group: positive confirmation is required, because `threat.envelope_for` keys the danger call on believed classification, so a wrongly-continued SAM **suppresses the warning** rather than mislabelling a contact. |
 | 4 | composition compatibility (hard) | the two sides' non-air-defence `op_class` **sets** must not be disjoint-in-both-directions: one must be a subset of the other | **user direction**, D4: a *different kind* appearing is evidence of a new group. **Count is deliberately not gated** — the user's own words cover both directions: more members than memory means *"some unit(s) have to be newly detected"* (new members of a continuing group), and *"I see more units from a different angle and maybe some are hidden by buildings"* means fewer is occlusion. A count test would be brittle in exactly the case the user described as normal. |
 | 5 | displacement plausibility (hard) | `hypot(Δcentroid) <= speed_bound_mps * elapsed_s + slack_m`, where `slack_m = group.centroid_uncertainty_m + observed.centroid_uncertainty_m`, and `speed_bound_mps = 0.0` when **both** sides' movement state is `"stopped"`, else `max(plausible_speed_mps(op_class) for op_class in group.composition)` | **mixed** — the zero-when-both-stopped rule is **user direction**, D4: *"If I see no movement, then I especially expect that the units I remember have not moved."* The speed table is **stated assumption**, scaled by user direction (D8, *"20 m/s is fast for most units… Expect slower"*) — see the table below. `max` over classes, not `min`, because this is a plausibility *bound*, and bounding by the slowest member would reject a real match. |
 | 6 | **ambiguity resolution (D5's inversion)** | more than one remembered group passing 1–5 → **nearest centroid wins**, then lowest group id | **user direction**, D5: *"If a new group is mistakes as existing group, it's the unusual occurence and I can live with that easier than new group beliefs popping up all the time."* Supported by the **measured** cluster separation (explore notes §2: median cluster-to-cluster nearest separation 236 m at 100 m link, 625 m at 250 m link) — two remembered groups both inside one displacement bound is rare, not typical. Count the occurrences in a store-level counter so the rarity stays **observable** rather than assumed. |
@@ -208,6 +603,10 @@ This is the stage that dissolves `BL-B24` and the 554-contacts-for-444-objects c
 1. If **any** passing candidate's `last_class_raw` resolves to an `op_class` in
    `AIR_DEFENSE_OP_CLASSES` → **found a new contact** (today's rule). D6: a visible duplicate is the
    safe direction for a threat; a wrong fold is not.
+   > **Resolution path superseded 2026-10-11 — amendment A3.** "Resolves" here must mean
+   > `classification._op_class_of`, not `object_model.profile_for`; via `profile_for` a class-level
+   > SAM belief falls into the default bucket and this branch never fires. That is `BL-B47`,
+   > merged 2026-10-11.
 2. Else if **every** passing candidate is currently a member of one and the same `Group`
    (`self._groups.group_for_contact`) → **fold onto the nearest, then lowest id.**
 3. Else → **found a new contact** (today's rule, unchanged).
@@ -283,7 +682,9 @@ Recommendation is to build the **cheap half now** and move the graph half to `BL
 - **Deferred to `BL-8`:** the corridor that *branches at junctions* and is *monotone in direction*.
   Reasons in the effort/value read below.
 
-**Hard constraint if this stage is built**: `describe_position` is measured at **51.6 ms median on
+**Hard constraint if this stage is built** (figure superseded 2026-10-11 — amendment A7: the real
+cost is **84.6 ms per call in situ**, every call shape identical, and `BL-B49` is unresolved on the
+same call; the constraint is *stronger*): `describe_position` is measured at **51.6 ms median on
 `syria-full`** (`BL-11` Stage 3). A per-group-per-tick road query would be a larger term than the
 one `BL-11` Stage 3 exists to remove. Cache per group, or do not build it.
 
@@ -303,6 +704,9 @@ on this stage specifically; re-measure against the same sortie logs.
 ---
 
 ### Interaction with already-merged and in-flight work
+
+> **Amended 2026-10-11.** Both `BL-11` dependencies below have **landed** — amendment **A1**. Six
+> further rows (`BL-13`, `BL-B47`, `BL-B48`, `BL-B49`, `BL-B50`, `BL-B51`) are in **A5**.
 
 - **`BL-11` Stage 2 (`group_salient_ids` hoist, `@lru_cache` on `profile_for`)** — a **dependency**,
   not a conflict. Stage 1 computes a `composition` per cluster per reconcile via
@@ -374,7 +778,9 @@ explore notes already assign to it.
 - **Stage 1 phase 2's false-continuity rate is unmeasurable from existing logs** (no group-identity
   trace exists). The 60 s window and the composition test are the only things bounding it. Consider
   a group-identity line in the sortie trace before flying Stage 1, or the first evidence will be
-  the pilot noticing a wrong "that column".
+  the pilot noticing a wrong "that column". **Promoted from a suggestion to Stage 1's first commit,
+  2026-10-11 — amendment A4** (D5's acceptance is a rarity claim, and nothing can currently check
+  it; `BL-B50`'s lapse condition is unevaluable without it too).
 - **`GroupStore.groups` vs `remembered_groups`** is the sharpest silent-failure surface in this
   plan: a consumer that reads the wrong one starts speaking about groups nobody can see — the same
   class of defect as D11's masked-hour callouts.
@@ -395,8 +801,13 @@ explore notes already assign to it.
   uncalibrated stated assumptions** feeding the clustering this whole plan reconciles over. A wrong
   cluster boundary makes the composition test compare the wrong things. Not this plan's to fix, but
   it is upstream of everything here.
+  > **Narrowed 2026-10-11 — amendment A2/A7.** Still true of those two constants' calibration.
+  > **False for `BL-B48`**, a composition defect in the same function, which is now blocking
+  > **Stage 0**: BL-12 does not dissolve it, it amplifies it.
 - **Knowledge-graph query returned "No graph yet. Build it with /graphify, then query."** from this
-  worktree, so the graph step produced nothing. The prior work was found by reading
+  worktree, so the graph step produced nothing. **Superseded 2026-10-11 — amendment A7**: the graph
+  answered (10,915 nodes) and surfaced no prior plan document that was not already in hand, so this
+  bullet's conclusion survives on different evidence. The prior work was found by reading
   `plans/contact-duplication-ambiguity-runaway/`, `plans/group-contact-model/`,
   `plans/group-reporting/` and the modules directly. Recording this because a miss means "not
   indexed", never "does not exist" — a rebuild before the next planning pass on this area would
@@ -469,6 +880,10 @@ with a pointer, never deleted or rewritten:
 ---
 
 ### Questions for the user (queued, not blocking the read)
+
+> **Amended 2026-10-11.** All six below still stand. **Three more were added, and the first of them
+> blocks Stage 1** — see the amendment's "Questions for the user — new in this amendment" (Q-A
+> infantry cohesion, Q-B maximum group extent, Q-C the trace line).
 
 1. **D9 / Stage 5 — accept the recommendation?** Build the cheap anisotropic road-axis bound now and
    move the junction-branching corridor to `BL-8` (where D10 already puts the long horizon and where

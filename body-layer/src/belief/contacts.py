@@ -37,10 +37,12 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
 from belief.association_over_time import (
+    contact_growth_rate_mps,
     implied_position,
     passes_gate,
     percept_position_uncertainty,
@@ -62,12 +64,14 @@ from belief.cardinality import (
     new_cardinality_belief,
 )
 from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
     SpecificityLevel,
     class_compatibility,
     fold_classification,
     new_classification_belief,
+    parent_class_of,
 )
 from belief.decay import (
     CALLOUT_OBSERVABILITY_GRACE_S,
@@ -463,6 +467,24 @@ class Contact:
     #: `belief.decay.OBSERVED_WINDOW_S` of its own `last_seen_sim`, and as
     #: unknown (fail-open) otherwise -- see that block's own comments.
     live_los_clear: bool | None = None
+    #: `plans/group-cohesion-admission-gate/plan.md` (`BL-B58`) -- metres of
+    #: this contact's fused-position displacement attributable to a Stage 3
+    #: within-group ambiguity fold (`ContactStore._fold_target_for_ambiguous_
+    #: candidates` resolving `ingest`'s `len(passing) >= 2` branch) since this
+    #: contact was last recorded from an *unambiguous* percept. Written only
+    #: by `ContactStore.ingest`, at the one call site that folds: accumulated
+    #: (`+=`, not overwritten) across repeat folds with no intervening clean
+    #: look, and reset to `0.0` on either unambiguous branch (an object-
+    #: permanence continuity resolution, or a `len(passing) == 1` gate match)
+    #: -- an independent look confirming where the contact actually is is
+    #: exactly the evidence that retires the doubt. `0.0` for a founding
+    #: contact and for every contact that has never been an ambiguous fold
+    #: target. Read by `groups._cluster_contacts`'s admission gate as the
+    #: cost of letting this contact's own (possibly fold-corrupted) position
+    #: admit a new group member; never read as a position correction itself.
+    #: Accumulate-not-replace is a stated assumption, not measured against a
+    #: real repeat-fold incident -- see that plan's Risks section.
+    fold_displacement_m: float = 0.0
 
     @property
     def last_position(self) -> GeoPosition:
@@ -491,9 +513,19 @@ class Contact:
         there is no separate "most recent raw position" field any more: the
         percept-gate (`association_over_time.passes_gate`) reads `position.
         covariance` directly (see that module's docstring), so there is
-        nothing left that needs the pre-fusion number."""
+        nothing left that needs the pre-fusion number.
+
+        `growth_rate_mps` (`plans/group-contact-identity/plan.md` Stage 2a)
+        is resolved from *this contact's own current* `last_class_raw` --
+        i.e. before the assignment below overwrites it with the incoming
+        percept's claim -- via `association_over_time.
+        contact_growth_rate_mps`, the one place that resolution happens
+        (see that function's docstring on why `Contact.record`, not
+        `position_belief`, is the caller: `PositionEstimate` must not know
+        its own classification)."""
         look_position = implied_position(percept)
         prior_position = self.position
+        growth_rate_mps = contact_growth_rate_mps(self)
         observer = GeoPosition(
             x=percept.ownship_at_observation.x,
             z=percept.ownship_at_observation.z,
@@ -506,12 +538,14 @@ class Contact:
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
             t_sim=percept.t_sim,
+            growth_rate_mps=growth_rate_mps,
         )
         self.position = clamp_to_detection_envelope(
             fused_position,
             prior_position,
             observer,
             _max_detection_range_m(percept.source),
+            growth_rate_mps=growth_rate_mps,
         )
         self.last_alt_m = look_position.alt_m
         self.last_class_raw = percept.classification_raw
@@ -753,10 +787,25 @@ class ContactStore:
 
     @property
     def groups(self) -> list[Group]:
-        """Every currently persisted associative group (`plans/
+        """Every *currently observed* associative group (`plans/
         group-reporting/plan.md` Stage 2), insertion order. A read-only
-        view -- callers must not mutate the returned list."""
+        view -- callers must not mutate the returned list.
+
+        **Unchanged meaning since before BL-12 Stage 1** (`plans/
+        group-contact-identity/plan.md`): a group this store merely
+        *remembers*, not matched by a cluster on the most recent `tick`,
+        is deliberately excluded -- see `remembered_groups` and `belief.
+        groups.GroupStore`'s own class docstring on why the two must not
+        be confused."""
         return self._groups.groups
+
+    @property
+    def remembered_groups(self) -> list[Group]:
+        """Every group this store still remembers, observed on the most
+        recent `tick` or not (BL-12 Stage 1) -- delegates to `belief.
+        groups.GroupStore.remembered_groups`. Not for pilot-facing use;
+        see `groups`."""
+        return self._groups.remembered_groups
 
     def group_for_contact(self, contact_id: str) -> Group | None:
         """The `Group` `contact_id` currently belongs to, or `None` --
@@ -935,13 +984,19 @@ class ContactStore:
         available, use the gate."
 
         **Gate/ambiguity decision rule** (`plans/pb2-contact-memory/plan.md`
-        Stage 1), reached whenever continuity does not apply -- a founding
-        observation, a non-correlating reacquisition, or an expired/
-        incompatible continuity match: exactly one existing contact passes
-        both gates -> merge into it; zero, or two-or-more, -> create a new
-        contact. Ambiguity between two-or-more candidates is deliberately
-        never resolved by a best-match tiebreak -- see
-        `association_over_time`'s module docstring.
+        Stage 1, narrowed within a group by `plans/
+        group-contact-identity/plan.md` Stage 3), reached whenever
+        continuity does not apply -- a founding observation, a
+        non-correlating reacquisition, or an expired/incompatible
+        continuity match: exactly one existing contact passes both gates ->
+        merge into it; zero -> create a new contact. Two-or-more is no
+        longer an unconditional new contact -- see
+        `_fold_target_for_ambiguous_candidates`'s own docstring for the
+        narrowed rule (air-defence carve-out, then within-group fold, else
+        the original new-contact rule) and `association_over_time`'s module
+        docstring for why the gate itself still never ranks candidates by a
+        best-match score -- that stays the gate's own posture; only what
+        `ingest` does with *two or more* passing candidates changed.
 
         **Same-source, same-poll exclusion** (`plans/group-contact-model/
         plan.md` Stage 3a): two observations sharing both `source` and
@@ -1008,7 +1063,12 @@ class ContactStore:
 
             contact = continuity_by_observation_id[observation.id]
             if contact is not None:
+                # Object-permanence continuity is an unambiguous resolution
+                # (`plans/group-cohesion-admission-gate/plan.md` §4) -- an
+                # independent look confirming identity retires any
+                # outstanding fold-displacement budget.
                 contact.record(percept)
+                contact.fold_displacement_m = 0.0
             else:
                 already_claimed = claimed.get(claim_key, set())
                 passing = [
@@ -1019,16 +1079,111 @@ class ContactStore:
                 ]
 
                 if len(passing) == 1:
+                    # A single passing candidate is also unambiguous --
+                    # same reset as the continuity branch above.
                     contact = passing[0]
                     contact.record(percept)
+                    contact.fold_displacement_m = 0.0
                 else:
-                    contact = Contact.from_percept(self._new_contact_id(), percept)
-                    self._contacts[contact.id] = contact
+                    fold_target = (
+                        self._fold_target_for_ambiguous_candidates(passing, percept)
+                        if len(passing) >= 2
+                        else None
+                    )
+                    if fold_target is not None:
+                        # The one call site that folds: accumulate the
+                        # position displacement this fold causes, metres,
+                        # never reset here (`Contact.fold_displacement_m`'s
+                        # own docstring; `plans/group-cohesion-admission-
+                        # gate/plan.md` §4).
+                        contact = fold_target
+                        position_before = contact.position
+                        contact.record(percept)
+                        contact.fold_displacement_m += math.hypot(
+                            contact.position.x - position_before.x,
+                            contact.position.z - position_before.z,
+                        )
+                    else:
+                        contact = Contact.from_percept(self._new_contact_id(), percept)
+                        self._contacts[contact.id] = contact
 
             claimed.setdefault(claim_key, set()).add(contact.id)
             self._observation_id_to_contact_id[observation.id] = contact.id
             touched.append(contact)
         return touched
+
+    def _fold_target_for_ambiguous_candidates(
+        self, passing: list[Contact], percept: Percept
+    ) -> Contact | None:
+        """`ingest`'s resolution for `len(passing) >= 2` (`plans/
+        group-contact-identity/plan.md` Stage 3, "Within-group ambiguity
+        resolution") -- the contact to fold `percept` onto, or `None` to
+        found a new contact (the pre-Stage-3 rule, kept as the fallback in
+        every case this method does not narrow).
+
+        1. **Air-defence carve-out, D6.** If *any* passing candidate's
+           believed classification resolves to an `op_class` in
+           `AIR_DEFENSE_OP_CLASSES`, returns `None` unconditionally -- a
+           visible duplicate is the safe direction for a possible threat;
+           a wrong fold is not. Resolved via `belief.classification.
+           parent_class_of`, **never** `perception.object_model.
+           profile_for` (amendment A3 to the plan, correcting its own body
+           text): `profile_for` keyword-matches DCS type designations, so a
+           *class*-level belief -- which carries the bare `OP_*` string
+           itself, and is what a contact holds before it is identified to
+           type, i.e. most of the time at range -- matches no keyword and
+           falls into the default bucket. `parent_class_of` is the
+           resolver this project settled on for exactly this gap
+           (`BL-B47`), and it is the one this method must use or the
+           carve-out silently fails to fire for most real SAM contacts.
+        2. **Within-group fold, D5 at contact grain.** Otherwise, if every
+           passing candidate is currently a member of one and the same
+           `Group` (`GroupStore.group_for_contact` -- the pilot-facing
+           *currently observed* view; a candidate this returns `None` for
+           fails the "one and the same" test exactly like a candidate in a
+           different group would), fold onto whichever candidate is
+           nearest `percept`'s implied position, ties broken by lowest
+           contact id -- the same "nearest, then lowest id" shape Stage 1
+           test 6 already applies one level up (clusters choosing among
+           ambiguous *groups*; this is candidates choosing among ambiguous
+           *contacts* inside one already-believed group).
+        3. **Otherwise `None`** -- found a new contact. This is the
+           original Stage 1 rule, preserved exactly where it still earns
+           its place: candidates in different groups, or not grouped at
+           all, where the choice carries real information. See `ingest`'s
+           own docstring and this module's own docstring for why narrowing
+           it only here (not the gate itself) is sound.
+
+        **No-omniscience check**: reads only `Contact.last_class_raw`
+        (believed classification, resolved through the lattice) and
+        `GroupStore.group_for_contact`/`Contact.position` (believed group
+        membership and fused position) -- never a DCS `object_type` or
+        `object_id`. Unchanged boundary."""
+        for candidate in passing:
+            op_class = parent_class_of(candidate.last_class_raw)
+            if op_class is not None and op_class in AIR_DEFENSE_OP_CLASSES:
+                return None
+
+        group_ids: set[str] = set()
+        for candidate in passing:
+            group = self._groups.group_for_contact(candidate.id)
+            if group is None:
+                return None
+            group_ids.add(group.id)
+        if len(group_ids) != 1:
+            return None
+
+        look_position = implied_position(percept)
+        return min(
+            passing,
+            key=lambda candidate: (
+                math.hypot(
+                    candidate.position.x - look_position.x,
+                    candidate.position.z - look_position.z,
+                ),
+                candidate.id,
+            ),
+        )
 
     def _resolve_continuity(self, percept: Percept, now_sim: float) -> Contact | None:
         """The object-permanence shortcut lookup for one percept -- `None`
@@ -1059,6 +1214,8 @@ class ContactStore:
         self,
         now_sim: float,
         ownship: OwnshipState | None = None,
+        *,
+        group_trace_sink: Callable[[Mapping[str, object]], None] | None = None,
     ) -> None:
         """Materialise lifecycle, classification, *and* attention events
         for every known contact as of `now_sim`. For each contact, per event
@@ -1096,6 +1253,12 @@ class ContactStore:
         range-crossing block a no-op (see that block's own docstring). Not
         threaded into any of the five pre-existing blocks above, which have
         no use for ownship position.
+
+        **`group_trace_sink` (BL-12 Stage 1, amendment A4) drives the
+        eighth block alone** -- passed straight to `belief.groups.
+        GroupStore.reconcile`'s own `trace_sink` parameter, keyword-only
+        and `None` by default, a true no-op when absent. See that method's
+        docstring for what gets passed to it and when.
 
         **An eighth, cross-contact block runs once per `tick()` call, after
         every contact's per-contact blocks above** (`plans/
@@ -1489,6 +1652,7 @@ class ContactStore:
                 if certainty_of(contact, now_sim) != "lost"
             ],
             now_sim,
+            trace_sink=group_trace_sink,
         )
 
     @staticmethod

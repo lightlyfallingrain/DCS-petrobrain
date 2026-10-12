@@ -11,6 +11,7 @@ contradiction lockout."""
 from __future__ import annotations
 
 from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     PRESENCE_CLASS,
     ClassificationBelief,
@@ -19,6 +20,7 @@ from belief.classification import (
     new_classification_belief,
     parent_class_of,
 )
+from perception import object_model
 
 
 def _belief(
@@ -295,3 +297,89 @@ def test_promotion_succeeds_again_once_the_lockout_expires() -> None:
     assert outcome.contradicted is False
     assert outcome.classification.level == SpecificityLevel.CLASS
     assert outcome.classification.value == "OP_ARMORED"
+
+
+# --- AIR_DEFENSE_OP_CLASSES, the one copy (BL-B51) --------------------------
+
+
+def test_air_defence_classes_cover_every_air_defence_class_in_the_object_model() -> (
+    None
+):
+    """**The single drift guard for the single set** -- moved here from
+    `tests/test_crew_console.py` when `BL-B51` consolidated three
+    hand-enumerated copies (`belief.groups.AIR_DEFENSE_OP_CLASSES`,
+    `belief.crew_console._AIR_DEFENCE_OP_CLASSES`,
+    `eyesight_view._AIR_DEFENCE_CLASSES`) into
+    `belief.classification.AIR_DEFENSE_OP_CLASSES`.
+
+    It guards the drift that caused the `OP_LRSAM` omission, rather than
+    only that one instance of it. The set is enumerated by hand against
+    `perception.object_model`'s profile tables and nothing connects the
+    two: when they gained a long-range SAM entry, no copy had a way to
+    notice. `object_model` carries no structural air-defence marker to
+    derive the set from (an `ObjectTypeProfile` is a size and an
+    `op_class`, nothing more), so this test matches on the `OP_*` naming
+    instead -- any class whose name says SAM or names a gun system must be
+    covered.
+
+    **`<=`, not `==`, and that distinction is the whole of `BL-B51`.** Two
+    of the three retired copies were effectively pinned against a literal
+    frozenset, which is a change *detector*: it fires when someone edits
+    the set and stays silent when `object_model` grows underneath it,
+    which is the only direction that loses coverage. The companion test
+    below asserts that property directly.
+
+    **Both tables are read, because the second runs only when the first
+    misses**: `_KEYWORD_PROFILES` (70 entries) and
+    `_REPORTING_NAME_KEYWORD_PROFILES` (61), 131 entries in all, carrying
+    9 distinct `op_class` values between them (9 in the first table, 6 in
+    the second, union 9).
+
+    If a future profile entry introduces an air-defence class this pattern
+    does not catch, that is a signal to give `object_model` a real marker,
+    not to loosen the assertion."""
+    profiled_classes = {
+        profile.op_class
+        for _keyword, profile in (
+            *object_model._KEYWORD_PROFILES,
+            *object_model._REPORTING_NAME_KEYWORD_PROFILES,
+        )
+    }
+    air_defence_by_name = {
+        op_class
+        for op_class in profiled_classes
+        if op_class.endswith("SAM") or op_class in {"OP_SPAAG", "OP_ZU23"}
+    }
+
+    assert air_defence_by_name, "naming heuristic matched nothing -- it has gone stale"
+    assert air_defence_by_name <= AIR_DEFENSE_OP_CLASSES
+
+
+def test_the_drift_guard_fires_on_a_new_air_defence_class_and_a_pin_would_not() -> None:
+    """The guard's own red case, as a property rather than a manual
+    mutation someone has to remember to repeat.
+
+    The naming predicate is written out again here rather than imported
+    from the test above, deliberately: sharing it would let a change to
+    the predicate make both tests agree about nothing. The claim is that
+    an air-defence class `AIR_DEFENSE_OP_CLASSES` does not hold fails the
+    `<=` form **and passes the `==` form the retired copies used**, which
+    is why `<=` is the guard and `==` is only a change detector.
+
+    `OP_XLRSAM` is the value `BL-B51` measured with: injecting it as a
+    profile turned `crew_console`'s `<=` test red and left
+    `test_groups.py`'s literal pin green."""
+    profiled_with_a_newcomer = set(AIR_DEFENSE_OP_CLASSES) | {"OP_XLRSAM"}
+    air_defence_by_name = {
+        op_class
+        for op_class in profiled_with_a_newcomer
+        if op_class.endswith("SAM") or op_class in {"OP_SPAAG", "OP_ZU23"}
+    }
+
+    assert "OP_XLRSAM" in air_defence_by_name
+    assert not air_defence_by_name <= AIR_DEFENSE_OP_CLASSES
+    # The `==` form is blind to the same newcomer: it never looks at
+    # `object_model` at all, so it still holds.
+    assert AIR_DEFENSE_OP_CLASSES == frozenset(
+        {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
+    )

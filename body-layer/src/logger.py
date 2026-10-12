@@ -190,7 +190,7 @@ import threading
 import time
 import urllib.error
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TextIO
@@ -236,6 +236,7 @@ from eyesight_view import (
     ground_truth_markers_from_trace,
 )
 from eyesight_view import render_frame as render_eyesight_frame
+from group_trace_log import GroupTraceLogWriter
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
 from perception.gaze import (
@@ -352,6 +353,12 @@ class ConsolePerceptionRunner:
     #: no separate URL/CLI argument, `POST /text/push` lives on the exact
     #: aircraft-layer instance `--aircraft-layer-url` already points at.
     overlay_client: AircraftLayerClient | None = None
+    #: `--group-trace` (`BL-12` Stage 1, amendment A4). `None` (the
+    #: default) is a true no-op, the same posture as `overlay_client`
+    #: above -- `run_once` passes this straight through to `ContactStore.
+    #: tick`'s own `group_trace_sink` keyword, which already defaults to
+    #: `None`, so nothing changes for a run that never sets this field.
+    group_trace_sink: Callable[[Mapping[str, object]], None] | None = None
     #: BL-3's world-model connection/theatre (`plans/bl3-world-enrichment/
     #: plan.md` step 6), set once by `_run_console_poll_loop` at the same
     #: point it already builds `sources` -- both need the same thread-local
@@ -547,7 +554,9 @@ class ConsolePerceptionRunner:
         # a value carried on the contact itself (set from `Percept` in
         # `record()`/`from_percept()`), never a live callback into
         # world-model.
-        self.store.tick(ownship.t_sim, ownship=ownship)
+        self.store.tick(
+            ownship.t_sim, ownship=ownship, group_trace_sink=self.group_trace_sink
+        )
         self.tasks.tick(self.store, ownship.t_sim)
         self.last_t_sim = ownship.t_sim
         if self.overlay_client is not None:
@@ -1942,6 +1951,55 @@ def _per_run_log_paths(
     )
 
 
+def _resolve_group_trace_log_path(
+    group_trace: Path | None, when: float | None = None
+) -> Path | None:
+    """Apply `_per_run_log_paths`'s own policy (stamp, expand `~`, create
+    the parent directory, degrade to `None` on any of `_RESOLVE_FAILURES`
+    rather than crash the sortie) to `--group-trace`, the fourth per-run
+    JSONL log (`BL-12` amendment A4).
+
+    **A sibling function, not a fifth parameter on `_per_run_log_paths`
+    itself.** That function's four-exception guard and "one stamp for all
+    three" framing are exercised by nine existing tests
+    (`tests/test_run_log_paths.py`) written against a three-log arity;
+    widening its signature and return tuple would require rewriting every
+    one of those call sites' unpacking for a mechanical reason that has
+    nothing to do with what they test, which `body-layer/CLAUDE.md`'s
+    "Mechanism and calibration never share a commit" spirit argues against
+    doing inside a Stage-1-review fix. The policy itself -- the thing worth
+    not duplicating by hand -- is the `resolve` closure's logic, reproduced
+    here verbatim rather than factored out, since factoring it out from
+    inside `_per_run_log_paths` would touch that function's body for the
+    same reason widening its signature would.
+
+    The one divergence from "one stamp for all three": this log gets its
+    own `time.time()` call when `when` is `None`, a handful of
+    nanoseconds away from `_per_run_log_paths`'s own default stamp rather
+    than bit-for-bit identical. Both calls happen within the same `main()`
+    invocation before either poll loop starts, so the two timestamps never
+    disagree at the second resolution `RUN_STAMP_FORMAT` actually renders
+    at, in practice -- and an explicit `when` (what every test above
+    passes) makes the two identical by construction regardless."""
+    if group_trace is None:
+        return None
+    stamp_at = time.time() if when is None else when
+    reported_parent = group_trace.parent
+    try:
+        expanded = group_trace.expanduser()
+        reported_parent = expanded.parent
+        stamped = per_run_log_path(expanded, stamp_at)
+        stamped.parent.mkdir(parents=True, exist_ok=True)
+    except _RESOLVE_FAILURES as exc:
+        print(
+            f"group-trace: could not create log directory {reported_parent} "
+            f"({exc}); continuing without this log",
+            file=sys.stderr,
+        )
+        return None
+    return stamped
+
+
 def _configure_logger_for_main() -> None:
     """Give this module's own `logger` (`logging.getLogger(__name__)`,
     above) a level and a handler, so `_log_live_los_coverage_summary`'s
@@ -2212,6 +2270,24 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--group-trace",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per belief.groups.GroupStore.reconcile "
+            "resolution outcome (overlap/property/found/expired) to this "
+            "path -- BL-12 amendment A4, plans/group-contact-identity/"
+            "plan.md. Answers 'how often did a group survive by matching "
+            "remembered properties rather than its own members' -- the "
+            "only way D5's rarity claim and BL-B50's lapse condition "
+            "(membership flipping on consecutive ticks) are checkable from "
+            "an actual sortie rather than from a wrong spoken line in "
+            "flight. Only meaningful with --console or --crew-text (there "
+            "is nothing to join against belief without one of those poll "
+            "loops); defaults off, a true no-op when absent."
+        ),
+    )
+    parser.add_argument(
         "--eyesight-view",
         action="store_true",
         help=(
@@ -2276,6 +2352,8 @@ def main() -> None:
         )
     if args.detection_trace is not None and not (args.console or args.crew_text):
         parser.error("--detection-trace requires --console or --crew-text")
+    if args.group_trace is not None and not (args.console or args.crew_text):
+        parser.error("--group-trace requires --console or --crew-text")
     if args.eyesight_view and not (args.console or args.crew_text):
         parser.error("--eyesight-view requires --console or --crew-text")
     if args.belief_truth_log is not None and not (args.console or args.crew_text):
@@ -2366,10 +2444,15 @@ def main() -> None:
         belief_truth_log=args.belief_truth_log,
         speech_log=args.speech_log,
     )
+    # BL-12 amendment A4: a fourth per-run log, resolved by its own sibling
+    # function rather than a fifth `_per_run_log_paths` parameter -- see
+    # `_resolve_group_trace_log_path`'s own docstring for why.
+    args.group_trace = _resolve_group_trace_log_path(args.group_trace)
     for label, rolled in (
         ("detection-trace", args.detection_trace),
         ("belief-truth-log", args.belief_truth_log),
         ("speech-log", args.speech_log),
+        ("group-trace", args.group_trace),
     ):
         if rolled is not None:
             print(f"{label}: writing {rolled}", file=sys.stderr)
@@ -2398,6 +2481,11 @@ def main() -> None:
             aircraft_client=aircraft_client,
             output=None,
             mission_phase_tracker=mission_phase_tracker,
+            group_trace_sink=(
+                GroupTraceLogWriter(args.group_trace).write
+                if args.group_trace is not None
+                else None
+            ),
         )
         # One AudioAdapterClient instance, shared by whichever of --speech-
         # audio (push_speech, outbound) / --speech-input (get_transcripts,
@@ -2463,6 +2551,11 @@ def main() -> None:
             output=None,
             overlay_client=aircraft_client if args.overlay else None,
             mission_phase_tracker=mission_phase_tracker,
+            group_trace_sink=(
+                GroupTraceLogWriter(args.group_trace).write
+                if args.group_trace is not None
+                else None
+            ),
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(

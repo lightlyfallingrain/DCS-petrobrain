@@ -115,7 +115,15 @@ def _make_observation(
     id: str = "OBS_1",
     source: str = "proxy_heuristic",
     classification_raw: str = "BMP",
+    bearing_deg: float = 32.0,
+    range_m: float = 3100.0,
 ) -> Observation:
+    """`bearing_deg`/`range_m` default to every pre-existing caller's
+    implied shared position -- added (BL-12 Stage 3) so a caller that
+    needs a spatially *distinct* percept (not ambiguous against an
+    existing contact's gate) can say so explicitly, rather than relying
+    on every other observation in a test happening to share this
+    fixture's one default position."""
     return Observation(
         id=id,
         contact_id=None,
@@ -123,8 +131,8 @@ def _make_observation(
         t_wall=0.0,
         source=source,
         classification_raw=classification_raw,
-        bearing_deg=32.0,
-        range_m=3100.0,
+        bearing_deg=bearing_deg,
+        range_m=range_m,
         ownship_at_observation=ownship,
         derived_world_position=None,
         provenance="test",
@@ -315,6 +323,57 @@ def test_console_runner_without_overlay_client_pushes_nothing() -> None:
     # ...it is simply never mirrored anywhere, which is exactly the point.
 
 
+def test_console_runner_group_trace_sink_defaults_to_none_and_is_a_true_noop() -> None:
+    """`--group-trace` (`BL-12` amendment A4): `group_trace_sink` defaults
+    to `None`, the same posture as `overlay_client` above, and `run_once`
+    must not fail passing it straight through to `ContactStore.tick`."""
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+    )
+
+    runner.run_once()
+
+    assert runner.group_trace_sink is None
+
+
+def test_console_runner_threads_group_trace_sink_into_store_tick() -> None:
+    """`run_once` must pass its own `group_trace_sink` field to `self.
+    store.tick`'s `group_trace_sink` keyword, not drop it on the floor --
+    the one line this wiring actually adds. Spies on `ContactStore.tick`
+    rather than engineering a real cluster-resolution scenario (`tests/
+    test_groups.py` already owns that geometry), since what this module is
+    responsible for is the plumbing, not `GroupStore.reconcile`'s own
+    logic."""
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    received: list[Any] = []
+
+    def fake_sink(record: Any) -> None:
+        received.append(record)
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+        group_trace_sink=fake_sink,
+    )
+    original_tick = runner.store.tick
+    tick_kwargs: list[Any] = []
+
+    def spying_tick(*args: Any, **kwargs: Any) -> None:
+        tick_kwargs.append(kwargs.get("group_trace_sink"))
+        original_tick(*args, **kwargs)
+
+    runner.store.tick = spying_tick  # type: ignore[method-assign]
+
+    runner.run_once()
+
+    assert tick_kwargs == [fake_sink]
+
+
 def test_console_runner_pushes_one_line_per_newly_materialized_event() -> None:
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
@@ -351,7 +410,23 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
     starting at 1, and this test uses a single fresh store -- `CONTACT_1`
     for the batch's first observation, `CONTACT_2` for its second, `CONTACT_3`
     for the follow-up poll's one observation), since `fail_on` must be
-    configured before the call that assigns those ids."""
+    configured before the call that assigns those ids.
+
+    **The follow-up poll's observation is given its own, distinct
+    bearing/range (BL-12 Stage 3, 2026-10-12)** -- every other call here
+    shares `_make_observation`'s default position by convenience, which
+    this test does not care about (it is testing push-failure isolation,
+    not ambiguity resolution), but Stage 3 does: at the shared default
+    position, "Mi-8 helicopter" resolves to no `op_class`
+    (`object_model.profile_for` does not recognise the keyword), so it is
+    class-*unknown* rather than incompatible against both `CONTACT_1`
+    (BMP-2) and `CONTACT_2` (Ural truck) -- genuinely ambiguous between
+    them. Those two, at the same shared position, cluster into one group
+    on the first poll's `tick()`, so Stage 3 branch 2 would fold this
+    observation onto the nearest of them instead of founding `CONTACT_3`,
+    which is not what this test is checking and would make the second
+    assertion below fail for a reason unrelated to overlay-push
+    isolation. A distinct position keeps the two questions separate."""
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
     failing_text = "CONTACT_1: CONTACT_DETECTED, BMP-2, observed, currently visible."
@@ -388,7 +463,11 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
         FakeSource(
             [
                 _make_observation(
-                    ownship, id="OBS_2", classification_raw="Mi-8 helicopter"
+                    ownship,
+                    id="OBS_2",
+                    classification_raw="Mi-8 helicopter",
+                    bearing_deg=200.0,
+                    range_m=9000.0,
                 )
             ]
         )

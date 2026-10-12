@@ -1,5 +1,15 @@
 # BL-B24 — Ambiguous reacquisition candidates after a long gap
 
+> **Recheck note added 2026-10-12 (`[[BL-12]]` DoD).** `[[BL-12]]`'s plan states Stage 3 "dissolves
+> `BL-B24` directly" and cites this entry's own 554-contacts-for-444-objects number as Stage 3's
+> re-measurable acceptance criterion — but `plans/group-contact-identity/implementation.md` never
+> re-measures against it, and this entry was not otherwise touched during that milestone. Left
+> **open** rather than closed on the strength of a design claim: BL-12's group-level matching
+> changes `ingest`'s ambiguity policy (D5) in exactly the mechanism this entry's two-close-contacts
+> case runs through, so it plausibly dissolves it, but nobody has re-run this entry's own scenario
+> against the merged code to confirm. Re-check against a live sortie log (or this entry's own
+> two-contact fixture shape) before closing.
+
 - [ ] **BL-B24 — Two close contacts can become ambiguous reacquisition candidates for each other
   after a long gap.** #status/open Found 2026-10-02 while fixing [[BL-B23]], **pre-existing and not introduced by
   it**; the Reviewer recommended filing it for discoverability rather than leaving it only in a

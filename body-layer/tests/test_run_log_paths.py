@@ -280,3 +280,39 @@ def test_a_tilde_path_lands_under_the_home_directory(
     assert trace == home / f"trace-{_STAMP}.jsonl"
     assert (truth, speech) == (None, None)
     assert list(cwd.iterdir()) == []
+
+
+# --- `_resolve_group_trace_log_path` (BL-12 amendment A4's sibling function,
+# not a fourth parameter on `_per_run_log_paths` -- see its own docstring) --
+
+
+def test_group_trace_none_stays_none() -> None:
+    assert logger_module._resolve_group_trace_log_path(None, when=_WHEN) is None
+
+
+def test_group_trace_rolls_and_creates_its_parent(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    assert not logs.exists()
+
+    rolled = logger_module._resolve_group_trace_log_path(
+        logs / "group-trace.jsonl", when=_WHEN
+    )
+
+    assert rolled == logs / f"group-trace-{_STAMP}.jsonl"
+    assert logs.is_dir()
+
+
+def test_group_trace_degrades_rather_than_raising(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same policy as `_per_run_log_paths`'s own logs: an unwritable parent
+    costs this one log, not the sortie."""
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+
+    rolled = logger_module._resolve_group_trace_log_path(
+        blocker / "group-trace.jsonl", when=_WHEN
+    )
+
+    assert rolled is None
+    assert "group-trace: could not create log directory" in capsys.readouterr().err

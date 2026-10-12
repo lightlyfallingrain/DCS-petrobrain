@@ -25,10 +25,9 @@ from belief import enrichment as enrichment_module
 from belief.attention import RelativeSector, Sector
 from belief.audio_client import AudioAdapterError
 from belief.brain_client import BrainLayerClient
-from belief.classification import PRESENCE_CLASS
+from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import (
-    _AIR_DEFENCE_OP_CLASSES,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -51,7 +50,6 @@ from belief.voice_commands import (
     CONFIRM_LATE_ANSWER_GRACE_S,
     CONFIRM_WINDOW_S,
 )
-from perception import object_model
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -1980,9 +1978,12 @@ def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
 def test_watch_nearest_air_defence_selects_a_long_range_sam(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression, 2026-09-24: `OP_LRSAM` was absent from
-    `_AIR_DEFENCE_OP_CLASSES`, so an S-300 -- long-range SAM, unambiguously
-    air defence -- could never be selected by "watch nearest air defence".
+    """Regression, 2026-09-24: `OP_LRSAM` was absent from the air-defence
+    class set -- then `crew_console`'s own local `_AIR_DEFENCE_OP_CLASSES`,
+    since `BL-B51` the shared `belief.classification.
+    AIR_DEFENSE_OP_CLASSES` -- so an S-300, long-range SAM and
+    unambiguously air defence, could never be selected by "watch nearest
+    air defence".
 
     This is the worst contact to have missed. The vision calibration found
     the S-300's tracking-radar mast detectable out to 8.89 km, further than
@@ -2016,38 +2017,35 @@ def test_watch_nearest_air_defence_selects_a_long_range_sam(
     assert tank.attention == "normal"
 
 
-def test_air_defence_classes_cover_every_air_defence_class_in_the_object_model() -> (
-    None
-):
-    """Guards the drift that caused the `OP_LRSAM` omission above, rather
-    than only the one instance of it.
+def test_watch_nearest_air_defence_resolves_through_the_one_shared_set() -> None:
+    """`BL-B51`: the `<=` drift guard that used to live here moved to
+    `tests/test_classification.py::test_air_defence_classes_cover_every_
+    air_defence_class_in_the_object_model` with the set itself, so it is
+    not duplicated.
 
-    `_AIR_DEFENCE_OP_CLASSES` is enumerated by hand against
-    `perception.object_model`'s profile table, and nothing connects the two:
-    when that table gained a long-range SAM entry, this set had no way to
-    notice. `object_model` carries no structural air-defence marker to
-    derive the set from (an `ObjectTypeProfile` is a size and an `op_class`,
-    nothing more), so this test matches on the `OP_*` naming instead -- any
-    class whose name says SAM or names a gun system must be covered.
+    What stays here is this command's own wiring, asserted as an
+    equivalence rather than as a provenance claim: the predicate behind
+    "watch nearest air defence" agrees with `AIR_DEFENSE_OP_CLASSES`
+    across that set's own boundary in **both** directions -- a class in
+    the set is air defence to this command, and a profiled class outside
+    it is not. **It cannot distinguish reading the shared set from
+    reading an identical local copy**, and does not claim to -- no test
+    asserts that, only `BL-B51`'s grep over `src`/`tests`/`tools` did.
+    What this one buys is that the command's verdict tracks the set's
+    *contents*, which is what breaks first if either side drifts."""
+    console_predicate = CrewConsole._believed_air_defence
 
-    If a future profile entry introduces an air-defence class this pattern
-    does not catch, that is a signal to give `object_model` a real marker,
-    not to loosen the assertion."""
-    profiled_classes = {
-        profile.op_class
-        for _keyword, profile in (
-            *object_model._KEYWORD_PROFILES,
-            *object_model._REPORTING_NAME_KEYWORD_PROFILES,
+    def verdict(value: str) -> bool:
+        return console_predicate(
+            cast(CrewConsole, None),
+            {"classification": {"level": "class", "value": value}},
         )
-    }
-    air_defence_by_name = {
-        op_class
-        for op_class in profiled_classes
-        if op_class.endswith("SAM") or op_class in {"OP_SPAAG", "OP_ZU23"}
-    }
 
-    assert air_defence_by_name, "naming heuristic matched nothing -- it has gone stale"
-    assert air_defence_by_name <= _AIR_DEFENCE_OP_CLASSES
+    for op_class in sorted(AIR_DEFENSE_OP_CLASSES):
+        assert verdict(op_class), op_class
+    for op_class in ("OP_ARMORED", "OP_TRUCK", "OP_INFANTRY"):
+        assert op_class not in AIR_DEFENSE_OP_CLASSES
+        assert not verdict(op_class), op_class
 
 
 def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
@@ -4126,11 +4124,14 @@ def _in_scope(
     **Asserted against the scope, not the spoken sentence, deliberately.**
     The enumerated answer goes through `render_group_full_disclosure`,
     whose rule is to name a group's *full roster*, so an in-scope contact
-    pulls its out-of-scope group-mates into the text -- measured: three
-    contacts at two o'clock at 1/3/7 km cohere into one `Group` and
-    `report two o'clock near` says "Armor, truck and infantry". A spoken
-    assertion would therefore be testing `belief.groups`' cohesion, not
-    the filter. Stage 3's summary (`render_report_summary`) is computed
+    pulls its out-of-scope group-mates into the text. A spoken assertion
+    would therefore be testing `belief.groups`' cohesion, not the filter
+    -- and the cohesion it would have tested has since moved: this
+    docstring cited the 1/3/7 km spread of `_three_banded_contacts`
+    cohering into one `Group`, which was `BL-B48`'s infantry bridge and
+    stopped being true at BL-12 Stage 0a. The leak itself is unchanged;
+    `_cohering_contacts_across_a_band_boundary` is the fixture that still
+    produces it. Stage 3's summary (`render_report_summary`) is computed
     from this same in-scope set, which is what removes the leak -- see
     `test_slotted_report_summary_does_not_leak_an_out_of_scope_group_
     member`."""
@@ -4166,6 +4167,64 @@ def test_report_band_bounds_mirror_audio_adapters_band_names() -> None:
     assert _REPORT_BAND_BOUNDS_M["near"] == (0.0, 2000.0)
     assert _REPORT_BAND_BOUNDS_M["medium"] == (2000.0, 5000.0)
     assert _REPORT_BAND_BOUNDS_M["far"] == (5000.0, float("inf"))
+
+
+def _cohering_contacts_across_a_band_boundary(now_sim: float = 0.0) -> ContactStore:
+    """Three contacts at two o'clock that genuinely cohere into one
+    `Group` while straddling the near/medium band boundary -- armor just
+    inside 2 km, truck and infantry just outside it.
+
+    **This exists because `_three_banded_contacts` stopped forming a
+    group.** That fixture's 1/3/7 km spread only ever cohered through
+    `BL-B48`'s unbounded infantry edge, which BL-12 Stage 0a removed, so
+    it can no longer demonstrate a roster leak at all. The spacing here is
+    inside the real per-pair backstops instead (armor<->truck ~100 m
+    against `20.0 * mean(7.0, 6.0) = 130` m; truck<->infantry ~70 m
+    against `20.0 * mean(6.0, 1.8) = 78` m), so the group forms on the
+    ordinary rule with no eager latitude anywhere in it -- which makes it
+    a *better* fixture for the leak than the original was.
+
+    The band split is in `range_m`, which `_enrichment_context`'s
+    passthrough `project_terrain_aware` makes the reported range exactly:
+    armor 1 950 m (near, `< 2 000`), truck 2 050 m and infantry 2 120 m
+    (medium). Member spacing is the `range_m` *difference*, because all
+    three sit on one radial -- which is why 100 m / 70 m spacing and a
+    2 km band boundary coexist here at all.
+
+    `_three_banded_contacts` is left exactly as it was: its own two tests
+    assert band filtering and band labelling and never read a group."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_NEAR",
+                t_sim=now_sim,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1950.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_MEDIUM",
+                t_sim=now_sim,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=2050.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_FAR",
+                t_sim=now_sim,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                clock=2,
+                range_m=2120.0,
+            ),
+        ],
+        now_sim=now_sim,
+    )
+    store.tick(now_sim=now_sim)
+    return store
 
 
 def _three_banded_contacts(now_sim: float = 0.0) -> ContactStore:
@@ -4616,15 +4675,18 @@ def test_slotted_report_summary_does_not_leak_an_out_of_scope_group_member(
     `render_group_full_disclosure` names a group's *full roster* by
     design, so while the pull site enumerated groups, a filtered query
     whose scope held one member of a group spoke that group's
-    out-of-scope members too: these three contacts cohere into one
-    `Group`, and `report two o'clock near` answered *"Armor, truck and
-    infantry, 2 o'clock, 1 kilometre."* -- naming a truck at 3 km and
-    infantry at 7 km to a pilot who asked about *near*.
+    out-of-scope members too: three cohering contacts straddling the
+    near/medium boundary, and `report two o'clock near` answered by
+    naming the truck and the infantry outside the band to a pilot who
+    asked about *near*.
 
     The summary is computed from the in-scope facts, so it cannot leak by
     construction. The group is asserted to actually exist, because
-    without it this test would pass while exercising nothing."""
-    store = _three_banded_contacts()
+    without it this test would pass while exercising nothing -- and that
+    guard is what caught the fixture going hollow when BL-12 Stage 0a
+    removed the `BL-B48` infantry bridge the old 1/3/7 km fixture had
+    cohered through. See `_cohering_contacts_across_a_band_boundary`."""
+    store = _cohering_contacts_across_a_band_boundary()
     assert len(store.groups) == 1, "fixture must reproduce the cohering group"
     assert len(store.groups[0].member_contact_ids) == 3
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))

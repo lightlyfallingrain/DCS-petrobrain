@@ -17,7 +17,11 @@ import pytest
 
 from belief import enrichment as enrichment_module
 from belief import speech as speech_module
-from belief.classification import SpecificityLevel, new_classification_belief
+from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
+    SpecificityLevel,
+    new_classification_belief,
+)
 from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
@@ -27,7 +31,6 @@ from belief.events import (
     CONTACT_MOTION_CHANGED,
     Event,
 )
-from belief.groups import AIR_DEFENSE_OP_CLASSES
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import (
     REPORT_SUMMARY_MAX_WORDS,
@@ -3011,3 +3014,152 @@ def test_render_group_full_disclosure_ignores_the_delta_taxonomy() -> None:
 
     assert second is not None
     assert second.text == first.text
+
+
+# --- BL-12 Stage 4: the spoken direction clause (D7) -------------------
+
+
+def test_render_group_disclosure_speaks_moving_direction_when_established() -> None:
+    """D7's payoff, minimal form (no enrichment -- the clock/range clause
+    below exercises it combined): `Group.movement_state == "moving"` plus
+    an established heading speaks a trailing `", moving {compass}"`
+    clause."""
+    import dataclasses
+
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+    group = dataclasses.replace(
+        group, movement_state="moving", heading_deg=0.0, heading_confidence=1.0
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "Group, moving north."
+
+
+def test_render_group_disclosure_moving_direction_combines_with_clock_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D7's full worked line: composition, clock/range, then direction --
+    *"that column, now 2 o'clock, three kilometres, still moving north"*,
+    minus the "on the road" half (Stage 5, out of scope here)."""
+    import dataclasses
+
+    enrichment = _enrichment_context(monkeypatch)
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+    group = dataclasses.replace(
+        group, movement_state="moving", heading_deg=0.0, heading_confidence=1.0
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0, enrichment=enrichment)
+
+    assert speech is not None
+    assert "o'clock, " in speech.text
+    assert speech.text.endswith(", moving north.")
+
+
+def test_render_group_disclosure_extent_guard_suppresses_the_direction_clause() -> None:
+    """Amendment A6's Stage 4 row: the extent guard is unconditional, not a
+    fallback -- a group wider than `_GROUP_SPOKEN_EXTENT_GUARD_M` does not
+    get a spoken heading even with `movement_state == "moving"` and an
+    established `heading_deg`. 1 200 m is the pinned `tests/test_groups.py
+    ::test_the_eager_cap_still_chains_a_long_infantry_line` chained-infantry
+    extent -- exactly the case Stage 0b's pair backstop does not catch.
+
+    No `EnrichmentContext` is supplied here, so `nearest_relative_now` is
+    `None` regardless of extent and this test alone cannot see whether the
+    clock/range clause is also gated -- see
+    `test_render_group_disclosure_extent_guard_suppresses_the_clock_range_
+    clause_too` below for that, which is why this one is kept rather than
+    folded into it: both must hold, and the reviewer-found gap was exactly
+    this test's blind spot."""
+    import dataclasses
+
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+    group = dataclasses.replace(
+        group,
+        movement_state="moving",
+        heading_deg=0.0,
+        heading_confidence=1.0,
+        extent_m=1200.0,
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert "moving" not in speech.text
+
+
+def test_render_group_disclosure_extent_guard_suppresses_the_clock_range_clause_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BL-12 Stage 4 review, required fix 1: amendment A6's own words are
+    *"do not speak a heading **or a single bearing** for a group wider than
+    one believable bearing"* -- A2.2 names bearing, range, and direction as
+    the three facts that are false for a wide group, not direction alone.
+    A real `EnrichmentContext` is supplied (unlike the test above) so
+    `nearest_relative_now` is populated and the clock/range clause would
+    fire if it were not gated -- this is the exact pinned 1 200 m
+    chained-infantry scene the reviewer used to show `render_group_
+    disclosure` returning "Group, 12 o'clock, very close." before this fix."""
+    import dataclasses
+
+    enrichment = _enrichment_context(monkeypatch)
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+    group = dataclasses.replace(
+        group,
+        movement_state="moving",
+        heading_deg=0.0,
+        heading_confidence=1.0,
+        extent_m=1200.0,
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0, enrichment=enrichment)
+
+    assert speech is not None
+    assert "o'clock" not in speech.text
+    assert "moving" not in speech.text
+    assert speech.text == "Group."
+
+
+def test_render_group_disclosure_stopped_group_speaks_no_direction() -> None:
+    """`movement_state == "stopped"` never speaks a direction, even if a
+    stale `heading_deg` were somehow still set -- the clause's own gate
+    checks `movement_state`, not just `heading_deg is not None`."""
+    import dataclasses
+
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+    group = dataclasses.replace(
+        group, movement_state="stopped", heading_deg=0.0, heading_confidence=1.0
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert "moving" not in speech.text
+
+
+def test_render_group_full_disclosure_also_speaks_the_direction_clause() -> None:
+    """The pull ("report") path shares `_render_full_group_composition`
+    with the push path, so the direction clause applies there too."""
+    import dataclasses
+
+    store, group = _cohering_group_store([("OP_ARMORED", 2), ("OP_TRUCK", 2)])
+    group = dataclasses.replace(
+        group, movement_state="moving", heading_deg=90.0, heading_confidence=1.0
+    )
+
+    speech = render_group_full_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text.endswith(", moving east.")

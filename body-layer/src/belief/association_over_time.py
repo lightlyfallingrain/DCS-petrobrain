@@ -9,11 +9,36 @@ questions and neither should stand in for the other.
 
 Gate = spatial (hard) **and** class-not-incompatible (hard). Both must pass
 for a percept to be a *candidate* merge target; the caller (`belief.
-contacts.ContactStore.ingest`) then applies the plan's Stage 1 decision
-rule: exactly one candidate passing every gate -> merge; zero -> new
-contact; **two or more -> new contact** (ambiguity must produce a visible
-duplicate, never a guessed merge -- no best-match/highest-score tiebreak
-exists in this module, by design).
+contacts.ContactStore.ingest`) then applies the decision rule: exactly one
+candidate passing every gate -> merge; zero -> new contact. **This gate
+itself never ranks candidates by a best-match/highest-score tiebreak, by
+design, and that does not change below** -- what changed is what the
+caller does with *two or more* passing candidates.
+
+**Two-or-more was an unconditional new contact through `plans/
+pb2-contact-memory/plan.md` Stage 1** (ambiguity must produce a visible
+duplicate, never a guessed merge). `plans/group-contact-identity/plan.md`
+Stage 3 narrows that rule, in `ContactStore._fold_target_for_ambiguous_
+candidates` -- not here, and not by adding a tiebreak to this gate: a
+class-level air-defence candidate still forces a new contact
+unconditionally (D6, the one case ambiguity must not resolve toward
+memory, because a wrongly-continued SAM suppresses a threat warning,
+rather than merely mislabelling a contact); otherwise, when every passing
+candidate is already believed to be a member of **one and the same**
+`belief.groups.Group`, the percept folds onto whichever candidate is
+nearest, ties broken by lowest contact id. The old invariant survives
+exactly where it still earns its place -- candidates in different groups,
+or not grouped at all, where the choice carries real information -- and is
+still decided here, by this gate, with no change to its formulas. The
+premise this narrows was an unwritten density assumption (not this gate's
+geometry): at the measured ~16m median nearest-neighbour spacing against a
+gate that inflates to hundreds of metres within tens of seconds, no radius
+both separates genuinely distinct objects and tolerates normal position
+drift, so founding a third contact in the within-group case does not
+preserve information -- it destroys the count, which is the thing the
+pilot actually hears. See `_fold_target_for_ambiguous_candidates`'s own
+docstring for the full rule and `plans/group-contact-identity/plan.md`
+Stage 3 for the decision.
 
 **The presence-tier veto that used to live here is gone**
 (`plans/group-contact-model/plan.md` Stage 2). It was an interim fix
@@ -210,7 +235,12 @@ from typing import TYPE_CHECKING, Final
 
 from belief.classification import class_compatibility
 from belief.percept import Percept
-from belief.position_belief import Covariance2D, covariance_from_uncertainty
+from belief.position_belief import (
+    Covariance2D,
+    covariance_from_uncertainty,
+    plausible_speed_mps,
+)
+from perception import object_model
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.source import PositionUncertainty
 
@@ -300,14 +330,45 @@ def _percept_covariance(percept: Percept) -> Covariance2D:
     )
 
 
+def contact_growth_rate_mps(contact: Contact) -> float:
+    """The per-contact plausible-speed bound `_contact_covariance` inflates
+    by -- `plans/group-contact-identity/plan.md` Stage 2a. Resolved from
+    `contact.last_class_raw` (believed classification, never a DCS
+    `object_type`) via `object_model.profile_for`, the same resolution
+    `belief.groups._profile_for_contact` already applies for composition/
+    installation -- so a contact's own class and its `installation_
+    component` flag are read through one path, not two.
+
+    Exposed (not a private `_`-prefixed helper) so `belief.contacts.
+    Contact.record` can resolve the identical rate before mutating
+    `last_class_raw`, and thread it through `position_belief.fold_position`/
+    `clamp_to_detection_envelope` as well -- the plan's "one table" rule:
+    the gate's own inflation and `belief.groups.group_matches`'s
+    displacement bound must read `position_belief.plausible_speed_mps`
+    through the same resolution shape, never a second copy of it."""
+    profile = object_model.profile_for(contact.last_class_raw)
+    return plausible_speed_mps(
+        profile.op_class, installation_component=profile.installation_component
+    )
+
+
 def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:
     """The contact side of the gate's covariance sum: `Contact.position`'s
     own real, fused, anisotropic covariance (`plans/precise-position-belief/
     plan.md` Stage 4), inflated for elapsed motion since `contact.
     last_seen_sim`. Pre-Stage-4 this read an isotropic proxy built from the
     scalar `last_position_uncertainty_m` -- now that `Contact` holds a real
-    2x2 covariance, that proxy is gone; this function reads it directly."""
-    return contact.position.covariance.inflated(elapsed_s)
+    2x2 covariance, that proxy is gone; this function reads it directly.
+
+    **Stage 2a**: the inflation rate is now `contact_growth_rate_mps(
+    contact)`, not the bare module default -- see that function and
+    `position_belief.plausible_speed_mps`'s own docstring. Stage 2a's own
+    table returns `GATE_GROWTH_RATE_MPS` for every class, so this is
+    provably no behaviour change yet; Stage 2b is what makes the rate
+    actually vary."""
+    return contact.position.covariance.inflated(
+        elapsed_s, contact_growth_rate_mps(contact)
+    )
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:

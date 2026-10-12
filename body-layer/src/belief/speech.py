@@ -198,8 +198,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from belief.attention import Attention, effective_attention
-from belief.classification import parent_class_of
+from belief.attention import (
+    _SECTOR_CENTER_DEG,
+    SECTORS,
+    Attention,
+    Sector,
+    effective_attention,
+)
+from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -213,10 +219,11 @@ from belief.events import (
     CONTACT_REACQUIRED,
     Event,
 )
-from belief.groups import AIR_DEFENSE_OP_CLASSES, Group
+from belief.groups import Group
 from belief.threat import envelope_for
 from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
+from perception.geometry import angular_delta_deg
 
 Template = Literal["readback", "contact_report", "lifecycle_event", "threat_reaction"]
 Urgency = Literal["normal", "critical"]
@@ -1457,6 +1464,63 @@ def _format_range_km(range_m: float) -> str:
     return f"{range_str} {unit}"
 
 
+#: BL-12 Stage 4's extent guard (`plans/group-contact-identity/plan.md`
+#: amendment A6's Stage 4 row): a group wider than this does not get a
+#: spoken heading, or a single bearing, at all -- unconditional, not a
+#: fallback for a declined option. **Same derivation, same value, as
+#: `belief.groups.GROUP_REPORTING_EAGER_COHESION_CAP_M`, kept as its own
+#: constant because the two ask different questions** (that one bounds a
+#: *pair's* cohesion at cluster time; this one bounds what a *speech*-time
+#: claim may cover) -- the identical "equal by coincidence, not by
+#: derivation" posture that constant's own docstring already states for
+#: its sibling, `GROUP_REPORTING_INSTALLATION_COHESION_CAP_M`.
+#:
+#: Derived here, not transcribed, since this module owns `_format_range_km`
+#: directly: that function rounds a spoken range to the nearest 0.5 km, so
+#: *"that group, two o'clock, three kilometres"* is a claim with 500 m of
+#: resolution -- a group wider than that contains members the sentence
+#: would place in different buckets, which is the point a single bearing
+#: stops being true of all of them.
+#:
+#: **Why a guard is needed even with Stage 0b's `GROUP_REPORTING_EAGER_
+#: COHESION_CAP_M` already in force.** That cap bounds a *pair*, not a
+#: cluster's total span, and single-link chaining still permits a wider
+#: group -- pinned by `tests/test_groups.py::
+#: test_the_eager_cap_still_chains_a_long_infantry_line` (four infantry at
+#: 400 m spacing, 1 200 m extent, one group). 1 200 m is 2.4 of this
+#: guard's own 500 m buckets, so that pinned test's group is exactly the
+#: case this guard exists to catch at speech time.
+_GROUP_SPOKEN_EXTENT_GUARD_M: Final[float] = 500.0
+
+#: `heading_deg` -> compass word, for Stage 4's spoken direction clause --
+#: nearest of the same eight sectors `belief.attention.SECTORS`/`_SECTOR_
+#: CENTER_DEG` already tile the compass into, using `perception.geometry.
+#: angular_delta_deg` for the circular nearest-neighbour comparison rather
+#: than a fresh one. Words mirror `crew_console._SECTOR_SCAN_LABELS`
+#: exactly -- a duplicated vocabulary, not a new one, since `speech.py`
+#: cannot import `crew_console.py` (the reverse import already exists).
+_COMPASS_WORDS: dict[Sector, str] = {
+    "N": "north",
+    "NE": "northeast",
+    "E": "east",
+    "SE": "southeast",
+    "S": "south",
+    "SW": "southwest",
+    "W": "west",
+    "NW": "northwest",
+}
+
+
+def _compass_word(heading_deg: float) -> str:
+    """Nearest of the eight compass words to `heading_deg` -- Stage 4's
+    spoken direction clause (`_render_full_group_composition`)."""
+    nearest = min(
+        SECTORS,
+        key=lambda sector: angular_delta_deg(heading_deg, _SECTOR_CENTER_DEG[sector]),
+    )
+    return _COMPASS_WORDS[nearest]
+
+
 def _round_enrichment_fragment(text: str) -> str:
     """Round a `SemanticFact.text` fragment's trailing `"(NNNm)"` distance to
     the nearest 100 m, prefixed with `~` and spelled out for TTS
@@ -1914,7 +1978,7 @@ def _is_differentiated(member_facts: Sequence[dict[str, object]]) -> bool:
 
 def _is_air_defence(facts: dict[str, object]) -> bool:
     """Whether `facts`' believed classification resolves to one of
-    `belief.groups.AIR_DEFENSE_OP_CLASSES` -- the delta taxonomy's
+    `belief.classification.AIR_DEFENSE_OP_CLASSES` -- the delta taxonomy's
     "more air defence is always news" test (`plans/
     group-cohesion-redesign/plan.md` §4 Correction 2). Reads the
     classification's raw *believed* value, never a DCS `object_type`.
@@ -2128,6 +2192,7 @@ def _render_full_group_composition(
     member_facts: list[dict[str, object]],
     leading_index: int | None,
     differentiated: bool,
+    group: Group,
 ) -> tuple[str, str]:
     """The full-roster disclosure composition -- `(text, content_signature)`
     before either has its trailing `"."`/clock-range/watched clause
@@ -2139,7 +2204,13 @@ def _render_full_group_composition(
     below (the "report" pull path, which always wants the full roster and
     must never see a delta or a silent `None` -- see that function's own
     docstring for why the two paths cannot share one taxonomy-gated
-    function)."""
+    function).
+
+    **`group` is BL-12 Stage 4's addition** (`plans/group-contact-identity/
+    plan.md` Stage 4, D7's spoken direction) -- read only for the trailing
+    `", moving {compass}"` clause below. Not touched by `member_facts`/
+    `leading_index`/`differentiated` or anything above this comment, which
+    is unchanged from before Stage 4."""
     if leading_index is not None:
         leading_classification = member_facts[leading_index]["classification"]
         assert isinstance(leading_classification, dict)
@@ -2177,6 +2248,15 @@ def _render_full_group_composition(
     # differ only by the clock/range clause itself.
     content_signature = text
 
+    # The extent guard (amendment A6's Stage 4 row) is unconditional: *"do
+    # not speak a heading or a single bearing for a group wider than one
+    # believable bearing"* -- A2.2 names bearing, range, and direction as
+    # the three facts that are false for a wide group, not direction alone.
+    # So this one condition gates both the clock/range clause below and the
+    # direction clause further down; a group over the threshold gets
+    # composition only, with nothing positional appended at all.
+    within_spoken_extent = group.extent_m <= _GROUP_SPOKEN_EXTENT_GUARD_M
+
     nearest_relative_now: dict[str, object] | None = None
     nearest_range_m = math.inf
     for facts in member_facts:
@@ -2188,9 +2268,22 @@ def _render_full_group_composition(
         if range_m < nearest_range_m:
             nearest_range_m = range_m
             nearest_relative_now = relative_now
-    if nearest_relative_now is not None:
+    if nearest_relative_now is not None and within_spoken_extent:
         clock = nearest_relative_now["clock_position"]
         text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
+
+    # BL-12 Stage 4, D7's spoken direction ("that column, now 2 o'clock,
+    # three kilometres, still moving north on the road") -- the "on the
+    # road" half is Stage 5 (road-following), out of scope here; this
+    # clause speaks only the compass direction.
+    if (
+        group.movement_state == "moving"
+        and group.heading_deg is not None
+        and within_spoken_extent
+    ):
+        direction_word = _compass_word(group.heading_deg)
+        text += f", moving {direction_word}"
+        content_signature += f", moving {direction_word}"
 
     watched = any(
         facts.get("attention") in ("watch", "priority") for facts in member_facts
@@ -2241,7 +2334,7 @@ def render_group_full_disclosure(
     leading_index = _leading_index(member_contacts)
     differentiated = _is_differentiated(member_facts)
     text, content_signature = _render_full_group_composition(
-        member_facts, leading_index, differentiated
+        member_facts, leading_index, differentiated, group
     )
     return OutgoingSpeech(
         text=text, template="contact_report", content_signature=content_signature
@@ -2365,7 +2458,7 @@ def render_group_disclosure(
     4. **A newly arrived, differentiated member is worth announcing** --
        either its class was not already known among the group's
        *continuing* members (a genuinely new class joining), or it belongs
-       to `belief.groups.AIR_DEFENSE_OP_CLASSES` (another instance of an
+       to `belief.classification.AIR_DEFENSE_OP_CLASSES` (another instance of an
        already-known air-defence class still counts as news, Correction 2,
        *"more air defense does make a difference"*): a delta clause
        composing just the newly-worth-announcing arrivals via `_group_
@@ -2426,15 +2519,20 @@ def render_group_disclosure(
 
     Clock/range are taken from the group's nearest member (`_contact_report_
     text`'s single-contact convention, restated here since a group has no
-    such helper of its own), and a trailing `", watched"` is appended when
+    such helper of its own); a trailing `", moving {compass}"` clause
+    (BL-12 Stage 4, D7's spoken direction -- *"that column, now 2 o'clock,
+    three kilometres, still moving north"*) is appended when `Group.
+    movement_state == "moving"`, a heading is established, and the group's
+    `extent_m` clears the unconditional spoken-extent guard (`_GROUP_
+    SPOKEN_EXTENT_GUARD_M`); and a trailing `", watched"` is appended when
     any member is under `watch`/`priority` attention -- the group-level
-    analogue of a single contact's own trailing motion clause. **Neither
-    clause/trailing-word is attached to a delta branch** (§4's own worked
-    examples -- `"Now leading: SRSAM."`, `"Shilka, in 2 o'clock group"` --
-    carry no separate range figure and no watched marker): the leader-delta
-    carries no positional clause at all, and the membership-delta's own
-    `", in {clock} o'clock group"` suffix already is its positional
-    clause."""
+    analogue of a single contact's own trailing motion clause. **None of
+    these three clauses/trailing-words is attached to a delta branch**
+    (§4's own worked examples -- `"Now leading: SRSAM."`, `"Shilka, in
+    2 o'clock group"` -- carry no separate range figure, direction, or
+    watched marker): the leader-delta carries no positional clause at all,
+    and the membership-delta's own `", in {clock} o'clock group"` suffix
+    already is its positional clause."""
     member_facts = _group_member_facts(store, group, now_sim, enrichment)
     if member_facts is None:
         return None
@@ -2527,7 +2625,7 @@ def render_group_disclosure(
         )
     elif never_spoken or first_differentiation:
         text, content_signature = _render_full_group_composition(
-            member_facts, leading_index, differentiated
+            member_facts, leading_index, differentiated, group
         )
     elif leader_changed:
         assert leading_index is not None

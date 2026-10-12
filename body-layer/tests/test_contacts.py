@@ -9,9 +9,20 @@ import itertools
 import math
 import pathlib
 
+import pytest
+
 from belief import contacts as contacts_module
 from belief import percept as percept_module
-from belief.classification import SpecificityLevel
+from belief.association_over_time import (
+    contact_growth_rate_mps,
+    implied_position,
+    percept_position_uncertainty,
+)
+from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
+    PRESENCE_CLASS,
+    SpecificityLevel,
+)
 from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S, OBJECT_ID_MEMORY_S
 from belief.events import (
@@ -24,6 +35,8 @@ from belief.events import (
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
+from belief.percept import percept_of
+from belief.position_belief import fold_position
 from belief.tools import describe_contact, set_attention
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.geometry import bearing_deg as geometry_bearing_deg
@@ -129,10 +142,16 @@ def test_two_well_separated_objects_produce_two_contacts() -> None:
     assert len(store.contacts) == 2
 
 
-def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
-    """Two existing contacts both close enough and class-compatible with a
-    new percept must produce a *third* contact -- the plan's deliberate
-    anti-guessing rule (Stage 1 decision rule).
+def test_ambiguous_candidates_fold_within_a_group_else_found_a_new_contact() -> None:
+    """`plans/group-contact-identity/plan.md` Stage 3: `ingest`'s ambiguity
+    branch (`len(passing) >= 2`) no longer always founds a new contact --
+    it now depends on whether the passing candidates are already believed
+    to be one `Group` (D5 at contact grain). This test demonstrates both
+    outcomes from the same base geometry, per the plan's own instruction
+    that this test (previously `test_two_ambiguous_candidates_create_a_
+    new_contact_not_a_merge`, renamed because that name is no longer
+    accurate) be rewritten rather than extended to show both branches,
+    keeping the old assertion for the still-unchanged branch 3.
 
     Every observation here declares no `position_uncertainty`, so each one
     falls back to the isotropic `_FALLBACK_UNCERTAINTY_RADIUS_M` (300m) on
@@ -143,12 +162,15 @@ def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     two isotropic 300m-radius sides at zero elapsed time works out to 900m
     (see that module's own `_isotropic_covariance_from_radius` and
     `GATE_SIGMA_THRESHOLD`)."""
+    # --- Branch 3 (unchanged): A and B ungrouped, 1000m apart -- far
+    # enough that B does not merge into A when it is created (each side's
+    # isotropic gate covariance allows 900m at t=0, per this test's own
+    # docstring), but close enough that a percept exactly between them
+    # (500m from each) falls within both of their gates. Neither is a
+    # member of any group (1000m is far past any cohesion backstop), so
+    # the ambiguity still founds a new, third contact -- the original,
+    # pre-Stage-3 rule, preserved exactly where it still earns its place.
     store = ContactStore()
-    # A and B are 1000m apart -- far enough that B does not merge into A when
-    # it is created (each side's isotropic gate covariance allows 900m at
-    # t=0, per this test's own docstring), but close enough that a percept
-    # exactly between them (500m from each) falls within both of their
-    # gates.
     contact_a_obs = _observation(
         obs_id="OBS_A", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
@@ -166,6 +188,257 @@ def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     assert len(store.contacts) == 3
     newest = store.contacts[-1]
     assert newest.contributing_observation_ids == ["OBS_C"]
+    assert store.group_for_contact(newest.id) is None
+
+    # --- Branch 2 (new, Stage 3): D and E are 50m apart -- well inside
+    # the pair-cohesion backstop for two `Ural truck`s (`OP_TRUCK`, not
+    # `EAGER`, not an installation), so `tick()`'s reconcile forms one
+    # `Group` from them. A percept ambiguous between the two (same
+    # generous isotropic gate as above) must now fold onto whichever of
+    # the two is nearer its own implied position, rather than founding a
+    # fourth contact -- branch 1 (air-defence) does not apply (`Ural
+    # truck` is not in `AIR_DEFENSE_OP_CLASSES`), so branch 2 fires.
+    contact_d_obs = _observation(
+        obs_id="OBS_D", t_sim=0.0, bearing_deg=90.0, range_m=1000.0
+    )
+    contact_e_obs = _observation(
+        obs_id="OBS_E", t_sim=0.0, bearing_deg=90.0, range_m=1050.0
+    )
+    store.ingest([contact_d_obs, contact_e_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_d = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_D"]
+    )
+    contact_e = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_E"]
+    )
+    group_d = store.group_for_contact(contact_d.id)
+    assert group_d is not None
+    assert store.group_for_contact(contact_e.id) is group_d
+
+    contact_count_before_fold = len(store.contacts)
+    # Placed closer to D (range 1010 vs. D's 1000 and E's 1050) -- the
+    # fold must pick D, the nearer of the two, not E.
+    ambiguous_within_group_obs = _observation(
+        obs_id="OBS_F", t_sim=0.0, bearing_deg=90.0, range_m=1010.0
+    )
+    store.ingest([ambiguous_within_group_obs], now_sim=0.0)
+
+    assert len(store.contacts) == contact_count_before_fold
+    assert "OBS_F" in contact_d.contributing_observation_ids
+    assert "OBS_F" not in contact_e.contributing_observation_ids
+
+
+def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_record() -> (
+    None
+):
+    """`plans/group-cohesion-admission-gate/plan.md` (`BL-B58`) commit 1 --
+    `Contact.fold_displacement_m` is provenance only here, nothing reads it
+    yet. Reuses `test_ambiguous_candidates_fold_within_a_group_else_found_a_
+    new_contact`'s own D/E/F geometry (two `Ural truck`s 50m apart, grouped;
+    an ambiguous percept placed closer to D folds onto it) so the fold this
+    test measures is the exact one that plan's probe replays -- independent
+    re-derivation, not a guess, via the same `fold_position` call `record`
+    itself makes."""
+    store = ContactStore()
+    contact_d_obs = _observation(
+        obs_id="OBS_D", t_sim=0.0, bearing_deg=90.0, range_m=1000.0
+    )
+    contact_e_obs = _observation(
+        obs_id="OBS_E", t_sim=0.0, bearing_deg=90.0, range_m=1050.0
+    )
+    store.ingest([contact_d_obs, contact_e_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_d = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_D"]
+    )
+    assert contact_d.fold_displacement_m == 0.0  # untouched before any fold
+
+    position_before_fold = contact_d.position
+    ambiguous_within_group_obs = _observation(
+        obs_id="OBS_F", t_sim=0.0, bearing_deg=90.0, range_m=1010.0
+    )
+    store.ingest([ambiguous_within_group_obs], now_sim=0.0)
+
+    expected_displacement = math.hypot(
+        contact_d.position.x - position_before_fold.x,
+        contact_d.position.z - position_before_fold.z,
+    )
+    assert expected_displacement > 0.0  # the fold must have actually moved it
+    assert contact_d.fold_displacement_m == pytest.approx(expected_displacement)
+
+    # A second fold onto the same contact accumulates rather than replaces
+    # (`fold_displacement_m`'s own docstring, stated assumption, unmeasured
+    # against a real repeat-fold incident).
+    budget_after_first_fold = contact_d.fold_displacement_m
+    position_before_second_fold = contact_d.position
+    second_ambiguous_obs = _observation(
+        obs_id="OBS_F2", t_sim=0.0, bearing_deg=90.0, range_m=1015.0
+    )
+    store.ingest([second_ambiguous_obs], now_sim=0.0)
+    second_displacement = math.hypot(
+        contact_d.position.x - position_before_second_fold.x,
+        contact_d.position.z - position_before_second_fold.z,
+    )
+    assert contact_d.fold_displacement_m == pytest.approx(
+        budget_after_first_fold + second_displacement
+    )
+
+    # An unambiguous re-observation -- the object-permanence continuity
+    # branch, resolved directly against `OBS_D` without ever reaching the
+    # gate -- resets the budget to 0.0: an independent look confirming
+    # identity retires the doubt.
+    unambiguous_obs = _observation(
+        obs_id="OBS_D2",
+        t_sim=1.0,
+        bearing_deg=90.0,
+        range_m=1005.0,
+        continues_observation_id="OBS_D",
+    )
+    store.ingest([unambiguous_obs], now_sim=1.0)
+    assert "OBS_D2" in contact_d.contributing_observation_ids
+    assert contact_d.fold_displacement_m == 0.0
+
+
+def test_air_defence_candidate_forces_a_new_contact_even_within_a_group() -> None:
+    """D6's carve-out (Stage 3 branch 1): even when every passing candidate
+    is a member of one and the same `Group`, an air-defence candidate must
+    still force a new contact -- a visible duplicate is the safe direction
+    for a possible threat; a wrong fold is not.
+
+    **Resolved via `belief.classification.parent_class_of`, never
+    `perception.object_model.profile_for`** (amendment A3 to `plans/
+    group-contact-identity/plan.md`): the candidates here hold a *class*-
+    level belief (`classification_raw="OP_SRSAM"`, the bare `OP_*` string
+    a contact carries before it is ever identified to a specific type),
+    and `profile_for("OP_SRSAM")` resolves to `OP_GROUPSOMETHING` (the
+    default bucket) rather than `OP_SRSAM` -- it keyword-matches DCS type
+    designations, not an already-bucketed class string. If this method
+    used `profile_for` instead of `parent_class_of`, branch 1 would never
+    fire for a class-level belief and this test would fail by falling
+    through to branch 2's fold (both candidates are in one group, exactly
+    as `test_ambiguous_candidates_fold_within_a_group_else_found_a_new_
+    contact` proves branch 2 does for a non-air-defence class) -- that is
+    the one failure this test exists to catch."""
+    assert "OP_SRSAM" in AIR_DEFENSE_OP_CLASSES
+    store = ContactStore()
+    contact_g_obs = _observation(
+        obs_id="OBS_G",
+        t_sim=0.0,
+        bearing_deg=90.0,
+        range_m=1000.0,
+        classification_raw="OP_SRSAM",
+    )
+    contact_h_obs = _observation(
+        obs_id="OBS_H",
+        t_sim=0.0,
+        bearing_deg=90.0,
+        range_m=1050.0,
+        classification_raw="OP_SRSAM",
+    )
+    store.ingest([contact_g_obs, contact_h_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_g = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_G"]
+    )
+    group_g = store.group_for_contact(contact_g.id)
+    assert group_g is not None  # same 50m-apart geometry as the fold test above
+
+    ambiguous_obs = _observation(
+        obs_id="OBS_I",
+        t_sim=0.0,
+        bearing_deg=90.0,
+        range_m=1010.0,
+        classification_raw="OP_SRSAM",
+    )
+    store.ingest([ambiguous_obs], now_sim=0.0)
+
+    assert len(store.contacts) == 3
+    newest = store.contacts[-1]
+    assert newest.contributing_observation_ids == ["OBS_I"]
+
+
+def test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw() -> (
+    None
+):
+    """`Contact.record` must resolve `growth_rate_mps` from the contact's
+    own *current* `last_class_raw` before overwriting it with the
+    incoming percept's claim (`record`'s own docstring) -- reviewed and
+    found unpinned in `plans/group-contact-identity/plan.md` Stage 2's
+    review (reversing the two lines left the suite green).
+
+    Proven by computing both candidate fused positions independently
+    (via `fold_position` directly, the same call `record` makes) and
+    comparing `contact.position` against them, rather than by reading
+    `record`'s source: a percept classified `PRESENCE_CLASS` (level 1,
+    class-blind) is used for the re-observation specifically so the gate
+    admits it regardless of ordering (`class_compatibility` resolves
+    presence-level claims to "unknown", never "incompatible", so the
+    merge happens either way) while still changing *what `last_class_raw`
+    would read as* after the overwrite -- `OP_INFANTRY` (2.0 m/s) before,
+    `PRESENCE_CLASS` i.e. the default bucket (8.0 m/s) after. The two
+    rates fuse the look into materially different positions (a faster
+    rate inflates the prior's covariance more over the elapsed 100s,
+    shifting the fused mean further toward the new look), so the two
+    candidate positions this test computes are not approximately equal
+    -- confirmed below before relying on it to distinguish the orders."""
+    store = ContactStore()
+    founding = _observation(
+        obs_id="OBS_1",
+        t_sim=0.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        classification_raw="OP_INFANTRY",
+    )
+    store.ingest([founding], now_sim=0.0)
+    contact = store.contacts[0]
+    prior_position = contact.position
+
+    reobservation = _observation(
+        obs_id="OBS_2",
+        t_sim=100.0,
+        bearing_deg=0.0,
+        range_m=1300.0,
+        classification_raw=PRESENCE_CLASS,
+        classification_level=1,
+    )
+    percept = percept_of(reobservation)
+    look_position = implied_position(percept)
+    uncertainty = percept_position_uncertainty(percept)
+
+    correct_order_rate = contact_growth_rate_mps(contact)  # reads OP_INFANTRY
+    wrong_order_rate = contact_growth_rate_mps(
+        dataclasses.replace(contact, last_class_raw=PRESENCE_CLASS)
+    )
+    assert correct_order_rate != wrong_order_rate
+
+    fused_with_correct_order = fold_position(
+        prior_position,
+        x=look_position.x,
+        z=look_position.z,
+        uncertainty=uncertainty,
+        look_bearing_deg=percept.bearing_deg,
+        t_sim=percept.t_sim,
+        growth_rate_mps=correct_order_rate,
+    )
+    fused_with_wrong_order = fold_position(
+        prior_position,
+        x=look_position.x,
+        z=look_position.z,
+        uncertainty=uncertainty,
+        look_bearing_deg=percept.bearing_deg,
+        t_sim=percept.t_sim,
+        growth_rate_mps=wrong_order_rate,
+    )
+    # The two candidate fusions must actually differ, or this test could
+    # not distinguish the orderings regardless of what `record` does.
+    assert fused_with_correct_order.x != pytest.approx(fused_with_wrong_order.x)
+
+    store.ingest([reobservation], now_sim=100.0)  # the real call, through record()
+
+    assert len(store.contacts) == 1  # confirms the merge happened, not a new contact
+    assert contact.position.x == pytest.approx(fused_with_correct_order.x)
+    assert contact.position.x != pytest.approx(fused_with_wrong_order.x)
 
 
 def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_gap() -> (
@@ -180,11 +453,15 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
     every single poll, forever (120 contacts for 2 real objects over 60
     polls in the debugger's own random-sweep reproduction).
 
-    Reuses `test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`'s
-    own already-verified overlapping-gate geometry (A at bearing 0 range
-    1000, B at bearing 0 range 2000, 1000m apart -- a percept at range 1500
-    falls within both gates) rather than re-deriving new numbers, since that
-    test already proves the overlap is real. Every re-observation of A or B
+    Reuses `test_ambiguous_candidates_fold_within_a_group_else_found_a_
+    new_contact`'s own already-verified overlapping-gate geometry for its
+    *ungrouped* branch (A at bearing 0 range 1000, B at bearing 0 range
+    2000, 1000m apart -- a percept at range 1500 falls within both gates)
+    rather than re-deriving new numbers, since that test already proves
+    the overlap is real. A and B stay ungrouped at 1000m apart (far past
+    any cohesion backstop), so Stage 3 branch 3 (found a new contact,
+    unchanged) governs every re-observation below exactly as it did
+    before Stage 3 existed. Every re-observation of A or B
     below is placed at that same ambiguous midpoint (bearing 0, range 1500)
     -- if continuity were not skipping the gate, *every one* of these would
     be genuinely ambiguous between the two existing contacts, reproducing
@@ -1157,7 +1434,14 @@ def test_slow_directional_drift_never_reports_a_range_beyond_the_detection_cap()
     # still accepts the drift as the same contact -- past this, the gate
     # itself (unaffected by this fix) starts a new contact, which is
     # correct behaviour, not part of the invariant this test checks.
-    for i in range(1, 22):
+    #
+    # Bound is 18, not 21 -- BL-12 Stage 2b gives this fixture's class
+    # (`_observation`'s default `"Ural truck"` -> `OP_TRUCK`) a 15 m/s
+    # plausible-speed bound instead of the old flat 20 m/s, so the gate's
+    # elapsed-motion inflation is narrower and the drift starts a second
+    # contact a few polls sooner than it used to (measured: poll 19 is the
+    # first split under the new rate, poll 22 under the old one).
+    for i in range(1, 19):
         bearing += 0.3
         rng += 150.0
         store.ingest(
@@ -1230,7 +1514,12 @@ def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> No
         ],
         now_sim=0.0,
     )
-    for i in range(1, 22):
+    # Bound is 18, not 21 -- see `test_slow_directional_drift_never_reports_
+    # a_range_beyond_the_detection_cap`'s own comment: BL-12 Stage 2b's
+    # per-class plausible-speed table narrows this fixture's class
+    # (`OP_TRUCK`) to 15 m/s from the old flat 20, so the drift starts a
+    # second contact a few polls sooner.
+    for i in range(1, 19):
         bearing += 0.3
         rng += 150.0
         store.ingest(
@@ -1260,7 +1549,7 @@ def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> No
             dataclasses.replace(
                 _observation(
                     obs_id="OBS_SEPARATE",
-                    t_sim=21.0,
+                    t_sim=18.0,
                     bearing_deg=90.0,
                     range_m=3000.0,
                     source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
@@ -1270,7 +1559,7 @@ def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> No
                 count_bucket="OP_TO5UNITS",
             )
         ],
-        now_sim=21.0,
+        now_sim=18.0,
     )
 
     assert len(store.contacts) == 2

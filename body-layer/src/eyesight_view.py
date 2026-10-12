@@ -63,20 +63,28 @@ from dataclasses import dataclass
 from typing import Final
 
 from belief.attention import AttentionArea, effective_attention
-from belief.classification import SpecificityLevel, parent_class_of
+from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
+    SpecificityLevel,
+    parent_class_of,
+)
 from belief.contacts import Contact
 from perception.detection_trace import DetectionTrace, GateOutcome
 from perception.gaze import Gaze
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.object_model import profile_for
 
-#: `belief.classification`'s ED-vocabulary `OP_*` buckets this view reads
-#: as "air defence" -- SAM launchers/radars plus the two self-propelled AA
-#: guns, `object_model.py`'s own `op_class` vocabulary (grepped, not
-#: guessed: these are the only eight `OP_*` values that table assigns).
-_AIR_DEFENCE_CLASSES: Final[frozenset[str]] = frozenset(
-    {"OP_SRSAM", "OP_MRSAM", "OP_LRSAM", "OP_SPAAG", "OP_ZU23"}
-)
+#: A local `_AIR_DEFENCE_CLASSES` was declared here until 2026-10-11 and is
+#: now `belief.classification.AIR_DEFENSE_OP_CLASSES`, the one copy
+#: (`BL-B51`). It held the same five values, with no guard that could
+#: notice `perception.object_model` growing -- and its comment claimed the
+#: five were "the only eight `OP_*` values that table assigns", which was
+#: wrong twice over: it said eight while listing five, and `object_model`
+#: assigns **9** distinct `op_class` values (`_KEYWORD_PROFILES`' 70
+#: entries carry 9, `_REPORTING_NAME_KEYWORD_PROFILES`' 61 carry 6, union
+#: 9; `DEFAULT_OP_CLASS` = `OP_GROUPSOMETHING` makes 10 reachable values
+#: in all). The five here are the air-defence subset of those 9, which is
+#: what the comment should have said.
 
 #: Rows read roughly twice as tall as columns read wide in a typical
 #: terminal font -- without this, a range ring draws as a flattened
@@ -220,7 +228,7 @@ def contact_label(contact: Contact) -> str:
     ):
         return "U"
     op_class = parent_class_of(contact.classification.value)
-    if op_class in _AIR_DEFENCE_CLASSES:
+    if op_class in AIR_DEFENSE_OP_CLASSES:
         return "AA"
     if op_class == "OP_ARMORED":
         return "AR"
@@ -240,7 +248,7 @@ def _object_type_label(object_type: str) -> str:
     object, not a cluster, and the offline JSONL carries no cardinality to
     read (documented gap, `tools/eyesight_replay.py`'s own docstring)."""
     op_class = profile_for(object_type).op_class
-    if op_class in _AIR_DEFENCE_CLASSES:
+    if op_class in AIR_DEFENSE_OP_CLASSES:
         return "AA"
     if op_class == "OP_ARMORED":
         return "AR"

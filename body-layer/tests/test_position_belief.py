@@ -25,6 +25,7 @@ from belief.position_belief import (
     covariance_from_uncertainty,
     estimate_from_look,
     fold_position,
+    plausible_speed_mps,
 )
 from perception.geometry import GeoPosition
 from perception.source import PositionUncertainty
@@ -94,6 +95,55 @@ def test_covariance2d_inflated_defaults_to_module_growth_rate() -> None:
     explicit_growth = covariance.inflated(5.0, growth_rate_mps=GATE_GROWTH_RATE_MPS)
 
     assert default_growth == explicit_growth
+
+
+# --- BL-12 Stage 2b: `plausible_speed_mps`'s real, calibrated table ------
+# (`plans/group-contact-identity/plan.md` Stage 2b). Replaces Stage 2a's
+# `test_plausible_speed_mps_stage_2a_is_flat_for_every_class` -- that test
+# pinned down the pre-calibration mechanism and is deleted, not extended,
+# because this commit's entire purpose is to make the function it pinned
+# stop being flat.
+
+
+def test_plausible_speed_mps_installation_component_overrides_every_class() -> None:
+    """D8: "~0 for entrenched" -- `installation_component=True` returns
+    `0.0` regardless of `op_class`, including classes that otherwise carry
+    a real, non-default rate (an entrenched `OP_ARMORED`/`OP_TRUCK` makes
+    little sense in practice, but the override is structural per-profile,
+    not an op_class allowlist, and must hold for every class uniformly)."""
+    for op_class in ("OP_ARMORED", "OP_TRUCK", "OP_SRSAM", "OP_GROUPSOMETHING"):
+        assert plausible_speed_mps(op_class, installation_component=True) == 0.0
+
+
+def test_plausible_speed_mps_calibrated_table_matches_the_plan() -> None:
+    """`plans/group-contact-identity/plan.md` Stage 2b's table, verbatim --
+    every row a stated assumption, scaled by user direction (D8), none
+    measured. `installation_component` left at its default (`False`) for
+    every row here; the override is covered separately above."""
+    expected = {
+        "OP_INFANTRY": 2.0,
+        "OP_ARMORED": 8.0,
+        "OP_SPAAG": 8.0,
+        "OP_ZU23": 8.0,
+        "OP_SRSAM": 8.0,
+        "OP_MRSAM": 8.0,
+        "OP_LRSAM": 8.0,
+        "OP_TRUCK": 15.0,
+        "OP_SHIP": 10.0,
+    }
+    for op_class, speed_mps in expected.items():
+        assert plausible_speed_mps(op_class) == speed_mps
+
+
+def test_plausible_speed_mps_default_is_eight_not_the_old_flat_twenty() -> None:
+    """The default row (`object_model.DEFAULT_OP_CLASS`, i.e.
+    `"OP_GROUPSOMETHING"`, plus any `op_class` the table does not name) is
+    `8.0`, **deliberately not `GATE_GROWTH_RATE_MPS` (20.0)** -- the plan's
+    own words: the old flat value modelled the worst case for everything,
+    which is exactly the behaviour D8 overturns."""
+    assert plausible_speed_mps("OP_GROUPSOMETHING") == 8.0
+    assert plausible_speed_mps("OP_SOMETHING_NOT_IN_ANY_TABLE") == 8.0
+    assert plausible_speed_mps("OP_GROUPSOMETHING") != GATE_GROWTH_RATE_MPS
 
 
 def test_covariance2d_mahalanobis_squared_isotropic_matches_scaled_distance() -> None:

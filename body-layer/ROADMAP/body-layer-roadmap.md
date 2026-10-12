@@ -121,10 +121,10 @@ Group model, contact-report flood and the tick-cost/LOS workstream:
 - [[BL-W1]] — Contact-report flood (merge-echo callout suppression)
 - [[BL-W2]] — Redundant group disclosure
 - [[BL-11]] — Tick cost, and making silent degradation visible
+- [[BL-12]] — Group-level contact identity and continuity
 
 Ahead:
 
-- [[BL-12]] — Group-level contact identity and continuity
 - [[BL-13]] — The crew query path
 - [[BL-14]] — Attack run: target selection and run guidance
 
