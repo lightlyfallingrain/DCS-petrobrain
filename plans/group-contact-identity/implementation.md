@@ -937,3 +937,190 @@ change's diff.
   up as a live sortie symptom. Not filed as a new `BL-B` item here since the task scope named
   `BL-B56`/`speech._is_air_defence` as explicitly out of scope and this is adjacent to, not inside,
   that boundary — flagging in this log per the role's "report discoveries" instruction instead.
+
+# BL-12 Stage 3 — implementation
+
+Branch `feature/bl12-group-contact-identity`, from tip `0abc738` ("Review BL-12 Stage 2
+(per-class growth-rate mechanism/calibration): APPROVED"). Stage 3 only. Four commits:
+
+| sha | content |
+|---|---|
+| `54b6190` | the mechanism: `ContactStore._fold_target_for_ambiguous_candidates`, `ingest`'s ambiguity branch rewired to call it, `association_over_time.py`'s module docstring corrected |
+| `0a28405` | plan-named test rewrite (`test_two_ambiguous_candidates_create_a_new_contact_not_a_merge` → `test_ambiguous_candidates_fold_within_a_group_else_found_a_new_contact`) plus two new tests (air-defence carve-out, growth-rate ordering pin) |
+| `fbbba25` | `test_callouts.py`'s 2C transcript fixture, re-derived — **not** in the plan's named list |
+| `3fb6018` | `test_logger.py`'s push-failure test, given its follow-up observation its own position — **not** in the plan's named list |
+
+## The mechanism
+
+`ContactStore.ingest`'s ambiguity branch (`len(passing) >= 2`, around what was `contacts.py:965`
+at the branch tip) now calls a new private method, `_fold_target_for_ambiguous_candidates`, exactly
+where it used to unconditionally found a new contact:
+
+1. **Branch 1 (D6, air-defence carve-out).** If *any* passing candidate's `last_class_raw` resolves
+   via `belief.classification.parent_class_of` to an `op_class` in `AIR_DEFENSE_OP_CLASSES`, returns
+   `None` (found new) unconditionally. **Per amendment A3, this reads `parent_class_of`, never
+   `object_model.profile_for`** — `profile_for("OP_SRSAM")` resolves to the default bucket
+   (`OP_GROUPSOMETHING`), not `OP_SRSAM`, because it keyword-matches DCS *type* strings and a
+   class-level belief carries the bare `OP_*` string itself. Verified directly (not just read off
+   the amendment): `object_model.profile_for('OP_SRSAM').op_class == 'OP_GROUPSOMETHING'` while
+   `classification.parent_class_of('OP_SRSAM') == 'OP_SRSAM'`, confirmed in `AIR_DEFENSE_OP_CLASSES`.
+   A dedicated test (`test_air_defence_candidate_forces_a_new_contact_even_within_a_group`)
+   constructs a scenario where branch 2 would otherwise fold (both class-level-SAM candidates in
+   one group) specifically so a `profile_for`-based resolution would fail this test by falling
+   through to the fold — the one failure mode the test exists to catch.
+2. **Branch 2 (D5 at contact grain).** Otherwise, if every passing candidate is currently a member
+   of one and the same `Group` (`GroupStore.group_for_contact`, the pilot-facing *currently
+   observed* view — a candidate this returns `None` for fails the test, same as a different group
+   id), folds onto whichever candidate is nearest the percept's implied position
+   (`association_over_time.implied_position`), ties broken by lowest contact id. Mirrors Stage 1
+   test 6's own "nearest, then lowest id" shape one level down (candidates inside one group, rather
+   than groups across one cluster).
+3. **Branch 3 (unchanged).** Otherwise `None` — found a new contact, the original Stage 1 rule,
+   surviving exactly where candidates are in different groups or ungrouped.
+
+**`association_over_time.py`'s module docstring is corrected**, not left contradicted: its old text
+("ambiguity must produce a visible duplicate, never a guessed merge") was Stage 1's unconditional
+rule and is false as a blanket statement now. The new text states what narrowed and why (D5's
+accepted density-based premise), and is explicit that the *gate itself* (spatial + class, no
+best-match ranking) is unchanged — only what `ingest` does with two-or-more passing candidates
+changed, and that change lives in `contacts.py`, not here.
+
+**No-omniscience.** Branch 1 reads `Contact.last_class_raw` through the classification lattice;
+branch 2 reads `GroupStore.group_for_contact` and `Contact.position` (fused belief). Neither reads
+`Observation`, a DCS `object_id`, or `object_type`. Unchanged boundary, confirmed by inspection of
+every new line added.
+
+## Test-impact: both kinds of mismatch, per the role's step 1b
+
+**The plan-named list was right about what it named and incomplete about what else moved.** Ran
+the full suite after landing the mechanism, before writing any new test, specifically to find what
+the plan's own "Tests that must be rewritten, not extended" section did not anticipate — not a
+courtesy pass, the task's own explicit instruction (step 1b).
+
+**Named by the plan, confirmed and executed:**
+
+- `tests/test_contacts.py:132` (`test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`)
+  — rewritten, renamed to `test_ambiguous_candidates_fold_within_a_group_else_found_a_new_contact`
+  (its old name asserted something no longer universally true). The original A/B-1000m-apart
+  geometry is kept verbatim as the branch-3 (ungrouped) demonstration, with one line added
+  (`store.group_for_contact(newest.id) is None`) to make the "ungrouped" precondition explicit
+  rather than implicit. A second block, new geometry (D/E 50m apart, close enough to cluster into
+  one `Group` via `tick()`), demonstrates branch 2's fold, asserting the nearer candidate
+  (`range_m=1000` beats `range_m=1050` against an ambiguous percept at `range_m=1010`) receives the
+  observation and the farther one does not.
+- `tests/test_contacts.py:183` (reused that geometry by name) — docstring corrected to state
+  explicitly that A/B stay ungrouped at 1000m apart (far past any cohesion backstop), so branch 3
+  governs this test's whole 116-reobservation loop exactly as before Stage 3 existed. No assertion
+  changed; this was a documentation correction, confirmed by the full 60-poll loop still landing at
+  exactly 3 contacts.
+- `tests/test_callouts.py:489-554` (the merge-echo fixture) — **read, not touched.** Checked
+  directly: that fixture's three same-poll founding observations
+  (`test_contact_report_flood_suppresses_a_same_tick_founding_echo`-adjacent scenario) never
+  produces `len(passing) >= 2` for any of its own observations (each one's candidates are either
+  zero, via the same-source-same-poll exclusion, or the single continuity-resolved match), so
+  Stage 3's branch never fires in this fixture and no change was needed. Confirmed by running it
+  unmodified — it still passes. Flagged here because the plan named this fixture and a silent
+  "nothing to do" is indistinguishable from "forgot to check" without saying so.
+
+**Not named by the plan, found by running the suite (step 1b's "the missing entry is the dangerous
+one"):**
+
+- `tests/test_callouts.py::test_2c_transcript_fixture_renders_four_lines_not_seven`. At t=12 this
+  fixture's 2-o'clock infantry pair no longer founds its own two contacts. By t=12, the 12/1-o'clock
+  trio (`CONTACT_1`/`CONTACT_2`/`CONTACT_3`, in one `Group` since t=4) has not been re-observed
+  since t=0 (`CONTACT_2` not at all), so their covariance has inflated for up to 12s of elapsed time
+  on top of this fixture's own undeclared-`position_uncertainty` fallback (`_FALLBACK_
+  UNCERTAINTY_RADIUS_M`, 300m on both sides of the gate — the same generosity `test_contacts.py`'s
+  own docstring measures at ~900m for two such sides at zero elapsed time). The 2-o'clock pair, at
+  300m range and several hundred metres from the trio, still passes the spatial+class gate against
+  all three. All three are `GROUP_1` members, so branch 2 fires twice: the first new percept folds
+  onto the nearest member, the second (now only two candidates remain unclaimed this poll) onto the
+  nearest of those. `CONTACT_6`/`CONTACT_7` are never founded.
+
+  **This is the plan's own accepted failure mode 2 (undercount replaces overcount, confirmed by the
+  user at Q5) — firing on a cluster considerably farther away than the plan's own rationale
+  measured.** The plan's Stage 3 text cites a measured 16m median real nearest-neighbour spacing as
+  the premise that founding a third contact "does not preserve information." This fixture's
+  wide fallback gate plus 12s of no-reobservation inflation reaches roughly 500-900m, which a
+  declared, tighter uncertainty (what the real naked-eye/scope channels actually report) would not.
+  Re-derived the fixture's expected output by running it, not predicting it (same posture every
+  earlier rewrite of this fixture took): spoken lines are still 4 (the count is unaffected), but
+  line 4 changes from "Pair of infantry, 12 o'clock, 0.5 kilometres." to "BTR-70, in 1 o'clock
+  group.", and the group-membership assertion changes from two 2-member groups to one 4-member
+  group.
+
+  **A second-order effect the plan's three named failure modes do not individually describe, and
+  worth the user's attention before this merges:** the fold does not just consume the 2-o'clock
+  pair's identity — it also moves `CONTACT_1`/`CONTACT_2`'s *fused positions* toward the 2-o'clock
+  percepts (`fold_position` is a real weighted fuse, not a no-op), which widens the next `tick()`'s
+  cluster enough to also absorb `CONTACT_4` (BTR-70) — a contact that was never itself an ambiguous
+  candidate for anything. Failure mode 1 ("within-group record swapping... the group-level answer
+  stays correct") does not cover this: here the group-level answer becomes wrong — a real, correctly
+  individually-identified BTR-70 gets reported as "in 1 o'clock group" with the infantry. Flagged in
+  the test's own docstring and here, not silently absorbed into "expected churn."
+- `tests/test_logger.py::test_console_runner_overlay_push_failure_is_isolated_per_push`. Its
+  follow-up poll's "Mi-8 helicopter" observation shared every other observation's default bearing/
+  range (`_make_observation`'s fixture convenience, 32°/3100m) with the first poll's BMP-2/Ural
+  truck pair. "Mi-8 helicopter" is not a keyword `perception.object_model` recognises
+  (`profile_for('Mi-8 helicopter').op_class == 'OP_GROUPSOMETHING'`, the default bucket), so it is
+  class-*unknown* against both BMP-2 and Ural truck — genuinely ambiguous. Those two, at the shared
+  position, cluster into one `Group` on the first poll's `tick()`, so branch 2 folded the Mi-8
+  percept onto the nearer of the two instead of founding `CONTACT_3`. This test's subject is
+  overlay-push failure isolation, not ambiguity resolution, and had no reason to depend on the
+  latter — fixed by giving `_make_observation` optional `bearing_deg`/`range_m` parameters
+  (additive, defaulting to the shared position for every pre-existing caller) and this one call its
+  own distinct position, which decouples the two questions rather than re-deriving new numbers for
+  an assertion that was never about this mechanism.
+
+**Neither of the two unnamed tests was rewritten to make the suite pass by whatever means worked.**
+The 2C fixture's new expectation was *read off a run*, matched against the plan's own accepted
+failure mode, and its second-order consequence (BTR-70's absorption) was traced to its mechanism and
+written into the docstring rather than left as an unexplained number change. The logger test's fix
+decouples an incidental fixture-sharing accident from the thing it was actually testing, rather than
+updating its assertion to match the new (irrelevant-to-its-purpose) fold.
+
+**Also done, per the task's explicit small item:** `Contact.record`'s unpinned ordering (resolve
+`growth_rate_mps` from `self` before overwriting `last_class_raw`) now has
+`test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw`. It computes both
+candidate fused positions independently via `fold_position` (the same call `record` makes) using
+the correct-order rate and a constructed wrong-order rate, asserts they differ (so the test could
+in principle distinguish the two), then asserts the real `record()` call's result matches the
+correct one. **Verified as a counterfactual, not assumed**: temporarily swapped the two lines in
+`Contact.record` (`self.last_class_raw = ...` moved before `growth_rate_mps = contact_growth_rate_
+mps(self)`), reran the test, confirmed it failed for exactly the stated reason (`1281.51` vs. the
+expected `1196.15 ± 0.001`), then restored the original two lines and confirmed the file's checksum
+matched the pre-edit state (`e4e7700a…`) before moving on.
+
+## Checks
+
+**body-layer/**
+
+- `ruff format --check src tests`: **pass** (after one auto-reformat each of `contacts.py` and
+  `test_contacts.py` — the new branch's nested `else` and a `next(...)` call wrapped differently
+  than hand-formatted)
+- `ruff check .`: **pass** (after one auto-fix: an import-order fix in `test_contacts.py` from the
+  new `belief.position_belief`/`belief.percept` imports)
+- `mypy src` (strict, from inside the subproject): **pass**, 55 source files (unchanged file count
+  — no new module)
+- `pytest -q`: **pass** — **1676 passed / 4 xfailed** (1674 baseline + 2 new tests: the air-defence
+  carve-out test and the growth-rate-ordering pin test; the rewritten/re-derived tests replace their
+  prior versions one-for-one rather than adding net new tests)
+
+**audio-adapter/**: not run. Nothing in this stage touches `belief/audio_client.py` or any file that
+subproject's own copy depends on, and no shared import exists either direction for this diff — same
+posture Stage 2's log took.
+
+## Not done, deliberately
+
+- **No change to Stage 3's literal design** to guard against the 2C-fixture second-order effect
+  (position drift from a within-group fold widening the next cluster enough to absorb an unrelated,
+  previously-ungrouped contact). The mechanism was implemented exactly as the plan (and amendment
+  A3) specify; the consequence is real and is reported above and in the test's own docstring, not
+  designed around — adding a safeguard not in the plan (e.g. capping how far a fold may move a
+  contact's fused position, or requiring the folded-onto group's own extent to bound the percept)
+  would be an architectural change outside this role's remit and outside what five rounds of review
+  already approved for Stage 3.
+- **Stages 4-5 untouched**, as scoped: no heading/extent-guard speech, no road corridor,
+  `speech._is_air_defence`, `crew_console.py`'s fourth air-defence vocabulary copy (`BL-B56`), or
+  `BL-B57`'s class-level `installation_component` gap.
+- **`decay.py`'s values untouched.**
