@@ -136,9 +136,27 @@ history describes the *merged* group's history from that point on, not any
 one contributing group's -- the same "arbitrary survivor" cost `plans/
 group-contact-model/plan.md` already accepted for its own clusters.
 
+**Group identity now also survives member-id replacement (BL-12 Stage 1,
+`plans/group-contact-identity/plan.md`).** Member-overlap is still tried
+first and is still how a split/merge resolves -- the paragraph above is
+unchanged. What changes is what happens to a cluster overlap could not
+match: a second pass (`group_matches`) matches it against a *remembered*
+group's properties (kind, composition, air-defence confirmation,
+plausible displacement) instead of founding a fresh `Group` outright, and
+a group that matches nothing is *kept*, properties frozen, for
+`GROUP_REIDENTIFY_WINDOW_S` before it is actually dropped -- see
+`GroupStore.reconcile`'s own docstring for the four phases in full.
+`GroupStore.groups` keeps meaning "currently observed" throughout; the
+retained-but-unmatched set is `GroupStore.remembered_groups`.
+
 **No omniscience**: `reconcile` takes `Contact` objects (already-folded
 belief), never an `Observation` or a DCS object id -- `belief/percept.py`'s
-boundary is upstream of this module and untouched by it.
+boundary is upstream of this module and untouched by it. Stage 1's
+property-match predicate (`group_matches`) reads the same two `Contact`
+fields every other computation here already does: `.position` (fused
+belief) and `.last_class_raw` (believed classification, via `_profile_for_
+contact` and `belief.classification.parent_class_of`) -- never a DCS
+`object_type`.
 
 **No spoken split/merge event.** A membership change is only ever visible
 as a changed rendered line, once `belief.speech.render_group_disclosure`
@@ -150,11 +168,15 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 
+from belief import classification
+from belief.decay import GROUP_REIDENTIFY_WINDOW_S
+from belief.position_belief import GATE_GROWTH_RATE_MPS
 from perception import object_model
 
 if TYPE_CHECKING:
@@ -437,7 +459,65 @@ class Group:
     the next call to decide full/delta/silent. Same carry-over/reset rule as
     `last_spoken_signature` above: untouched across a reconciliation that
     keeps this group's id, reset to the empty/`None`/`False` defaults only
-    for a freshly founded group."""
+    for a freshly founded group.
+
+    **The seven fields below are BL-12 Stage 1** (`plans/
+    group-contact-identity/plan.md`) -- the remembered *properties* a group
+    carries so its identity can survive a reconcile where none of its
+    members' contact ids are the ones last seen (member-id replacement,
+    D4/D5/D7). All additive, all defaulted, so every pre-existing
+    construction site (including test fixtures that only ever pass the
+    four original fields) keeps compiling. Every one is computed from
+    `Contact.position` (fused belief) and `Contact.last_class_raw`
+    (believed classification) -- never a DCS `object_type` or an
+    `Observation` -- so the no-omniscience boundary this module's own
+    docstring states is unchanged by Stage 1.
+
+    `last_observed_sim` is the last reconcile at which a cluster actually
+    matched this group -- distinct from `last_reconciled_sim`, which now
+    means "the last reconcile call that still knew about this group at
+    all," matched or merely retained. The two coincided for every group
+    before Stage 1, because an unmatched group was simply dropped; now a
+    retained-but-unseen group advances `last_reconciled_sim` every call
+    while `last_observed_sim` stays fixed at the reconcile it was last
+    actually seen.
+
+    `centroid_x`/`centroid_z` are the mean of the matched cluster's
+    `Contact.position.x`/`.z` -- needed because the members may be gone by
+    the time a later reconcile attempts to match against this group.
+    `centroid_uncertainty_m` is the RMS (quadratic mean) of the matched
+    members' own `PositionEstimate.radius_m()` -- the slack term
+    `group_matches`'s displacement test budgets against, not a measure of
+    the cluster's *extent* (which the Stage 1 amendment's A2/A4 track
+    separately, in the sortie trace, precisely because this field cannot
+    stand in for it -- a wide, well-observed group has a small per-member
+    radius and a large extent at once).
+
+    `composition` is the sorted `(op_class, count)` multiset over members,
+    resolved via `_profile_for_contact` (`object_model.profile_for` on each
+    member's `last_class_raw`) -- the same resolution `_cluster_contacts`
+    already uses for size/backstop, so composition and cohesion never read
+    a believed classification through two different paths.
+
+    `installation` is `True` only when every member's resolved profile has
+    `installation_component is True` -- the same all-or-nothing question
+    `_pair_backstop_m`'s installation cap already asks pairwise, lifted to
+    the whole group.
+
+    `air_defence_composition` is the air-defence subset of `composition`,
+    **resolved through the classification lattice
+    (`belief.classification.parent_class_of`), not through `_profile_for_
+    contact`** -- amendment A3's correction. `object_model.profile_for`
+    keyword-matches DCS *type* designations; a classification held at
+    *class* level (which is what a contact holds before it is identified to
+    type, i.e. most of the time at range) carries the `OP_*` string itself
+    and matches no keyword, so four of the five air-defence classes would
+    silently fail a `profile_for`-based test. This is `BL-B47`'s own
+    boundary decision applied to Stage 1's two new consumers (this field,
+    and `group_matches`'s test 3). Kept as its own field rather than
+    re-derived at match time, because D6 keys the air-defence confirmation
+    gate on the *remembered* value -- by the time a match is attempted the
+    members producing it may be gone."""
 
     id: str
     member_contact_ids: frozenset[str]
@@ -448,6 +528,13 @@ class Group:
     last_spoken_member_contact_ids: frozenset[str] = frozenset()
     last_spoken_leading_contact_id: str | None = None
     last_spoken_differentiated: bool = False
+    last_observed_sim: float = 0.0
+    centroid_x: float = 0.0
+    centroid_z: float = 0.0
+    centroid_uncertainty_m: float = 0.0
+    composition: tuple[tuple[str, int], ...] = ()
+    installation: bool = False
+    air_defence_composition: tuple[tuple[str, int], ...] = ()
 
 
 def _pairwise_distance(
@@ -649,26 +736,324 @@ def _cluster_contacts(
     ]
 
 
+# --- BL-12 Stage 1: remembered group properties and the matching predicate --
+# `plans/group-contact-identity/plan.md`, amendment A2's matching-predicate
+# table. Everything below is computed from already-folded `Contact` state
+# (`.position`, `.last_class_raw`) -- the same no-omniscience boundary
+# `_cluster_contacts` above already keeps.
+
+
+def _air_defence_op_class_of(contact: Contact) -> str | None:
+    """`contact.last_class_raw` resolved to an air-defence `op_class`, or
+    `None` if it is not one -- amendment A3's correction. Reads `belief.
+    classification.parent_class_of` (the lattice), **not** `object_model.
+    profile_for`: a classification held at *class* level (what a contact
+    holds before it is identified to type, i.e. most of the time at range)
+    carries the `OP_*` bucket string itself, which `profile_for`'s keyword
+    match cannot resolve -- four of the five air-defence classes would
+    silently fail a `profile_for`-based test at that level. This is `BL-
+    B47`'s own boundary decision, applied here to Stage 1's two new
+    consumers (`Group.air_defence_composition`, `group_matches` test 3)."""
+    op_class = classification.parent_class_of(contact.last_class_raw)
+    if op_class is not None and op_class in classification.AIR_DEFENSE_OP_CLASSES:
+        return op_class
+    return None
+
+
+def _composition_of(
+    members: Sequence[Contact],
+) -> tuple[tuple[str, int], ...]:
+    """The sorted `(op_class, count)` multiset over `members`, resolved via
+    `_profile_for_contact` -- the same resolution `_cluster_contacts`
+    already uses for size/backstop. See `Group.composition`'s docstring on
+    why this field (unlike `air_defence_composition`) is correct to resolve
+    this way: it needs `installation_component`/`size_m`, which only a
+    profile carries, not air-defence membership specifically."""
+    counts: Counter[str] = Counter(
+        _profile_for_contact(member).op_class for member in members
+    )
+    return tuple(sorted(counts.items()))
+
+
+def _air_defence_composition_of(
+    members: Sequence[Contact],
+) -> tuple[tuple[str, int], ...]:
+    """The air-defence subset of `_composition_of`, resolved through
+    `_air_defence_op_class_of` (the lattice) rather than through
+    `_profile_for_contact` -- see that function's docstring and `Group.
+    air_defence_composition`."""
+    counts: Counter[str] = Counter()
+    for member in members:
+        op_class = _air_defence_op_class_of(member)
+        if op_class is not None:
+            counts[op_class] += 1
+    return tuple(sorted(counts.items()))
+
+
+def _installation_of(members: Sequence[Contact]) -> bool:
+    """`True` only when every member's resolved profile has `installation_
+    component is True` -- see `Group.installation`'s docstring."""
+    return all(
+        _profile_for_contact(member).installation_component for member in members
+    )
+
+
+def _centroid_of(members: Sequence[Contact]) -> tuple[float, float]:
+    """Mean (x, z) of `members`' fused `Contact.position` -- `Group.
+    centroid_x`/`.centroid_z`."""
+    return (
+        statistics.fmean(member.position.x for member in members),
+        statistics.fmean(member.position.z for member in members),
+    )
+
+
+def _centroid_uncertainty_of(members: Sequence[Contact]) -> float:
+    """RMS (quadratic mean) of `members`' own `PositionEstimate.radius_m()`
+    -- `Group.centroid_uncertainty_m`'s docstring: the slack term `group_
+    matches`'s displacement test budgets against, not the cluster's
+    extent."""
+    radii = [member.position.radius_m() for member in members]
+    return math.sqrt(statistics.fmean(r * r for r in radii))
+
+
+def _extent_of(members: Sequence[Contact]) -> float:
+    """The cluster's extent, metres -- the maximum pairwise distance among
+    `members`' fused positions. This is the figure amendment A2's measured
+    table reports (e.g. "one group, extent 6,000 m" for an armour contact
+    and an infantry contact 6 km apart) and the field the group-identity
+    sortie trace line (A4) carries, because neither `centroid_uncertainty_m`
+    above nor any per-member field says anything about how wide the group
+    actually is."""
+    if len(members) < 2:
+        return 0.0
+    positions = [(member.position.x, member.position.z) for member in members]
+    n = len(positions)
+    return max(
+        _pairwise_distance(positions, i, j) for i in range(n) for j in range(i + 1, n)
+    )
+
+
+def _cluster_is_stopped(members: Sequence[Contact]) -> bool:
+    """`True` only when at least one member reports a motion belief and
+    every member that reports one reports `"stopped"` -- the observed side
+    of `group_matches` test 5's zero-speed-bound rule. A member with no
+    motion belief at all (`Contact.motion is None` -- never observed for
+    movement, `belief.motion`'s own module docstring) is silently excluded
+    rather than treated as either "moving" or "stopped": it carries no
+    evidence either way, and this function must not manufacture some."""
+    known = [member.motion.state for member in members if member.motion is not None]
+    if not known:
+        return False
+    return all(state == "stopped" for state in known)
+
+
+@dataclass(frozen=True, slots=True)
+class _ClusterProperties:
+    """The same seven remembered properties `Group` carries, computed once
+    per observed cluster per `reconcile` call and shared between the
+    matching predicate, the newly-founded/re-matched `Group` construction,
+    and the trace line -- so none of the three can read a believed
+    classification through a different path than the others."""
+
+    centroid_x: float
+    centroid_z: float
+    centroid_uncertainty_m: float
+    composition: tuple[tuple[str, int], ...]
+    installation: bool
+    air_defence_composition: tuple[tuple[str, int], ...]
+    extent_m: float
+    stopped: bool
+
+
+def _cluster_properties(members: Sequence[Contact]) -> _ClusterProperties:
+    centroid_x, centroid_z = _centroid_of(members)
+    return _ClusterProperties(
+        centroid_x=centroid_x,
+        centroid_z=centroid_z,
+        centroid_uncertainty_m=_centroid_uncertainty_of(members),
+        composition=_composition_of(members),
+        installation=_installation_of(members),
+        air_defence_composition=_air_defence_composition_of(members),
+        extent_m=_extent_of(members),
+        stopped=_cluster_is_stopped(members),
+    )
+
+
+def _plausible_speed_mps(op_class: str) -> float:
+    """How fast a contact of `op_class` could plausibly have moved,
+    metres/second -- the bound `group_matches` test 5 budgets displacement
+    against.
+
+    **Stage 1's bridging stand-in for Stage 2's per-class table.** Amendment
+    A2's test 5 row specifies `max(plausible_speed_mps(op_class) for
+    op_class in group.composition)`, but the per-class table itself is
+    Stage 2's own mechanism (`plans/group-contact-identity/plan.md` Stage
+    2a, "provably no behaviour change": the mechanism commit returns
+    `GATE_GROWTH_RATE_MPS` for *every* class, before Stage 2b's calibration
+    commit populates it). Stage 1 does not implement Stage 2, so this
+    function returns the same flat `GATE_GROWTH_RATE_MPS` for every
+    `op_class` -- i.e. `max(...)` over `group.composition` always reduces to
+    this one constant today. Once Stage 2 lands its table, this function
+    (or its caller) is what changes -- not `group_matches` itself, which
+    already reads it as a per-class lookup."""
+    del op_class  # Stage 1: flat for every class -- see docstring.
+    return GATE_GROWTH_RATE_MPS
+
+
+def group_match_score(group: Group, observed: _ClusterProperties) -> float:
+    """Phase 2's ordering, not a gate: the negative centroid distance, so
+    sorting candidates by *descending* score puts the nearest first.
+    Deliberately not a composite score weighing multiple factors -- see
+    amendment A2's own note that a weighted score here would reintroduce
+    the "best-match tiebreak" `pb2-contact-memory` Stage 1 refused to
+    build; every candidate this orders has already independently passed
+    every hard test in `group_matches`."""
+    return -math.hypot(
+        group.centroid_x - observed.centroid_x, group.centroid_z - observed.centroid_z
+    )
+
+
+def group_matches(
+    group: Group,
+    observed: _ClusterProperties,
+    elapsed_s: float,
+    *,
+    window_s: float = GROUP_REIDENTIFY_WINDOW_S,
+) -> bool:
+    """Whether `observed` (a cluster with no overlap-match this reconcile)
+    may inherit `group`'s identity -- amendment A2's six-test matching
+    predicate, evaluated cheapest/hardest first, tests 1-5 all required
+    (test 6, the ambiguity tiebreak, is the caller's job once more than one
+    group passes here for the same cluster -- see `GroupStore.reconcile`).
+
+    `window_s` is keyword-only and defaulted to `GROUP_REIDENTIFY_WINDOW_S`
+    specifically so `BL-8` can reuse this exact predicate at its own,
+    longer horizon with its own window (`plans/group-contact-identity/
+    plan.md`'s "What `BL-8` will need from this design" -- the thresholds
+    being parameters is the whole point of the seam).
+
+    No-omniscience: every field this function reads comes from `Contact.
+    position` (fused belief) and `Contact.last_class_raw` (believed
+    classification), via `Group`'s own stored properties and `_cluster_
+    properties`. No `Observation`, no DCS object id."""
+    # Test 1 -- elapsed window.
+    if elapsed_s > window_s:
+        return False
+    # Test 2 -- kind coherence (hard). User direction, D4.
+    if group.installation != observed.installation:
+        return False
+    # Test 3 -- air-defence confirmation (hard). User direction, D6; lattice
+    # resolution per amendment A3 (both sides already resolved that way --
+    # see `Group.air_defence_composition`/`_air_defence_composition_of`).
+    if (
+        group.air_defence_composition or observed.air_defence_composition
+    ) and group.air_defence_composition != observed.air_defence_composition:
+        return False
+    # Test 4 -- composition compatibility (hard). User direction, D4: a
+    # different *kind* of member is evidence of a new group; count is
+    # deliberately not gated (more members than memory is new detections of
+    # a continuing group; fewer is occlusion -- both normal per the user's
+    # own words).
+    group_classes = {op_class for op_class, _count in group.composition}
+    observed_classes = {op_class for op_class, _count in observed.composition}
+    group_non_ad = group_classes - classification.AIR_DEFENSE_OP_CLASSES
+    observed_non_ad = observed_classes - classification.AIR_DEFENSE_OP_CLASSES
+    if not (group_non_ad <= observed_non_ad or observed_non_ad <= group_non_ad):
+        return False
+    # Test 5 -- displacement plausibility (hard). The zero-speed-bound rule
+    # is one-sided in Stage 1, deliberately: `Group` carries no persisted
+    # movement state until Stage 4, so only the *observed* side's motion is
+    # known here. This is the conservative direction -- it zeroes the bound
+    # only on positive evidence the thing seen right now is stopped, never
+    # on an assumption about the (possibly long-gone) remembered members --
+    # so it can only ever make this test *stricter* than the full two-sided
+    # D4 rule, never more permissive. Stage 4 persists `Group.movement_
+    # state` and should widen this to both sides then.
+    speed_bound_mps = (
+        0.0
+        if observed.stopped
+        else max(
+            (_plausible_speed_mps(op_class) for op_class, _count in group.composition),
+            default=GATE_GROWTH_RATE_MPS,
+        )
+    )
+    slack_m = group.centroid_uncertainty_m + observed.centroid_uncertainty_m
+    displacement_m = math.hypot(
+        group.centroid_x - observed.centroid_x, group.centroid_z - observed.centroid_z
+    )
+    return displacement_m <= speed_bound_mps * elapsed_s + slack_m
+
+
 class GroupStore:
     """Holds all currently persisted `Group`s. Structurally parallel to
     `belief.contacts.ContactStore`, deliberately far smaller -- see module
-    docstring."""
+    docstring.
+
+    **BL-12 Stage 1 split what this store holds into two readable sets**
+    (`plans/group-contact-identity/plan.md`'s own sharpest-silent-failure
+    warning): `_groups` now holds every group this store still remembers,
+    whether or not a cluster matched it on the most recent `reconcile`
+    call -- a group that matched nothing is *kept*, properties frozen,
+    until `GROUP_REIDENTIFY_WINDOW_S` elapses (the expire phase), so that a
+    later reconcile's property-match phase has something to match against.
+    `groups` (the pre-existing, pilot-facing property) and `group_for_
+    contact` must keep meaning exactly what they meant before Stage 1 --
+    *currently observed* only -- or every existing consumer (`belief.
+    speech.render_group_disclosure`, `tools.py`, `callouts.py`, `crew_
+    console.py`) starts rendering or acting on a group nobody can currently
+    see. `remembered_groups` is the new, explicit escape hatch for the one
+    caller (`reconcile`'s own phase 2) that needs the full set."""
 
     def __init__(self) -> None:
         self._groups: dict[str, Group] = {}
         self._next_group_number = 0
+        #: The `now_sim` of the most recent `reconcile` call, or `None`
+        #: before the first one -- what `groups` filters `Group.last_
+        #: observed_sim` against to answer "matched *this* reconcile".
+        self._last_reconciled_sim: float | None = None
+        #: BL-12 Stage 1 test 6's observability requirement (amendment A4 /
+        #: A2): how many times a cluster's property-match phase found *more
+        #: than one* remembered group passing every hard test, across this
+        #: store's whole life. The matching predicate's rarity claim (D5)
+        #: is otherwise unmeasurable -- see the module docstring's
+        #: `GROUP_REIDENTIFY_WINDOW_S`-adjacent reasoning and amendment A4.
+        self.ambiguous_property_matches_count: int = 0
 
     @property
     def groups(self) -> list[Group]:
-        """All known groups, insertion order. A read-only view -- callers
-        must not mutate the returned list."""
+        """Currently-observed groups only -- a cluster matched one of them
+        on the most recent `reconcile` call. Insertion order. A read-only
+        view -- callers must not mutate the returned list.
+
+        **Unchanged meaning since before Stage 1.** A group this store
+        merely *remembers* (retained through the expire phase, not yet
+        re-matched) is deliberately excluded -- see the class docstring and
+        `remembered_groups`."""
+        if self._last_reconciled_sim is None:
+            return []
+        return [
+            group
+            for group in self._groups.values()
+            if group.last_observed_sim == self._last_reconciled_sim
+        ]
+
+    @property
+    def remembered_groups(self) -> list[Group]:
+        """Every group this store still remembers, observed this reconcile
+        or not -- BL-12 Stage 1's phase 2 (property match) candidate pool.
+        Not for pilot-facing use; see the class docstring."""
         return list(self._groups.values())
 
     def group_for_contact(self, contact_id: str) -> Group | None:
-        """The `Group` `contact_id` currently belongs to, or `None` if it is
-        not a member of any group. Linear in the number of groups, which is
-        always far smaller than the number of contacts."""
-        for group in self._groups.values():
+        """The *currently observed* `Group` `contact_id` belongs to, or
+        `None` if it is not a member of one -- deliberately `self.groups`,
+        not `self._groups`/`remembered_groups`, for the same reason that
+        property is filtered (class docstring): every caller of this method
+        (`ContactStore.group_for_contact`, `tools.py`, `crew_console.py`,
+        `callouts.py`) is pilot-facing. Linear in the number of currently
+        observed groups, which is always far smaller than the number of
+        contacts."""
+        for group in self.groups:
             if contact_id in group.member_contact_ids:
                 return group
         return None
@@ -716,22 +1101,72 @@ class GroupStore:
         self._next_group_number += 1
         return f"{_GROUP_ID_PREFIX}_{self._next_group_number}"
 
-    def reconcile(self, contacts: Sequence[Contact], now_sim: float) -> None:
+    def reconcile(
+        self,
+        contacts: Sequence[Contact],
+        now_sim: float,
+        *,
+        trace_sink: Callable[[Mapping[str, object]], None] | None = None,
+    ) -> None:
         """Recompute cohesion clusters from `contacts` (the belief store's
         current `Contact` set) and reconcile them against this store's
-        persisted `Group`s by majority-member-overlap -- see module
-        docstring for the split/merge rule. Replaces this store's entire
-        membership every call; a persisted group with no matching cluster
-        (every member dispersed, or the cluster fell below `GROUP_
-        REPORTING_MIN_MEMBERS`) is simply dropped, no event fired (deferred, per the
-        plan)."""
+        persisted `Group`s -- BL-12 Stage 1, four phases in order (amendment
+        A6):
+
+        1. **Overlap match** -- unchanged from before Stage 1: greedy,
+           highest-member-overlap-first, against every group this store
+           still remembers (`remembered_groups`, not only `groups`) -- so a
+           group can be reclaimed by overlap even if it was merely
+           retained, not currently observed, going into this call.
+        2. **Property match** -- for each cluster overlap left unmatched,
+           against each group `remembered_groups` still has unclaimed, in
+           ascending centroid distance (ties by lowest group id): if
+           `group_matches` passes, the cluster claims that group's id,
+           `established_sim` and `last_spoken_*` snapshot, the same
+           carry-over phase 1 already does. More than one group passing
+           for the same cluster increments `ambiguous_property_matches_
+           count` (test 6's rarity claim, made observable) before the
+           tiebreak is applied.
+        3. **Found** -- unchanged: any cluster still unmatched gets a fresh
+           `Group`.
+        4. **Expire** -- a persisted group that matched no cluster this
+           call is *kept*, properties frozen, while `now_sim - group.
+           last_observed_sim <= GROUP_REIDENTIFY_WINDOW_S`; past that it is
+           dropped. This is what makes phase 2 possible at all -- before
+           Stage 1, an unmatched group was dropped on this same call,
+           before ever offering a later reconcile anything to match
+           against.
+
+        `trace_sink`, when given, is called once per cluster-resolution
+        outcome (phase 1/2/3) and once per group that expires this call --
+        amendment A4's group-identity sortie trace line, promoted to
+        Stage 1's first commit. A `None` default is a true no-op: nothing
+        about this method's behaviour changes when no sink is supplied.
+        Deliberately **not** file I/O -- this module owns no writer (module
+        docstring: "this module never reads or writes anything speech-
+        shaped"; the same posture applies to any other kind of I/O) --
+        wiring a sink to a file is the caller's job, mirroring `detection_
+        trace_writer.py`/`speech_log.py`'s placement outside `belief/`.
+
+        **No omniscience**: every field computed here comes from `Contact.
+        position` (fused belief) and `Contact.last_class_raw` (believed
+        classification) -- see `_cluster_properties` and `group_matches`."""
         clusters = _cluster_contacts(
             contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS
         )
+        contacts_by_id = {contact.id: contact for contact in contacts}
+        cluster_props: dict[frozenset[str], _ClusterProperties] = {
+            cluster: _cluster_properties([contacts_by_id[cid] for cid in cluster])
+            for cluster in clusters
+        }
 
+        persisted = dict(self._groups)
+
+        # --- Phase 1: overlap match (unchanged in spirit; candidate set is
+        # every remembered group, not only currently-observed ones). ---
         scored: list[tuple[int, frozenset[str], Group]] = []
         for cluster in clusters:
-            for group in self._groups.values():
+            for group in persisted.values():
                 overlap = len(cluster & group.member_contact_ids)
                 if overlap > 0:
                     scored.append((overlap, cluster, group))
@@ -743,16 +1178,48 @@ class GroupStore:
 
         cluster_to_group: dict[frozenset[str], Group] = {}
         claimed_group_ids: set[str] = set()
+        resolution_phase: dict[frozenset[str], str] = {}
         for _overlap, cluster, group in scored:
             if cluster in cluster_to_group or group.id in claimed_group_ids:
                 continue
             cluster_to_group[cluster] = group
             claimed_group_ids.add(group.id)
+            resolution_phase[cluster] = "overlap"
 
+        # --- Phase 2: property match. Clusters in a deterministic order
+        # (sorted member ids) so ties/collisions resolve reproducibly. ---
+        unmatched_clusters = sorted(
+            (cluster for cluster in clusters if cluster not in cluster_to_group),
+            key=lambda cluster: sorted(cluster),
+        )
+        for cluster in unmatched_clusters:
+            props = cluster_props[cluster]
+            elapsed_candidates = [
+                group
+                for group in persisted.values()
+                if group.id not in claimed_group_ids
+                and group_matches(group, props, now_sim - group.last_observed_sim)
+            ]
+            if len(elapsed_candidates) > 1:
+                self.ambiguous_property_matches_count += 1
+            if not elapsed_candidates:
+                continue
+            winner = min(
+                elapsed_candidates,
+                key=lambda group: (-group_match_score(group, props), group.id),
+            )
+            cluster_to_group[cluster] = winner
+            claimed_group_ids.add(winner.id)
+            resolution_phase[cluster] = "property"
+
+        # --- Phase 3: found. ---
         new_groups: dict[str, Group] = {}
+        trace_records: list[dict[str, object]] = []
         for cluster in clusters:
+            props = cluster_props[cluster]
             old = cluster_to_group.get(cluster)
             if old is not None:
+                phase = resolution_phase[cluster]
                 new_groups[old.id] = Group(
                     id=old.id,
                     member_contact_ids=cluster,
@@ -763,7 +1230,15 @@ class GroupStore:
                     last_spoken_member_contact_ids=old.last_spoken_member_contact_ids,
                     last_spoken_leading_contact_id=old.last_spoken_leading_contact_id,
                     last_spoken_differentiated=old.last_spoken_differentiated,
+                    last_observed_sim=now_sim,
+                    centroid_x=props.centroid_x,
+                    centroid_z=props.centroid_z,
+                    centroid_uncertainty_m=props.centroid_uncertainty_m,
+                    composition=props.composition,
+                    installation=props.installation,
+                    air_defence_composition=props.air_defence_composition,
                 )
+                group_id = old.id
             else:
                 new_id = self._new_group_id()
                 new_groups[new_id] = Group(
@@ -771,5 +1246,68 @@ class GroupStore:
                     member_contact_ids=cluster,
                     established_sim=now_sim,
                     last_reconciled_sim=now_sim,
+                    last_observed_sim=now_sim,
+                    centroid_x=props.centroid_x,
+                    centroid_z=props.centroid_z,
+                    centroid_uncertainty_m=props.centroid_uncertainty_m,
+                    composition=props.composition,
+                    installation=props.installation,
+                    air_defence_composition=props.air_defence_composition,
                 )
+                group_id = new_id
+                phase = "found"
+            trace_records.append(
+                {
+                    "now_sim": now_sim,
+                    "phase": phase,
+                    "group_id": group_id,
+                    "member_contact_ids": sorted(cluster),
+                    "centroid_x": props.centroid_x,
+                    "centroid_z": props.centroid_z,
+                    "extent_m": props.extent_m,
+                    "composition": [list(pair) for pair in props.composition],
+                }
+            )
+
+        # --- Phase 4: expire. ---
+        for group in persisted.values():
+            if group.id in claimed_group_ids:
+                continue
+            if now_sim - group.last_observed_sim <= GROUP_REIDENTIFY_WINDOW_S:
+                new_groups[group.id] = Group(
+                    id=group.id,
+                    member_contact_ids=group.member_contact_ids,
+                    established_sim=group.established_sim,
+                    last_reconciled_sim=now_sim,
+                    last_spoken_signature=group.last_spoken_signature,
+                    last_spoken_sim=group.last_spoken_sim,
+                    last_spoken_member_contact_ids=group.last_spoken_member_contact_ids,
+                    last_spoken_leading_contact_id=group.last_spoken_leading_contact_id,
+                    last_spoken_differentiated=group.last_spoken_differentiated,
+                    last_observed_sim=group.last_observed_sim,
+                    centroid_x=group.centroid_x,
+                    centroid_z=group.centroid_z,
+                    centroid_uncertainty_m=group.centroid_uncertainty_m,
+                    composition=group.composition,
+                    installation=group.installation,
+                    air_defence_composition=group.air_defence_composition,
+                )
+            else:
+                trace_records.append(
+                    {
+                        "now_sim": now_sim,
+                        "phase": "expired",
+                        "group_id": group.id,
+                        "member_contact_ids": sorted(group.member_contact_ids),
+                        "centroid_x": group.centroid_x,
+                        "centroid_z": group.centroid_z,
+                        "extent_m": None,
+                        "composition": [list(pair) for pair in group.composition],
+                    }
+                )
+
         self._groups = new_groups
+        self._last_reconciled_sim = now_sim
+        if trace_sink is not None:
+            for record in trace_records:
+                trace_sink(record)

@@ -37,6 +37,7 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -753,10 +754,25 @@ class ContactStore:
 
     @property
     def groups(self) -> list[Group]:
-        """Every currently persisted associative group (`plans/
+        """Every *currently observed* associative group (`plans/
         group-reporting/plan.md` Stage 2), insertion order. A read-only
-        view -- callers must not mutate the returned list."""
+        view -- callers must not mutate the returned list.
+
+        **Unchanged meaning since before BL-12 Stage 1** (`plans/
+        group-contact-identity/plan.md`): a group this store merely
+        *remembers*, not matched by a cluster on the most recent `tick`,
+        is deliberately excluded -- see `remembered_groups` and `belief.
+        groups.GroupStore`'s own class docstring on why the two must not
+        be confused."""
         return self._groups.groups
+
+    @property
+    def remembered_groups(self) -> list[Group]:
+        """Every group this store still remembers, observed on the most
+        recent `tick` or not (BL-12 Stage 1) -- delegates to `belief.
+        groups.GroupStore.remembered_groups`. Not for pilot-facing use;
+        see `groups`."""
+        return self._groups.remembered_groups
 
     def group_for_contact(self, contact_id: str) -> Group | None:
         """The `Group` `contact_id` currently belongs to, or `None` --
@@ -1059,6 +1075,8 @@ class ContactStore:
         self,
         now_sim: float,
         ownship: OwnshipState | None = None,
+        *,
+        group_trace_sink: Callable[[Mapping[str, object]], None] | None = None,
     ) -> None:
         """Materialise lifecycle, classification, *and* attention events
         for every known contact as of `now_sim`. For each contact, per event
@@ -1096,6 +1114,12 @@ class ContactStore:
         range-crossing block a no-op (see that block's own docstring). Not
         threaded into any of the five pre-existing blocks above, which have
         no use for ownship position.
+
+        **`group_trace_sink` (BL-12 Stage 1, amendment A4) drives the
+        eighth block alone** -- passed straight to `belief.groups.
+        GroupStore.reconcile`'s own `trace_sink` parameter, keyword-only
+        and `None` by default, a true no-op when absent. See that method's
+        docstring for what gets passed to it and when.
 
         **An eighth, cross-contact block runs once per `tick()` call, after
         every contact's per-contact blocks above** (`plans/
@@ -1489,6 +1513,7 @@ class ContactStore:
                 if certainty_of(contact, now_sim) != "lost"
             ],
             now_sim,
+            trace_sink=group_trace_sink,
         )
 
     @staticmethod

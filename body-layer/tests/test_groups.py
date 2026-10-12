@@ -8,11 +8,14 @@ faster-to-read test."""
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 import belief.groups as groups_module
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
+from belief.decay import GROUP_REIDENTIFY_WINDOW_S
 from belief.groups import (
     GROUP_PROXIMITY_GAP_RATIO,
     GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS,
@@ -21,37 +24,61 @@ from belief.groups import (
     GROUP_REPORTING_MIN_MEMBERS,
     GROUP_REPORTING_UNKNOWN_SIZE_M,
     CohesionBackstop,
+    Group,
     GroupStore,
+    _cluster_properties,
     _pair_backstop_m,
     _profile_for_contact,
     _representative_size_m,
+    group_match_score,
+    group_matches,
 )
+from belief.motion import MotionBelief, MotionState
 from belief.position_belief import Covariance2D, PositionEstimate
 from perception import object_model
 
 
 def _contact(
-    contact_id: str, x: float, z: float, *, class_raw: str = "OP_TRUCK"
+    contact_id: str,
+    x: float,
+    z: float,
+    *,
+    class_raw: str = "OP_TRUCK",
+    uncertainty_m: float = 0.0,
+    motion_state: MotionState | None = None,
 ) -> Contact:
     """`class_raw` defaults to `OP_TRUCK` (unchanged for every pre-existing
     caller) -- the `EAGER`/installation-cohesion tests below pass a real
     `object_model` keyword string (`"infantry"`, `"osa"`, `"s-125"`, ...) to
     exercise a specific per-class backstop policy or `installation_
-    component` flag via `object_model.profile_for`."""
+    component` flag via `object_model.profile_for`.
+
+    `uncertainty_m` (new, BL-12 Stage 1) sets `covariance` so `PositionEstimate.
+    radius_m()` returns exactly this value (`xx = zz = uncertainty_m**2 / 2`,
+    since `radius_m() = sqrt(xx + zz)`) -- defaults to 0.0, unchanged for
+    every pre-existing caller. `motion_state` (new) sets `Contact.motion`
+    to a `MotionBelief` in that state, or leaves it `None` (unobserved for
+    movement) by default."""
+    half_variance = 0.5 * uncertainty_m * uncertainty_m
     return Contact(
         id=contact_id,
         position=PositionEstimate(
             x=x,
             z=z,
-            covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+            covariance=Covariance2D(xx=half_variance, zz=half_variance, xz=0.0),
             as_of_sim=0.0,
             fused_at_sim=0.0,
-            fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+            fused_covariance=Covariance2D(xx=half_variance, zz=half_variance, xz=0.0),
         ),
         last_alt_m=0.0,
         last_class_raw=class_raw,
         classification=new_classification_belief(
             value=class_raw, level=SpecificityLevel.CLASS, established_sim=0.0
+        ),
+        motion=(
+            None
+            if motion_state is None
+            else MotionBelief(state=motion_state, confidence=0.5, established_sim=0.0)
         ),
     )
 
@@ -853,3 +880,447 @@ def test_real_s300_site_ground_truth_geometry_forms_a_three_member_cluster() -> 
 
 def test_cohesion_backstop_enum_members() -> None:
     assert {policy.value for policy in CohesionBackstop} == {"strict", "eager"}
+
+
+# --- BL-12 Stage 1: remembered properties, computed on reconcile -----------
+# `plans/group-contact-identity/plan.md`, "Group" field table.
+
+
+def test_a_freshly_formed_group_carries_its_remembered_properties() -> None:
+    """The seven new fields are populated on the very first reconcile that
+    forms a group, not only on a later property-match -- `composition`
+    resolves via `_profile_for_contact` (both `OP_TRUCK`), `installation`
+    is `False` (neither member's profile is an installation component),
+    `air_defence_composition` is empty, and `last_observed_sim` equals
+    `now_sim`."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=5.0)
+
+    group = store.groups[0]
+    assert group.last_observed_sim == 5.0
+    assert group.last_reconciled_sim == 5.0
+    assert group.composition == (("OP_TRUCK", 2),)
+    assert group.installation is False
+    assert group.air_defence_composition == ()
+    assert group.centroid_x == pytest.approx(5.0)
+    assert group.centroid_z == pytest.approx(0.0)
+
+
+def test_air_defence_composition_resolves_through_the_lattice_at_class_level() -> None:
+    """Amendment A3's correction, exercised through a real reconcile: a
+    contact whose `last_class_raw` is the bare `op_class` string
+    `"OP_MRSAM"` (a *class*-level belief -- what a contact holds before it
+    is identified to type) still counts as air defence here, even though
+    `object_model.profile_for("OP_MRSAM")` cannot resolve it (it is not a
+    keyword `profile_for` matches -- it is the bucket name itself)."""
+    assert (
+        object_model.profile_for("OP_MRSAM").op_class == object_model.DEFAULT_OP_CLASS
+    )
+    store = GroupStore()
+    contacts = [
+        _contact("C1", 0.0, 0.0, class_raw="OP_MRSAM"),
+        _contact("C2", 50.0, 0.0, class_raw="OP_MRSAM"),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    group = store.groups[0]
+    assert group.air_defence_composition == (("OP_MRSAM", 2),)
+
+
+def test_installation_is_true_only_when_every_member_is_an_installation_component() -> (
+    None
+):
+    store = GroupStore()
+    both = [
+        _contact("S1", 0.0, 0.0, class_raw="s-125"),
+        _contact("S2", 400.0, 0.0, class_raw="s-125"),
+    ]
+    mixed_store = GroupStore()
+    mixed = [
+        _contact("O1", 0.0, 0.0, class_raw="osa"),
+        _contact("T1", 50.0, 0.0, class_raw="truck"),
+    ]
+
+    store.reconcile(both, now_sim=0.0)
+    mixed_store.reconcile(mixed, now_sim=0.0)
+
+    assert store.groups[0].installation is True
+    assert mixed_store.groups[0].installation is False
+
+
+def test_centroid_uncertainty_is_the_rms_of_member_radii() -> None:
+    """RMS (quadratic mean), not a plain mean -- `sqrt(mean(r**2))`."""
+    store = GroupStore()
+    contacts = [
+        _contact("C1", 0.0, 0.0, uncertainty_m=3.0),
+        _contact("C2", 10.0, 0.0, uncertainty_m=4.0),
+    ]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    expected = math.sqrt((3.0**2 + 4.0**2) / 2)
+    assert store.groups[0].centroid_uncertainty_m == pytest.approx(expected)
+
+
+# --- BL-12 Stage 1: group identity survives member-id replacement ----------
+
+
+def test_a_group_survives_total_member_id_replacement_via_property_match() -> None:
+    """The headline behaviour. A group of two trucks is observed, then
+    every member's contact id changes (simulating `ContactStore` re-
+    founding the same real vehicles under fresh ids, `BL-B24`) while the
+    cluster's geometry/composition stay the same and little sim-time has
+    passed -- `group_matches`' tests 1-5 all pass, so the new cluster
+    inherits the old group's id, `established_sim` and disclosure
+    snapshot, rather than founding a new `Group`."""
+    store = GroupStore()
+    store.reconcile([_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)], now_sim=0.0)
+    original = store.groups[0]
+    original_id = original.id
+    store.mark_spoken(original_id, "signature", 0.0)
+
+    # Every member's contact id changes; same classes, same geometry, 2 s
+    # later -- well under the plausible-speed bound even for a stationary
+    # pair budgeted only by `GATE_GROWTH_RATE_MPS`.
+    store.reconcile([_contact("D1", 0.0, 0.0), _contact("D2", 10.0, 0.0)], now_sim=2.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    reidentified = groups[0]
+    assert reidentified.id == original_id
+    assert reidentified.member_contact_ids == frozenset({"D1", "D2"})
+    assert reidentified.established_sim == 0.0
+    assert reidentified.last_observed_sim == 2.0
+    assert reidentified.last_spoken_signature == "signature"
+
+
+def test_a_group_with_no_matching_cluster_is_retained_not_dropped_within_the_window() -> (
+    None
+):
+    """Phase 4 (expire): a group every member of which has vanished from
+    the observed `Contact` set is *kept*, properties frozen, rather than
+    dropped on this same reconcile -- `GroupStore.groups` stops listing it
+    (nothing currently observed), but `remembered_groups` still does."""
+    store = GroupStore()
+    store.reconcile([_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)], now_sim=0.0)
+    original_id = store.groups[0].id
+
+    store.reconcile([], now_sim=10.0)
+
+    assert store.groups == []
+    remembered = store.remembered_groups
+    assert len(remembered) == 1
+    assert remembered[0].id == original_id
+    assert remembered[0].last_observed_sim == 0.0
+    assert remembered[0].last_reconciled_sim == 10.0
+
+
+def test_a_group_expires_once_the_reidentify_window_elapses() -> None:
+    """Past `GROUP_REIDENTIFY_WINDOW_S` since it was last observed, a
+    retained group is actually dropped from `remembered_groups` too."""
+    store = GroupStore()
+    store.reconcile([_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)], now_sim=0.0)
+
+    store.reconcile([], now_sim=GROUP_REIDENTIFY_WINDOW_S)
+    assert len(store.remembered_groups) == 1  # still within the window, inclusive
+
+    store.reconcile([], now_sim=GROUP_REIDENTIFY_WINDOW_S + 0.1)
+    assert store.remembered_groups == []
+
+
+def test_a_reclaimed_group_is_no_longer_in_remembered_groups_alongside_groups() -> None:
+    """Once a cluster re-matches a retained group, it moves back to being
+    both "observed" and "remembered" -- the two properties are not
+    mutually exclusive, `remembered_groups` is simply the superset."""
+    store = GroupStore()
+    store.reconcile([_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)], now_sim=0.0)
+    store.reconcile([], now_sim=5.0)
+    assert store.groups == []
+    assert len(store.remembered_groups) == 1
+
+    store.reconcile([_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)], now_sim=10.0)
+
+    assert len(store.groups) == 1
+    assert store.groups == store.remembered_groups
+
+
+def test_group_for_contact_only_considers_currently_observed_groups() -> None:
+    """The sharpest silent-failure surface the plan names: `group_for_
+    contact` (and therefore `tools.py`/`crew_console.py`/`callouts.py`)
+    must not resolve a contact into a merely-remembered, not-currently-
+    observed group."""
+    store = GroupStore()
+    store.reconcile([_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)], now_sim=0.0)
+    store.reconcile([], now_sim=5.0)
+
+    assert store.remembered_groups != []
+    assert store.group_for_contact("C1") is None
+
+
+# --- BL-12 Stage 1: `group_matches`'s hard tests, in isolation --------------
+
+
+def _group(
+    *,
+    composition: tuple[tuple[str, int], ...] = (("OP_TRUCK", 2),),
+    installation: bool = False,
+    air_defence_composition: tuple[tuple[str, int], ...] = (),
+    centroid_x: float = 0.0,
+    centroid_z: float = 0.0,
+    centroid_uncertainty_m: float = 0.0,
+    last_observed_sim: float = 0.0,
+) -> Group:
+    return Group(
+        id="GROUP_TEST",
+        member_contact_ids=frozenset({"X1", "X2"}),
+        established_sim=0.0,
+        last_reconciled_sim=0.0,
+        last_observed_sim=last_observed_sim,
+        centroid_x=centroid_x,
+        centroid_z=centroid_z,
+        centroid_uncertainty_m=centroid_uncertainty_m,
+        composition=composition,
+        installation=installation,
+        air_defence_composition=air_defence_composition,
+    )
+
+
+def test_group_matches_rejects_past_the_reidentify_window() -> None:
+    group = _group()
+    observed = _cluster_properties(
+        [_contact("Y1", 0.0, 0.0), _contact("Y2", 10.0, 0.0)]
+    )
+    assert group_matches(group, observed, GROUP_REIDENTIFY_WINDOW_S) is True
+    assert group_matches(group, observed, GROUP_REIDENTIFY_WINDOW_S + 0.1) is False
+
+
+def test_group_matches_rejects_a_mismatched_installation_flag() -> None:
+    """Test 2, kind coherence (D4): an entrenched installation and a
+    mobile cluster never match, however close and however compatible their
+    composition otherwise looks."""
+    group = _group(installation=True)
+    observed = _cluster_properties(
+        [
+            _contact("Y1", 0.0, 0.0, class_raw="osa"),
+            _contact("Y2", 5.0, 0.0, class_raw="osa"),
+        ]
+    )
+    assert observed.installation is False
+    assert group_matches(group, observed, 1.0) is False
+
+
+def test_group_matches_requires_air_defence_confirmation_both_ways() -> None:
+    """Test 3, D6: positive confirmation is required, in *both* directions
+    -- a remembered SAM cluster must not inherit into a cluster that is no
+    longer confirmed air defence, and a cluster that is newly confirmed air
+    defence must not inherit a non-air-defence group's identity, either."""
+    sam_group = _group(
+        composition=(("OP_MRSAM", 2),), air_defence_composition=(("OP_MRSAM", 2),)
+    )
+    non_sam_observed = _cluster_properties(
+        [_contact("Y1", 0.0, 0.0), _contact("Y2", 10.0, 0.0)]
+    )
+    assert group_matches(sam_group, non_sam_observed, 1.0) is False
+
+    plain_group = _group()
+    sam_observed = _cluster_properties(
+        [
+            _contact("Y1", 0.0, 0.0, class_raw="OP_MRSAM"),
+            _contact("Y2", 10.0, 0.0, class_raw="OP_MRSAM"),
+        ]
+    )
+    assert group_matches(plain_group, sam_observed, 1.0) is False
+
+
+def test_group_matches_composition_compatibility_is_subset_either_direction() -> None:
+    """Test 4, D4: count is deliberately not gated -- more members than
+    memory (new detections of a continuing group) and fewer (occlusion)
+    both pass, as long as one side's non-air-defence classes is a subset
+    of the other's. A genuinely new *kind* of member -- neither subset --
+    fails."""
+    group = _group(composition=(("OP_TRUCK", 2),))
+
+    more_members = _cluster_properties(
+        [
+            _contact("Y1", 0.0, 0.0),
+            _contact("Y2", 10.0, 0.0),
+            _contact("Y3", 5.0, 5.0),
+        ]
+    )
+    assert group_matches(group, more_members, 1.0) is True
+
+    fewer_members = _cluster_properties([_contact("Y1", 0.0, 0.0)])
+    # Below `GROUP_REPORTING_MIN_MEMBERS` as an observed cluster in
+    # practice, but `group_matches` itself places no floor on `observed`'s
+    # own member count -- it is a pure predicate over already-computed
+    # properties.
+    assert group_matches(group, fewer_members, 1.0) is True
+
+    different_kind = _cluster_properties(
+        [
+            _contact("Y1", 0.0, 0.0, class_raw="infantry"),
+            _contact("Y2", 10.0, 0.0, class_raw="infantry"),
+        ]
+    )
+    assert group_matches(group, different_kind, 1.0) is False
+
+
+def test_group_matches_rejects_an_implausible_displacement() -> None:
+    """Test 5: a jump far beyond `GATE_GROWTH_RATE_MPS * elapsed_s` plus
+    both sides' position uncertainty is rejected, even with every other
+    test passing."""
+    group = _group(centroid_x=0.0, centroid_z=0.0)
+    far_observed = _cluster_properties(
+        [_contact("Y1", 10_000.0, 0.0), _contact("Y2", 10_010.0, 0.0)]
+    )
+    assert group_matches(group, far_observed, 1.0) is False
+
+
+def test_group_matches_zero_speed_bound_when_the_observed_cluster_is_stopped() -> None:
+    """D4: *"if I see no movement, then I especially expect that the
+    units I remember have not moved."* Stage 1 reads this one-sidedly (see
+    `group_matches`'s own comment) -- only the *observed* side's motion is
+    known, since `Group` carries no persisted movement state until Stage
+    4. A displacement inside the ordinary moving bound but outside the
+    zero-speed bound is accepted when motion is unknown and rejected only
+    once the observed cluster is confirmed stopped."""
+    group = _group(centroid_x=0.0, centroid_z=0.0)
+    elapsed_s = 10.0
+    # Chosen to sit strictly between the zero-speed bound (just slack, 0 m
+    # here) and the ordinary moving bound (GATE_GROWTH_RATE_MPS * 10 = 200
+    # m): 50 m clears neither side's uncertainty but is well inside the
+    # moving bound.
+    displacement_m = 50.0
+    moving_observed = _cluster_properties(
+        [
+            _contact("Y1", displacement_m, 0.0, motion_state="moving"),
+            _contact("Y2", displacement_m + 10.0, 0.0, motion_state="moving"),
+        ]
+    )
+    stopped_observed = _cluster_properties(
+        [
+            _contact("Y1", displacement_m, 0.0, motion_state="stopped"),
+            _contact("Y2", displacement_m + 10.0, 0.0, motion_state="stopped"),
+        ]
+    )
+
+    assert group_matches(group, moving_observed, elapsed_s) is True
+    assert group_matches(group, stopped_observed, elapsed_s) is False
+
+
+def test_group_match_score_orders_nearest_first() -> None:
+    group = _group(centroid_x=0.0, centroid_z=0.0)
+    near = _cluster_properties([_contact("Y1", 10.0, 0.0), _contact("Y2", 20.0, 0.0)])
+    far = _cluster_properties([_contact("Z1", 100.0, 0.0), _contact("Z2", 110.0, 0.0)])
+    assert group_match_score(group, near) > group_match_score(group, far)
+
+
+# --- BL-12 Stage 1: ambiguity resolution and its observability counter -----
+
+
+def test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id() -> None:
+    """Test 6, D5's inversion: when more than one remembered group passes
+    every hard test for the same cluster, the nearer one wins -- and the
+    attempt is counted, so the rarity D5's acceptance rests on is
+    observable rather than assumed.
+
+    Group A (centroid x=5) and group B (centroid x=65) must form as two
+    *separate* clusters in one reconcile call -- far enough apart (60 m
+    between A's far member and B's near member) that single-link chaining
+    does not merge them (the within-group 10 m gap sets the relative
+    threshold at `3 * 10 = 30`, well under 60), but close enough that a
+    later cluster at x=26 is within the flat `GATE_GROWTH_RATE_MPS * 2 s =
+    40 m` displacement bound of *both* (21 m from A, 39 m from B)."""
+    store = GroupStore()
+    store.reconcile(
+        [
+            _contact("A1", 0.0, 0.0),
+            _contact("A2", 10.0, 0.0),
+            _contact("B1", 60.0, 0.0),
+            _contact("B2", 70.0, 0.0),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.groups) == 2
+    near_id, far_id = (
+        (store.groups[0].id, store.groups[1].id)
+        if store.groups[0].centroid_x < store.groups[1].centroid_x
+        else (store.groups[1].id, store.groups[0].id)
+    )
+
+    # Both groups go quiet at once.
+    store.reconcile([], now_sim=1.0)
+    assert store.ambiguous_property_matches_count == 0
+
+    # A new cluster at x in [21, 31] (centroid 26) sits within the
+    # plausible-displacement bound of both A (21 m) and B (39 m).
+    store.reconcile([_contact("C1", 21.0, 0.0), _contact("C2", 31.0, 0.0)], now_sim=2.0)
+
+    assert store.ambiguous_property_matches_count == 1
+    assert len(store.groups) == 1
+    assert store.groups[0].id == near_id
+    assert far_id in {g.id for g in store.remembered_groups}
+
+
+# --- BL-12 Stage 1: the group-identity sortie trace line (amendment A4) ----
+
+
+def test_reconcile_emits_a_trace_record_for_each_resolution_phase() -> None:
+    """Minimum fields per amendment A4: `group_id`, the resolving phase,
+    the roster, the centroid, the cluster's extent, and composition. A
+    `None` `trace_sink` (every pre-existing caller) is a true no-op --
+    exercised by every other test in this file never passing one."""
+    store = GroupStore()
+    records: list[dict[str, object]] = []
+
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0), _contact("C2", 50.0, 0.0)],
+        now_sim=0.0,
+        trace_sink=records.append,
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["phase"] == "found"
+    assert record["group_id"] == store.groups[0].id
+    assert record["member_contact_ids"] == ["C1", "C2"]
+    assert record["centroid_x"] == pytest.approx(25.0)
+    assert record["extent_m"] == pytest.approx(50.0)
+    assert record["composition"] == [["OP_TRUCK", 2]]
+
+
+def test_reconcile_trace_distinguishes_overlap_property_and_expired() -> None:
+    store = GroupStore()
+    records: list[dict[str, object]] = []
+
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)],
+        now_sim=0.0,
+        trace_sink=records.append,
+    )
+    assert [r["phase"] for r in records] == ["found"]
+
+    # Same contact ids -- overlap match.
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)],
+        now_sim=1.0,
+        trace_sink=records.append,
+    )
+    assert [r["phase"] for r in records[-1:]] == ["overlap"]
+
+    # Fresh contact ids, same geometry -- property match.
+    store.reconcile(
+        [_contact("D1", 0.0, 0.0), _contact("D2", 10.0, 0.0)],
+        now_sim=2.0,
+        trace_sink=records.append,
+    )
+    assert [r["phase"] for r in records[-1:]] == ["property"]
+
+    # Nothing observed until the window elapses -- expired.
+    store.reconcile(
+        [], now_sim=2.0 + GROUP_REIDENTIFY_WINDOW_S + 0.1, trace_sink=records.append
+    )
+    assert [r["phase"] for r in records[-1:]] == ["expired"]

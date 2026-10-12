@@ -593,7 +593,18 @@ def test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent()
     *contact* association gate this fixture's geometry is borrowed from,
     but outside `belief.groups`' own, tighter cohesion gate, so they never
     cohere naturally; the taxonomy under test does not care how a group
-    came to exist, only what it currently contains."""
+    came to exist, only what it currently contains.
+
+    **BL-12 Stage 1 note**: the final assertion reads `store.
+    remembered_groups`, not `store.groups` -- `poll()` never calls `store.
+    tick()`, so `GroupStore.reconcile` never runs again after the direct
+    injection below, and the injected `Group`'s `last_observed_sim` stays
+    at its default (never set by a real reconcile). Stage 1 made `.groups`
+    mean *currently observed* specifically so a group nobody's reconcile
+    actually matched this tick cannot render as if it were -- exactly this
+    fixture's situation, by construction. `.remembered_groups` is the
+    right read here: this test does not care about the observed/remembered
+    distinction, only that nothing marked the injected group as spoken."""
     from belief.groups import Group
 
     store = ContactStore()
@@ -636,7 +647,9 @@ def test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent()
         poll(t)
 
     assert spoken == ["Ural truck.", "Ural truck."]  # the group adds nothing
-    assert store.groups[0].last_spoken_signature is None  # never became a candidate
+    assert (
+        store.remembered_groups[0].last_spoken_signature is None
+    )  # never became a candidate
 
 
 def test_simultaneously_founded_mutually_close_contacts_both_speak() -> None:
