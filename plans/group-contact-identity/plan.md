@@ -350,6 +350,37 @@ already gives — its heading input is membership noise, and §2 of that plan pu
 
 ---
 
+## A10 — BL-12 ends at Stage 4. Stage 5 is skipped; Stage 6 is deferred.
+
+**User direction, 2026-10-12**, after Stage 4 was approved. BL-12's merged scope is **Stages 0, 0a,
+0b, 1, 2a, 2b, 3, 3.5 and 4**, and nothing further.
+
+- **Stage 5 (road-following, D9) — skipped entirely, not partially built.** The effort/value read
+  recommended taking the cheap anisotropic half now and moving the graph corridor to `BL-8`; the
+  user took **the whole of D9 to `BL-8`**, the cheap half included. So Stage 1's displacement bound
+  stays **isotropic**, no `Group` field caches a road axis, and this milestone adds no new
+  `describe_position` caller — which also leaves `BL-B49` untouched by it. Anything written as
+  though the anisotropic stand-in had landed should assume an isotropic bound instead.
+- **Stage 6 (shorten `OBJECT_ID_MEMORY_S` to the 60 s belief horizon, D3's bound) — deferred, not
+  rejected.** Its stated prerequisite is satisfied (Stages 1 and 3 are in), so this is a scheduling
+  choice, not a blocked one. **The omniscience shortcut it would close stays live**: object-id
+  continuity is still trusted across a ten-minute gap, which D3 forbids, and the contact-count
+  change the stage would produce remains unmeasured. Whoever takes it up should re-measure against
+  the same sortie logs, per the stage's own text.
+
+**Consequence for the claim this milestone makes.** Group identity now survives losing sight for up
+to `GROUP_REIDENTIFY_WINDOW_S`, but beyond that window re-identification still goes through
+object-id rather than the group predicate until Stage 6 lands — so the no-omniscience boundary this
+plan argues for is **not yet fully closed at the long horizon**. State that plainly rather than
+letting the merged milestone imply otherwise.
+
+**The bare `"Group."` disclosure stays** (user direction, same day). An over-wide, unclassified group
+speaks the composition word alone, with no bearing, range or heading, because the extent guard
+removes all three. The alternatives offered were silence and a bearing-arc/range-span form; the user
+kept current behaviour, so the arc form is **not** backlogged from here.
+
+---
+
 ## Questions for the user — new in this amendment
 
 These are in addition to the body's Q1–Q6, which all still stand.
