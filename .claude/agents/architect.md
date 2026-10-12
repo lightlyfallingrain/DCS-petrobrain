@@ -243,10 +243,8 @@ type: {{user, feedback, project, reference}}
 {{memory content}}
 ```
 
-**Step 2** — nothing further. **Do not maintain a `MEMORY.md` index.** It is derived on demand from
-each file's `description:` frontmatter, so the `description:` *is* the index entry — write it as the
-one-line hook a reader needs. The hand-kept index drifted, outgrew its read limit, and a hook asked
-six agents in one session to compact it (`todo/todo/X-T25.md`).
+**Step 2** — nothing further. There is no index to maintain; the `description:` you just wrote *is*
+the index entry, so make it the one-line hook a future reader needs.
 
 **Reading memory belongs in your step 2, beside the graph query.** That step already says to query
 the graph for prior work *before reading code*, because the thing you are looking for is a document

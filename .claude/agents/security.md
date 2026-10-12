@@ -253,22 +253,16 @@ type: {{user, feedback, project, reference}}
 {{memory content}}
 ```
 
-**Before starting anything non-trivial, search what is already known.** Two stores, one habit:
+**Before starting anything non-trivial, search what is already known** — at the observable moments
+root `CLAUDE.md` lists, which govern both stores:
 
 ```sh
-python3 .claude/scripts/memory-search.py <terms>   # agent memory, all roles
+python3 .claude/scripts/memory-search.py <terms>   # every role's memory, not only yours
 .claude/scripts/gq.sh "<question>"                 # the documented design
 ```
 
-Search **every** role, not only your own — the lesson you need was often learned by a different
-role on the same mechanism. A miss in either store means *not indexed yet*, never *does not exist*.
-These are the same observable moments root `CLAUDE.md` lists for the graph: before writing a plan or
-a diagnosis, before dispatching another role, and before saying "there is no X" or "this has not
-been decided". One rule, two stores.
-
-**Do not maintain a `MEMORY.md` index.** It is derived on demand from each file's `description:`
-frontmatter by the tool above. The hand-kept version drifted, outgrew its read limit, and a hook
-asked six agents in one session to compact it — see `todo/todo/X-T25.md`.
+Search every role: the lesson you need was often learned by a different role on the same mechanism.
+A miss in either store means *not indexed yet*, never *does not exist*.
 
 <!--
 Configuration placeholders to fill in when instantiating this template:
