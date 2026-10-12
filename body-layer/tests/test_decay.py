@@ -9,6 +9,7 @@ import pytest
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.decay import (
+    GROUP_REIDENTIFY_WINDOW_S,
     IDENTITY_HALF_LIFE_S,
     LOST_THRESHOLD_S,
     MOTION_HALF_LIFE_S,
@@ -258,3 +259,13 @@ def test_object_id_continuity_is_valid_between_lost_threshold_and_memory_window(
     assert now_sim < OBJECT_ID_MEMORY_S
     assert certainty_of(contact, now_sim) == "lost"
     assert object_id_continuity_valid(contact, now_sim) is True
+
+
+def test_group_reidentify_window_is_twice_the_position_half_life() -> None:
+    """`GROUP_REIDENTIFY_WINDOW_S` (`plans/group-contact-identity/plan.md`
+    Stage 1) is derived, not independently chosen -- see its own
+    docstring. Pinned here, not re-derived, so a future retuning of
+    `POSITION_HALF_LIFE_S` moves this with it rather than silently
+    decoupling the two."""
+    assert GROUP_REIDENTIFY_WINDOW_S == 2.0 * POSITION_HALF_LIFE_S
+    assert GROUP_REIDENTIFY_WINDOW_S == 60.0
