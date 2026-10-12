@@ -229,6 +229,77 @@ def test_ambiguous_candidates_fold_within_a_group_else_found_a_new_contact() -> 
     assert "OBS_F" not in contact_e.contributing_observation_ids
 
 
+def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_record() -> (
+    None
+):
+    """`plans/group-cohesion-admission-gate/plan.md` (`BL-B58`) commit 1 --
+    `Contact.fold_displacement_m` is provenance only here, nothing reads it
+    yet. Reuses `test_ambiguous_candidates_fold_within_a_group_else_found_a_
+    new_contact`'s own D/E/F geometry (two `Ural truck`s 50m apart, grouped;
+    an ambiguous percept placed closer to D folds onto it) so the fold this
+    test measures is the exact one that plan's probe replays -- independent
+    re-derivation, not a guess, via the same `fold_position` call `record`
+    itself makes."""
+    store = ContactStore()
+    contact_d_obs = _observation(
+        obs_id="OBS_D", t_sim=0.0, bearing_deg=90.0, range_m=1000.0
+    )
+    contact_e_obs = _observation(
+        obs_id="OBS_E", t_sim=0.0, bearing_deg=90.0, range_m=1050.0
+    )
+    store.ingest([contact_d_obs, contact_e_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_d = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_D"]
+    )
+    assert contact_d.fold_displacement_m == 0.0  # untouched before any fold
+
+    position_before_fold = contact_d.position
+    ambiguous_within_group_obs = _observation(
+        obs_id="OBS_F", t_sim=0.0, bearing_deg=90.0, range_m=1010.0
+    )
+    store.ingest([ambiguous_within_group_obs], now_sim=0.0)
+
+    expected_displacement = math.hypot(
+        contact_d.position.x - position_before_fold.x,
+        contact_d.position.z - position_before_fold.z,
+    )
+    assert expected_displacement > 0.0  # the fold must have actually moved it
+    assert contact_d.fold_displacement_m == pytest.approx(expected_displacement)
+
+    # A second fold onto the same contact accumulates rather than replaces
+    # (`fold_displacement_m`'s own docstring, stated assumption, unmeasured
+    # against a real repeat-fold incident).
+    budget_after_first_fold = contact_d.fold_displacement_m
+    position_before_second_fold = contact_d.position
+    second_ambiguous_obs = _observation(
+        obs_id="OBS_F2", t_sim=0.0, bearing_deg=90.0, range_m=1015.0
+    )
+    store.ingest([second_ambiguous_obs], now_sim=0.0)
+    second_displacement = math.hypot(
+        contact_d.position.x - position_before_second_fold.x,
+        contact_d.position.z - position_before_second_fold.z,
+    )
+    assert contact_d.fold_displacement_m == pytest.approx(
+        budget_after_first_fold + second_displacement
+    )
+
+    # An unambiguous re-observation -- the object-permanence continuity
+    # branch, resolved directly against `OBS_D` without ever reaching the
+    # gate -- resets the budget to 0.0: an independent look confirming
+    # identity retires the doubt.
+    unambiguous_obs = _observation(
+        obs_id="OBS_D2",
+        t_sim=1.0,
+        bearing_deg=90.0,
+        range_m=1005.0,
+        continues_observation_id="OBS_D",
+    )
+    store.ingest([unambiguous_obs], now_sim=1.0)
+    assert "OBS_D2" in contact_d.contributing_observation_ids
+    assert contact_d.fold_displacement_m == 0.0
+
+
 def test_air_defence_candidate_forces_a_new_contact_even_within_a_group() -> None:
     """D6's carve-out (Stage 3 branch 1): even when every passing candidate
     is a member of one and the same `Group`, an air-defence candidate must

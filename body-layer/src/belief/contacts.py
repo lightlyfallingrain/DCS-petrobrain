@@ -467,6 +467,24 @@ class Contact:
     #: `belief.decay.OBSERVED_WINDOW_S` of its own `last_seen_sim`, and as
     #: unknown (fail-open) otherwise -- see that block's own comments.
     live_los_clear: bool | None = None
+    #: `plans/group-cohesion-admission-gate/plan.md` (`BL-B58`) -- metres of
+    #: this contact's fused-position displacement attributable to a Stage 3
+    #: within-group ambiguity fold (`ContactStore._fold_target_for_ambiguous_
+    #: candidates` resolving `ingest`'s `len(passing) >= 2` branch) since this
+    #: contact was last recorded from an *unambiguous* percept. Written only
+    #: by `ContactStore.ingest`, at the one call site that folds: accumulated
+    #: (`+=`, not overwritten) across repeat folds with no intervening clean
+    #: look, and reset to `0.0` on either unambiguous branch (an object-
+    #: permanence continuity resolution, or a `len(passing) == 1` gate match)
+    #: -- an independent look confirming where the contact actually is is
+    #: exactly the evidence that retires the doubt. `0.0` for a founding
+    #: contact and for every contact that has never been an ambiguous fold
+    #: target. Read by `groups._cluster_contacts`'s admission gate as the
+    #: cost of letting this contact's own (possibly fold-corrupted) position
+    #: admit a new group member; never read as a position correction itself.
+    #: Accumulate-not-replace is a stated assumption, not measured against a
+    #: real repeat-fold incident -- see that plan's Risks section.
+    fold_displacement_m: float = 0.0
 
     @property
     def last_position(self) -> GeoPosition:
@@ -1045,7 +1063,12 @@ class ContactStore:
 
             contact = continuity_by_observation_id[observation.id]
             if contact is not None:
+                # Object-permanence continuity is an unambiguous resolution
+                # (`plans/group-cohesion-admission-gate/plan.md` §4) -- an
+                # independent look confirming identity retires any
+                # outstanding fold-displacement budget.
                 contact.record(percept)
+                contact.fold_displacement_m = 0.0
             else:
                 already_claimed = claimed.get(claim_key, set())
                 passing = [
@@ -1056,8 +1079,11 @@ class ContactStore:
                 ]
 
                 if len(passing) == 1:
+                    # A single passing candidate is also unambiguous --
+                    # same reset as the continuity branch above.
                     contact = passing[0]
                     contact.record(percept)
+                    contact.fold_displacement_m = 0.0
                 else:
                     fold_target = (
                         self._fold_target_for_ambiguous_candidates(passing, percept)
@@ -1065,8 +1091,18 @@ class ContactStore:
                         else None
                     )
                     if fold_target is not None:
+                        # The one call site that folds: accumulate the
+                        # position displacement this fold causes, metres,
+                        # never reset here (`Contact.fold_displacement_m`'s
+                        # own docstring; `plans/group-cohesion-admission-
+                        # gate/plan.md` §4).
                         contact = fold_target
+                        position_before = contact.position
                         contact.record(percept)
+                        contact.fold_displacement_m += math.hypot(
+                            contact.position.x - position_before.x,
+                            contact.position.z - position_before.z,
+                        )
                     else:
                         contact = Contact.from_percept(self._new_contact_id(), percept)
                         self._contacts[contact.id] = contact
