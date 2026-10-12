@@ -1599,6 +1599,49 @@ def test_heading_is_a_smoothed_circular_mean_of_consistent_steps() -> None:
     assert len(group.heading_history_deg) == 2
 
 
+def test_heading_circular_mean_handles_the_0_360_wrap() -> None:
+    """BL-12 Stage 4 review, required fix 2: every other heading fixture in
+    this module uses due-north (`0.0`) steps exclusively, so a regression
+    from the circular mean (`atan2(sum sin, sum cos)`) to a naive arithmetic
+    mean passes the whole suite with zero failures -- it breaks precisely
+    at the wrap, which due-north steps never exercise.
+
+    Two per-step headings straddling the wrap, `350.0` deg then `10.0` deg
+    (`dz = 100 * tan(10 deg)`, first step angled slightly south of east,
+    second slightly north of east), must average to `~0.0` deg (`atan2`'s
+    own float-precision artifact can land this at `360.0` instead of
+    `0.0` -- both are the same heading, and `_update_heading`'s own
+    docstring already notes `_compass_word` normalizes mod 360 before
+    comparing). A naive arithmetic mean gives `180.0` deg instead -- the
+    opposite direction -- which is the regression this test exists to
+    catch."""
+    store = GroupStore()
+    moving = {"motion_state": "moving"}
+    dz = 100.0 * math.tan(math.radians(10.0))
+
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0, **moving), _contact("C2", 50.0, 0.0, **moving)],
+        now_sim=0.0,
+    )
+    store.reconcile(
+        [
+            _contact("C1", 100.0, -dz, **moving),
+            _contact("C2", 150.0, -dz, **moving),
+        ],
+        now_sim=1.0,
+    )
+    store.reconcile(
+        [_contact("C1", 200.0, 0.0, **moving), _contact("C2", 250.0, 0.0, **moving)],
+        now_sim=2.0,
+    )
+
+    heading_deg = store.groups[0].heading_deg
+    assert heading_deg is not None
+    wrapped = heading_deg % 360.0
+    circular_distance_from_north = min(wrapped, 360.0 - wrapped)
+    assert circular_distance_from_north == pytest.approx(0.0, abs=1e-6)
+
+
 def test_heading_history_caps_at_the_smoothing_window() -> None:
     """`heading_history_deg` never grows past `GROUP_HEADING_SMOOTHING_
     WINDOW` steps -- the oldest step is dropped as a newer one arrives."""

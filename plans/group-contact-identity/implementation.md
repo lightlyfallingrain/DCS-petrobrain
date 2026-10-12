@@ -1315,3 +1315,83 @@ text changing.
   touch only `_render_full_group_composition` and its two existing call sites.
 - **Stage 5 (road-following)** — no `nearest_road`/`describe_position` call added anywhere in this
   diff; the "on the road" half of D7's line stays unspoken, by design, named in a code comment.
+
+## Stage 4, review round 2 — both required fixes
+
+Applied against `plans/group-contact-identity/review.md`'s "Review — BL-12 Stage 4" section
+(tip `34258bf`). Scope: `speech.py`'s extent guard and `groups.py`'s heading test coverage only —
+no touch to Stages 0–3.5, `motion.py`, `enrichment.py`, the delta taxonomy, Stage 5, or any
+backlog item named in the review.
+
+### Fix 1 — the extent guard now reaches the clock/range clause too
+
+`_render_full_group_composition` (`speech.py`) previously gated only the trailing `", moving
+{compass}"` clause behind `group.extent_m <= _GROUP_SPOKEN_EXTENT_GUARD_M`. The clock/range clause
+(`", {clock} o'clock, {range}"`), a few lines above it in the same function, had no extent
+condition at all — unconditional both before and after Stage 4, because nothing in Stage 4's own
+change touched it.
+
+**Fix**: factored the extent comparison into one `within_spoken_extent` local, computed once, and
+added it as a second condition on the clock/range clause's existing `if nearest_relative_now is
+not None:` guard (alongside the pre-existing conditions on the direction clause). A group over the
+threshold now gets composition only — nothing positional appended — which is what amendment A6's
+own words require ("do not speak a heading **or a single bearing**") and what A2.2 names as the
+three facts (bearing, range, direction) that are false for a wide group.
+
+**Verified by reproducing the reviewer's finding directly**, not inferred from reading: reverted
+the fix locally, re-ran the new test, and got the review's exact quoted string back —
+`"Group, 12 o'clock, very close."` — then restored the fix (confirmed by `shasum` before/after)
+and re-ran green.
+
+**Test added**: `test_render_group_disclosure_extent_guard_suppresses_the_clock_range_clause_too`
+(`test_speech.py`) — unlike the committed Stage 4 test of the same shape, this one supplies a real
+`EnrichmentContext` (via the module's own `_enrichment_context` fixture), so `nearest_relative_now`
+is populated and the clock/range clause actually fires if ungated. Pins the 1,200 m
+chained-infantry extent (`test_the_eager_cap_still_chains_a_long_infantry_line`'s own geometry) to
+produce exactly `"Group."` — composition only, no clock/range, no direction. The pre-existing
+`test_render_group_disclosure_extent_guard_suppresses_the_direction_clause` is kept as-is (its
+docstring now notes why it alone cannot see this gap) rather than folded into the new test, since
+both properties — no enrichment, and with enrichment — are each worth pinning on their own.
+
+### Fix 2 — the circular mean's wrap-around is now pinned
+
+`_update_heading`'s circular mean (`atan2(sum sin, sum cos)`) was already correct; the review's
+mutation (naive arithmetic mean) passed the whole 235-test `test_groups.py` + `test_speech.py`
+suite because every existing heading fixture uses due-north (`0.0°`) steps exclusively, which a
+naive mean cannot distinguish from a circular one.
+
+**Test added**: `test_heading_circular_mean_handles_the_0_360_wrap` (`test_groups.py`) — two
+per-step headings straddling the wrap (`350.0°` then `10.0°`, built from `dz = 100 * tan(10°)`
+displacements) must average to `~0.0°` (accepting the `360.0°` float-precision artifact the review
+itself noted, since `_compass_word` normalizes mod 360 before comparing). Asserts via circular
+distance from north, not raw equality, for exactly that reason.
+
+**Mutation reproduced directly**: swapped `_update_heading`'s circular mean for
+`math.fsum(history) / len(history)` (the review's own stated naive form), confirmed by `shasum`
+before/after. Result: the new wrap test failed for the stated reason (`180.0 == 0.0 ± 1e-06`,
+obtained `180.0`) while the rest of `test_groups.py` + `test_speech.py` (236 other tests) stayed
+green — reproducing the review's exact claim that the regression is invisible to every existing
+fixture. Reverted; `shasum` confirmed byte-identical to the pre-mutation file; full suite green
+again (237 passed in that pair of files).
+
+### Checks
+
+- `ruff format --check`: pass, 120 files already formatted
+- `ruff check .`: pass, all checks passed
+- `mypy src` (strict, from inside the subproject): pass, 55 source files
+- `pytest -q`: pass — **1697 passed / 4 xfailed** (1695 baseline + 2 new tests)
+- `audio-adapter`: run, not assumed, because this round changes spoken text — **255 passed / 1
+  skipped**, matching the stated baseline exactly. No fixture there reads a group-disclosure string
+  from body-layer, so this is a baseline re-confirmation, not a regression check against a changed
+  dependency.
+
+### Which fixtures moved, and why only one new one was added rather than an existing one changing
+
+**No pre-existing fixture's expected string changed.** The only two tests in the whole suite that
+override `extent_m` above `_GROUP_SPOKEN_EXTENT_GUARD_M` are both in `test_speech.py`'s
+extent-guard pair — the pre-existing one (no enrichment, asserts `"moving" not in speech.text`,
+unaffected by this fix since it never reached the clock/range clause either way) and the new one
+added by this round. Every other group-disclosure fixture in `test_speech.py` uses the module's
+default `extent_m` (well under the guard threshold), so the clock/range clause's new extent
+condition is always true for them and nothing about their rendered text moved. Confirmed by `grep
+-n "extent_m=" tests/test_speech.py` returning exactly those two lines.

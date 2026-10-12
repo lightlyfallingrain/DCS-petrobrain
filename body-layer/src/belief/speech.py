@@ -2248,6 +2248,15 @@ def _render_full_group_composition(
     # differ only by the clock/range clause itself.
     content_signature = text
 
+    # The extent guard (amendment A6's Stage 4 row) is unconditional: *"do
+    # not speak a heading or a single bearing for a group wider than one
+    # believable bearing"* -- A2.2 names bearing, range, and direction as
+    # the three facts that are false for a wide group, not direction alone.
+    # So this one condition gates both the clock/range clause below and the
+    # direction clause further down; a group over the threshold gets
+    # composition only, with nothing positional appended at all.
+    within_spoken_extent = group.extent_m <= _GROUP_SPOKEN_EXTENT_GUARD_M
+
     nearest_relative_now: dict[str, object] | None = None
     nearest_range_m = math.inf
     for facts in member_facts:
@@ -2259,21 +2268,18 @@ def _render_full_group_composition(
         if range_m < nearest_range_m:
             nearest_range_m = range_m
             nearest_relative_now = relative_now
-    if nearest_relative_now is not None:
+    if nearest_relative_now is not None and within_spoken_extent:
         clock = nearest_relative_now["clock_position"]
         text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
 
     # BL-12 Stage 4, D7's spoken direction ("that column, now 2 o'clock,
     # three kilometres, still moving north on the road") -- the "on the
     # road" half is Stage 5 (road-following), out of scope here; this
-    # clause speaks only the compass direction. The extent guard (amendment
-    # A6's Stage 4 row) is unconditional: a group wider than one believable
-    # bearing does not get a heading spoken at all, regardless of how
-    # confident `heading_deg` is.
+    # clause speaks only the compass direction.
     if (
         group.movement_state == "moving"
         and group.heading_deg is not None
-        and group.extent_m <= _GROUP_SPOKEN_EXTENT_GUARD_M
+        and within_spoken_extent
     ):
         direction_word = _compass_word(group.heading_deg)
         text += f", moving {direction_word}"
