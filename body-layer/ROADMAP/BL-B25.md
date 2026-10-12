@@ -1,5 +1,13 @@
 # BL-B25 — Merge-echo predicate evaluated at the wrong tick
 
+> **Recheck note added 2026-10-12 (`[[BL-12]]` DoD).** `[[BL-12]]`'s own milestone-completion
+> question (`BL-12.md`) names this entry as "partially superseded" by the milestone, but the
+> implementation and review logs never mention `BL-B25` or re-measure its scenario. Left **open**:
+> the merge-echo mechanism this entry concerns is untouched by BL-12's diff (`crew_console.py`'s
+> `_already_reported_member_ids` is not in `plans/group-contact-identity/plan.md`'s Affected
+> Modules). Whether BL-12's group-level continuity narrows this entry's reachable window is
+> plausible but unverified — re-check rather than assume before closing.
+
 - [ ] **BL-B25 — `_already_reported_member_ids` evaluates its merge-echo predicate at the current
   tick, not the tick the original suppression happened.** #status/open Found by Reviewer during
   `fix/redundant-group-disclosure` review (2026-10-05); recorded, not fixed — judged bounded and

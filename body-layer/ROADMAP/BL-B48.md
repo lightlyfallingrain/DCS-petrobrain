@@ -1,8 +1,18 @@
 # BL-B48 — Infantry is an unbounded cohesion bridge between non-infantry contacts
 
-- [ ] **BL-B48 — `belief.groups` drops the absolute cohesion backstop to `math.inf` for any pair where
-  *either* member is infantry, so an infantry contact bridges non-infantry contacts without bound.** #status/open
-  Found by the Reviewer during [[BL-13]], 2026-10-10. Pre-existing, **live on the push path today**,
+> **FIXED, 2026-10-12, `[[BL-12]]` Stage 0a/0b.** Q-A/Q-B (plan.md amendment A10's predecessor
+> questions) were accepted by the user: `_pair_backstop_m` now requires **both** members `EAGER`
+> (mirroring the existing mixed-installation fall-through) before dropping the absolute backstop,
+> so `armor@1km + infantry@7km` no longer merges — infantry-to-infantry thresholds stay
+> bit-identical. Stage 0b additionally caps the mixed-pair case at a finite eager distance rather
+> than leaving it unbounded. Verified: `tests/test_groups.py`'s Stage 0a/0b acceptance tests, the
+> mixed-pair equivalence test, and the Stage 0 Reviewer round (APPROVED, round 2). Status closed at
+> merge time per the implementer's own note (`plans/group-contact-identity/implementation.md`,
+> "Not done, deliberately": *"Closing them is a roadmap update, not an implementation step"*).
+
+- [x] **BL-B48 — `belief.groups` dropped the absolute cohesion backstop to `math.inf` for any pair where
+  *either* member was infantry, so an infantry contact bridged non-infantry contacts without bound.** #status/done
+  Found by the Reviewer during [[BL-13]], 2026-10-10. Pre-existing, **was live on the push path**,
   and nothing in BL-13 caused it.
 
   **It was first reported as "cohesion is erratic at fixture scales" and that was wrong.** It is

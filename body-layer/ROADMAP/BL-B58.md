@@ -1,7 +1,7 @@
 # BL-B58 — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
 
-> **Implemented, 2026-10-12, on `feature/bl12-group-contact-identity` (BL-12 Stage 3.5) --
-> pending Reviewer/DoD.** Three commits: `Contact.fold_displacement_m` (provenance,
+> **Implemented, Reviewer-APPROVED (round 7) and DoD-PASSED, 2026-10-12, on
+> `feature/bl12-group-contact-identity` (BL-12 Stage 3.5).** Three commits: `Contact.fold_displacement_m` (provenance,
 > behaviour-neutral), the admission gate itself (`_cluster_contacts` gains `prior_rosters`), and the
 > 2C fixture rewrite. Re-run against the real pipeline, not just the isolated predicate: probe 2
 > (`plans/group-cohesion-admission-gate/scratchpad/probe_b58_second_incident.py`) now shows
@@ -37,11 +37,12 @@
 > fix is **not materially more expensive, but differently shaped** — one more module (`contacts.py`,
 > for the provenance field), no new calibration constant, no new persistent store state.
 
-- [~] **BL-B58 — [[BL-12]] Stage 3's within-group ambiguity fold (D5 at contact grain) moves a
+- [x] **BL-B58 — [[BL-12]] Stage 3's within-group ambiguity fold (D5 at contact grain) moves a
   contact's fused position toward the folded percept (`fold_position` is a real weighted fuse, not
   a no-op); the next `tick()`'s position-only cluster can widen enough to absorb a previously
   separate, correctly-identified contact into the same `Group` — not itself an ambiguous candidate
-  for anything, and not individually failing any gate.** #status/in-progress Found by the Implementer
+  for anything, and not individually failing any gate. FIXED by the Stage 3.5 admission gate.**
+  #status/done Found by the Implementer
   during Stage 3 (2026-10-12), via a plan-unlisted test (`test_callouts.py`'s 2C fixture), confirmed
   and characterised by the Reviewer the same stage round.
 
