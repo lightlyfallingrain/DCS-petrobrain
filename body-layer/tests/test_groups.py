@@ -1491,3 +1491,187 @@ def test_reconcile_trace_distinguishes_overlap_property_and_expired() -> None:
         [], now_sim=2.0 + GROUP_REIDENTIFY_WINDOW_S + 0.1, trace_sink=records.append
     )
     assert [r["phase"] for r in records[-1:]] == ["expired"]
+
+
+# --- BL-12 Stage 4: movement state and direction (D7's spoken identity) ---
+
+
+def test_movement_state_is_the_majority_of_members_motion() -> None:
+    """`Group.movement_state` -- majority vote over members' own `Contact.
+    motion.state`, honestly `None` when no member carries one at all."""
+    store = GroupStore()
+
+    store.reconcile(
+        [
+            _contact("C1", 0.0, 0.0, motion_state="moving"),
+            _contact("C2", 50.0, 0.0, motion_state="moving"),
+        ],
+        now_sim=0.0,
+    )
+    assert store.groups[0].movement_state == "moving"
+
+    store = GroupStore()
+    store.reconcile(
+        [
+            _contact("C1", 0.0, 0.0, motion_state="stopped"),
+            _contact("C2", 50.0, 0.0, motion_state="stopped"),
+        ],
+        now_sim=0.0,
+    )
+    assert store.groups[0].movement_state == "stopped"
+
+    store = GroupStore()
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0), _contact("C2", 50.0, 0.0)],
+        now_sim=0.0,
+    )
+    assert store.groups[0].movement_state is None
+
+
+def test_movement_state_tie_breaks_toward_moving() -> None:
+    """A tie (one mover, one stopped) reads as `"moving"` -- `belief.
+    motion`'s own promote-fast asymmetry, lifted to the group
+    (`_majority_movement_state`'s own docstring)."""
+    store = GroupStore()
+    store.reconcile(
+        [
+            _contact("C1", 0.0, 0.0, motion_state="moving"),
+            _contact("C2", 50.0, 0.0, motion_state="stopped"),
+        ],
+        now_sim=0.0,
+    )
+    assert store.groups[0].movement_state == "moving"
+
+
+def test_heading_is_none_until_the_minimum_sample_count_is_reached() -> None:
+    """A freshly founded group has no prior centroid to diff against, so
+    `heading_deg` is `None` on the first reconcile, and stays `None` after
+    exactly one step too -- one step alone is the single-look shape this
+    mechanism exists to avoid (`_MIN_HEADING_SAMPLES`)."""
+    store = GroupStore()
+
+    store.reconcile(
+        [
+            _contact("C1", 0.0, 0.0, motion_state="moving"),
+            _contact("C2", 50.0, 0.0, motion_state="moving"),
+        ],
+        now_sim=0.0,
+    )
+    assert store.groups[0].heading_deg is None
+    assert store.groups[0].heading_confidence == 0.0
+
+    # One step of displacement -- still below `_MIN_HEADING_SAMPLES` (2).
+    store.reconcile(
+        [
+            _contact("C1", 50.0, 0.0, motion_state="moving"),
+            _contact("C2", 100.0, 0.0, motion_state="moving"),
+        ],
+        now_sim=1.0,
+    )
+    assert store.groups[0].heading_deg is None
+
+
+def test_heading_is_a_smoothed_circular_mean_of_consistent_steps() -> None:
+    """Two consecutive due-north steps (DCS `x` is the north axis,
+    `perception.geometry`'s own convention) average to a `0.0` degree
+    heading with full confidence -- `R = 1.0` when every step agreed
+    exactly (`_update_heading`'s own circular-mean-resultant-length
+    docstring)."""
+    store = GroupStore()
+    moving = {"motion_state": "moving"}
+
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0, **moving), _contact("C2", 50.0, 0.0, **moving)],
+        now_sim=0.0,
+    )
+    store.reconcile(
+        [_contact("C1", 50.0, 0.0, **moving), _contact("C2", 100.0, 0.0, **moving)],
+        now_sim=1.0,
+    )
+    store.reconcile(
+        [_contact("C1", 100.0, 0.0, **moving), _contact("C2", 150.0, 0.0, **moving)],
+        now_sim=2.0,
+    )
+
+    group = store.groups[0]
+    assert group.heading_deg == pytest.approx(0.0)
+    assert group.heading_confidence == pytest.approx(1.0)
+    assert len(group.heading_history_deg) == 2
+
+
+def test_heading_history_caps_at_the_smoothing_window() -> None:
+    """`heading_history_deg` never grows past `GROUP_HEADING_SMOOTHING_
+    WINDOW` steps -- the oldest step is dropped as a newer one arrives."""
+    store = GroupStore()
+    moving = {"motion_state": "moving"}
+
+    for i in range(8):
+        store.reconcile(
+            [
+                _contact("C1", 50.0 * i, 0.0, **moving),
+                _contact("C2", 50.0 * i + 50.0, 0.0, **moving),
+            ],
+            now_sim=float(i),
+        )
+
+    group = store.groups[0]
+    assert (
+        len(group.heading_history_deg) == groups_module.GROUP_HEADING_SMOOTHING_WINDOW
+    )
+
+
+def test_heading_is_cleared_on_a_confirmed_stop() -> None:
+    """`heading_deg`/`.heading_confidence`/`.heading_history_deg` are all
+    cleared the tick `movement_state` reads `"stopped"` -- "held only while
+    moving" (`Group.heading_history_deg`'s own docstring), so resuming
+    movement later starts a fresh smoothing window rather than stitching a
+    step across whatever happened while stopped."""
+    store = GroupStore()
+    moving = {"motion_state": "moving"}
+
+    store.reconcile(
+        [_contact("C1", 0.0, 0.0, **moving), _contact("C2", 50.0, 0.0, **moving)],
+        now_sim=0.0,
+    )
+    store.reconcile(
+        [_contact("C1", 50.0, 0.0, **moving), _contact("C2", 100.0, 0.0, **moving)],
+        now_sim=1.0,
+    )
+    store.reconcile(
+        [_contact("C1", 100.0, 0.0, **moving), _contact("C2", 150.0, 0.0, **moving)],
+        now_sim=2.0,
+    )
+    assert store.groups[0].heading_deg is not None
+
+    stopped = {"motion_state": "stopped"}
+    store.reconcile(
+        [_contact("C1", 100.0, 0.0, **stopped), _contact("C2", 150.0, 0.0, **stopped)],
+        now_sim=3.0,
+    )
+
+    group = store.groups[0]
+    assert group.movement_state == "stopped"
+    assert group.heading_deg is None
+    assert group.heading_confidence == 0.0
+    assert group.heading_history_deg == ()
+
+
+def test_extent_m_is_persisted_on_the_group() -> None:
+    """`Group.extent_m` -- the same `_extent_of` figure the Stage 1 sortie
+    trace already carries (A4), now also readable off the `Group` itself
+    without recomputing it from the current roster. Three infantry at
+    300 m spacing (the `test_the_eager_cap_still_chains_a_long_infantry_
+    line` geometry, scaled down) so the pair backstop still admits every
+    link while the chain's own extent (600 m) is well past it."""
+    store = GroupStore()
+
+    store.reconcile(
+        [
+            _contact("C1", 0.0, 0.0, class_raw="Infantry AK"),
+            _contact("C2", 300.0, 0.0, class_raw="Infantry AK"),
+            _contact("C3", 600.0, 0.0, class_raw="Infantry AK"),
+        ],
+        now_sim=0.0,
+    )
+
+    assert store.groups[0].extent_m == pytest.approx(600.0)

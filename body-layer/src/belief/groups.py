@@ -181,6 +181,7 @@ from perception import object_model
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
+    from belief.motion import MotionState
 
 #: Stated assumption, no data behind it yet -- see module docstring.
 GROUP_PROXIMITY_GAP_RATIO: Final[float] = 3.0
@@ -430,6 +431,24 @@ GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
 #: optic-blind error model as a cohesion problem.
 GROUP_REPORTING_EAGER_COHESION_CAP_M: Final[float] = 500.0
 
+#: BL-12 Stage 4 (`plans/group-contact-identity/plan.md`, D7's spoken
+#: direction) -- how many consecutive per-step headings `_update_heading`
+#: smooths the spoken heading over. **A stated assumption, not a
+#: measurement** (that plan's own wording: "propose N = 5, ~5 s at the
+#: 1.0 s poll") -- the mechanism below is exact for whatever this is set
+#: to; nothing here calibrates the number itself.
+GROUP_HEADING_SMOOTHING_WINDOW: Final[int] = 5
+
+#: `_update_heading`'s own minimum step count before a heading is exposed
+#: at all, even while `movement_state == "moving"`. One step (two
+#: centroids) is exactly `belief.enrichment.motion_when_seen`'s own
+#: "flippable by one noisy percept" shape (that function's own docstring,
+#: cited by the Stage 4 plan as why it must not be the source of a spoken
+#: heading) -- a single step must not be spoken as a *smoothed* heading.
+#: Two steps is the first point at which smoothing means anything. A
+#: judgment call, not itself re-derived from data.
+_MIN_HEADING_SAMPLES: Final[int] = 2
+
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
 
 
@@ -517,7 +536,29 @@ class Group:
     and `group_matches`'s test 3). Kept as its own field rather than
     re-derived at match time, because D6 keys the air-defence confirmation
     gate on the *remembered* value -- by the time a match is attempted the
-    members producing it may be gone."""
+    members producing it may be gone.
+
+    **The five fields below are BL-12 Stage 4** (`plans/
+    group-contact-identity/plan.md` Stage 4, D7's spoken direction):
+    `extent_m` is the matched cluster's own `_extent_of` -- the maximum
+    pairwise distance among members' fused positions, the same figure the
+    Stage 1 sortie trace already carries (A4), now also persisted on the
+    `Group` itself so `belief.speech`'s spoken-extent guard can read it at
+    render time without recomputing it from a roster that may have moved
+    on. `movement_state` is the majority of members' own `Contact.motion.
+    state` (`_majority_movement_state`), honestly `None` when no member
+    carries a motion belief -- the same posture `belief.motion`'s own
+    module docstring argues for `Contact.motion` itself, lifted to the
+    group; never a DCS velocity. `heading_deg`/`heading_confidence`/
+    `heading_history_deg` are `_update_heading`'s own state: a heading
+    derived **only** from centroid displacement between successive
+    reconciles of the same group id (never a raw percept), smoothed by
+    circular mean over up to `GROUP_HEADING_SMOOTHING_WINDOW` steps, held
+    only while `movement_state == "moving"` and cleared (history included)
+    on any other state. `heading_history_deg` is carried over across a
+    reconciliation that keeps this group's id, the same rule every other
+    carried field in this class follows -- reset to empty only for a
+    freshly founded group, which has no prior centroid to diff against."""
 
     id: str
     member_contact_ids: frozenset[str]
@@ -535,6 +576,11 @@ class Group:
     composition: tuple[tuple[str, int], ...] = ()
     installation: bool = False
     air_defence_composition: tuple[tuple[str, int], ...] = ()
+    extent_m: float = 0.0
+    movement_state: MotionState | None = None
+    heading_deg: float | None = None
+    heading_confidence: float = 0.0
+    heading_history_deg: tuple[float, ...] = ()
 
 
 def _pairwise_distance(
@@ -908,9 +954,82 @@ def _cluster_is_stopped(members: Sequence[Contact]) -> bool:
     return all(state == "stopped" for state in known)
 
 
+def _majority_movement_state(members: Sequence[Contact]) -> MotionState | None:
+    """`Group.movement_state` -- the majority of `members`' own `Contact.
+    motion.state`, honestly `None` when no member carries a motion belief
+    at all (`belief.motion`'s own module docstring's posture for `Contact.
+    motion`, lifted to the group). Never a DCS velocity -- only each
+    member's already-folded `Contact.motion` belief.
+
+    A tie (reachable only at exactly two members, one of each state) breaks
+    toward `"moving"`, consistent with `belief.motion`'s own promote-fast/
+    demote-slow asymmetry: positive motion evidence is noticed at once, so
+    an evenly split group is read as having a mover rather than as
+    uniformly stopped."""
+    counts: dict[MotionState, int] = {}
+    for member in members:
+        if member.motion is not None:
+            counts[member.motion.state] = counts.get(member.motion.state, 0) + 1
+    if not counts:
+        return None
+    moving_n = counts.get("moving", 0)
+    stopped_n = counts.get("stopped", 0)
+    return "moving" if moving_n >= stopped_n else "stopped"
+
+
+def _update_heading(
+    old: Group | None,
+    movement_state: MotionState | None,
+    centroid: tuple[float, float],
+) -> tuple[tuple[float, ...], float | None, float]:
+    """`Group.heading_history_deg`/`.heading_deg`/`.heading_confidence` for
+    this reconcile -- `(history, heading_deg, heading_confidence)`, derived
+    **only** from centroid displacement between successive reconciles of
+    the same group id (`old`, the matched prior `Group`, or `None` for a
+    freshly founded one), never from any member's own raw percept
+    (`plans/group-contact-identity/plan.md` Stage 4: `belief.enrichment.
+    motion_when_seen`'s unsmoothed two-look derivation is documented as
+    flippable by one noisy percept and must not be the source here).
+
+    Held only while `movement_state == "moving"` -- any other state
+    (`"stopped"`, or `None`) clears the smoothing window outright, so
+    resuming movement later starts a fresh window rather than stitching a
+    step across whatever happened while not confirmed moving. `old is
+    None` (freshly founded, no prior centroid to diff against) also starts
+    empty -- the same "a fresh group has said nothing yet" posture `last_
+    spoken_*` already follows.
+
+    Smoothed by circular mean over up to `GROUP_HEADING_SMOOTHING_WINDOW`
+    per-step headings, not a single endpoint-to-endpoint vector:
+    `heading_confidence` is the mean resultant length `R = |sum(unit
+    vectors)| / n`, the standard circular-statistics concentration measure
+    -- `1.0` when every step agreed exactly, falling toward `0.0` as they
+    disagree. Below `_MIN_HEADING_SAMPLES` steps, `heading_deg`/`.
+    heading_confidence` stay `None`/`0.0` even while moving -- one step
+    alone is exactly the single-look shape this function exists to avoid."""
+    if movement_state != "moving":
+        return (), None, 0.0
+    history = old.heading_history_deg if old is not None else ()
+    if old is not None:
+        step_deg = (
+            math.degrees(
+                math.atan2(centroid[1] - old.centroid_z, centroid[0] - old.centroid_x)
+            )
+            % 360.0
+        )
+        history = (*history, step_deg)[-GROUP_HEADING_SMOOTHING_WINDOW:]
+    if len(history) < _MIN_HEADING_SAMPLES:
+        return history, None, 0.0
+    sin_sum = math.fsum(math.sin(math.radians(h)) for h in history)
+    cos_sum = math.fsum(math.cos(math.radians(h)) for h in history)
+    heading_deg = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0
+    confidence = math.hypot(sin_sum, cos_sum) / len(history)
+    return history, heading_deg, confidence
+
+
 @dataclass(frozen=True, slots=True)
 class _ClusterProperties:
-    """The same seven remembered properties `Group` carries, computed once
+    """The same eight remembered properties `Group` carries, computed once
     per observed cluster per `reconcile` call and shared between the
     matching predicate, the newly-founded/re-matched `Group` construction,
     and the trace line -- so none of the three can read a believed
@@ -924,6 +1043,7 @@ class _ClusterProperties:
     air_defence_composition: tuple[tuple[str, int], ...]
     extent_m: float
     stopped: bool
+    movement_state: MotionState | None
 
 
 def _cluster_properties(members: Sequence[Contact]) -> _ClusterProperties:
@@ -936,6 +1056,7 @@ def _cluster_properties(members: Sequence[Contact]) -> _ClusterProperties:
         installation=_installation_of(members),
         air_defence_composition=_air_defence_composition_of(members),
         extent_m=_extent_of(members),
+        movement_state=_majority_movement_state(members),
         stopped=_cluster_is_stopped(members),
     )
 
@@ -1287,6 +1408,15 @@ class GroupStore:
         for cluster in clusters:
             props = cluster_props[cluster]
             old = cluster_to_group.get(cluster)
+            # BL-12 Stage 4: `old` is `None` for a freshly founded cluster
+            # (the "found" branch below), in which case `_update_heading`
+            # itself returns an empty history regardless of `movement_
+            # state` -- a fresh group has no prior centroid to diff
+            # against, the same posture every other carried field here
+            # follows for a fresh group.
+            heading_history_deg, heading_deg, heading_confidence = _update_heading(
+                old, props.movement_state, (props.centroid_x, props.centroid_z)
+            )
             if old is not None:
                 phase = resolution_phase[cluster]
                 new_groups[old.id] = Group(
@@ -1306,6 +1436,11 @@ class GroupStore:
                     composition=props.composition,
                     installation=props.installation,
                     air_defence_composition=props.air_defence_composition,
+                    extent_m=props.extent_m,
+                    movement_state=props.movement_state,
+                    heading_deg=heading_deg,
+                    heading_confidence=heading_confidence,
+                    heading_history_deg=heading_history_deg,
                 )
                 group_id = old.id
             else:
@@ -1322,6 +1457,11 @@ class GroupStore:
                     composition=props.composition,
                     installation=props.installation,
                     air_defence_composition=props.air_defence_composition,
+                    extent_m=props.extent_m,
+                    movement_state=props.movement_state,
+                    heading_deg=heading_deg,
+                    heading_confidence=heading_confidence,
+                    heading_history_deg=heading_history_deg,
                 )
                 group_id = new_id
                 phase = "found"
@@ -1360,6 +1500,11 @@ class GroupStore:
                     composition=group.composition,
                     installation=group.installation,
                     air_defence_composition=group.air_defence_composition,
+                    extent_m=group.extent_m,
+                    movement_state=group.movement_state,
+                    heading_deg=group.heading_deg,
+                    heading_confidence=group.heading_confidence,
+                    heading_history_deg=group.heading_history_deg,
                 )
             else:
                 trace_records.append(
