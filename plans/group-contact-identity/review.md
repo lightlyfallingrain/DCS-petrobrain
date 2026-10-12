@@ -603,3 +603,144 @@ and this section) which by this project's own convention do not get swept, leavi
 **The one thing I could not settle** is optional refinement 1: whether the 342 m / 236 m figures were
 reduced from `true_*` or `believed_*`. The reduction script does not exist in the repo and the field
 is named in no document. Flagged rather than asserted in either direction.
+
+---
+
+# Review — BL-12 Stage 1 (`b54841b..c2c7e2d`, commits `9d7f4ae`, `327816c`, `c2c7e2d`)
+
+Reviewed 2026-10-12 against `plans/group-contact-identity/plan.md`'s Stage 1 section and the
+2026-10-11 amendment (A2–A6), `plans/group-contact-identity/implementation.md`'s Stage 1 log,
+`body-layer/CLAUDE.md`'s Invariants, and `body-layer/ROADMAP/BL-12.md` / `BL-B48.md` / `BL-B51.md` /
+`BL-B55.md` / `BL-B56.md`.
+
+**Base check.** Worktree HEAD was `cb39159` (behind the named tip), a strict ancestor of the
+expected `c2c7e2d` with a clean tree — fast-forwarded with `git merge --ff-only c2c7e2d`. No
+divergence, nothing worked around.
+
+---
+
+## Verdict
+
+**APPROVED WITH REQUIRED FIXES.** The core mechanism — `group_matches`, the four-phase `reconcile`,
+the `groups`/`remembered_groups` split, the lattice-based air-defence resolution — is built exactly
+as amendment A2/A3 specify, and every claim in `implementation.md` that I could independently check
+reproduced. Two required fixes, both small; see below. Neither touches the mechanism's correctness
+for the scenarios already tested — the first is a real test-coverage regression on one existing
+test, the second is a scoping call that should be ruled explicit rather than left implicit.
+
+---
+
+## Required Fixes
+
+**1. The `test_callouts.py` rewrite makes the test pass vacuously — it no longer exercises the
+suppression logic it was written to protect.**
+
+`test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent` injects a hand-built
+`Group` directly into `store._groups._groups[...]`, bypassing `GroupStore.reconcile` entirely. Under
+Stage 1's new semantics, `store.groups` filters to `last_observed_sim == self._last_reconciled_sim`
+— and the injected group's `last_observed_sim` stays at its dataclass default (`0.0`), which never
+matches `_last_reconciled_sim` (`6.0` at injection time, from the last real `store.tick()` call; it
+is never advanced again because `poll()` only calls `scheduler.tick`, never `store.tick`). So
+`store.groups` is **empty** for the rest of the test, which I confirmed by instrumenting the exact
+fixture.
+
+The consequence is not cosmetic. `CalloutScheduler.tick`'s whole group-disclosure block — the one
+this test exists to exercise — is `for belief_group in store.groups:` (`callouts.py:1140`). With
+the injected group invisible to that loop, `_already_reported_member_ids`, `render_group_disclosure`
+and the suppression check never run for it at all. **I verified this by mutation**: I replaced
+`_already_reported_member_ids`'s body with `return frozenset()` (which, if the loop ran, would
+defeat suppression and make the group speak its full composition) and re-ran the test — it still
+passed. Restored afterwards; full suite re-confirmed green (1663/4).
+
+The implementer's own fix note frames this as "the property the test actually cares about (never
+marked spoken) was unaffected by which accessor read it" — true of the *read*, but it misses that
+the group became unreachable by the *production code path* the test is supposed to be driving. The
+rewritten assertion (`store.remembered_groups[0].last_spoken_signature is None`) is true for a
+reason that has nothing to do with suppression working: nothing ever touches this group now.
+
+**Fix, not a reopening of the invariant decision**: give the injected `Group` a `last_observed_sim`
+that matches what `_last_reconciled_sim` will be at the time of injection (`6.0` in this fixture, to
+line up with the last real `store.tick()` call before the direct injection), so it is "currently
+observed" for the rest of the test and the scheduler's group loop actually processes it, the same as
+before Stage 1. This restores exactly what the test was checking, with the one Stage-1-aware
+addition the original docstring already anticipated — the fixture models a group that could not form
+by real `reconcile` (A and C are 500 m apart, outside the cohesion gate), which is exactly why it
+was built by direct injection in the first place; it now additionally needs the one field Stage 1
+added to mean "observed."
+
+**2. A4's trace-line promise is not met by a mechanism nobody calls — rule needed on whether this
+blocks Stage 1.** I agree with the implementer's three reasons for not wiring `--group-trace`
+through `logger.py` in this commit, and the mechanism (`trace_sink`/`group_trace_sink`, fully tested)
+is real engineering progress. But A4's stated reasons for promoting the trace line to "Stage 1's
+first commit" are not about the mechanism existing — they are about **D5's rarity claim and
+`BL-B50`'s lapse condition becoming checkable from an actual sortie**, and reason 4 names the
+alternative outcome explicitly: *"the alternative first evidence is a wrong spoken line in
+flight."* With no `--group-trace` flag, a live sortie today produces exactly zero observable trace
+of phase-2 property matches — nothing has changed from before Stage 1 in what the pilot or a
+debrief can check. I am not asking for `logger.py`'s wiring to be redone to a higher standard; I am
+asking that this be ruled on explicitly rather than left as a flagged-but-undecided scope question,
+since BL-12 stays on one branch and the user's acceptance of D5 is conditional on rarity being
+checkable. **Recommendation**: land the CLI flag (one flag, one ~79-line writer mirroring
+`speech_log.py`, one `_per_run_log_paths` entry) before this feature reaches DoD — it does not need
+to block Stage 1's own merge into the feature branch, since the mechanism is already correct and
+stages stay together until the whole milestone's DoD.
+
+---
+
+## What I verified independently
+
+- **A3's lattice correction** (`_air_defence_op_class_of` reading `classification.parent_class_of`,
+  never `object_model.profile_for`): reproduced the amendment's own six-row probe against this tree.
+  `profile_for("OP_MRSAM")` resolves to `OP_GROUPSOMETHING` (miss); `parent_class_of("OP_MRSAM")`
+  resolves to `OP_MRSAM` directly (hit) — matches the amendment's table exactly, row for row.
+- **`GroupStore.groups` still means "currently observed"** for every pilot-facing consumer. Grepped
+  `speech.py`, `tools.py`, `callouts.py`, `crew_console.py`: every one reads `.groups` or
+  `.group_for_contact`, none reads `remembered_groups` or `_groups` directly. `group_for_contact`
+  itself is correctly narrowed to iterate `self.groups`, not `self._groups`/`remembered_groups`.
+- **The expire phase freezes properties for real.** Read the diff's phase-4 `Group(...)`
+  reconstruction: every Stage-1 field (`centroid_x/z`, `composition`, `installation`,
+  `air_defence_composition`) is carried over unchanged from the prior `Group`, only
+  `last_reconciled_sim` advances. `test_a_group_with_no_matching_cluster_is_retained_not_dropped_
+  within_the_window` and the expiry-boundary test both exercise this directly and I traced the code
+  path matches what they assert.
+- **`group_matches`/`group_match_score` against the amendment's six tests**: read each of
+  `test_group_matches_rejects_a_mismatched_installation_flag` through
+  `test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id` against the predicate's actual
+  code (not just the test names) — all six tests are exercised in isolation plus once end-to-end via
+  `GroupStore.reconcile` in the ambiguity test. `centroid_uncertainty_m` is RMS, confirmed both by
+  reading `_centroid_uncertainty_of` (`sqrt(fmean(r*r))`) and by
+  `test_centroid_uncertainty_is_the_rms_of_member_radii`'s literal expected-value computation. Test
+  5's displacement bound and the one-sided "stopped" rule match the plan's own documented
+  justification (zero-bound is a special case of the always-stricter direction, since
+  `elapsed_s >= 0`); I agree this is the correct narrowing rather than a silent weakening.
+- **No omniscience, every new field.** `_composition_of`/`_installation_of`/`_centroid_of`/
+  `_centroid_uncertainty_of`/`_extent_of`/`_cluster_is_stopped` each read only `Contact.position` or
+  `Contact.last_class_raw`/`Contact.motion.state` — no `Observation`, no DCS object id, no
+  `derived_world_position`. Read every function body, not just the docstrings' claims.
+- **`BL-B48`/`BL-B51` roadmap entries still `#status/open`**: correct, per Stage 0's own review —
+  already flagged there as a merge-time update, not a Stage 1 defect. `BL-B56` (filed during Stage 0
+  review) is unaffected by Stage 1 and correctly untouched.
+
+## Checks (confirmed, not merely trusted)
+
+**body-layer/** (from this worktree, binaries resolved against the root checkout's `.venv` per the
+task's instruction):
+- `ruff format --check src tests`: pass, 118 files
+- `ruff check .`: pass
+- `mypy src --strict` (from inside `body-layer/`): pass, 54 source files
+- `pytest -q`: **1663 passed, 4 xfailed** — matches the implementer's reported numbers exactly
+
+**audio-adapter/** (untouched by this change, run because the task asked):
+- `ruff check .`: pass
+- `mypy src`: pass, 15 source files
+- `pytest -q`: 255 passed, 1 skipped — matches baseline
+
+## Review Confidence
+
+**Full read**, with one mutation test performed (required fix 1, described above) rather than
+inferred from the implementer's own account — this is the thing the project's reviewer memory
+specifically names: a test asserting an absence must be mutated, not read. Every other claim in
+`implementation.md`'s Stage 1 section that could be independently checked (A3's lattice resolution,
+the `groups`/`remembered_groups` consumer split, the expire-phase freeze, the six match-predicate
+tests) was checked against the actual code and, where numeric, re-run against the real tree —
+nothing here was spot-checked or taken on the implementer's word alone.
