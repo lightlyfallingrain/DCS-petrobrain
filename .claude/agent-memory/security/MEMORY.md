@@ -1,51 +1,15 @@
-# Agent Memory Index
+# Agent memory — this is not an index
 
-One line per entry, under ~150 characters: `- [Title](file.md) — one-line hook`.
-Individual memory files live alongside this index, named `feedback_<topic>.md` (corrections/
-confirmations about how to approach work) or `project_<topic>.md` (non-obvious project facts).
-Write directly to this directory — it already exists, no need to create it or check first.
+Your memories are the `feedback_<topic>.md` / `project_<topic>.md` files beside this one.
+**There is no index to read or to maintain.** Search them — and every other role's, which you
+could never see before — with:
 
-- [Wire boundary: type-check not range-check](project_wire_boundary_type_check_not_range_check.md) — logger.py validates isinstance only, not value domain, across the audio-adapter<->body-layer wire; check this class of gap on future passes.
-- [Elapsed-time inflation, quadratic dt composition](project_elapsed_time_inflation_quadratic_dt_composition.md) — a hold+inflate recovery pattern's time-to-recover scales ~1/poll_interval, not a fixed constant; test continuous polling, not just a single gap.
-- [brain-layer wide bind, no benefit](project_brain_layer_wide_bind_no_benefit.md) — run-brain.sh overrides server.py's loopback default to 0.0.0.0 though both ends are same-box; flagged non-blocking 2026-09-25.
-- [BR-1 Stage 2 Ollama trust boundary](project_br1_stage2_ollama_trust_boundary.md) — D10 CONFIRM validator checks full token set not offered vocabulary (fails safe); PICK got this right, CONFIRM didn't — check for this divergence pattern elsewhere.
-- [aircraft-layer full audit 2026-09-26](project_aircraft_layer_full_audit_2026_09_26.md) — dostring_in call sites all clean (fixed literals only); recurring gap is unsupervised daemon threads, no REQUIRED FIX this pass.
-- [audio-adapter full audit 2026-09-26](project_audio_adapter_full_audit_2026_09_26.md) — genuinely stdlib-only, no shell=True, no logged mic/transcript text; APPROVED, 3 RECOMMENDED (no request-size cap, unguarded Content-Length, mkstemp-reopen TOCTOU).
-- [Claude setup audit 2026-09-27](project_claude_setup_audit_2026_09_27.md) — demonstrated deny-list bypasses (`rm -fr`, `git worktree remove -f`, `git -C reset --hard`) and a `..`-traversal gap in agent-memory-path-gate.sh; full report in reviews/claude-setup-security.md.
-- [body-layer bounded-growth accepted pattern](project_body_layer_bounded_growth_accepted_pattern.md) — Contacts/optic-policy maps never shrink but are sortie-bounded by design; don't re-flag per-contact dict growth as new exhaustion risk.
-- [LOS terrain tolerance accepted omniscience trade](project_los_terrain_tolerance_accepted_omniscience_trade.md) — 12.0 m LOS tolerance is a reviewed, user-approved relaxation; lapse condition is a pop-up-and-shoot airframe (Ka-50/Apache), not a re-flag target as-is.
-- [world-model first native deps: numpy/scipy](project_world_model_first_native_deps_numpy_scipy.md) — terrain-watershed's numpy<2.5/scipy deps checked clean 2026-10-01; <2.5 ceiling is a mypy-stub pin, not security.
-- [store.writer fail-closed geometry guard](project_store_writer_fail_closed_geometry_guard.md) — insert_features' new sub-2-point LineString/Polygon check aborts the whole transaction; confirmed fail-closed 2026-10-01.
+    python3 .claude/scripts/memory-search.py <terms>
 
-- [Group cohesion redesign: reassign not accumulate](project_group_cohesion_reassign_not_accumulate.md) — new Group.last_spoken_* fields checked clean (reassigned, not unioned); installation_component fails closed.
-- [Player bubble trace is local debug artifact](project_player_bubble_trace_is_local_debug_artifact.md) — PLAYER_BUBBLE trace row records a filtered-out unit but stays local-disk/read-only-join, no belief/network path; checked 2026-10-02.
-- [BL-B23 contact-store-pruning security approved](project_bl_b23_contact_store_pruning_security_approved.md) — lost-contact clustering filter verified clean: memory unaffected, no false-departed claim; APPROVED 2026-10-02.
-- [BL-B23 memory-vs-clustering-filter pattern](project_bl_b23_memory_vs_clustering_filter_pattern.md) — reusable check for future "filter input to O(n^2) consumer" perf fixes: trace unfiltered store stays readable, confirm consumer stays silent on shrink.
-- [WM-B1 name tags not merged from raw OSM](project_wm_b1_name_tags_not_merged_from_raw_osm.md) — reserved tags dict is code-built, never spread from raw OSM tags, so no hostile-OSM-tag key collision; ingest-side Latin-1 filter is incidental, body-layer re-checks independently. APPROVED 2026-10-02.
-- [terrain_cache resumable fail-closed, APPROVED](project_terrain_cache_resumable_fail_closed_approved.md) -- WM-B6 per-tile SQLite cache verified crash-safe without tmp-rename; theatre not in invalidation key mirrors pre-existing osm_cache gap, not new.
-- [silence-command security approved](project_silence_command_security_approved.md) — ack-before-mute and clear-cannot-stick both checked by tracing code/exception paths, not assertion; CANCEL_TOKENS floor confirmed live on real voice path. APPROVED 2026-10-04.
-- [landform-relief-gate security approved](project_landform_relief_gate_security_approved.md) — cache fail-closed on missing META_FIELDS confirmed independently; decimation deviation-check direction correct; DP O(n²) zig-zag noted non-finding (offline/trusted DEM input). APPROVED 2026-10-04.
+No query lists everything, newest first. Exit status 1 means no match, which means *not indexed
+yet*, never *does not exist*. Each file's `description:` frontmatter is its index entry, so write
+that line as the hook a future reader needs.
 
-- [contact-report-flood class-gate permissive by design](project_contact_report_flood_class_gate_permissive_by_design.md) -- contacts_plausibly_same's class check passes freely for OP_GROUPSOMETHING; inherited from already-trusted passes_gate, not a new weakness. APPROVED 2026-10-05.
-- [redundant-group-disclosure approved](project_redundant_group_disclosure_approved.md) -- group-first-disclosure silencing composes safely with merge-echo suppression (per-member, not per-group); no cycle, no new dep. APPROVED 2026-10-05.
-- [mission theatre field unsanitized into path and sqlite URI](project_mission_theatre_field_unsanitized_into_path_and_sqlite_uri.md) — multi-theatre-afghanistan Stage 5: unvalidated mission["theatre"] into pathlib join + sqlite URI; demonstrated absolute/UNC override and mode=ro override. NEEDS FIXES 2026-10-05.
-- [terrain-divide-qualifier security approved](project_terrain_divide_qualifier_security_approved.md) -- divides_between/terrain_divide_qualifier confirmed belief-only input, cache-excluded, bbox-bounded by PLAYER_BUBBLE_RADIUS_M. APPROVED 2026-10-05.
-- [spu8-scale-wav-volume-unguarded-frombytes](project_spu8_scale_wav_volume_unguarded_frombytes.md) -- array.frombytes() outside scale_wav_volume's try/except kills playback worker thread on odd-length truncated PCM; NEEDS FIXES 2026-10-05.
-- [dostring_in numeric splice / NaN clamp gap](project_dostring_in_numeric_splice_naN_clamp_gap.md) -- X-B29's %d splice into dostring_in is injection-proof but naive math.min/max clamps pass NaN through; check this pattern on any future runtime-value-into-Lua-code splice. APPROVED w/ 2 required fixes 2026-10-05.
-- [X-B29 LOS two-%d splice approved](project_xb29_los_two_percent_d_splice_approved.md) -- hour+FOV both reach %d through identical total clamp, no weaker modulo path; future look_around(x,y,alt) needs its own fresh review. APPROVED 2026-10-05.
-- [body-layer full audit 2026-10-05](project_body_layer_full_audit_2026_10_05.md) — what cleared and why (no listener, no model-text-to-speech path, guards present); findings A1-A5. NEEDS FIXES.
-- [LOS join key unit_name is not total](project_los_join_key_unit_name_not_total.md) — nameless scenery/statics can never get a live LOS verdict, so they silently use the building-blind SRTM fallback forever.
-- [Poll loop has no 5 Hz spec](project_poll_loop_has_no_5hz_spec.md) — default is 1.0 s fixed-DELAY, so ~1.44 s observed is correct; BL-B30's "seven times slower" premise is wrong.
-- [world-model full audit 2026-10-05](project_world_model_full_audit_2026_10_05.md) -- provenance solid in describe_position, absent in line_of_sight_clear/raster; pipeline measures its own error and delivers it as prose (WM-B3's mechanism). Verified sqlite URI/nan/bind-limit behaviours.
-- [Kind-keyed exemption admits every transition](project_exemption_from_a_gate_check_both_transitions.md) -- check each payload direction against the exemption's own bar; "Safe from" failed where "Danger" passed, through 3 reviews and a DoD.
-- [Engagement exemption disclosure traced](project_callout_observability_gate_exemption_disclosure_traced.md) -- belief-only premise verified to ground (position cannot refresh behind the mask); don't re-derive. APPROVED w/ required fixes 2026-10-06.
-- [CLI mkdir degrade policy misses ValueError](project_cli_path_mkdir_degrade_policy_misses_valueerror.md) -- `with_name` raises ValueError not OSError, `~` never expands; probe recipe for any path-handling change. BL-11 Stage 5, APPROVED 2026-10-06.
-- [Quantised cache key provenance check](project_quantised_cache_key_provenance_check.md) -- two checks clear a cache of a no-omniscience charge: key identity (unrecycled?) and error direction (coarser, not sharper). Trace key-space drivers for a string memo.
-- [Watched-set expansion is a gated surface](project_watched_set_expansion_is_a_gated_surface.md) -- the 3 watched-side speech paths and their gate status; the ungated one is the pulled report, a decision not a bug. 2026-10-06.
-- [los-hook-statics: admitting statics tightens the gate](project_los_hook_statics_security_approved.md) -- compare a newly-admitted population's verdict against what the FALLBACK said, not against silence; the real finding was `;` in a name dropping a whole poll.
-- [Phrase-table single-word false positives](project_phrase_table_single_word_false_positive_class.md) -- bare one-word collisions at MATCH_FLOOR 0.6 are pre-existing and accepted; probe the baseline table before calling a new synonym a finding.
-- [BL-11 Stage 4 fail-closed LOS gate approved](project_bl11_stage4_fail_closed_security_approved.md) -- mutation-verified gate 4 + flood-fix at 77faae3; one advisory: plain-logger entry point has zero coverage visibility (low-probability, unused path).
-- [doc-conventions-audio-adapter security approved](project_doc_conventions_audio_adapter_security_approved.md) -- roadmap-split + 2 new gates checked clean, additive-only regex widenings, no secrets in untracked .obsidian/. APPROVED 2026-10-06.
-- [Probe through the real suppression path](feedback_probe_through_the_real_suppression_path.md) -- a flood probe that skips the consumer's own signature/snapshot gate inflates every count; measure steady state and pre-vs-post, not the renderer.
-- [BL-B47 air-defence class-level APPROVED](project_bl_b47_air_defence_class_level_security.md) -- a predicate only ever OR'd into a speech decision cannot lose a warning; closing the producer space makes "0 lost" total. Ratchet lapse condition stated.
-- [Pull-path freshness is all-or-nothing](project_pull_path_freshness_all_or_nothing.md) -- BL-13's "Last I saw" needs EVERY contact stale and is the first clause the budget drops; ask how often the partial case is normal. CHANGES REQUIRED 2026-10-10.
+This file is a pointer because the harness injects it into every agent's system prompt whether or
+not anything reads it. It used to be a hand-kept index: it drifted, outgrew its read limit, and a
+hook asked six agents in one session to compact it. Full account: `todo/todo/X-T25.md`.
