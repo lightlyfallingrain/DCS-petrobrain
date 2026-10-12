@@ -628,6 +628,7 @@ def _cluster_contacts(
     contacts: Sequence[Contact],
     gap_ratio: float,
     min_members: int,
+    prior_rosters: Sequence[frozenset[str]],
 ) -> list[frozenset[str]]:
     """Single-link union-find over `contact.position.x`/`.z`. Two contacts
     cohere when their gap clears both of two thresholds: the relative test
@@ -641,6 +642,52 @@ def _cluster_contacts(
     (never returned as a pair or a singleton); a total contact count below
     `min_members` short-circuits with no distance computation at all,
     since no cluster meeting the floor is possible either way.
+
+    **The cohesion admission gate** (`plans/group-cohesion-admission-gate/
+    plan.md`, `BL-B58`/BL-12 Stage 3.5): `prior_rosters` is the previous
+    `reconcile()` call's group rosters (`[g.member_contact_ids for g in
+    self._groups.values()]`, passed by the caller before it reassigns
+    `self._groups`) -- the only membership statement that exists before
+    *this* tick's clustering has run. For a candidate pair `(i, j)`:
+
+    - If `i` and `j` were co-members of one and the same prior roster, the
+      ordinary rule above applies unchanged. This is what makes the gate
+      incapable of causing eviction churn -- it is never consulted for an
+      already-formed pair.
+    - Otherwise (an *admission*: at least one side is new to the other's
+      group, or neither is grouped), the gap is inflated by both sides'
+      `Contact.fold_displacement_m` before the same comparison:
+      `gap + fold_displacement_m[i] + fold_displacement_m[j] <=
+      min(relative_threshold, pair_backstop)`.
+
+    No new constant: the threshold is exactly the one the ordinary rule
+    already selects, never widened or narrowed for the admission case
+    itself -- only the gap being compared against it changes. **Measured as
+    a provenance problem, not a geometry one** (that plan's §1): the
+    no-op sketch this gate replaces re-checked the *existing* pair backstop
+    against the *existing* positions, which the absorbing edge already
+    clears (81.9 m against an 88.0 m backstop, the 2C fixture) -- the gap
+    closed because a Stage 3 fold rewrote one member's fused position, not
+    because anything moved, so a tick-local re-check of unchanged geometry
+    is a no-op by construction. `fold_displacement_m` is deliberately not
+    `Contact.position.radius_m()` (ordinary position uncertainty): that was
+    tried and rejected (`plans/group-undermerging/debug.md`) for
+    over-merging at close range, and here it argues the wrong way --
+    uncertainty alone cannot distinguish a real nearby contact from a
+    folded one. `fold_displacement_m` is narrower: it only ever grows a
+    gap, so an admission can be refused but a merge can never be forced by
+    it, and an excluded contact is simply not unioned -- it lands wherever
+    its remaining edges put it (ungrouped if it has none), never a new
+    group, never an eviction. See that plan's §4 for the six-row measured
+    table (rows C/D/E -- the eager-cap/chaining/genuine-joiner invariants
+    -- byte-identical to the ordinary rule).
+
+    `prior_rosters` is flattened once, before the O(n^2) edge loop below,
+    into a `dict[str, frozenset[str]]` (contact id -> its one prior
+    roster) -- a contact belongs to at most one roster in a partition, so
+    this lookup is exact, and it keeps the admission test itself at one
+    dict lookup and one float add per edge rather than an `any(...)` scan
+    of `prior_rosters` per pair (that plan's own performance note).
 
     **Investigated and deliberately not budgeted by position uncertainty**
     (`plans/group-undermerging/debug.md`, 2026-10-01 sortie debug): a
@@ -687,7 +734,15 @@ def _cluster_contacts(
     positions = [(c.position.x, c.position.z) for c in contacts]
     profiles = [_profile_for_contact(c) for c in contacts]
     sizes = [_representative_size_m(profile) for profile in profiles]
+    fold_budgets = [c.fold_displacement_m for c in contacts]
     n = len(ids)
+
+    # Flattened once, before the O(n^2) edge loop -- a contact id maps to
+    # at most one prior roster, since `prior_rosters` is a partition.
+    roster_of: dict[str, frozenset[str]] = {}
+    for roster in prior_rosters:
+        for cid in roster:
+            roster_of[cid] = roster
 
     nn_gaps: list[float] = []
     for i in range(n):
@@ -722,7 +777,13 @@ def _cluster_contacts(
                 profiles[i], profiles[j], sizes[i], sizes[j]
             )
             pair_threshold = min(relative_threshold, pair_backstop)
-            if _pairwise_distance(positions, i, j) <= pair_threshold:
+            gap = _pairwise_distance(positions, i, j)
+            prior_roster_i = roster_of.get(ids[i])
+            if prior_roster_i is not None and prior_roster_i == roster_of.get(ids[j]):
+                effective_gap = gap  # prior co-members: ordinary rule, unchanged
+            else:
+                effective_gap = gap + fold_budgets[i] + fold_budgets[j]  # admission
+            if effective_gap <= pair_threshold:
                 union(i, j)
 
     members_by_root: dict[int, list[str]] = {}
@@ -1150,8 +1211,17 @@ class GroupStore:
         **No omniscience**: every field computed here comes from `Contact.
         position` (fused belief) and `Contact.last_class_raw` (believed
         classification) -- see `_cluster_properties` and `group_matches`."""
+        # `self._groups` still holds the *previous* reconcile's rosters at
+        # this point -- it is not reassigned until this method's very end
+        # -- so this is exactly the admission gate's required "the only
+        # membership statement that exists before this tick's clustering
+        # has run" (`plans/group-cohesion-admission-gate/plan.md` §3).
+        prior_rosters = [group.member_contact_ids for group in self._groups.values()]
         clusters = _cluster_contacts(
-            contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS
+            contacts,
+            GROUP_PROXIMITY_GAP_RATIO,
+            GROUP_REPORTING_MIN_MEMBERS,
+            prior_rosters,
         )
         contacts_by_id = {contact.id: contact for contact in contacts}
         cluster_props: dict[frozenset[str], _ClusterProperties] = {

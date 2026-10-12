@@ -26,6 +26,7 @@ from belief.groups import (
     CohesionBackstop,
     Group,
     GroupStore,
+    _cluster_contacts,
     _cluster_properties,
     _pair_backstop_m,
     _profile_for_contact,
@@ -46,6 +47,7 @@ def _contact(
     class_raw: str = "OP_TRUCK",
     uncertainty_m: float = 0.0,
     motion_state: MotionState | None = None,
+    fold_displacement_m: float = 0.0,
 ) -> Contact:
     """`class_raw` defaults to `OP_TRUCK` (unchanged for every pre-existing
     caller) -- the `EAGER`/installation-cohesion tests below pass a real
@@ -58,7 +60,9 @@ def _contact(
     since `radius_m() = sqrt(xx + zz)`) -- defaults to 0.0, unchanged for
     every pre-existing caller. `motion_state` (new) sets `Contact.motion`
     to a `MotionBelief` in that state, or leaves it `None` (unobserved for
-    movement) by default."""
+    movement) by default. `fold_displacement_m` (new, BL-12 Stage 3.5,
+    `BL-B58`) sets `Contact.fold_displacement_m` directly -- defaults to
+    0.0, unchanged for every pre-existing caller."""
     half_variance = 0.5 * uncertainty_m * uncertainty_m
     return Contact(
         id=contact_id,
@@ -80,6 +84,7 @@ def _contact(
             if motion_state is None
             else MotionBelief(state=motion_state, confidence=0.5, established_sim=0.0)
         ),
+        fold_displacement_m=fold_displacement_m,
     )
 
 
@@ -691,6 +696,159 @@ def test_the_eager_cap_still_chains_a_long_infantry_line() -> None:
     groups = store.groups
     assert len(groups) == 1
     assert groups[0].member_contact_ids == frozenset({"I1", "I2", "I3", "I4"})
+
+
+# --- BL-12 Stage 3.5: the cohesion admission gate (`BL-B58`) ---------------
+# `plans/group-cohesion-admission-gate/plan.md` §4's six-row table, reusing
+# that plan's own probe geometry/budgets rather than re-deriving them --
+# `scratchpad/probe_b58_candidate.py` is the same predicate, run against the
+# real module's constants, and `implementation.md` records the matching
+# output from running that probe against this commit.
+
+
+def test_admission_gate_excludes_the_2c_incidents_absorbed_member() -> None:
+    """Row A of the plan's table: the 2C fixture's own geometry at t=12,
+    after the fold (`CONTACT_1`'s 219.4 m and `CONTACT_2`'s 142.4 m fold
+    budgets, read off `probe_b58_geometry.py`). `CONTACT_1-CONTACT_4`'s raw
+    gap (82.2 m) already clears the 88.0 m pair backstop -- the no-op the
+    plan's §1 measures -- so only the inflated admission test excludes it.
+    `CONTACT_4` becomes ungrouped (below `GROUP_REPORTING_MIN_MEMBERS`),
+    never evicted from anywhere and never founding anything."""
+    contacts = [
+        _contact(
+            "CONTACT_1",
+            1324.1,
+            131.3,
+            class_raw="OP_INFANTRY",
+            fold_displacement_m=219.4,
+        ),
+        _contact(
+            "CONTACT_2",
+            1290.8,
+            254.6,
+            class_raw="OP_INFANTRY",
+            fold_displacement_m=142.4,
+        ),
+        _contact("CONTACT_3", 1500.0, 0.0, class_raw="OP_INFANTRY"),
+        _contact("CONTACT_4", 1242.4, 140.1, class_raw="BTR-70"),
+        _contact("CONTACT_5", 1290.0, 0.0, class_raw="OP_TRUCK"),
+    ]
+    prior_rosters = [frozenset({"CONTACT_1", "CONTACT_2", "CONTACT_3"})]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, prior_rosters
+    )
+
+    assert clusters == [frozenset({"CONTACT_1", "CONTACT_2", "CONTACT_3"})]
+
+
+def test_admission_gate_excludes_incident_2s_absorbed_air_defence_member() -> None:
+    """Row B: the second, independent incident (`probe_b58_second_
+    incident.py`) -- a ZSU-23-4 that the ordinary rule absorbs, flipping
+    `air_defence_composition` from `[]` to asserting air defence the group
+    does not contain. The admission gate excludes it the same way as Row A,
+    via the same mechanism, on different geometry and a different class."""
+    contacts = [
+        _contact(
+            "CONTACT_1", 868.0, 10.0, class_raw="OP_INFANTRY", fold_displacement_m=132.4
+        ),
+        _contact("CONTACT_2", 1060.0, 40.0, class_raw="OP_INFANTRY"),
+        _contact(
+            "CONTACT_3",
+            888.0,
+            -35.0,
+            class_raw="OP_INFANTRY",
+            fold_displacement_m=145.8,
+        ),
+        _contact("CONTACT_4", 805.0, 0.0, class_raw="ZSU-23-4 Shilka"),
+    ]
+    prior_rosters = [frozenset({"CONTACT_1", "CONTACT_2", "CONTACT_3"})]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, prior_rosters
+    )
+
+    assert clusters == [frozenset({"CONTACT_1", "CONTACT_3"})]
+
+
+def test_admission_gate_leaves_a_first_formation_chained_infantry_line_identical() -> (
+    None
+):
+    """Row C (invariant): `test_the_eager_cap_still_chains_a_long_infantry_
+    line`'s own geometry, with no prior group at all and no fold budget
+    anywhere -- the admission gate must not touch a group's *first*
+    formation, only an existing group's later admissions."""
+    contacts = [
+        _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+        _contact("I2", 400.0, 0.0, class_raw="Infantry AK"),
+        _contact("I3", 800.0, 0.0, class_raw="Infantry AK"),
+        _contact("I4", 1200.0, 0.0, class_raw="Infantry AK"),
+    ]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, []
+    )
+
+    assert clusters == [frozenset({"I1", "I2", "I3", "I4"})]
+
+
+def test_admission_gate_leaves_an_existing_three_member_group_identical() -> None:
+    """Row D (invariant): three infantry at 30 m spacing, already one
+    `Group` -- every pair is a prior co-member, so every edge takes the
+    ordinary rule and the gate is never consulted at all."""
+    contacts = [
+        _contact("I1", 0.0, 0.0, class_raw="Infantry AK"),
+        _contact("I2", 30.0, 0.0, class_raw="Infantry AK"),
+        _contact("I3", 60.0, 0.0, class_raw="Infantry AK"),
+    ]
+    prior_rosters = [frozenset({"I1", "I2", "I3"})]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, prior_rosters
+    )
+
+    assert clusters == [frozenset({"I1", "I2", "I3"})]
+
+
+def test_admission_gate_leaves_a_genuine_unfolded_joiner_identical() -> None:
+    """Row E (invariant): an armour contact with **no** fold budget
+    genuinely joining an existing armour pair -- an admission, but with
+    nothing to inflate, so it must link exactly as the ordinary rule
+    would."""
+    contacts = [
+        _contact("A1", 0.0, 0.0, class_raw="T-72B"),
+        _contact("A2", 100.0, 0.0, class_raw="T-72B"),
+        _contact("A3", 200.0, 0.0, class_raw="T-72B"),
+    ]
+    prior_rosters = [frozenset({"A1", "A2"})]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, prior_rosters
+    )
+
+    assert clusters == [frozenset({"A1", "A2", "A3"})]
+
+
+def test_admission_gate_still_chains_around_a_tainted_member_via_single_link() -> None:
+    """Row F: the same scene as Row E, but `A1` itself carries a 130 m fold
+    budget. The `A1`-`A3` admission edge is vetoed (200 m + 130 m = 330 m,
+    past the 140 m pair backstop), but `A3` still joins the group via the
+    untainted `A2` -- single-link routing around one tainted member is
+    exactly what keeps this gate from freezing a group's otherwise-
+    legitimate growth (plan §3, the third reason `_cluster_contacts` is the
+    right seam)."""
+    contacts = [
+        _contact("A1", 0.0, 0.0, class_raw="T-72B", fold_displacement_m=130.0),
+        _contact("A2", 100.0, 0.0, class_raw="T-72B"),
+        _contact("A3", 200.0, 0.0, class_raw="T-72B"),
+    ]
+    prior_rosters = [frozenset({"A1", "A2"})]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, prior_rosters
+    )
+
+    assert clusters == [frozenset({"A1", "A2", "A3"})]
 
 
 def test_the_eager_cap_and_the_installation_cap_do_not_move_together(
