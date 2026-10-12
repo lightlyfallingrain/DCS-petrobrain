@@ -1386,3 +1386,178 @@ assertion), and the "cannot evict or found" claim tested both by construction (r
 candidate counterexamples) and by mutation of the one branch that makes it true. The two items
 left as optional refinements are the same two sub-questions the plan itself states as open and
 unmeasured, not new gaps found this round.
+
+---
+
+# Review — BL-12 Stage 4 (`6ecfd2d..9bc551e`)
+
+Reviewed 2026-10-12 against `plans/group-contact-identity/plan.md`'s Stage 4 body, Amendment A2.2 /
+A4 / A6's Stage 4 row / A9, `plans/group-contact-identity/implementation.md`'s Stage 4 section,
+`plans/post-review-fixes/explore-notes.md`'s D7, `plans/group-cohesion-redesign/plan.md` §4,
+`body-layer/src/belief/motion.py`, `body-layer/src/belief/enrichment.py`,
+`.claude/agent-memory/implementer/project_bl12_stage4_heading_smoothing.md`, and
+`body-layer/CLAUDE.md`.
+
+**Base check.** Worktree HEAD landed at `cb39159`, eight commits behind the named tip `9bc551e` —
+all bookkeeping (agent-memory, `MEMORY.md` stubs, memory-search wiring), no source. Confirmed a
+strict ancestor with a clean tree and fast-forwarded (`git merge --ff-only 9bc551e`); no
+divergence.
+
+**Rewrite claim.** `git diff 48873cc ec557d1` is empty, confirmed directly — the `git reset
+--soft` + recommit changed only commit messages/trailers, nothing else.
+
+## What this round checked, and how
+
+- **Both-sites wiring, by grep and by read, not by file list.** `render_group_disclosure`'s
+  never-spoken/first-differentiation branch and `render_group_full_disclosure`'s pull path both
+  call `_render_full_group_composition(member_facts, leading_index, differentiated, group)`
+  (`speech.py:2330`, `:2621`) — the one function that renders the direction clause. Confirmed the
+  delta-clause branch (`_render_member_delta_clause`) and the leader-change branch are
+  byte-identical to before Stage 4 (`git diff 19a3671 9bc551e -- src/belief/speech.py`, grepped for
+  both names — only docstring prose changed near the leader-change branch, zero logic lines).
+- **Circular mean, verified by direct computation and by mutation.** `_update_heading`
+  (`groups.py:980-1027`) accumulates a *per-step* heading into `heading_history_deg` (not an
+  endpoint-to-endpoint vector) and takes the circular mean via `atan2(sum sin, sum cos)` —
+  confirmed this handles the 350°/10° wrap correctly by direct computation
+  (`math.fsum`/`atan2` on `[350.0, 10.0]` gives `~0.0°`/`360.0°`, confidence `0.985` — the `360.0`
+  vs `0.0` float-precision artifact is harmless because `_compass_word`'s
+  `angular_delta_deg` normalizes mod 360 before comparing). **No test exercises the wrap at all** —
+  every heading test in `test_groups.py` uses due-north (`0.0°`) steps exclusively. Mutated the
+  mean to a naive arithmetic mean (`sum(history) / len(history)`, which gives `180°` for
+  `[350, 10]` instead of `~0°`) and ran the full `test_groups.py` + `test_speech.py` suite: **235
+  passed, zero failures** — the wrap defect would ship silently. Reverted; tree confirmed clean
+  (`git diff --stat` empty) after reverting both this and the mutations below.
+- **`_MIN_HEADING_SAMPLES = 2`, mutated to 1**: `test_heading_is_none_until_the_minimum_sample_
+  count_is_reached` failed for the stated reason (`assert 0.0 is None` — a one-step heading was
+  exposed). Reverted. **Ruling: right call, right value.** One step is exactly the
+  endpoint-to-endpoint shape the plan cites `motion_when_seen` for, and the floor is correctly
+  named as a judgment call (not silently assumed) in both the code comment and the agent-memory
+  file, which also states the generalizable lesson correctly (a plan stating a smoothing
+  *ceiling* has implicitly also made an unstated claim about the *floor*).
+- **`_GROUP_SPOKEN_EXTENT_GUARD_M = 500.0`, mutated to 5000.0**:
+  `test_render_group_disclosure_extent_guard_suppresses_the_direction_clause` failed for the
+  stated reason (`'moving' is contained here: 'Group, moving north.'`). Reverted. Independently
+  re-derived the 500 m figure against `_format_range_km`'s own rounding bucket — same number,
+  same reasoning, confirmed rather than taken on faith. **On "mechanism and calibration never
+  share a commit"**: the guard's threshold and its mechanism (the `extent_m <=` conditional, the
+  compass-word lookup) do land in one commit (`c41129a`). This is not a violation in the way the
+  rule exists to prevent — the rule's worked example (BL-2.6 Stages 6/7) is about re-tuning an
+  *existing* gate's numbers separately from changing how it computes, so a later calibration
+  change has one attributable cause. This guard and its number are both new; there is no
+  "mechanism commit with a placeholder value" state that would be meaningful to split out, and
+  this project's own Stage 0b (`68598f7`) set the precedent — a brand-new mechanism and its
+  initial calibration value, bundled in one commit, is the established pattern here. Not a
+  finding.
+- **Verified the real pipeline, not just the unit fixtures.** Ran the pinned chained-infantry
+  geometry (`I1..I4` at 0/400/800/1200 m) through three real `GroupStore.reconcile` ticks with
+  `motion_state="moving"` and a 10 m/tick northward drift: `extent_m == 1200.0`,
+  `movement_state == "moving"`, `heading_deg == 0.0` — confirming the guard's inputs in this round
+  come from the real clustering/heading pipeline, not only from the `dataclasses.replace`
+  shortcut the committed tests use to reach the same state. The existing tests isolate the guard
+  correctly for what they test, but see the required fix below for what they do not test.
+- **No-omniscience boundary.** `git diff 19a3671 9bc551e -- src/belief/motion.py
+  src/belief/enrichment.py` is **empty** — both files are byte-identical across the stage,
+  confirmed by diff, not by the implementer's say-so. `_update_heading` and
+  `_majority_movement_state` read only `Contact.position` (fused) and `Contact.motion` (folded);
+  no DCS velocity, no raw percept, no `motion_when_seen` call anywhere in the new code
+  (`grep -n "motion_when_seen" src/belief/groups.py src/belief/speech.py` — no hits).
+- **Delta taxonomy untouched**, confirmed by diff rather than by the log's assertion:
+  `plans/group-cohesion-redesign/plan.md` §4's branches (`_render_member_delta_clause`, the
+  leader-change text) carry zero logic changes in `git diff 19a3671 9bc551e -- src/belief/speech.py`.
+- **"Fixtures moved: none."** Confirmed independently: the one other pre-existing
+  `motion_state="moving"` fixture outside the two new test ranges (`test_groups.py:1357`, in
+  `test_group_matches_zero_speed_bound_when_the_observed_cluster_is_stopped`) calls
+  `group_matches`/`_cluster_properties` directly — it never reaches `GroupStore.reconcile` or
+  `_update_heading` at all, so it was never at risk. The claim holds.
+- **audio-adapter.** Ran it rather than accepted the "not run" posture: `255 passed, 1 skipped`,
+  matching the stated baseline exactly, and `git diff 19a3671 9bc551e --stat -- audio-adapter/` is
+  empty — zero files touched. `OutgoingSpeech`'s dataclass fields (`text`, `template`, `author`,
+  `content_signature`) are unchanged; this stage only varies the *contents* of the `text`/
+  `content_signature` strings. The "no wire-shape change" reasoning is correct, verified rather
+  than accepted.
+
+## Required Fixes
+
+1. **The extent guard suppresses the heading clause but not the clock/range bearing clause, and
+   the plan requires both.** Amendment A6's Stage 4 row states, in its own words: *"The
+   speech-time extent guard is unconditional, not a fallback — do not speak a heading **or a
+   single bearing** for a group wider than one believable bearing."* A2.2 point 3 makes the same
+   claim concrete against D7's own worked sentence — *"'that column', now 2 o'clock, three
+   kilometres, still moving north'" — three of its four facts are false for a wide group"*,
+   naming bearing, range, and direction as the three false facts, not direction alone.
+
+   `_render_full_group_composition` (`speech.py:2191-2291`) implements only the direction half.
+   The clock/range clause (`speech.py:2262-2264`: `if nearest_relative_now is not None: ... text
+   += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"`) has **no extent condition at
+   all** — it fires unconditionally, the same as it did before Stage 4 added the `extent_m` field.
+
+   **Verified directly, not inferred from reading**: constructed the pinned 1,200 m
+   chained-infantry extent with a real `EnrichmentContext` (the committed
+   `test_render_group_disclosure_extent_guard_suppresses_the_direction_clause` passes no
+   enrichment, so it never exercises this clause at all — `nearest_relative_now` is `None` in that
+   test regardless of extent, which is why the gap is invisible to the existing suite). With
+   enrichment supplied and `extent_m=1200.0`, `render_group_disclosure` returns:
+
+   ```
+   "Group, 12 o'clock, very close."
+   ```
+
+   — a single bearing and range spoken for a group the plan explicitly says has none to give.
+   This is not a hypothetical: it is the exact pinned scenario (`test_the_eager_cap_still_chains_
+   a_long_infantry_line`'s geometry) amendment A6 names as "the case this guard exists to catch."
+
+   **Fix**: gate the clock/range clause (`speech.py:2262-2264`) behind the same
+   `group.extent_m <= _GROUP_SPOKEN_EXTENT_GUARD_M` condition as the direction clause (or a shared
+   helper), and add a test with enrichment supplied that pins the over-wide case producing bare
+   `"Group."` (or whatever composition-only text remains) with no clock/range clause at all —
+   the committed extent-guard test currently cannot catch this because it never supplies
+   enrichment.
+
+2. **No test pins the circular mean across the 0°/360° wrap.** Every heading fixture in
+   `test_groups.py` uses due-north (`0.0°`) steps exclusively (`test_heading_is_a_smoothed_
+   circular_mean_of_consistent_steps`, `test_heading_history_caps_at_the_smoothing_window`), so a
+   regression to a naive arithmetic mean — which breaks precisely at the wrap, averaging `350°`
+   and `10°` to `180°` instead of `~0°` — passes the entire 235-test `test_groups.py` +
+   `test_speech.py` suite with zero failures (confirmed by mutation, see above). The mechanism
+   itself is correct (verified by direct computation); the gap is that nothing in the suite would
+   catch its regression. **Fix**: add a reconcile sequence that steps a centroid across the
+   0°/360° boundary (e.g. two successive displacements yielding per-step headings near `350°` and
+   `10°`) and assert `heading_deg` lands near `0.0°` (or `360.0°`), not `180.0°`.
+
+Neither fix touches `motion.py`, `enrichment.py`, the delta taxonomy, or Stage 0–3.5's mechanism —
+both are scoped entirely to `groups.py`'s `_update_heading` test coverage and `speech.py`'s extent
+guard reaching the clause it was specified to reach.
+
+## Optional Refinements
+
+1. **The `_GROUP_SPOKEN_EXTENT_GUARD_M`/`GROUP_REPORTING_EAGER_COHESION_CAP_M` "equal by
+   coincidence, not derivation" pair** now has three siblings sharing the value `500.0`
+   (`GROUP_REPORTING_INSTALLATION_COHESION_CAP_M` makes a fourth, per the existing docstring note)
+   — not a defect, since each answers a genuinely different question and the module's own
+   docstring convention already states the posture, but worth a single named constant with three
+   call sites if a fifth ever needs the same number, to stop the "equal by coincidence" footnote
+   from needing to be re-derived a fourth time.
+2. **`_COMPASS_WORDS` duplicates `crew_console._SECTOR_SCAN_LABELS` exactly**, justified in both
+   the implementation log and a code comment as unavoidable given the one-way import direction.
+   Correct as analyzed; flagging only because a third copy of the same eight words anywhere else
+   in this module would be the point to stop duplicating and extract a shared table instead of a
+   third justification comment.
+
+## Verdict
+
+**NEEDS REVISION.** Required Fix 1 is a correctness gap against the plan's own explicit words,
+not a style preference — a group Petrovich cannot actually resolve to one bearing is currently
+given one anyway, which is precisely the no-omniscience failure this whole plan exists to close
+for D7. Required Fix 2 is a test-coverage gap on a mechanism whose only defense against the
+textbook wrap-around bug is the mechanism being correct today, with nothing pinning that it stays
+correct.
+
+## Review Confidence
+
+**Full read.** Every claim in the implementation log was independently re-run rather than
+accepted: the empty-diff rewrite claim, the real-pipeline chained-infantry extent/heading values,
+both mutation checks (naive mean, guard threshold, minimum-sample floor), the audio-adapter
+baseline, and the motion.py/enrichment.py/delta-taxonomy byte-identity claims. Required Fix 1 was
+found by executing the actual rendering path with a real `EnrichmentContext` against the pinned
+over-wide scenario — the committed test suite's own extent-guard test cannot surface it because it
+passes no enrichment, so re-reading the test file alone would have missed it.
