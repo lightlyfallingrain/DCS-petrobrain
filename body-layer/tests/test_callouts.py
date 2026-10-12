@@ -595,16 +595,20 @@ def test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent()
     cohere naturally; the taxonomy under test does not care how a group
     came to exist, only what it currently contains.
 
-    **BL-12 Stage 1 note**: the final assertion reads `store.
-    remembered_groups`, not `store.groups` -- `poll()` never calls `store.
-    tick()`, so `GroupStore.reconcile` never runs again after the direct
-    injection below, and the injected `Group`'s `last_observed_sim` stays
-    at its default (never set by a real reconcile). Stage 1 made `.groups`
-    mean *currently observed* specifically so a group nobody's reconcile
-    actually matched this tick cannot render as if it were -- exactly this
-    fixture's situation, by construction. `.remembered_groups` is the
-    right read here: this test does not care about the observed/remembered
-    distinction, only that nothing marked the injected group as spoken."""
+    **BL-12 Stage 1 note**: the injected `Group` below is given
+    `last_observed_sim=6.0`, matching `_last_reconciled_sim` at injection
+    time (the last real `store.tick(now_sim=6.0)` call above -- `poll()`
+    never calls `store.tick()`, so `GroupStore.reconcile` never runs again
+    after the direct injection). Stage 1 made `.groups` mean *currently
+    observed*, filtered on exactly this field; without it the injected
+    group would be invisible to `CalloutScheduler.tick`'s group-disclosure
+    loop (`for belief_group in store.groups:`) and the suppression check
+    this test is named for would never run at all -- true in an earlier
+    version of this fixture, caught by review (`plans/
+    group-contact-identity/review.md`, Stage 1 required fix 1) via mutation
+    of `_already_reported_member_ids`. Setting the field keeps the group
+    reachable by the real production path, and the final assertion reads
+    `store.groups` accordingly."""
     from belief.groups import Group
 
     store = ContactStore()
@@ -640,6 +644,7 @@ def test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent()
         member_contact_ids=frozenset({"CONTACT_1", "CONTACT_3"}),
         established_sim=12.0,
         last_reconciled_sim=12.0,
+        last_observed_sim=6.0,
     )
     store._groups._groups[group.id] = group  # type: ignore[attr-defined]
 
@@ -647,9 +652,7 @@ def test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent()
         poll(t)
 
     assert spoken == ["Ural truck.", "Ural truck."]  # the group adds nothing
-    assert (
-        store.remembered_groups[0].last_spoken_signature is None
-    )  # never became a candidate
+    assert store.groups[0].last_spoken_signature is None  # never became a candidate
 
 
 def test_simultaneously_founded_mutually_close_contacts_both_speak() -> None:

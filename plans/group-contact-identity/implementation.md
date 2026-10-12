@@ -651,3 +651,113 @@ See the bullet above for the full list by topic; by name, in `tests/test_groups.
 - **`body-layer/docs/STRUCTURE.md` still has no `src/belief/groups.py` entry** — carried over from
   Stage 0, still correctly deferred; this stage's reasoning is recorded in the module's own
   docstring, same posture as Stage 0.
+
+---
+
+## Round 3 — the Stage 1 review's two required fixes (`plans/group-contact-identity/review.md`,
+"Review — BL-12 Stage 1")
+
+### Fix 1 — `test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent` restored
+
+The review's mutation test (replacing `_already_reported_member_ids` with `return frozenset()`)
+proved Round 2's fix left this test passing for a reason unrelated to the mechanism it names: the
+injected `Group`'s `last_observed_sim` stayed at its dataclass default, so it never matched
+`_last_reconciled_sim` and was invisible to `CalloutScheduler.tick`'s whole group-disclosure block —
+`store.remembered_groups` happened to be true, but nothing exercising suppression ever ran.
+
+**Fix**: set `last_observed_sim=6.0` on the injected `Group` (matching `_last_reconciled_sim` at
+injection time — the last real `store.tick(now_sim=6.0)` call in the fixture, since `poll()` never
+calls `store.tick()` again). This keeps the group inside `.groups`'s "currently observed" filter for
+the rest of the test, restores the final assertion to `store.groups[0].last_spoken_signature is
+None`, and re-engages the exact production path (`for belief_group in store.groups:`) the test is
+named for. Updated the docstring's "BL-12 Stage 1 note" to describe this rather than the
+`remembered_groups` workaround it supersedes.
+
+**Reproduced the reviewer's mutation myself** before and after the fix: same `return frozenset()`
+replacement in `_already_reported_member_ids`, confirmed the test now fails (asserts `spoken ==
+[...]` with two lines, gets three — `"Pair of Ural truck."` leaks through), reverted the mutation by
+re-reading the file against `git diff` (clean, zero diff on `callouts.py`), confirmed green again.
+
+**Sibling check**: grepped `tests/` for the same direct-injection pattern
+(`_groups\._groups\[`) and for every other `Group(`/`_Group(` construction site. One other hit
+(`test_crew_console.py::test_watch_nearest_group_readback_counts_only_members_actually_marked`)
+monkeypatches `store.group_for_contact` directly to return its stale group, bypassing the `.groups`
+filter by a different mechanism entirely (not reading `.groups` at all) — unaffected by Stage 1's
+narrowing and not a sibling of this defect. `test_speech.py`'s two direct `Group`/`_Group`
+constructions call `render_group_disclosure` directly with the group as an argument, never through
+`store.groups` — also unaffected. No second fix needed.
+
+### Fix 2 — `--group-trace` flag and writer
+
+Added `src/group_trace_log.py` (`GroupTraceLogWriter`), mirroring `speech_log.py`'s shape exactly:
+unbuffered, one JSON line per `write()` call, `t_wall` stamped at write time, disables itself and
+reports once to stderr on the first `OSError`. Its `write` signature is `Mapping[str, object] ->
+None`, matching `GroupStore.reconcile`'s `trace_sink` type directly, so `GroupTraceLogWriter(path
+).write` can be passed as `ContactStore.tick`'s `group_trace_sink` with no adapter.
+
+**Wiring**: `ConsolePerceptionRunner` gained a `group_trace_sink` field (default `None`, same
+true-no-op posture as `overlay_client`), threaded straight through in `run_once`'s existing
+`self.store.tick(...)` call. `main()` builds a `--group-trace`-based `GroupTraceLogWriter` and
+passes its `.write` to both the `--crew-text` and `--console` `ConsolePerceptionRunner`
+constructions. Argparse: `--group-trace PATH`, validated the same way `--detection-trace` is
+(`parser.error` unless `--console` or `--crew-text`).
+
+**Design choice not escalated (local, reversible): a sibling `_resolve_group_trace_log_path`
+function, not a fourth parameter on `_per_run_log_paths`.** That function's stamp/expand-`~`/mkdir/
+degrade-on-`_RESOLVE_FAILURES` policy is exactly what `--group-trace` should also get, and the
+review's own recommendation phrased it as "one line in `_per_run_log_paths`." But
+`_per_run_log_paths`'s three-log arity (parameters *and* return tuple) is the literal shape nine
+existing tests in `tests/test_run_log_paths.py` are written against — every one of them unpacks a
+3-tuple positionally. Widening the signature to four would require touching all nine call sites'
+unpacking for a reason that has nothing to do with what they test, which reads as exactly the kind
+of test-rewriting-to-dodge-a-signature-change this role is told not to do without it being the
+point of the fix. The sibling function reproduces the same four-exception guard
+(`_RESOLVE_FAILURES`, reused, not redeclared) and the same `resolve` closure logic verbatim, called
+once from `main()` right after `_per_run_log_paths` itself, printed through the same
+`"{label}: writing {rolled}"` loop. The one real divergence: this log's stamp is a separate
+`time.time()` call rather than bit-for-bit the same value `_per_run_log_paths` draws — both happen
+within the same `main()` invocation before either poll thread starts, so they cannot disagree at
+`RUN_STAMP_FORMAT`'s one-second resolution in practice, and an explicit `when=` (what every test
+passes) makes them identical by construction regardless.
+
+### Tests Added
+
+- `tests/test_group_trace_log.py` (new file): `test_write_appends_one_json_line_stamped_with_t_wall`,
+  `test_write_appends_rather_than_truncates`,
+  `test_an_unwritable_path_disables_after_one_reported_failure` — direct unit tests of
+  `GroupTraceLogWriter`, mirroring `test_logger.py`'s existing `SpeechLogWriter` tests.
+- `tests/test_run_log_paths.py`: `test_group_trace_none_stays_none`,
+  `test_group_trace_rolls_and_creates_its_parent`, `test_group_trace_degrades_rather_than_raising` —
+  `_resolve_group_trace_log_path`'s stamp/mkdir/degrade behaviour, same shape as the existing
+  `_per_run_log_paths` tests above them in the same file.
+- `tests/test_logger.py`: `test_console_runner_group_trace_sink_defaults_to_none_and_is_a_true_noop`,
+  `test_console_runner_threads_group_trace_sink_into_store_tick` — confirms the field defaults to a
+  true no-op and that `run_once` actually forwards it to `ContactStore.tick`'s `group_trace_sink`
+  keyword (spied via a wrapped `store.tick`, not a real cluster-resolution scenario — that geometry
+  is `tests/test_groups.py`'s job, not this module's).
+- `tests/test_callouts.py`: no new test; the existing
+  `test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent` was restored (fix 1
+  above), not extended.
+
+### Checks
+
+**body-layer/**
+
+- `ruff format --check src tests`: **pass** (120 files)
+- `ruff check .`: **pass**
+- `mypy src --strict` (from inside the subproject): **pass**, 55 source files (54 at Stage 1 + 1,
+  `group_trace_log.py`)
+- `pytest -q`: **pass** — **1671 passed / 4 xfailed** (Stage 1: 1663/4; +8 new tests, 0 removed, 0
+  rewritten beyond fix 1's one restored test)
+
+**audio-adapter/** (untouched by this change; run because the task asked)
+
+- `ruff check .`: **pass**
+- `mypy src`: **pass**, 15 source files
+- `pytest -q`: **pass** — **255 passed / 1 skipped** (matches baseline)
+
+### Not done, deliberately
+
+- **Everything this task's Scope section excluded**: Stage 2–5 work, the BL-13 pull path,
+  `speech._is_air_defence`, `decay.py`'s logic, `crew_console.py`'s fourth air-defence vocabulary
+  copy (`BL-B56`) — untouched; not in the diff.

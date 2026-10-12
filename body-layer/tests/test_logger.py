@@ -315,6 +315,57 @@ def test_console_runner_without_overlay_client_pushes_nothing() -> None:
     # ...it is simply never mirrored anywhere, which is exactly the point.
 
 
+def test_console_runner_group_trace_sink_defaults_to_none_and_is_a_true_noop() -> None:
+    """`--group-trace` (`BL-12` amendment A4): `group_trace_sink` defaults
+    to `None`, the same posture as `overlay_client` above, and `run_once`
+    must not fail passing it straight through to `ContactStore.tick`."""
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+    )
+
+    runner.run_once()
+
+    assert runner.group_trace_sink is None
+
+
+def test_console_runner_threads_group_trace_sink_into_store_tick() -> None:
+    """`run_once` must pass its own `group_trace_sink` field to `self.
+    store.tick`'s `group_trace_sink` keyword, not drop it on the floor --
+    the one line this wiring actually adds. Spies on `ContactStore.tick`
+    rather than engineering a real cluster-resolution scenario (`tests/
+    test_groups.py` already owns that geometry), since what this module is
+    responsible for is the plumbing, not `GroupStore.reconcile`'s own
+    logic."""
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    received: list[Any] = []
+
+    def fake_sink(record: Any) -> None:
+        received.append(record)
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+        group_trace_sink=fake_sink,
+    )
+    original_tick = runner.store.tick
+    tick_kwargs: list[Any] = []
+
+    def spying_tick(*args: Any, **kwargs: Any) -> None:
+        tick_kwargs.append(kwargs.get("group_trace_sink"))
+        original_tick(*args, **kwargs)
+
+    runner.store.tick = spying_tick  # type: ignore[method-assign]
+
+    runner.run_once()
+
+    assert tick_kwargs == [fake_sink]
+
+
 def test_console_runner_pushes_one_line_per_newly_materialized_event() -> None:
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
