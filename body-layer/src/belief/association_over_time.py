@@ -9,11 +9,36 @@ questions and neither should stand in for the other.
 
 Gate = spatial (hard) **and** class-not-incompatible (hard). Both must pass
 for a percept to be a *candidate* merge target; the caller (`belief.
-contacts.ContactStore.ingest`) then applies the plan's Stage 1 decision
-rule: exactly one candidate passing every gate -> merge; zero -> new
-contact; **two or more -> new contact** (ambiguity must produce a visible
-duplicate, never a guessed merge -- no best-match/highest-score tiebreak
-exists in this module, by design).
+contacts.ContactStore.ingest`) then applies the decision rule: exactly one
+candidate passing every gate -> merge; zero -> new contact. **This gate
+itself never ranks candidates by a best-match/highest-score tiebreak, by
+design, and that does not change below** -- what changed is what the
+caller does with *two or more* passing candidates.
+
+**Two-or-more was an unconditional new contact through `plans/
+pb2-contact-memory/plan.md` Stage 1** (ambiguity must produce a visible
+duplicate, never a guessed merge). `plans/group-contact-identity/plan.md`
+Stage 3 narrows that rule, in `ContactStore._fold_target_for_ambiguous_
+candidates` -- not here, and not by adding a tiebreak to this gate: a
+class-level air-defence candidate still forces a new contact
+unconditionally (D6, the one case ambiguity must not resolve toward
+memory, because a wrongly-continued SAM suppresses a threat warning,
+rather than merely mislabelling a contact); otherwise, when every passing
+candidate is already believed to be a member of **one and the same**
+`belief.groups.Group`, the percept folds onto whichever candidate is
+nearest, ties broken by lowest contact id. The old invariant survives
+exactly where it still earns its place -- candidates in different groups,
+or not grouped at all, where the choice carries real information -- and is
+still decided here, by this gate, with no change to its formulas. The
+premise this narrows was an unwritten density assumption (not this gate's
+geometry): at the measured ~16m median nearest-neighbour spacing against a
+gate that inflates to hundreds of metres within tens of seconds, no radius
+both separates genuinely distinct objects and tolerates normal position
+drift, so founding a third contact in the within-group case does not
+preserve information -- it destroys the count, which is the thing the
+pilot actually hears. See `_fold_target_for_ambiguous_candidates`'s own
+docstring for the full rule and `plans/group-contact-identity/plan.md`
+Stage 3 for the decision.
 
 **The presence-tier veto that used to live here is gone**
 (`plans/group-contact-model/plan.md` Stage 2). It was an interim fix

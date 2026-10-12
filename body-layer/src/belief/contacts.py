@@ -64,12 +64,14 @@ from belief.cardinality import (
     new_cardinality_belief,
 )
 from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
     SpecificityLevel,
     class_compatibility,
     fold_classification,
     new_classification_belief,
+    parent_class_of,
 )
 from belief.decay import (
     CALLOUT_OBSERVABILITY_GRACE_S,
@@ -964,13 +966,19 @@ class ContactStore:
         available, use the gate."
 
         **Gate/ambiguity decision rule** (`plans/pb2-contact-memory/plan.md`
-        Stage 1), reached whenever continuity does not apply -- a founding
-        observation, a non-correlating reacquisition, or an expired/
-        incompatible continuity match: exactly one existing contact passes
-        both gates -> merge into it; zero, or two-or-more, -> create a new
-        contact. Ambiguity between two-or-more candidates is deliberately
-        never resolved by a best-match tiebreak -- see
-        `association_over_time`'s module docstring.
+        Stage 1, narrowed within a group by `plans/
+        group-contact-identity/plan.md` Stage 3), reached whenever
+        continuity does not apply -- a founding observation, a
+        non-correlating reacquisition, or an expired/incompatible
+        continuity match: exactly one existing contact passes both gates ->
+        merge into it; zero -> create a new contact. Two-or-more is no
+        longer an unconditional new contact -- see
+        `_fold_target_for_ambiguous_candidates`'s own docstring for the
+        narrowed rule (air-defence carve-out, then within-group fold, else
+        the original new-contact rule) and `association_over_time`'s module
+        docstring for why the gate itself still never ranks candidates by a
+        best-match score -- that stays the gate's own posture; only what
+        `ingest` does with *two or more* passing candidates changed.
 
         **Same-source, same-poll exclusion** (`plans/group-contact-model/
         plan.md` Stage 3a): two observations sharing both `source` and
@@ -1051,13 +1059,95 @@ class ContactStore:
                     contact = passing[0]
                     contact.record(percept)
                 else:
-                    contact = Contact.from_percept(self._new_contact_id(), percept)
-                    self._contacts[contact.id] = contact
+                    fold_target = (
+                        self._fold_target_for_ambiguous_candidates(passing, percept)
+                        if len(passing) >= 2
+                        else None
+                    )
+                    if fold_target is not None:
+                        contact = fold_target
+                        contact.record(percept)
+                    else:
+                        contact = Contact.from_percept(self._new_contact_id(), percept)
+                        self._contacts[contact.id] = contact
 
             claimed.setdefault(claim_key, set()).add(contact.id)
             self._observation_id_to_contact_id[observation.id] = contact.id
             touched.append(contact)
         return touched
+
+    def _fold_target_for_ambiguous_candidates(
+        self, passing: list[Contact], percept: Percept
+    ) -> Contact | None:
+        """`ingest`'s resolution for `len(passing) >= 2` (`plans/
+        group-contact-identity/plan.md` Stage 3, "Within-group ambiguity
+        resolution") -- the contact to fold `percept` onto, or `None` to
+        found a new contact (the pre-Stage-3 rule, kept as the fallback in
+        every case this method does not narrow).
+
+        1. **Air-defence carve-out, D6.** If *any* passing candidate's
+           believed classification resolves to an `op_class` in
+           `AIR_DEFENSE_OP_CLASSES`, returns `None` unconditionally -- a
+           visible duplicate is the safe direction for a possible threat;
+           a wrong fold is not. Resolved via `belief.classification.
+           parent_class_of`, **never** `perception.object_model.
+           profile_for` (amendment A3 to the plan, correcting its own body
+           text): `profile_for` keyword-matches DCS type designations, so a
+           *class*-level belief -- which carries the bare `OP_*` string
+           itself, and is what a contact holds before it is identified to
+           type, i.e. most of the time at range -- matches no keyword and
+           falls into the default bucket. `parent_class_of` is the
+           resolver this project settled on for exactly this gap
+           (`BL-B47`), and it is the one this method must use or the
+           carve-out silently fails to fire for most real SAM contacts.
+        2. **Within-group fold, D5 at contact grain.** Otherwise, if every
+           passing candidate is currently a member of one and the same
+           `Group` (`GroupStore.group_for_contact` -- the pilot-facing
+           *currently observed* view; a candidate this returns `None` for
+           fails the "one and the same" test exactly like a candidate in a
+           different group would), fold onto whichever candidate is
+           nearest `percept`'s implied position, ties broken by lowest
+           contact id -- the same "nearest, then lowest id" shape Stage 1
+           test 6 already applies one level up (clusters choosing among
+           ambiguous *groups*; this is candidates choosing among ambiguous
+           *contacts* inside one already-believed group).
+        3. **Otherwise `None`** -- found a new contact. This is the
+           original Stage 1 rule, preserved exactly where it still earns
+           its place: candidates in different groups, or not grouped at
+           all, where the choice carries real information. See `ingest`'s
+           own docstring and this module's own docstring for why narrowing
+           it only here (not the gate itself) is sound.
+
+        **No-omniscience check**: reads only `Contact.last_class_raw`
+        (believed classification, resolved through the lattice) and
+        `GroupStore.group_for_contact`/`Contact.position` (believed group
+        membership and fused position) -- never a DCS `object_type` or
+        `object_id`. Unchanged boundary."""
+        for candidate in passing:
+            op_class = parent_class_of(candidate.last_class_raw)
+            if op_class is not None and op_class in AIR_DEFENSE_OP_CLASSES:
+                return None
+
+        group_ids: set[str] = set()
+        for candidate in passing:
+            group = self._groups.group_for_contact(candidate.id)
+            if group is None:
+                return None
+            group_ids.add(group.id)
+        if len(group_ids) != 1:
+            return None
+
+        look_position = implied_position(percept)
+        return min(
+            passing,
+            key=lambda candidate: (
+                math.hypot(
+                    candidate.position.x - look_position.x,
+                    candidate.position.z - look_position.z,
+                ),
+                candidate.id,
+            ),
+        )
 
     def _resolve_continuity(self, percept: Percept, now_sim: float) -> Contact | None:
         """The object-permanence shortcut lookup for one percept -- `None`
