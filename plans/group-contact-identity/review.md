@@ -1561,3 +1561,119 @@ baseline, and the motion.py/enrichment.py/delta-taxonomy byte-identity claims. R
 found by executing the actual rendering path with a real `EnrichmentContext` against the pinned
 over-wide scenario — the committed test suite's own extent-guard test cannot surface it because it
 passes no enrichment, so re-reading the test file alone would have missed it.
+
+---
+
+## Review — BL-12 Stage 4, round 2 (both required fixes)
+
+Reviewed at `872fdc7` (one commit on top of `34258bf`, the tip round 1 reviewed). Scope per the
+commit message and `implementation.md`'s new entry: `speech.py`'s extent guard and `groups.py`'s
+heading test coverage only.
+
+### Fix 1 — verified by mutation
+
+`_render_full_group_composition` now computes `within_spoken_extent = group.extent_m <=
+_GROUP_SPOKEN_EXTENT_GUARD_M` once and gates both the clock/range clause (`if nearest_relative_now
+is not None and within_spoken_extent:`) and the pre-existing direction clause with it. Built the
+pinned 1,200 m chained-infantry scene myself with a real `EnrichmentContext`
+(three undifferentiated `"Ural truck"` members, `movement_state="moving"`, `extent_m=1200.0`) —
+`render_group_disclosure` returns exactly `"Group."`, matching the new test's own assertion.
+
+Mutated the guard directly (reverted `and within_spoken_extent` on the clock/range `if`, restoring
+the pre-fix condition) and re-ran `test_render_group_disclosure_extent_guard_suppresses_the_
+clock_range_clause_too`: it fails for the stated reason, reproducing the review round 1 finding's
+exact string — `"Group, 12 o'clock, very close."` Reverted via the backup file; `shasum` confirms
+byte-identical to the committed version before re-running green. The gap the round-1 review found
+is closed, and the new test actually bites.
+
+### Fix 2 — verified by mutation
+
+Swapped `_update_heading`'s circular mean for `math.fsum(history) / len(history)` (the stated
+naive form) in a scratch copy and re-ran `test_groups.py` + `test_speech.py`: exactly one failure,
+`test_heading_circular_mean_handles_the_0_360_wrap`, `180.0 == 0.0 ± 1e-06` obtained `180.0`, with
+the other 236 tests green — reproducing the implementation log's own claim precisely. Reverted;
+`shasum` confirms byte-identical; full pair green again (237 passed).
+
+### Both pre-existing checks re-verified independently
+
+- `test_render_group_disclosure_extent_guard_suppresses_the_direction_clause`'s added docstring
+  note — that it supplies no `EnrichmentContext` so `nearest_relative_now` is `None` regardless of
+  extent and the test alone cannot see the clock/range gap — is accurate. Confirmed by reading
+  `render_group_disclosure`'s call path: without `enrichment`, nothing populates `relative_now` in
+  `member_facts`, so the clock/range clause's own `is not None` precondition is false independent
+  of the new guard.
+- `grep -n "extent_m=" body-layer/tests/test_speech.py` returns exactly two lines (3090, 3122),
+  both in the extent-guard pair — "fixtures moved: none" holds.
+- `_MIN_HEADING_SAMPLES` and `_GROUP_SPOKEN_EXTENT_GUARD_M`: untouched, confirmed by the commit
+  diff (no change to either constant's declaration).
+- Full commit diff (`git show 872fdc7 --stat`) touches exactly `speech.py`, `test_groups.py`,
+  `test_speech.py`, `implementation.md`, and one new agent-memory file — nothing in `motion.py`,
+  `enrichment.py`, the delta taxonomy, or Stages 0–3.5.
+
+### Checks, re-run independently
+
+- `ruff format --check` / `ruff check`: pass.
+- `cd body-layer && .venv/bin/mypy src --strict`: pass, 55 source files.
+- `pytest body-layer/tests -q`: **1697 passed, 4 xfailed** (confirmed, matches the stated 1695 +
+  2 new).
+- `audio-adapter` (`pytest -q` from `audio-adapter/`): **255 passed, 1 skipped** (confirmed,
+  matches the stated baseline).
+
+### Judgement call — is bare `"Group."` worth speaking?
+
+With both clauses gated, an over-wide group whose composition has not yet been differentiated
+(every member still at `presence` level, e.g. unclassified distant infantry) renders exactly
+`"Group."` — no bearing, no range, no heading, no composition. Built a second scene to check
+whether this is the common case or the rare one: the same 1,200 m extent with **differentiated**
+membership (`OP_ARMORED` × 2, `OP_TRUCK` × 1, `classification_level=2`) renders `"Two armor and
+truck."` — composition only, still no position, but real content. So the bare `"Group."` case is
+specifically the intersection of *wide* and *not yet classified* — which is not an edge case here,
+it is the motivating scenario this whole plan amendment (`BL-B48`'s chained-infantry bridging) is
+about. Distant, chained infantry is exactly the traffic class hardest to classify and most prone
+to bridging wide.
+
+**Recommendation: this is a product question for the user, not one this review should settle
+unilaterally** — but I have a lean, with the cost stated.
+
+- A bare `"Group."` push-path callout (unprompted, not a `report` answer) gives the pilot nothing
+  to act on: no bearing, no range, no composition. Per `CLAUDE.md`'s own test — does this help the
+  pilot evade, attack, or understand what is out there — it does not. Decision 13 of
+  `plans/post-review-fixes/explore-notes.md` (*"a report's job is to aim the pilot's eyes, not
+  transfer the picture"*) is about *answers to `report`*, where the pilot already knows roughly
+  where they are looking; an unprompted callout that says only `"Group."` points nowhere at all.
+- **My lean: suppress the unprompted disclosure in this one case** (extent-guarded *and*
+  composition reduces to the bare word, i.e. `text == "Group"` before the trailing clauses) rather
+  than speak a content-free line. This costs one more condition in the same function and changes
+  no other rendering. It does not lose information, because there is none in `"Group."` to lose —
+  composition is already absent (that is *why* it is bare), and position was already stripped by
+  Fix 1. The `report`/pull path (`render_group_full_disclosure`) is unaffected either way since the
+  pilot asked and decision 13 governs it on its own terms.
+- **The alternative — speak something true at that width instead of nothing** (a bearing arc or
+  range band rather than a point estimate, e.g. "spread across ten to two o'clock, two to four
+  kilometres") is real value but is a materially bigger build: it needs an angular-span/range-span
+  computation over the cluster that does not exist anywhere in this module today, a phrasing
+  convention for a span rather than a point, and its own test coverage — new scope well past a
+  two-fix review round. I would not build it now; it is a reasonable `BL-B` backlog item if the
+  user wants the richer version later.
+- **Leaving it exactly as `872fdc7` has it** (speak `"Group."` and nothing else) is the one option
+  I would not choose on my own authority: it is honest, but a radio call carrying zero actionable
+  information, repeated every time an unclassified wide group is still in range, risks training the
+  pilot to tune Petrovich out — the opposite of what persistent spoken group identity (decision 7)
+  is for.
+
+Not filing a `BL-B` backlog item for either direction pending the user's call — whichever they
+pick is either a one-line suppression (small enough to fold into this same round if they say so)
+or a new backlog item for the span-rendering version.
+
+### Verdict
+
+**APPROVED.** Both required fixes are correct, independently reproduced by mutation, and scoped
+exactly as the round-1 review asked. The one open item is the judgement call above, which is a
+product decision for the user, not a defect blocking this round.
+
+### Review Confidence
+
+**Full read**, both fixes verified by mutation performed directly (not accepted from the
+implementation log), all stated check counts (`body-layer` pytest/mypy/ruff, `audio-adapter`
+pytest) re-run independently rather than trusted, and the fixture-count and byte-identity claims
+confirmed by `grep`/`shasum` run myself.
