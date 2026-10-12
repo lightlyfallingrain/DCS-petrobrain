@@ -115,7 +115,15 @@ def _make_observation(
     id: str = "OBS_1",
     source: str = "proxy_heuristic",
     classification_raw: str = "BMP",
+    bearing_deg: float = 32.0,
+    range_m: float = 3100.0,
 ) -> Observation:
+    """`bearing_deg`/`range_m` default to every pre-existing caller's
+    implied shared position -- added (BL-12 Stage 3) so a caller that
+    needs a spatially *distinct* percept (not ambiguous against an
+    existing contact's gate) can say so explicitly, rather than relying
+    on every other observation in a test happening to share this
+    fixture's one default position."""
     return Observation(
         id=id,
         contact_id=None,
@@ -123,8 +131,8 @@ def _make_observation(
         t_wall=0.0,
         source=source,
         classification_raw=classification_raw,
-        bearing_deg=32.0,
-        range_m=3100.0,
+        bearing_deg=bearing_deg,
+        range_m=range_m,
         ownship_at_observation=ownship,
         derived_world_position=None,
         provenance="test",
@@ -402,7 +410,23 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
     starting at 1, and this test uses a single fresh store -- `CONTACT_1`
     for the batch's first observation, `CONTACT_2` for its second, `CONTACT_3`
     for the follow-up poll's one observation), since `fail_on` must be
-    configured before the call that assigns those ids."""
+    configured before the call that assigns those ids.
+
+    **The follow-up poll's observation is given its own, distinct
+    bearing/range (BL-12 Stage 3, 2026-10-12)** -- every other call here
+    shares `_make_observation`'s default position by convenience, which
+    this test does not care about (it is testing push-failure isolation,
+    not ambiguity resolution), but Stage 3 does: at the shared default
+    position, "Mi-8 helicopter" resolves to no `op_class`
+    (`object_model.profile_for` does not recognise the keyword), so it is
+    class-*unknown* rather than incompatible against both `CONTACT_1`
+    (BMP-2) and `CONTACT_2` (Ural truck) -- genuinely ambiguous between
+    them. Those two, at the same shared position, cluster into one group
+    on the first poll's `tick()`, so Stage 3 branch 2 would fold this
+    observation onto the nearest of them instead of founding `CONTACT_3`,
+    which is not what this test is checking and would make the second
+    assertion below fail for a reason unrelated to overlay-push
+    isolation. A distinct position keeps the two questions separate."""
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
     failing_text = "CONTACT_1: CONTACT_DETECTED, BMP-2, observed, currently visible."
@@ -439,7 +463,11 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
         FakeSource(
             [
                 _make_observation(
-                    ownship, id="OBS_2", classification_raw="Mi-8 helicopter"
+                    ownship,
+                    id="OBS_2",
+                    classification_raw="Mi-8 helicopter",
+                    bearing_deg=200.0,
+                    range_m=9000.0,
                 )
             ]
         )
