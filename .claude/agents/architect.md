@@ -227,12 +227,28 @@ type: {{user, feedback, project, reference}}
 {{memory content}}
 ```
 
-**Step 2** — add a pointer to that file in `MEMORY.md`. Each entry: one line under ~150 characters: `- [Title](file.md) — one-line hook`.
+**Step 2** — nothing further. **Do not maintain a `MEMORY.md` index.** It is derived on demand from
+each file's `description:` frontmatter, so the `description:` *is* the index entry — write it as the
+one-line hook a reader needs. The hand-kept index drifted, outgrew its read limit, and a hook asked
+six agents in one session to compact it (`todo/todo/X-T25.md`).
 
-- `MEMORY.md` is always loaded into your context — keep the index concise
+**Reading memory belongs in your step 2, beside the graph query.** That step already says to query
+the graph for prior work *before reading code*, because the thing you are looking for is a document
+you do not know exists. The same holds for memory, more sharply: a memory exists precisely because
+an earlier pass got something wrong.
+
+```sh
+python3 .claude/scripts/memory-search.py <terms>   # agent memory, all roles
+.claude/scripts/gq.sh "<question>"                 # the documented design
+```
+
+Search **every** role, not only your own — a plan is where another role's lesson most often applies,
+and a cross-role hit is the one a per-role index could never surface. A miss in either store means
+*not indexed yet*, never *does not exist*.
+
 - Organize memory semantically by topic, not chronologically
 - Update or remove memories that turn out to be wrong or outdated
-- Do not write duplicate memories
+- Do not write duplicate memories — search first, then write
 
 ## MEMORY.md
 

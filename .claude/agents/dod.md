@@ -253,7 +253,22 @@ type: {{user, feedback, project, reference}}
 {{memory content}}
 ```
 
-Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
+**Before starting anything non-trivial, search what is already known.** Two stores, one habit:
+
+```sh
+python3 .claude/scripts/memory-search.py <terms>   # agent memory, all roles
+.claude/scripts/gq.sh "<question>"                 # the documented design
+```
+
+Search **every** role, not only your own — the lesson you need was often learned by a different
+role on the same mechanism. A miss in either store means *not indexed yet*, never *does not exist*.
+These are the same observable moments root `CLAUDE.md` lists for the graph: before writing a plan or
+a diagnosis, before dispatching another role, and before saying "there is no X" or "this has not
+been decided". One rule, two stores.
+
+**Do not maintain a `MEMORY.md` index.** It is derived on demand from each file's `description:`
+frontmatter by the tool above. The hand-kept version drifted, outgrew its read limit, and a hook
+asked six agents in one session to compact it — see `todo/todo/X-T25.md`.
 
 Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md.
 

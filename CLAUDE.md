@@ -178,6 +178,29 @@ could observe it failing, and it was followed zero times across eight separate p
 **A miss means "not indexed yet", never "does not exist"** — the semantic layer lags the working
 tree, and `GRAPH_REPORT.md`'s mtime says by how much.
 
+**At every trigger above, search agent memory too — one rule, two stores** (user direction,
+2026-10-12):
+
+```sh
+python3 .claude/scripts/memory-search.py <terms>   # agent memory, every role
+```
+
+The two stores hold different things and the memory half was, until now, unreachable in practice.
+The graph covers the *documented design*; `.claude/agent-memory/` holds what a role **got wrong**,
+and it is deliberately outside the graph corpus (see the `grep` note below), so no graph query will
+ever surface it. **Search every role, not only the one you are in** — the cross-role hit is the
+one the old per-role indexes could not surface at all.
+
+**Why a tool and not the `MEMORY.md` index that used to sit in each directory.** That index was
+loaded on *every* agent dispatch — all eight role files carry `memory: project`, which is a Claude
+Code feature rather than a repo convention — while **no role file ever told an agent to read it**.
+Unconditional cost, optional benefit. It also drifted, outgrew its read limit, and a `PostToolUse`
+hook asked six separate agents in one session to compact it, each correctly refusing because the ask
+was impossible as phrased: fixed cost is ~86 bytes per entry, so a byte target is an entry-count
+target and no prose trimming reaches it. The tool derives the same index on demand from each file's
+`description:` frontmatter — present in 556 of 556 files, measured — so it cannot drift and cannot
+be asked to shrink. Full account: `todo/todo/X-T25.md`.
+
 ### Graph to find it, `grep` to prove it is gone
 
 **User direction, 2026-10-06.** The graph goes first — that is what the section above is for. But
