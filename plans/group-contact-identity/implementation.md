@@ -1124,3 +1124,194 @@ posture Stage 2's log took.
   `speech._is_air_defence`, `crew_console.py`'s fourth air-defence vocabulary copy (`BL-B56`), or
   `BL-B57`'s class-level `installation_component` gap.
 - **`decay.py`'s values untouched.**
+
+---
+
+# BL-12 Stage 4 — implementation (D7's spoken direction)
+
+Branch `feature/bl12-group-contact-identity`, two commits (mechanism, then the speech-time guard
+and its render wiring — `body-layer/CLAUDE.md`'s "mechanism and calibration never share a commit"):
+`2fdb443` (groups.py) and `42442b0` (speech.py).
+
+## Round 1 — tip check and inputs
+
+`git rev-parse HEAD` landed at `cb39159` (eight commits behind the named tip `19a3671` — all
+agent-memory/roadmap bookkeeping, no source). Confirmed a strict ancestor with a clean tree and
+fast-forwarded (`git merge --ff-only 19a3671`); no divergence, nothing to report beyond that.
+
+Test-impact check (role step 1b): the orchestrator's prompt named one pinned test
+(`test_the_eager_cap_still_chains_a_long_infantry_line`) as evidence not to be modified, and named
+no test expected to move. `grep -l "render_group_disclosure\|render_group_full_disclosure\|Group("
+tests/*.py` turned up `test_groups.py`, `test_speech.py`, `test_callouts.py`, `test_crew_console.py`,
+`test_tools.py`. Checked all five for a `motion_state="moving"` fixture combined with two or more
+reconciles of the same group id — none exists, so nothing was at risk of silently changing meaning.
+This held: the full suite before this stage's first commit (1683 passed) and after both commits
+(1695 passed) differ by exactly the 12 tests added, no other count moved.
+
+## Commit 1 (`2fdb443`) — `Group` gains `movement_state` and a smoothed heading
+
+**`_majority_movement_state(members)`** (`belief/groups.py`): majority vote over members' own
+`Contact.motion.state`, `None` when no member carries one. A tie (reachable only at exactly two
+members, one of each state) breaks toward `"moving"` — a judgment call, not a worked example,
+justified by `belief.motion`'s own promote-fast/demote-slow asymmetry (positive motion evidence is
+noticed at once).
+
+**`_update_heading(old, movement_state, centroid)`** (`belief/groups.py`): the heading mechanism.
+Derived *only* from centroid displacement between the matched prior `Group` (`old`) and the current
+cluster's centroid — never a raw percept, per the plan's own citation of `enrichment.
+motion_when_seen`'s "flippable by one noisy percept" shape. Held only while `movement_state ==
+"moving"`; any other state clears the smoothing window (`heading_history_deg`) outright, so
+resuming movement starts fresh rather than stitching a step across a stop. Smoothed by circular
+mean over up to `GROUP_HEADING_SMOOTHING_WINDOW` (5, the plan's own stated assumption, "~5 s at the
+1.0 s poll") per-step headings — `heading_confidence` is the mean resultant length `R = |sum(unit
+vectors)| / n`, the standard circular-statistics concentration measure (1.0 when every step agreed
+exactly, falling toward 0.0 as they disagree; verified directly: three consecutive due-north steps
+give `heading_deg == 0.0`, `heading_confidence == 1.0`).
+
+**One judgment call beyond the plan's own text, flagged here rather than silently decided:**
+`_MIN_HEADING_SAMPLES = 2`. The plan says "smoothed over the last N reconciles" but does not state a
+floor below which a heading must not be spoken. One step (two centroids) is exactly the single-look
+shape the plan itself says must not be the source of a spoken heading (citing `motion_when_seen`),
+so a heading is withheld (`None`/`0.0`) until at least two steps have accumulated — tested directly
+(`test_heading_is_none_until_the_minimum_sample_count_is_reached`).
+
+**`Group.extent_m`** is the existing `_extent_of` figure the Stage 1 sortie trace already computes
+per cluster, now also persisted on the `Group` dataclass itself (one new field, three carry-over
+sites: the overlap/property-match branch, the found branch, the expire branch) — needed because
+Stage 4's speech-time guard (commit 2) reads it off the `Group`, not off a roster that may have
+moved on by render time.
+
+**No-omniscience**: every new field reads `Contact.position` (fused belief, via the existing
+`_centroid_of`/`_extent_of`) and `Contact.motion` (folded belief) only. No DCS velocity, no DCS
+`object_type`, no raw percept.
+
+### Tests Added (`test_groups.py`, 7)
+
+- `test_movement_state_is_the_majority_of_members_motion` — all-moving, all-stopped, and no-motion-
+  belief-at-all each read correctly.
+- `test_movement_state_tie_breaks_toward_moving` — the one judgment call named above.
+- `test_heading_is_none_until_the_minimum_sample_count_is_reached` — a freshly founded group, then
+  exactly one step, both `None`.
+- `test_heading_is_a_smoothed_circular_mean_of_consistent_steps` — three due-north reconciles give
+  `heading_deg == 0.0`, `heading_confidence == 1.0`, exactly two stored steps.
+- `test_heading_history_caps_at_the_smoothing_window` — eight reconciles, history length stays at
+  `GROUP_HEADING_SMOOTHING_WINDOW`.
+- `test_heading_is_cleared_on_a_confirmed_stop` — all three heading fields and the history reset the
+  tick `movement_state` reads `"stopped"`.
+- `test_extent_m_is_persisted_on_the_group` — three infantry at 300 m spacing (the pinned chaining
+  test's geometry, scaled down), extent 600 m read straight off the `Group`.
+
+### Checks (commit 1)
+
+- `ruff format --check`: pass (after one auto-reformat of `groups.py`'s wrapped `step_deg`
+  expression and one line in `test_groups.py`)
+- `ruff check .`: pass
+- `mypy src` (strict, from inside the subproject): pass, 55 source files
+- `pytest -q`: pass — 1690 passed / 4 xfailed (1683 baseline + 7)
+
+## Commit 2 (`42442b0`) — the spoken heading, gated by the extent guard
+
+**`_GROUP_SPOKEN_EXTENT_GUARD_M = 500.0`** (`belief/speech.py`): the unconditional guard amendment
+A6's Stage 4 row requires. Same value and derivation as `groups.
+GROUP_REPORTING_EAGER_COHESION_CAP_M` — both transcribe `_format_range_km`'s 500 m rounding bucket
+(a spoken range/bearing claim has 500 m of resolution) — kept as a separate constant because the two
+bound different things, the same "equal by coincidence, not by derivation" posture that module's own
+docstring already states for its own sibling pair. **What I counted to confirm the guard is actually
+needed in addition to Stage 0b's pair cap, not redundant with it**: the pinned
+`test_the_eager_cap_still_chains_a_long_infantry_line` forms one group spanning 1,200 m (three
+400 m gaps, each individually under the 500 m pair cap) — 1,200 / 500 = 2.4 of this guard's own
+buckets, so that pinned test's own group is the case the guard exists to catch, measured by running
+it, not estimated.
+
+**`_compass_word(heading_deg)`**: nearest of the eight compass words to a heading, reusing
+`belief.attention.SECTORS`/`_SECTOR_CENTER_DEG` (the same 8-sector tiling `crew_console.py` already
+imports the same private names from) and `perception.geometry.angular_delta_deg` for the circular
+nearest-neighbour comparison. The word table (`_COMPASS_WORDS`) duplicates `crew_console.
+_SECTOR_SCAN_LABELS` exactly rather than importing it, because the import direction only runs one
+way (`crew_console.py` already imports from `speech.py`; the reverse would cycle) — confirmed by
+`grep -n "^from belief.speech" src/belief/crew_console.py` before writing the duplicate, not assumed.
+
+**`_render_full_group_composition`** gains a fourth parameter, `group: Group`, and one new clause
+appended after the existing clock/range clause and before the existing watched clause: `", moving
+{compass}"` when `group.movement_state == "moving"`, `group.heading_deg is not None`, and
+`group.extent_m <= _GROUP_SPOKEN_EXTENT_GUARD_M` — all three conditions required, the guard
+unconditional per A6 (not gated behind any other decision). Both call sites
+(`render_group_disclosure`'s never-spoken/first-differentiation branch, and
+`render_group_full_disclosure`'s always-full pull path) pass `group` through; neither delta branch
+(`_render_member_delta_clause`, the leader-change branch) was touched — the delta taxonomy is
+unchanged, per scope.
+
+**The clause is appended to `content_signature` as well as `text`** (the same treatment the
+existing `", watched"` clause already gets, and unlike the clock/range clause, which is deliberately
+excluded from the signature because it is positional, not content). A direction is content in the
+same sense attention state is: verified by reading the one existing precedent
+(`_render_full_group_composition`'s own "watched"/content_signature comment) rather than inventing a
+new rule.
+
+### The actual spoken line for D7's scenario
+
+Built directly from the new test (`test_render_group_disclosure_moving_direction_combines_with_
+clock_range`), with the existing enrichment fake supplying a 12 o'clock/very-close geometry rather
+than literally 2 o'clock/3 km (no test fixture in this file produces that exact bearing/range; the
+mechanism is range/bearing-independent so the fixture's own numbers stand in for the plan's worked
+example without loss):
+
+```
+"Group, 12 o'clock, very close, moving north."
+```
+
+This is the composition/clock-range/direction ordering D7 asks for — *"that column, now 2 o'clock,
+three kilometres, still moving north on the road"* — minus two things deliberately not rendered:
+the leading phrase ("that column" is referential language belonging to a later dialogue-level
+feature, not this stage's composition clause) and "on the road" (Stage 5, road-following, out of
+scope here, named explicitly in a code comment at the clause's call site so a future reader does not
+mistake the omission for an oversight).
+
+### Tests Added (`test_speech.py`, 5)
+
+- `test_render_group_disclosure_speaks_moving_direction_when_established` — minimal case, no
+  enrichment: `"Group, moving north."`
+- `test_render_group_disclosure_moving_direction_combines_with_clock_range` — the full D7-shaped
+  line, quoted above.
+- `test_render_group_disclosure_extent_guard_suppresses_the_direction_clause` — extent 1,200 m
+  (the pinned chaining test's own figure) suppresses the clause even with a confident heading.
+- `test_render_group_disclosure_stopped_group_speaks_no_direction` — the gate checks
+  `movement_state`, not just whether a stale `heading_deg` happens to be set.
+- `test_render_group_full_disclosure_also_speaks_the_direction_clause` — the pull ("report") path
+  shares the same composition function, so the clause applies there too (`", moving east."` for a
+  90° heading, confirming the compass-word mapping independent of the north case above).
+
+### Checks (commit 2)
+
+- `ruff format --check`: pass (after two auto-reformats: the multi-name `belief.attention` import
+  line, and one over-wrapped test function signature)
+- `ruff check .`: pass (after one auto-fix: the same import, sorted)
+- `mypy src` (strict, from inside the subproject): pass, 55 source files (no new module)
+- `pytest -q`: pass — **1695 passed / 4 xfailed** (1683 baseline + 12 across both commits)
+
+**audio-adapter/**: not run. This stage changes only the text a template produces, over the existing
+`OutgoingSpeech`/`POST /speak` wire shape — no field added, removed, or retyped, and no file this
+subproject's own copy (`belief/audio_client.py`) depends on was touched. Same posture as every prior
+stage's log in this file.
+
+## Which fixtures moved, and why none did
+
+**None.** No pre-existing fixture in `test_groups.py`, `test_speech.py`, `test_callouts.py`,
+`test_crew_console.py`, or `test_tools.py` combines `motion_state="moving"` with two or more
+reconciles of the same group id (the `grep` in Round 1 above), which is what the new mechanism
+requires before it produces anything observable. Confirmed, not assumed: the full suite's pass
+count moved by exactly 12 (1683 → 1695) across both commits, with zero pre-existing test's assertion
+text changing.
+
+## Not done, deliberately
+
+- **`BL-B59`'s eviction half** — out of BL-12 by user decision, not touched.
+- **`BL-B57`, `BL-B50`, BL-13's pull path, `crew_console.py`'s fourth air-defence vocabulary copy
+  (`BL-B56`)** — none of these files or mechanisms were read or touched.
+- **`enrichment.motion_when_seen`** — read only, to confirm what it is and why it must not be the
+  heading's source; zero lines changed.
+- **The delta taxonomy** (`group-cohesion-redesign` plan's §4) — zero lines of
+  `_render_member_delta_clause` or the leader-change branch changed; the new parameter and clause
+  touch only `_render_full_group_composition` and its two existing call sites.
+- **Stage 5 (road-following)** — no `nearest_road`/`describe_position` call added anywhere in this
+  diff; the "on the road" half of D7's line stays unspoken, by design, named in a code comment.
