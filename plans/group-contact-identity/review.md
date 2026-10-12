@@ -744,3 +744,152 @@ specifically names: a test asserting an absence must be mutated, not read. Every
 the `groups`/`remembered_groups` consumer split, the expire-phase freeze, the six match-predicate
 tests) was checked against the actual code and, where numeric, re-run against the real tree —
 nothing here was spot-checked or taken on the implementer's word alone.
+
+---
+---
+
+# Round 4 — review of the fix round (`43ed428`)
+
+**Appended 2026-10-12.** Reviews the single commit at `feature/bl12-group-contact-identity`'s tip,
+*"BL-12 Stage 1 review: restore the neutered suppression test, wire `--group-trace`"* — Round 3's
+two required fixes, against `plan.md`'s A4 and the implementer's agent-memory note on the sibling-
+function tradeoff.
+
+**Base check.** Worktree HEAD was `cb39159` (behind the named tip), a strict ancestor of `43ed428`
+with a clean tree — fast-forwarded with `git merge --ff-only 43ed428`. No divergence, nothing
+worked around.
+
+## Verdict
+
+**APPROVED.** Both required fixes are answered correctly and verified independently, not taken on
+the implementer's account.
+
+## Fix 1 — verified by reproducing the reviewer's own mutation, not by reading
+
+Reproduced the exact mutation from Round 3: inserted `return frozenset()` as the first statement of
+`_already_reported_member_ids` (`body-layer/src/belief/callouts.py:841`). Ran
+`test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent` alone — **red**, with
+`spoken` gaining a third line, `"Pair of Ural truck."`, exactly as the implementer reported. Reverted
+with `git checkout -- src/belief/callouts.py`, confirmed `git status --porcelain` empty, re-ran the
+same test — **green**.
+
+**The fixture's `6.0` is genuinely tied to `_last_reconciled_sim`, not a literal that happens to
+match today.** `GroupStore.reconcile` sets `self._last_reconciled_sim = now_sim` at
+`groups.py:1310`, and `.groups`'s filter (`groups.py:1037`) is
+`group.last_observed_sim == self._last_reconciled_sim`. The fixture's last real `store.tick()` call
+before the direct injection is `store.tick(now_sim=6.0)` (`test_callouts.py`, immediately after the
+`OBS_C` ingest) — `poll()` never calls `store.tick()` again, so `_last_reconciled_sim` stays at `6.0`
+for the rest of the test. The injected `Group`'s `last_observed_sim=6.0` is pinned to that same call
+by construction, not by coincidence: if the fixture's timeline shifted (a different `now_sim` on
+that `tick()` call), the needed value would shift with it, and nothing about `6.0` is special beyond
+being that call's argument.
+
+## Fix 2 — the flag reaches the sink, costs nothing when absent, and matches the sibling writer's posture
+
+Traced the whole path from the CLI down: `--group-trace PATH` (argparse, `logger.py:2272`) →
+`_resolve_group_trace_log_path` (stamp/`expanduser`/`mkdir`/degrade, reusing the shared
+`_RESOLVE_FAILURES` tuple) → `GroupTraceLogWriter(args.group_trace).write` passed as
+`group_trace_sink=` to **both** `ConsolePerceptionRunner` constructions (`--crew-text` and
+`--console`, `logger.py:2484`/`:2555`) → `run_once`'s `self.store.tick(..., group_trace_sink=
+self.group_trace_sink)` → `ContactStore.tick`'s existing `group_trace_sink` keyword
+(`contacts.py:1079`) → `GroupStore.reconcile`'s `trace_sink=` parameter (`contacts.py:1516`) →
+called once per trace record at `groups.py:1311-1313`. Not merely constructed — the new
+`test_console_runner_threads_group_trace_sink_into_store_tick` spies on `store.tick` and asserts the
+kwarg is the exact sink passed in, which I read against the production code it exercises rather than
+trusting the test name.
+
+**A4's minimum fields are all present** in the trace record built at `groups.py:1264-1272` (phase
+`found`/`property`) and `:1300-1308` (phase `expired`): `group_id`, `phase` (one of
+`overlap`/`property`/`found`/`expired` — `overlap`/`property` collapse to the single `resolution_
+phase[cluster]` value set earlier in `reconcile`, which I traced reads `"overlap"` or `"property"`
+depending on which phase claimed the cluster), the roster (`member_contact_ids`, sorted), the
+centroid (`centroid_x`/`centroid_z`), **`extent_m`** (`None` on expiry, correctly — an expired
+group's current extent is not computed), and `composition`. This machinery was built in Stage 1
+itself (`c2c7e2d`); what Round 3 added is the only thing that was missing — a caller.
+
+**Default is a true no-op.** `group_trace_sink: ... | None = None` on `ConsolePerceptionRunner`
+(same posture as `overlay_client`), and `GroupStore.reconcile` only calls `trace_sink` inside `if
+trace_sink is not None:` (`groups.py:1311`) — with the flag absent, `trace_records` is still built
+(the list-append cost is unconditional) but never iterated into a sink call. That is the same
+cost profile `DetectionTrace`/`SpeechLog` already carry when their own flags are absent, so this is
+not a regression class; confirmed by reading, not re-measured, since the task did not ask for a new
+performance pass and this is a handful of dict-building calls per reconcile at most (D5's own rarity
+claim).
+
+**Failure posture matches `speech_log.py` exactly.** Diffed the two `write()` methods side by side:
+identical `_disabled` flag, identical unbuffered open-append-except-`OSError` shape, identical
+"report once, then silently no-op" policy, identical `print(..., file=sys.stderr)` message shape
+with only the label (`"group-trace"` vs `"speech-log"`) differing. `GroupTraceLogWriter`'s own
+`test_an_unwritable_path_disables_after_one_reported_failure` pins the same property
+`test_logger.py`'s speech-log equivalent does. `ContactStore.tick`'s call to `group_trace_sink` is
+likewise not wrapped in a caller-side `try/except`, matching the implementer's own stated reasoning
+for why the writer itself must never raise — read, not just cited.
+
+**Stamping/naming matches the existing three logs.** `_resolve_group_trace_log_path` calls the same
+`per_run_log_path` function `_per_run_log_paths` uses for the other three, so the stamp format is
+identical and the resolved path prints through the same `"{label}: writing {rolled}"` loop
+(`logger.py:2451-2457`, `group-trace` added to the three-tuple of `(label, rolled)` pairs). One gap,
+optional below: `sortie-log-triage/SKILL.md`, the stated consumer, still only names three logs.
+
+## The sibling-function design choice — accept it, file nothing new
+
+Verified the blast-radius claim rather than crediting it: `grep -n "_per_run_log_paths(" tests/
+test_run_log_paths.py` returns exactly 9 hits, and reading each confirms all 9 are positional
+3-tuple unpacks (`trace, truth, speech = logger_module._per_run_log_paths(...)`). Widening the
+function to a 4-tuple would force touching every one of those 9 call sites' unpacking for a reason
+unrelated to what any of them test — which is the literal shape of "modifying existing tests without
+it being the point of the fix," so declining the literal "one line" phrasing from Round 1's review
+and writing a sibling function instead is the right call, not merely a defensible one. The
+duplication is real (the `resolve` closure's stamp/`expanduser`/`mkdir`/except-`_RESOLVE_FAILURES`
+logic is reproduced verbatim rather than factored out) but bounded — one function, ~25 lines,
+reusing the shared exception tuple rather than redeclaring it — and the implementer flagged the
+tradeoff explicitly in both `implementation.md` and a new agent-memory file rather than picking
+silently, which is exactly the right disposal for a local, reversible choice under `AGENTS.md`'s
+Escalation Rules. **This does leave two divergent policies for "resolve a per-run log path"** (one
+function serving three logs, a second serving the fourth) — worth a backlog item if a fifth log
+is ever added, at which point the duplication would be the wrong call, but not now with exactly one
+sibling.
+
+## Checks — confirmed, not merely trusted
+
+**body-layer/** (binaries resolved against the root checkout's `.venv`, `cwd` inside `body-layer/`):
+- `ruff format --check src tests`: pass, 120 files already formatted
+- `ruff check .`: all checks passed
+- `mypy src --strict`: success, 55 source files (54 + `group_trace_log.py`)
+- `pytest -q`: **1671 passed, 4 xfailed** — matches the implementer's reported numbers exactly
+
+**audio-adapter/** (untouched by this change, run because the task asked):
+- `ruff check .`: pass
+- `mypy src`: success, 15 source files
+- `pytest -q`: **255 passed, 1 skipped** — matches baseline
+
+## What must not have regressed — checked
+
+- Exactly the 8 files the task named were touched (`git show 7b02510..43ed428 --name-only`); no
+  stray file.
+- No `TODO`/`FIXME`/debug-print/`pdb` in either new source file.
+- Agent memory at the correct path (`.claude/agent-memory/implementer/…`), one file, with
+  `description:`/`type:` frontmatter.
+- `git status --porcelain` clean at the fast-forwarded tip before I made any change, and clean again
+  after the mutation test was reverted.
+
+## Optional refinements (not blockers)
+
+1. **`sortie-log-triage/SKILL.md` names three sortie logs; there are now four.** The skill is the
+   stated consumer of these logs' stamping/naming convention, and the new `--group-trace` output
+   follows that convention exactly (same `per_run_log_path` stamp, same stderr announce line), but
+   the skill's own description and file-resolution section don't mention it yet. Not a defect in
+   this commit — the skill is a separate file with its own maintenance path — but worth a one-line
+   addition next time that skill is touched, so a debrief session knows to look for it.
+2. **The phase-collapse from `resolution_phase[cluster]` to the trace record's `phase` field is
+   worth one more word in `groups.py`'s trace-record comment** (currently none at the construction
+   site, `groups.py:1264-1272`) — `"overlap"`/`"property"` are set earlier in the function and simply
+   read back here, which I had to trace rather than read off a local comment. Cosmetic; the fields
+   are correct and A4 is satisfied either way.
+
+## Review Confidence
+
+**Full read**, with mutation reproduced myself (fix 1) rather than taken from the implementer's
+account, the call-site count for the sibling-function tradeoff re-grepped rather than credited, and
+the full CLI-to-`trace_sink` call chain traced through six files rather than inferred from the test
+names. Both check suites re-run from the fast-forwarded tip. Nothing spot-checked.
