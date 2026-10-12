@@ -513,33 +513,33 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 09 Oct 2026</span>
+      <span>Derived from ROADMAP.md · 12 Oct 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems, two hundred and forty tracked items &mdash; and the
-      line-of-sight chain that has run through this project since September is <strong>closed</strong>.
-      <code>BL-11</code> is done: Petrovich's eye now <strong>fails closed</strong>. No live DCS
-      line-of-sight verdict means a contact is not admitted, and world-model's offline terrain
-      primitive is no longer reachable from the live path at all &mdash; the pilot's own standing
-      direction (<em>&ldquo;world model LOS must not be used &hellip; especially for
-      correctness&rdquo;</em>) finally taking effect in code. It was authorised on measurement, not
-      argument: the 2026-10-08 sortie put <strong>145 of 145 evaluated objects and 85 of 85 admitted
-      ones</strong> on a real verdict, against a baseline where <strong>76&nbsp;% had none</strong>.
-      The cause of that 76&nbsp;% turned out to be one missing engine call &mdash; the Hook had never
-      enumerated static objects, so 278 of 404 objects in the flown mission could not receive a
-      verdict at all. Those statics were never scenery: <strong>120 infantry, 65 tanks, 70 APCs and
-      eight Shilkas, and not one building</strong>. What remains unheard in the air is everything
-      about <em>what he says</em> &mdash; eight merged cards' worth, still batched behind one
-      flight.</p>
+    <p class="lede">Six subsystems, two hundred and sixty-one tracked items &mdash; and the rule this
+      board has called <em>untouched</em> for three cycles is now <strong>inverted</strong>.
+      <code>BL-12</code> merged: <strong>group identity, not per-unit identity, is what survives
+      losing sight</strong>. A remembered group is matched against a freshly observed cluster on
+      kind, composition, movement and plausible displacement, and ambiguity inside a group now
+      resolves <em>toward</em> the remembered contact instead of founding a duplicate. The
+      measurement that forced it: nearest-neighbour spacing between distinct tracked objects is
+      <strong>16&nbsp;m median</strong>, against a gate that inflates to <strong>600&nbsp;m after
+      30&nbsp;s unseen</strong>. No radius is both, so per-unit identity is not recoverable from
+      position at real DCS spacing &mdash; at the group grain the numbers invert and become
+      workable. Petrovich can also now say <em>&ldquo;still moving north&rdquo;</em> about a group he
+      has kept, and says <strong>nothing</strong> about a bearing too wide to be true. One known
+      defect shipped with it <em>deliberately</em>, and it is the direction that makes him go quiet
+      about something real. What remains unheard in the air is still everything about <em>what he
+      says</em> &mdash; now six merged cards' worth, behind one flight.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>129</b><span>Done</span></div>
-    <div class="count is-active"><b>12</b><span>In progress</span></div>
-    <div class="count is-open"><b>91</b><span>Open</span></div>
+    <div class="count is-done"><b>139</b><span>Done</span></div>
+    <div class="count is-active"><b>16</b><span>In progress</span></div>
+    <div class="count is-open"><b>94</b><span>Open</span></div>
     <div class="count is-hold"><b>12</b><span>Deferred</span></div>
-    <div class="count is-block"><b>3</b><span>Await you</span></div>
+    <div class="count is-block"><b>4</b><span>Await you</span></div>
   </div>
 
   <section>
@@ -597,16 +597,18 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
         <div class="bar"><i style="width:96%"></i></div>
-        <span class="chip done">BL-11 closed &mdash; the eye now fails closed</span>
-        <p class="next">The eye's correctness chain is finished. <code>BL-11</code> went
-          <b>done</b>: gate 4 fails closed, so no live DCS verdict means not admitted, and the
-          offline terrain primitive has <b>zero remaining live call sites</b> &mdash; verified by
-          grep, not asserted. A regression guard rides with it, logging even a clean
-          <code>0/N</code> so a passing check is distinguishable from a check that never ran. The
-          quieting work from the previous cycle is all still merged and still unheard. <b>Next:</b>
-          one flight settles that backlog, and the open question underneath is unchanged and still
-          yours: what should he <em>say</em> when sixteen separately-resolvable vehicles sit in one
-          sector?</p>
+        <span class="chip done">BL-12 merged &mdash; group identity survives losing sight</span>
+        <p class="next">Two milestones landed since the last board. <code>BL-13</code> made
+          <code>report</code>/<code>describe</code> one slotted command answering with a single
+          summary whose job is to <em>aim the pilot's eyes</em>, not transfer the picture.
+          <code>BL-12</code> then replaced the identity model underneath it: a remembered
+          <b>group</b> is matched against an observed cluster, ambiguity inside a group folds onto
+          the remembered contact, per-class plausible speed replaced a flat 20&nbsp;m/s worst case
+          for everything, and a heading is spoken only when the group is narrow enough for one
+          bearing to be true. <b>Next:</b> one flight settles six cards, and the question underneath
+          is unchanged and still yours &mdash; what should he <em>say</em> when sixteen
+          separately-resolvable vehicles sit in one sector? <code>BL-B59</code> is the known defect
+          merged with BL-12 on purpose, and it is next in line.</p>
         <span class="more">Details</span>
       </article>
 
@@ -646,11 +648,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 
   <section>
     <h2>Dependency map</h2>
-    <p class="section-note">What gates what, done work included. The landform chain &mdash; parked
-      on a judgement four days ago, which is why its nodes were grey last time &mdash; now runs
-      green all the way to a theatre build the pilot accepted. The crew-behaviour chain did the
-      opposite: it grew five green nodes that all feed one red one, because every single change in
-      it is merged and unheard.</p>
+    <p class="section-note">What gates what, done work included. The crew-behaviour chain grew two
+      more green nodes this cycle and they feed the same red one &mdash; <code>BL-13</code> and
+      <code>BL-12</code> are both merged and both unheard. The new edge worth reading is the one
+      out of <code>BL-12</code> into an <em>open</em> node: the milestone shipped with half of a
+      measured defect fixed and the other half filed, on purpose.</p>
 
     <div class="diagram-wrap">
       <button class="expand" id="gv-open" data-graph="#graph-deps" type="button">Expand graph</button>
@@ -689,7 +691,11 @@ flowchart LR
   RGD["Group lines stop&lt;br/&gt;restating known members"]:::done
   BUBBLE["10 km player bubble&lt;br/&gt;built, no cockpit observable"]:::done
   PRUNE["BL-B23 lost contacts&lt;br/&gt;out of clustering"]:::done
-  CBS["On main, still unheard&lt;br/&gt;four cards (four accepted 10-09)"]:::block
+  BL13["BL-13 crew query path&lt;br/&gt;one slotted command, one summary"]:::done
+  SPACING["16 m median spacing&lt;br/&gt;vs a 600 m gate"]:::done
+  BL12["BL-12 group identity&lt;br/&gt;stages 0–4, ambiguity inverted"]:::done
+  B59["BL-B59 eviction&lt;br/&gt;merged knowingly, next up"]:::open
+  CBS["On main, still unheard&lt;br/&gt;six cards (four accepted 10-09)"]:::block
 
   PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
   DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
@@ -733,6 +739,11 @@ flowchart LR
   N1004 --> FLOOD --> RGD --> CBS
   COH --> PRUNE --> CBS
   BL27 --> BUBBLE --> CBS
+  BL5a --> BL13 --> CBS
+  NOISE --> SPACING --> BL12 --> CBS
+  COH --> BL12
+  BL13 -.->|"nine findings filed, not improvised"| BL12
+  BL12 -->|"the half it did not fix"| B59
   AL --> PROBE --> DMG
   AL --> BRIDGE --> TREE
   TREE --> OSMV
@@ -761,10 +772,10 @@ flowchart LR
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
     <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing
-      that is done. The line-of-sight group has changed meaning rather than shrinking: last cycle it
-      was a probe awaiting a flight and a batched-LOS design: now detection is closed and what sits
-      there is a <em>budget</em> question, some log hygiene, and a process gap. The largest group is
-      still the one that cannot be reasoned about from a desk.</p>
+      that is done. The perception group is where this cycle moved: the ambiguity rule it was built
+      around has been inverted, and the group did not shrink &mdash; two of its nodes are now open
+      <em>because nothing has re-measured them</em>, and two more arrived as known defects shipped
+      knowingly. The largest group is still the one that cannot be reasoned about from a desk.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -795,7 +806,9 @@ flowchart LR
     CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
     COND["Conditions&lt;br/&gt;f(condition, optical path) + a ceiling"]:::open
     FRAG["X-B6 outpost fragments&lt;br/&gt;diagnosed, not the noise cause"]:::open
-    AMB["BL-B24 · BL-B25&lt;br/&gt;the ambiguity rule itself, untouched"]:::open
+    AMB["BL-B24 · BL-B25&lt;br/&gt;rule inverted; neither re-measured"]:::open
+    B59["BL-B59 fold drift evicts&lt;br/&gt;a real member — suppresses"]:::open
+    B57["BL-B57 class-level SAM&lt;br/&gt;misses the entrenched speed"]:::open
   end
 
   subgraph LOSG ["Line of sight &mdash; closed; what is left is budget and hygiene"]
@@ -839,8 +852,11 @@ flowchart LR
   SORTIE -.->|"needs many flights"| BL8
   SORTIE -.->|"tunes the prompts"| D10
   SORTIE --> SAY --> POL
-  OVER -.->|"the root rule, below both fixes"| AMB
+  OVER -.->|"BL-12 inverted the rule; the claim is unverified"| AMB
   FRAG -.-> AMB
+  B59 -->|"prioritised next, not parked"| SORTIE
+  B59 -.->|"same machinery, opposite direction"| AMB
+  B57 -.->|"only a flight shows it"| SORTIE
   DMG --> POL
   CAP128 -.->|"unblocked: the grid lost its last live reader"| GRID
   PARK --> DENS
@@ -866,14 +882,26 @@ flowchart LR
       that intertwined work is better tested against current HEAD, and which has the compounding
       side effect this picture makes obvious. The board has stopped being a set of parallel chains
       and become a funnel.</p>
-    <p class="section-note"><strong>Two fixes landed on top of a rule neither of them touched, and
-      the drawing is where that shows.</strong> Merge-echo suppression and the group-disclosure
-      fix both silence a <em>symptom</em> of <code>ContactStore.ingest</code>'s
-      &ldquo;two-or-more candidates &rarr; always found a new contact&rdquo; rule. The rule itself
-      is still there, which is why <code>BL-B24</code>, <code>BL-B25</code> and the old
-      fragmentation defect all sit in one node downstream of them rather than being closed by them.
-      Both roadmap entries say so explicitly &mdash; the value of drawing it is that the three stop
-      reading as unrelated backlog.</p>
+    <p class="section-note"><strong>The rule this note used to call untouched is now
+      inverted &mdash; and the node did not disappear.</strong> For three cycles this board said
+      that merge-echo suppression and the group-disclosure fix were muting <em>symptoms</em> of
+      <code>ContactStore.ingest</code>'s &ldquo;two-or-more candidates &rarr; always found a new
+      contact&rdquo; rule while the rule itself stood. <code>BL-12</code> Stage 3 inverted it: inside
+      one believed group, ambiguity folds onto the remembered contact. What is worth drawing is that
+      <code>BL-B24</code> and <code>BL-B25</code> are <em>still open</em> anyway. The plan claims
+      they are superseded; nothing re-measured the 554-contacts-for-444-objects churn on the new
+      code, so they were left open on recheck notes rather than closed on a design claim. A rule
+      changing is not the same as its consequence being observed.</p>
+    <p class="section-note"><strong>A known defect was merged on purpose, and that is a new shape on
+      this board.</strong> <code>BL-B59</code> is the other half of the drift that
+      <code>BL-12</code> Stage 3.5 fixed: the same fold that could pull an unrelated unit
+      <em>into</em> a group can also <strong>evict a real member</strong> &mdash; including an
+      air-defence one, which means a threat warning that is never spoken. It was measured,
+      reproduced, filed, and deliberately scoped out so the fix that <em>was</em> built could stay a
+      single mechanism with no new constant. It is visible in the sortie trace rather than silent,
+      and it is bounded: a contact that has already spoken for itself survives eviction. Everything
+      else on this board is either done or not yet started; this one is knowingly shipped and
+      waiting.</p>
     <p class="section-note"><strong>Closing the live path unblocked something nobody
       filed.</strong> The elevation grid's retirement had been gated on &ldquo;whatever removes its
       last live reader&rdquo;, and that is exactly what <code>BL-11</code> Stage 4 did: with
@@ -895,20 +923,25 @@ flowchart LR
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Three, and two of the three that sat here last time are cleared &mdash; the elevation-cost
-        probe was flown 2026-10-05, and the line-of-sight chain it fed has since been flown twice
-        and closed. What is left is one batched flight, one small check that can ride along with it,
-        and a design conversation.</p>
+      <p>Four. Nothing here was cleared this cycle and the flight got heavier: two more milestones
+        merged ahead of their sortie, both of which change what you actually hear. What is left is
+        one batched flight, one small check that can ride along with it, a design conversation, and
+        a theatre build only your machine can run.</p>
       <ul class="blockers">
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>Four cards left on <code>main</code>, down from eight</b>
+            <b>Six cards left on <code>main</code>, up from four</b>
             <p>Four were accepted outright on 2026-10-09 without a debrief &mdash; the 10&nbsp;km
               player bubble, the 12&nbsp;m line-of-sight tolerance, the group lines that stopped
-              restating known members, and <code>silence</code>. What still wants ears: the confirm
-              band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, and the
-              cohesion redesign. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
+              restating known members, and <code>silence</code>. Two more have arrived since:
+              <code>BL-13</code>'s crew query path (does a summary beat an enumeration over an
+              intercom in a hover, and is ~10&nbsp;s too long there?) and <code>BL-12</code>'s group
+              identity (does the churn actually stop, does <em>&ldquo;still moving north&rdquo;</em>
+              appear, and is anything placed in a group it visibly is not in?). Branch to check out:
+              <code>main</code> &mdash; both are merged. What still wants ears alongside them: the
+              confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, and
+              the cohesion redesign. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
               all of them reduce what you hear, and a genuine contact split immediately after a merge
               is indistinguishable from a merge echo at the speech layer, so it also goes quiet. That
               is an accepted cost on paper; whether it is ever <em>noticed</em> is a cockpit
@@ -945,6 +978,21 @@ flowchart LR
               was verified by four gates through <code>caplog</code> and was still false in
               production. Card:
               <code>docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md</code>.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="theatre">
+          <span class="chip block">Your machine</span>
+          <div>
+            <b>Two theatre builds nobody else can run</b>
+            <p>Caucasus and Kola are implemented, reviewer-approved and merged &mdash; projections,
+              region entries, beacons and towns, coordinate tests. What is left is not design but a
+              <strong>build per theatre on the Windows box</strong>, because a full-theatre build
+              reads the installed DCS tree and is yours to execute, not this session's. The commands
+              are written down per theatre in <code>world-model/RUN.md</code> &sect;8, including the
+              one trap: Caucasus capitalises <code>Map/towns.lua</code> and
+              <code>Beacons.lua</code> while Kola does not. Both projections stay
+              <code>provisional</code> until a live <code>coord_probe.lua</code> run on each, the way
+              Afghanistan's was confirmed.</p>
           </div>
         </li>
       </ul>
@@ -991,17 +1039,21 @@ flowchart LR
       <div class="row s-open" role="button" tabindex="0" data-detail="ambiguity">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>The rule underneath all three noise defects is still untouched</b>
-          <p><code>ContactStore.ingest</code> treats &ldquo;two or more plausible candidates&rdquo;
-            as ambiguous and founds a <em>new</em> contact rather than guessing &mdash; deliberate
-            anti-guessing, and the engine behind the duplication runaway, the fragmenting outpost,
-            and <code>BL-B24</code>'s two-contacts-after-a-long-gap case. Everything shipped this
-            cycle muted symptoms one layer up, at the speech boundary, and every one of those
-            roadmap entries says so in its own text. <code>BL-B25</code> is the small honest
-            footnote: the suppression predicate is re-evaluated each tick rather than snapshotted,
-            so it can forget that it suppressed something.</p>
+          <b>The rule underneath all three noise defects has been inverted &mdash; and nothing has
+            re-measured the churn</b>
+          <p><code>ContactStore.ingest</code> used to treat &ldquo;two or more plausible
+            candidates&rdquo; as ambiguous and found a <em>new</em> contact rather than guess.
+            <code>BL-12</code> Stage 3 changed that <strong>inside one believed group</strong>:
+            ambiguity now folds onto the nearest remembered member. The premise, not the logic, was
+            what was wrong &mdash; refusing to guess is correct in a saturated world where &ldquo;a
+            different unit&rdquo; is a cheap explanation, and you say DCS is not that world. So
+            <code>BL-B24</code> and <code>BL-B25</code> stay <em>open</em> on recheck notes rather
+            than closed: the plan claims supersession, but the 554-contacts-for-444-objects figure
+            has not been re-measured on the new code. <code>BL-B59</code> joins them &mdash; the
+            same fold drift can evict a real member, which suppresses a report rather than
+            duplicating one.</p>
         </div>
-        <span class="chip open">Diagnosed, deliberate</span>
+        <span class="chip open">Inverted, unverified</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
@@ -1394,16 +1446,19 @@ const DETAIL = {
   },
 
   ambiguity: {
-    kicker: "body-layer/", title: "The anti-guessing rule under three defects", chip: ["open", "BL-B24 / BL-B25, deliberate"],
-    facts: [["The rule", "2+ plausible candidates -> found a new contact"], ["Why it exists", "Petrovich must not guess which truck"], ["Symptoms", "duplication runaway, 18-contact outpost, BL-B24"]],
+    kicker: "body-layer/", title: "The anti-guessing rule, now inverted inside a group", chip: ["open", "BL-B24 / B25 / B59 - unverified"],
+    facts: [["The old rule", "2+ plausible candidates -> found a new contact"], ["BL-12 Stage 3", "inside one believed group, fold onto the remembered one"], ["Why the premise was wrong", "DCS is not a saturated world - your words"], ["Still open", "nothing re-measured 554-for-444"]],
     sections: [
+      { h: "What changed, 2026-10-12", p: "<code>BL-12</code> Stage 3 inverted this rule <strong>within one believed group</strong>: ambiguity resolves toward the nearest remembered member rather than founding a third contact. The reasoning was never that the old logic was faulty &mdash; it was that its <em>premise</em> was. Refusing to guess is correct in a saturated world where a different unit is a cheap alternative explanation; you said DCS is not that world, and nothing had ever written that assumption down, which is why it survived unexamined. Air defence is carved out: a visible duplicate is the safe direction for a threat, a wrong fold is not, and that gate reads the classification lattice rather than the DCS-type table that made four of five SAM classes invisible to it." },
+      { h: "Why these entries are still open rather than closed", p: "The plan claims BL-12 supersedes <code>BL-B24</code> and <code>BL-B25</code>. The DoD pass declined to close them on that claim, because the churn figure that motivated them &mdash; 554 contacts for 444 real objects &mdash; <strong>has not been re-measured on the new code</strong>. A rule changing is not the same as its consequence being observed, and the sortie trace BL-12 added is what would settle it." },
+      { h: "BL-B59, the half that was not fixed", p: "Stage 3 fold moves a contact fused position. Stage 3.5 stopped that drift pulling an <em>unrelated</em> unit into the group; the same drift can still <strong>evict a real member</strong>, by shifting the median nearest-neighbour gap and tightening the relative threshold. That direction suppresses a report rather than duplicating one, including for an air-defence member, which is why it is prioritised next rather than parked. It is visible in the group trace and bounded: a contact that already spoke for itself survives eviction untouched." },
       { h: "The rule is correct and the symptoms are real at the same time", p: "When a percept has two or more plausible existing contacts, <code>ingest</code> refuses to pick one and founds a new contact instead. That is the no-omniscience invariant working as designed &mdash; guessing which identical truck this is would be exactly the omniscience this project forbids. The cost is that ambiguity <em>creates</em> contacts, and each new contact makes the next look more ambiguous." },
       { h: "BL-B24: two contacts can become ambiguous for each other", p: "The association gate inflates with elapsed time since a contact was last seen, which is right in itself &mdash; a unit unobserved for two minutes could genuinely have moved. But two contacts ~17 m apart, both reacquired in the same poll after a 120 s gap, each fall inside the other's inflated gate. Real traffic routes around it: naked-eye and hybrid observations both carry a continuation id that resolves the pairing without consulting the gate. <strong>So the honest first step is establishing whether an observation ever arrives without one in production</strong> &mdash; if it does not, the right outcome is a test and a comment, not a change to the gate." },
       { h: "BL-B25: the suppression predicate forgets", p: "Found by Reviewer on the group-disclosure fix and recorded rather than fixed. Whether a member was merge-echo-suppressed is re-evaluated against <em>current</em> belief, not snapshotted at the moment it happened &mdash; so if the earlier contact has since gone lost or drifted, a genuinely suppressed member stops counting as already-reported and the group can re-speak it. It risks one extra line, never a missed one, and it is bounded to the first-disclosure window. Fixing it would mean adding per-contact state this project has so far avoided; worth doing only if it is ever actually heard." },
       { h: "Why these three sit in one node now", p: "The fragmenting outpost, the duplication runaway and <code>BL-B24</code> are the same engine with different triggers &mdash; range-scaled sigma, elapsed-time inflation, and a merge. Everything shipped this cycle muted them at the speech layer. That was the right call for a cockpit problem, and it means the count of contacts Petrovich believes in is still wrong where it was wrong before; he is simply quieter about it." }
     ],
-    items: [["done","Both filed with their own IDs"],["open","Establish when a percept arrives with no continuation id"],["open","The root rule itself"],["hold","BL-B25 - fix only if heard"]],
-    src: "body-layer/BACKLOG.md (BL-B24, BL-B25), plans/contact-duplication-ambiguity-runaway/"
+    items: [["done","BL-12 Stage 3 - the rule inverted inside a group"],["done","BL-12 Stage 3.5 - the absorption half of the drift"],["open","Re-measure 554-for-444 on the new code"],["open","BL-B59 - the eviction half, prioritised next"],["open","Establish when a percept arrives with no continuation id"],["hold","BL-B25 - fix only if heard"]],
+    src: "body-layer/ROADMAP/ (BL-B24, BL-B25, BL-B59), plans/group-contact-identity/, plans/group-cohesion-admission-gate/"
   },
 
   saywhat: {
@@ -1476,8 +1531,8 @@ const DETAIL = {
     src: "mission-interpreter/ROADMAP.md, docs/acceptance/2026-09-24-mission-interpreter-sortie.md"
   },
   bl: {
-    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Five quieting changes merged, none flown"],
-    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["This cycle", "bubble, pruning, silence, two suppression fixes"], ["Flown", "none of it"]],
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "BL-13 and BL-12 merged, neither flown"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["This cycle", "BL-13 crew query path, BL-12 group identity"], ["Flown", "none of it"]],
     sections: [
       { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state -- never LLM chat history." },
       { h: "The invariant everything serves", p: "Contact identity is <strong>perceptual</strong>, never a DCS object id or any truth field. That is deliberate: Petrovich can confuse two identical trucks, which is exactly the fallibility this project exists to model." },
@@ -1492,9 +1547,13 @@ const DETAIL = {
       { h: "Two scope limits built, neither of which the pilot can hear", p: "The <strong>10 km player bubble</strong> now bounds what is computed at all for ground and air units &mdash; not gated late, not scored and discarded, never considered. World features stay unbounded: they do not move, and enrichment reaches for them by proximity to a contact. It passed DoD with <em>no live acceptance owed</em>, and that is a waiver rather than deferred debt: it has no in-cockpit observable until the 9K113 sight's 20 km cone makes the bubble radius diverge from the naked-eye cap. Separately, <code>BL-B23</code> took <em>lost</em> contacts out of clustering's input &mdash; <code>ContactStore</code> has no delete path, so every tick had been handing group reconciliation every contact ever seen. Measured before: 2.96 ms at 100 contacts, 406 ms at 1200, clean quadratic. After: 0.15&ndash;1.4 ms flat given 20 live contacts regardless of how many are long-lost. The cost now tracks the live picture, not sortie length. The record kept, deliberately &mdash; a lost contact is still memory Petrovich should have." },
       { h: "The 2026-10-04 sortie, and the two fixes it produced", p: "<em>\"It feels like many of those reports were about the same units.\"</em> The cause was continuity loss in the <strong>merge direction</strong>: when two separately-tracked contacts become one, the survivor is founded fresh, and a fresh founding speaks. Two fixes, both at the speech layer by choice: a merge-echo contact's first callout is suppressed (17 of 34 foundings on that sortie, reconstructed), and a group's opening line goes silent when every member was already named, speaking only the delta. <strong>Both can also silence a genuine split</strong> &mdash; stated in the plan, not discovered later. Neither touches the root rule in <code>ContactStore.ingest</code>, and both roadmap entries say so." },
       { h: "And one word that stops him entirely", p: "<code>silence</code> (also \"be quiet\", \"shut up\") mutes everything &mdash; including urgent calls &mdash; after one spoken acknowledgement, until any other command ends it. Absolute, by decision rather than by omission. Whether that is still what you want when a threat appears while muted is one of the things its flight has to answer, along with which of the three phrasings the recogniser actually hears." },
-      { h: "What's next", p: "The flight. Eight acceptance cards are queued on <code>main</code> and nothing else in this subproject is worth starting ahead of them, because most of what remains is calibration the air decides. Behind it: sector fairness (<code>BL-B20</code>, needs its own <code>/explore</code>), attention capture, and the question of what he should say about sixteen vehicles in one sector &mdash; which is yours, not the code's." }
+      { h: "BL-13: the query path, and a command that silently answered about the wrong direction", p: "<code>report</code> and <code>describe</code> became one slotted command &mdash; <code>[what] [where] [how far]</code>, every slot optional, both verbs interchangeable &mdash; answering with a single summary whose job is to <strong>aim the pilot's eyes</strong> rather than transfer the picture. It closed <code>BL-B28</code>, whose diagnosis had been understated: <code>report left</code> did not fail to parse, it resolved to <strong>report east</strong> at 0.75 confidence while <code>report right</code> returned nothing. DoD then found three more silent-drop gaps by <em>running</em> the shipped matcher rather than reading review documents: the wake word strips a report's slots, the <em>what</em> slot took only seven singular words so <code>trucks</code> and <code>air defence</code> both missed &mdash; your own grammar request used both &mdash; and <code>report six o'clock</code> answered about <strong>eight</strong>. What fixtures cannot reach is the whole milestone: whether a summary beats an enumeration over an intercom in a hover." },
+      { h: "BL-12: group identity, and a measurement that said per-unit identity is unrecoverable", p: "Nearest-neighbour spacing between distinct tracked objects is <strong>16 m median</strong> (p25 6 m, p75 55 m) against an association gate that inflates to <strong>600 m after 30 s unseen</strong>. No radius is both, so identity cannot be recovered from position at the unit grain &mdash; the same fact the group contact model established for <em>resolution</em>, reappearing in <em>identity</em>. At the group grain it inverts: cluster-to-cluster separation is 236 m median. So a remembered <code>Group</code> is now matched against an observed cluster on kind, composition, movement state and plausible displacement, with remembered-but-unseen groups kept for 60 s. Per-class plausible speed replaced a flat 20 m/s worst case for everything (0 for entrenched, 2 infantry, 8 armour, 15 trucks), and heading comes from centroid displacement across reconciles, smoothed, never from a two-look derivation one bad percept can flip." },
+      { h: "What the reviews caught that the tests did not", p: "Three findings worth keeping. A callout test had been <strong>silently neutered</strong> by Stage 1's own change &mdash; found by <em>mutating</em> the suppression function and watching the test still pass. The fix sketched in <code>BL-B58</code> turned out to be a <strong>measured no-op</strong>: the absorbing edge already cleared the backstop at 81.9 m against 88.0 m, so the real cause was a 219 m single-tick fold displacement that <em>persists</em>, which kills every tick-local rule. And Stage 4's extent guard covered only half the sentence it was named for: it suppressed the heading but left the bearing spoken, so a 1.2 km group still said <em>12 o'clock, very close</em>. All three were caught by running or mutating, not by reading." },
+      { h: "What BL-12 deliberately did not do", p: "Stage 5 (road-following) is skipped <em>entirely</em> &mdash; the whole of it, including the cheap anisotropic half, goes to <code>BL-8</code>, where the ten-minute horizon makes a road decisive and a disc useless. Stage 6 would have shortened <code>OBJECT_ID_MEMORY_S</code> from ten minutes to the belief layer's own 60 s, and is deferred, which means <strong>the omniscience shortcut it would close is still live</strong>: beyond the re-identification window, continuity still rests on a DCS object id rather than on a judgement a crew could make. The milestone's no-omniscience claim holds at the short horizon only, and says so." },
+      { h: "What's next", p: "The flight. Six acceptance cards are queued on <code>main</code> and nothing else in this subproject is worth starting ahead of them, because most of what remains is calibration the air decides. Behind it: sector fairness (<code>BL-B20</code>, needs its own <code>/explore</code>), attention capture, and the question of what he should say about sixteen vehicles in one sector &mdash; which is yours, not the code's." }
     ],
-    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["done","Cohesion redesign (merged, unflown)"],["done","10 km player bubble - no observable, waived"],["done","BL-B23 - lost contacts out of clustering"],["done","silence command (merged, unflown)"],["done","Merge-echo + group-disclosure suppression (unflown)"],["open","BL-B20 sector fairness"],["open","BL-B24/B25 - the ambiguity rule itself"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
+    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["done","Cohesion redesign (merged, unflown)"],["done","10 km player bubble - no observable, waived"],["done","BL-B23 - lost contacts out of clustering"],["done","silence command (merged, unflown)"],["done","Merge-echo + group-disclosure suppression (unflown)"],["done","BL-13 crew query path, stages 1-3 (unflown)"],["done","BL-12 group identity, stages 0-4 + 3.5 (unflown)"],["open","BL-B59 - fold drift evicts a real member"],["open","BL-B20 sector fairness"],["open","BL-B24/B25 - inverted, not re-measured"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
     src: "body-layer/ROADMAP.md"
   },
   srs: {
