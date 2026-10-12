@@ -761,3 +761,179 @@ passes) makes them identical by construction regardless.
 - **Everything this task's Scope section excluded**: Stage 2–5 work, the BL-13 pull path,
   `speech._is_air_defence`, `decay.py`'s logic, `crew_console.py`'s fourth air-defence vocabulary
   copy (`BL-B56`) — untouched; not in the diff.
+
+---
+
+# BL-12 Stage 2 — implementation
+
+Branch `feature/bl12-group-contact-identity`, from tip `33d78d8` ("Review BL-12 Stage 1 fix round
+(43ed428): APPROVED"). Stage 2 only. Two commits, per `body-layer/CLAUDE.md`'s "Mechanism and
+calibration never share a commit":
+
+| sha | stage | kind |
+|---|---|---|
+| `2e05f87` | **2a** — `position_belief.plausible_speed_mps` mechanism, threaded through every elapsed-motion inflation call site | mechanism |
+| `2f75286` | **2b** — the real per-class table | calibration |
+
+## Stage 2a (`2e05f87`) — the mechanism, provably no behaviour change
+
+Added `position_belief.plausible_speed_mps(op_class, *, installation_component=False) -> float`,
+returning `GATE_GROWTH_RATE_MPS` for every input. Threaded `growth_rate_mps` through every place
+elapsed-motion inflation happens:
+
+- `position_belief._inflated_since_last_fuse`, `fold_position`, `clamp_to_detection_envelope` —
+  new keyword parameter, defaulted to `GATE_GROWTH_RATE_MPS` so every pre-existing call site
+  compiles and behaves unchanged.
+- `association_over_time._contact_covariance`, via a new **exported** (not `_`-prefixed)
+  `contact_growth_rate_mps(contact: Contact) -> float` — resolves `contact.last_class_raw` through
+  `object_model.profile_for` (the same resolution `belief.groups._profile_for_contact` already
+  uses for composition/installation), then calls `plausible_speed_mps(profile.op_class,
+  installation_component=profile.installation_component)`.
+- `belief.contacts.Contact.record` — calls `contact_growth_rate_mps(self)` *before* overwriting
+  `self.last_class_raw` with the incoming percept's claim (the rate must reflect what the contact
+  was believed to be during the elapsed interval, not what it is about to become), and threads the
+  one resolved value through both `fold_position` and `clamp_to_detection_envelope`.
+- `belief.groups._plausible_speed_mps` — Stage 1's own bridging stub ("this function (or its
+  caller) is what changes") now delegates to `position_belief.plausible_speed_mps(op_class)`
+  instead of its private flat return, op_class-only (see Stage 2b note below on why).
+
+**Why `contact_growth_rate_mps` lives in `association_over_time.py`, not `contacts.py` or
+`position_belief.py`.** `position_belief.py` must not import `perception.object_model` or know
+about `Contact` (module docstring's own stated boundary — a future non-percept measurement must
+still be able to use `fold_position`). `contacts.py` already imports from `association_over_time`
+for `implied_position`/`passes_gate`/`percept_position_uncertainty`, and `_contact_covariance`
+(which already lived there) is the other caller needing the identical resolution — centralising it
+there means the Contact→rate glue exists exactly once, not duplicated between `contacts.py` and
+`association_over_time.py`.
+
+**Bit-identity, established rather than merely observed.** Because Stage 2a's `plausible_speed_mps`
+returns `GATE_GROWTH_RATE_MPS` for every `(op_class, installation_component)` pair, every threaded
+call site is structurally unable to diverge from its pre-Stage-2 behaviour yet. Added
+`test_plausible_speed_mps_stage_2a_is_flat_for_every_class` (`tests/test_position_belief.py`),
+parametrized over every `OP_*` bucket used in the codebase (including an unmapped string and
+`installation_component=True`), asserting the module constant each time — the same posture `BL-11`
+Stage 2 took for the `group_salient_ids` hoist. Full suite: **1672 passed, 4 xfailed** — the 1671
+pre-existing tests, unchanged, plus this one.
+
+**No-omniscience.** `plausible_speed_mps` itself takes a bare string and a bool; every resolution
+from a believed classification to those two values goes through `object_model.profile_for(contact.
+last_class_raw)` — never a DCS `object_type`, never `Observation`.
+
+## Stage 2b (`2f75286`) — the calibrated table
+
+Populated `plausible_speed_mps` with the plan's table exactly: `installation_component is True` →
+`0.0` (checked first, overriding every `op_class`); `OP_INFANTRY` 2.0; `OP_ARMORED`/`OP_SPAAG`/
+`OP_ZU23`/`OP_SRSAM`/`OP_MRSAM`/`OP_LRSAM` 8.0; `OP_TRUCK` 15.0; `OP_SHIP` 10.0; default (including
+`OP_GROUPSOMETHING`) 8.0. Every row is a stated assumption scaled by user direction (D8); none is
+measured — both the table's own module-level comment and this log say so, deliberately, rather than
+letting the numbers read as measured.
+
+**Resolution path: `object_model.profile_for`, not the classification lattice.** Amendment A3 found
+that `profile_for` fails to resolve four of five air-defence `op_class` values at class level (a
+belief held before type identification, i.e. most of the time at range), and corrected the plan's
+*two air-defence-membership tests* (Stage 1's `air_defence_composition`, Stage 3 branch 1) to read
+`classification.parent_class_of` instead. That correction is scoped to air-defence-set membership
+specifically — not to `op_class`/`installation_component` resolution generally, which
+`_representative_size_m`, `_pair_backstop_m`, `_installation_of` and `_composition_of` all still do
+via `profile_for` (groups.py, pre-existing, unchanged by this plan). `contact_growth_rate_mps`
+follows that same established pattern. **It does not matter numerically for the air-defence rows
+either way**: every air-defence `op_class` in the Stage 2 table (`OP_SPAAG`/`OP_ZU23`/`OP_SRSAM`/
+`OP_MRSAM`/`OP_LRSAM`) maps to the identical 8.0 the default row also returns, so a class-level
+belief that `profile_for` cannot resolve to its real `op_class` still lands on the correct rate via
+the default fallback. The one place this *could* matter is `installation_component`, which
+`profile_for` also cannot resolve from a bare class-level string (e.g. `"OP_SRSAM"` alone carries no
+entrenchment information) — an entrenched SAM site believed only at class level gets the non-zero
+default rate (8.0) rather than 0.0 until it is identified to type. This is an existing limitation of
+`profile_for`-based resolution shared with `_installation_of`/`_pair_backstop_m`, not a new
+regression this plan introduces, and is not this task's to fix.
+
+**`groups.py`'s displacement bound stays op_class-only, deliberately.** `Group.composition` is a
+`(op_class, count)` multiset with no per-entry `installation_component` flag — only the group-level
+`Group.installation` carries that, and it is already a hard gate in `group_matches` test 2. Stage 2
+does not widen `Group.composition` to carry it per-member; `_plausible_speed_mps(op_class)` passes
+`installation_component`'s default (`False`) to the shared table, exactly matching Stage 1's own
+docstring prediction that only the function's *body* would change, not `group_matches` itself.
+
+**Corrected `POSITION_HALF_LIFE_S`'s docstring** (`decay.py`): it derived 30 s from
+`GATE_GROWTH_RATE_MPS` (20 m/s), which is no longer the rate actually applied to any real contact's
+covariance. The value (30.0) and both its `assert`s are untouched — only the stale derivation is
+corrected, stating plainly that recalibrating it against the new per-class rates is future work.
+
+### Tests: the 2a-only test is deleted, three calibration tests replace it, four pre-existing tests move
+
+**Deleted** `test_plausible_speed_mps_stage_2a_is_flat_for_every_class` — it existed to pin Stage
+2a's own flat behaviour, and Stage 2b's entire purpose is to make that false. Replaced with:
+
+- `test_plausible_speed_mps_installation_component_overrides_every_class` — 0.0 for four different
+  op_classes under `installation_component=True`.
+- `test_plausible_speed_mps_calibrated_table_matches_the_plan` — every named row, verbatim.
+- `test_plausible_speed_mps_default_is_eight_not_the_old_flat_twenty` — the default row, and an
+  explicit `!= GATE_GROWTH_RATE_MPS` assertion so a future accidental revert back to 20 fails loudly.
+
+**Four pre-existing tests moved** — all because the gate/matcher's elapsed-motion inflation is
+narrower for a non-default class (every fixture here defaults to `"Ural truck"` → `OP_TRUCK`,
+15 m/s) than the old flat 20 m/s was. Each is a parameter re-derivation that preserves the test's
+original assertions and intent, not a rewrite of what it checks — flagged here per the task's own
+instruction, rather than left as a silent re-baseline:
+
+1. **`test_groups.py::test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id`.** The old
+   fixture's "both A and B pass the displacement test" window was the flat 20 m/s bound (40 m at
+   2 s elapsed); at `OP_TRUCK`'s 15 m/s that bound is 30 m, under which the old far-candidate
+   distance (39 m) no longer clears. Rescaled to 4 s elapsed (60 m bound) with the candidate cluster
+   moved to x∈[27,37] (27 m from A, 33 m from B) — same assertions (`ambiguous_property_matches_count
+   == 1`, nearer group wins, farther group survives in `remembered_groups`), different numbers,
+   chosen with an 6 m/non-tie margin on each side rather than at the boundary.
+2. **`test_contacts.py::test_slow_directional_drift_never_reports_a_range_beyond_the_detection_cap`**
+   and **`::test_position_runaway_does_not_corrupt_a_second_contacts_cardinality`** (which shares
+   the first test's exact drift sequence by design, per its own docstring). Both loop
+   `range(1, 22)`, documented as "bounded to the polls over which the gate still accepts the drift
+   as the same contact." Measured directly (script run against the real tree, both before and after
+   2b): the first split moves from poll 22 (flat 20 m/s) to poll 19 (`OP_TRUCK`'s 15 m/s). Both
+   loops shortened to `range(1, 19)`; the second test's follow-up "separate object" ingest moved
+   from `t_sim=21.0` to `t_sim=18.0` to stay the same number of polls past the loop's end.
+3. **`test_enrichment.py::test_terrain_aware_position_reprojects_the_fused_estimate_not_the_last_look`.**
+   This test computes its own "ground truth" fused position by calling `fold_position` directly,
+   outside `ContactStore`, to compare against what the real `Contact.record` path produces through
+   `WorldEnrichmentCache`. It previously relied on `fold_position`'s default `growth_rate_mps`
+   (`GATE_GROWTH_RATE_MPS`, 20.0); the real path now resolves 15.0 for this fixture's `OP_TRUCK`
+   classification, so the two diverged. Fixed by passing
+   `growth_rate_mps=plausible_speed_mps("OP_TRUCK")` explicitly to both of the test's own
+   `fold_position` calls, so the "ground truth" computation matches what `Contact.record` actually
+   does rather than silently drifting from it.
+
+No test was rewritten in the sense that would trigger `AGENTS.md`'s escalation rule — every change
+above is a fixture-constant re-derivation against the new calibration, not a change to what any test
+asserts or checks. All four are existing-behaviour-moved cases the task's own prompt anticipated
+("expect existing gate/association tests to move"), not newly-discovered gaps.
+
+### Checks
+
+**body-layer/**
+
+- `ruff format --check src tests`: **pass** (120 files, after one auto-reformat of
+  `position_belief.py`'s new function signature)
+- `ruff check .`: **pass**
+- `mypy src` (strict, from inside the subproject): **pass**, 55 source files (unchanged file count
+  — no new module)
+- `pytest -q`: **pass** — **1674 passed / 4 xfailed**
+  - Stage 2a alone: 1672 passed / 4 xfailed (1671 baseline + 1 new bit-identity test)
+  - Stage 2b: 1674 passed / 4 xfailed (1672 − 1 deleted 2a-only test + 3 new calibration tests, and
+    4 pre-existing tests re-derived to the new numbers rather than counted as regressions)
+
+**audio-adapter/**: not run. Nothing in this stage touches `belief/audio_client.py` or any other
+file that subproject's own copy depends on — no shared import exists either direction for this
+change's diff.
+
+### Notable discoveries
+
+- **`groups.py`'s Stage 1 stub already anticipated this exact seam.** `_plausible_speed_mps`'s own
+  docstring (written at Stage 1, before Stage 2 existed) said "once Stage 2 lands its table, this
+  function (or its caller) is what changes — not `group_matches` itself." That prediction held
+  exactly: only the function body changed, confirming the Stage 1 author had already designed the
+  seam Stage 2 needed.
+- **The installation-component class-level gap is real but pre-existing, not new.** Documented
+  above under "Resolution path" — worth a future backlog item if a class-level SAM belief's
+  displacement/gate behaviour (treated as mobile, 8.0 m/s, rather than entrenched, 0.0) ever shows
+  up as a live sortie symptom. Not filed as a new `BL-B` item here since the task scope named
+  `BL-B56`/`speech._is_air_defence` as explicitly out of scope and this is adjacent to, not inside,
+  that boundary — flagging in this log per the role's "report discoveries" instruction instead.
