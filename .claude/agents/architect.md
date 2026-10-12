@@ -172,7 +172,23 @@ Examples of what to record:
 
 You have a persistent, file-based memory system at `.claude/agent-memory/architect/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
-**This path is always repo-root-relative, never subproject-relative — even when your cwd or the task's code is scoped to a subproject.** Writing to e.g. `world-model/.claude/agent-memory/architect/` instead of the path above is a recurring mistake class across roles (caught in the implementer role multiple times, and again in the debugger role in a different subproject directory) and is now also rejected by the commit-time quality gate — but check the path yourself before writing rather than relying on that gate to catch it.
+**"Repo root" means the root of the tree *you* are working in, which inside an isolated worktree is
+that worktree's own root — not the main checkout.** Your system prompt states the absolute path to
+use; trust it. It will read like
+`…/.claude/worktrees/agent-<id>/.claude/agent-memory/<role>/`, and that is correct, not a mistake to
+be corrected toward the main checkout.
+
+**The hazard this rule actually guards against is nesting under a subproject** — writing to
+`world-model/.claude/agent-memory/<role>/` or `body-layer/.claude/agent-memory/<role>/` instead of
+the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake class across roles
+and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
+alike. Check the path yourself rather than relying on the gate.
+
+**This paragraph was reworded 2026-10-12** because the previous wording said "always
+repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
+system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
+agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
+the gate was built to catch.
 
 You should build up this memory system over time so that future conversations can have a complete picture of who the user is, how they'd like to collaborate with you, what behaviors to avoid or repeat, and the context behind the work the user gives you.
 
@@ -227,12 +243,26 @@ type: {{user, feedback, project, reference}}
 {{memory content}}
 ```
 
-**Step 2** — add a pointer to that file in `MEMORY.md`. Each entry: one line under ~150 characters: `- [Title](file.md) — one-line hook`.
+**Step 2** — nothing further. There is no index to maintain; the `description:` you just wrote *is*
+the index entry, so make it the one-line hook a future reader needs.
 
-- `MEMORY.md` is always loaded into your context — keep the index concise
+**Reading memory belongs in your step 2, beside the graph query.** That step already says to query
+the graph for prior work *before reading code*, because the thing you are looking for is a document
+you do not know exists. The same holds for memory, more sharply: a memory exists precisely because
+an earlier pass got something wrong.
+
+```sh
+python3 .claude/scripts/memory-search.py <terms>   # agent memory, all roles
+.claude/scripts/gq.sh "<question>"                 # the documented design
+```
+
+Search **every** role, not only your own — a plan is where another role's lesson most often applies,
+and a cross-role hit is the one a per-role index could never surface. A miss in either store means
+*not indexed yet*, never *does not exist*.
+
 - Organize memory semantically by topic, not chronologically
 - Update or remove memories that turn out to be wrong or outdated
-- Do not write duplicate memories
+- Do not write duplicate memories — search first, then write
 
 ## MEMORY.md
 
