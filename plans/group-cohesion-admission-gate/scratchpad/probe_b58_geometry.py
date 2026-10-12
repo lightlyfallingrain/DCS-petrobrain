@@ -58,8 +58,13 @@ def dump(label: str, store: ContactStore) -> None:
     print("  positions:", {ids[k]: (round(pos[k][0]), round(pos[k][1])) for k in range(n)})
     print("  classes:", {ids[k]: contacts[k].last_class_raw for k in range(n)})
     print("  unc_m:", {ids[k]: round(contacts[k].position.radius_m()) for k in range(n)})
+    # `_cluster_contacts` gained `prior_rosters` in commit 2 of
+    # plans/group-cohesion-admission-gate/plan.md -- `[]` here reproduces
+    # this probe's original purpose (the raw geometry table above, and the
+    # no-gate cluster/extent dump), not the live gate; see implementation.md
+    # for the gate re-run against the real pipeline (probe 2).
     cl = G._cluster_contacts(contacts, G.GROUP_PROXIMITY_GAP_RATIO,
-                             G.GROUP_REPORTING_MIN_MEMBERS)
+                             G.GROUP_REPORTING_MIN_MEMBERS, [])
     for c in cl:
         mem = sorted(c)
         members = [contacts[ids.index(m)] for m in mem]

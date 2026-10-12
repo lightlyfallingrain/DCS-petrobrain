@@ -1,5 +1,15 @@
 # BL-B58 — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
 
+> **Implemented, 2026-10-12, on `feature/bl12-group-contact-identity` (BL-12 Stage 3.5) --
+> pending Reviewer/DoD.** Three commits: `Contact.fold_displacement_m` (provenance,
+> behaviour-neutral), the admission gate itself (`_cluster_contacts` gains `prior_rosters`), and the
+> 2C fixture rewrite. Re-run against the real pipeline, not just the isolated predicate: probe 2
+> (`plans/group-cohesion-admission-gate/scratchpad/probe_b58_second_incident.py`) now shows
+> `GROUP_1 members=['CONTACT_1', 'CONTACT_3']`, `air_defence=[]` after the fold -- the ZSU-23-4
+> (`CONTACT_4`) is no longer absorbed. Full numbers: `plans/group-cohesion-admission-gate/
+> implementation.md`. The eviction half this plan's own point 3 names (`CONTACT_2` dropping out in
+> the same probe run) is **[[BL-B59]]**, filed separately and deliberately not fixed here.
+
 > **Decided and planned, 2026-10-12.** The user chose **option 3 — fix at source in clustering** over
 > options 1 and 2, because *"group membership is what the rest of BL-12 and BL-14 build on — a wrong
 > member poisons heading, composition and attack-run alignment, not just one spoken line."* The plan
@@ -27,11 +37,11 @@
 > fix is **not materially more expensive, but differently shaped** — one more module (`contacts.py`,
 > for the provenance field), no new calibration constant, no new persistent store state.
 
-- [ ] **BL-B58 — [[BL-12]] Stage 3's within-group ambiguity fold (D5 at contact grain) moves a
+- [~] **BL-B58 — [[BL-12]] Stage 3's within-group ambiguity fold (D5 at contact grain) moves a
   contact's fused position toward the folded percept (`fold_position` is a real weighted fuse, not
   a no-op); the next `tick()`'s position-only cluster can widen enough to absorb a previously
   separate, correctly-identified contact into the same `Group` — not itself an ambiguous candidate
-  for anything, and not individually failing any gate.** #status/open Found by the Implementer
+  for anything, and not individually failing any gate.** #status/in-progress Found by the Implementer
   during Stage 3 (2026-10-12), via a plan-unlisted test (`test_callouts.py`'s 2C fixture), confirmed
   and characterised by the Reviewer the same stage round.
 

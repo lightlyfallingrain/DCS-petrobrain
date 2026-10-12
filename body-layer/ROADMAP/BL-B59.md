@@ -1,5 +1,17 @@
 # BL-B59 — The same fold drift that absorbs an unrelated contact also evicts a real member
 
+> **Disposition, 2026-10-12 (user decision, `BL-B58`'s decision 2): out of `BL-12`'s Stage 3.5,
+> and prioritised next -- not parked unprioritised.** The admission gate (Stage 3.5, implemented
+> this stage) only ever blocks an admission, never an eviction, by design (see below). Confirmed
+> still live against the real pipeline after Stage 3.5 landed: probe 2
+> (`plans/group-cohesion-admission-gate/scratchpad/probe_b58_second_incident.py`) shows `CONTACT_2`
+> dropping out of `GROUP_1`'s membership at t=20 even with the admission gate in place
+> (`GROUP_1 members=['CONTACT_1', 'CONTACT_3']` after the fold, down from
+> `['CONTACT_1', 'CONTACT_2', 'CONTACT_3']` before it -- `CONTACT_2` evicted, `CONTACT_4` correctly
+> excluded rather than absorbed). This is the more dangerous of the two halves (it can **suppress**
+> an air-defence report rather than fabricate one) and should be taken up next, not left in the
+> general backlog.
+
 - [ ] **A Stage 3 within-group fold's position drift shifts the median nearest-neighbour gap, which
   tightens `_cluster_contacts`'s *relative* threshold, which can drop a real, correctly-identified
   member out of the group on the same tick — the eviction half of [[BL-B58]], and the more dangerous
