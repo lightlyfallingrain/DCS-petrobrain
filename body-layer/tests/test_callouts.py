@@ -959,7 +959,46 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     That five-member group was the `BL-B48` bridge, so the behaviour is
     still live in `render_group_disclosure` but is no longer exercised
     here. `tests/test_speech.py` is where that renderer's
-    already-reported rule is pinned directly."""
+    already-reported rule is pinned directly.
+
+    **Rewritten a third time for BL-12 Stage 3 (2026-10-12) -- line 4
+    changed again, and the group membership assertion below changed with
+    it. Not in `plans/group-contact-identity/plan.md`'s own named
+    rewrite list (`test_contacts.py:132`/`:183`, the merge-echo fixture)
+    -- found by running the full suite after Stage 3 landed, not
+    predicted, and read off a run rather than guessed, same posture as
+    every earlier rewrite of this fixture.**
+
+    The mechanism: at t=12 the 2-o'clock pair's own gate candidates are
+    no longer only each other. `CONTACT_1`/`CONTACT_2`/`CONTACT_3` have
+    not been re-observed since t=0 (`CONTACT_2` not at all), so by t=12
+    their covariance has inflated for 12s of elapsed time on top of this
+    fixture's undeclared-uncertainty fallback (`_FALLBACK_UNCERTAINTY_
+    RADIUS_M`, 300m on both sides of the gate) -- wide enough that OBS_5
+    and OBS_6 (2 o'clock, 300m -- several hundred metres from the 12/1
+    o'clock trio) still pass the spatial+class gate against all three.
+    All three are `GROUP_1` members, so Stage 3 branch 2 fires: OBS_5
+    folds onto the nearest of them (`CONTACT_2`), OBS_6 onto the nearest
+    of what remains (`CONTACT_1`) -- never founding `CONTACT_6`/
+    `CONTACT_7` at all. This is `plans/group-contact-identity/plan.md`
+    Stage 3's accepted failure mode 2 (undercount replaces overcount,
+    confirmed by the user, Q5) firing on a *different* real cluster than
+    the one the plan's own rationale measured (16m median real spacing)
+    -- the fixture's wide fallback gate plus 12s of no-reobservation
+    inflation reaches this far, which a declared, tighter uncertainty
+    would not have. Flagged for the user rather than silently accepted:
+    the fold then **also** moves `CONTACT_1`/`CONTACT_2`'s fused
+    positions toward the 2-o'clock percepts (`fold_position` is a real
+    weighted fuse, not a no-op), which pulls the next `tick()`'s cluster
+    boundary wide enough to absorb `CONTACT_4` (BTR-70) too -- a unit
+    that was never itself an ambiguous candidate. The three named failure
+    modes in the plan's Stage 3 section (within-group record swapping,
+    undercount, false group continuity) do not individually describe
+    this specific second-order path (an accepted within-group fold
+    dragging an *unrelated, previously un-grouped* contact into the
+    cluster via position drift); this test now pins the measured result
+    as a record of that path, not as an endorsement that it needs no
+    further look."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
@@ -1125,15 +1164,16 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
         "unit 12 o'clock, very close is truck.",
-        "Pair of infantry, 12 o'clock, 0.5 kilometres.",
+        "BTR-70, in 1 o'clock group.",
     ]
-    # The grouping itself, asserted beside the sentences: Stage 0a's whole
-    # effect on this fixture is that the five-member bridge is gone and two
-    # infantry-only pairs stand in its place. Without this, the four-line
-    # count above would still pass over a single five-member group.
+    # The grouping itself, asserted beside the sentences: Stage 3's
+    # within-group fold (see this test's own docstring) absorbs the
+    # 2-o'clock pair into `GROUP_1` without ever founding `CONTACT_6`/
+    # `CONTACT_7`, and the resulting position drift then pulls `CONTACT_4`
+    # (BTR-70) into the same cluster on the next `tick()`. One four-member
+    # group, not the two infantry-only pairs Stage 0a alone produced.
     assert sorted(sorted(g.member_contact_ids) for g in store.groups) == [
-        ["CONTACT_1", "CONTACT_3"],
-        ["CONTACT_6", "CONTACT_7"],
+        ["CONTACT_1", "CONTACT_2", "CONTACT_3", "CONTACT_4"],
     ]
 
 
