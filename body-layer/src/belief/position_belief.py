@@ -161,7 +161,38 @@ from perception.source import PositionUncertainty
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
 
-def plausible_speed_mps(op_class: str, *, installation_component: bool = False) -> float:
+#: Stage 2b's calibration table (`plans/group-contact-identity/plan.md`
+#: Stage 2) -- every row is a **stated assumption**, scaled by user
+#: direction (D8: *"20 m/s is fast for most units... Expect slower"*),
+#: none of it measured. Read via `plausible_speed_mps` below, never
+#: directly -- that function is the one place `installation_component`
+#: overrides the op_class lookup, and the one place a missing/unmapped
+#: `op_class` (including `object_model.DEFAULT_OP_CLASS`,
+#: `"OP_GROUPSOMETHING"`) falls back to `_DEFAULT_PLAUSIBLE_SPEED_MPS`.
+_PLAUSIBLE_SPEED_MPS: Final[dict[str, float]] = {
+    "OP_INFANTRY": 2.0,  # dismounted pace -- stated assumption.
+    "OP_ARMORED": 8.0,  # ~29 km/h sustained, scaled from D8's "near full
+    # speed" framing of 20 m/s for armour.
+    "OP_SPAAG": 8.0,  # same band as armour -- stated assumption.
+    "OP_ZU23": 8.0,
+    "OP_SRSAM": 8.0,
+    "OP_MRSAM": 8.0,
+    "OP_LRSAM": 8.0,
+    "OP_TRUCK": 15.0,  # road truck, deliberately below the old flat 20.
+    "OP_SHIP": 10.0,  # stated assumption.
+}
+
+#: The table's own default row, including `object_model.DEFAULT_OP_CLASS`
+#: ("OP_GROUPSOMETHING") and any `op_class` string the table does not
+#: name. **Deliberately not `GATE_GROWTH_RATE_MPS` (20.0)** -- the old
+#: value modelled the worst case for everything, which is exactly the
+#: behaviour D8 overturns.
+_DEFAULT_PLAUSIBLE_SPEED_MPS: Final[float] = 8.0
+
+
+def plausible_speed_mps(
+    op_class: str, *, installation_component: bool = False
+) -> float:
     """How fast a contact of `op_class` could plausibly have moved,
     metres/second -- the one shared table `plans/group-contact-identity/
     plan.md` Stage 2 threads through both consumers that need a per-class
@@ -172,26 +203,24 @@ def plausible_speed_mps(op_class: str, *, installation_component: bool = False) 
     `BL-B51`'s own lesson about a set declared more than once drifting
     apart -- see that backlog item.
 
-    **Stage 2a (this commit): flat for every class, `installation_
-    component` included.** Returns `GATE_GROWTH_RATE_MPS` regardless of
-    either argument -- provably no behaviour change, the same posture
-    `BL-11` Stage 2 took for the `group_salient_ids` hoist: every caller
-    now threads a per-class rate through, but until Stage 2b populates the
-    table below, that rate is the same constant the old hard-coded default
-    already was, for every input. `tests/test_position_belief.py::
-    test_plausible_speed_mps_stage_2a_is_flat_for_every_class` is this
-    commit's acceptance test, and belongs to Stage 2a only -- Stage 2b
-    replaces it with the calibrated table's own test, since by design
-    Stage 2b changes exactly what this function returns.
+    **Stage 2b (this commit): the real, calibrated table.**
+    `installation_component is True` always wins and returns `0.0`
+    ("~0 for entrenched", D8) regardless of `op_class` -- structural,
+    keyed on the existing profile field rather than an `op_class` list,
+    for the same reason `group-cohesion-redesign` plan.md §1 rejected an
+    `op_class`-keyed installation set (a real system's entrenchment is a
+    property of that specific emplacement, not of its weapon class: the
+    same `OP_SRSAM`/`OP_MRSAM` bucket covers both a dug-in SA-3 site and a
+    mobile SA-13). Otherwise `_PLAUSIBLE_SPEED_MPS.get(op_class,
+    _DEFAULT_PLAUSIBLE_SPEED_MPS)` -- every row a stated assumption, none
+    measured; see that table's own docstring for the per-row provenance.
 
-    Signature fixed here rather than widened later: Stage 2b's table keys
-    on `op_class` for every row but one, and that one row (`installation_
-    component is True -> 0.0`) is keyed on the existing `object_model.
-    ObjectTypeProfile.installation_component` field instead, per
-    amendment A2's own precedent (`group-cohesion-redesign` plan.md §1
-    rejected an `op_class`-keyed installation set) -- so both inputs are
-    needed from the first commit, not added in 2b as a breaking change to
-    an already-shipped signature.
+    Replaces Stage 2a's flat `GATE_GROWTH_RATE_MPS`-for-everything body --
+    `tests/test_position_belief.py::
+    test_plausible_speed_mps_stage_2a_is_flat_for_every_class` (that
+    commit's own acceptance test, which this change necessarily falsifies)
+    is deleted in this commit, replaced by this docstring's own calibration
+    test.
 
     No-omniscience: takes a bare `op_class` string and a bool, resolved by
     each caller from `Contact.last_class_raw` (believed classification)
@@ -199,8 +228,9 @@ def plausible_speed_mps(op_class: str, *, installation_component: bool = False) 
     function itself holds no reference to `Contact` or any perception
     type, by design (see module docstring on why this module never
     imports `belief.association_over_time` or `perception.object_model`)."""
-    del op_class, installation_component
-    return GATE_GROWTH_RATE_MPS
+    if installation_component:
+        return 0.0
+    return _PLAUSIBLE_SPEED_MPS.get(op_class, _DEFAULT_PLAUSIBLE_SPEED_MPS)
 
 
 #: Relative floor against a near-singular matrix when inverting, expressed

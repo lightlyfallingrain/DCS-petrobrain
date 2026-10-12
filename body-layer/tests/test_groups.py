@@ -1232,8 +1232,16 @@ def test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id() -> None:
     between A's far member and B's near member) that single-link chaining
     does not merge them (the within-group 10 m gap sets the relative
     threshold at `3 * 10 = 30`, well under 60), but close enough that a
-    later cluster at x=26 is within the flat `GATE_GROWTH_RATE_MPS * 2 s =
-    40 m` displacement bound of *both* (21 m from A, 39 m from B)."""
+    later cluster at x=32 is within the displacement bound of both.
+
+    Elapsed time is 4 s and the bound is `OP_TRUCK`'s plausible-speed
+    bound (15 m/s, BL-12 Stage 2b -- `_contact`'s default class) * 4 s =
+    60 m; this used to be 2 s against the old flat `GATE_GROWTH_RATE_MPS`
+    (20 m/s) for a 40 m bound, with the candidate at x=26 (21 m from A,
+    39 m from B). Stage 2b's narrower per-class rate shrinks the bound
+    enough that the old candidate's 39 m to B no longer clears it, so both
+    the elapsed time and the candidate's position are rescaled here to
+    keep the same ambiguity (nearer-wins, not a boundary-exact tie)."""
     store = GroupStore()
     store.reconcile(
         [
@@ -1255,9 +1263,10 @@ def test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id() -> None:
     store.reconcile([], now_sim=1.0)
     assert store.ambiguous_property_matches_count == 0
 
-    # A new cluster at x in [21, 31] (centroid 26) sits within the
-    # plausible-displacement bound of both A (21 m) and B (39 m).
-    store.reconcile([_contact("C1", 21.0, 0.0), _contact("C2", 31.0, 0.0)], now_sim=2.0)
+    # A new cluster at x in [27, 37] (centroid 32) sits within the 60 m
+    # plausible-displacement bound of both A (27 m) and B (33 m), nearer to
+    # A.
+    store.reconcile([_contact("C1", 27.0, 0.0), _contact("C2", 37.0, 0.0)], now_sim=4.0)
 
     assert store.ambiguous_property_matches_count == 1
     assert len(store.groups) == 1

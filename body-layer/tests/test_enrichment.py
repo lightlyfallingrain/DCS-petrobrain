@@ -32,7 +32,7 @@ from belief.enrichment import (
     terrain_divide_qualifier,
 )
 from belief.percept import percept_of
-from belief.position_belief import fold_position
+from belief.position_belief import fold_position, plausible_speed_mps
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -502,10 +502,15 @@ def test_terrain_aware_position_reprojects_the_fused_estimate_not_the_last_look(
     # Ground truth for what the fused range *should* be, computed directly
     # from the same primitives Contact.record uses -- both looks carry no
     # declared position_uncertainty, so both use the isotropic fallback.
+    # `growth_rate_mps` (BL-12 Stage 2b) must match what `Contact.record`
+    # itself resolves for this fixture's classification (`_observation`'s
+    # default `"Ural truck"` -> `OP_TRUCK`), or this "ground truth" diverges
+    # from the real `ContactStore.ingest` path it is meant to mirror.
     first_percept = percept_of(first)
     second_percept = percept_of(second)
     first_position = implied_position(first_percept)
     second_position = implied_position(second_percept)
+    growth_rate_mps = plausible_speed_mps("OP_TRUCK")
     fused = fold_position(
         fold_position(
             None,
@@ -514,12 +519,14 @@ def test_terrain_aware_position_reprojects_the_fused_estimate_not_the_last_look(
             uncertainty=percept_position_uncertainty(first_percept),
             look_bearing_deg=first_percept.bearing_deg,
             t_sim=first_percept.t_sim,
+            growth_rate_mps=growth_rate_mps,
         ),
         x=second_position.x,
         z=second_position.z,
         uncertainty=percept_position_uncertainty(second_percept),
         look_bearing_deg=second_percept.bearing_deg,
         t_sim=second_percept.t_sim,
+        growth_rate_mps=growth_rate_mps,
     )
     # Sanity: the fused mean must sit strictly between the two raw looks,
     # not coincide with either -- otherwise this test could not actually

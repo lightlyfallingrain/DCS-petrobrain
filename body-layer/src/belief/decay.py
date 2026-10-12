@@ -74,12 +74,29 @@ if TYPE_CHECKING:
 #: claim's `established_sim`.
 IDENTITY_HALF_LIFE_S: Final[float] = 600.0
 
-#: Fastest-decaying attribute: the exact perceived position. Chosen as the
-#: order-of-magnitude time a ground vehicle needs to move roughly its own
-#: uncertainty radius at `belief.position_belief.GATE_GROWTH_RATE_MPS`
-#: (20 m/s) -- i.e. "trust the exact spot for about half a minute, then
-#: start hedging." This is the one half-life `certainty_of` below actually
-#: uses to separate "tracked" from "estimated".
+#: Fastest-decaying attribute: the exact perceived position. Originally
+#: chosen as the order-of-magnitude time a ground vehicle needs to move
+#: roughly its own uncertainty radius at `belief.position_belief.
+#: GATE_GROWTH_RATE_MPS` (20 m/s) -- i.e. "trust the exact spot for about
+#: half a minute, then start hedging."
+#:
+#: **That derivation no longer holds** (`plans/group-contact-identity/
+#: plan.md` Stage 2b). `GATE_GROWTH_RATE_MPS` is no longer the growth rate
+#: actually applied to any contact's covariance: `belief.position_belief.
+#: plausible_speed_mps` now supplies a per-`op_class` rate (2.0-15.0 m/s;
+#: 0.0 for an entrenched installation), and `GATE_GROWTH_RATE_MPS` survives
+#: only as Stage 2a's pre-calibration mechanism default and `belief.
+#: groups`' empty-composition defensive fallback -- it is no longer the
+#: figure this half-life was derived from for any real contact.
+#:
+#: The **value** (30.0) is left exactly as it was -- both assertions below
+#: still hold, and no sortie evidence says it is wrong. This note exists so
+#: the stale derivation does not keep reading as the reason the value is
+#: what it is; recalibrating it against the new per-class rates is future
+#: work, not this commit's.
+#:
+#: This is the one half-life `certainty_of` below actually uses to
+#: separate "tracked" from "estimated".
 POSITION_HALF_LIFE_S: Final[float] = 30.0
 
 #: Medium decay: which way it was moving. Slower than exact position (a

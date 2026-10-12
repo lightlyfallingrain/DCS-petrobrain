@@ -1157,7 +1157,14 @@ def test_slow_directional_drift_never_reports_a_range_beyond_the_detection_cap()
     # still accepts the drift as the same contact -- past this, the gate
     # itself (unaffected by this fix) starts a new contact, which is
     # correct behaviour, not part of the invariant this test checks.
-    for i in range(1, 22):
+    #
+    # Bound is 18, not 21 -- BL-12 Stage 2b gives this fixture's class
+    # (`_observation`'s default `"Ural truck"` -> `OP_TRUCK`) a 15 m/s
+    # plausible-speed bound instead of the old flat 20 m/s, so the gate's
+    # elapsed-motion inflation is narrower and the drift starts a second
+    # contact a few polls sooner than it used to (measured: poll 19 is the
+    # first split under the new rate, poll 22 under the old one).
+    for i in range(1, 19):
         bearing += 0.3
         rng += 150.0
         store.ingest(
@@ -1230,7 +1237,12 @@ def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> No
         ],
         now_sim=0.0,
     )
-    for i in range(1, 22):
+    # Bound is 18, not 21 -- see `test_slow_directional_drift_never_reports_
+    # a_range_beyond_the_detection_cap`'s own comment: BL-12 Stage 2b's
+    # per-class plausible-speed table narrows this fixture's class
+    # (`OP_TRUCK`) to 15 m/s from the old flat 20, so the drift starts a
+    # second contact a few polls sooner.
+    for i in range(1, 19):
         bearing += 0.3
         rng += 150.0
         store.ingest(
@@ -1260,7 +1272,7 @@ def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> No
             dataclasses.replace(
                 _observation(
                     obs_id="OBS_SEPARATE",
-                    t_sim=21.0,
+                    t_sim=18.0,
                     bearing_deg=90.0,
                     range_m=3000.0,
                     source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
@@ -1270,7 +1282,7 @@ def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> No
                 count_bucket="OP_TO5UNITS",
             )
         ],
-        now_sim=21.0,
+        now_sim=18.0,
     )
 
     assert len(store.contacts) == 2
