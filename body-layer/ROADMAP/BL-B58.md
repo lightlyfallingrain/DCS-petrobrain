@@ -1,5 +1,32 @@
 # BL-B58 — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
 
+> **Decided and planned, 2026-10-12.** The user chose **option 3 — fix at source in clustering** over
+> options 1 and 2, because *"group membership is what the rest of BL-12 and BL-14 build on — a wrong
+> member poisons heading, composition and attack-run alignment, not just one spoken line."* The plan
+> is **`plans/group-cohesion-admission-gate/plan.md`** (BL-12 Stage 3.5, blocking Stage 4; pointer
+> amendment **A9** in `plans/group-contact-identity/plan.md`).
+>
+> **Three things that Architect pass measured, which correct this entry below rather than confirm it:**
+>
+> 1. **This entry's own option-3 sketch is a no-op.** The absorbing edge *already clears*
+>    `_pair_backstop_m` — 81.9 m against 88.0 m. The cause is a **219 m single-tick fold
+>    displacement** of the folded-onto contact, and it **persists**, so re-checking the existing
+>    pairwise test (or any tick-local displacement test) cannot close the gap. The gate in the plan
+>    carries **provenance** (`Contact.fold_displacement_m`) instead, and introduces **no new
+>    constant**.
+> 2. **Both open sub-questions are now closed by reproduction, not deferred.** A clean second
+>    independent incident (different geometry and class mix, no 2C fixture) and the same absorption
+>    **with a ZSU-23-4 as the absorbed member** — `air_defence_composition` goes `[]` →
+>    `[('OP_SPAAG', 1)]`, persistently.
+> 3. **A sibling defect was found in the same run: the drift also *evicts* a real member**, by
+>    shifting the median nearest-neighbour gap and tightening the relative threshold. That is the
+>    direction that can **suppress** an air-defence report, and it is **[[BL-B59]]** — deliberately
+>    out of Stage 3.5's scope.
+>
+> The cost line below ("the most expensive") is corrected in that plan's effort/value section: the
+> fix is **not materially more expensive, but differently shaped** — one more module (`contacts.py`,
+> for the provenance field), no new calibration constant, no new persistent store state.
+
 - [ ] **BL-B58 — [[BL-12]] Stage 3's within-group ambiguity fold (D5 at contact grain) moves a
   contact's fused position toward the folded percept (`fold_position` is a real weighted fuse, not
   a no-op); the next `tick()`'s position-only cluster can widen enough to absorb a previously

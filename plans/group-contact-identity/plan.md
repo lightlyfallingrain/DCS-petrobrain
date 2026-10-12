@@ -278,7 +278,8 @@ These extend the body's "Interaction with already-merged and in-flight work".
 | **1** | Unchanged in shape. Three corrections: the trace line becomes its **first commit** (A4); the air-defence test reads the classification lattice (A3); the prerequisite note is discharged (A1). |
 | **2a / 2b** | Unchanged. The split is right and `body-layer/CLAUDE.md`'s rule requires it. |
 | **3** | Unchanged in shape; branch 1's air-defence predicate corrected per A3. |
-| **4** | Unchanged, **conditional on Stage 0**. Without a bounded extent its heading input is membership noise (A2.2). **The speech-time extent guard is unconditional, not a fallback** — do not speak a heading or a single bearing for a group wider than one believable bearing. (Corrected 2026-10-11, Stage 0 review observation 1. This read *"if Q-A declines 0b, Stage 4 needs an extent guard at speech time instead"*. Q-A/Q-B were **accepted** and 0b shipped, so the condition is settled — but 0b caps a *pair*, not a cluster, and single-link chaining still permits a 1.2 km span: `tests/test_groups.py::test_the_eager_cap_still_chains_a_long_infantry_line` pins four infantry at 400 m spacing, 3 gaps × 400 m = 1,200 m, as one group. Against `_format_range_km`'s 500 m bucket that is 2.4 buckets wide, so the guard is needed *with* 0b rather than instead of it. It is also the natural consumer of the `extent` field A4's trace line already requires.) |
+| **3.5 (new)** | **The cohesion admission gate — `BL-B58`. Blocking, before Stage 4.** Own plan document: `plans/group-cohesion-admission-gate/plan.md` (see **A9**). |
+| **4** | Unchanged, **conditional on Stage 0 and now also on Stage 3.5** (A9). Without a bounded extent its heading input is membership noise (A2.2). **The speech-time extent guard is unconditional, not a fallback** — do not speak a heading or a single bearing for a group wider than one believable bearing. (Corrected 2026-10-11, Stage 0 review observation 1. This read *"if Q-A declines 0b, Stage 4 needs an extent guard at speech time instead"*. Q-A/Q-B were **accepted** and 0b shipped, so the condition is settled — but 0b caps a *pair*, not a cluster, and single-link chaining still permits a 1.2 km span: `tests/test_groups.py::test_the_eager_cap_still_chains_a_long_infantry_line` pins four infantry at 400 m spacing, 3 gaps × 400 m = 1,200 m, as one group. Against `_format_range_km`'s 500 m bucket that is 2.4 buckets wide, so the guard is needed *with* 0b rather than instead of it. It is also the natural consumer of the `extent` field A4's trace line already requires.) |
 | **5** | **Recommendation unchanged and now stronger.** The body's effort/value read used 51.6 ms; the real figure is 84.6 ms in situ, and `BL-B49` is unresolved on the same call. Keep the cheap anisotropic stand-in as a *proposal*, move the graph corridor to `BL-8`. Still Q1 for the user. |
 | **6** | Unchanged, still last. Its stated precondition (Stages 1 and 3 in first) is unaffected. |
 
@@ -312,6 +313,40 @@ here re-decides them.
 to **pairs**, so it currently merges armour across 6 km. Whether that was meant is his call, not
 this plan's — **Q-A**. The recommendation (both-EAGER) is the reading that keeps his sentence
 literally true about infantry and nothing else, but it is a recommendation.
+
+---
+
+## A9 — Stage 3.5: the cohesion admission gate (`BL-B58`), planned separately
+
+**Added 2026-10-12, after Stages 0–3 landed.** Stage 3's within-group fold moves a contact's fused
+position; the next tick's clustering can absorb a previously-separate, correctly-identified contact.
+`BL-B58` is the finding. The user chose **option 3 — fix at source in clustering** (over speech-time
+suppression and a displacement bound), because *"group membership is what the rest of BL-12 and
+BL-14 build on — a wrong member poisons heading, composition and attack-run alignment, not just one
+spoken line."*
+
+**The plan is `plans/group-cohesion-admission-gate/plan.md`**, its own document because it spans
+`contacts.py` as well as `groups.py` and carries its own staging and open decisions. What that pass
+established, which matters to this plan's own text:
+
+- **`BL-B58`'s sketched check is a measured no-op.** The absorbing edge already clears
+  `_pair_backstop_m` — 81.9 m against 88.0 m. The cause is a **219 m single-tick fold displacement**,
+  and it persists, so no tick-local rule fixes it. The gate therefore carries provenance
+  (`Contact.fold_displacement_m`), not geometry.
+- **A cluster-extent bound cannot be the instrument here.** The wrong four-member cluster and the
+  correct three-member one have **identical extent, 329.9 m**. This does **not** retire A6's Stage 4
+  extent guard, which answers a different question (spoken width) and is still required.
+- **A second independent incident is reproduced**, and **with an air-defence member absorbed**:
+  `air_defence_composition` goes `[]` → `[('OP_SPAAG', 1)]`, persistently — both sub-questions
+  `BL-B58` left open are now closed by measurement rather than deferred.
+- **A sibling defect was found in the same run and is `BL-B59`**: the same fold drift **evicts** a
+  real member, by shifting the median nearest-neighbour gap and tightening the relative threshold.
+  That is the direction that can *suppress* an air-defence report, and it is out of Stage 3.5's scope
+  by design.
+
+**Stage 4's dependency widens**: it is now gated on Stage 3.5 as well as Stage 0, for the reason A2.2
+already gives — its heading input is membership noise, and §2 of that plan puts a number on it
+(one tick, no motion, a 132 m member displacement plus a simultaneous absorption and eviction).
 
 ---
 

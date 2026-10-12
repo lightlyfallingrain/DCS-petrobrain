@@ -97,6 +97,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B56]] — A fourth copy of the air-defence vocabulary, outside the new guard
 - [[BL-B57]] — A class-level installation belief gets a non-zero plausible speed
 - [[BL-B58]] — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
+- [[BL-B59]] — The same fold drift that absorbs an unrelated contact also evicts a real member
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
