@@ -893,3 +893,185 @@ sibling.
 account, the call-site count for the sibling-function tradeoff re-grepped rather than credited, and
 the full CLI-to-`trace_sink` call chain traced through six files rather than inferred from the test
 names. Both check suites re-run from the fast-forwarded tip. Nothing spot-checked.
+
+---
+
+# Round: BL-12 Stage 2 — Per-classification uncertainty growth (D8)
+
+Reviewed `2e05f87` (2a, mechanism), `2f75286` (2b, calibration), `b180c7e` (log + agent memory), on
+top of `33d78d8`. Eleven files, matching the task's own list exactly
+(`git diff --stat 33d78d8 b180c7e`).
+
+## Mechanism/calibration split — real, not nominal
+
+`body-layer/CLAUDE.md`'s "Mechanism and calibration never share a commit" is honoured literally:
+2a adds `plausible_speed_mps(op_class, installation_component)` returning `GATE_GROWTH_RATE_MPS`
+for every input (`del op_class, installation_component; return GATE_GROWTH_RATE_MPS`) and threads
+it through every elapsed-motion call site (`_inflated_since_last_fuse`, `fold_position`,
+`clamp_to_detection_envelope`, the new `association_over_time.contact_growth_rate_mps`,
+`groups._plausible_speed_mps`); 2b replaces only the function body with the real table. Checked out
+`2e05f87` on its own (`git archive` to a scratch dir, `body-layer/.venv` run against it): **1672
+passed, 4 xfailed** — 1671 pre-existing + the one new bit-identity test, exactly as claimed.
+
+**The bit-identity claim is sound, but by algebra plus one direct test, not by an end-to-end
+pin.** `test_plausible_speed_mps_stage_2a_is_flat_for_every_class` establishes that
+`plausible_speed_mps` itself returns `GATE_GROWTH_RATE_MPS` for every `op_class`/`installation_
+component` combination that appears anywhere in the codebase's tables. Combined with the call-site
+diffs — which only add a `growth_rate_mps` parameter defaulting to `GATE_GROWTH_RATE_MPS`, with no
+other logic touched — that is sufficient to prove no behaviour change; I did not find a gap in the
+reasoning. There is no test that exercises the full pipeline (`Contact.record` → gate) and asserts
+bit-identical gate outcomes directly, but the full 1672-test suite passing unchanged at 2a serves
+that role in practice. **Deleting the test in 2b was right, not merely convenient**: 2b's whole
+purpose is to make `plausible_speed_mps` stop being flat, so a test asserting flatness for every
+input would fail by design after 2b and would have to be deleted or rewritten either way; keeping
+it would mean either a contradiction in the suite or disabling it, neither better than deletion.
+
+## One table, no second copy — confirmed, with one explainable fallback
+
+`grep -rn "plausible_speed"` across `src/` turns up exactly one table (`position_belief.
+_PLAUSIBLE_SPEED_MPS` / `_DEFAULT_PLAUSIBLE_SPEED_MPS`), one public function, and every consumer
+(`association_over_time.contact_growth_rate_mps`, `groups._plausible_speed_mps`) delegating to it.
+`groups.py` still imports `GATE_GROWTH_RATE_MPS` directly for one use:
+`max((_plausible_speed_mps(op_class) for op_class in group.composition), default=GATE_GROWTH_RATE_MPS)`
+— the `default=` fires only if `group.composition` is empty. Traced: the sole construction site
+(`groups.py:874`, the "found" phase) always sets `composition=_composition_of(members)` from a
+real, non-empty member list (`GROUP_REPORTING_MIN_MEMBERS = 2`), so this branch is unreachable for
+any group that has gone through `reconcile`'s found phase — `composition: tuple[...] = ()` is a
+dataclass default kept only for the additive-fields backward-compatibility rule Stage 1 established,
+not a live path. **Optional, not required**: using `_DEFAULT_PLAUSIBLE_SPEED_MPS`-equivalent (i.e.
+calling `plausible_speed_mps` with no classes rather than falling back to the raw constant) would
+remove even the theoretical inconsistency, but since the branch is dead in practice this is not
+worth a commit on its own.
+
+## Installation-component keying — honoured
+
+`plausible_speed_mps(op_class, *, installation_component=False)` checks `installation_component`
+first and returns `0.0` unconditionally, never keyed on an `op_class` list — exactly the reasoning
+`group-cohesion-redesign/plan.md` §1 gives for rejecting an `op_class`-keyed installation set (one
+`op_class` bucket, e.g. `OP_SRSAM`, covers both a genuine fixed site and a single-vehicle mobile
+system). Read, not just cited: §1's own example (`"osa"` vs `"s-125"` both inside `OP_SRSAM`) is the
+exact case this structural keying was built to keep separate, and it does.
+
+## `Contact.record`'s resolve-before-overwrite ordering — true, but unpinned
+
+Read `contacts.py:506-531`: `growth_rate_mps = contact_growth_rate_mps(self)` executes at line 508,
+reading `self.last_class_raw` as it stood *before* the call; `self.last_class_raw =
+percept.classification_raw` does not happen until line 531, after both `fold_position` and
+`clamp_to_detection_envelope` have already consumed `growth_rate_mps`. The ordering is correct as
+documented.
+
+**Verified by mutation, not just reading**: moved the resolve to after the overwrite (and after
+`self.last_alt_m`) in a scratch copy of `contacts.py`. Full suite stayed green — **1674 passed, 4
+xfailed, unchanged** — so no existing test would catch a regression that made the rate follow the
+*new* classification instead of the old one. This is a real gap, not a blocker for this round: the
+ordering is a one-line, load-bearing fact with no behavioural test pinning it, and the natural test
+(a contact whose classification changes between two consecutive looks, with a growth rate that
+differs enough between the two classes to move the resulting covariance measurably) was not written
+in either commit. Recommend a follow-up test next time `Contact.record` is touched for this
+mechanism; not required to land this round because the plan's acceptance criteria for Stage 2 never
+asked for one and the class-flip case is rare relative to what this stage actually calibrates.
+
+## The four moved tests — re-derived correctly, verified by mutation on each
+
+Reverted each moved fixture to its pre-2b numbers (restoring afterward) and re-ran against the
+calibrated table:
+
+| test | old numbers restored | result |
+|---|---|---|
+| `test_groups.py::test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id` | `x=21.0/31.0`, `now_sim=2.0` | `ambiguous_property_matches_count == 1` → **fails** (`0 == 1`) |
+| `test_contacts.py::test_slow_directional_drift_never_reports_a_range_beyond_the_detection_cap` | `range(1, 22)` | **fails** (`assert 2 == 1`, second contact founds early) |
+| `test_contacts.py::test_position_runaway_does_not_corrupt_a_second_contacts_cardinality` | `range(1, 22)`, `t_sim=21.0` | **fails** (same shape) |
+| `test_enrichment.py::test_terrain_aware_position_reprojects_the_fused_estimate_not_the_last_look` | `growth_rate_mps` arg removed from both `fold_position` calls | **fails** (`1100.249… == 1100.442… ± 1e-06`) |
+
+All four fail under the old numbers against the new calibration and pass only at the re-derived
+ones — none is a loosened or boundary-exact rewrite; each still protects the invariant its docstring
+states (gate-split timing, ambiguity nearer-wins, ground-truth parity), just at the correct new
+magnitudes. This is the same check the `BL-B48` case established as a standing instrument, applied
+here to a different table.
+
+## `POSITION_HALF_LIFE_S` — value and asserts untouched, docstring corrected honestly
+
+`decay.py`: the value stays `30.0`; both `assert`s (`OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S`,
+`SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S`) are byte-identical. The docstring now
+says plainly that the 20 m/s derivation "no longer holds for any real contact" and that
+recalibrating the half-life is future work — it does not quietly re-derive a new justification for
+the same number, which would have been worse than leaving the old one.
+
+## The flagged-not-fixed discovery — ruled on, and filed
+
+`object_model.profile_for` cannot resolve `installation_component` from a bare class-level string
+(`"OP_SRSAM"` alone matches no keyword), so an entrenched SAM believed only at class level gets the
+default `8.0` m/s instead of D8's `0.0` until identified to type. Enumerated the same way amendment
+A3 did for the air-defence membership gate: every air-defence `op_class` in the table is `8.0`, same
+as the default fallback, so the *op_class* axis is genuinely harmless as claimed — but
+`installation_component` has no such symmetry (its correct value, `0.0`, differs from the default,
+`8.0`), so the miss is real on that axis.
+
+**Ruling: correct reading, filed as [[BL-B57]] rather than left as a log note.** Pre-existing and
+shared with `_installation_of`/`_pair_backstop_m` (true, as claimed) — but "pre-existing" does not
+mean "not this stage's problem" when this stage is the first consumer for which the default and
+correct values actually diverge (every earlier consumer of `profile_for`'s installation resolution
+only needed a boolean gate, where `False`-by-default degrades safely; this one needs a *number*,
+where the wrong default is numerically wrong, not just conservative). D8's headline case is exactly
+the one this misses. **Does not interact with D6's threat-suppression carve-out**: D6 is gated
+through `classification._op_class_of` (amendment A3's fix, already merged), a different path from
+the growth-rate table reviewed here — this item widens a displacement/association bound, not a
+threat-envelope lookup, so it is a separate, bounded miscalibration rather than a safety-relevant
+interaction with D6.
+
+## Checks
+
+**body-layer/**:
+- `ruff format --check .`: one unrelated pre-existing file flagged (`research/
+  2026-10-05-security-audit.md`, a markdown code-block ruff reformats as if it were live Python —
+  untouched by this diff, confirmed via `git diff 33d78d8 b180c7e -- <that path>` returning nothing).
+  Not a regression from this stage.
+- `ruff check .`: all checks passed.
+- `mypy src --strict` (run from inside `body-layer`): success, 55 source files.
+- `pytest -q`: **1674 passed, 4 xfailed** — matches the implementer's reported numbers exactly.
+  Stage 2a alone (`2e05f87`, via `git archive` to a scratch dir): **1672 passed, 4 xfailed**,
+  matching the claimed 1671 baseline + 1 new test.
+
+**audio-adapter/** — not run by the implementer; checked the claim rather than accepting it.
+`grep -rn "belief\.(groups|contacts|position_belief|association_over_time|decay)" audio-adapter/`
+returns nothing: that subproject talks to body-layer exclusively over `POST /speak`/`/transcripts`
+HTTP, no in-process import either direction (confirmed against `audio-adapter/CLAUDE.md`'s own
+"Division of responsibility" framing). Ran it anyway: **255 passed, 1 skipped** — matches the
+stated baseline exactly, confirming the claim.
+
+## Required Fixes
+
+None.
+
+## Optional Refinements
+
+1. **The resolve-before-overwrite ordering in `Contact.record` is load-bearing and unpinned** — a
+   mutation that resolves the growth rate after `last_class_raw` is overwritten passes the full
+   suite unchanged. Worth a direct regression test (a contact whose classification changes between
+   two consecutive looks, with growth rates that differ enough to move the resulting covariance
+   measurably) next time this function is touched for this mechanism. Not required this round.
+2. **`groups.py`'s `max(..., default=GATE_GROWTH_RATE_MPS)` fallback is the one place the flat
+   constant survives**, even though it is dead code today (the sole construction site always
+   populates `composition`). Cosmetic — the "one table" principle is honoured in every reachable
+   path — but a future caller passing an empty `composition` directly (bypassing `reconcile`'s
+   found phase, e.g. a test fixture) would silently get the pre-calibration rate rather than the
+   table's own default (`8.0`). Worth tightening if `Group` ever gains a second construction path.
+3. **No direct unit test for `association_over_time.contact_growth_rate_mps`** itself (its
+   `profile_for`-resolution logic is only exercised indirectly through the four moved fixtures,
+   all of which happen to use `OP_TRUCK`). A direct test crossing a couple of `op_class`/
+   `installation_component` combinations would pin the function's own contract rather than relying
+   on fixture incidence. Optional.
+
+## Verdict
+
+**APPROVED.**
+
+## Review Confidence
+
+**Full read.** Checked out `2e05f87` standalone via `git archive` to confirm the stated 1672/4
+Stage-2a-only figure rather than trusting the commit message. Mutated four things myself and
+observed the result rather than re-deriving the author's reasoning: the `Contact.record` ordering
+(found an unpinned-but-true claim), each of the four moved tests' old numbers (all four fail under
+the new calibration, confirming genuine re-derivation, not loosening), and the `test_enrichment.py`
+growth-rate arg (confirmed load-bearing). Ran `audio-adapter`'s suite myself rather than accepting
+the "not run, nothing touches it" claim on the strength of a grep alone. Nothing spot-checked.
