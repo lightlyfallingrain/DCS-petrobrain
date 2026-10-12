@@ -176,7 +176,7 @@ from typing import TYPE_CHECKING, Final
 
 from belief import classification
 from belief.decay import GROUP_REIDENTIFY_WINDOW_S
-from belief.position_belief import GATE_GROWTH_RATE_MPS
+from belief.position_belief import GATE_GROWTH_RATE_MPS, plausible_speed_mps
 from perception import object_model
 
 if TYPE_CHECKING:
@@ -884,20 +884,19 @@ def _plausible_speed_mps(op_class: str) -> float:
     metres/second -- the bound `group_matches` test 5 budgets displacement
     against.
 
-    **Stage 1's bridging stand-in for Stage 2's per-class table.** Amendment
-    A2's test 5 row specifies `max(plausible_speed_mps(op_class) for
-    op_class in group.composition)`, but the per-class table itself is
-    Stage 2's own mechanism (`plans/group-contact-identity/plan.md` Stage
-    2a, "provably no behaviour change": the mechanism commit returns
-    `GATE_GROWTH_RATE_MPS` for *every* class, before Stage 2b's calibration
-    commit populates it). Stage 1 does not implement Stage 2, so this
-    function returns the same flat `GATE_GROWTH_RATE_MPS` for every
-    `op_class` -- i.e. `max(...)` over `group.composition` always reduces to
-    this one constant today. Once Stage 2 lands its table, this function
-    (or its caller) is what changes -- not `group_matches` itself, which
-    already reads it as a per-class lookup."""
-    del op_class  # Stage 1: flat for every class -- see docstring.
-    return GATE_GROWTH_RATE_MPS
+    **Stage 2: delegates to the one shared table**, `position_belief.
+    plausible_speed_mps` -- amendment A2's test 5 row specifies
+    `max(plausible_speed_mps(op_class) for op_class in group.composition)`,
+    and that table is now `position_belief`'s, not a second copy here
+    (`BL-B51`'s own lesson about a set declared more than once). Op-class
+    only, deliberately: `Group.composition` does not carry a per-member
+    `installation_component` flag (`Group.installation` is the group-level
+    analogue, already a hard gate in `group_matches` test 2 -- see that
+    test's own docstring), so this call site passes `installation_
+    component`'s default (`False`). `group_matches` itself is unchanged by
+    Stage 2 landing -- exactly as this function's Stage 1 docstring
+    predicted: "this function (or its caller) is what changes"."""
+    return plausible_speed_mps(op_class)
 
 
 def group_match_score(group: Group, observed: _ClusterProperties) -> float:

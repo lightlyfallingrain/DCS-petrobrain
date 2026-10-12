@@ -160,6 +160,49 @@ from perception.source import PositionUncertainty
 #: docstring for why the direction of the move avoids an import cycle.
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
+
+def plausible_speed_mps(op_class: str, *, installation_component: bool = False) -> float:
+    """How fast a contact of `op_class` could plausibly have moved,
+    metres/second -- the one shared table `plans/group-contact-identity/
+    plan.md` Stage 2 threads through both consumers that need a per-class
+    growth rate: this module's own elapsed-motion inflation
+    (`Covariance2D.inflated`, via `_inflated_since_last_fuse`/
+    `fold_position`/`clamp_to_detection_envelope`) and `belief.groups.
+    group_matches` test 5's displacement bound. One table, not two, per
+    `BL-B51`'s own lesson about a set declared more than once drifting
+    apart -- see that backlog item.
+
+    **Stage 2a (this commit): flat for every class, `installation_
+    component` included.** Returns `GATE_GROWTH_RATE_MPS` regardless of
+    either argument -- provably no behaviour change, the same posture
+    `BL-11` Stage 2 took for the `group_salient_ids` hoist: every caller
+    now threads a per-class rate through, but until Stage 2b populates the
+    table below, that rate is the same constant the old hard-coded default
+    already was, for every input. `tests/test_position_belief.py::
+    test_plausible_speed_mps_stage_2a_is_flat_for_every_class` is this
+    commit's acceptance test, and belongs to Stage 2a only -- Stage 2b
+    replaces it with the calibrated table's own test, since by design
+    Stage 2b changes exactly what this function returns.
+
+    Signature fixed here rather than widened later: Stage 2b's table keys
+    on `op_class` for every row but one, and that one row (`installation_
+    component is True -> 0.0`) is keyed on the existing `object_model.
+    ObjectTypeProfile.installation_component` field instead, per
+    amendment A2's own precedent (`group-cohesion-redesign` plan.md §1
+    rejected an `op_class`-keyed installation set) -- so both inputs are
+    needed from the first commit, not added in 2b as a breaking change to
+    an already-shipped signature.
+
+    No-omniscience: takes a bare `op_class` string and a bool, resolved by
+    each caller from `Contact.last_class_raw` (believed classification)
+    via `object_model.profile_for` -- never a DCS `object_type`. This
+    function itself holds no reference to `Contact` or any perception
+    type, by design (see module docstring on why this module never
+    imports `belief.association_over_time` or `perception.object_model`)."""
+    del op_class, installation_component
+    return GATE_GROWTH_RATE_MPS
+
+
 #: Relative floor against a near-singular matrix when inverting, expressed
 #: as a fraction of the matrix's own squared trace rather than an absolute
 #: value -- `2026-09-25` addendum to `plans/position-belief-runaway/
@@ -205,7 +248,11 @@ _MIN_DETERMINANT_ABSOLUTE: Final[float] = 1e-300
 FUSION_SANITY_SIGMA: Final[float] = 5.0
 
 
-def _inflated_since_last_fuse(prior: PositionEstimate, t_sim: float) -> Covariance2D:
+def _inflated_since_last_fuse(
+    prior: PositionEstimate,
+    t_sim: float,
+    growth_rate_mps: float = GATE_GROWTH_RATE_MPS,
+) -> Covariance2D:
     """`prior.fused_covariance`, inflated for elapsed motion since `prior.
     fused_at_sim` -- **always the last genuinely fused update, never the
     last poll** (module docstring's "Hold-recovery timing" invariant).
@@ -214,9 +261,16 @@ def _inflated_since_last_fuse(prior: PositionEstimate, t_sim: float) -> Covarian
     poll -- goes through this one function, so inflation is computed fresh
     from the true base every time rather than compounding an
     already-inflated `prior.covariance` a second time across a chain of
-    holds."""
+    holds.
+
+    `growth_rate_mps` (`plans/group-contact-identity/plan.md` Stage 2a) is
+    the contact's own class-derived rate, resolved by the caller via
+    `plausible_speed_mps` -- this function never resolves a classification
+    itself (module docstring: `PositionEstimate` does not know its own
+    classification and should not). Defaults to `GATE_GROWTH_RATE_MPS` so
+    every pre-Stage-2 call site compiles and behaves unchanged."""
     elapsed_s = max(0.0, t_sim - prior.fused_at_sim)
-    return prior.fused_covariance.inflated(elapsed_s)
+    return prior.fused_covariance.inflated(elapsed_s, growth_rate_mps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,6 +454,7 @@ def fold_position(
     uncertainty: PositionUncertainty,
     look_bearing_deg: float,
     t_sim: float,
+    growth_rate_mps: float = GATE_GROWTH_RATE_MPS,
 ) -> PositionEstimate:
     """Fuse one look `(x, z, uncertainty, look_bearing_deg)` into `prior`
     (`None` for a founding percept) via the information-form covariance
@@ -408,6 +463,13 @@ def fold_position(
     single-look sigma would allow (the plan's "the uncertainty floor
     follows for free" -- the systematic bias never averages out, so the
     fused estimate must never claim to have averaged it away).
+
+    `growth_rate_mps` (`plans/group-contact-identity/plan.md` Stage 2a)
+    is passed straight through to `_inflated_since_last_fuse` for the
+    `prior is not None` branch's elapsed-motion inflation; it is never
+    read when `prior is None` (a founding look has no elapsed motion to
+    inflate). Defaults to `GATE_GROWTH_RATE_MPS`, unchanged for every
+    pre-Stage-2 caller.
 
     **Ill-conditioning guard** (module docstring, defect 1): when `prior` is
     not `None`, the ordinary information-form fused mean is computed first,
@@ -428,7 +490,7 @@ def fold_position(
             fused_covariance=look_covariance,
         )
     else:
-        prior_covariance = _inflated_since_last_fuse(prior, t_sim)
+        prior_covariance = _inflated_since_last_fuse(prior, t_sim, growth_rate_mps)
         info_prior = prior_covariance.inverse()
         info_look = look_covariance.inverse()
         info_sum = info_prior + info_look
@@ -476,6 +538,7 @@ def clamp_to_detection_envelope(
     prior: PositionEstimate | None,
     observer: GeoPosition,
     max_range_m: float,
+    growth_rate_mps: float = GATE_GROWTH_RATE_MPS,
 ) -> PositionEstimate:
     """Module docstring's defect 2: a believed position farther from
     `observer` than `max_range_m` (the perception channel's own physical
@@ -508,7 +571,14 @@ def clamp_to_detection_envelope(
     of reach of any channel's own gate, may still carry an out-of-envelope
     founding range deliberately, to exercise downstream logic unrelated to
     this defect -- clamping here would silently rewrite the very state
-    those tests are checking.)"""
+    those tests are checking.)
+
+    `growth_rate_mps` (`plans/group-contact-identity/plan.md` Stage 2a) is
+    threaded through to the same `_inflated_since_last_fuse` call
+    `fold_position` makes, so a held envelope violation inflates by the
+    same per-class rate the fuse it is holding in place of would have
+    used. Defaults to `GATE_GROWTH_RATE_MPS`, unchanged for every
+    pre-Stage-2 caller."""
     if prior is None:
         return fused
     target = GeoPosition(x=fused.x, z=fused.z, alt_m=observer.alt_m)
@@ -517,7 +587,7 @@ def clamp_to_detection_envelope(
     return PositionEstimate(
         x=prior.x,
         z=prior.z,
-        covariance=_inflated_since_last_fuse(prior, fused.as_of_sim),
+        covariance=_inflated_since_last_fuse(prior, fused.as_of_sim, growth_rate_mps),
         as_of_sim=fused.as_of_sim,
         fused_at_sim=prior.fused_at_sim,
         fused_covariance=prior.fused_covariance,

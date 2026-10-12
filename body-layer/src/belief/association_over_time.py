@@ -210,7 +210,12 @@ from typing import TYPE_CHECKING, Final
 
 from belief.classification import class_compatibility
 from belief.percept import Percept
-from belief.position_belief import Covariance2D, covariance_from_uncertainty
+from belief.position_belief import (
+    Covariance2D,
+    covariance_from_uncertainty,
+    plausible_speed_mps,
+)
+from perception import object_model
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.source import PositionUncertainty
 
@@ -300,14 +305,45 @@ def _percept_covariance(percept: Percept) -> Covariance2D:
     )
 
 
+def contact_growth_rate_mps(contact: Contact) -> float:
+    """The per-contact plausible-speed bound `_contact_covariance` inflates
+    by -- `plans/group-contact-identity/plan.md` Stage 2a. Resolved from
+    `contact.last_class_raw` (believed classification, never a DCS
+    `object_type`) via `object_model.profile_for`, the same resolution
+    `belief.groups._profile_for_contact` already applies for composition/
+    installation -- so a contact's own class and its `installation_
+    component` flag are read through one path, not two.
+
+    Exposed (not a private `_`-prefixed helper) so `belief.contacts.
+    Contact.record` can resolve the identical rate before mutating
+    `last_class_raw`, and thread it through `position_belief.fold_position`/
+    `clamp_to_detection_envelope` as well -- the plan's "one table" rule:
+    the gate's own inflation and `belief.groups.group_matches`'s
+    displacement bound must read `position_belief.plausible_speed_mps`
+    through the same resolution shape, never a second copy of it."""
+    profile = object_model.profile_for(contact.last_class_raw)
+    return plausible_speed_mps(
+        profile.op_class, installation_component=profile.installation_component
+    )
+
+
 def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:
     """The contact side of the gate's covariance sum: `Contact.position`'s
     own real, fused, anisotropic covariance (`plans/precise-position-belief/
     plan.md` Stage 4), inflated for elapsed motion since `contact.
     last_seen_sim`. Pre-Stage-4 this read an isotropic proxy built from the
     scalar `last_position_uncertainty_m` -- now that `Contact` holds a real
-    2x2 covariance, that proxy is gone; this function reads it directly."""
-    return contact.position.covariance.inflated(elapsed_s)
+    2x2 covariance, that proxy is gone; this function reads it directly.
+
+    **Stage 2a**: the inflation rate is now `contact_growth_rate_mps(
+    contact)`, not the bare module default -- see that function and
+    `position_belief.plausible_speed_mps`'s own docstring. Stage 2a's own
+    table returns `GATE_GROWTH_RATE_MPS` for every class, so this is
+    provably no behaviour change yet; Stage 2b is what makes the rate
+    actually vary."""
+    return contact.position.covariance.inflated(
+        elapsed_s, contact_growth_rate_mps(contact)
+    )
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:

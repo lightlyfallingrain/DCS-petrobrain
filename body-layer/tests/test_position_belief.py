@@ -25,6 +25,7 @@ from belief.position_belief import (
     covariance_from_uncertainty,
     estimate_from_look,
     fold_position,
+    plausible_speed_mps,
 )
 from perception.geometry import GeoPosition
 from perception.source import PositionUncertainty
@@ -94,6 +95,45 @@ def test_covariance2d_inflated_defaults_to_module_growth_rate() -> None:
     explicit_growth = covariance.inflated(5.0, growth_rate_mps=GATE_GROWTH_RATE_MPS)
 
     assert default_growth == explicit_growth
+
+
+# --- BL-12 Stage 2a: `plausible_speed_mps` mechanism, provably no --------
+# behaviour change (`plans/group-contact-identity/plan.md` Stage 2a; same
+# posture `BL-11` Stage 2 took for the `group_salient_ids` hoist). **This
+# test belongs to Stage 2a only** -- Stage 2b's calibration commit deletes
+# it and replaces it with the real table's own test, since Stage 2b's
+# entire purpose is to make this function stop being flat.
+
+
+def test_plausible_speed_mps_stage_2a_is_flat_for_every_class() -> None:
+    """Every `op_class` string that appears anywhere in this codebase's
+    profile table or classification lattice (`OP_*` buckets, plus a value
+    that resolves to none of them), crossed with both `installation_
+    component` values, must return exactly `GATE_GROWTH_RATE_MPS` before
+    Stage 2b's calibration lands -- establishing bit-identity at the one
+    function every downstream caller (`association_over_time.
+    contact_growth_rate_mps`, `belief.groups._plausible_speed_mps`) now
+    threads a rate through, rather than merely observing that today's
+    fuller test suite still passes."""
+    op_classes = (
+        "OP_INFANTRY",
+        "OP_ARMORED",
+        "OP_SPAAG",
+        "OP_ZU23",
+        "OP_SRSAM",
+        "OP_MRSAM",
+        "OP_LRSAM",
+        "OP_TRUCK",
+        "OP_SHIP",
+        "OP_GROUPSOMETHING",
+        "OP_SOMETHING_NOT_IN_ANY_TABLE",
+    )
+    for op_class in op_classes:
+        assert plausible_speed_mps(op_class) == GATE_GROWTH_RATE_MPS
+        assert (
+            plausible_speed_mps(op_class, installation_component=True)
+            == GATE_GROWTH_RATE_MPS
+        )
 
 
 def test_covariance2d_mahalanobis_squared_isotropic_matches_scaled_distance() -> None:

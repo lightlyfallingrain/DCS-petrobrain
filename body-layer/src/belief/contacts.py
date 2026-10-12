@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from belief.association_over_time import (
+    contact_growth_rate_mps,
     implied_position,
     passes_gate,
     percept_position_uncertainty,
@@ -492,9 +493,19 @@ class Contact:
         there is no separate "most recent raw position" field any more: the
         percept-gate (`association_over_time.passes_gate`) reads `position.
         covariance` directly (see that module's docstring), so there is
-        nothing left that needs the pre-fusion number."""
+        nothing left that needs the pre-fusion number.
+
+        `growth_rate_mps` (`plans/group-contact-identity/plan.md` Stage 2a)
+        is resolved from *this contact's own current* `last_class_raw` --
+        i.e. before the assignment below overwrites it with the incoming
+        percept's claim -- via `association_over_time.
+        contact_growth_rate_mps`, the one place that resolution happens
+        (see that function's docstring on why `Contact.record`, not
+        `position_belief`, is the caller: `PositionEstimate` must not know
+        its own classification)."""
         look_position = implied_position(percept)
         prior_position = self.position
+        growth_rate_mps = contact_growth_rate_mps(self)
         observer = GeoPosition(
             x=percept.ownship_at_observation.x,
             z=percept.ownship_at_observation.z,
@@ -507,12 +518,14 @@ class Contact:
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
             t_sim=percept.t_sim,
+            growth_rate_mps=growth_rate_mps,
         )
         self.position = clamp_to_detection_envelope(
             fused_position,
             prior_position,
             observer,
             _max_detection_range_m(percept.source),
+            growth_rate_mps=growth_rate_mps,
         )
         self.last_alt_m = look_position.alt_m
         self.last_class_raw = percept.classification_raw
