@@ -419,3 +419,235 @@ Root checkout's venv binaries, cwd inside each subproject — this worktree has 
 
 Both counts landing on baseline is the check that matters for a documentation-only round: a moved
 count would mean something other than a docstring changed.
+
+---
+
+## Stage 1 — Group identity survives member-id replacement
+
+Branch `feature/bl12-group-contact-identity`, from tip `b54841b` ("Merge main into
+feature/bl12-group-contact-identity before Stage 1"), which already carries Stage 0 (both rounds)
+and a merge of `main`.
+
+### What shipped
+
+`Group` gains seven additive fields (`last_observed_sim`, `centroid_x`, `centroid_z`,
+`centroid_uncertainty_m`, `composition`, `installation`, `air_defence_composition`), all defaulted
+so every pre-existing direct `Group(...)` construction site (four in the test suite) compiles
+unchanged. `GroupStore.reconcile` becomes four phases (overlap → property → found → expire), with
+a new pure predicate `group_matches` (amendment A2's six tests, 1–5 as hard gates, 6 as the
+caller's tiebreak) and `group_match_score` (nearest-first ordering). `GroupStore.groups` keeps
+meaning "currently observed" exactly as before; a new `GroupStore.remembered_groups` (and
+`ContactStore.remembered_groups`, delegating) is the full retained set, including groups merely
+kept through the expire window. `group_for_contact` now reads `self.groups`, not the full retained
+set, for the same reason. `GROUP_REIDENTIFY_WINDOW_S` (60.0 s, `= 2 * POSITION_HALF_LIFE_S`) lives
+in `belief/decay.py`'s one table, per that module's own "a future pass extends this table rather
+than starting a second one."
+
+**The group-identity sortie trace line is the first behavioural addition, per A4/Q-C.**
+`GroupStore.reconcile` gained a keyword-only `trace_sink: Callable[[Mapping[str, object]], None] |
+None = None` parameter (default `None`, true no-op), threaded through `ContactStore.tick`'s own new
+`group_trace_sink` keyword parameter to the same eighth block that already calls `reconcile`. One
+record per cluster-resolution outcome (`phase` in `overlap`/`property`/`found`) and one per group
+that actually expires this call (`phase = "expired"`), each carrying `group_id`, the roster
+(`member_contact_ids`, sorted), `centroid_x`/`centroid_z`, `extent_m` (the maximum pairwise distance
+among the cluster's members — the field A4 singles out as the one that would have caught `BL-B48`,
+and the one no existing field could stand in for: `centroid_uncertainty_m` is per-member position
+noise, not cluster width), and `composition`.
+
+### Scoping decision flagged rather than made silently: no CLI/file wiring for the trace line
+
+**A4 says the trace line is Stage 1's first commit; it does not say it must already write to a
+file this commit.** I built the mechanism (above) fully and tested it, but did **not** wire a
+`--group-trace PATH` CLI flag through `logger.py`/`run_log_paths.py`, mirroring
+`--detection-trace`/`--speech-log`. Three reasons, together:
+
+1. **The plan's own "Affected Modules / Files" list for Stage 1 never names `logger.py` or a new
+   top-level writer module** — every other Stage 1 field/mechanism it names is in `groups.py`,
+   `contacts.py`, or a test file. A fourth CLI-wired JSONL log is a materially different shape of
+   work than anything else listed.
+2. **`logger.py`'s `_per_run_log_paths`/`DEFAULT_SPEECH_LOG_PATH` machinery is exactly the function
+   this project's own implementer memory names as having cost five review rounds over
+   under-enumerated exception handling** (`feedback_scope_your_verification_to_the_containing_unit`
+   in spirit) — not a reason to avoid it forever, but a reason not to extend it inside a task scoped
+   to "Stage 1 only."
+3. **The mechanism is fully usable without it.** `trace_sink`/`group_trace_sink` are ordinary
+   optional parameters a caller (a future `--group-trace` flag, or a test, or an interactive
+   session) can supply directly; nothing about Stage 2–6 or the CLI wiring is blocked by deferring
+   the file/flag half.
+
+**Flagging this explicitly rather than silently deciding it**, per the Escalation Rules ("the
+feature is much larger or smaller than expected") — the mechanism is complete and tested; wiring it
+to `--group-trace` is a small, well-scoped follow-up (one flag, one writer module mirroring
+`speech_log.py`'s ~79 lines, one line in `_per_run_log_paths`) that the orchestrator/Reviewer should
+decide whether to fold into this feature's remaining stages or file separately. Until it exists,
+D5's rarity claim and `BL-B50`'s lapse condition are checkable only by a caller that supplies its
+own sink (e.g. a test, or an ad hoc session script) — not yet from a live sortie.
+
+### The one-sided "stopped" rule in test 5 (D4), and why
+
+Amendment A2's test 5 specifies `speed_bound_mps = 0.0` when **both** sides' movement state is
+`"stopped"`. `Group` carries no persisted movement state until Stage 4 — it is not in Stage 1's
+field list — so there is no "remembered side's movement" to read. I implemented the rule
+one-sidedly: the bound zeroes only on the **observed** cluster's confirmed-stopped evidence
+(`_cluster_is_stopped`, requiring at least one member with a known motion belief and all known
+members reporting `"stopped"`).
+
+**Why this is the safe narrowing, not a silent weakening.** Since `elapsed_s >= 0`, a zero bound is
+never *larger* than the ordinary moving bound — one-sided evaluation can only ever make test 5
+*stricter* (reject more) than the full two-sided rule would, never more permissive. It cannot cause
+a false re-identification that the full rule would have rejected; it can only reject a
+re-identification the full rule (with remembered motion available) might have accepted. Stage 4,
+which persists `Group.movement_state`, is the natural place to widen this to both sides — flagged
+in `group_matches`'s own comment so it is not rediscovered as a defect.
+
+### `plausible_speed_mps` is a flat Stage 1 stand-in, not Stage 2 pulled forward
+
+Test 5's `max(plausible_speed_mps(op_class) for op_class in group.composition)` is, as written in
+the plan, Stage 2's per-class table. Stage 2 is out of scope for this task. `_plausible_speed_mps`
+in `groups.py` returns `position_belief.GATE_GROWTH_RATE_MPS` (20.0, flat) for every `op_class` —
+exactly what Stage 2a's own "mechanism commit, provably no behaviour change" describes as its
+starting state, before Stage 2b's calibration populates the table. `group_matches` already reads
+it as a per-class lookup, so Stage 2 changes `_plausible_speed_mps` (or its caller), not
+`group_matches` itself.
+
+### No-omniscience, per new field
+
+Every one of the seven `Group` fields, `_ClusterProperties`, and `group_matches` reads exactly two
+sources: `Contact.position` (fused belief, `PositionEstimate.x`/`.z`/`.radius_m()`) and
+`Contact.last_class_raw` (believed classification), via `_profile_for_contact`
+(`object_model.profile_for`) for `composition`/`installation`/size, and via
+`belief.classification.parent_class_of` (the lattice) for `air_defence_composition` specifically —
+amendment A3's correction, verified below. Nothing reads an `Observation`, a DCS `object_id`, or
+`derived_world_position`. `_cluster_is_stopped` reads `Contact.motion.state`, itself folded belief
+(`belief.motion`), never a raw velocity.
+
+### A3's correction, verified against the real tables
+
+Ran the same probe the amendment's own measurement used, against this tree, confirming
+`object_model.profile_for("OP_MRSAM")` resolves to `DEFAULT_OP_CLASS` (`OP_GROUPSOMETHING`) —
+i.e. a class-level SAM belief is invisible to a `profile_for`-based test — while
+`classification.parent_class_of("OP_MRSAM")` resolves to `"OP_MRSAM"` directly. Exercised in
+`test_air_defence_composition_resolves_through_the_lattice_at_class_level`, which asserts both the
+`profile_for` miss and the `air_defence_composition` hit in one test, so the two paths cannot
+silently agree by coincidence.
+
+### Test-impact: the orchestrator's prompt named no existing tests, and that held — with one exception found and fixed
+
+Per the implementer role's "test-impact hypothesis" step: grepped the suite for every consumer of
+`belief.groups` (`test_speech`, `test_crew_console`, `test_contacts`, `test_callouts`, `test_groups`,
+`test_tools`) and for the one place a `Group` is constructed/injected directly bypassing
+`GroupStore.reconcile` (`grep -rn "_groups\._groups\[" tests/`). One test needed rewriting, and it
+is **not named anywhere in the plan or the task prompt**:
+
+`test_callouts.py::test_group_of_already_reported_and_merge_echo_suppressed_members_is_silent`
+injects a hand-built `Group` directly into `store._groups._groups[...]` and then calls `poll()` in
+a loop that never calls `store.tick()` again — so `GroupStore.reconcile` never re-examines it. Its
+final assertion read `store.groups[0].last_spoken_signature is None`. Under Stage 1's new, stricter
+`groups` semantics (currently observed only), an injected group that was never actually matched by
+a real `reconcile` call correctly has `last_observed_sim` at its unset default, so it is — correctly
+— not "currently observed," and `store.groups` is empty: `IndexError`, not a silent pass. Fixed by
+reading `store.remembered_groups` instead, which is exactly the right read here (this test's own
+docstring says explicitly that it does not care how the group came to exist) — not a weakening of
+the test, since the property being checked (never marked as spoken) is unaffected by which of the
+two properties is read. Documented inline in the test with a short note explaining why the
+distinction now matters, so a future reader does not read the change as arbitrary. This is the
+"missing entry is the dangerous one" case the role's own step 1b warns about: the plan's test-impact
+section is about Stages 2–3 (not written for Stage 1 at all, since this task is Stage-1-only), and
+the orchestrator's task prompt named no tests either — this one surfaced only from the broad grep,
+not from any document.
+
+No other test in the full suite moved; the one failure above was the only regression surfaced by
+running the whole suite with the new code in place (1643 passed before this fix attempt, 1 failed,
+1642 passed after — confirming it was the sole casualty).
+
+### Design choices made and not escalated (local, reversible)
+
+- **Phase 2 cluster-processing order**: unmatched clusters are processed in a deterministic order
+  (sorted by each cluster's own sorted member-id tuple), each claiming at most one unclaimed group
+  greedily. This resolves the one ambiguity amendment A2 does not fully specify — what happens when
+  one group could plausibly match *two different* clusters in the same reconcile (as opposed to
+  test 6's "one cluster, two groups" case, which *is* specified) — by giving priority to whichever
+  cluster sorts first. Documented in `reconcile`'s own docstring. Reversible in isolation; flagging
+  rather than treating as settled.
+- **`GroupStore.ambiguous_property_matches_count`** is a plain running counter (not reset, not
+  windowed) — the simplest implementation of A4/test 6's "count the occurrences" requirement.
+  `BL-8` or a later pass can window/reset it if the raw count proves awkward to read from a sortie.
+
+### Files Changed
+
+- `body-layer/src/belief/decay.py` — `GROUP_REIDENTIFY_WINDOW_S` added to the one half-life/window
+  table (derived, `2 * POSITION_HALF_LIFE_S`), plus a module-docstring sentence noting it.
+- `body-layer/src/belief/groups.py` — the bulk of the work: `Group`'s seven new fields;
+  `_air_defence_op_class_of`/`_composition_of`/`_air_defence_composition_of`/`_installation_of`/
+  `_centroid_of`/`_centroid_uncertainty_of`/`_extent_of`/`_cluster_is_stopped`/`_ClusterProperties`/
+  `_cluster_properties`/`_plausible_speed_mps`/`group_match_score`/`group_matches`; `GroupStore`
+  gains `remembered_groups`, `ambiguous_property_matches_count`, `_last_reconciled_sim`, a rewritten
+  `reconcile` (four phases + `trace_sink`), and a `groups`/`group_for_contact` narrowed to
+  currently-observed. Module and class docstrings updated in place, pointers kept to superseded
+  passages per `docs/PROCESS.md`'s "Superseding a decision" convention.
+- `body-layer/src/belief/contacts.py` — `ContactStore.tick` gains keyword-only `group_trace_sink`,
+  threaded to `reconcile`'s `trace_sink`; `ContactStore` gains `remembered_groups`, delegating.
+- `body-layer/tests/test_decay.py` — `GROUP_REIDENTIFY_WINDOW_S` import + one pin test.
+- `body-layer/tests/test_groups.py` — `_contact` fixture gains `uncertainty_m`/`motion_state`
+  (additive, defaulted); 20 new tests covering: remembered-property computation on reconcile
+  (composition, installation, air-defence lattice resolution, centroid/RMS uncertainty); the
+  headline member-id-replacement scenario; retention vs. expiry (`groups` vs. `remembered_groups`);
+  `group_for_contact`'s narrowed scope; each of `group_matches`' five hard tests in isolation, plus
+  `group_match_score`'s ordering; the ambiguity tiebreak and its counter; the trace line's four
+  phases including `expired`.
+- `body-layer/tests/test_callouts.py` — one existing test's final assertion and docstring, per the
+  test-impact finding above.
+
+### Tests Added
+
+See the bullet above for the full list by topic; by name, in `tests/test_groups.py`:
+`test_a_freshly_formed_group_carries_its_remembered_properties`,
+`test_air_defence_composition_resolves_through_the_lattice_at_class_level`,
+`test_installation_is_true_only_when_every_member_is_an_installation_component`,
+`test_centroid_uncertainty_is_the_rms_of_member_radii`,
+`test_a_group_survives_total_member_id_replacement_via_property_match`,
+`test_a_group_with_no_matching_cluster_is_retained_not_dropped_within_the_window`,
+`test_a_group_expires_once_the_reidentify_window_elapses`,
+`test_a_reclaimed_group_is_no_longer_in_remembered_groups_alongside_groups`,
+`test_group_for_contact_only_considers_currently_observed_groups`,
+`test_group_matches_rejects_past_the_reidentify_window`,
+`test_group_matches_rejects_a_mismatched_installation_flag`,
+`test_group_matches_requires_air_defence_confirmation_both_ways`,
+`test_group_matches_composition_compatibility_is_subset_either_direction`,
+`test_group_matches_rejects_an_implausible_displacement`,
+`test_group_matches_zero_speed_bound_when_the_observed_cluster_is_stopped`,
+`test_group_match_score_orders_nearest_first`,
+`test_ambiguity_resolution_prefers_nearest_centroid_then_lowest_id`,
+`test_reconcile_emits_a_trace_record_for_each_resolution_phase`,
+`test_reconcile_trace_distinguishes_overlap_property_and_expired`; in `tests/test_decay.py`:
+`test_group_reidentify_window_is_twice_the_position_half_life`.
+
+### Checks
+
+**body-layer/**
+
+- `ruff format --check src tests`: **pass** (118 files already formatted, after one `ruff format`
+  run to settle line-wrapping in the new code)
+- `ruff check .`: **pass**
+- `mypy src` (`--strict`, from inside the subproject): **pass**, 54 source files
+- `pytest`: **pass** — **1663 passed / 4 xfailed** (baseline at Stage 0 round 2: 1643 / 4; +20 new
+  tests, 0 removed, 0 rewritten beyond the one test-impact fix above)
+
+**audio-adapter/** (untouched by this change; run because the task asked)
+
+- `ruff check .`: **pass**
+- `mypy src`: **pass**, 15 source files
+- `pytest`: **pass** — **255 passed / 1 skipped** (matches baseline)
+
+### Not done, deliberately
+
+- **CLI/file wiring for the group-identity trace line** (`--group-trace`, a writer module mirroring
+  `speech_log.py`, `_per_run_log_paths` integration) — see the scoping decision above.
+- **Stages 2–6** — per-class uncertainty growth (beyond the flat stand-in noted above), the
+  inverted ambiguity policy at contact grain, group movement/heading and the speech-time extent
+  guard, the road corridor, and shortening `OBJECT_ID_MEMORY_S` — all out of scope per the task.
+- **`speech._is_air_defence`, `decay.py`'s certainty ladder, `crew_console.py`'s fourth air-defence
+  vocabulary copy (`BL-B56`)** — untouched; not in the diff.
+- **`body-layer/docs/STRUCTURE.md` still has no `src/belief/groups.py` entry** — carried over from
+  Stage 0, still correctly deferred; this stage's reasoning is recorded in the module's own
+  docstring, same posture as Stage 0.
