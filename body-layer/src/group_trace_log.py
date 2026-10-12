@@ -32,11 +32,21 @@ class GroupTraceLogWriter:
     """Appends one JSON line per group-identity trace record.
 
     Unbuffered, mirroring `SpeechLogWriter` rather than
-    `DetectionTraceWriter`'s five-poll buffer: a phase-2 property match or
-    an expiry is a handful of rows per sortie at most (D5's own rarity
-    claim), not hundreds per poll, and the row most worth having is the one
-    immediately before a wrong spoken line — which a buffer would still be
-    holding when the process was killed to investigate.
+    `DetectionTraceWriter`'s five-poll buffer. The unbuffered choice is for
+    the usual reason -- the row most worth having is the one immediately
+    before a wrong spoken line, which a buffer would still be holding when
+    the process was killed to investigate -- but the frequency it is
+    weighed against is not rare: `GroupStore.reconcile`'s `trace_sink`
+    fires once per active cluster on **every** reconcile call when
+    `--group-trace` is on, not only on the occasional phase-2 property
+    match or expiry (see `reconcile`'s own docstring: "once per cluster-
+    resolution outcome... and once per group that expires this call").
+    Measured at realistic scale (4-15 tracked clusters, ~1 Hz polling):
+    ~0.03 ms per write, ~0.14-0.51 ms per poll, against a 12.6 ms median
+    poll and a 1.0 s budget -- immaterial, so unbuffered is still the
+    right call, but on "every cluster, every poll," not "a handful per
+    sortie." With no `--group-trace` (the default), nothing here runs at
+    all -- a true no-op.
     """
 
     def __init__(self, path: Path) -> None:

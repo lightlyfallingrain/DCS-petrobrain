@@ -1395,3 +1395,32 @@ added by this round. Every other group-disclosure fixture in `test_speech.py` us
 default `extent_m` (well under the guard threshold), so the clock/range clause's new extent
 condition is always true for them and nothing about their rendered text moved. Confirmed by `grep
 -n "extent_m=" tests/test_speech.py` returning exactly those two lines.
+
+---
+
+## Performance review change request — `GroupTraceLogWriter` docstring (docs-only)
+
+`plans/group-contact-identity/performance-review.md`'s one Change Request: the class docstring
+justified its unbuffered design on *"a phase-2 property match or an expiry is a handful of rows
+per sortie at most... not hundreds per poll."* The actual call site
+(`belief/groups.py`'s `reconcile`, trace-record loop around line 1408/1468-1479) appends one
+record per **active cluster on every `reconcile` call** whenever `--group-trace` is on, not only
+on the rare phase-2/expiry events — confirmed against `reconcile`'s own docstring ("`trace_sink`...
+is called once per cluster-resolution outcome... and once per group that expires this call").
+
+Corrected `body-layer/src/group_trace_log.py`'s `GroupTraceLogWriter` class docstring to state the
+real frequency ("every active cluster, every reconcile call") and the measured cost from the
+performance review (~0.03 ms/write, ~0.14-0.51 ms/poll at 4-15 clusters against a 12.6 ms median
+poll and a 1.0 s budget) rather than the false "handful per sortie" claim. The design decision
+itself — unbuffered, for the "last row before a kill" reason — is kept; only the stated reason was
+wrong. No behaviour change: `write()`, `__init__`, the flag, and the call site are untouched.
+
+### Checks
+
+- `ruff format --check src/group_trace_log.py`: pass (whole-tree `ruff format --check .` reports
+  the pre-existing `research/2026-10-05-security-audit.md` reformat, unrelated to this change and
+  left as-is per the dispatch note)
+- `ruff check .`: pass, all checks passed
+- `mypy src` (strict, from inside the subproject): pass, 55 source files
+- `pytest -q`: pass — **1697 passed / 4 xfailed**, unmoved from the pre-change baseline, as expected
+  for a docstring-only change
