@@ -1075,3 +1075,177 @@ observed the result rather than re-deriving the author's reasoning: the `Contact
 the new calibration, confirming genuine re-derivation, not loosening), and the `test_enrichment.py`
 growth-rate arg (confirmed load-bearing). Ran `audio-adapter`'s suite myself rather than accepting
 the "not run, nothing touches it" claim on the strength of a grep alone. Nothing spot-checked.
+
+---
+
+# Round: BL-12 Stage 3 — Within-group ambiguity resolution (D5 at contact grain, D6 carve-out)
+
+Reviewed `54b6190` (mechanism), `0a28405` (plan-named test rewrite + two new tests), `fbbba25`
+(2C fixture re-derived, not plan-named), `3fb6018` (`test_logger.py` decoupling, not plan-named),
+`74f6efd` (log + agent memory), on top of `0abc738`. Seven files
+(`git diff --stat 0abc738 74f6efd`), matching the implementer's own list exactly.
+
+## Branch assembly, per rule 4
+
+Worktree HEAD (`cb39159`) was a strict ancestor of the named tip `74f6efd` and the tree was clean —
+`git merge --ff-only 74f6efd` succeeded, now at that sha.
+
+## Branch 1 (D6) resolves through the lattice — verified by mutation, not reading
+
+`_fold_target_for_ambiguous_candidates` reads `belief.classification.parent_class_of`, never
+`object_model.profile_for`, exactly as amendment A3 and the implementation log state. Checked by
+breaking it deliberately: swapped the resolution to
+`object_model.profile_for(candidate.last_class_raw).op_class` (adding the one import that requires),
+reran `test_air_defence_candidate_forces_a_new_contact_even_within_a_group` —
+**fails, `2 == 3`**, falling through to branch 2's fold exactly as the test's own docstring predicts
+for this specific mutation. Restored the file; `shasum` of `contacts.py` matches the pre-mutation
+value, confirming a clean revert. `groups.py`'s companion fix (`_air_defence_op_class_of` reading
+`classification.AIR_DEFENSE_OP_CLASSES`/`_op_class_of`, not `_profile_for_contact`) is read and
+matches the same posture; `BL-B51`'s fold-into-one-set is also confirmed: the set now lives in
+`belief/classification.py` alone, with `groups.py` importing it rather than holding its own copy.
+
+## The growth-rate ordering counterfactual — reproduced exactly
+
+Swapped `Contact.record`'s two lines (resolving `growth_rate_mps` after overwriting
+`last_class_raw`, instead of before) and reran
+`test_contact_record_resolves_growth_rate_before_overwriting_last_class_raw`: fails with
+**`1281.5068493150686 == 1196.1538461538462 ± 0.00119615`** — the implementer's own reported numbers
+to five significant figures. Restored; `shasum` matches.
+
+## The two plan-unlisted test fixes — judged separately, as the task asked
+
+**`3fb6018` (`test_logger.py`) is a decoupling, not a loosening.** `_make_observation` gains
+additive, default-preserving `bearing_deg`/`range_m` parameters; only the one call that needed a
+distinct position gets one. The test's own assertion is untouched — it still checks push-failure
+isolation, now without an incidental dependency on ambiguity resolution it never intended to
+exercise. Matches this project's own `feedback_shared_fixture_position_becomes_load_bearing`
+agent-memory note (written the same round) precisely, and is the right kind of fix per that note's
+own distinction (decouple the fixture vs. rewrite the assertion).
+
+**`fbbba25` (`test_callouts.py`'s 2C fixture) is scrutinised hard, per the task's instruction, and
+holds up.** Its new expectation was read off a run — I re-derived the same run independently rather
+than trusting either the implementer's account or the diff: built a standalone script against the
+real `ContactStore`/`GroupStore` reproducing the fixture's full event sequence through t=12 and
+printed contact positions and group membership after the fold+reconcile. Result matched the test's
+assertion exactly — one group, `{CONTACT_1, CONTACT_2, CONTACT_3, CONTACT_4}`, not the two
+infantry-only pairs Stage 0a alone produced. This is independent reproduction, not re-reading the
+same diff twice.
+
+## The cascade finding — real, reproduced, characterised
+
+**Real.** Confirmed above by independent reproduction (own script, not the implementer's), and by
+running the actual test unmodified (`1 passed`). `CONTACT_4` (BTR-70) is never itself a candidate in
+any `ingest` call in this fixture — it is absorbed purely by `_cluster_contacts`'s position-only
+single-link re-clustering inside the same `tick()` call that follows the fold, because the fold
+moved `CONTACT_1`/`CONTACT_2`'s fused positions (`fold_position` is a real weighted fuse) close
+enough to `CONTACT_4` to clear the pair backstop/relative-gap test.
+
+**Bounded within one incident, not a single-tick runaway — settled with a run, not an argument.**
+Extended the same script ten further polls past t=12, injecting a fresh, nearby, genuinely new
+infantry percept each poll. Each one folds onto the existing group (repeating the undercount,
+moving the folded-onto contact's position a little further each time) but **group membership stays
+at the same four contacts and `centroid_uncertainty_m` *shrinks*, 258 m -> 242 m, across the ten
+polls** — re-observation tightens covariance faster than the drift widens it once the group is
+actually being seen again. So this is not compounding cluster growth within one continuously-visible
+episode. **The real risk is repeat-incident, not runaway-single-incident**: each time a group goes
+unobserved long enough for covariance to inflate (an ordinary occurrence — terrain masking, a scan
+elsewhere) and an ambiguous percept lands nearby exactly when visibility returns, one more
+absorption of this shape can fire, independently, on its own schedule. I did not construct a clean
+second, independent incident in the time available (my own attempt at one accidentally exercised a
+different, pre-existing single-candidate continuity-merge path instead of the ambiguity fold,
+which is a real distinction worth knowing but not evidence either way for repeat-incident
+compounding) — flagged as the open half of this question in `BL-B58`, not asserted as settled.
+
+**Partly, not wholly, a fixture artifact — measured, not assumed either way.** The fixture's
+observations declare no `position_uncertainty`, so both gate sides fall back to the isotropic
+`_FALLBACK_UNCERTAINTY_RADIUS_M` (300 m) — a path `association_over_time.py`'s own comment says
+"should not happen in production." At this fixture's short ranges (280-500 m), real declared
+naked-eye uncertainty (`naked_eye_sigma_m`: `sigma_cross = radians(3.0) * range`, `sigma_down =
+0.17 * range`) is far tighter — about 49 m at 280 m, 89 m at 500 m, one-sided — than the 300 m
+fallback, so the fixture's 500-900 m absorption range would not reproduce at these particular close
+ranges with real declared uncertainty. **But at the ranges this project's own prior measurements
+already cite as typical naked-eye operating range** — `plans/contact-duplication-ambiguity-runaway/
+debug.md`'s ~590 m one-sided gate at 1200 m range, and `BL-12`'s own roadmap entry's 600 m gate
+after 30 s unseen — real declared uncertainty alone is already comparable to or wider than this
+fixture's fallback. So the mechanism is not confined to a fixture artifact; it would recur at
+realistic mid-range engagement distances with entirely real numbers, just without this fixture's
+own extra amplification at *these particular* close ranges. Filed in `BL-B58` with both halves
+stated, not just the flattering one.
+
+**D6's own gate is unaffected by the cascade — checked directly against the code, not inferred.**
+The absorption resolves through `reconcile`'s phase 1 (overlap match, since the new cluster already
+shares 3 of 4 members with the existing `Group`), which carries no class/air-defence/displacement
+check at all — D6's hard air-defence-confirmation test only gates phase 2 (property match, a cluster
+with *zero* member overlap against a remembered group), a path this absorption never reaches. Read
+`reconcile`'s phase 1 and phase 3 construction directly: `Group.air_defence_composition` is
+recomputed fresh from the matched cluster's actual current members on every call regardless of
+phase, never carried over stale. So the risk this cascade poses is not a stale or bypassed
+air-defence flag — it is that cluster *membership itself* can be corrupted by spurious position
+drift, which would then correctly (but misleadingly, given the corrupted membership) update
+`air_defence_composition` to match. I did not reproduce this with an actual air-defence contact in
+the time available — noted as the concrete next check in `BL-B58`, not asserted as proven either
+way.
+
+**None of the plan's three named failure modes individually describes this**, as the implementer's
+own log and the test's docstring already say, and I agree after reading all three against the
+mechanism directly: failure mode 1 ("the group-level answer stays correct") is the one that comes
+closest and explicitly does not cover it — here the group-level answer becomes wrong.
+
+**Filed as `[[BL-B58]]`**, with three options and their relative costs (widen Stage 4's
+not-yet-built extent guard to also suppress composition-based disclosure past a width bound;
+bound a single fold's maximum position displacement; re-check cohesion before a plain overlap-match
+absorbs a new member) — for the orchestrator to put to the user, per the task's own framing. No
+option is applied here: the mechanism as built matches the plan and its amendments exactly, and
+adding a safeguard not in the plan would be scope the implementer correctly declined to add
+unprompted.
+
+## Checks — confirmed myself, not accepted from the log
+
+**body-layer/** (via `/Users/sg/Code/DCS-petrobrain/body-layer/.venv`, this worktree has none of
+its own):
+- `ruff format --check src tests`: **pass**, 120 files already formatted.
+- `ruff check .`: **pass**, all checks passed.
+- `mypy src --strict` (run from inside `body-layer`): **pass**, 55 source files.
+- `pytest tests -q`: **pass — 1676 passed, 4 xfailed**, matching the implementer's reported numbers
+  exactly.
+
+**audio-adapter/**: ran it myself rather than accepting the "not run, nothing touches it" claim —
+`grep -rn "belief\.(groups|contacts|position_belief|association_over_time|decay)" audio-adapter/`
+returns nothing (no cross-import either direction), and the suite itself: **255 passed, 1 skipped**,
+matching the stated baseline exactly.
+
+## Required Fixes
+
+None. The mechanism matches the plan and amendment A3 exactly, verified by mutation on both the
+air-defence resolution path and the growth-rate ordering; both plan-unlisted test changes are sound
+(one a correct decoupling, one a correctly re-derived expectation, independently reproduced); all
+checks pass with real numbers matching the log.
+
+## Optional Refinements
+
+1. **`BL-B58`'s repeat-incident-compounding question is left open**, not closed — my own attempt at
+   a second, independent incident exercised a different continuity-merge path by accident rather
+   than the ambiguity fold. Worth a clean second-incident reproduction before this is treated as
+   fully characterised, though it does not block this round's verdict (the mechanism as implemented
+   matches the plan; `BL-B58` is about a consequence the plan did not anticipate, not a defect in
+   what was built against it).
+2. **`BL-B58`'s air-defence-interaction question is also left open** for the same reason (time-boxed
+   this round) — worth a direct reproduction with an actual air-defence contact as the absorbed
+   member before closing that item, even though the code-level read (fresh recomputation every
+   reconcile, no stale carry-over) already rules out the sharpest version of the worry (a stale,
+   silently-wrong `air_defence_composition`).
+
+## Verdict
+
+**APPROVED.**
+
+## Review Confidence
+
+**Full read**, with one explicit limit stated above: `BL-B58`'s repeat-incident and
+air-defence-interaction sub-questions are reproduced-in-part (bounded-within-one-incident is
+settled with a run; whether the pattern can recur across independent incidents, and whether an
+actual air-defence contact can be the absorbed member, are not — both left open in the filed
+backlog item rather than asserted). Everything else in this round — both resolution-path mutations,
+the growth-rate counterfactual, the 2C fixture's new expectation, both plan-unlisted test fixes, and
+every check number — was verified directly: mutated and reran, or re-derived independently and
+compared, not read off the log and trusted.
