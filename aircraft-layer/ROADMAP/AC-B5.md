@@ -1,5 +1,7 @@
 # AC-B5 — A probe Hook left deployed taxes every sortie
 
+REJECTED by user 2026-10-11. Deleting probe hooks is user's responsibility. Not worth the effort.
+
 - [ ] **AC-B5 — A probe Hook left deployed taxes every sortie and contaminates the measurements the
   sortie was flown to take.** #status/open Found 2026-10-08, by the user, after three hypotheses had been tested
   against it:
