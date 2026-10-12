@@ -1,5 +1,37 @@
 # BL-B59 — The same fold drift that absorbs an unrelated contact also evicts a real member
 
+> **Planned, 2026-10-13 — and the plan reverses this entry's framing of its own mechanism.**
+> `plans/group-retention-hysteresis/plan.md`, on `fix/bl-b59-retention-hysteresis`. The user
+> prioritised this as the next piece of work after `BL-12` merged. Reproduced against
+> `1884775` first, then measured; six probes in that plan's `scratchpad/`. **Four findings
+> that correct this entry below rather than confirm it:**
+>
+> 1. **The threshold tightening is the *minor* cause.** Across the fold tick the relative
+>    threshold tightens 13.6 % (195.6 → 169.0 m) while the `CONTACT_1–CONTACT_2` gap grows
+>    **170 %** (72.1 → 194.6 m), because the fold drags `CONTACT_1` and `CONTACT_3` 132.7 m
+>    and 143.3 m while `CONTACT_2` does not move. Clustering is reading a position the fold
+>    corrupted, not mis-reading a correct one — so this is **the same provenance defect as
+>    [[BL-B58]], read on the other side of the comparison**, not a second independent one.
+> 2. **The instrument this entry names is ruled out, measured.** `plans/watch-reporting/
+>    plan.md` §4e's 1.5× hysteresis factor fixes the fold tick and **loses the member again
+>    at t=25**; sweeping the bound as any fraction of the pair threshold (0.25 / 0.5 / 1.0)
+>    fixes the fold tick and loses the member at t=25 in every case. Only an **unbounded**
+>    fold-budget discount holds (0 membership transitions over 60 ticks vs the baseline's 12).
+>    The sweep is not a calibration curve with a good value in it.
+> 3. **Why: `Contact.fold_displacement_m` never retires in the regime where the defect
+>    lives** — it grows 132.7 → 239.0 m over 60 ticks and resets zero times, because in a
+>    scene dense enough for the relative term to bind, every re-observation is itself
+>    ambiguous and folds again. `position.radius_m()` floors at 120.0 m, so covariance
+>    supplies no retiring bound either. **This is a measurement about merged Stage 3.5 code**
+>    — see the recheck note on [[BL-B58]].
+> 4. **The backstop never evicts**; the `CONTACT_1–CONTACT_2` backstop is 500.0 m (Stage 0b's
+>    eager cap) against a 194.6 m gap. Retention must touch the relative term only.
+>
+> The plan's recommendation is therefore **not** what this entry proposes: [[BL-B58]]'s
+> **option 2** (bound a single fold's position displacement at source) fixes *both* halves
+> with one mechanism and removes the need for a retention term — bigger, and the user's call.
+> Three decisions are open; see that plan's §8.
+
 > **Disposition, 2026-10-12 (user decision, `BL-B58`'s decision 2): out of `BL-12`'s Stage 3.5,
 > and prioritised next -- not parked unprioritised.** The admission gate (Stage 3.5, implemented
 > this stage) only ever blocks an admission, never an eviction, by design (see below). Confirmed

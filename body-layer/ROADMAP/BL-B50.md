@@ -15,6 +15,14 @@
 > result is stable across consecutive ticks, or whether `BL-B59`'s eviction mechanism reopens
 > flipping on this exact fixture once it is live for longer than this fixture's own window.**
 
+> **Pointer added 2026-10-13.** `[[BL-B59]]` is now planned
+> (`plans/group-retention-hysteresis/plan.md`), and that plan's acceptance table row **I** is
+> this entry's recheck condition stated as a test: re-run the 2C fixture and confirm the
+> three-line result is **stable across consecutive ticks**. Relevant measurement from that
+> pass: over 60 ticks of repeat folds the baseline shows **12** membership transitions and the
+> retention mechanism **0** — so `BL-B59`'s eviction path is a live flipping source today, and
+> fixing it pushes this entry's ratchet ingredient the right way rather than adding to it.
+
 - [ ] **BL-B50 — `belief.callouts`' group suppression is a one-slot signature plus a speak-only
   membership-snapshot refresh, and any two alternating group lines defeat both.** #status/open
   Found during [[BL-B47]]'s fix, 2026-10-10, and **measured by the Reviewer** rather than reasoned

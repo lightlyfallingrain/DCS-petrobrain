@@ -1,5 +1,27 @@
 # BL-B58 — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
 
+> **Recheck note added 2026-10-13 ([[BL-B59]]'s Architect pass): the `+=` accumulation this
+> stage shipped is now measured, and it never retires.** This entry's own Risks line recorded
+> accumulate-not-replace as *"a stated assumption, not measured against a real repeat-fold
+> incident."* Measured over 60 ticks of continued re-observation in probe 2's geometry
+> (`plans/group-retention-hysteresis/scratchpad/probe_b59_lifetime.py`):
+> `CONTACT_1.fold_displacement_m` goes **132.7 → 172.5 → 192.3 → … → 239.0 m** (`CONTACT_3`
+> reaches 259.8 m) and **resets zero times**. The reason is structural rather than incidental:
+> in a scene dense enough for `_cluster_contacts`'s relative term to bind, every
+> re-observation has ≥2 passing gate candidates, so every re-observation is *itself* ambiguous
+> and folds again — the unambiguous resolution at `contacts.py:1071`/`:1086` that would retire
+> the budget never arrives. `Contact.position.radius_m()` floors at 120.0 m, so covariance
+> supplies no retiring bound either.
+>
+> **Consequence for this stage's own gate, not just for [[BL-B59]]:** the *admission* penalty
+> grows monotonically too, so Stage 3.5 becomes progressively more exclusionary for a
+> repeatedly-folded contact. **No live symptom is attached to this yet** — it would surface as
+> a genuine joiner refused admission to a group it belongs in, which reads as under-merging
+> and would plausibly be attributed to the wrong mechanism. Replacing `+=` with `max()` ("the
+> worst single unretired fold") is decision 2(b) of
+> `plans/group-retention-hysteresis/plan.md`; it would change this stage's behaviour, so it
+> needs its own commit and a re-measurement of this stage's six-row table.
+
 > **Implemented, Reviewer-APPROVED (round 7) and DoD-PASSED, 2026-10-12, on
 > `feature/bl12-group-contact-identity` (BL-12 Stage 3.5).** Three commits: `Contact.fold_displacement_m` (provenance,
 > behaviour-neutral), the admission gate itself (`_cluster_contacts` gains `prior_rosters`), and the
