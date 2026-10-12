@@ -46,7 +46,7 @@ confined to n=2** -- at three or more tracked contacts spread kilometres
 apart with nothing else in the scene, the relative rule alone still merges
 dissimilar, unrelated contacts into one `Group` (`plans/group-reporting/
 review.md`'s n>=3 finding, pinned by `tests/test_callouts.py::
-test_2c_transcript_fixture_renders_four_lines_not_seven` before this
+test_2c_transcript_fixture_renders_three_lines_not_seven` before this
 backstop existed). A relative-only rule has no natural floor at any n --
 it is answering "is this gap small *for this scene*," never "is this gap
 small in any absolute sense a person would recognise as one group" -- so a

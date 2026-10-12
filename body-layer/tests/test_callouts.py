@@ -10,15 +10,17 @@ type never merges, `"very close"` never merges with a kilometre range, a
 group never manufactures an exact count, and the whole pipeline is
 replay-deterministic.
 
-**The headline test, `test_2c_transcript_fixture_renders_four_lines_not_
+**The headline test, `test_2c_transcript_fixture_renders_three_lines_not_
 seven`, is the fixture the plan asks to be constructed and actually run** --
 it reproduces the shape of the 2026-09-21 cones 2C sortie transcript quoted
 in the plan (three close infantry detections, a BTR-70 identification, two
 more infantry detections, a truck identification) with events staggered
 over real sim time the way a sortie actually produces them (not bunched at
 one instant -- see this test's own docstring for why that distinction
-matters), and asserts 7 candidate events collapse to exactly 4 spoken
-lines."""
+matters), and asserts 7 candidate events collapse to exactly 3 spoken
+lines -- 4 before `plans/group-cohesion-admission-gate/plan.md` (`BL-B58`,
+BL-12 Stage 3.5); see this test's own docstring for why that count
+dropped, read off a run rather than predicted."""
 
 from __future__ import annotations
 
@@ -889,7 +891,7 @@ def test_group_never_speaks_an_exact_count_unless_every_member_is_attended_and_e
     assert both_watched.text.startswith("two trucks,")
 
 
-def test_2c_transcript_fixture_renders_four_lines_not_seven(
+def test_2c_transcript_fixture_renders_three_lines_not_seven(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reproduces the shape of the plan's quoted 2026-09-21 cones 2C sortie
@@ -998,7 +1000,28 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     dragging an *unrelated, previously un-grouped* contact into the
     cluster via position drift); this test now pins the measured result
     as a record of that path, not as an endorsement that it needs no
-    further look."""
+    further look.
+
+    **Rewritten a fourth time for BL-12 Stage 3.5 (2026-10-12) -- line 4
+    is gone, and the group membership assertion drops `CONTACT_4`. This is
+    the fix for the exact path the third rewrite flagged, not a new
+    finding: `BL-B58`'s admission gate (`plans/
+    group-cohesion-admission-gate/plan.md`) now carries `CONTACT_1`'s
+    `fold_displacement_m` (the 219m single-tick drift the third rewrite's
+    paragraph above describes) into the `CONTACT_1`-`CONTACT_4` pairwise
+    test as an inflation term. That pair's raw gap (82.2m) already clears
+    the 88.0m infantry/BTR-70 backstop on its own -- the no-op the plan's
+    §1 measures directly on this fixture's own geometry -- so only the
+    inflated test excludes the edge. `CONTACT_4` is not evicted from
+    anywhere (it was never a member before this tick) and no new group is
+    founded; it is simply ungrouped, the same outcome `GROUP_REPORTING_
+    MIN_MEMBERS` already gives any contact with no cohering neighbour.
+    Read off a run, not predicted, same posture as every earlier rewrite:
+    the spoken total drops from four lines to three, and `GROUP_1` is the
+    three-infantry cluster Stage 0a alone would have produced from the
+    12/1-o'clock trio. A quieter Petrovich here is the intended outcome,
+    per the user's decision 3 on `BL-B58` -- silence beats placing a
+    BTR-70 in an infantry group it is not in."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
@@ -1164,16 +1187,21 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
         "unit 12 o'clock, very close is truck.",
-        "BTR-70, in 1 o'clock group.",
     ]
-    # The grouping itself, asserted beside the sentences: Stage 3's
-    # within-group fold (see this test's own docstring) absorbs the
-    # 2-o'clock pair into `GROUP_1` without ever founding `CONTACT_6`/
-    # `CONTACT_7`, and the resulting position drift then pulls `CONTACT_4`
-    # (BTR-70) into the same cluster on the next `tick()`. One four-member
-    # group, not the two infantry-only pairs Stage 0a alone produced.
+    # The grouping itself, asserted beside the sentences: Stage 3.5's
+    # admission gate (see this test's own docstring, fourth rewrite) now
+    # excludes `CONTACT_4` (the BTR-70) from `GROUP_1` -- its own gap to
+    # the pre-existing cluster already clears `_pair_backstop_m`, but the
+    # link only closed because Stage 3's fold rewrote `CONTACT_1`'s fused
+    # position, and `CONTACT_1`'s `fold_displacement_m` budget now makes
+    # that admission fail. `GROUP_1` stays the three-infantry cluster
+    # Stage 0a alone would have produced from the 12/1-o'clock trio;
+    # `CONTACT_4` is ungrouped (ordinary, individually reported, ineligible
+    # to speak here only because its own `CONTACT_DETECTED` is already
+    # past `CALLOUT_MAX_AGE_S` before polling starts -- this test's own
+    # earlier paragraph).
     assert sorted(sorted(g.member_contact_ids) for g in store.groups) == [
-        ["CONTACT_1", "CONTACT_2", "CONTACT_3", "CONTACT_4"],
+        ["CONTACT_1", "CONTACT_2", "CONTACT_3"],
     ]
 
 
