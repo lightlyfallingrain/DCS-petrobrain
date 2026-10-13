@@ -201,3 +201,56 @@ noise-reduction behaviour untouched where it is wanted.
 Captured, not planned. The `/explore` that produced it is complete for the question it was asked.
 Next step is a planning pass that decides how much of this belongs to `BL-14` and how much to a
 preceding milestone — and that decision is his.
+
+---
+
+## Part 4 — `collapse(group, depth)` endorsed, and the access pattern that makes it cheap
+
+**User direction, later the same day.** On the question of whether `Group`'s flat `composition`
+should become a stored tree, the answer was neither: derive the tree at read time instead.
+
+> *"collapse(group, depth) would be a good approach.*
+>
+> *Note that usually we are interested in one group at a time, so once its members are collected,
+> no need to iterate through the other groups."*
+
+### Why deriving beats storing, from what is already in the code
+
+- `Group` holds **`member_contact_ids`** and nothing per-unit — its own docstring: *"no per-member
+  position, no per-member identity of its own, because membership is a set of ids into a store that
+  already has identity for each of them."* The individual units already exist in `ContactStore`.
+- `classification.py` already carries the hierarchy as a three-level lattice with `parent_class_of`.
+  The tree's *shape* exists as a lookup.
+- `composition` and `air_defence_composition` are **recomputed from members every reconcile** — they
+  are caches of a projection, not truth.
+
+So the tree is already reachable; what was missing is one derivation that collapses members to a
+requested depth. **Nothing new gets stored.**
+
+**The flat tuple stays as the match key.** `group_matches` tests 3 and 5 compare `composition` for
+equality, and a sorted tuple is the right shape for that — cheap, stable, comparable. A nested
+structure would need its own comparison semantics and make matching slower and more fragile. So:
+flat for matching, derived tree for reporting. (Stated as the recommendation, **not yet measured**
+against the matcher.)
+
+### His access-pattern note holds for one path and not the other — measured by reading, worth a probe
+
+| path | iteration | fit for a deep collapse |
+|---|---|---|
+| **pull** — `report`/`describe`, a selected target, a watched group | **one group**, on demand | yes, exactly his case: a handful of members plus a lattice lookup each |
+| **push** — unprompted callouts | **every group, every poll** (`callouts.py:1140`, `for belief_group in store.groups:`) | only shallow; a deep collapse here is N groups per tick |
+
+**This converges with the tiers rather than fighting them.** Low and medium tier are the push path
+and want the shallow projection; high tier is the pull path, which is the one-group-at-a-time case
+where depth is affordable. The depth parameter and the cost profile line up with attention.
+
+### What is still unmeasured, and should be before a plan commits
+
+- `collapse`'s actual per-call cost at realistic member counts. Cheap in principle — but *"cheap in
+  principle"* is what the 552 m no-op bound and the 300 m `radius_m()` floor both looked like, and
+  both were wrong when measured.
+- Whether the matcher genuinely keeps working off the flat tuple once a derived view exists, or
+  whether something in `group_matches` quietly wants the deeper structure.
+- Whether `air_defence_composition` can then be retired (it would become
+  `collapse(group, …)["air defense"]`) or whether `D6`'s gate needs it materialised for a reason the
+  derivation cannot serve.
