@@ -157,3 +157,132 @@ diff, `logger.py`'s diff, `detection_trace.py`'s diff, `STRUCTURE.md`'s diff, al
 level rather than taking the docstring's assertion on trust. Ran format/lint/type/test myself
 rather than trusting the implementer's reported numbers, and independently counted the new test
 functions in the diff to cross-check the 1704→1718 claim.
+
+
+---
+
+## Review of the fix: non-finite-position security finding
+
+Fix commit `e4e78da..ec8b70d` (`ec8b70d60cb841df6c4d364540fce04c664f4c04`), answering
+`plans/forest-occlusion/security-review.md`'s one required fix. Base check: worktree HEAD
+(`f444370`) was a strict ancestor of the named tip; fast-forwarded cleanly, tree clean both before
+and after my own checks.
+
+### What changed
+
+`ForestOcclusion.occluded(x, z)` in `body-layer/src/perception/forest.py` now returns `False`
+(fail open) before `_cache_cell_key` whenever `x` or `z` is non-finite, skipping both the cache
+write and the DB query. Plus two documentation corrections: `plan.md`'s stale 5 Hz / 95% hit-rate
+figure corrected to 1 Hz / ~80%, and `forest.py`'s "10 m/s" assumption marked explicitly
+unverified. Diff touches only `forest.py`, `test_forest.py`, `plan.md`, `implementation.md`, and
+one new agent-memory file -- nothing else.
+
+### Findings, against "what I want checked hardest"
+
+1. **Guard completeness -- verified independently, holds.**
+   `grep -n "_cache_cell_key|math\.floor|math\.isfinite|int(|round("` over the whole of
+   `forest.py` shows exactly one definition of `_cache_cell_key`, exactly one call site (inside
+   `occluded`, immediately after the new guard), and no other integer-converting operation
+   anywhere in the module. A repo-wide `grep -rln _cache_cell_key body-layer world-model` turns up
+   only `forest.py` and `test_forest.py` -- no second caller anywhere. `occluded`'s only two
+   operands, `x` and `z`, are both covered by the `or` in the guard (unlike the
+   `clamp_fold_displacement` precedent's first miss, which covered only one of two operands). This
+   enumeration was done by reading the file directly, not by accepting the implementer's count.
+   `visibility.py`'s gate-5 call site (`forest.occluded(candidate.x, candidate.z)`) is the only
+   call into `occluded` on the whole gate-5 path, and nothing downstream of gate 5 performs its
+   own integer conversion on `x`/`z` (`_achieved_tier` takes `candidate_range_m`, not raw
+   position). No path into `_cache_cell_key`, and no other operation on the gate-5 path, can still
+   receive a non-finite value and raise.
+
+2. **Fail-open reaches `check_visibility` as a pass, and the trace outcome is correct --
+   verified by reading the call site.** `visibility.py`, gate 5: `if forest is not None and
+   forest.occluded(candidate.x, candidate.z): _record(GateOutcome.FOREST); return None`. A
+   non-finite position makes `occluded(...)` return `False`, so the `and` short-circuits to
+   `False`, `GateOutcome.FOREST` is never recorded, and execution falls through to
+   `_achieved_tier`/`_record(GateOutcome.ADMITTED, ...)` -- gate 5 is the last gate before
+   `ADMITTED` (confirmed by reading the full body of `check_visibility` through its return), so
+   there is nothing else a non-finite position could be rejected by on this path. The contact
+   stays visible and the trace never claims `FOREST` for a case the gate never actually evaluated.
+   Matches the claim exactly.
+
+3. **Not caching the non-finite case -- right call, no hole.** Confirmed by reading `occluded`:
+   the only cache write (`self._cache[key] = result`) happens after `key = _cache_cell_key(x, z)`,
+   which the guard's early return skips entirely for a non-finite input -- there is no path that
+   writes to `self._cache` before the guard returns. `test_non_finite_position_is_not_cached`
+   asserts `_cache == {}` after two non-finite calls; I don't consider this assertion vacuous
+   because I mutated the guard away (below) and watched the same test fail with the named
+   exception rather than silently passing on an empty cache for the wrong reason -- the cache
+   stays empty because the function raises before touching it, which is exactly the hole the task
+   asked me to rule out, confirmed absent.
+
+4. **Early return skips nothing that matters -- confirmed by reading what comes after gate 5.**
+   Gate 5 is the last gate in `check_visibility` before `_achieved_tier`/`ADMITTED`; there is no
+   bookkeeping, counter, or trace write between the forest check and the function's final return
+   that a `False` from `forest.occluded` would skip, unlike the `clamp_fold_displacement`
+   precedent where a hold branch's early return silently broke a timing invariant downstream.
+   `_record` is called exactly once per exit path throughout the function (gaze, cockpit mask,
+   optic FOV, range, terrain LOS, forest, admitted), and the forest gate's `False` result simply
+   lets the existing `_record(GateOutcome.ADMITTED, ...)` call run, the same call every other
+   "not rejected by this gate" case already reaches. No skipped bookkeeping.
+
+5. **Mutation re-verified independently, not just re-run.** I removed the guard line myself
+   (restoring the single original `key = _cache_cell_key(x, z)` line), ran
+   `pytest tests/test_forest.py -v`: **8 failed, 6 passed** -- all 7 parametrized non-finite cases
+   plus `test_non_finite_position_is_not_cached` failed with the exact `ValueError: cannot convert
+   float NaN to integer` (NaN cases) or the equivalent `OverflowError` (Inf cases) at
+   `_cache_cell_key`'s `math.floor` line, the exact call site named in both the security review
+   and the implementer's report. Restored the guard; `shasum -a1` before mutation, after mutation,
+   and after restore gave `0907e0f472a0c32245e51632f5a91859ec9250f8` for both the original and
+   restored file -- byte-identical, confirming the mutation left no stray diff. This was my own
+   mutation, independent of the implementer's -- the tests genuinely bite.
+
+6. **Documentation corrections -- arithmetic checked, direction preserved.** A 50 m cell at
+   10 m/s takes 5 s to cross; at the project's real 1 Hz poll rate that is 5 polls per cell, so
+   1 cache miss (entering a new cell) in every 5 polls is a 4-in-5, 80% hit rate -- matches the
+   corrected figure exactly, and is internally consistent with the old (wrong) 5 Hz figure's own
+   arithmetic (5 Hz times 5 s equals 25 polls, 24-in-25 is about 95%, matching what was there
+   before). The surrounding cost argument ("still enough that most lookups are dict hits... the
+   conclusion survives, only the magnitude was off") is left intact in both `plan.md` and this
+   file's own earlier text, not rewritten -- matches the performance review's own finding that the
+   *direction* holds at the corrected rate.
+
+### Invariants re-confirmed (cheap pass, not a full re-review)
+
+- No-omniscience: `detection_trace_writer.py` untouched by `git diff e4e78da..ec8b70d`.
+- `world-model/src/**`, `belief/decay.py`, `belief/enrichment.py`, `belief/contacts.py`,
+  `events.py`, `aircraft-layer/**`, `perception/association.py`: all empty in the fix diff.
+- `FOREST_LANDCOVER_CLASSES` unchanged (`frozenset({"forest"})`), orchard still out.
+- Stage 3/4 still absent -- correct, this fix does not touch the on/off default.
+- `body-layer/CLAUDE.md:279` still stale, still correctly left alone on this branch.
+
+### Verification run myself
+
+From `body-layer/`, borrowing the main checkout's venv binaries by absolute path (no `.venv` in
+this worktree, as expected), cwd kept in the worktree, import resolution confirmed
+(`perception.forest.__file__` resolves to this worktree's own `src/`):
+
+- `ruff format --check src tests tools`: pass (127 files)
+- `ruff check src tests tools`: pass
+- `mypy src` (from inside `body-layer/`): pass, 56 source files
+- `pytest -q`: **1726 passed, 4 xfailed** -- matches the implementer's claimed numbers exactly.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None beyond what the earlier Stages 1-2 review already listed (unaffected by this fix).
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read of the fix diff (`forest.py`, `test_forest.py`, `plan.md`'s corrected paragraph,
+`visibility.py`'s gate-5 call site and everything after it in `check_visibility`), plus an
+independent mutation (guard removed, byte-identical restore via `shasum`) and an independent
+`grep`-based re-enumeration of every operand and call site rather than accepting the
+implementer's count. Did not re-review Stages 1-2 from scratch -- those are the prior APPROVED
+review above and the performance review at `3372b01`, neither disturbed by this diff.
