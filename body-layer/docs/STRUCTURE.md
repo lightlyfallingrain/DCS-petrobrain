@@ -230,11 +230,41 @@ The entries are in the order they were written, which is roughly perception → 
   an empty queue; raises `AudioAdapterError` on transport/parse failure, same as `push_speech`).
 - `src/replay.py` — BL-0 replay harness: drives any `PerceptionSource.poll()` over a recorded
   sequence of ownship states, no live DCS/aircraft-layer connection required.
+- `src/belief/position_belief.py` — the 2x2 covariance primitives and `PositionEstimate`
+  (`plans/precise-position-belief/plan.md` Stages 3-4): `fold_position` (the real weighted
+  information-form covariance fuse `Contact.record`/`from_percept` call), `plausible_speed_mps`
+  (`BL-B51`'s one shared per-class-rate table, read by this module's own elapsed-motion inflation
+  and by `belief.groups.group_matches` test 5 alike), and three deliberately *caller-invoked*
+  post-fusion clamps, all with the same identity-when-nothing-to-bound-against shape:
+  `clamp_to_detection_envelope` (a believed position cannot sit farther from the observer than
+  that channel's own physical detection range), `clamp_fold_displacement` (`plans/
+  bounded-fold-displacement/plan.md`, `BL-B58`/`BL-B59` — caps how far a single Stage 3
+  within-group ambiguity fold may move a contact's fused mean, at `plausible_speed_mps(class) *
+  elapsed`, applied *after* the envelope clamp so the bound is measured against the position
+  actually adopted). None of the three is built into `fold_position` itself — each is a fact
+  about the *caller's* situation (a channel's range cap, whether this specific call is folding an
+  ambiguous percept) that the fuse itself must not need to know, the same boundary this module's
+  own docstring draws for the first two and the plan draws again for the third. Read this
+  module's own docstring before touching any of the three — it carries two live-flight-found
+  defects' worked reasoning (runaway fusion, the no-envelope-gate) plus the fold-displacement
+  plan's own.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
   *production*): `percept.py` (`Percept`/`percept_of`, the structural no-omniscience boundary —
   belief code never sees `Observation.derived_world_position` or a DCS object id),
   `contacts.py` (`Contact`/`SightingSpan`/`ContactStore` — append-only observation log,
-  `ingest`/`tick`). `ingest` (`plans/group-contact-model/plan.md` Stage 3a) runs a read-only
+  `ingest`/`tick`). `Contact.record` takes a keyword-only `ambiguous_fold: bool = False`
+  (`plans/bounded-fold-displacement/plan.md`) — set `True` at exactly one call site, `ingest`'s
+  `len(passing) >= 2` fold branch — which is what tells `record` to resolve and apply the
+  `clamp_fold_displacement` bound above; every other call leaves it `False`, `clamp_fold_
+  displacement`'s own identity branch. `Contact.fold_displacement_m` (`BL-B58`) tracks the
+  *clamped* displacement of the **worst single unretired fold** (`max()`, not an accumulated
+  sum — Stage 3 of that plan: accumulation never retired in a dense scene, since every
+  re-observation there is itself ambiguous) since this contact was last recorded from an
+  unambiguous percept; read by `groups._cluster_contacts`'s admission gate and carried onto
+  `GroupStore.reconcile`'s own trace record (`fold_budgets`, one `[contact_id,
+  fold_displacement_m]` pair per member of that record's cluster — see that method's own
+  docstring in `src/belief/groups.py`, which has no separate entry of its own here).
+  `ingest` (`plans/group-contact-model/plan.md` Stage 3a) runs a read-only
   pre-scan over each batch before its main loop — memoizing `_resolve_continuity` per observation
   (so the main loop never calls it twice) and recording every continuity-resolved contact id under
   `claimed[(source, t_sim)]` — then, in the gate branch only, excludes a candidate contact already
