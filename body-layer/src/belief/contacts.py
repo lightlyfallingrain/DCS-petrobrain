@@ -473,33 +473,37 @@ class Contact:
     #: within-group ambiguity fold (`ContactStore._fold_target_for_ambiguous_
     #: candidates` resolving `ingest`'s `len(passing) >= 2` branch) since this
     #: contact was last recorded from an *unambiguous* percept. Written only
-    #: by `ContactStore.ingest`, at the one call site that folds: accumulated
-    #: (`+=`, not overwritten) across repeat folds with no intervening clean
-    #: look, and reset to `0.0` on either unambiguous branch (an object-
-    #: permanence continuity resolution, or a `len(passing) == 1` gate match)
-    #: -- an independent look confirming where the contact actually is is
-    #: exactly the evidence that retires the doubt. `0.0` for a founding
-    #: contact and for every contact that has never been an ambiguous fold
-    #: target. Read by `groups._cluster_contacts`'s admission gate as the
-    #: cost of letting this contact's own (possibly fold-corrupted) position
-    #: admit a new group member; never read as a position correction itself.
-    #: Accumulate-not-replace is a stated assumption, not measured against a
-    #: real repeat-fold incident -- see that plan's Risks section.
+    #: by `ContactStore.ingest`, at the one call site that folds, and reset
+    #: to `0.0` on either unambiguous branch (an object-permanence
+    #: continuity resolution, or a `len(passing) == 1` gate match) -- an
+    #: independent look confirming where the contact actually is is exactly
+    #: the evidence that retires the doubt. `0.0` for a founding contact and
+    #: for every contact that has never been an ambiguous fold target. Read
+    #: by `groups._cluster_contacts`'s admission gate as the cost of letting
+    #: this contact's own (possibly fold-corrupted) position admit a new
+    #: group member; never read as a position correction itself.
     #:
     #: **`plans/bounded-fold-displacement/plan.md` (`BL-B58` option 2,
     #: closing `BL-B59` too): this now measures the *clamped* displacement,
-    #: never the raw fuse's.** `ContactStore.ingest`'s fold branch calls
+    #: never the raw fuse's, and tracks the worst single unretired fold
+    #: (`max()`), never an accumulated sum (`+=`, this field's own
+    #: pre-this-plan behaviour).** `ContactStore.ingest`'s fold branch calls
     #: `Contact.record(percept, ambiguous_fold=True)`, which bounds the
     #: fuse's own mean-displacement at `position_belief.
-    #: clamp_fold_displacement` before `record` returns -- the value
-    #: accumulated here is `contact.position` *after* that bound, so a
-    #: fold that would have moved the mean farther than the contact's own
-    #: believed class could plausibly have travelled is recorded at the
-    #: bound, not at the uncapped distance. `BL-B58`'s own accumulator
-    #: defect (never retiring in a dense scene, since every re-observation
-    #: there is itself ambiguous) is unchanged by the bound -- the field
-    #: still accumulates, now at a physically plausible rate rather than
-    #: an arbitrary one; see that plan's Stage 3 for `+=` -> `max()`.
+    #: clamp_fold_displacement` before `record` returns, so the value
+    #: compared here is `contact.position` *after* that bound: a fold that
+    #: would have moved the mean farther than the contact's own believed
+    #: class could plausibly have travelled is recorded at the bound, not
+    #: at the uncapped distance. The `+=` → `max()` change is Stage 3, its
+    #: own commit: accumulate-not-replace was a stated assumption
+    #: (previously here, unmeasured), and under repeat folds with no
+    #: intervening clean look it never retired at all -- every
+    #: re-observation in a dense scene is itself ambiguous, so the
+    #: unambiguous branches above that reset this field to `0.0` never
+    #: arrive. `max()` -- "the worst single unretired fold" -- bounds the
+    #: budget without a new constant, where accumulation grew it without
+    #: limit (measured: 40.0 → 160.0 m over 60 ticks under `+=`, zero
+    #: resets, same incident).
     fold_displacement_m: float = 0.0
 
     @property
@@ -1135,17 +1139,20 @@ class ContactStore:
                         # is what tells `Contact.record` to bound this
                         # fuse's own displacement (`plans/
                         # bounded-fold-displacement/plan.md`, `BL-B58`/
-                        # `BL-B59`) -- accumulate the *clamped* displacement
-                        # this fold actually caused, metres, never reset
-                        # here (`Contact.fold_displacement_m`'s own
-                        # docstring; `plans/group-cohesion-admission-
+                        # `BL-B59`) -- the budget tracks the *worst single
+                        # unretired fold* (`max()`, never accumulated),
+                        # never reset here (`Contact.fold_displacement_m`'s
+                        # own docstring; `plans/group-cohesion-admission-
                         # gate/plan.md` §4).
                         contact = fold_target
                         position_before = contact.position
                         contact.record(percept, ambiguous_fold=True)
-                        contact.fold_displacement_m += math.hypot(
-                            contact.position.x - position_before.x,
-                            contact.position.z - position_before.z,
+                        contact.fold_displacement_m = max(
+                            contact.fold_displacement_m,
+                            math.hypot(
+                                contact.position.x - position_before.x,
+                                contact.position.z - position_before.z,
+                            ),
                         )
                     else:
                         contact = Contact.from_percept(self._new_contact_id(), percept)

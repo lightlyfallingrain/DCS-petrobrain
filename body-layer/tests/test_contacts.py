@@ -281,9 +281,10 @@ def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_re
     assert expected_displacement < 150.0  # well clear of this fold's own bound
     assert contact_d.fold_displacement_m == pytest.approx(expected_displacement)
 
-    # A second fold onto the same contact accumulates rather than replaces
-    # (`fold_displacement_m`'s own docstring, stated assumption, unmeasured
-    # against a real repeat-fold incident).
+    # A second fold onto the same contact tracks the *worst* single
+    # unretired fold, never an accumulated sum (`fold_displacement_m`'s own
+    # docstring, `plans/bounded-fold-displacement/plan.md` Stage 3 --
+    # `+=` -> `max()`, since accumulation never retired in a dense scene).
     budget_after_first_fold = contact_d.fold_displacement_m
     position_before_second_fold = contact_d.position
     second_ambiguous_obs = _observation(
@@ -296,7 +297,7 @@ def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_re
     )
     assert second_displacement < 150.0  # this fold's own bound, same margin
     assert contact_d.fold_displacement_m == pytest.approx(
-        budget_after_first_fold + second_displacement
+        max(budget_after_first_fold, second_displacement)
     )
 
     # An unambiguous re-observation -- the object-permanence continuity
@@ -353,6 +354,56 @@ def test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_speed() ->
     # not at whatever the unclamped fuse would have produced.
     assert applied_displacement == pytest.approx(bound_m, abs=1e-6)
     assert contact_d.fold_displacement_m == pytest.approx(applied_displacement)
+
+
+def test_fold_displacement_m_tracks_the_worst_single_fold_not_an_accumulated_sum() -> (
+    None
+):
+    """`plans/bounded-fold-displacement/plan.md` Stage 3 -- `+=` -> `max()`.
+    Three consecutive folds on the same contact, displacements 6.0 m, then
+    9.95 m (larger), then 2.0 m (smaller): the budget must track the
+    *running maximum* (6.0 -> 9.95 -> still 9.95), never an accumulated sum
+    (which would have reached ~18.0 m after the third fold under this
+    field's pre-Stage-3 `+=` behaviour)."""
+    store = ContactStore()
+    contact_d_obs = _observation(
+        obs_id="OBS_D", t_sim=0.0, bearing_deg=90.0, range_m=1000.0
+    )
+    contact_e_obs = _observation(
+        obs_id="OBS_E", t_sim=0.0, bearing_deg=90.0, range_m=1050.0
+    )
+    store.ingest([contact_d_obs, contact_e_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_d = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_D"]
+    )
+
+    store.ingest(
+        [_observation(obs_id="OBS_F1", t_sim=10.0, bearing_deg=90.0, range_m=1010.0)],
+        now_sim=10.0,
+    )
+    budget_after_fold_1 = contact_d.fold_displacement_m
+    assert budget_after_fold_1 == pytest.approx(6.0, abs=1e-6)
+
+    store.ingest(
+        [_observation(obs_id="OBS_F2", t_sim=20.0, bearing_deg=90.0, range_m=1025.0)],
+        now_sim=20.0,
+    )
+    budget_after_fold_2 = contact_d.fold_displacement_m
+    # The second fold's own displacement is larger than the first's --
+    # the budget must rise to match it, same as `+=` would have shown.
+    assert budget_after_fold_2 == pytest.approx(9.952380952380963, abs=1e-6)
+    assert budget_after_fold_2 > budget_after_fold_1
+
+    store.ingest(
+        [_observation(obs_id="OBS_F3", t_sim=30.0, bearing_deg=90.0, range_m=1012.0)],
+        now_sim=30.0,
+    )
+    # The third fold's own displacement (~2.0 m) is smaller than the
+    # running maximum -- the budget must stay at that maximum, not grow
+    # further (an accumulated sum would read ~18.0 m here) and not shrink
+    # to the smaller value either.
+    assert contact_d.fold_displacement_m == pytest.approx(budget_after_fold_2, abs=1e-6)
 
 
 def test_air_defence_candidate_forces_a_new_contact_even_within_a_group() -> None:
