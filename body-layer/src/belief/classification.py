@@ -218,6 +218,24 @@ AIR_DEFENSE_OP_CLASSES: Final[frozenset[str]] = frozenset(
 )
 
 
+#: `plans/group-collapse/plan.md` Decision 7 -- the level-1 ("class") table
+#: `belief.group_view.collapse`/`collapse_members` groups by, and (Stage 4)
+#: `belief.groups.group_matches` test 4 reads instead of its own inline
+#: `AIR_DEFENSE_OP_CLASSES` carve-out. One entry: every air-defence `op_class`
+#: maps to `"air defense"`. Every other `op_class` is left to map to itself
+#: (a sparse table with an identity default, not a `== len(10)` enumeration)
+#: -- the user's own sketch names `"armor"`/`"truck"`/`"infantry"` as
+#: classes too, but no such super-class grouping exists in code today beyond
+#: this one air-defence partition (`plans/group-collapse/scratchpad/
+#: probe_matcher_independence.py` §3), so inventing the rest here would be
+#: vocabulary the attention-tier milestone has not yet decided. Growing this
+#: table later changes both `collapse`'s class level and (after Stage 4)
+#: test 4's partition at once -- see that plan's Risks.
+CLASS_GROUP_OF: Final[dict[str, str]] = {
+    c: "air defense" for c in AIR_DEFENSE_OP_CLASSES
+}
+
+
 def parent_class_of(value: str) -> str | None:
     """The `OP_*` class `value` resolves to: a level-3 value's parent class,
     or a level-2 value's own class (a no-op through the same resolver), or
