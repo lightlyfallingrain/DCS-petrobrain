@@ -485,6 +485,39 @@ The entries are in the order they were written, which is roughly perception → 
   `cardinality_belief_from_bucket_name` resolves a `perception`-emitted `count_bucket` string.
   `decay.cardinality_confidence_at` (Stage 1) is `classification_confidence_at`'s twin, reusing
   `IDENTITY_HALF_LIFE_S` rather than declaring a new half-life.
+- `src/belief/group_view.py` (`plans/group-collapse/plan.md`, Stages 1-2) — `collapse(store, group,
+  depth, now_sim)`/`collapse_members(members, depth, now_sim)`: a read-time derivation of the
+  user's own group -> class -> sub-class -> type -> contact tree, deliberately **not** homed in
+  `groups.py` (that module owns identity/cohesion/matching, reads `last_class_raw` through
+  `object_model.profile_for`, and takes `Sequence[Contact]` rather than a `ContactStore`; this
+  derivation reads the *other* field — `Contact.classification` — through the *other* resolver —
+  the classification lattice — and needs id -> contact resolution, which is exactly the
+  cross-contamination shape `BL-B47`'s family is made of). `CollapseDepth` (`GROUP`/`CLASS`/
+  `SUBCLASS`/`TYPE`/`CONTACT`) is an `IntEnum`, `SpecificityLevel`'s own posture; one recursive
+  `CollapseNode` type at every depth (`label`/`level`/`contacts`/`units_lo`/`units_hi`/`children`,
+  plus `contact_id`/`x`/`z`/`radius_m`/`confidence` at `CONTACT` only — `confidence` is this
+  module's one addition beyond the plan's named field list, routed through `decay.
+  classification_confidence_at`, never `ClassificationBelief.confidence` raw). `units_lo`/
+  `units_hi` is a `CardinalityBelief` interval summed across members, never `len(members)` — a
+  contact is not a unit, and `CONTACT` (not `UNIT`) is this derivation's honestly deepest rung.
+  Level-1 vocabulary is `classification.CLASS_GROUP_OF` (air-defence `op_class`es collapse to
+  `"air defense"`; everything else stands alone) — Stage 4 (`groups.py`'s `group_matches` test 4)
+  reads the same table instead of its own inline `AIR_DEFENSE_OP_CLASSES` carve-out, one definition
+  of that partition rather than two. **`_subclass_label` gates on `Contact.classification.level`
+  before resolving `.value` through the lattice at all** — a claim held below `SpecificityLevel.
+  CLASS` has no class claim by the lattice's own definition regardless of whether its raw value
+  happens to be a keyword-matchable string (a common test-fixture default across this codebase);
+  without this gate a presence-level member is silently promoted into a real sub-class bucket.
+  Nothing new is stored; `tools._group_facts` (Stage 2) gains a `tree` key, a shallow
+  (`CollapseDepth.SUBCLASS`) collapse, gated caller-side on `ContactStore.callout_observable` (any
+  member, not all) — the gate decides *whether* `collapse` runs at all, never *what* it returns, so
+  a remembered-but-currently-unobservable group's tree is omitted entirely rather than filtered.
+  **Stage 3 (re-expressing `speech._group_composition_clause` as a renderer over this module) was
+  attempted and reverted** — see that plan's `implementation.md` for the discovered divergence
+  (a `CLASS`-level claim whose raw value happens to resolve through the lattice collapses into its
+  resolved class, changing a push-path disclosure's wording for a test-fixture-only combination the
+  old flat `(value, level)` grouping never resolved) and why it was left to the user rather than
+  silently decided either way.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete
