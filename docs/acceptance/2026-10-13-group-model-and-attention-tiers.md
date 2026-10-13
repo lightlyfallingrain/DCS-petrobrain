@@ -28,6 +28,18 @@ targets*, confirmed — but see Part 3, which bounds *when* that requirement app
 > *"aiming at unit. With guns and rockets a 40 m error could be acceptable since the pilot then
 > aligns the attack visually, but absolutely not with 9K113, it must be exact."*
 
+> **Clarified by him immediately after, and it changes the shape of the constraint:**
+> *"ATGM guidance is with 9K113 only, there is no naked eye channel for ATGM guidance."*
+>
+> So this is a **channel** split, not an accuracy split. ATGM guidance is served by the 9K113 sight
+> and by nothing else; no improvement to a naked-eye-derived position is relevant to it. The 40 m
+> figure is not a shortfall against the ATGM requirement — it is the wrong instrument for that
+> question. **And the channel does not exist yet**: `perception/optics.py` declares exactly two
+> optics, `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`, and the code says so about itself in four places
+> (`belief/groups.py:385`, `perception/association.py:91`, `perception/visibility.py:49`,
+> `perception/clustering.py:79`). **ATGM guidance therefore has a hard prerequisite that is
+> unbuilt**, independent of anything about group identity or the fold.
+
 **This is the sharpest constraint in the document, and it splits the acceptance criterion in two.**
 The bounded-fold work (`BL-B58` option 2) gets a held position to **40 m**, i.e. 2.29° at 1 km,
 under the naked-eye channel's own `BEARING_SIGMA_DEG = 3.0`. By his reading that is **acceptable for
@@ -163,11 +175,13 @@ noise-reduction behaviour untouched where it is wanted.
 1. **`BL-14` cannot be planned as a pure consumer of today's group model.** It needs per-unit
    records for selected targets, and the mechanism that produces them (attention-driven resolution)
    does not exist. Either `BL-14` grows that scope or it is sequenced behind a milestone that does.
-2. **The 9K113 constraint is a hard one and may not be reachable from the naked-eye channel at all.**
-   "Must be exact" against a believed position whose own bearing noise is 3.0° is a demanding
-   requirement; it probably implies the 9K113's own optic path, with its much tighter angular
-   precision, is the only channel that can serve ATGM guidance. Worth checking before `BL-14`
-   assumes a position good enough for missile guidance can come from anywhere else.
+2. **ATGM guidance is 9K113-only, and the 9K113 is unimplemented — so missile guidance is blocked
+   on a channel, not on precision.** Confirmed by him, and the prerequisite verified in code rather
+   than inferred: `perception/optics.py` has two optics and the 9K113 is absent, with four source
+   comments acknowledging it. `BL-14` cannot deliver missile guidance until that channel lands; it
+   *can* deliver guns-and-rockets guidance on the existing channel, where 40 m clears his bar
+   because the pilot aligns visually. That is a sequencing fact worth settling before BL-14 is
+   scoped, since it decides whether the milestone is one piece of work or two.
 3. **The tree structure interacts with BL-12's merged `Group`.** `composition` and
    `air_defence_composition` are a flat projection of his tree; `iff` has no home yet. Any move to
    the tree is a data-model change to code merged yesterday, and `docs/PROCESS.md`'s
