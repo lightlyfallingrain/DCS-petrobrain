@@ -91,14 +91,25 @@ contact Petrovich cannot currently see. That is already true of terrain-masked c
 does not make it worse and fixing it is a separate question. Named here so it is not re-discovered
 as a defect of this feature.
 
-### Decision 6 — `forest` only. `orchard` is a user decision, deferred by default.
+### Decision 6 — `forest` only. `orchard` goes to the treeline `/explore`. **DECIDED by the user, 2026-10-13.**
 
 The store holds 9,710 `forest` polygons and **7,171 `orchard`** ones. Orchards are trees, but
 planted in rows with lanes and far lower canopy — partial cover, which is the deferred treeline
-problem wearing a different hat. Default: **forest only**, matching the user's literal words.
-Magnitude if he wants orchard in: it is comparable in extent to forest theatre-wide and *larger*
-in places (Palmyra road-adjacent: 5.0% orchard vs 0.0% forest). Listed under Decisions Requiring
-User Input.
+problem wearing a different hat. **Forest only**, matching the user's literal words.
+Magnitude if orchard were brought in: it is comparable in extent to forest theatre-wide and
+*larger* in places (Palmyra road-adjacent: 5.0% orchard vs 0.0% forest).
+
+> **User decision, 2026-10-13**, in their own words: *"Leave orchard for the tree line explore"*.
+> No longer a default taken for want of an answer — it is settled, and settled by sending orchard
+> to the conversation that owns partial cover rather than by excluding it on the merits.
+>
+> Why that is the right home rather than a deferral: **orchard is not a smaller forest, it is the
+> same problem as treeline.** Rows with lanes and low canopy give cover that depends on direction,
+> which is precisely what the binary rule cannot express and what the treeline model exists to
+> decide. If that model lands as chord-length or anything else directional, orchard most likely
+> rides on it as a **density parameter** rather than ever becoming a second binary class.
+> `FOREST_LANDCOVER_CLASSES` remains the single place that would change if the `/explore`
+> concludes otherwise.
 
 ---
 
@@ -241,11 +252,10 @@ topology) actually lives. Separating them means the topology decision no longer 
 
 ### Decisions Requiring User Input
 
-1. **Orchard: in or out?** Default taken is **out** — forest only, his literal words. 7,171 orchard
-   polygons, comparable extent to forest and larger in some regions. Including them widens the gate
-   meaningfully; they are also the weakest case for a *binary* rule, since an orchard is lanes and
-   low canopy rather than a wall of trees. Recommend leaving out and letting the treeline `/explore`
-   decide whether orchard is a partial-cover case.
+1. ~~**Orchard: in or out?**~~ **ANSWERED 2026-10-13** — *"Leave orchard for the tree line
+   explore"* (user). Out of this feature; the treeline `/explore` owns it, since an orchard's
+   lanes-and-low-canopy cover is directional and is the same problem as treeline rather than a
+   smaller forest. Full reasoning and the measured magnitudes are in Decision 6 above.
 2. **Should Stage 3 (default on) land in this feature, or wait for a flown A/B?** Recommend landing
    Stages 1–2 and flying the A/B first, then Stage 3 on his word — the flag exists for exactly that
    and the blast-radius number says there is no urgency.

@@ -106,15 +106,45 @@ earns its place: does the pilot notice a treeline asymmetry in the air, or is bi
 enough to make the picture read right? That is his call on evidence, and the simple model is what
 produces the evidence.
 
+### 5. Orchard — added to this conversation's agenda by user decision, 2026-10-13
+
+> *"Leave orchard for the tree line explore"*
+
+The simple model gates on `landcover_class == "forest"` only. Orchard was the one open question
+the forest-occlusion plan left for the user, and they sent it here rather than settling it either
+way on the merits.
+
+**It belongs here because orchard is not a smaller forest — it is this conversation's own problem
+wearing a different hat.** Rows with lanes and low canopy give cover that *depends on direction*,
+which is exactly what a binary rule cannot express and exactly what items 1–3 above exist to
+decide. So the likely outcome is not "orchard in or out" but **orchard as a density parameter** on
+whichever directional model earns its place — a second binary class is the least likely answer.
+
+Measured, so the conversation starts from numbers (`world-model/tools/measure_landcover_coverage.py`,
+real `syria-full`):
+
+- **7,171 orchard polygons** against 9,710 forest — comparable extent theatre-wide.
+- **Larger than forest in places**: Palmyra road-adjacent is 5.0% orchard against 0.0% forest.
+  So excluding orchard is not a small omission everywhere; around Palmyra it is the *only* tree
+  cover there is.
+- `FOREST_LANDCOVER_CLASSES` in `body-layer/src/perception/forest.py` is the single place that
+  changes if this `/explore` concludes orchard should gate binarily after all.
+
 ---
 
 ## Next step, in order
 
-1. `BL-B59` — in flight on `fix/bl-b59-retention-hysteresis`.
-2. Then the **simple model**: a landcover gate in `check_visibility`, inside-forest → not detected.
-   Ordinary Architect → Implementer → Reviewer work; no `/explore` needed, the direction is
-   unambiguous.
-3. Then `/explore` the treeline case against the ideas above, with flight evidence from (2) in hand.
+1. ~~`BL-B59`~~ — **done**, merged to `main` 2026-10-13 (`a8551d9`), `#needs-flight`.
+2. ~~The **simple model**~~ — **built**, `feature/forest-occlusion`, Stages 1–2, all gates passed
+   (DoD `198a9d8`). Ships with `--forest-occlusion` **off**; Stage 3 (default on) awaits the flown
+   A/B. Acceptance card: https://claude.ai/artifact/T7dPmNq3h91hXNeZRvCRyS
+3. **Fly the A/B** — `--forest-occlusion` with `--detection-trace`, same scene both ways, units
+   parked deliberately in and at the edge of the coastal woods **north-east of Latakia** (3.2%
+   areal, the theatre's densest). This matters more than usual: blast radius is 1–3% of ground
+   positions theatre-wide and **zero** at Latakia itself, so an ordinary sortie fires the gate a
+   handful of times at most and generates almost no treeline evidence.
+4. Then `/explore` the treeline case against the ideas above — items 1–4 plus **orchard (item 5)**
+   — with that flight evidence in hand.
 
 ---
 
