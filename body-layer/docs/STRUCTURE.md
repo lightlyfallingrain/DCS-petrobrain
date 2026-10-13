@@ -38,9 +38,13 @@ The entries are in the order they were written, which is roughly perception → 
   `association.py` + `geometry.py` to resolve geometry against a `world_objects` candidate.
   `source: "petrovich_detection_associated"` on every emitted `Observation`.
 - `src/perception/visibility.py` (PB-1.5, retuned BL-2.6, gains a per-optic gate at
-  `plans/detection-cones-slice1/plan.md`) — `check_visibility`, the naked-eye channel's four
-  composed plausibility gates (cockpit mask, per-optic field of view, angular-radius recognition
-  tier, terrain LOS via `geometry.py`). `VisibilityResult.tier` is a **computed achieved tier**
+  `plans/detection-cones-slice1/plan.md`) — `check_visibility`, the naked-eye channel's composed
+  plausibility gates: gaze, cockpit mask, per-optic field of view, angular-radius recognition
+  tier, terrain LOS via `geometry.py`, and (Stage 1/2, `plans/forest-occlusion/plan.md`) forest
+  occlusion — six in total as of that plan, up from the four this bullet originally described
+  before gaze/optic-FOV and forest were each added at their own time; see `forest.py`'s own
+  Structure entry just below for the newest one. `VisibilityResult.tier` is a **computed achieved
+  tier**
   (`"lowres"`/`"medres"`/`"hires"`, BL-2.6 Stage 6) rather than the constant `"medres"` PB-1.5
   originally returned — a candidate that clears the gate can resolve closer-in to a tighter tier
   than the gate itself requires. `NAKED_EYE_GATING_TIER_NAME` is the gate's own threshold and
@@ -90,6 +94,30 @@ The entries are in the order they were written, which is roughly perception → 
   was run against, `test_vision_calibration.py` is fully green again with no `xfail`s — verified
   by actually running it, not assumed from the numbers matching on paper. `BINOCULAR_RANGE_
   MULTIPLIER` stays declared here (plan Decision 1) — `optics.py` imports it, not the reverse.
+- `src/perception/forest.py` (`plans/forest-occlusion/plan.md` Stage 1, specification `docs/
+  acceptance/2026-10-13-tree-cover-direction.md`) — `ForestOcclusion`, `check_visibility`'s gate 5
+  (last in the chain, after terrain LOS). One public method, `occluded(x, z) -> bool`: `True` iff
+  `(x, z)` falls inside a mapped `landcover` polygon whose `landcover_class` is in
+  `FOREST_LANDCOVER_CLASSES` (`{"forest"}` only — `orchard` is a deliberately excluded user
+  decision, Decision 6). `None` landcover (no mapped data) is **not** treated as forest — measured
+  against the real `syria-full` store, unmapped is 42-96% of ground positions depending on region,
+  so the opposite reading would blind Petrovich almost everywhere. Reads `store.reader.
+  containing_polygons(conn, ["landcover"], x, z)`, not `query.describe.describe_position` (1120x
+  cheaper measured: 0.075 ms vs. 84.6 ms median) — `containing_polygons` already honours a
+  polygon's `inner_rings`, so a clearing inside a wood correctly answers `False` with no extra code
+  here. A quantised-position memo (50 m cell, mirroring `belief.enrichment`'s
+  `ENRICHMENT_CACHE_POSITION_GRID_M` cell-key arithmetic but 2D, no altitude term, and keyed on the
+  cell itself rather than `object_id` — the public signature has no `object_id` to key on, and a
+  cell-keyed cache is shared across every candidate in the same cell) keeps the steady-state cost
+  at a dict lookup; uncached, 200 candidates at the gate's own 0.075 ms median would already exceed
+  the 12.6 ms poll budget. Optic-independent (no new `Optic` field): magnification does not see
+  through canopy. Target-position-only — tests `candidate.x/z`, never ownship's, and feeds no
+  threat/engagement state (Decision 3); an already-detected contact that drives into forest simply
+  stops receiving percepts and decays through the existing `OBSERVED_WINDOW_S`/
+  `POSITION_HALF_LIFE_S`/`LOST_THRESHOLD_S` ladder — no new decay constant (Decision 5). Wired into
+  `NakedEyePerceptionSource` only (`forest: ForestOcclusion | None = None`, Stage 2) via
+  `logger.py`'s `--forest-occlusion`/`--no-forest-occlusion` (`argparse.BooleanOptionalAction`,
+  default off) — `None` is a true no-op, same posture as `trace_sink`/`live_los_coverage`.
 - `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md`, slice 1 of the "detection
   cones" milestone) — `Optic` (`name`, `magnification`, `fov_half_angle_deg: float | None`,
   `boresight_azimuth_deg: float = 0.0`) and two named instances: `UNAIDED_OPTIC` (M=1.0, no FOV
@@ -201,7 +229,10 @@ The entries are in the order they were written, which is roughly perception → 
   detection_trace.DetectionTraceCollector | None = None` (BL-9) is threaded into every
   `check_visibility` call this poll, and `poll()` annotates each admitted candidate's trace entry
   with its cluster's member `object_id`s and the emitted `Observation.id` once clustering/emission
-  are done — see `detection_trace.py`'s own Structure entry.
+  are done — see `detection_trace.py`'s own Structure entry. `forest: perception.forest.
+  ForestOcclusion | None = None` (`plans/forest-occlusion/plan.md` Stage 2) is constructed by
+  `logger._build_sources` only when `--forest-occlusion` is passed and threaded straight into every
+  `check_visibility` call this poll, alongside `trace_sink` — `None` (the default) is a true no-op.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API
   (`GET /telemetry/latest`, `GET /world_objects/latest`, `GET /petrovich_indication/latest`). A
   real network call, unlike the world-model seam. `push_text_line` (BL-2.5,
@@ -535,13 +566,16 @@ The entries are in the order they were written, which is roughly perception → 
   a readback while Petrovich kept free-scanning. `run_once` passes `ownship.heading_true_deg`; test
   call sites default it to `0.0`. `_search_sweep`/`_format_gaze_line` stay gated on `commanded_
   sector` alone for the binocular band, extended only for the debug overlay's own label.
-- `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`COCKPIT_MASK`/`RANGE_OR_SIZE`/
-  `TERRAIN_LOS`/`ADMITTED`), the mutable `DetectionTrace` record (one per candidate per poll,
+- `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`GAZE`/`COCKPIT_MASK`/`OPTIC_FOV`/
+  `RANGE_OR_SIZE`/`TERRAIN_LOS`/`FOREST`/`ADMITTED`/`PLAYER_BUBBLE` — `FOREST` added `plans/
+  forest-occlusion/plan.md` Stage 1, the answer to "lost in forest" vs. "lost to terrain LOS" a
+  debrief needs, never fires while `check_visibility`'s `forest` parameter is `None`), the mutable
+  `DetectionTrace` record (one per candidate per poll,
   ground truth by construction, same footing as `Observation`/`WorldObjectCandidate` — no
   `belief/` import), and `DetectionTraceCollector`, the small accumulator
   `visibility.check_visibility`'s new optional `trace` parameter and `NakedEyePerceptionSource`
-  append/annotate into. `check_visibility` records one entry per call, at whichever of its three
-  gates decided a candidate's fate (or `ADMITTED`); `range_threshold_m`/`threshold_bound`
+  append/annotate into. `check_visibility` records one entry per call, at whichever gate decided a
+  candidate's fate (or `ADMITTED`); `range_threshold_m`/`threshold_bound`
   (`"size_curve"` vs `"range_cap"`, recovering the two distinct reasons a single `min()`
   expression collapses) are populated unconditionally, even on a `COCKPIT_MASK` failure, so every
   row has a uniform shape. `NakedEyePerceptionSource.poll` then annotates each admitted
@@ -597,7 +631,11 @@ The entries are in the order they were written, which is roughly perception → 
   mask (plausibly "on screen") but never reached `ADMITTED` at any tier. That second list is
   stated in its own output as an approximation, not a verified claim — code can confirm an object
   cleared the geometric gates, not that the pilot's own monitor rendered it large enough to
-  notice.
+  notice. `outcome_histogram` (`plans/forest-occlusion/plan.md` Stage 2) adds a third, simpler
+  section: a count of every candidate-poll row by `GateOutcome`, so a sortie flown with
+  `--forest-occlusion` can answer "how many rows were `forest`" without the per-object tables
+  above, which were never designed to distinguish *which* gate most often blocked a never-admitted
+  object.
 - `src/belief/utterance.py` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`) — the
   deterministic intent parser: `PlayerUtterance`/`PartialParse` (§5/§3.5's shapes, trimmed to what
   this milestone populates) and `parse_utterance`, a small ordered table of `(regex, intent)` pairs

@@ -239,6 +239,7 @@ from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
+from perception.forest import ForestOcclusion
 from perception.gaze import (
     FREE_SCAN_PLAN,
     SCAN_CYCLE_PERIOD_S,
@@ -1073,6 +1074,7 @@ def _build_sources(
     world_model_conn: sqlite3.Connection,
     emit_mode: Literal["on_change", "every_poll"],
     trace_sink: DetectionTraceCollector | None = None,
+    forest_occlusion: bool = False,
 ) -> list[PerceptionSource]:
     """Construct both concrete tiers at a given `emit_mode` -- shared by
     `main()`'s plain-logger path (`"on_change"`) and `--console`/
@@ -1083,7 +1085,20 @@ def _build_sources(
     `trace_sink` (BL-9, `--detection-trace`) is additive, defaults to
     `None`, and is only ever wired into `NakedEyePerceptionSource` -- the
     scope/hybrid channel has no geometric gate chain to trace (plan
-    Risks)."""
+    Risks).
+
+    `forest_occlusion` (`--forest-occlusion`, `plans/forest-occlusion/
+    plan.md` Stage 2) defaults to `False` -- a true no-op, same additive
+    posture as `trace_sink` above. When `True`, constructs one
+    `ForestOcclusion` against `world_model_conn`/`theatre` and wires it
+    into `NakedEyePerceptionSource` only, for the same reason `trace_sink`
+    is naked-eye-only: the scope/hybrid channel has no geometric gate
+    chain for a forest gate to join."""
+    forest = (
+        ForestOcclusion(conn=world_model_conn, theatre=theatre)
+        if forest_occlusion
+        else None
+    )
     return [
         HybridPerceptionSource(
             aircraft_client=aircraft_client, theatre=theatre, emit_mode=emit_mode
@@ -1094,6 +1109,7 @@ def _build_sources(
             world_model_conn=world_model_conn,
             emit_mode=emit_mode,
             trace_sink=trace_sink,
+            forest=forest,
         ),
     ]
 
@@ -1238,6 +1254,7 @@ def _run_console_poll_loop(
     eyesight_view: bool = False,
     eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
     belief_truth_log_path: Path | None = None,
+    forest_occlusion: bool = False,
 ) -> None:
     """Stage 4's background poll thread, fixed in Stage 6: opens
     `world_model_conn` and builds `runner.sources` here, on this thread, then
@@ -1254,6 +1271,12 @@ def _run_console_poll_loop(
     `DetectionTraceWriter` immediately after `runner.run_once()` -- after
     `ingest`/`tick` have already run against this poll's `Observation`s, so
     the write can never influence what was ingested.
+
+    `forest_occlusion` (`--forest-occlusion`, `plans/forest-occlusion/
+    plan.md` Stage 2) is additive and defaults to `False` -- unset, this
+    function's behavior is unchanged. Passed straight through to
+    `_build_sources`, which constructs the `ForestOcclusion` instance (see
+    that function's own docstring).
 
     `eyesight_view` (`--eyesight-view`, `todo/todo.md`'s "Added 2026-09-25
     (user)" entry) and `belief_truth_log_path` (`--belief-truth-log`, that
@@ -1293,6 +1316,7 @@ def _run_console_poll_loop(
             world_model_conn,
             emit_mode="every_poll",
             trace_sink=trace_collector,
+            forest_occlusion=forest_occlusion,
         )
         # BL-3: same thread-affinity reasoning as `sources` above -- the
         # `EnrichmentContext` `run_once` lazily builds needs this same
@@ -1539,6 +1563,7 @@ def _run_crew_text_poll_loop(
     eyesight_view: bool = False,
     eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
     belief_truth_log_path: Path | None = None,
+    forest_occlusion: bool = False,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -1557,9 +1582,9 @@ def _run_crew_text_poll_loop(
     still checked so this function has no implicit dependency on how its
     caller constructs them. `detection_trace_path` (BL-9, `--detection-
     trace`), `eyesight_view`/`eyesight_view_radius_m` (`--eyesight-view`),
-    and `belief_truth_log_path` (`--belief-truth-log`) mirror
-    `_run_console_poll_loop`'s own wiring exactly -- see that function's
-    docstring for all three."""
+    `belief_truth_log_path` (`--belief-truth-log`), and `forest_occlusion`
+    (`--forest-occlusion`) mirror `_run_console_poll_loop`'s own wiring
+    exactly -- see that function's docstring for all four."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -1589,6 +1614,7 @@ def _run_crew_text_poll_loop(
             world_model_conn,
             emit_mode="every_poll",
             trace_sink=trace_collector,
+            forest_occlusion=forest_occlusion,
         )
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
@@ -2335,6 +2361,20 @@ def main() -> None:
             "a true no-op when absent."
         ),
     )
+    parser.add_argument(
+        "--forest-occlusion",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "gate 5 of visibility.check_visibility: a ground unit inside a "
+            "mapped forest landcover polygon is not detected -- flat and "
+            "binary, no directionality, no altitude term -- plans/"
+            "forest-occlusion/plan.md Stage 1-2, specification docs/"
+            "acceptance/2026-10-13-tree-cover-direction.md. Defaults off, "
+            "a true no-op when absent (--no-forest-occlusion makes that "
+            "explicit)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.crew_text and args.console:
@@ -2531,6 +2571,7 @@ def main() -> None:
                 args.eyesight_view,
                 args.eyesight_view_radius_m,
                 args.belief_truth_log,
+                args.forest_occlusion,
             ),
             daemon=True,
         )
@@ -2571,6 +2612,7 @@ def main() -> None:
                 args.eyesight_view,
                 args.eyesight_view_radius_m,
                 args.belief_truth_log,
+                args.forest_occlusion,
             ),
             daemon=True,
         )
@@ -2603,6 +2645,7 @@ def main() -> None:
                 theatre,
                 world_model_conn,
                 emit_mode="on_change",
+                forest_occlusion=args.forest_occlusion,
             )
             perception_logger = PerceptionLogger(
                 aircraft_client=aircraft_client,

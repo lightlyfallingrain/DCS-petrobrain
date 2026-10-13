@@ -48,6 +48,7 @@ from logger import (
     PerceptionLogger,
     _active_gaze,
     _apply_active_gaze,
+    _build_sources,
     _format_gaze_line,
     _log_live_los_coverage_summary,
     _poll_transcripts,
@@ -61,6 +62,7 @@ from logger import (
     main,
 )
 from perception import association
+from perception.forest import ForestOcclusion
 from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
@@ -791,6 +793,41 @@ def _identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         association, "wgs84_to_dcs", lambda theatre, lat, lon: (lat, lon)
     )
+
+
+def test_build_sources_wires_a_forest_occlusion_when_requested() -> None:
+    """`plans/forest-occlusion/plan.md` Stage 2: `forest_occlusion=True`
+    constructs one `ForestOcclusion` against the same `world_model_conn`/
+    `theatre` `_build_sources` already received, and wires it into
+    `NakedEyePerceptionSource` only (the scope/hybrid channel has no
+    geometric gate chain for it to join, same reasoning as `trace_sink`)."""
+    aircraft_client = FakeConsoleAircraftClient({}, {})
+    conn = sqlite3.connect(":memory:")
+
+    sources = _build_sources(
+        aircraft_client,
+        "Syria",
+        conn,
+        emit_mode="on_change",
+        forest_occlusion=True,
+    )
+
+    naked_eye = next(s for s in sources if isinstance(s, NakedEyePerceptionSource))
+    assert isinstance(naked_eye.forest, ForestOcclusion)
+    assert naked_eye.forest.conn is conn
+    assert naked_eye.forest.theatre == "Syria"
+
+
+def test_build_sources_forest_defaults_off() -> None:
+    """Omitting `forest_occlusion` entirely (the default) must be a true
+    no-op, same contract as every other additive flag in this module."""
+    aircraft_client = FakeConsoleAircraftClient({}, {})
+    conn = sqlite3.connect(":memory:")
+
+    sources = _build_sources(aircraft_client, "Syria", conn, emit_mode="on_change")
+
+    naked_eye = next(s for s in sources if isinstance(s, NakedEyePerceptionSource))
+    assert naked_eye.forest is None
 
 
 def test_console_poll_loop_uses_a_thread_local_world_model_connection(

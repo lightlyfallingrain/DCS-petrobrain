@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -92,11 +93,22 @@ def summarize(records: list[dict[str, Any]]) -> dict[int, _ObjectSummary]:
     return summaries
 
 
+def outcome_histogram(records: list[dict[str, Any]]) -> Counter[str]:
+    """Count every row's `outcome` -- every `GateOutcome` value appears
+    here, including `"forest"` (`plans/forest-occlusion/plan.md` Stage 2):
+    the debrief question this feature exists to raise is "lost in forest"
+    vs. "lost to terrain LOS" vs. everything else, and a histogram over
+    every candidate-poll row is the cheapest answer that distinguishes
+    them, without inventing a second per-object classification alongside
+    `_ObjectSummary`'s existing first-admitted-range table."""
+    return Counter(str(record["outcome"]) for record in records)
+
+
 def _fmt_range(value: float | None) -> str:
     return "-" if value is None else f"{value:.0f}"
 
 
-def format_table(summaries: dict[int, _ObjectSummary]) -> str:
+def format_table(summaries: dict[int, _ObjectSummary], histogram: Counter[str]) -> str:
     lines = ["First-admitted range per object (metres, nearer-tier-first):"]
     lines.append(
         f"{'object_id':>10}  {'type':<24}  {'presence':>10}  {'class':>10}  {'type':>10}"
@@ -108,6 +120,16 @@ def format_table(summaries: dict[int, _ObjectSummary]) -> str:
             f"{_fmt_range(summary.first_class_range_m):>10}  "
             f"{_fmt_range(summary.first_type_range_m):>10}"
         )
+
+    lines.append("")
+    lines.append("Gate outcome histogram (every candidate-poll row):")
+    if not histogram:
+        lines.append("  (no rows)")
+    else:
+        for outcome, count in sorted(
+            histogram.items(), key=lambda item: (-item[1], item[0])
+        ):
+            lines.append(f"  {outcome:<16} {count}")
 
     never_admitted = sorted(
         (
@@ -141,7 +163,8 @@ def main() -> None:
     args = parser.parse_args()
     records = load_records(args.trace_path)
     summaries = summarize(records)
-    print(format_table(summaries))
+    histogram = outcome_histogram(records)
+    print(format_table(summaries, histogram))
 
 
 if __name__ == "__main__":
