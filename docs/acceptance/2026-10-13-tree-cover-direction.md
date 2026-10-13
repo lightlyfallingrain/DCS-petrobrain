@@ -115,3 +115,28 @@ produces the evidence.
    Ordinary Architect → Implementer → Reviewer work; no `/explore` needed, the direction is
    unambiguous.
 3. Then `/explore` the treeline case against the ideas above, with flight evidence from (2) in hand.
+
+---
+
+## Separate direction, same day: the attack run needs individual unit positions
+
+> *"Attack run does need individual unit positions. That is the whole premise of attack run."*
+
+Recorded here because it arrived in the same exchange and because it is **load-bearing for
+`BL-B59`/`BL-B58` option 2, which was being designed when he said it.** It converts a measurement
+that was going to be a confirmation into an acceptance criterion: a fix that stabilises group
+membership while leaving a member believed ~132 m from where the unit actually is does not clear
+the bar, because `BL-14` reads per-unit positions and not only the roster.
+
+**It also puts a prior accepted trade back in question, and that is the part worth not losing.**
+`BL-12` Stage 3's within-group fold deliberately merges two contacts' records: its own accepted
+failure modes state that `contributing_observation_ids` and `sighting_spans` become unreliable at
+within-group grain and that an undercount replaces an overcount. He accepted those on the stated
+reasoning that **the group-level answer stays correct** — which is true, and is not the same as
+per-unit positions being correct. So bounding the fold's displacement makes the surviving position
+more honest, while two real units still share one record.
+
+Open question, flagged to the architect mid-design rather than left for `BL-14` to discover:
+**is bounding the displacement sufficient for per-unit positions, or is the fold itself — not its
+magnitude — what `BL-14` cannot live with?** Not a licence to redesign Stage 3; a finding to put
+in front of him before `BL-14` is planned.
