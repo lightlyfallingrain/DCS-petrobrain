@@ -56,9 +56,9 @@ needs anything from this module, so `Optic`/`UNAIDED_OPTIC`/
 `within_optic_fov` are now an ordinary top-level import here, not the
 `TYPE_CHECKING`/function-local workaround this docstring used to explain.
 
-Composes five independent plausibility gates over one
+Composes six independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
-`OwnshipState`. All five must pass; failing any one returns `None`
+`OwnshipState`. All six must pass; failing any one returns `None`
 (absence, not a fabricated weak-confidence guess -- deliberately stricter
 than `association.py`'s ambiguous-match compromise, since there is no real
 detection here to be ambiguous *about*):
@@ -159,6 +159,21 @@ detection here to be ambiguous *about*):
    how many of those carried no live verdict, so a dead live-LOS feed is
    observable in the logs rather than indistinguishable from an empty sky
    (step 4; see `logger.py`).
+5. **Forest occlusion, binary and target-position-only**
+   (`plans/forest-occlusion/plan.md` Stage 1, specification `docs/
+   acceptance/2026-10-13-tree-cover-direction.md`). `perception.forest.
+   ForestOcclusion.occluded(candidate.x, candidate.z)` -- `True` means the
+   candidate's own position (never ownship's) falls inside a mapped
+   `landcover` polygon classed `"forest"`, and rejects. `None`-landcover
+   (no mapped data) is never treated as forest -- see `forest.py`'s own
+   docstring for the measured reason. Optic-independent: runs identically
+   for `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`, since magnification does not
+   see through canopy. The treeline case (a unit near the edge, where
+   canopy blocks some bearings and not others) is explicitly deferred to a
+   later `/explore` and is not modelled here. Last in the chain -- the
+   only remaining DB-touching test, so it only runs against candidates
+   that already cleared every cheaper gate. `forest` defaults to `None`,
+   a true no-op (gate 5 below).
 
 **Resolution vs. salience (`plans/group-detectability/plan.md`).** Gate 3's
 `profile.size_m`-based presence threshold above conflated two different
@@ -193,6 +208,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
+from perception.forest import ForestOcclusion
 from perception.gaze import Gaze, within_gaze
 
 # `line_of_sight_clear` is deliberately re-exported into this module's
@@ -633,15 +649,31 @@ def check_visibility(
     trace: DetectionTraceCollector | None = None,
     group_salient: bool = False,
     live_los_coverage: LiveLosCoverage | None = None,
+    forest: ForestOcclusion | None = None,
 ) -> VisibilityResult | None:
-    """Run `candidate` through all five gates: gaze, cockpit mask, per-optic
+    """Run `candidate` through all six gates: gaze, cockpit mask, per-optic
     field of view (`plans/detection-cones-slice1/plan.md`), angular-radius
-    range, terrain LOS (see module docstring for all but the first).
-    Returns `None` on the first failing gate -- cheap geometric checks
-    (gaze, cockpit mask, FOV, angular-radius range) before the expensive
-    LOS terrain-sampling check, mirroring `association.associate()`'s own
-    cheap-before-expensive ordering; gaze goes first among the cheap ones
-    (module docstring, gate 0).
+    range, terrain LOS, forest occlusion (see module docstring for all but
+    the first). Returns `None` on the first failing gate -- cheap geometric
+    checks (gaze, cockpit mask, FOV, angular-radius range) before the two
+    DB-touching checks (terrain LOS, forest), mirroring
+    `association.associate()`'s own cheap-before-expensive ordering; gaze
+    goes first among the cheap ones (module docstring, gate 0).
+
+    `forest` (`perception.forest.ForestOcclusion`, `plans/
+    forest-occlusion/plan.md` Stage 1) defaults to `None` -- a true no-op,
+    same additive pattern as `trace`/`live_los_coverage`: no caller passes
+    a `ForestOcclusion` instance until Stage 2 wires one into
+    `NakedEyePerceptionSource`, and `check_visibility`'s behaviour is
+    byte-identical to before this parameter existed when it is omitted.
+    When set, it is consulted **last**, gate 5, after terrain LOS -- it is
+    the only remaining DB-touching test in the chain, so only candidates
+    that already cleared every cheaper gate (gaze, mask, FOV, range/size,
+    terrain LOS) pay for it. `conn`/`theatre` are already parameters of
+    this function and are unused by any gate (`BL-11` Stage 4 left them
+    dead -- see gate 4's own note below); the forest gate deliberately
+    reads its connection from `forest.conn`, not from this function's own
+    `conn`, rather than silently reviving those dead parameters.
 
     `group_salient` (`plans/group-detectability/plan.md`, default `False`,
     behaviour-identical to before this parameter existed) relaxes the
@@ -839,6 +871,16 @@ def check_visibility(
             live_los_coverage.no_verdict += 1
     if not candidate.live_los_clear:
         _record(GateOutcome.TERRAIN_LOS)
+        return None
+
+    # Gate 5, last in the chain (`plans/forest-occlusion/plan.md` Stage 1):
+    # a unit inside a mapped forest polygon is not detected, flat and
+    # binary, no directionality, no altitude term -- see module docstring
+    # and `forest.py`'s own docstring for why `None` is deliberately not
+    # treated as forest. `forest is None` is a true no-op, so every
+    # existing caller's behaviour is unchanged until Stage 2 wires one in.
+    if forest is not None and forest.occluded(candidate.x, candidate.z):
+        _record(GateOutcome.FOREST)
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
