@@ -633,7 +633,17 @@ def clamp_to_detection_envelope(
     `fold_position` makes, so a held envelope violation inflates by the
     same per-class rate the fuse it is holding in place of would have
     used. Defaults to `GATE_GROWTH_RATE_MPS`, unchanged for every
-    pre-Stage-2 caller."""
+    pre-Stage-2 caller.
+
+    **Incidentally also holds `prior` when `fused`'s mean is non-finite**,
+    because `range_m(...) <= max_range_m` is `False` for NaN in Python
+    (any comparison with NaN is `False`, never raises) -- but this is not
+    a guard this function was written to provide, nothing relies on it by
+    design, and `clamp_fold_displacement` (the next clamp in the same call
+    chain) does not get the same accidental protection and carries its own
+    explicit `math.isfinite` guard instead (`plans/bounded-fold-
+    displacement/security-review.md`). Do not read this fall-through as a
+    documented NaN contract for this function."""
     if prior is None:
         return fused
     target = GeoPosition(x=fused.x, z=fused.z, alt_m=observer.alt_m)
@@ -670,6 +680,23 @@ def clamp_fold_displacement(
     no-op). Neither branch constructs a new `PositionEstimate`; both return
     `fused` itself unchanged.
 
+    **Non-finite `fused` mean, by design, not by accident**: a NaN/inf
+    `fused.x`/`fused.z` returns `prior` itself, unchanged, rather than
+    being bounded -- this function has no `observer`/`growth_rate_mps` of
+    its own to re-inflate `prior.covariance` with (unlike
+    `clamp_to_detection_envelope`'s hold branch above), so holding the
+    prior exactly as given is the whole of this guard. Without it, the
+    displacement/scale arithmetic below would write the non-finite value
+    into the adopted mean permanently -- `NaN * 0.0 == NaN` in IEEE 754,
+    so the ordinary clamp branch does not sanitise it. This function's one
+    real caller (`belief.contacts.Contact.record`) never reaches this
+    guard today, because it always calls `clamp_to_detection_envelope`
+    first and that call's own `range_m(...) <= max_range_m` comparison
+    happens to be `False` for NaN -- security review, `plans/
+    bounded-fold-displacement/security-review.md` -- but that is caller
+    ordering, not a property of this function, so the guard is explicit
+    here rather than borrowed.
+
     Otherwise: if `fused`'s mean already sits within `max_displacement_m`
     of `prior`'s, `fused` passes through unchanged (the common case -- an
     ordinary fold whose own displacement never approached the bound).
@@ -685,6 +712,8 @@ def clamp_fold_displacement(
     repositioned, not a hold."""
     if max_displacement_m is None or prior is None:
         return fused
+    if not math.isfinite(fused.x) or not math.isfinite(fused.z):
+        return prior
     dx = fused.x - prior.x
     dz = fused.z - prior.z
     displacement_m = math.hypot(dx, dz)

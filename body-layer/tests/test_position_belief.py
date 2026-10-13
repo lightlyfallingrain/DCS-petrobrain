@@ -21,6 +21,7 @@ from belief.position_belief import (
     GATE_GROWTH_RATE_MPS,
     Covariance2D,
     PositionEstimate,
+    clamp_fold_displacement,
     clamp_to_detection_envelope,
     covariance_from_uncertainty,
     estimate_from_look,
@@ -625,6 +626,40 @@ def test_clamp_to_detection_envelope_founding_look_passes_through_unchanged() ->
     result = clamp_to_detection_envelope(fused, None, observer, max_range_m=10000.0)
 
     assert result is fused
+
+
+def test_clamp_fold_displacement_holds_prior_on_nan_mean() -> None:
+    """Security finding, `plans/bounded-fold-displacement/security-review.md`:
+    without an explicit finiteness guard, a NaN `fused.x` falls into the
+    ordinary clamp branch (`displacement_m <= max_displacement_m` is
+    `False` for NaN, so is `displacement_m > 0.0`, giving `scale = 0.0`)
+    and `dx * scale == NaN * 0.0 == NaN` writes NaN into the adopted mean
+    permanently. The guard must hold `prior` instead."""
+    covariance = covariance_from_uncertainty(
+        PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0), 0.0
+    )
+    prior = PositionEstimate(
+        x=100.0,
+        z=200.0,
+        covariance=covariance,
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=covariance,
+    )
+    fused = PositionEstimate(
+        x=math.nan,
+        z=300.0,
+        covariance=covariance,
+        as_of_sim=1.0,
+        fused_at_sim=1.0,
+        fused_covariance=covariance,
+    )
+
+    result = clamp_fold_displacement(fused, prior, max_displacement_m=10.0)
+
+    assert result is prior
+    assert result.x == prior.x
+    assert result.z == prior.z
 
 
 def test_fusion_sanity_sigma_is_positive_and_generous() -> None:

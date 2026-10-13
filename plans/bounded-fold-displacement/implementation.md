@@ -127,3 +127,68 @@ Both invariants the plan named as must-not-regress, confirmed by name at every s
   specific keys, not exact dict equality**, so adding `fold_budgets` to `reconcile`'s trace record
   payload needed no changes to any pre-existing assertion — confirmed by the full suite passing
   unchanged at every stage before this field was added, and unchanged again after.
+
+## Round: security finding close-out (2026-10-13)
+
+Closed the one finding from `security-review.md` (APPROVED verdict, recommended action B/C):
+`clamp_fold_displacement` was not actually identity-safe under a NaN mean, despite its own
+docstring's identity claim — a NaN `fused.x` fell into the ordinary clamp branch
+(`displacement_m <= max_displacement_m` is `False` for NaN, so is `displacement_m > 0.0`, giving
+`scale = 0.0`), and `dx * scale == NaN * 0.0 == NaN` wrote NaN into the adopted mean permanently.
+Not reachable today — `Contact.record` always runs `clamp_to_detection_envelope` first, which
+scrubs NaN incidentally via `range_m(...) <= max_range_m`'s own NaN-comparison semantics — but
+that protection was borrowed from caller ordering, not a property of the function.
+
+### Files Changed
+
+- `body-layer/src/belief/position_belief.py` — added an explicit `math.isfinite(fused.x)`/
+  `math.isfinite(fused.z)` guard at the top of `clamp_fold_displacement`, returning `prior`
+  unchanged (not re-inflated — this function has no `observer`/`growth_rate_mps` of its own to
+  inflate `prior.covariance` with, unlike `clamp_to_detection_envelope`'s hold branch, so "hold"
+  here means the prior exactly as given). Documented the guard in the function's own docstring.
+  Also added a paragraph to `clamp_to_detection_envelope`'s docstring saying its own NaN
+  fall-through is incidental (NaN-comparison semantics), not a documented contract, and that
+  nothing relies on it by design — the comment lives on the sibling rather than on the new guard
+  because the sibling is the one whose docstring could otherwise be misread as intentional.
+- `body-layer/tests/test_position_belief.py` — added
+  `test_clamp_fold_displacement_holds_prior_on_nan_mean` and the `clamp_fold_displacement` import.
+
+### Tests Added
+
+- `test_clamp_fold_displacement_holds_prior_on_nan_mean` — NaN `fused.x` in, `prior` (by identity,
+  `result is prior`) out. Mutation-tested: with the guard removed, this test fails with
+  `result.x == nan` instead of `prior.x == 100.0` (confirmed by running it, not asserted) —
+  exactly the defect the security finding described. Restored and confirmed the file hashes
+  byte-identical to pre-mutation (`shasum` before/after) before re-running green.
+
+### Checks
+
+(body-layer/, the only subproject touched)
+
+- `ruff format --check`: pass (120 files already formatted)
+- `ruff check`: pass (all checks passed)
+- `mypy --strict` (`cd body-layer && .venv/bin/mypy src`): pass, 55 source files, no issues
+- `pytest -q`: **1703 passed / 4 xfailed** (was 1702/4 at `de6aacf`; +1 new test, no regressions)
+
+Both pinned invariants reconfirmed by name:
+`tests/test_groups.py::test_the_eager_cap_still_chains_a_long_infantry_line` (file unmodified,
+confirmed via `git diff --stat de6aacf -- tests/test_groups.py` — no output) and
+`tests/test_callouts.py::test_2c_transcript_fixture_renders_three_lines_not_seven`. Both pass.
+
+`audio-adapter` untouched by this round (`git diff --stat de6aacf -- audio-adapter` empty) —
+checked, not assumed.
+
+### Notable Discoveries
+
+- **This worktree's own agent branch had zero unique commits relative to `main`**
+  (`git log main..HEAD` empty) while `fix/bl-b59-retention-hysteresis` was checked out in a
+  separate user worktree (`/Users/sg/Code/DCS-petrobrain-b59`). Repointed via
+  `git checkout -B worktree-agent-a6ad0ac58a84a2442 de6aacf`, landing exactly on the expected tip
+  with a clean tree — same resolution pattern as the previous round's analogous conflict, this
+  time against the final security-approved tip rather than the pre-Stage-2 one.
+- **`clamp_to_detection_envelope`'s own docstring already had every fact needed to see this
+  finding coming** (the module docstring calls out "Hold-recovery timing" explicitly) — the gap
+  was that the fact lived as an implementation detail of one function rather than being stated as
+  a general property neither function could assume of the other. The new cross-reference between
+  the two docstrings is meant to close that specific kind of silent coupling for the next clamp
+  added to this file.
