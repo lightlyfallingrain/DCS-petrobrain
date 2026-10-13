@@ -262,3 +262,115 @@ this specific commit's claim to have closed it fully is accurate. Re-enters Impl
 Full read of the commit's diff and both touched docstrings in full module context, plus three
 direct probes against the merged code (the documented mutation test, a non-finite-bound probe, and
 an `as_of_sim`-staleness probe) rather than reasoning from the docstring text alone.
+
+## Round: close-out of both required fixes (2026-10-13)
+
+Reviewed `2a9a676` ("Close both NaN-safety gaps the review found in clamp_fold_displacement"), the
+single commit addressing both required fixes from the round above. Scope: `body-layer/src/belief/
+position_belief.py`, `body-layer/tests/test_position_belief.py`, `plans/bounded-fold-displacement/
+implementation.md`.
+
+**Worktree mechanics**: this agent's own disposable branch (`worktree-agent-a0291a60857cf9c32`) sat
+at `main` (`c28a6b9`) with zero unique commits vs. `main`, while `fix/bl-b59-retention-hysteresis`
+was checked out in the user's own worktree (`/Users/sg/Code/DCS-petrobrain-b59`), refusing a second
+checkout. Repointed via `git checkout -B worktree-agent-a0291a60857cf9c32 2a9a676`, landing exactly
+on the named tip with a clean tree.
+
+**Is the operand set now closed?** Re-ran the same enumeration the prior round used. The guard now
+reads `not math.isfinite(fused.x) or not math.isfinite(fused.z) or not math.isfinite(
+max_displacement_m)`, one combined condition, one hold branch, no separate path left returning bare
+`prior`. Checked every operand feeding the `dx`/`dz`/`displacement_m`/`scale` arithmetic below the
+guard:
+- `fused.x`/`fused.z`: guarded (unchanged from the previous fix).
+- `max_displacement_m`: now guarded — the gap this round closes. `max_displacement_m is None`
+  returns first, so `math.isfinite(max_displacement_m)` is never reached with `None` — confirmed by
+  reading the guard order, not assumed.
+- `prior.x`/`prior.z`: **not guarded, and this is unchanged from the prior round's own finding, not
+  a new gap.** If `prior` itself already carries a non-finite mean, every branch (guarded or not)
+  propagates what was already there — a pre-existing-garbage-in case this function's guard was
+  never meant to fix, since `prior` is this module's own prior output and finite by induction from
+  the founding look onward. Nothing in this round's diff touches that boundary.
+- Covariance fields (`xx`/`zz`/`xz`): not computed through this clamp's `dx * scale` arithmetic at
+  all — the ordinary-fuse branch passes `fused.covariance`/`fused.fused_covariance` straight
+  through unchanged, and the hold branch passes `prior.covariance`/`prior.fused_covariance`
+  straight through unchanged. Neither is derived arithmetic this guard needs to sanitise.
+
+**No third gap. The set is closed for the two operands this function's own arithmetic can corrupt
+(`fused`'s mean, `max_displacement_m`); the `prior`-already-garbage case was already out of scope
+last round and stays out of scope this round.**
+
+**The hold branch's field set, checked against this function specifically, not copied blind from
+its sibling.** `clamp_to_detection_envelope`'s hold branch inflates covariance via `_inflated_
+since_last_fuse(prior, fused.as_of_sim, growth_rate_mps)`, because that function has an `observer`/
+`growth_rate_mps` to do so with. `clamp_fold_displacement` has neither — its signature is `(fused,
+prior, max_displacement_m)`, confirmed by reading it — so `covariance=prior.covariance` unchanged
+is correct *for this function*, not a shortcut. `fused_at_sim=prior.fused_at_sim` (held, not
+bumped) and `as_of_sim=fused.as_of_sim` (bumped) is the right split: traced the one real caller
+(`Contact.record`, `contacts.py:586-588`) — `max_displacement_m = growth_rate_mps * max(0.0,
+percept.t_sim - prior_position.fused_at_sim)`, where `prior_position` is `self.position` *before*
+this fold. Holding `fused_at_sim` at the prior's value means a run of consecutive holds keeps
+`fused_at_sim` anchored at the last genuine fuse, so the bound (`max_displacement_m`) keeps growing
+poll over poll exactly as the module's "Hold-recovery timing" invariant intends — a repeated hold
+does not reset the clock on itself. Bumping `fused_at_sim` on a hold (the wrong field to bump)
+would have frozen the bound at whatever it was on the first hold, defeating the mechanism. This is
+the one place this round's fix could have silently reintroduced the sibling defect
+`clamp_to_detection_envelope`'s hold branch was itself hardened against in `plans/
+position-belief-runaway/debug.md` — it did not.
+
+**"Both hold branches construct a fresh `PositionEstimate`"** reads correctly as "both finiteness
+operands (`fused`'s mean, `max_displacement_m`) share the one hold branch, which now constructs,"
+not as two separate branches — there is exactly one `if`/`return` for the finiteness guard, and it
+is the only place in this function that used to return bare `prior`. No duplicate or missed path.
+
+**Both mutations reproduced myself** (`Edit`, not a heredoc, per worktree rules):
+- Removed the `or not math.isfinite(max_displacement_m)` clause.
+  `test_clamp_fold_displacement_holds_prior_on_nan_max_displacement` failed exactly as claimed —
+  `result.x == nan` where `100.0` was expected (`assert nan == 100.0`). Restored via `Edit`;
+  `git diff --stat`/`git status --porcelain` on the restored tree both empty.
+- Reverted both finiteness-guard branches' `return PositionEstimate(...)` to bare `return prior`
+  (there is only one such branch, so this is one edit, not two). Both
+  `test_clamp_fold_displacement_holds_prior_on_nan_mean` and
+  `test_clamp_fold_displacement_holds_prior_on_nan_max_displacement` failed on
+  `result.as_of_sim == fused.as_of_sim` (`0.0 == 1.0`), exactly the invariant this fix is about.
+  Restored via `Edit`; diff/status both empty again.
+
+**The reworked test.** `test_clamp_fold_displacement_holds_prior_on_nan_mean`'s old `assert result
+is prior` became six field assertions (`x`, `z`, `covariance`, `as_of_sim`, `fused_at_sim`,
+`fused_covariance`) — a strict superset of what identity implicitly guaranteed, not a narrower
+check. `as_of_sim` is asserted against `fused.as_of_sim` (`1.0`), which differs from `prior.
+as_of_sim` (`0.0`) in the fixture, so the assertion exercises the value actually *advancing*, not
+merely existing. The new `test_clamp_fold_displacement_holds_prior_on_nan_max_displacement` test
+mirrors the same six-field pattern for the operand this round adds.
+
+**Scope.** `git diff 7f078f2 -- body-layer/tests/test_groups.py body-layer/tests/test_callouts.py`
+is empty — `test_the_eager_cap_still_chains_a_long_infantry_line` and
+`test_2c_transcript_fixture_renders_three_lines_not_seven` are both unmodified, and both pass by
+name. `git diff 7f078f2 -- audio-adapter` is empty — that subproject untouched. Nothing outside the
+three files the commit claims moved.
+
+**Checks, run myself**: `ruff format --check` clean except the pre-existing `research/
+2026-10-05-security-audit.md` flag (unrelated to this round, confirmed present before and after);
+`ruff check` clean (all checks passed); `mypy src --strict` clean, 55 source files; `pytest -q`
+**1704 passed / 4 xfailed** (both before mutation and after restore — identical both times).
+`audio-adapter`: **255 passed / 1 skipped**.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None.
+
+### Verdict
+
+**APPROVED.**
+
+### Review Confidence
+
+Full read — both fixed docstring paragraphs in full module context, the sibling hold branch
+(`clamp_to_detection_envelope`) compared field-by-field rather than assumed parallel, the one real
+caller (`Contact.record`) traced to confirm the `fused_at_sim`-held/`as_of_sim`-bumped split
+actually serves the "Hold-recovery timing" invariant rather than merely matching its sibling's
+shape, both mutations reproduced directly against the merged code and cleanly restored, and the
+full test/lint/type suite for both touched subprojects run and read.
