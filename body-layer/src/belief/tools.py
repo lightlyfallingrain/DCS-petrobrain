@@ -127,6 +127,7 @@ from belief.enrichment import (
     terrain_divide_qualifier,
 )
 from belief.events import Event
+from belief.group_view import CollapseDepth, CollapseNode, collapse
 from belief.mission_phase import MissionPhaseTracker, mission_phase_relevance
 from belief.tasks import PendingIntent, TaskKind, TaskStore
 from perception.geometry import GeoPosition
@@ -261,24 +262,72 @@ def _motion_facts(contact: Contact, now_sim: float) -> dict[str, object] | None:
     }
 
 
-def _group_facts(contact: Contact, store: ContactStore) -> dict[str, object] | None:
-    """`facts.group`'s shape (`plans/group-reporting/plan.md` Stage 2) --
-    `_cardinality_facts`/`_motion_facts`'s sibling: `None` (omitted from
-    `facts` entirely, this module's documented absent-not-null convention)
-    whenever `contact` belongs to no `belief.groups.Group`. Deliberately
-    minimal for this stage -- membership only, no per-member breakdown --
-    since Stage 2 only needs this to be *inspectable* (`console.py`'s
-    `show <id>`), not yet spoken; Stage 3's `belief.speech.
-    render_group_disclosure` reads the group's members directly off the
-    store, not off this fact."""
+def _collapse_node_to_dict(node: CollapseNode) -> dict[str, object]:
+    """`CollapseNode` -> a plain JSON-shaped dict, this module's own
+    absent-not-null convention applied recursively: `children`/
+    `contact_id`+`position`+`radius_m`/`confidence` are omitted entirely
+    rather than present as `null`/`[]` when `node` does not carry them
+    (every rung except `CollapseDepth.CONTACT` leaves `contact_id`/`x`/`z`/
+    `radius_m`/`confidence` unset -- see `belief.group_view.CollapseNode`'s
+    own docstring)."""
+    out: dict[str, object] = {
+        "label": node.label,
+        "level": node.level.name.lower(),
+        "contacts": node.contacts,
+        "units_lo": node.units_lo,
+        "units_hi": node.units_hi,
+    }
+    if node.children:
+        out["children"] = [_collapse_node_to_dict(child) for child in node.children]
+    if node.contact_id is not None:
+        out["contact_id"] = node.contact_id
+        out["position"] = {"x": node.x, "z": node.z}
+        out["radius_m"] = node.radius_m
+    if node.confidence is not None:
+        out["confidence"] = node.confidence
+    return out
+
+
+def _group_facts(
+    contact: Contact, store: ContactStore, now_sim: float
+) -> dict[str, object] | None:
+    """`facts.group`'s shape (`plans/group-reporting/plan.md` Stage 2,
+    `plans/group-collapse/plan.md` Stage 2) -- `_cardinality_facts`/
+    `_motion_facts`'s sibling: `None` (omitted from `facts` entirely, this
+    module's documented absent-not-null convention) whenever `contact`
+    belongs to no `belief.groups.Group`.
+
+    `tree` is `plans/group-collapse/plan.md` Stage 2's addition: a shallow
+    (`CollapseDepth.SUBCLASS`) `belief.group_view.collapse`, inspectable
+    through `console.py`'s `show <id>` (the `BL-W36` Stage 2 inspection
+    seam) -- `collapse` is cheap (that plan's own measurement), but the
+    gate below is still the *same* cost-pruning discipline every other
+    caller of this module applies, not a special case for this one key.
+    Absent-not-null like every other key here: omitted whenever no member
+    is currently observable, per Decision 6/6a of that plan -- the gate
+    decides *whether* `collapse` runs at all (cost pruning), never *what*
+    it returns (content filtering, explicitly rejected by the user); a
+    remembered member stays in the tree once the gate passes. Reuses
+    `ContactStore.callout_observable` (**any** member, not all, same as
+    `belief.callouts.CalloutScheduler.tick`'s own group loop) -- nothing
+    new is written for this gate."""
     group = store.group_for_contact(contact.id)
     if group is None:
         return None
-    return {
+    facts: dict[str, object] = {
         "group_id": group.id,
         "member_contact_ids": sorted(group.member_contact_ids),
         "member_count": len(group.member_contact_ids),
     }
+    any_observable = any(
+        (member := store.contact(member_id)) is not None
+        and store.callout_observable(member, now_sim)
+        for member_id in group.member_contact_ids
+    )
+    if any_observable:
+        node = collapse(store, group, CollapseDepth.SUBCLASS, now_sim)
+        facts["tree"] = _collapse_node_to_dict(node)
+    return facts
 
 
 def _contact_facts(
@@ -312,7 +361,7 @@ def _contact_facts(
     motion_facts = _motion_facts(contact, now_sim)
     if motion_facts is not None:
         facts["motion"] = motion_facts
-    group_facts = _group_facts(contact, store)
+    group_facts = _group_facts(contact, store, now_sim)
     if group_facts is not None:
         facts["group"] = group_facts
     if enrichment is not None:
