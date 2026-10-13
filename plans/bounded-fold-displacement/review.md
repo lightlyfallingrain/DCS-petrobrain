@@ -144,3 +144,121 @@ Full read — plan, all affected source files, full diff, both pinned-invariant 
 all five scratchpad probes run and their output compared line-by-line against the plan's tables,
 the suite run at Stage 1 in isolation, and two independent mutations applied directly to the merged
 code and reverted cleanly.
+
+## Round: NaN-safety fix close-out (2026-10-13)
+
+Reviewed `3dfe922` ("Make clamp_fold_displacement NaN-safe on its own terms"), the single commit
+closing the one finding from `security-review.md`. Scope: `body-layer/src/belief/
+position_belief.py` (the new `math.isfinite` guard in `clamp_fold_displacement` plus the two
+docstring additions), `body-layer/tests/test_position_belief.py` (one new test), and
+`plans/bounded-fold-displacement/implementation.md`'s round entry.
+
+**Mutation, run myself** (`Edit`, not a heredoc, per worktree rules): removed the two-line guard
+(`if not math.isfinite(fused.x) or not math.isfinite(fused.z): return prior`).
+`test_clamp_fold_displacement_holds_prior_on_nan_mean` fails exactly as the commit claims —
+`result.x == nan` where `prior.x == 100.0` was expected. Restored via `Edit`; `shasum -a 256`
+before and after the mutate/restore cycle match
+(`2e0153acab774084d6397facf1c00a3db3d151ab382815ac1f4d7807a77404cd`), and `git diff --stat` on the
+restored tree is empty.
+
+**The guard closes two of three doors, not all three — the third is the one the orchestrator's
+brief specifically asked me to look for.** Checked by direct probe against the merged code
+(`PYTHONPATH=src:../world-model/src <venv>/python3 -c '...'`), not by reading alone:
+
+- `fused.x`/`fused.z` non-finite: guarded, confirmed held (`result is prior`).
+- **`max_displacement_m` itself non-finite: *not* guarded.** `clamp_fold_displacement(fused=
+  PositionEstimate(x=150.0, z=300.0, …), prior=PositionEstimate(x=100.0, z=200.0, …),
+  max_displacement_m=math.nan)` returns `x=nan, z=nan` — probed directly, reproduces the *exact*
+  mechanism the security review described for `fused`'s mean (`displacement_m <= max_displacement_m`
+  is `False` for a NaN bound too, `displacement_m > 0.0` is also `False`, `scale = 0.0`, `dx * 0.0 ==
+  NaN` when `max_displacement_m` itself was NaN — the multiplication is against `scale`, and `scale`
+  inherits the NaN here, not `dx`). The guard's own new docstring paragraph ("Non-finite `fused`
+  mean, by design, not by accident") is accurate about what it covers but reads as more complete
+  than it is — it does not mention the bound is a second, unguarded path to the identical
+  corruption. **Reachability today is low, by the same reasoning the security review already
+  applied to the original finding**: `max_displacement_m` is `growth_rate_mps * max(0.0, elapsed)`
+  in the one real caller (`Contact.record`), and `growth_rate_mps` resolves through
+  `contact_growth_rate_mps` → `object_model.profile_for` → `plausible_speed_mps`, a table lookup
+  that does not currently produce NaN/inf under any believed classification. Not reachable, same as
+  the original finding — but this round's whole point was to make the function's safety claim true
+  "on its own terms rather than borrowed from caller ordering," and the claim as shipped is still
+  partly borrowed from `max_displacement_m`'s callers never producing a bad bound.
+- `prior.x`/`prior.z` non-finite: not a new corruption path — if `prior` itself already carries a
+  non-finite mean, every branch (guarded or not) just continues propagating what was already there,
+  which is a pre-existing-garbage-in case, not something this commit's guard could or should fix.
+
+**The hold branch does not bump `as_of_sim`, and the module's own docstring says it must.** The
+guard `return`s `prior` by bare identity, so `as_of_sim` stays at whatever it was before this poll
+— probed directly: with `prior.as_of_sim=0.0` and `fused.as_of_sim=1.0`, the guard's result carries
+`as_of_sim=0.0`, not `1.0`. This is not a style nit: the module's own header docstring states the
+"Hold-recovery timing" invariant in so many words — *"`as_of_sim` ('this estimate is current as of
+this sim-time,' bumped on every poll including a hold, since the belief is still the best current
+answer even when unchanged)"* — and names the exact prior incident this guards against (the
+2026-09-25 security addendum, where a *different* `as_of_sim`-handling bug in these same two
+functions' siblings caused hold-recovery time to scale as `1 / poll_interval_s`, measured ~47s
+becoming ~934s). `clamp_to_detection_envelope`'s own hold branch, three lines above this one in the
+same file, gets this right — it constructs a new `PositionEstimate` with `as_of_sim=fused.as_of_sim`
+even though it (like this guard) cannot re-fuse. This guard's docstring addition explains why it
+cannot re-inflate `prior.covariance` (no `observer`/`growth_rate_mps` available) but that reasoning
+only covers the covariance field — `fused.as_of_sim` is already a parameter in scope, needs no
+growth rate, and bumping it costs nothing. **Read as two claims**: "this function has no
+`observer`/`growth_rate_mps` of its own" (true) "so holding the prior exactly as given is the whole
+of this guard" (does not follow for `as_of_sim`, only for `covariance`). Not reachable today either
+— `grep -rn "as_of_sim" src/` outside `position_belief.py` turns up nothing, so no current consumer
+reads a stale value — but it is latent in exactly the shape the project has already been burned by
+once in this file.
+
+Both gaps are one or two lines each and sit inside the function this commit already modified — not
+scope creep, and not something I am asking to re-open the original low-severity/not-reachable
+judgement call. They are about whether *this* commit actually delivers what its own message claims
+("NaN-safe on its own terms," not borrowed). The `as_of_sim` test fix would need
+`test_clamp_fold_displacement_holds_prior_on_nan_mean` reworked from `assert result is prior` to a
+field-equality assertion (mirroring `test_clamp_to_detection_envelope_*`'s own pattern a few hundred
+lines up in the same file), since an `as_of_sim`-bumped hold is no longer identity-equal to `prior`.
+
+Everything else holds: both docstring paragraphs are otherwise accurate (the
+`clamp_to_detection_envelope` addition's "incidental, not a contract" framing is correct and well
+placed); scope is exactly the three files claimed, nothing else moved
+(`tests/test_groups.py::test_the_eager_cap_still_chains_a_long_infantry_line` unmodified, diffed
+against `de6aacf` — empty; `tests/test_callouts.py::test_2c_transcript_fixture_renders_three_lines_
+not_seven` passes by name; `audio-adapter` diff against `de6aacf` empty). Checks: `ruff format
+--check`/`ruff check` clean (120 files), `mypy --strict` clean (55 files), `pytest -q` **1703
+passed / 4 xfailed** (was 1702/4 at `de6aacf`, exactly +1). `audio-adapter`: 255 passed, 1 skipped.
+
+### Required Fixes
+
+- **`clamp_fold_displacement`'s new guard must also treat a non-finite `max_displacement_m` as the
+  hold case** (`body-layer/src/belief/position_belief.py`, the guard currently at `if not
+  math.isfinite(fused.x) or not math.isfinite(fused.z): return prior`) — add `or not
+  math.isfinite(max_displacement_m)` to the condition (safe to call unconditionally at that point:
+  the `max_displacement_m is None` branch above already returns first). Without it, a non-finite
+  bound reaches the exact same `dx * scale == NaN` corruption the commit's own message describes,
+  through `scale` inheriting the NaN rather than `dx`. Update the docstring paragraph to say so.
+- **The hold branch must bump `as_of_sim` to `fused.as_of_sim`**, matching
+  `clamp_to_detection_envelope`'s sibling hold branch and the module's own "Hold-recovery timing"
+  invariant — return a new `PositionEstimate(x=prior.x, z=prior.z, covariance=prior.covariance,
+  as_of_sim=fused.as_of_sim, fused_at_sim=prior.fused_at_sim, fused_covariance=prior.
+  fused_covariance)` rather than bare `prior`. Rework
+  `test_clamp_fold_displacement_holds_prior_on_nan_mean`'s `assert result is prior` into a
+  field-by-field assertion (`result.x == prior.x`, `result.z == prior.z`, `result.as_of_sim ==
+  fused.as_of_sim`, `result.fused_at_sim == prior.fused_at_sim`), since the corrected hold is no
+  longer identity-equal to `prior`.
+
+### Optional Refinements
+
+- None — both findings above are cheap, in-scope, and directly bear on correctness, so neither
+  reads as a nice-to-have.
+
+### Verdict
+
+**NEEDS REVISION.** Both required fixes are small (each a one-line condition or constructor change
+plus a docstring/test touch-up) and stay inside `clamp_fold_displacement` — this does not reopen
+the broader feature or the original security finding's own low-severity judgement, only whether
+this specific commit's claim to have closed it fully is accurate. Re-enters Implementer → Reviewer
+(this round) → DoD per `AGENTS.md`'s change-request loop.
+
+### Review Confidence
+
+Full read of the commit's diff and both touched docstrings in full module context, plus three
+direct probes against the merged code (the documented mutation test, a non-finite-bound probe, and
+an `as_of_sim`-staleness probe) rather than reasoning from the docstring text alone.
