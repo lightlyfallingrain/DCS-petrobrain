@@ -123,3 +123,60 @@ re-verify beyond reading is the full shas-before/shas-after claim for the `_subc
 `tools.py` mutations in `implementation.md`'s first mutation table — noted above as an optional
 item, not a gap in the verdict, since the claims are consistent with the code I did read in full
 and I independently re-ran the two mutations the reviewer brief itself flagged as highest-risk.
+
+---
+
+### Confirmation pass — both required fixes closed (`ed50840`)
+
+Scope: confirming only the two required fixes above, against `ed50840a2b43ef117773f4624951eb9a0c6c960b`
+(three files: `body-layer/docs/STRUCTURE.md`, `body-layer/tests/test_speech.py`,
+`plans/group-collapse/implementation.md`). Not a second full review.
+
+Worktree HEAD (`f25c57c`) was a strict ancestor of the named tip on a clean tree; fast-forwarded,
+confirmed by `git rev-parse HEAD` after.
+
+**Fix 1 — `STRUCTURE.md`.** The entry now reads "Stages 1-4" and describes the landed state
+(fixture-correction finding, canonical sorting of the push-path composition line, the
+`OP_GROUPSOMETHING` wording divergence) in the same register as the surrounding entries — prose
+explaining *why*, not a changelog. No longer asserts Stage 3 was reverted; grepped the rest of the
+file and found no other stale reference to it.
+
+**Fix 2 — the pinning test.** `test_group_composition_clause_folds_op_groupsomething_into_undifferentiated`
+covers both required shapes (pure `OP_GROUPSOMETHING` pair → `"two contacts"`; mixed with a
+differentiated member → `"truck and something"`) plus the single-contact asymmetry
+(`_unit_type_display("OP_GROUPSOMETHING", "class") == "group"`), matching exactly what the change
+request asked for.
+
+**Verified by mutation myself, not from the implementer's table.** Confirmed `shasum
+src/belief/group_view.py` matched the implementation note's stated pre-mutation value
+(`c03857c4f6eea31fd309e133cec8df732508f809`) before touching anything. Changed `_subclass_label`'s
+fallback from `"unknown"` to `"OP_ARMORED"` and reran the new test: it went red with
+`assert 'two armor' == 'two contacts'` — the exact failure reported. Restored the line and
+confirmed the checksum was identical and `git status`/`git diff` showed no residual change. The
+pin is real: it fails for the stated reason when the behaviour it protects is removed.
+
+**No behaviour changed.** `git diff ed50840~1 ed50840 --name-only` lists exactly the three files
+above; no `src/` file appears in the diff. Confirmed independently via `git diff 7f03e73
+ed50840 --stat -- body-layer/src/` (empty).
+
+**No existing assertion's expected value was altered.** The only change to `test_speech.py` is a
+pure addition (one new test function appended after the existing
+`test_group_composition_clause_counts_members_exactly`); no existing `assert` line in that file
+was touched by this commit.
+
+**Checks run myself, inside `body-layer/`** (worktree has no `.venv`; borrowed the main
+checkout's binaries by absolute path, cwd kept in the worktree):
+`ruff format --check` pass, `ruff check` pass, `mypy --strict` pass (57 source files), `pytest`
+**1748 passed, 4 xfailed** — matches the expected count exactly (1747 + the one new pinning test).
+
+### Verdict (confirmation pass)
+
+**APPROVED.**
+
+### Review Confidence (confirmation pass)
+
+Full read of the one commit in scope, plus independent mutation verification (not taken on the
+implementer's table) and independent diffs confirming no behaviour change and no altered
+assertions. This is a narrow confirmation of two specific fixes, not a re-review of the whole
+feature — the original pass's "Review Confidence" note above still describes the depth of that
+broader read.
