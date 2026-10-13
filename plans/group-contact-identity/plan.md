@@ -344,6 +344,33 @@ established, which matters to this plan's own text:
   That is the direction that can *suppress* an air-defence report, and it is out of Stage 3.5's scope
   by design.
 
+### A9a — REVISED 2026-10-13: the displacement bound is now being built as well
+
+**A9 stands as the record of the 2026-10-12 decision and is not rewritten.** What has changed is
+that *"over speech-time suppression and a displacement bound"* no longer describes the current
+state: on 2026-10-13 the user **also chose `BL-B58` option 2**, the displacement bound, after the
+`BL-B59` pass measured that the fold's own displacement — not the clustering — is the dominant
+term in **both** the absorption and the eviction. Plan:
+**`plans/bounded-fold-displacement/plan.md`**. Option 3 is not reversed; Stage 3.5 stays merged.
+
+Three things in A9 above that the bound changes, measured
+(`plans/bounded-fold-displacement/scratchpad/`):
+
+- **Stage 3.5's gate becomes a no-op in incident 2** once the source is bounded — the absorbing
+  edge goes 63.8 → 155.0 m against its 78.0 m backstop. It is **load-bearing again at a 3× looser
+  bound**, which is the reason the gate stays rather than being removed: it is the safety net for
+  a bound derived from the uncalibrated `_PLAUSIBLE_SPEED_MPS` table.
+- **The 219 m / 132 m single-tick displacements A9 and A2.2 both cite drop to 40 m**, i.e. inside
+  the naked-eye channel's own `BEARING_SIGMA_DEG = 3.0` at these ranges. A2.2's "membership noise"
+  argument for gating Stage 4 is weakened in magnitude but not retired — Stage 4 is merged anyway.
+- **A6's Stage 4 extent guard is unaffected**, for the reason A9 already gives: it answers a
+  different question.
+
+**Not changed, and now measured rather than assumed:** `BL-14`'s premise needs a record *per
+unit*, and the bound fixes those records' **accuracy** without fixing their **existence** — two
+real units in incident 2 have no contact at all, before or after. That is Stage 3's accepted
+undercount, and it is decision 1 of the new plan.
+
 **Stage 4's dependency widens**: it is now gated on Stage 3.5 as well as Stage 0, for the reason A2.2
 already gives — its heading input is membership noise, and §2 of that plan puts a number on it
 (one tick, no motion, a 132 m member displacement plus a simultaneous absorption and eviction).

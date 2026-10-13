@@ -1,5 +1,9 @@
 # BL-B59 — retention against the relative cohesion test
 
+> **SUPERSEDED at §5, 2026-10-13 — the user chose [[BL-B58]] option 2 instead.** Replacement:
+> `plans/bounded-fold-displacement/plan.md`. §2's measurements remain the base for it; see the
+> note at §5 for exactly what stands and what does not.
+
 > **Status: plan only, not implemented.** Written 2026-10-13 by the Architect pass on
 > [[BL-B59]], on `fix/bl-b59-retention-hysteresis` (branched from `main` at `1884775`, so
 > BL-12 Stage 3.5 is present). Prioritised by the user as the next piece of work after
@@ -255,6 +259,21 @@ the defect *observable in a sortie* without changing behaviour — which is also
 ---
 
 ## 5. Implementation Plan
+
+> **Decision 1 REVISED — 2026-10-13. §5 is SUPERSEDED and was not implemented.** The user chose
+> **[[BL-B58]] option 2** (bound the fold's displacement at source) over the retention term, which
+> is what §3 above recommended and what §8 decision 1 put to him. The replacement is
+> **`plans/bounded-fold-displacement/plan.md`**.
+>
+> **§1–§4 and §6–§10 stand and are the measurement base that justifies the replacement** — in
+> particular §2a (the fold's displacement is the dominant term), §2b (the backstop never binds),
+> §2d (*no* bounded retention factor works) and §2e (`fold_displacement_m` never retires). The
+> option-2 plan re-measures §2e under the bound and finds the accumulator still never retires,
+> only at a bounded rate.
+>
+> **§5 below is left in place deliberately, per `docs/PROCESS.md` "Superseding a decision"** — it
+> is the design that was *rejected on the user's decision*, not a design that was wrong, and the
+> ruled-out family in §2c/§2d is only legible beside it. Do not implement it.
 
 Per `body-layer/CLAUDE.md`, *"Mechanism and calibration never share a commit."* Here the
 mechanism and the **bound** are the two separable halves, because §2d showed the bound is

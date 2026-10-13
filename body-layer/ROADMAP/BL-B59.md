@@ -1,5 +1,20 @@
 # BL-B59 — The same fold drift that absorbs an unrelated contact also evicts a real member
 
+> **Decided 2026-10-13: fixed at source, not by a retention term. The user chose [[BL-B58]]
+> **option 2** — bound how far a single fold-driven `Contact.record` may move a fused position —
+> over the retention hysteresis this entry names. Plan: **`plans/bounded-fold-displacement/
+> plan.md`**. `plans/group-retention-hysteresis/plan.md` §5 is superseded in place (its §2
+> measurements are what justify the replacement and still stand).
+>
+> **Measured under the bound** (`plans/bounded-fold-displacement/scratchpad/`): at a bound of
+> `plausible_speed_mps × elapsed` the eviction does not happen (`GROUP_1` stays `[1,2,3]`,
+> **0 membership transitions over 60 ticks** against the baseline's 12), the fold's displacement
+> drops 132.7 → **40.0 m**, and the absorption half fixes itself too — the absorbing edge to the
+> ZSU goes 63.8 → 155.0 m against its 78.0 m backstop, which makes **Stage 3.5's admission gate a
+> no-op in this incident** (it is load-bearing again at a 3× looser bound, which is why it stays).
+> **Zero new constants.** Of the whole existing suite exactly one test moves, and it is Stage
+> 3.5's own provenance test, whose fold is entirely at `t_sim=0.0`.
+
 > **Planned, 2026-10-13 — and the plan reverses this entry's framing of its own mechanism.**
 > `plans/group-retention-hysteresis/plan.md`, on `fix/bl-b59-retention-hysteresis`. The user
 > prioritised this as the next piece of work after `BL-12` merged. Reproduced against
