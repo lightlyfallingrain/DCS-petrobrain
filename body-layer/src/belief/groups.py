@@ -1135,10 +1135,27 @@ def group_matches(
     # deliberately not gated (more members than memory is new detections of
     # a continuing group; fewer is occlusion -- both normal per the user's
     # own words).
+    #
+    # `plans/group-collapse/plan.md` Stage 4 -- reads `classification.
+    # CLASS_GROUP_OF` rather than its own `- AIR_DEFENSE_OP_CLASSES`
+    # carve-out: `CLASS_GROUP_OF`'s domain *is* `AIR_DEFENSE_OP_CLASSES`
+    # (`belief.group_view.collapse`'s own level-1 vocabulary, Decision 7),
+    # so a class mapping to anything other than `"air defense"` is exactly
+    # the old subtraction -- measured behaviour-identical,
+    # `plans/group-collapse/scratchpad/probe_matcher_independence.py` §3.
+    # One definition of the air-defence partition, not two.
     group_classes = {op_class for op_class, _count in group.composition}
     observed_classes = {op_class for op_class, _count in observed.composition}
-    group_non_ad = group_classes - classification.AIR_DEFENSE_OP_CLASSES
-    observed_non_ad = observed_classes - classification.AIR_DEFENSE_OP_CLASSES
+    group_non_ad = {
+        c
+        for c in group_classes
+        if classification.CLASS_GROUP_OF.get(c, c) != "air defense"
+    }
+    observed_non_ad = {
+        c
+        for c in observed_classes
+        if classification.CLASS_GROUP_OF.get(c, c) != "air defense"
+    }
     if not (group_non_ad <= observed_non_ad or observed_non_ad <= group_non_ad):
         return False
     # Test 5 -- displacement plausibility (hard). The zero-speed-bound rule

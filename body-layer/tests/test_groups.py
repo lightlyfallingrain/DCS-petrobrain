@@ -1365,6 +1365,32 @@ def test_group_matches_composition_compatibility_is_subset_either_direction() ->
     assert group_matches(group, different_kind, 1.0) is False
 
 
+def test_group_matches_composition_still_excludes_air_defence_via_class_group_of() -> (
+    None
+):
+    """`plans/group-collapse/plan.md` Stage 4 -- test 4 now reads
+    `classification.CLASS_GROUP_OF` rather than its own inline
+    `AIR_DEFENSE_OP_CLASSES` carve-out. Measured behaviour-identical
+    (`probe_matcher_independence.py` §3): `CLASS_GROUP_OF`'s domain *is*
+    `AIR_DEFENSE_OP_CLASSES`, so an `OP_LRSAM` member is still excluded
+    from the non-air-defence subset check.
+
+    `group`'s `air_defence_composition` is deliberately left empty here
+    (a fixture-only inconsistency with its `composition`, isolating test 4
+    from test 3's own, separate air-defence-confirmation gate) so this
+    test exercises *only* the exclusion line test 4 itself changed: with
+    `OP_LRSAM` filtered out, `group`'s non-air-defence set is empty, a
+    subset of `observed`'s `{OP_TRUCK}` either way -- the match that would
+    *not* hold were `OP_LRSAM` left unfiltered (`{OP_LRSAM}` is not a
+    subset of, and does not contain, `{OP_TRUCK}`)."""
+    group = _group(composition=(("OP_LRSAM", 1),), air_defence_composition=())
+    observed = _cluster_properties(
+        [_contact("Y1", 0.0, 0.0), _contact("Y2", 10.0, 0.0)]  # both OP_TRUCK
+    )
+    assert observed.air_defence_composition == ()
+    assert group_matches(group, observed, 1.0) is True
+
+
 def test_group_matches_rejects_an_implausible_displacement() -> None:
     """Test 5: a jump far beyond `GATE_GROWTH_RATE_MPS * elapsed_s` plus
     both sides' position uncertainty is rejected, even with every other
