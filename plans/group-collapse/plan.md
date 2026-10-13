@@ -93,7 +93,28 @@ Probes under `plans/group-collapse/scratchpad/`, all runnable.
 | 52 | 2.6 µs | 22.7 µs | 43.9 µs |
 
 The push path (`callouts.py:1140`, every group every poll) at a realistic 10 groups × 6 members is
-**~5 µs/tick shallow, ~78 µs/tick at full depth** — against `BL-11`'s 12.6 ms poll, 0.04% and 0.6%.
+~~**~5 µs/tick shallow, ~78 µs/tick at full depth** — against `BL-11`'s 12.6 ms poll, 0.04% and
+0.6%.~~
+
+> **CORRECTED 2026-10-13 by the performance review** (`performance-review.md`). **The arithmetic
+> above was wrong, by 5–47×.** The "shallow" figure multiplied 10 × **0.45 µs**, which is the
+> *group*-depth column, while Stage 2's actual caller requests **sub-class** depth (5.2 µs at 6
+> members). Re-measured against a realistic mixed roster:
+>
+> | depth requested | per tick, 10 groups × 6 members | share of the 12.6 ms poll |
+> |---|---|---|
+> | `SUBCLASS` (Stage 2's caller) | **~235 µs** | **1.86%** |
+> | `CONTACT` (full depth) | **~415 µs** | **3.3%** |
+>
+> Still trivial in absolute terms, and the conclusion — depth is affordable on the push path —
+> **stands unchanged**. But the understated 0.04%/0.6% figures would have been cited later as
+> headroom that does not exist, so they are struck rather than silently replaced.
+>
+> **Linearity was separately confirmed 77× past this table's own ceiling**: an adversarial probe
+> (`scratchpad/perf_review_adversarial_scaling.py`) drove `collapse_members` to **4,000 members**
+> at the worst-case shape — many `TYPE` values across all five air-defence sub-classes, forcing the
+> deepest dict-build branch — and per-member cost *fell*, 6.24 µs at n=52 to 2.45 µs at n=4,000.
+> That is single-pass bucketing, not a quadratic re-filter.
 
 **The cost story the capture expected is inverted.** The push path *already* calls
 `describe_contact` per member via `_group_member_facts`, and `BL-B49` measured that path's
@@ -342,7 +363,8 @@ Per-subproject checks after every stage, from **inside** `body-layer/`:
 
 **Unblocks** the attention tiers cleanly: the tier's job becomes *choose a depth*, which is now a
 parameter rather than a redesign, and the push/pull cost split the capture worried about turns out
-not to constrain the choice at all (measured: 0.04–0.6% of a poll). **Narrows** `BL-14`: the
+not to constrain the choice at all (measured: **1.9–3.3%** of a poll — corrected from an earlier
+0.04–0.6%, see the correction note in §1). **Narrows** `BL-14`: the
 measured contact-vs-unit gap means a deep collapse delivers *per-contact* selection, not per-unit,
 so `BL-14`'s *"selection, step and guidance are all per unit"* still needs the attention-driven
 resolution mechanism — this plan does not supply it and must not be read as having done so.

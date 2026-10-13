@@ -152,6 +152,33 @@ def _units_lo(members: Sequence[Contact]) -> int:
 
 
 def _units_hi(members: Sequence[Contact]) -> float:
+    """Upper bound of the roster's unit-count interval -- the sum of each
+    member's own `CardinalityBelief.hi`.
+
+    **This can legitimately be `math.inf`, and is deliberately not guarded
+    here.** `CardinalityBelief.hi` is `math.inf` by design for the
+    `OP_MORETHAN15UNITS` and `UNKNOWN` buckets -- an open-ended "more than
+    fifteen" has no finite upper bound to state -- and that bucket is
+    reachable from real naked-eye clustering of more than fifteen units. So
+    an infinite `units_hi` is a *true* statement about belief, not a defect,
+    and the `float` return type is what makes it sayable.
+
+    **The hazard is downstream, and it is latent rather than live** (security
+    review, 2026-10-13): the value propagates into `facts["group"]["tree"]`,
+    where no current consumer does arithmetic on it or strict-JSON-encodes it
+    (`json.dumps` emits a non-standard `Infinity` token). Nothing is broken
+    today. It is flagged because body-layer has fixed the same shape of
+    defect -- an unguarded non-finite float reaching a conversion -- three
+    times in one day (`position_belief.clamp_fold_displacement` twice,
+    `perception/forest.py` once).
+
+    **No representation policy is chosen here on purpose.** Whether an
+    open-ended count should be spoken as "more than fifteen", clamped to a
+    sayable ceiling, or carried as `None` is a question for the consumer that
+    first needs to say it -- the attention-tier milestone, where `high` tier
+    reports per-classification counts. Guessing now would pre-empt that
+    decision and bake it into a derivation that has no opinion about
+    wording."""
     return sum(member.cardinality.hi for member in members)
 
 
