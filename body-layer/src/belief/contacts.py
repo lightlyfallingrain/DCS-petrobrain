@@ -102,6 +102,7 @@ from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
 from belief.position_belief import (
     PositionEstimate,
+    clamp_fold_displacement,
     clamp_to_detection_envelope,
     fold_position,
 )
@@ -502,7 +503,7 @@ class Contact:
         Read-only, same posture as `last_position` above."""
         return self.position.radius_m()
 
-    def record(self, percept: Percept) -> None:
+    def record(self, percept: Percept, *, ambiguous_fold: bool = False) -> None:
         """Fold `percept` into this contact's last-known state. Called only
         by `ContactStore.ingest`, which has already decided this percept
         belongs to this contact (via the gate in `belief.
@@ -522,7 +523,23 @@ class Contact:
         contact_growth_rate_mps`, the one place that resolution happens
         (see that function's docstring on why `Contact.record`, not
         `position_belief`, is the caller: `PositionEstimate` must not know
-        its own classification)."""
+        its own classification).
+
+        `ambiguous_fold` (`plans/bounded-fold-displacement/plan.md`,
+        `BL-B58`/`BL-B59`) is keyword-only and set `True` by exactly one
+        caller -- `ContactStore.ingest`'s within-group fold branch
+        (`_fold_target_for_ambiguous_candidates` resolving `len(passing) >=
+        2`). When `True`, the bound passed to `position_belief.
+        clamp_fold_displacement` is this same `growth_rate_mps` times the
+        elapsed sim-time since `prior_position`'s own last genuine fuse
+        (`percept.t_sim - prior_position.fused_at_sim`, floored at `0.0` --
+        a same-tick fold therefore has a bound of `0.0`, moving the mean
+        not at all, the plan's §2c decision: no elapsed time, no plausible
+        travel). `False` (every pre-`BL-B58` call site, and `ingest`'s two
+        unambiguous branches) makes the bound `None`, `clamp_fold_
+        displacement`'s own identity case -- so this contact's believed
+        position is never second-guessed outside the one call site that
+        actually folds an ambiguous percept onto it."""
         look_position = implied_position(percept)
         prior_position = self.position
         growth_rate_mps = contact_growth_rate_mps(self)
@@ -540,12 +557,20 @@ class Contact:
             t_sim=percept.t_sim,
             growth_rate_mps=growth_rate_mps,
         )
-        self.position = clamp_to_detection_envelope(
+        envelope_clamped = clamp_to_detection_envelope(
             fused_position,
             prior_position,
             observer,
             _max_detection_range_m(percept.source),
             growth_rate_mps=growth_rate_mps,
+        )
+        max_displacement_m = (
+            growth_rate_mps * max(0.0, percept.t_sim - prior_position.fused_at_sim)
+            if ambiguous_fold
+            else None
+        )
+        self.position = clamp_fold_displacement(
+            envelope_clamped, prior_position, max_displacement_m
         )
         self.last_alt_m = look_position.alt_m
         self.last_class_raw = percept.classification_raw

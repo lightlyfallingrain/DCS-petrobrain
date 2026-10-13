@@ -71,6 +71,31 @@ could have been made from at all.
    went wrong, not evidence of a position, so the prior (still the most
    recent trustworthy belief) is what should survive.
 
+3. **No bound on how far a single *ambiguity fold* may move a fused
+   position (`clamp_fold_displacement`, `plans/bounded-fold-displacement/
+   plan.md`, `BL-B58`/`BL-B59`).** A Stage 3 within-group fold
+   (`belief.contacts.ContactStore._fold_target_for_ambiguous_candidates`)
+   folds a percept onto a contact the gate could not uniquely resolve --
+   the fuse itself cannot distinguish that case from an ordinary
+   unambiguous look, so an unlucky fold could move the mean farther than
+   that contact's own class could plausibly have travelled, which then
+   let a stale downstream cluster silently absorb or evict a real member
+   (`BL-B58`/`BL-B59`). Like `clamp_to_detection_envelope`, this is a
+   *caller-invoked* post-fusion check -- bounding inside `fold_position`
+   would need an `is_fold` flag, making the fuse know about *association
+   ambiguity*, a boundary this module's own fold-vs-look-covariance split
+   above already draws. `belief.contacts.Contact.record` calls it last, on
+   the result `clamp_to_detection_envelope` already returned, with a bound
+   derived from the contact's own believed class rate and the elapsed time
+   since its own last genuine fuse (never from any DCS ground-truth
+   position or velocity) when `record`'s own `ambiguous_fold` keyword says
+   this call is a fold; `None` otherwise, which is this function's
+   identity branch. **The fold still happens and the clamped mean is still
+   fused evidence** -- only the *distance the mean travels* is capped; the
+   clamped remainder keeps the fuse's own covariance, never the prior's
+   (plan §2c: holding the prior's covariance leaves its `fused_at_sim`
+   behind, which grows every subsequent fold's own bound).
+
 Kept out of `belief.contacts` deliberately, to hold that already-crowded
 module's diff small (plan's Affected Modules). `Covariance2D`/
 `covariance_from_uncertainty` are used two places: `belief.
@@ -621,6 +646,58 @@ def clamp_to_detection_envelope(
         as_of_sim=fused.as_of_sim,
         fused_at_sim=prior.fused_at_sim,
         fused_covariance=prior.fused_covariance,
+    )
+
+
+def clamp_fold_displacement(
+    fused: PositionEstimate,
+    prior: PositionEstimate | None,
+    max_displacement_m: float | None,
+) -> PositionEstimate:
+    """Module docstring's third caller-invoked clamp: cap how far `fused`'s
+    mean may have moved from `prior`'s, structurally parallel to
+    `clamp_to_detection_envelope` above but a distance bound rather than a
+    range-from-observer one. `belief.contacts.Contact.record` calls this
+    last, after `clamp_to_detection_envelope`, so the bound is measured
+    against the position actually adopted -- when the envelope clamp has
+    already held the prior mean, the displacement here is `0.0` and this
+    clamp is a no-op by construction.
+
+    **Identity when there is nothing to bound against**: `max_displacement_m
+    is None` (the ordinary, non-fold case -- every pre-`BL-B58` call site)
+    or `prior is None` (a founding look has no prior mean to have moved
+    from, mirroring `clamp_to_detection_envelope`'s own founding-look
+    no-op). Neither branch constructs a new `PositionEstimate`; both return
+    `fused` itself unchanged.
+
+    Otherwise: if `fused`'s mean already sits within `max_displacement_m`
+    of `prior`'s, `fused` passes through unchanged (the common case -- an
+    ordinary fold whose own displacement never approached the bound).
+    Past the bound, the mean is scaled back along the straight line from
+    `prior` to `fused` so its displacement equals exactly
+    `max_displacement_m` (`0.0` pulls it back onto `prior`'s own point,
+    the `plans/bounded-fold-displacement/plan.md` §2c zero-elapsed case --
+    physically correct: no elapsed time, no plausible travel). **The
+    clamped remainder keeps `fused`'s own covariance and `fused_at_sim`**,
+    never `prior`'s (that plan's §2c, measured: holding the prior's
+    covariance leaves `fused_at_sim` behind, which only grows the *next*
+    fold's own bound) -- this is still a genuine fuse, with only its mean
+    repositioned, not a hold."""
+    if max_displacement_m is None or prior is None:
+        return fused
+    dx = fused.x - prior.x
+    dz = fused.z - prior.z
+    displacement_m = math.hypot(dx, dz)
+    if displacement_m <= max_displacement_m:
+        return fused
+    scale = max_displacement_m / displacement_m if displacement_m > 0.0 else 0.0
+    return PositionEstimate(
+        x=prior.x + dx * scale,
+        z=prior.z + dz * scale,
+        covariance=fused.covariance,
+        as_of_sim=fused.as_of_sim,
+        fused_at_sim=fused.fused_at_sim,
+        fused_covariance=fused.fused_covariance,
     )
 
 
