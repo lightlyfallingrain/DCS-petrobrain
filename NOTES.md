@@ -1047,3 +1047,41 @@ two functions that must agree (2026-09-19).
   reproduces a known-quiet baseline first (here: steady state is one line then silence for 19
   ticks). A probe that cannot reproduce silence cannot be trusted about noise
   (`plans/air-defence-class-level/security.md` §3, `review.md`).
+- **A NaN-safety guard can close the reachable operand and still leave another one in the same
+  arithmetic expression open, and reasoning from the docstring's own completeness claim will not
+  catch it.** `clamp_fold_displacement`'s first fix guarded `fused.x`/`fused.z` against non-finite
+  values; the same `dx * scale` expression the fix patched also depends on `max_displacement_m`,
+  a second operand the guard's own author did not re-enumerate before declaring the function
+  "NaN-safe on its own terms." Found only because the Reviewer, on the fix's own review round, was
+  asked to re-run the enumeration (every operand feeding the arithmetic) rather than to confirm the
+  fix worked — "does the guard still claim more than it covers" is a different question from "does
+  the test pass," and only the first one finds a second unguarded operand sharing the same line.
+  Lesson: a safety-claim docstring invites checking the claim against every operand in the
+  expression it protects, not just the one the original finding named
+  (`plans/bounded-fold-displacement/review.md`, "NaN-safety fix close-out" round).
+- **A hold branch that returns a value by bare identity instead of constructing a fresh object is
+  an easy way to silently violate a "bump the timestamp on every poll" invariant**, and this
+  project has now been caught by the same shape twice in the same file. `position_belief.py`'s own
+  "Hold-recovery timing" invariant (hardened once already, 2026-09-25, after a different hold
+  branch's `as_of_sim` bug scaled hold-recovery time as `1 / poll_interval_s`) was violated again by
+  a brand-new hold branch (`clamp_fold_displacement`'s NaN guard) returning bare `prior` instead of
+  a `PositionEstimate` with `as_of_sim` bumped to the current poll. The sibling function three lines
+  above it in the same module gets this right, and the new guard's own docstring explained why it
+  could not re-inflate covariance (true) without noticing that reasoning does not extend to
+  `as_of_sim`, which needs no growth rate and costs nothing to bump. Lesson: when a module states an
+  invariant as a numbered rule in its own header docstring, a *new* code path added to that module
+  needs to be checked against that rule explicitly, not just against its nearest sibling's shape —
+  shape-matching catches "did I copy the pattern," not "did I satisfy the rule the pattern exists
+  to satisfy" (`plans/bounded-fold-displacement/review.md`, `body-layer/src/belief/
+  position_belief.py`'s "Hold-recovery timing" docstring section).
+- **A retention-hysteresis candidate copied the exact bound *shape* of an existing in-repo
+  precedent (`watch-reporting` §4e's 1.5× factor) and failed anyway, because the factor was never
+  re-derived against the new defect's own geometry.** Sweeping the factor (0.25× / 0.5× / 1.0× /
+  1.5×) fixed the fold tick in every case and lost the member again a few ticks later in every
+  case — not a near-miss that calibration would close, a sweep with no good value in it. Only an
+  *unbounded* discount held. Measurement is what told the two apart; reading the shapes side by
+  side would not have, because the candidate looked like a reasonable generalisation of working
+  code. Lesson: a bound shape that works elsewhere transfers its *form*, never its *factor*, and a
+  sweep across plausible factors — not a single plausible-looking value — is what actually tells
+  you whether the shape itself is wrong (`plans/group-retention-hysteresis/plan.md` §2, superseded
+  by `plans/bounded-fold-displacement/plan.md`).

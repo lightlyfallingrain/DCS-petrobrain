@@ -1,5 +1,15 @@
 # BL-B50 — Group callout suppression is defeated by any two alternating lines
 
+> **Recheck condition discharged, 2026-10-13 — do not re-open on the strength of this alone.**
+> `[[BL-B59]]`'s own plan (`plans/bounded-fold-displacement/plan.md` §5, row A) re-ran the 2C
+> fixture over 60 ticks of repeat folds under the bound: **0 membership transitions, versus the
+> unbounded baseline's 12.** That is this entry's own stated recheck condition ("confirm whether
+> the three-line result is stable across consecutive ticks"), and it is now stable — `BL-B59`'s
+> eviction path, the mechanism this recheck existed to watch for, no longer fires on this fixture.
+> This discharges the recheck; it does **not** close this entry's own defect (the one-slot
+> signature / speak-only snapshot refresh below still exists and still ratchets under two
+> alternating oscillators of distinct classes, which is unrelated to the fold-drift mechanism).
+
 > **Recheck note added 2026-10-12 (BL-12 Stage 3.5, `BL-B58` decision 3).** The cohesion
 > admission gate landed this stage and dropped `tests/test_callouts.py`'s 2C fixture from four
 > spoken lines to three -- `test_2c_transcript_fixture_renders_four_lines_not_seven` renamed to
@@ -14,6 +24,14 @@
 > re-run the 2C fixture (and any sortie trace available by then) and confirm whether the three-line
 > result is stable across consecutive ticks, or whether `BL-B59`'s eviction mechanism reopens
 > flipping on this exact fixture once it is live for longer than this fixture's own window.**
+
+> **Pointer added 2026-10-13.** `[[BL-B59]]` is now planned
+> (`plans/group-retention-hysteresis/plan.md`), and that plan's acceptance table row **I** is
+> this entry's recheck condition stated as a test: re-run the 2C fixture and confirm the
+> three-line result is **stable across consecutive ticks**. Relevant measurement from that
+> pass: over 60 ticks of repeat folds the baseline shows **12** membership transitions and the
+> retention mechanism **0** — so `BL-B59`'s eviction path is a live flipping source today, and
+> fixing it pushes this entry's ratchet ingredient the right way rather than adding to it.
 
 - [ ] **BL-B50 — `belief.callouts`' group suppression is a one-slot signature plus a speak-only
   membership-snapshot refresh, and any two alternating group lines defeat both.** #status/open

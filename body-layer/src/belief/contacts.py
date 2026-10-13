@@ -102,6 +102,7 @@ from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
 from belief.position_belief import (
     PositionEstimate,
+    clamp_fold_displacement,
     clamp_to_detection_envelope,
     fold_position,
 )
@@ -472,18 +473,37 @@ class Contact:
     #: within-group ambiguity fold (`ContactStore._fold_target_for_ambiguous_
     #: candidates` resolving `ingest`'s `len(passing) >= 2` branch) since this
     #: contact was last recorded from an *unambiguous* percept. Written only
-    #: by `ContactStore.ingest`, at the one call site that folds: accumulated
-    #: (`+=`, not overwritten) across repeat folds with no intervening clean
-    #: look, and reset to `0.0` on either unambiguous branch (an object-
-    #: permanence continuity resolution, or a `len(passing) == 1` gate match)
-    #: -- an independent look confirming where the contact actually is is
-    #: exactly the evidence that retires the doubt. `0.0` for a founding
-    #: contact and for every contact that has never been an ambiguous fold
-    #: target. Read by `groups._cluster_contacts`'s admission gate as the
-    #: cost of letting this contact's own (possibly fold-corrupted) position
-    #: admit a new group member; never read as a position correction itself.
-    #: Accumulate-not-replace is a stated assumption, not measured against a
-    #: real repeat-fold incident -- see that plan's Risks section.
+    #: by `ContactStore.ingest`, at the one call site that folds, and reset
+    #: to `0.0` on either unambiguous branch (an object-permanence
+    #: continuity resolution, or a `len(passing) == 1` gate match) -- an
+    #: independent look confirming where the contact actually is is exactly
+    #: the evidence that retires the doubt. `0.0` for a founding contact and
+    #: for every contact that has never been an ambiguous fold target. Read
+    #: by `groups._cluster_contacts`'s admission gate as the cost of letting
+    #: this contact's own (possibly fold-corrupted) position admit a new
+    #: group member; never read as a position correction itself.
+    #:
+    #: **`plans/bounded-fold-displacement/plan.md` (`BL-B58` option 2,
+    #: closing `BL-B59` too): this now measures the *clamped* displacement,
+    #: never the raw fuse's, and tracks the worst single unretired fold
+    #: (`max()`), never an accumulated sum (`+=`, this field's own
+    #: pre-this-plan behaviour).** `ContactStore.ingest`'s fold branch calls
+    #: `Contact.record(percept, ambiguous_fold=True)`, which bounds the
+    #: fuse's own mean-displacement at `position_belief.
+    #: clamp_fold_displacement` before `record` returns, so the value
+    #: compared here is `contact.position` *after* that bound: a fold that
+    #: would have moved the mean farther than the contact's own believed
+    #: class could plausibly have travelled is recorded at the bound, not
+    #: at the uncapped distance. The `+=` → `max()` change is Stage 3, its
+    #: own commit: accumulate-not-replace was a stated assumption
+    #: (previously here, unmeasured), and under repeat folds with no
+    #: intervening clean look it never retired at all -- every
+    #: re-observation in a dense scene is itself ambiguous, so the
+    #: unambiguous branches above that reset this field to `0.0` never
+    #: arrive. `max()` -- "the worst single unretired fold" -- bounds the
+    #: budget without a new constant, where accumulation grew it without
+    #: limit (measured: 40.0 → 160.0 m over 60 ticks under `+=`, zero
+    #: resets, same incident).
     fold_displacement_m: float = 0.0
 
     @property
@@ -502,7 +522,7 @@ class Contact:
         Read-only, same posture as `last_position` above."""
         return self.position.radius_m()
 
-    def record(self, percept: Percept) -> None:
+    def record(self, percept: Percept, *, ambiguous_fold: bool = False) -> None:
         """Fold `percept` into this contact's last-known state. Called only
         by `ContactStore.ingest`, which has already decided this percept
         belongs to this contact (via the gate in `belief.
@@ -522,7 +542,23 @@ class Contact:
         contact_growth_rate_mps`, the one place that resolution happens
         (see that function's docstring on why `Contact.record`, not
         `position_belief`, is the caller: `PositionEstimate` must not know
-        its own classification)."""
+        its own classification).
+
+        `ambiguous_fold` (`plans/bounded-fold-displacement/plan.md`,
+        `BL-B58`/`BL-B59`) is keyword-only and set `True` by exactly one
+        caller -- `ContactStore.ingest`'s within-group fold branch
+        (`_fold_target_for_ambiguous_candidates` resolving `len(passing) >=
+        2`). When `True`, the bound passed to `position_belief.
+        clamp_fold_displacement` is this same `growth_rate_mps` times the
+        elapsed sim-time since `prior_position`'s own last genuine fuse
+        (`percept.t_sim - prior_position.fused_at_sim`, floored at `0.0` --
+        a same-tick fold therefore has a bound of `0.0`, moving the mean
+        not at all, the plan's §2c decision: no elapsed time, no plausible
+        travel). `False` (every pre-`BL-B58` call site, and `ingest`'s two
+        unambiguous branches) makes the bound `None`, `clamp_fold_
+        displacement`'s own identity case -- so this contact's believed
+        position is never second-guessed outside the one call site that
+        actually folds an ambiguous percept onto it."""
         look_position = implied_position(percept)
         prior_position = self.position
         growth_rate_mps = contact_growth_rate_mps(self)
@@ -540,12 +576,20 @@ class Contact:
             t_sim=percept.t_sim,
             growth_rate_mps=growth_rate_mps,
         )
-        self.position = clamp_to_detection_envelope(
+        envelope_clamped = clamp_to_detection_envelope(
             fused_position,
             prior_position,
             observer,
             _max_detection_range_m(percept.source),
             growth_rate_mps=growth_rate_mps,
+        )
+        max_displacement_m = (
+            growth_rate_mps * max(0.0, percept.t_sim - prior_position.fused_at_sim)
+            if ambiguous_fold
+            else None
+        )
+        self.position = clamp_fold_displacement(
+            envelope_clamped, prior_position, max_displacement_m
         )
         self.last_alt_m = look_position.alt_m
         self.last_class_raw = percept.classification_raw
@@ -1091,17 +1135,24 @@ class ContactStore:
                         else None
                     )
                     if fold_target is not None:
-                        # The one call site that folds: accumulate the
-                        # position displacement this fold causes, metres,
+                        # The one call site that folds: `ambiguous_fold=True`
+                        # is what tells `Contact.record` to bound this
+                        # fuse's own displacement (`plans/
+                        # bounded-fold-displacement/plan.md`, `BL-B58`/
+                        # `BL-B59`) -- the budget tracks the *worst single
+                        # unretired fold* (`max()`, never accumulated),
                         # never reset here (`Contact.fold_displacement_m`'s
                         # own docstring; `plans/group-cohesion-admission-
                         # gate/plan.md` §4).
                         contact = fold_target
                         position_before = contact.position
-                        contact.record(percept)
-                        contact.fold_displacement_m += math.hypot(
-                            contact.position.x - position_before.x,
-                            contact.position.z - position_before.z,
+                        contact.record(percept, ambiguous_fold=True)
+                        contact.fold_displacement_m = max(
+                            contact.fold_displacement_m,
+                            math.hypot(
+                                contact.position.x - position_before.x,
+                                contact.position.z - position_before.z,
+                            ),
                         )
                     else:
                         contact = Contact.from_percept(self._new_contact_id(), percept)
