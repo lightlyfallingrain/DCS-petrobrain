@@ -263,6 +263,40 @@ def test_collapse_reads_classification_not_last_class_raw() -> None:
     assert type_node.level == CollapseDepth.TYPE
 
 
+def test_collapse_members_presence_level_claim_stays_unknown_even_if_its_value_resolves() -> (
+    None
+):
+    """A claim held below `SpecificityLevel.CLASS` has no class claim by
+    the lattice's own definition, regardless of what `.value` happens to
+    contain. Test fixtures across this codebase commonly default
+    `classification_level` to `CLASS` while supplying a type-shaped raw
+    string (e.g. `"BMP-2"`) for observations that are not exercising
+    classification at all -- and `object_model.profile_for("BMP-2")`
+    *does* resolve to `OP_ARMORED`. A member held at `PRESENCE` with that
+    same value must not be promoted into the `OP_ARMORED` sub-class on the
+    strength of a value the belief itself has not yet claimed to that
+    specificity."""
+    cov = Covariance2D(xx=0.0, zz=0.0, xz=0.0)
+    contact = Contact(
+        id="C1",
+        position=PositionEstimate(
+            x=0.0,
+            z=0.0,
+            covariance=cov,
+            as_of_sim=0.0,
+            fused_at_sim=0.0,
+            fused_covariance=cov,
+        ),
+        last_alt_m=0.0,
+        last_class_raw="BMP-2",
+        classification=new_classification_belief(
+            value="BMP-2", level=SpecificityLevel.PRESENCE, established_sim=0.0
+        ),
+    )
+    node = collapse_members([contact], CollapseDepth.TYPE, now_sim=0.0)
+    assert node.children[0].label == "unknown"
+
+
 # --- the cardinality interval at CONTACT depth --------------------------
 
 

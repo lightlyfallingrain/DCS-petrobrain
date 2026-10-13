@@ -185,11 +185,23 @@ def _subclass_label(contact: Contact) -> str:
     """The `op_class` a contact's own held classification resolves to
     through the lattice (`classification.parent_class_of`), or `"unknown"`
     for an unresolved/absent claim -- the sub-class rung's own label,
-    shared with the class rung via `classification.CLASS_GROUP_OF`."""
-    value = contact.classification.value
-    if value is None:
+    shared with the class rung via `classification.CLASS_GROUP_OF`.
+
+    **Gates on `level` before touching `value` at all.** A claim held
+    below `SpecificityLevel.CLASS` (`PRESENCE`/`UNKNOWN`) has, by the
+    lattice's own definition, no class claim -- `belief.classification`'s
+    module docstring: level 1 is "no identity claim beyond mere
+    presence." A percept can still carry an incidentally keyword-matchable
+    raw string at that level (naked-eye's own `OP_GROUPSOMETHING` never
+    does, but nothing enforces it, and `tests/test_speech.py`'s own
+    `_group_member_observation` fixture deliberately supplies one to
+    exercise wording), and resolving it through the lattice anyway would
+    promote a presence-only member into a real sub-class bucket -- exactly
+    the thing `SpecificityLevel.PRESENCE` exists to not claim yet."""
+    classified = contact.classification
+    if classified.level < SpecificityLevel.CLASS or classified.value is None:
         return "unknown"
-    op_class = classification.parent_class_of(value)
+    op_class = classification.parent_class_of(classified.value)
     return op_class if op_class is not None else "unknown"
 
 
