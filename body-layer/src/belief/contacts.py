@@ -485,6 +485,21 @@ class Contact:
     #: admit a new group member; never read as a position correction itself.
     #: Accumulate-not-replace is a stated assumption, not measured against a
     #: real repeat-fold incident -- see that plan's Risks section.
+    #:
+    #: **`plans/bounded-fold-displacement/plan.md` (`BL-B58` option 2,
+    #: closing `BL-B59` too): this now measures the *clamped* displacement,
+    #: never the raw fuse's.** `ContactStore.ingest`'s fold branch calls
+    #: `Contact.record(percept, ambiguous_fold=True)`, which bounds the
+    #: fuse's own mean-displacement at `position_belief.
+    #: clamp_fold_displacement` before `record` returns -- the value
+    #: accumulated here is `contact.position` *after* that bound, so a
+    #: fold that would have moved the mean farther than the contact's own
+    #: believed class could plausibly have travelled is recorded at the
+    #: bound, not at the uncapped distance. `BL-B58`'s own accumulator
+    #: defect (never retiring in a dense scene, since every re-observation
+    #: there is itself ambiguous) is unchanged by the bound -- the field
+    #: still accumulates, now at a physically plausible rate rather than
+    #: an arbitrary one; see that plan's Stage 3 for `+=` -> `max()`.
     fold_displacement_m: float = 0.0
 
     @property
@@ -1116,14 +1131,18 @@ class ContactStore:
                         else None
                     )
                     if fold_target is not None:
-                        # The one call site that folds: accumulate the
-                        # position displacement this fold causes, metres,
-                        # never reset here (`Contact.fold_displacement_m`'s
-                        # own docstring; `plans/group-cohesion-admission-
+                        # The one call site that folds: `ambiguous_fold=True`
+                        # is what tells `Contact.record` to bound this
+                        # fuse's own displacement (`plans/
+                        # bounded-fold-displacement/plan.md`, `BL-B58`/
+                        # `BL-B59`) -- accumulate the *clamped* displacement
+                        # this fold actually caused, metres, never reset
+                        # here (`Contact.fold_displacement_m`'s own
+                        # docstring; `plans/group-cohesion-admission-
                         # gate/plan.md` §4).
                         contact = fold_target
                         position_before = contact.position
-                        contact.record(percept)
+                        contact.record(percept, ambiguous_fold=True)
                         contact.fold_displacement_m += math.hypot(
                             contact.position.x - position_before.x,
                             contact.position.z - position_before.z,

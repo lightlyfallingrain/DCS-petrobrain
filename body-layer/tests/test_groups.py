@@ -771,6 +771,45 @@ def test_admission_gate_excludes_incident_2s_absorbed_air_defence_member() -> No
     assert clusters == [frozenset({"CONTACT_1", "CONTACT_3"})]
 
 
+def test_admission_gate_is_a_no_op_once_the_fold_is_bounded() -> None:
+    """`plans/bounded-fold-displacement/plan.md` §2d -- the same row B
+    geometry as the test above, but with `fold_displacement_m` and
+    `CONTACT_1`'s own position at the values `Contact.record`'s new
+    `ambiguous_fold` bound actually produces (`plausible_speed_mps(
+    OP_INFANTRY)=2.0 m/s * 20s elapsed = 40.0 m`, read off a real
+    `ContactStore`/`GroupStore` run, not hand-derived) rather than the
+    unbounded fuse's 132.4/145.8 m and (868, 10). The admission gate is
+    the identical function call as the test above; what changed is only
+    its input. At this input the gate no longer excludes anyone -- the
+    ordinary rule alone already keeps the ZSU separate, since the bounded
+    fold no longer pulls `CONTACT_1` close enough to absorb it (the
+    absorbing edge is 155.0 m against its own 78.0 m backstop, per that
+    plan's §2d). Stage 3.5's gate is a safety net for an *uncalibrated*
+    bound (load-bearing again at `k=3`, same plan), not a no-op generally
+    -- this pins the one case this plan's own acceptance table measures."""
+    contacts = [
+        _contact(
+            "CONTACT_1", 960.1, 3.1, class_raw="OP_INFANTRY", fold_displacement_m=40.0
+        ),
+        _contact("CONTACT_2", 1060.0, 40.0, class_raw="OP_INFANTRY"),
+        _contact(
+            "CONTACT_3",
+            990.2,
+            -45.7,
+            class_raw="OP_INFANTRY",
+            fold_displacement_m=40.0,
+        ),
+        _contact("CONTACT_4", 805.0, 0.0, class_raw="ZSU-23-4 Shilka"),
+    ]
+    prior_rosters = [frozenset({"CONTACT_1", "CONTACT_2", "CONTACT_3"})]
+
+    clusters = _cluster_contacts(
+        contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS, prior_rosters
+    )
+
+    assert clusters == [frozenset({"CONTACT_1", "CONTACT_2", "CONTACT_3"})]
+
+
 def test_admission_gate_leaves_a_first_formation_chained_infantry_line_identical() -> (
     None
 ):

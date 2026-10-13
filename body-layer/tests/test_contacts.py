@@ -239,7 +239,20 @@ def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_re
     an ambiguous percept placed closer to D folds onto it) so the fold this
     test measures is the exact one that plan's probe replays -- independent
     re-derivation, not a guess, via the same `fold_position` call `record`
-    itself makes."""
+    itself makes.
+
+    **Geometry moved off `t_sim=0.0`, `plans/bounded-fold-displacement/
+    plan.md` §2c/§5.** Every fold below now has a 10s gap from its prior
+    genuine fuse, so `Contact.record`'s new `ambiguous_fold` bound
+    (`growth_rate_mps * elapsed`, here `15.0 m/s * 10.0 s = 150.0 m` for a
+    `Ural truck`/`OP_TRUCK`) is wide enough that it never binds against
+    this fixture's own few-metres-per-fold displacements -- confirmed
+    below, not assumed, so this test still measures an unclamped fold, same
+    as before that plan. At `t_sim=0.0` the bound is `0.0` by the same
+    formula (no elapsed time, no plausible travel) and every fold here
+    would move nothing at all, which is the defect this move fixes rather
+    than papers over; `test_fold_displacement_m_is_bounded_by_the_contacts_
+    own_plausible_speed` below exercises the bound actually clamping."""
     store = ContactStore()
     contact_d_obs = _observation(
         obs_id="OBS_D", t_sim=0.0, bearing_deg=90.0, range_m=1000.0
@@ -256,15 +269,16 @@ def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_re
 
     position_before_fold = contact_d.position
     ambiguous_within_group_obs = _observation(
-        obs_id="OBS_F", t_sim=0.0, bearing_deg=90.0, range_m=1010.0
+        obs_id="OBS_F", t_sim=10.0, bearing_deg=90.0, range_m=1010.0
     )
-    store.ingest([ambiguous_within_group_obs], now_sim=0.0)
+    store.ingest([ambiguous_within_group_obs], now_sim=10.0)
 
     expected_displacement = math.hypot(
         contact_d.position.x - position_before_fold.x,
         contact_d.position.z - position_before_fold.z,
     )
     assert expected_displacement > 0.0  # the fold must have actually moved it
+    assert expected_displacement < 150.0  # well clear of this fold's own bound
     assert contact_d.fold_displacement_m == pytest.approx(expected_displacement)
 
     # A second fold onto the same contact accumulates rather than replaces
@@ -273,13 +287,14 @@ def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_re
     budget_after_first_fold = contact_d.fold_displacement_m
     position_before_second_fold = contact_d.position
     second_ambiguous_obs = _observation(
-        obs_id="OBS_F2", t_sim=0.0, bearing_deg=90.0, range_m=1015.0
+        obs_id="OBS_F2", t_sim=20.0, bearing_deg=90.0, range_m=1015.0
     )
-    store.ingest([second_ambiguous_obs], now_sim=0.0)
+    store.ingest([second_ambiguous_obs], now_sim=20.0)
     second_displacement = math.hypot(
         contact_d.position.x - position_before_second_fold.x,
         contact_d.position.z - position_before_second_fold.z,
     )
+    assert second_displacement < 150.0  # this fold's own bound, same margin
     assert contact_d.fold_displacement_m == pytest.approx(
         budget_after_first_fold + second_displacement
     )
@@ -290,14 +305,54 @@ def test_fold_displacement_m_is_written_on_a_fold_and_reset_on_an_unambiguous_re
     # identity retires the doubt.
     unambiguous_obs = _observation(
         obs_id="OBS_D2",
-        t_sim=1.0,
+        t_sim=30.0,
         bearing_deg=90.0,
         range_m=1005.0,
         continues_observation_id="OBS_D",
     )
-    store.ingest([unambiguous_obs], now_sim=1.0)
+    store.ingest([unambiguous_obs], now_sim=30.0)
     assert "OBS_D2" in contact_d.contributing_observation_ids
     assert contact_d.fold_displacement_m == 0.0
+
+
+def test_fold_displacement_m_is_bounded_by_the_contacts_own_plausible_speed() -> None:
+    """`plans/bounded-fold-displacement/plan.md` Stage 2 -- the clamp this
+    plan adds actually binds when a fold's own displacement would exceed
+    `growth_rate_mps * elapsed`, pinned as new behaviour rather than left
+    to the provenance test above (which deliberately stays clear of the
+    bound, §2c). Reuses the same D/E/F geometry, but with the fold only
+    `0.1s` after the founding look -- `15.0 m/s * 0.1 s = 1.5 m`, far
+    tighter than the ~5 m this fold would move unclamped (confirmed by the
+    provenance test's own ~10s-elapsed fold, which moves a few metres)."""
+    store = ContactStore()
+    contact_d_obs = _observation(
+        obs_id="OBS_D", t_sim=0.0, bearing_deg=90.0, range_m=1000.0
+    )
+    contact_e_obs = _observation(
+        obs_id="OBS_E", t_sim=0.0, bearing_deg=90.0, range_m=1050.0
+    )
+    store.ingest([contact_d_obs, contact_e_obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact_d = next(
+        c for c in store.contacts if c.contributing_observation_ids == ["OBS_D"]
+    )
+    position_before_fold = contact_d.position
+
+    ambiguous_within_group_obs = _observation(
+        obs_id="OBS_F", t_sim=0.1, bearing_deg=90.0, range_m=1010.0
+    )
+    store.ingest([ambiguous_within_group_obs], now_sim=0.1)
+
+    applied_displacement = math.hypot(
+        contact_d.position.x - position_before_fold.x,
+        contact_d.position.z - position_before_fold.z,
+    )
+    bound_m = contact_growth_rate_mps(contact_d) * 0.1
+    assert bound_m == pytest.approx(1.5)
+    # The clamp actually bound: applied displacement sits at the bound,
+    # not at whatever the unclamped fuse would have produced.
+    assert applied_displacement == pytest.approx(bound_m, abs=1e-6)
+    assert contact_d.fold_displacement_m == pytest.approx(applied_displacement)
 
 
 def test_air_defence_candidate_forces_a_new_contact_even_within_a_group() -> None:

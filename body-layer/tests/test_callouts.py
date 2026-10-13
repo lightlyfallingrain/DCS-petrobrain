@@ -1205,6 +1205,130 @@ def test_2c_transcript_fixture_renders_three_lines_not_seven(
     ]
 
 
+def test_bounded_fold_displacement_incident_2_neither_absorbs_nor_evicts() -> None:
+    """`plans/bounded-fold-displacement/plan.md` §2a/§2d -- incident 2
+    (`plans/group-cohesion-admission-gate/plan.md` §2a's own probe 2
+    geometry, three infantry in a ~95 m knot at 1,000 m plus a
+    continuously-observed ZSU-23-4 195 m away, the infantry unobserved for
+    20 s before two fresh percepts fold on) under the real,
+    now-built-in `ambiguous_fold` bound, with **no monkeypatching** -- the
+    plan's probes installed this mechanism externally; here it is the
+    merged one.
+
+    Before this plan: the fold's own 132.7 m single-tick displacement both
+    **absorbed** the ZSU (`CONTACT_4`) into the group and **evicted**
+    `CONTACT_2`, the no-longer-reachable [[BL-B58]]/[[BL-B59]] pair. Under
+    the bound (`plausible_speed_mps(OP_INFANTRY)=2.0 m/s * 20s elapsed =
+    40.0 m`), the fold's own displacement drops to 40.0 m and **neither
+    happens**: the roster stays the three original infantry, no air
+    defence is asserted, and the ZSU's own contact never merges with
+    anyone across 20 ticks of continuous re-observation."""
+    store = ContactStore()
+
+    def ingest_and_tick(observations: list[Observation], t_sim: float) -> None:
+        store.ingest(observations, now_sim=t_sim)
+        store.tick(now_sim=t_sim)
+
+    ingest_and_tick(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                ownship_x=0.0,
+                ownship_z=0.0,
+                dwp_x=10000.0,
+                dwp_z=0.0,
+            ),
+            _observation(
+                obs_id="OBS_2",
+                t_sim=0.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                ownship_x=60.0,
+                ownship_z=40.0,
+                dwp_x=20000.0,
+                dwp_z=0.0,
+            ),
+            _observation(
+                obs_id="OBS_3",
+                t_sim=0.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                ownship_x=30.0,
+                ownship_z=-50.0,
+                dwp_x=30000.0,
+                dwp_z=0.0,
+            ),
+            _observation(
+                obs_id="OBS_4",
+                t_sim=0.0,
+                classification_raw="ZSU-23-4 Shilka",
+                classification_level=3,
+                ownship_x=-195.0,
+                ownship_z=0.0,
+                dwp_x=40000.0,
+                dwp_z=0.0,
+            ),
+        ],
+        0.0,
+    )
+    # The ZSU stays continuously observed (object-permanence continuity),
+    # so its own `fold_displacement_m` never has anything to accumulate --
+    # the three infantry are the ones left unseen for 20 s.
+    for t in range(1, 21):
+        ingest_and_tick(
+            [
+                _observation(
+                    obs_id=f"OBS_ZSU_{t}",
+                    t_sim=float(t),
+                    classification_raw="ZSU-23-4 Shilka",
+                    classification_level=3,
+                    ownship_x=-195.0,
+                    ownship_z=0.0,
+                    dwp_x=40000.0,
+                    dwp_z=0.0,
+                )
+            ],
+            float(t),
+        )
+    ingest_and_tick(
+        [
+            _observation(
+                obs_id="OBS_5",
+                t_sim=20.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                ownship_x=-260.0,
+                ownship_z=20.0,
+                dwp_x=50000.0,
+                dwp_z=0.0,
+            ),
+            _observation(
+                obs_id="OBS_6",
+                t_sim=20.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                ownship_x=-250.0,
+                ownship_z=-20.0,
+                dwp_x=60000.0,
+                dwp_z=0.0,
+            ),
+        ],
+        20.0,
+    )
+
+    rosters = sorted(sorted(g.member_contact_ids) for g in store.groups)
+    assert rosters == [["CONTACT_1", "CONTACT_2", "CONTACT_3"]]
+    assert dict(store.groups[0].air_defence_composition) == {}
+
+    folded = next(
+        c for c in store.contacts if c.contributing_observation_ids[-1] == "OBS_5"
+    )
+    assert folded.fold_displacement_m == pytest.approx(40.0, abs=0.5)
+
+
 def test_replay_is_deterministic() -> None:
     """Replaying the same recorded event script twice produces a
     byte-identical sequence of spoken lines -- the analogue of BL-9's
