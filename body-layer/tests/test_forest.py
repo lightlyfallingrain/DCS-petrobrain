@@ -14,6 +14,7 @@ takes a plain `sqlite3.Connection`.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -171,6 +172,68 @@ def test_cache_hit_within_same_cell(
     assert first is True
     assert second is True
     assert call_count == 1
+
+
+@pytest.mark.parametrize(
+    "x,z",
+    [
+        (math.nan, 20.0),
+        (math.inf, 20.0),
+        (-math.inf, 20.0),
+        (20.0, math.nan),
+        (20.0, math.inf),
+        (20.0, -math.inf),
+        (math.nan, math.inf),
+    ],
+    ids=[
+        "nan-x",
+        "inf-x",
+        "-inf-x",
+        "nan-z",
+        "inf-z",
+        "-inf-z",
+        "nan-x-inf-z",
+    ],
+)
+def test_occluded_false_for_non_finite_position_and_does_not_raise(
+    forest_conn: object, monkeypatch: pytest.MonkeyPatch, x: float, z: float
+) -> None:
+    """Security deep analysis, `plans/forest-occlusion/security-review.md`:
+    `math.floor(nan)` raises `ValueError`, `math.floor(inf)` raises
+    `OverflowError` -- `_cache_cell_key` must never be reached with a
+    non-finite operand. `(20.0, 20.0)` (the finite partner value used
+    above) sits inside the fixture's forest polygon, so if the guard were
+    missing or wrong this would either raise or spuriously report
+    occluded based on the finite operand alone -- both are ruled out by
+    asserting `False` and no raise."""
+    occlusion = ForestOcclusion(conn=forest_conn, theatre=_THEATRE)  # type: ignore[arg-type]
+    call_count = 0
+    real_containing_polygons = forest_module.containing_polygons
+
+    def _counting(conn: object, kinds: object, cx: float, cz: float) -> object:
+        nonlocal call_count
+        call_count += 1
+        return real_containing_polygons(conn, kinds, cx, cz)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(forest_module, "containing_polygons", _counting)
+
+    assert occlusion.occluded(x=x, z=z) is False
+    # No DB query for a non-finite position -- the guard returns before
+    # `containing_polygons` is ever reached.
+    assert call_count == 0
+
+
+def test_non_finite_position_is_not_cached(forest_conn: object) -> None:
+    """A non-finite position is answered before `_cache_cell_key` is ever
+    computed (see `occluded`'s docstring on why caching it would need the
+    exact `math.floor` call the guard exists to avoid), so repeated
+    non-finite calls never populate `_cache` -- unlike a real position,
+    there is no stable cell for a NaN/Inf input to recur at."""
+    occlusion = ForestOcclusion(conn=forest_conn, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    assert occlusion.occluded(x=math.nan, z=20.0) is False
+    assert occlusion.occluded(x=math.inf, z=20.0) is False
+    assert occlusion._cache == {}
 
 
 def test_cache_miss_across_cell_boundary(

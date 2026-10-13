@@ -130,3 +130,85 @@ before moving on.
   scene, with units placed in and at the edge of the Latakia-area coastal forest (the plan's own
   finding: forest coverage is only 1-3% of ground positions theatre-wide, so an ordinary sortie
   elsewhere will rarely exercise the gate at all).
+
+---
+
+### Security fix round (re-entering Implementer → Reviewer → DoD per `plans/forest-occlusion/
+security-review.md`'s required fix)
+
+**The one required fix**: `ForestOcclusion.occluded`'s only two integer-converting operands are
+`x` and `z`, both fed to `_cache_cell_key`'s two `math.floor` calls — enumerated by reading the
+whole of `forest.py` (56 lines of actual code, one call site into `_cache_cell_key`, confirmed via
+`grep -n "math\.\|int(\|round(" src/perception/forest.py`), not inferred from the review's prose.
+`occluded` had exactly one return path before this fix (the end of the function); it now has two —
+the new guard's early `return False`, and the original path, unchanged below it. No other call
+site reaches `_cache_cell_key` (`grep -n "_cache_cell_key" src/perception/forest.py` — one
+definition, one call, inside `occluded` itself), and no other integer conversion exists anywhere
+else in this module.
+
+- `body-layer/src/perception/forest.py` — `occluded(x, z)` now returns `False` (not occluded, fail
+  open) before `_cache_cell_key` is reached when either `x` or `z` is non-finite
+  (`math.isfinite`), matching this gate's own "`None` landcover is not forest" posture (Decision 2)
+  and the identical guard `belief/position_belief.py`'s `clamp_fold_displacement` already applies
+  one layer downstream (`BL-B58`/`BL-B59`). **Not cached**: the cache key itself requires the exact
+  `math.floor` call the guard exists to avoid, and a non-finite input has no stable cell to recur
+  at the way a real position does, so there is no steady-state benefit to caching it. No DB query
+  is issued either — the guard returns before `containing_polygons` is called.
+- `plans/forest-occlusion/plan.md:132-133` — corrected "~25 polls per miss at 5 Hz" / "95% hit
+  rate" to "~5 polls per miss at 1 Hz" / "~80% hit rate" (`logger.py`'s own
+  `_DEFAULT_POLL_INTERVAL_S = 1.0`); the performance review's finding that the argument's
+  *direction* still holds at the corrected rate is preserved, not re-derived.
+- `body-layer/src/perception/forest.py`'s module docstring — the "a 50 m cell at 10 m/s takes 5 s
+  to cross" line is now marked explicitly as an unverified assumption (the figure appears nowhere
+  else in the codebase, per the performance review's own new finding) that a flown trace's
+  cache-hit-rate measurement (Stage 4) supersedes rather than confirms.
+
+### Tests Added (this round)
+
+- `test_forest.py::test_occluded_false_for_non_finite_position_and_does_not_raise` — parametrized
+  over 7 cases: `nan`/`inf`/`-inf` on `x` alone, the same three on `z` alone, and one case with
+  both bad (`x=nan, z=inf`), covering "only one of the two is bad" and "both are bad". Asserts
+  `occluded(...)` returns `False`, does not raise, and issues no DB query (call-count assertion via
+  a monkeypatched `containing_polygons`, same pattern the existing cache tests already use).
+- `test_forest.py::test_non_finite_position_is_not_cached` — asserts `_cache` stays `{}` after two
+  non-finite calls (`nan`, then `inf`), covering the "should this be cached" question the task
+  brief raised; decided no, for the reason in the docstring above.
+
+### Verified by mutation (this round)
+
+Removed the `if not math.isfinite(x) or not math.isfinite(z): return False` guard (restoring the
+single original `key = _cache_cell_key(x, z)` line), confirmed by `shasum` before/after that the
+file was back to its exact pre-fix content once restored:
+
+- Pre-fix sha1: `46f41c5049407f917fb113aae64e7bb42c804746`
+- Mutated (guard removed) sha1: `e5eb17d0c6c4982c845a70ba9f76aa995fbd8756`
+- Restored sha1: `46f41c5049407f917fb113aae64e7bb42c804746` (matches pre-fix exactly)
+
+With the guard removed, `pytest tests/test_forest.py -v` showed **8 failed, 6 passed**: all 7
+parametrized non-finite cases plus the not-cached test failed with `ValueError: cannot convert
+float NaN to integer` or `OverflowError: cannot convert float infinity to integer`, raised from
+`_cache_cell_key`'s `math.floor` call — the exact mechanism and call site the security review
+named. The 6 pre-existing `test_forest.py` tests were unaffected. Restored the guard and reran the
+full suite.
+
+### Checks (this round)
+
+(`body-layer/` only — no other subproject touched)
+
+- `ruff format --check src tests`: pass (122 files, none needed reformatting)
+- `ruff check src tests`: pass
+- `mypy src` (run from inside `body-layer/`): pass, 56 source files
+- `pytest -q`: **1726 passed, 4 xfailed** (prior baseline at this tip: 1718 passed / 4 xfailed; +8
+  new tests, all in `test_forest.py`)
+
+### Notable Discoveries (this round)
+
+- **The review's own enumeration was already complete.** `_cache_cell_key` has exactly two
+  operands (`x`, `z`) and `occluded` has exactly one call site into it — there was no third operand
+  or hidden second return path to find, unlike the `clamp_fold_displacement` precedent the review
+  cites (which was found incomplete twice). Said here because the task explicitly asked for the
+  enumeration to be reported either way, not only when it turns up something new.
+- Scope held: no change to `aircraft-layer`, `association.py`, `world-model/src/**`,
+  `belief/decay.py`, `belief/enrichment.py`, `belief/contacts.py`, `events.py`, or
+  `FOREST_LANDCOVER_CLASSES`; `body-layer/CLAUDE.md:279`'s stale "four composed gates" was left
+  untouched per instruction (belongs on its own bookkeeping branch).

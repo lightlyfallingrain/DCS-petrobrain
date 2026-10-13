@@ -129,8 +129,12 @@ fix it, both cheap:
 2. **A quantised-position memo**, the same shape as `WorldEnrichmentCache`'s
    `ENRICHMENT_CACHE_POSITION_GRID_M = 50.0` cell key, but keyed on `object_id` and living in
    perception (the belief-layer cache is keyed by `contact_id` and is not reachable from a
-   pre-belief gate). Ground units are static or slow: a 50 m cell at 10 m/s is 5 s, i.e. ~25 polls
-   per miss at 5 Hz. At a 95% hit rate the steady-state cost of the gate is a dict lookup.
+   pre-belief gate). Ground units are static or slow: a 50 m cell at 10 m/s is 5 s, i.e. ~5 polls
+   per miss at this project's own 1 Hz poll interval (`logger.py`'s `_DEFAULT_POLL_INTERVAL_S`,
+   corrected from an earlier 5 Hz figure — found by the security deep analysis and independently
+   by the performance review). At an ~80% hit rate (1 miss in every ~5 polls, not ~95%) the
+   steady-state cost of the gate is still a dict lookup most polls; the performance review's own
+   finding is that the *direction* of this argument still holds even at the corrected rate.
 
 ### Measured blast radius — small, and this is the finding to tell the user
 

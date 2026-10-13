@@ -42,9 +42,16 @@ ENRICHMENT_CACHE_POSITION_GRID_M`'s cell-key arithmetic, dropping the
 altitude term since forest containment is a 2D test) is strictly cheaper
 than a per-object cache would be: any candidate landing in an
 already-resolved cell hits regardless of which object it is. Ground units
-are static or slow -- a 50 m cell at 10 m/s takes 5 s to cross, many polls
-at this project's own 1.0 s poll interval -- so the steady-state cost of
-this gate is a dict lookup.
+are static or slow -- a 50 m cell at an assumed 10 m/s takes 5 s to
+cross, i.e. a handful of polls at this project's own 1.0 s poll interval
+-- so the steady-state cost of this gate is a dict lookup most polls.
+**The 10 m/s figure is an unverified assumption, not a measured constant**
+(performance review, `plans/forest-occlusion/performance-review.md`): it
+appears nowhere else in this codebase and was never checked against a
+flown trace. A flown sortie's own cache-hit-rate measurement (plan Stage
+4, Risks & Unknowns) supersedes this paragraph's reasoning rather than
+confirming it -- do not treat the 5-second/handful-of-polls claim above
+as established until that measurement exists.
 """
 
 from __future__ import annotations
@@ -100,7 +107,35 @@ class ForestOcclusion:
         theatre argument; kept on this dataclass for the same reason
         `check_visibility`'s own `conn`/`theatre` parameters exist, so a
         future multi-theatre store selection has somewhere to read it
-        from without a signature change."""
+        from without a signature change.
+
+        **Non-finite `x` or `z`, by design, not by accident.** `candidate.
+        x`/`candidate.z` is raw `LoGetWorldObjects` ground truth
+        (`check_visibility`'s only caller) with no finiteness validation
+        anywhere upstream (`aircraft-layer/src/schema/world_objects.py`,
+        `perception/association.py` -- neither validates); every earlier
+        gate in that chain only does float *comparison* on `x`/`z`, which
+        is NaN/Inf-safe by IEEE-754 accident, but `_cache_cell_key` below
+        does `math.floor`, which raises (`ValueError` on NaN,
+        `OverflowError` on Inf) rather than silently misbehaving --
+        security deep analysis, `plans/forest-occlusion/security-review.md`,
+        reproduced both directly. A non-finite position therefore answers
+        `False` (not occluded, fail open) *before* `_cache_cell_key` is
+        reached, matching this gate's own "`None` landcover is not
+        forest" posture (Decision 2) rather than adding a new failure
+        mode -- the same judgment `belief.position_belief.
+        clamp_fold_displacement` already applied one layer downstream for
+        the identical input shape (`BL-B58`/`BL-B59`), for the same
+        reason: caller ordering is not a property of this function, so
+        the guard is explicit here rather than borrowed. **Not cached**:
+        the cache key is itself `_cache_cell_key(x, z)`, which cannot be
+        computed for a non-finite input without the exact `math.floor`
+        call this guard exists to avoid, and a non-finite position is not
+        expected to recur at a stable cell the way a real ground-unit
+        position does, so there is no steady-state benefit to caching it
+        and no DB query is issued either."""
+        if not math.isfinite(x) or not math.isfinite(z):
+            return False
         key = _cache_cell_key(x, z)
         cached = self._cache.get(key)
         if cached is not None:
