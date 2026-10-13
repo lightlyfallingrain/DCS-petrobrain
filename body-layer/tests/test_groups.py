@@ -1498,6 +1498,28 @@ def test_reconcile_emits_a_trace_record_for_each_resolution_phase() -> None:
     assert record["composition"] == [["OP_TRUCK", 2]]
 
 
+def test_reconcile_trace_carries_each_members_fold_displacement_budget() -> None:
+    """`plans/bounded-fold-displacement/plan.md` Stage 4 -- `fold_budgets`
+    rides on a phase 1/2/3 trace record, `[[contact_id,
+    Contact.fold_displacement_m], ...]` sorted the same way as
+    `member_contact_ids`, so a sortie log can tell a cluster resolved with
+    an unretired fold in play from one where every member was clean,
+    without re-deriving it from the contact log."""
+    store = GroupStore()
+    records: list[dict[str, object]] = []
+
+    store.reconcile(
+        [
+            _contact("C1", 0.0, 0.0, fold_displacement_m=12.5),
+            _contact("C2", 50.0, 0.0),
+        ],
+        now_sim=0.0,
+        trace_sink=records.append,
+    )
+
+    assert records[0]["fold_budgets"] == [["C1", 12.5], ["C2", 0.0]]
+
+
 def test_reconcile_trace_distinguishes_overlap_property_and_expired() -> None:
     store = GroupStore()
     records: list[dict[str, object]] = []

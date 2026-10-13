@@ -1329,6 +1329,20 @@ class GroupStore:
         wiring a sink to a file is the caller's job, mirroring `detection_
         trace_writer.py`/`speech_log.py`'s placement outside `belief/`.
 
+        **`fold_budgets` (`plans/bounded-fold-displacement/plan.md` Stage 4,
+        `BL-B58`/`BL-B59`)** rides on every phase 1/2/3 record (not the
+        `"expired"` one, which has no current cluster to read it from):
+        `[[contact_id, Contact.fold_displacement_m], ...]` for this
+        record's own `member_contact_ids`, in the same sorted order --
+        i.e. the admission gate's own input, as of this resolution, read
+        straight off `Contact.fold_displacement_m` rather than re-derived.
+        A sortie log can tell "this cluster's resolution was shaped by an
+        unretired fold" from "every member here was clean" without
+        re-running anything -- Stage 3.5 already made `fold_displacement_m`
+        itself the answer to that question per contact; this just carries
+        it onto the group-level record the admission gate actually used it
+        for.
+
         **No omniscience**: every field computed here comes from `Contact.
         position` (fused belief) and `Contact.last_class_raw` (believed
         classification) -- see `_cluster_properties` and `group_matches`."""
@@ -1475,6 +1489,10 @@ class GroupStore:
                     "centroid_z": props.centroid_z,
                     "extent_m": props.extent_m,
                     "composition": [list(pair) for pair in props.composition],
+                    "fold_budgets": [
+                        [cid, round(contacts_by_id[cid].fold_displacement_m, 1)]
+                        for cid in sorted(cluster)
+                    ],
                 }
             )
 
