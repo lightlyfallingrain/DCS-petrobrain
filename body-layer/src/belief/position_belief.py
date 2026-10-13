@@ -680,22 +680,45 @@ def clamp_fold_displacement(
     no-op). Neither branch constructs a new `PositionEstimate`; both return
     `fused` itself unchanged.
 
-    **Non-finite `fused` mean, by design, not by accident**: a NaN/inf
-    `fused.x`/`fused.z` returns `prior` itself, unchanged, rather than
+    **Non-finite `fused` mean or non-finite `max_displacement_m`, by
+    design, not by accident**: a NaN/inf `fused.x`/`fused.z`, *or* a
+    NaN/inf `max_displacement_m` itself, holds the prior mean rather than
     being bounded -- this function has no `observer`/`growth_rate_mps` of
     its own to re-inflate `prior.covariance` with (unlike
     `clamp_to_detection_envelope`'s hold branch above), so holding the
-    prior exactly as given is the whole of this guard. Without it, the
-    displacement/scale arithmetic below would write the non-finite value
-    into the adopted mean permanently -- `NaN * 0.0 == NaN` in IEEE 754,
-    so the ordinary clamp branch does not sanitise it. This function's one
-    real caller (`belief.contacts.Contact.record`) never reaches this
-    guard today, because it always calls `clamp_to_detection_envelope`
-    first and that call's own `range_m(...) <= max_range_m` comparison
-    happens to be `False` for NaN -- security review, `plans/
-    bounded-fold-displacement/security-review.md` -- but that is caller
-    ordering, not a property of this function, so the guard is explicit
-    here rather than borrowed.
+    prior's mean and covariance exactly as given, while still bumping
+    `as_of_sim` to the current poll (see below), is the whole of this
+    guard. Without it, the displacement/scale arithmetic below would
+    write the non-finite value into the adopted mean permanently -- `NaN
+    * 0.0 == NaN` in IEEE 754, so the ordinary clamp branch does not
+    sanitise it, and `max_displacement_m` reaches the identical
+    corruption through `scale` (`max_displacement_m / displacement_m`)
+    rather than through `dx`. This function's one real caller
+    (`belief.contacts.Contact.record`) never reaches either case today:
+    the `fused`-mean case, because it always calls
+    `clamp_to_detection_envelope` first and that call's own `range_m(...)
+    <= max_range_m` comparison happens to be `False` for NaN; the
+    `max_displacement_m` case, because the one real caller resolves the
+    bound from a table lookup (`contact_growth_rate_mps` ->
+    `plausible_speed_mps`) that cannot currently produce NaN/inf --
+    security review, `plans/bounded-fold-displacement/security-review.md`,
+    and the reviewer's own follow-up round that found the second gap --
+    but that is caller ordering, not a property of this function, so the
+    guard is explicit here rather than borrowed. (The `max_displacement_m
+    is None` check above already returns first, so testing
+    `math.isfinite(max_displacement_m)` next is safe -- it is never
+    reached with `None`.)
+
+    **The held result still bumps `as_of_sim` to `fused.as_of_sim`**,
+    matching `clamp_to_detection_envelope`'s own hold branch and the
+    module docstring's "Hold-recovery timing" invariant (`as_of_sim`
+    "bumped on every poll including a hold, since the belief is still
+    the best current answer even when unchanged") -- this guard
+    constructs a fresh `PositionEstimate` rather than returning `prior`
+    by bare identity, carrying `prior`'s `x`/`z`/`covariance` and
+    `fused_at_sim`/`fused_covariance` through unchanged (no re-fuse
+    happened) but advancing `as_of_sim`, which needs no growth rate and
+    is already a parameter in scope.
 
     Otherwise: if `fused`'s mean already sits within `max_displacement_m`
     of `prior`'s, `fused` passes through unchanged (the common case -- an
@@ -712,8 +735,19 @@ def clamp_fold_displacement(
     repositioned, not a hold."""
     if max_displacement_m is None or prior is None:
         return fused
-    if not math.isfinite(fused.x) or not math.isfinite(fused.z):
-        return prior
+    if (
+        not math.isfinite(fused.x)
+        or not math.isfinite(fused.z)
+        or not math.isfinite(max_displacement_m)
+    ):
+        return PositionEstimate(
+            x=prior.x,
+            z=prior.z,
+            covariance=prior.covariance,
+            as_of_sim=fused.as_of_sim,
+            fused_at_sim=prior.fused_at_sim,
+            fused_covariance=prior.fused_covariance,
+        )
     dx = fused.x - prior.x
     dz = fused.z - prior.z
     displacement_m = math.hypot(dx, dz)

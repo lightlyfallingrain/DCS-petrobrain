@@ -192,3 +192,88 @@ checked, not assumed.
   a general property neither function could assume of the other. The new cross-reference between
   the two docstrings is meant to close that specific kind of silent coupling for the next clamp
   added to this file.
+
+## Round: review follow-up — both required fixes (2026-10-13)
+
+Addressed the two required fixes from `plans/bounded-fold-displacement/review.md`'s "Round: NaN-
+safety fix close-out" section, the one review round after `3dfe922`.
+
+**Worktree mechanics**: this run's own disposable worktree branch was created from `origin/HEAD`
+and had zero unique commits relative to `main` (`git log main..HEAD` empty), while
+`fix/bl-b59-retention-hysteresis` was checked out in a separate user worktree
+(`/Users/sg/Code/DCS-petrobrain-b59`), refusing a second checkout. Repointed via
+`git checkout -B worktree-agent-a04de0bb87b04d3f0 7f078f2`, landing exactly on the named tip with
+a clean tree.
+
+### Fix 1 — guard `max_displacement_m` itself, not just `fused`'s mean
+
+`clamp_fold_displacement`'s `math.isfinite` guard now also checks
+`math.isfinite(max_displacement_m)`, alongside `fused.x`/`fused.z`. Safe to call unconditionally
+at that point because the `max_displacement_m is None` branch above already returns first — a
+non-finite float and `None` cannot both be true, so there is no ordering hazard. Docstring
+rewritten so its completeness claim covers both operands that feed the shared `dx * scale`
+arithmetic, and states why neither is reachable today (the one real caller resolves the bound
+through a table lookup that cannot currently produce NaN/inf) without that being read as a
+documented guarantee the function depends on.
+
+### Fix 2 — the hold branch now bumps `as_of_sim`
+
+Both finiteness-guard branches (`fused`'s mean, `max_displacement_m`) now return one
+`PositionEstimate` constructed from `prior.x`/`prior.z`/`prior.covariance`/
+`prior.fused_at_sim`/`prior.fused_covariance`, with `as_of_sim=fused.as_of_sim` — matching
+`clamp_to_detection_envelope`'s own hold branch and the module docstring's "Hold-recovery timing"
+invariant. Confirmed by reading that invariant directly (`position_belief.py`'s module docstring,
+"Hold-recovery timing" section): it requires `as_of_sim` "bumped on every poll including a hold,"
+which this branch previously violated by returning `prior` under bare identity. The field set the
+review proposed matches `PositionEstimate`'s own declared fields exactly (`x, z, covariance,
+as_of_sim, fused_at_sim, fused_covariance`) — verified against the dataclass definition before
+using it, not copied blind.
+
+### Tests Added
+
+- `test_clamp_fold_displacement_holds_prior_on_nan_mean` — reworked from the prior round's
+  `assert result is prior` identity check to field-by-field equality (`x`, `z`, `covariance`,
+  `fused_at_sim`, `fused_covariance` all equal `prior`'s), **plus `result.as_of_sim ==
+  fused.as_of_sim`** — the one assertion that makes this test actually exercise the fix, since the
+  corrected hold is no longer identity-equal to `prior`.
+- `test_clamp_fold_displacement_holds_prior_on_nan_max_displacement` — new. Finite `fused`/`prior`,
+  `max_displacement_m=math.nan`. Same field-equality + `as_of_sim`-advance assertions as above;
+  covers the operand the previous round's guard missed.
+
+### Checks
+
+(body-layer/, the only subproject touched)
+
+- `ruff format --check`: pass (120 files already formatted)
+- `ruff check`: pass (all checks passed)
+- `mypy --strict` (`cd body-layer && .venv/bin/mypy src`): pass, 55 source files, no issues
+- `pytest -q`: **1704 passed / 4 xfailed** (was 1703/4 at `7f078f2`; +1 new test, no regressions)
+
+Both pinned invariants reconfirmed by name:
+`tests/test_groups.py::test_the_eager_cap_still_chains_a_long_infantry_line` (file unmodified,
+confirmed via `git diff 7f078f2 -- body-layer/tests/test_groups.py` — no output) and
+`tests/test_callouts.py::test_2c_transcript_fixture_renders_three_lines_not_seven`. Both pass by
+name, run explicitly with `-v`.
+
+`audio-adapter` untouched by this round — no files in that subproject were read or written.
+
+### Mutation verification, both fixes
+
+- **Fix 1**: removed the `or not math.isfinite(max_displacement_m)` clause.
+  `test_clamp_fold_displacement_holds_prior_on_nan_max_displacement` failed exactly as expected
+  (`result.x == nan` where `100.0` was expected). Restored via `Edit`;
+  `shasum -a 256 src/belief/position_belief.py` before and after the cycle match
+  (`685c49de436d56c4bc1e859aede221693bd175a96bfa217912db08d7a59d37ed`), confirmed green again
+  afterward.
+- **Fix 2**: reverted both hold branches' `return PositionEstimate(...)` to bare `return prior`.
+  Both `test_clamp_fold_displacement_holds_prior_on_nan_mean` and
+  `test_clamp_fold_displacement_holds_prior_on_nan_max_displacement` failed on their
+  `result.as_of_sim == fused.as_of_sim` assertion (`0.0 == 1.0`), exactly the invariant this fix
+  is about. Restored via `Edit`; same `shasum` before/after match as Fix 1, confirmed green again
+  afterward.
+
+### Notable Discoveries
+
+- None beyond what the review itself already surfaced — this round is a direct implementation of
+  both required fixes as specified, with no scope expansion. The bound's arithmetic, the
+  accumulator, the trace field, and `groups.py`/`contacts.py` were not touched.

@@ -634,7 +634,11 @@ def test_clamp_fold_displacement_holds_prior_on_nan_mean() -> None:
     ordinary clamp branch (`displacement_m <= max_displacement_m` is
     `False` for NaN, so is `displacement_m > 0.0`, giving `scale = 0.0`)
     and `dx * scale == NaN * 0.0 == NaN` writes NaN into the adopted mean
-    permanently. The guard must hold `prior` instead."""
+    permanently. The guard must hold `prior`'s mean/covariance -- but,
+    per the module's "Hold-recovery timing" invariant, must still bump
+    `as_of_sim` to the current poll's `fused.as_of_sim` rather than
+    returning `prior` by bare identity (review follow-up round,
+    `plans/bounded-fold-displacement/review.md`)."""
     covariance = covariance_from_uncertainty(
         PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0), 0.0
     )
@@ -657,9 +661,50 @@ def test_clamp_fold_displacement_holds_prior_on_nan_mean() -> None:
 
     result = clamp_fold_displacement(fused, prior, max_displacement_m=10.0)
 
-    assert result is prior
     assert result.x == prior.x
     assert result.z == prior.z
+    assert result.covariance == prior.covariance
+    assert result.as_of_sim == fused.as_of_sim
+    assert result.fused_at_sim == prior.fused_at_sim
+    assert result.fused_covariance == prior.fused_covariance
+
+
+def test_clamp_fold_displacement_holds_prior_on_nan_max_displacement() -> None:
+    """The guard added above for `fused`'s mean must also cover
+    `max_displacement_m` itself being non-finite -- it feeds the same
+    `dx * scale` arithmetic via `scale = max_displacement_m /
+    displacement_m`, so a NaN bound reaches the identical corruption
+    through `scale` rather than `dx` (reviewer-probed:
+    `clamp_fold_displacement(fused=(150,300), prior=(100,200),
+    max_displacement_m=nan)` returned `x=nan, z=nan` before this fix)."""
+    covariance = covariance_from_uncertainty(
+        PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0), 0.0
+    )
+    prior = PositionEstimate(
+        x=100.0,
+        z=200.0,
+        covariance=covariance,
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=covariance,
+    )
+    fused = PositionEstimate(
+        x=150.0,
+        z=300.0,
+        covariance=covariance,
+        as_of_sim=1.0,
+        fused_at_sim=1.0,
+        fused_covariance=covariance,
+    )
+
+    result = clamp_fold_displacement(fused, prior, max_displacement_m=math.nan)
+
+    assert result.x == prior.x
+    assert result.z == prior.z
+    assert result.covariance == prior.covariance
+    assert result.as_of_sim == fused.as_of_sim
+    assert result.fused_at_sim == prior.fused_at_sim
+    assert result.fused_covariance == prior.fused_covariance
 
 
 def test_fusion_sanity_sigma_is_positive_and_generous() -> None:
