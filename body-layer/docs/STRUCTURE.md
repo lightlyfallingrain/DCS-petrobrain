@@ -485,7 +485,7 @@ The entries are in the order they were written, which is roughly perception → 
   `cardinality_belief_from_bucket_name` resolves a `perception`-emitted `count_bucket` string.
   `decay.cardinality_confidence_at` (Stage 1) is `classification_confidence_at`'s twin, reusing
   `IDENTITY_HALF_LIFE_S` rather than declaring a new half-life.
-- `src/belief/group_view.py` (`plans/group-collapse/plan.md`, Stages 1-2) — `collapse(store, group,
+- `src/belief/group_view.py` (`plans/group-collapse/plan.md`, Stages 1-4) — `collapse(store, group,
   depth, now_sim)`/`collapse_members(members, depth, now_sim)`: a read-time derivation of the
   user's own group -> class -> sub-class -> type -> contact tree, deliberately **not** homed in
   `groups.py` (that module owns identity/cohesion/matching, reads `last_class_raw` through
@@ -512,12 +512,28 @@ The entries are in the order they were written, which is roughly perception → 
   (`CollapseDepth.SUBCLASS`) collapse, gated caller-side on `ContactStore.callout_observable` (any
   member, not all) — the gate decides *whether* `collapse` runs at all, never *what* it returns, so
   a remembered-but-currently-unobservable group's tree is omitted entirely rather than filtered.
-  **Stage 3 (re-expressing `speech._group_composition_clause` as a renderer over this module) was
-  attempted and reverted** — see that plan's `implementation.md` for the discovered divergence
-  (a `CLASS`-level claim whose raw value happens to resolve through the lattice collapses into its
-  resolved class, changing a push-path disclosure's wording for a test-fixture-only combination the
-  old flat `(value, level)` grouping never resolved) and why it was left to the user rather than
-  silently decided either way.
+  **Stage 3 is landed**: `speech._group_composition_clause` is re-expressed as a renderer over
+  `collapse_members(..., CollapseDepth.TYPE)` — this module supplies the grouping structure,
+  `speech.py` supplies the words. The first pass's attempt surfaced what turned out to be a
+  fixture defect, not a product question: two `test_crew_console.py` fixtures hardcoded a
+  type-shaped `classification_raw` (`"BMP-2"`) at `classification_level=2` ("class"), a pairing no
+  real producer ever makes (`perception.naked_eye_source._classification_for_tier`'s `medres`
+  emits an `op_class` bucket string at level 2, never a type string; `hybrid_source.py` hardcodes
+  level 3) — corrected to level 3 rather than left as the unreachable state the old literal
+  `(value, level)` grouping happened to render correctly by accident. Canonical sorting (alphabetical
+  by label at every level, this module's own invariant) also now governs the push-path composition
+  line, replacing first-seen insertion order; every existing test's input already sorted that way,
+  so no assertion changed, but a group observed in non-alphabetical class order now always speaks
+  in the same order. **One deliberate, reviewed wording divergence survives**: `_subclass_label`
+  resolves `"OP_GROUPSOMETHING"` (ED's unclassified-ground-unit fallback, `object_model.
+  DEFAULT_OP_CLASS`) to `"unknown"` by design (`classification.parent_class_of` excludes that value
+  from ever resolving, for the lattice's own parent-consistency reasons) — so inside a *group's*
+  composition clause specifically, such a member now folds into the undifferentiated aggregate
+  (`"something"`/`"N contacts"`) rather than speaking as `"group"`. The single-contact report path
+  (`render_contact_report`/`_unit_type_display`) is untouched and still says `"group"` for this
+  value — the two paths deliberately disagree, reviewed and pinned
+  (`test_speech.py::test_group_composition_clause_folds_op_groupsomething_into_undifferentiated`),
+  not a bug to fix here.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete

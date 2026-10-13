@@ -246,3 +246,43 @@ the task's explicit instruction not to touch it.
 `body-layer`): pass, 57 source files. `pytest`: **1747 passed, 4 xfailed** — identical to the
 first pass's own already-landed-Stages-1/2/4 baseline; Stage 3 adds no new tests (re-expression of
 an existing function, not new behaviour), only two one-line fixture corrections.
+
+### Reviewer change request — both required fixes closed (third pass)
+
+`plans/group-collapse/review.md` approved with two required fixes. Both addressed; no `group_view.py`
+behaviour change, per the reviewer's own verdict on the second fix.
+
+**Fix 1 — `STRUCTURE.md`'s `group_view.py` entry.** It still read "Stages 1-2" and described Stage 3
+as "attempted and reverted," written at `c60c6cb` before Stage 3 actually landed (`fc87237`).
+Updated the header to "Stages 1-4" and replaced the stale closing paragraph with one describing the
+landed state: the fixture-correction finding (type-shaped raw paired with `classification_level=2`
+is unreachable; real producers only ever pair that level with an `op_class` bucket string), the
+canonical-sort behaviour change for the push path, and the `OP_GROUPSOMETHING` wording divergence
+(reviewed, pinned by test, not a bug) — matching the register of the surrounding entries rather than
+restating the plan.
+
+**Fix 2 — a pinning test for the `OP_GROUPSOMETHING` wording change.** Added
+`test_speech.py::test_group_composition_clause_folds_op_groupsomething_into_undifferentiated`,
+pinning both shapes the reviewer reproduced: a pure `OP_GROUPSOMETHING` pair (`"two contacts"`) and
+mixed with a differentiated member (`"truck and something"`), plus an assertion that the
+single-contact path (`_unit_type_display("OP_GROUPSOMETHING", "class")`) still returns `"group"` —
+the deliberate asymmetry the reviewer flagged as itself worth pinning. The docstring records why
+this is a pin, not a fix: `classification.parent_class_of("OP_GROUPSOMETHING")` returns `None` by
+design, the value is reachable (naked-eye `medres` on an unrecognised type at class level), and it
+has now been wrongly assumed unreachable twice (the 2026-09-22 live sortie that added
+`_OP_CLASS_DISPLAY["OP_GROUPSOMETHING"] = "group"`, and this plan's own first implementation pass).
+
+**No `group_view.py` or `speech.py` behaviour was changed** — per the reviewer's verdict, this is
+(a), a deliberate and acceptable narrow divergence, not a defect; fixing it would touch merged
+Stage 1 code and is an architect/user-level question about `_subclass_label`'s semantics, out of
+this change's scope.
+
+**Verified by mutation.** Changed `group_view._subclass_label`'s fallback from
+`"unknown"` to `"OP_ARMORED"` (so `OP_GROUPSOMETHING` resolves into a real sub-class bucket instead
+of the undifferentiated aggregate) — the new test went red: `assert 'two armor' == 'two contacts'`.
+Restored; `shasum` of `group_view.py` identical before and after
+(`c03857c4f6eea31fd309e133cec8df732508f809`), confirming no diff survived the mutate/restore cycle.
+
+**Checks (third pass).** `ruff format --check`: pass. `ruff check`: pass. `mypy --strict` (cd
+`body-layer`): pass, 57 source files. `pytest`: **1748 passed, 4 xfailed** (1747 + the one new
+pinning test), confirmed by name in an unfiltered collection, not a `-k` run.
