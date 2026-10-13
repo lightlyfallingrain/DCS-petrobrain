@@ -443,6 +443,36 @@ them, so a later tree-aware call can replace it outright rather than needing to 
 **It does not change the staging below.** Buildings (Stage 1) are unaffected, measured and ready;
 trees ride a parallel investigation rather than blocking it.
 
+#### Trees — REVISED 2026-10-13. The stand-in is binary and optic-independent, not probabilistic.
+
+Both follow-up probes have reported (`X-B4`, `X-B32`, both closed): **no scripting-API call reaches
+tree-aware geometry**, and the per-tree placements in `Syria.surface5` sit behind the same
+payload-addressing wall the elevation decode hit. So the fallback this section pre-decided is now
+the answer, and the user has specified its shape — which is **not** the shape written above.
+
+His words (`docs/acceptance/2026-10-13-tree-cover-direction.md`): *"Proceed with simple model of
+anything in forest is not seen and let's explore later what near the trees could be."*
+
+Two things in this section are superseded, and both would have been built wrong from it:
+
+- **"a probabilistic transmission model per optic"** → a **binary** gate, and
+  **optic-independent**. Magnification does not see through canopy, and a probability per optic is
+  calibration this has no evidence for.
+- **"built as … a genuinely different mechanism"** → it is **one gate in
+  `perception.check_visibility`** on the target's own position, reading
+  `store.reader.containing_polygons`. No world-model change, and in particular **not** an occluder
+  inside `query/line_of_sight.py` — `BL-11` Stage 4 removed that primitive from the live path, so
+  an occluder there would never run in flight.
+
+What survives unchanged: the two-problems split (forest vs. sparse/linear), and the acceptance that
+the polygon model answers the treeline case wrongly in both directions. That case is now explicitly
+deferred to a later `/explore` rather than being an accepted limitation nobody revisits — the
+capture records four candidate shapes for it, the chord-length-through-canopy one being the most
+promising.
+
+Design and the measurements behind it: `plans/forest-occlusion/plan.md`. Backlog: `X-B31`'s
+trees-only slice, whose own framing is superseded for the same reason.
+
 ### Affected Modules / Files
 
 - `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` — new. Sibling Hook script to

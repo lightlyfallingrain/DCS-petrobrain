@@ -43,6 +43,7 @@ import pytest
 from perception import object_model, visibility
 from perception.association import WorldObjectCandidate
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
+from perception.forest import ForestOcclusion
 from perception.gaze import Gaze
 from perception.object_model import ObjectTypeProfile
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
@@ -57,6 +58,20 @@ from perception.visibility import (
 
 _FAKE_CONN = sqlite3.connect(":memory:")
 _THEATRE = "Syria"
+
+
+def _forest_stub(occluded: bool) -> ForestOcclusion:
+    """A `ForestOcclusion` whose `occluded` always returns `occluded`,
+    without touching `_FAKE_CONN` (which carries no `feature`/
+    `feature_bbox` schema) -- `check_visibility`'s gate 5 only ever calls
+    `forest.occluded(candidate.x, candidate.z)`, so overriding that one
+    bound method is enough to isolate gate 5's own wiring from
+    `perception.forest`'s containment logic, which `test_forest.py` covers
+    on its own fixture store."""
+    stub = ForestOcclusion(conn=_FAKE_CONN, theatre=_THEATRE)
+    stub.occluded = lambda x, z: occluded  # type: ignore[method-assign]
+    return stub
+
 
 #: A generous, unrestricted stand-in optic for tests whose purpose is the
 #: cockpit-mask/geometry gates, not range or field-of-view magnitude --
@@ -1279,3 +1294,92 @@ def test_optic_fov_boresight_follows_the_active_gaze() -> None:
         )
         is None
     )
+
+
+def test_forest_gate_rejects_an_otherwise_visible_candidate_when_occluded() -> None:
+    """`plans/forest-occlusion/plan.md` Stage 1, Decision 1: a unit inside
+    a mapped forest polygon is not detected -- flat and binary."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, forest=_forest_stub(True)
+    )
+
+    assert result is None
+
+
+def test_forest_gate_admits_an_otherwise_visible_candidate_when_not_occluded() -> None:
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, forest=_forest_stub(False)
+    )
+
+    assert result is not None
+
+
+def test_forest_default_none_is_a_true_noop() -> None:
+    """Omitting `forest` entirely must be byte-identical to a
+    never-occluded stub -- the additive-no-op contract every other
+    optional gate parameter in this module already carries
+    (`trace`/`live_los_coverage`/`gaze`)."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0)
+
+    default_result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+    explicit_none_result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, forest=None
+    )
+    clear_result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, forest=_forest_stub(False)
+    )
+
+    assert default_result is not None
+    assert explicit_none_result is not None
+    assert clear_result is not None
+    assert default_result == explicit_none_result == clear_result
+
+
+def test_forest_gate_runs_last_after_terrain_los() -> None:
+    """Gate 5 is last in the chain (plan "Measured cost": "forest goes
+    after terrain LOS, and only candidates that cleared gaze, mask, FOV,
+    range/size and LOS pay for it"). A candidate that fails terrain LOS
+    must record `TERRAIN_LOS`, never reaching the forest gate at all, even
+    though the stub below would also reject it -- proves ordering, not
+    just that both gates can independently reject."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0, live_los_clear=False)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(
+        ownship,
+        candidate,
+        _FAKE_CONN,
+        _THEATRE,
+        forest=_forest_stub(True),
+        trace=trace,
+    )
+
+    assert result is None
+    assert trace.records[-1].outcome is GateOutcome.TERRAIN_LOS
+
+
+def test_forest_gate_records_forest_outcome_in_trace() -> None:
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(
+        ownship,
+        candidate,
+        _FAKE_CONN,
+        _THEATRE,
+        forest=_forest_stub(True),
+        trace=trace,
+    )
+
+    assert result is None
+    assert len(trace.records) == 1
+    assert trace.records[0].outcome is GateOutcome.FOREST

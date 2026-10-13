@@ -252,6 +252,7 @@ from perception.detection_trace import (
     GateOutcome,
 )
 from perception.estimation import naked_eye_sigma_m, perturbed_bearing_range
+from perception.forest import ForestOcclusion
 from perception.gaze import (
     FREE_SCAN_PLAN,
     SCAN_CYCLE_PERIOD_S,
@@ -364,6 +365,13 @@ class NakedEyePerceptionSource:
     aircraft_client: AircraftLayerClient
     theatre: str
     world_model_conn: sqlite3.Connection
+    #: `plans/forest-occlusion/plan.md` Stage 2 -- `None` (default) is a
+    #: true no-op, same posture as `trace_sink`: `check_visibility`'s
+    #: gate 5 never fires when this is `None`, so constructing this source
+    #: without a `ForestOcclusion` is behaviour-identical to before this
+    #: field existed. `logger.py`'s `--forest-occlusion` flag (default
+    #: off) is the only thing that ever supplies one.
+    forest: ForestOcclusion | None = None
     #: `"on_change"` (default) is the per-object debounce, resolved at
     #: cluster granularity as of 2A.5 (module docstring point 5) --
     #: `plans/pb2-contact-memory/plan.md` Stage 3 established this as the
@@ -590,6 +598,7 @@ class NakedEyePerceptionSource:
                 trace=self.trace_sink,
                 group_salient=candidate.object_id in salient_ids,
                 live_los_coverage=self.live_los_coverage,
+                forest=self.forest,
             )
             if self.trace_sink is not None:
                 resolved_los = los_by_object_id.get(candidate.object_id)

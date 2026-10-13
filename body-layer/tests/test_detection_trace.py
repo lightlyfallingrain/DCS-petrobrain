@@ -34,6 +34,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
+from perception.forest import ForestOcclusion
 from perception.gaze import ScanPlan
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
@@ -148,6 +149,28 @@ def test_terrain_los_failure_is_recorded() -> None:
     assert result is None
     entry = trace.records[0]
     assert entry.outcome == GateOutcome.TERRAIN_LOS
+    assert entry.achieved_tier is None
+
+
+def test_forest_failure_is_recorded_as_one_entry() -> None:
+    """`plans/forest-occlusion/plan.md` Stage 1: one `DetectionTrace`
+    entry per `check_visibility` call, same as every other gate, with
+    outcome `GateOutcome.FOREST` -- the debrief answer to "lost in forest"
+    vs. "lost to terrain LOS" the plan exists to raise."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0)
+    trace = DetectionTraceCollector()
+    forest = ForestOcclusion(conn=_FAKE_CONN, theatre=_THEATRE)
+    forest.occluded = lambda x, z: True  # type: ignore[method-assign]
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, trace=trace, forest=forest
+    )
+
+    assert result is None
+    assert len(trace.records) == 1
+    entry = trace.records[0]
+    assert entry.outcome == GateOutcome.FOREST
     assert entry.achieved_tier is None
 
 

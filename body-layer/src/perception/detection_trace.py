@@ -63,6 +63,13 @@ class GateOutcome(str, Enum):
     OPTIC_FOV = "optic_fov"
     RANGE_OR_SIZE = "range_or_size"
     TERRAIN_LOS = "terrain_los"
+    #: `perception.forest.ForestOcclusion.occluded` rejected it -- gate 5,
+    #: last in `check_visibility`'s chain (`plans/forest-occlusion/
+    #: plan.md` Stage 1). Never fires when `forest is None` (the default,
+    #: and the only value any caller passes until Stage 2 wires one in) --
+    #: a true no-op, same posture as `OPTIC_FOV` before cones slice 2
+    #: wired a non-default optic in.
+    FOREST = "forest"
     ADMITTED = "admitted"
     #: Dropped by the player bubble (`perception.association.
     #: filter_player_bubble`, `todo/todo.md`'s "Player bubble" item) before

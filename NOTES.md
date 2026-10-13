@@ -1085,3 +1085,24 @@ two functions that must agree (2026-09-19).
   sweep across plausible factors — not a single plausible-looking value — is what actually tells
   you whether the shape itself is wrong (`plans/group-retention-hysteresis/plan.md` §2, superseded
   by `plans/bounded-fold-displacement/plan.md`).
+- **When a module's test is meant to pin behaviour that actually lives in a dependency it calls
+  unchanged, mutate the dependency, not the module.** `forest.py`'s hole-handling test
+  (a clearing inside a forest polygon is not forest) exercises `store.reader.containing_polygons`'s
+  own inner-ring logic end to end — `forest.py` itself contains no hole-handling code at all, just
+  a pass-through call. Mutating `forest.py` to try to break that test would have nothing to break;
+  the test was verified by temporarily mutating `containing_polygons` in world-model instead
+  (passing `[]` where it should pass the real inner rings) and confirming the test goes red. The
+  general rule: before asserting a test is mutation-verified, check which module actually computes
+  the behaviour under test — a thin pass-through has nothing of its own to mutate, and "this test
+  passed before and after my mutation" on the wrong file is a false confirmation, not a check
+  (`plans/forest-occlusion/implementation.md`, "Notable Discoveries").
+- **A numeric assumption repeated in a plan's own cost-reasoning prose can go stale relative to the
+  codebase's current constants without anyone noticing, because the plan is internally
+  consistent with itself.** `plans/forest-occlusion/plan.md` argued a cache's hit rate from "~25
+  polls per miss at 5 Hz" — arithmetically fine on its own terms, and wrong, because this project's
+  poll loop has been 1.0 s (not 5 Hz) since `abf49cd`. The number survived architect review and
+  into the plan because nothing checked it against the actual constant (`logger.py`'s
+  `_DEFAULT_POLL_INTERVAL_S`) rather than against the plan's own arithmetic. Caught by Reviewer, not
+  Architect. Lesson: a plan's cost/rate arguments need their inputs checked against the current
+  value in code, not just checked for internal consistency — a wrong constant and a consistent
+  argument built on it both read as "checked."
