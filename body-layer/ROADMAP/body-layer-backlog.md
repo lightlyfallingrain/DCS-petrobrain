@@ -99,6 +99,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B58]] — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
 - [[BL-B59]] — The same fold drift that absorbs an unrelated contact also evicts a real member
 - [[BL-B60]] — A misclassified fast mover is now tracked worse than before the fold-displacement bound
+- [[BL-B61]] — `group_matches` test 4 cannot tell kinds apart at class level (5th `BL-B47`-family occurrence)
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
