@@ -251,6 +251,7 @@ def _observation_at(
     ownship_x: float,
     ownship_z: float,
     classification_raw: str = "BMP-2",
+    classification_level: int = 2,
 ) -> Observation:
     """Places a contact at a controlled world position for `plans/
     voice-command-completeness/plan.md`'s report-family tests, via
@@ -263,7 +264,19 @@ def _observation_at(
     observing ownship's own position at the moment of its most recent
     contributing observation -- `bearing_deg=0.0`/`range_m=1000.0` below
     are therefore arbitrary placeholders, not the values that end up
-    driving `relative_now`."""
+    driving `relative_now`.
+
+    **`classification_level` defaults to 2 (class), matching every
+    existing caller's assumption** -- but a `classification_raw` default of
+    `"BMP-2"` (a type-shaped reporting name) paired with level 2 is a state
+    no real producer emits: `perception.naked_eye_source.
+    _classification_for_tier`'s `hires`/`hybrid_source.py`'s only producers
+    of a type-shaped string always pair it with level 3 (type); level 2 is
+    only ever paired with an `op_class` bucket string. A caller that wants
+    several same-type contacts to cohere into a group (`plans/
+    group-collapse/plan.md` Stage 3's fixture-correction note) must pass
+    `classification_level=3` explicitly -- see the two `_observation_at`
+    call sites that do."""
     return Observation(
         id=obs_id,
         contact_id=None,
@@ -278,7 +291,7 @@ def _observation_at(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
-        classification_level=2,
+        classification_level=classification_level,
     )
 
 
@@ -3349,12 +3362,23 @@ def test_report_speaks_a_persisted_group_as_one_counted_answer(
     store = ContactStore()
     store.ingest(
         [
+            # `classification_level=3` (type): `_observation_at`'s own
+            # default (2/class) paired with a type-shaped raw string like
+            # "BMP-2" is a state no real producer emits (see that
+            # function's own docstring) -- `plans/group-collapse/plan.md`
+            # Stage 3's fixture-correction note, found when `_group_
+            # composition_clause`'s re-expression over `collapse_members`
+            # started reading `classification.level`, not just the literal
+            # string. Corrected to the reachable pairing; the expected
+            # "Three BMP-2" wording below is unchanged, since a type-level
+            # value renders verbatim either way.
             _observation_at(
                 obs_id=f"OBS_{i}",
                 t_sim=0.0,
                 ownship_x=float(i) * 5.0,
                 ownship_z=1000.0,
                 classification_raw="BMP-2",
+                classification_level=3,
             )
             for i in range(3)
         ],
@@ -3407,12 +3431,16 @@ def test_report_speaks_an_already_spoken_group_in_full(
     store = ContactStore()
     store.ingest(
         [
+            # `classification_level=3` -- the same reachable-pairing
+            # correction as this test's sibling above; see that call
+            # site's comment.
             _observation_at(
                 obs_id=f"OBS_{i}",
                 t_sim=0.0,
                 ownship_x=float(i) * 5.0,
                 ownship_z=1000.0,
                 classification_raw="BMP-2",
+                classification_level=3,
             )
             for i in range(3)
         ],
