@@ -1,0 +1,256 @@
+# The group model, attention tiers, and what the attack run needs — user direction, 2026-10-13
+
+**Captured verbatim before any planning pass**, per the standing direction of 2026-10-05. This came
+out of the `/explore` on whether `BL-14` needs a contact record per unit, and it answers that
+question by **reframing it**: the answer is not "fold or do not fold" but *resolution depends on
+attention*. That reframing is the most consequential thing in this document.
+
+It also supersedes nothing yet. It is an input to planning, and the structure below is explicitly
+offered as a concept rather than a decision — his words: *"Not final word, but concept."*
+
+---
+
+## Part 1 — the three questions, answered
+
+### "step right" walks what the pilot sees, not what Petrovich holds
+
+> *"when I say step right, select the next target to the right from ownship perspective, i.e. what I
+> see out the window"*
+
+**Consequence.** The list being stepped through is the *world*, not the belief store. So a group that
+Petrovich has resolved into four records while six vehicles sit there cannot serve `step right`
+correctly at target-selection time: the pilot's third press would land on his fourth record while his
+eye is on a vehicle Petrovich never founded. Per-unit records are a requirement for *selectable
+targets*, confirmed — but see Part 3, which bounds *when* that requirement applies.
+
+### Aiming is at a unit, and the tolerable error depends on the weapon
+
+> *"aiming at unit. With guns and rockets a 40 m error could be acceptable since the pilot then
+> aligns the attack visually, but absolutely not with 9K113, it must be exact."*
+
+> **Clarified by him immediately after, and it changes the shape of the constraint:**
+> *"ATGM guidance is with 9K113 only, there is no naked eye channel for ATGM guidance."*
+>
+> So this is a **channel** split, not an accuracy split. ATGM guidance is served by the 9K113 sight
+> and by nothing else; no improvement to a naked-eye-derived position is relevant to it. The 40 m
+> figure is not a shortfall against the ATGM requirement — it is the wrong instrument for that
+> question. **And the channel does not exist yet**: `perception/optics.py` declares exactly two
+> optics, `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`, and the code says so about itself in four places
+> (`belief/groups.py:385`, `perception/association.py:91`, `perception/visibility.py:49`,
+> `perception/clustering.py:79`). **ATGM guidance therefore has a hard prerequisite that is
+> unbuilt**, independent of anything about group identity or the fold.
+
+**This is the sharpest constraint in the document, and it splits the acceptance criterion in two.**
+The bounded-fold work (`BL-B58` option 2) gets a held position to **40 m**, i.e. 2.29° at 1 km,
+under the naked-eye channel's own `BEARING_SIGMA_DEG = 3.0`. By his reading that is **acceptable for
+guns and rockets** — the pilot closes the loop with his own eyes — and **not acceptable for the
+9K113**, where the copilot must hold the sight on the target for the missile's whole flight.
+
+So "is 40 m good enough" has no single answer: **it is good enough for the weapon that lets the
+pilot correct, and the question does not arise for the one that does not** — because, per his
+clarification above, ATGM guidance is not served by this channel at all. The requirement is therefore
+not "a materially better naked-eye position" but "the 9K113 channel", which is unbuilt.
+
+### Whether he is wrong about the count depends on what he can see
+
+> *"being wrong: it depends on what he actually sees, LOS."*
+
+Not a defect to be eliminated, then — an honest consequence of perception, and the existing
+line-of-sight machinery is what decides it. This is consistent with the whole no-omniscience line
+and means an undercount is acceptable **when it reflects what was visible**, and only then.
+
+---
+
+## Part 2 — what a group is, in his own words
+
+> *"group is a collection of units in somewhat same location. That through certain similarity belong
+> together. Be it location only, location and movement, unit types etc.*
+>
+> *group consists of individual units*
+>
+> *we could think of groups as follows. Not final word, but concept"*
+
+```
+group {
+- id
+- position
+- iff=unknown/friendly/enemy/neutral/civilian/mixed   <-- deferred, but needed later
+- units_by_classification = [
+  "unknown" = [],
+  "armor" = [],
+  "truck" = [],
+  "infantry" = [],
+  "air defense" [
+    "LRSAM" = [<unit info>],
+    "AAA" = [
+      { type = zsu, location=..., other_data, ... , iff=}
+    ],
+    "unknown" = [<unit info>,...]
+  ],
+  etc
+  ]
+}
+```
+
+> *"For reporting purposes each branch of the tree can be collapsed into high level understanding:
+> group, classes of units, more detailed classes, types, individual units.*
+>
+> *A group can be treated as a group but also as it's indivudual members.*
+> *Contact reports treat groups as groups/collections to reduce noise and just state the important
+> things.*
+> *Things far away are more imprecise by nature. The closer something gets, the more precise
+> information we can detect."*
+
+**What is new here against what is built.** Today's `Group` (BL-12) carries a `composition` as a
+flat multiset of `(op_class, count)` plus a separate `air_defence_composition`. His structure is a
+**tree with collapsible branches** — group → class → sub-class → type → individual unit — where the
+*same* structure answers a noise-reducing group callout and a precise per-unit query, depending on
+how far down it is read. `iff` is named as a field, **deferred but needed later**.
+
+The flat composition is a lossy projection of that tree. Nothing built is wrong, but the shape is
+narrower than the one he is describing, and `air_defence_composition` existing as its own field is
+a symptom of the tree being flattened — in his structure it is just the `"air defense"` branch.
+
+---
+
+## Part 3 — attention tiers, verbatim
+
+> *"We probably need tiers of attention."*
+
+> *"- low:*
+>   *- there's units out there, but they are far away. Beyond class detection distance*
+>   *- expected info: `<where>` and far/mid-distance and few/several/many*
+>   *-> collapse to group level report*
+> *- medium:*
+>   *- units at <= 5km*
+>   *- expected info: `<where>` and how far and few/several/many, rough classification "there's
+>     armor" etc.*
+>   *-> group and classification level report*
+> *- high:*
+>   *- watched units, units selected as targets, units player asks about by "describe group ..."*
+>   *- expected info: `<where>` and how far and few/several/many per classification*
+>   *- can select individual units and their exact position*
+>   *- watched units get eyes-on more often, so also data about them is better*
+>   *- target units get constant eyes-on, so given LOS does not break, Petrovich is looking at them
+>     near-constantly (attention stealing behaviour when implemented) and knows their position as
+>     perfectly as belief allows, should be practically perfect at near distance.*
+>   *-> report dependent on action*
+>     *- attack runs get attack run specific guidance per individual unit*
+>     *- "where are they?" -> group position report*
+>     *- "where's that Shilka" -> report on Shilka*
+>     *- "what armor is there" -> report on armor, types and counts*
+>     *- etc. these are not exact wordings, but examples"*
+
+---
+
+## Why this resolves the question it was asked to answer
+
+The open question was: does `BL-14` need a contact record per unit, or accurate positions for the
+records Petrovich holds? The measured dilemma was that **bounding the fold fixes accuracy and cannot
+fix existence** — two of six real units had no record at all, before and after — while *not* folding
+reverses `D5` and produces 82 contacts for 2 units.
+
+His tiers dissolve that. **Resolution is a function of attention, not a global policy:**
+
+- At **low** and **medium** tier, the fold's undercount is not merely tolerable, it is the *correct*
+  behaviour — the expected output is `few/several/many` and a rough class, which is exactly what a
+  collapsed tree gives. Noise reduction is the goal there.
+- At **high** tier, Petrovich is looking at those units near-constantly, so the evidence to resolve
+  individuals *exists* in a way it does not at range. His own words: *"knows their position as
+  perfectly as belief allows, should be practically perfect at near distance."*
+
+So the fold is not the enemy of `BL-14`; **unconditional** folding is. What is needed is that
+promotion to high tier (watch, target selection, or a direct question) drives the belief layer to
+resolve the group into individuals, rather than the ambiguity policy being one setting for all
+ranges and all attention states.
+
+**That is a different and larger piece of work than the within-group split considered earlier**, and
+it is better: it has a stated trigger, it matches where the evidence actually is, and it leaves the
+noise-reduction behaviour untouched where it is wanted.
+
+---
+
+## Consequences worth recording now, before anything is planned
+
+1. **`BL-14` cannot be planned as a pure consumer of today's group model.** It needs per-unit
+   records for selected targets, and the mechanism that produces them (attention-driven resolution)
+   does not exist. Either `BL-14` grows that scope or it is sequenced behind a milestone that does.
+2. **ATGM guidance is 9K113-only, and the 9K113 is unimplemented — so missile guidance is blocked
+   on a channel, not on precision.** Confirmed by him, and the prerequisite verified in code rather
+   than inferred: `perception/optics.py` has two optics and the 9K113 is absent, with four source
+   comments acknowledging it. `BL-14` cannot deliver missile guidance until that channel lands; it
+   *can* deliver guns-and-rockets guidance on the existing channel, where 40 m clears his bar
+   because the pilot aligns visually. That is a sequencing fact worth settling before BL-14 is
+   scoped, since it decides whether the milestone is one piece of work or two.
+3. **The tree structure interacts with BL-12's merged `Group`.** `composition` and
+   `air_defence_composition` are a flat projection of his tree; `iff` has no home yet. Any move to
+   the tree is a data-model change to code merged yesterday, and `docs/PROCESS.md`'s
+   superseding rule applies — the flat form was not wrong, it was narrower.
+4. **Attention tiers overlap existing machinery and must be reconciled, not reinvented.** `BL-4`'s
+   attention levels, `Attention`/`effective_attention`, the watch mechanism, and the 5 km figure he
+   names here against the existing 10 km player bubble and the naked-eye class-detection ranges from
+   the vision calibration. A plan should start by mapping his three tiers onto what exists rather
+   than adding a fourth concept beside them.
+5. **`iff` is deferred by his own note** — *"deferred, but needed later"*. Do not build it; do not
+   design it out either.
+
+---
+
+## Status
+
+Captured, not planned. The `/explore` that produced it is complete for the question it was asked.
+Next step is a planning pass that decides how much of this belongs to `BL-14` and how much to a
+preceding milestone — and that decision is his.
+
+---
+
+## Part 4 — `collapse(group, depth)` endorsed, and the access pattern that makes it cheap
+
+**User direction, later the same day.** On the question of whether `Group`'s flat `composition`
+should become a stored tree, the answer was neither: derive the tree at read time instead.
+
+> *"collapse(group, depth) would be a good approach.*
+>
+> *Note that usually we are interested in one group at a time, so once its members are collected,
+> no need to iterate through the other groups."*
+
+### Why deriving beats storing, from what is already in the code
+
+- `Group` holds **`member_contact_ids`** and nothing per-unit — its own docstring: *"no per-member
+  position, no per-member identity of its own, because membership is a set of ids into a store that
+  already has identity for each of them."* The individual units already exist in `ContactStore`.
+- `classification.py` already carries the hierarchy as a three-level lattice with `parent_class_of`.
+  The tree's *shape* exists as a lookup.
+- `composition` and `air_defence_composition` are **recomputed from members every reconcile** — they
+  are caches of a projection, not truth.
+
+So the tree is already reachable; what was missing is one derivation that collapses members to a
+requested depth. **Nothing new gets stored.**
+
+**The flat tuple stays as the match key.** `group_matches` tests 3 and 5 compare `composition` for
+equality, and a sorted tuple is the right shape for that — cheap, stable, comparable. A nested
+structure would need its own comparison semantics and make matching slower and more fragile. So:
+flat for matching, derived tree for reporting. (Stated as the recommendation, **not yet measured**
+against the matcher.)
+
+### His access-pattern note holds for one path and not the other — measured by reading, worth a probe
+
+| path | iteration | fit for a deep collapse |
+|---|---|---|
+| **pull** — `report`/`describe`, a selected target, a watched group | **one group**, on demand | yes, exactly his case: a handful of members plus a lattice lookup each |
+| **push** — unprompted callouts | **every group, every poll** (`callouts.py:1140`, `for belief_group in store.groups:`) | only shallow; a deep collapse here is N groups per tick |
+
+**This converges with the tiers rather than fighting them.** Low and medium tier are the push path
+and want the shallow projection; high tier is the pull path, which is the one-group-at-a-time case
+where depth is affordable. The depth parameter and the cost profile line up with attention.
+
+### What is still unmeasured, and should be before a plan commits
+
+- `collapse`'s actual per-call cost at realistic member counts. Cheap in principle — but *"cheap in
+  principle"* is what the 552 m no-op bound and the 300 m `radius_m()` floor both looked like, and
+  both were wrong when measured.
+- Whether the matcher genuinely keeps working off the flat tuple once a derived view exists, or
+  whether something in `group_matches` quietly wants the deeper structure.
+- Whether `air_defence_composition` can then be retired (it would become
+  `collapse(group, …)["air defense"]`) or whether `D6`'s gate needs it materialised for a reason the
+  derivation cannot serve.
