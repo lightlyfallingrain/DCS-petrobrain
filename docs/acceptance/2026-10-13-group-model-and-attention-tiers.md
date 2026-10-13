@@ -47,9 +47,9 @@ guns and rockets** — the pilot closes the loop with his own eyes — and **not
 9K113**, where the copilot must hold the sight on the target for the missile's whole flight.
 
 So "is 40 m good enough" has no single answer: **it is good enough for the weapon that lets the
-pilot correct, and not for the one that does not.** Anything built for ATGM guidance needs a
-materially better position than the fold-bounded figure, and that is a per-weapon requirement rather
-than a global one.
+pilot correct, and the question does not arise for the one that does not** — because, per his
+clarification above, ATGM guidance is not served by this channel at all. The requirement is therefore
+not "a materially better naked-eye position" but "the 9K113 channel", which is unbuilt.
 
 ### Whether he is wrong about the count depends on what he can see
 
