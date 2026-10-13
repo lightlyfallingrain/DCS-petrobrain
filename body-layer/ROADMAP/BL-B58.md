@@ -1,5 +1,13 @@
 # BL-B58 — A within-group fold's position drift can widen a cluster enough to absorb an unrelated contact
 
+> **DoD-PASSED 2026-10-13 (`plans/bounded-fold-displacement/`, tip `50428dd`): confirms this entry
+> stays closed.** The displacement bound makes Stage 3.5's admission gate a measured no-op in this
+> entry's own incident (63.8 → 155.0 m against the 78.0 m backstop) — the absorption is now fixed
+> at its source as well as behind the gate, and the gate is kept as the safety net for an
+> uncalibrated speed table rather than because it is still load-bearing here. No change to this
+> entry's own `[x]`/done status, which predates this round. Full report:
+> `plans/bounded-fold-displacement/dod-check.md`.
+
 > **Option 2 chosen by the user, 2026-10-13 — the option declined for the absorption half is now
 > the fix for both halves.** *"Bound how far a single fold-driven `Contact.record` call may move a
 > fused position"*, the option listed below and passed over in favour of option 3 (Stage 3.5's

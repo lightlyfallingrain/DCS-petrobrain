@@ -1,5 +1,27 @@
 # BL-B59 — The same fold drift that absorbs an unrelated contact also evicts a real member
 
+> **DoD-PASSED 2026-10-13 on `fix/bl-b59-retention-hysteresis` (tip `50428dd`), merge pending user
+> approval, `#needs-flight`.** The bound closes the eviction measured below: 0 membership
+> transitions over 60 ticks of repeat folds, versus the unbounded baseline's 12 — `GROUP_1` stays
+> `['CONTACT_1','CONTACT_2','CONTACT_3']` throughout rather than evicting `CONTACT_2`. Reviewer
+> (APPROVED, full read, both NaN-safety fixes closed and re-reviewed), Performance (APPROVED —
+> MONITOR, sub-microsecond per fold), Security (APPROVED, one low-severity finding closed) all
+> signed off. Full report: `plans/bounded-fold-displacement/dod-check.md`. Acceptance test card
+> (branch, setup, what to watch for, `fold_budgets`' honest limit):
+> https://claude.ai/artifact/NxSFmKNdjxvGG2JtnVKvUC.
+>
+> **Fixture-only — no sortie has exercised this path.** The one calibration axis
+> (`_PLAUSIBLE_SPEED_MPS`) is a table of stated assumptions, not measured against real DCS
+> telemetry; the known regression this bound accepts (a unit at 4× its believed class rate is
+> tracked *worse* than before, 104.2 m vs 49.8 m) is exactly the shape of defect only a real
+> misclassified fast mover could surface — filed as **[[BL-B60]]**.
+>
+> **Per-weapon note for whoever reads the 40 m figure next**: it is a naked-eye/binocular-channel
+> number. Guns and rockets close the aiming loop visually and this clears that bar. **ATGM (9K113)
+> guidance has no naked-eye channel at all** — it is a different perception channel this project
+> has not built (`perception/optics.py` declares only `UNAIDED_OPTIC`/`BINOCULAR_OPTIC`) — so this
+> number says nothing about missile-guidance accuracy, favourably or unfavourably.
+
 > **Decided 2026-10-13: fixed at source, not by a retention term. The user chose [[BL-B58]]
 > **option 2** — bound how far a single fold-driven `Contact.record` may move a fused position —
 > over the retention hysteresis this entry names. Plan: **`plans/bounded-fold-displacement/
@@ -59,12 +81,13 @@
 > an air-defence report rather than fabricate one) and should be taken up next, not left in the
 > general backlog.
 
-- [ ] **A Stage 3 within-group fold's position drift shifts the median nearest-neighbour gap, which
+- [x] **A Stage 3 within-group fold's position drift shifts the median nearest-neighbour gap, which
   tightens `_cluster_contacts`'s *relative* threshold, which can drop a real, correctly-identified
   member out of the group on the same tick — the eviction half of [[BL-B58]], and the more dangerous
-  half, because for an air-defence member it **suppresses** a report rather than fabricating one.**
-  #status/open Found 2026-10-12 by the Architect pass on [[BL-B58]], in the same reproduction that
-  answered that entry's two open sub-questions. Measured, not argued.
+  half, because for an air-defence member it **suppresses** a report rather than fabricating one.
+  FIXED by bounding the fold's own displacement (`plans/bounded-fold-displacement/plan.md`).**
+  #status/done #needs-flight Found 2026-10-12 by the Architect pass on [[BL-B58]], in the same
+  reproduction that answered that entry's two open sub-questions. Measured, not argued.
 
   **The measurement** (probe 2 of `plans/group-cohesion-admission-gate/plan.md` §2a; three infantry
   in a ~95 m knot at 1,000 m, a continuously-observed ZSU-23-4 195 m away, infantry unobserved for

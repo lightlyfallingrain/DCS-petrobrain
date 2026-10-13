@@ -1,5 +1,15 @@
 # BL-B50 — Group callout suppression is defeated by any two alternating lines
 
+> **Recheck condition discharged, 2026-10-13 — do not re-open on the strength of this alone.**
+> `[[BL-B59]]`'s own plan (`plans/bounded-fold-displacement/plan.md` §5, row A) re-ran the 2C
+> fixture over 60 ticks of repeat folds under the bound: **0 membership transitions, versus the
+> unbounded baseline's 12.** That is this entry's own stated recheck condition ("confirm whether
+> the three-line result is stable across consecutive ticks"), and it is now stable — `BL-B59`'s
+> eviction path, the mechanism this recheck existed to watch for, no longer fires on this fixture.
+> This discharges the recheck; it does **not** close this entry's own defect (the one-slot
+> signature / speak-only snapshot refresh below still exists and still ratchets under two
+> alternating oscillators of distinct classes, which is unrelated to the fold-drift mechanism).
+
 > **Recheck note added 2026-10-12 (BL-12 Stage 3.5, `BL-B58` decision 3).** The cohesion
 > admission gate landed this stage and dropped `tests/test_callouts.py`'s 2C fixture from four
 > spoken lines to three -- `test_2c_transcript_fixture_renders_four_lines_not_seven` renamed to
