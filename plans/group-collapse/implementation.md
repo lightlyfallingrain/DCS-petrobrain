@@ -138,3 +138,111 @@ against the Stage 2 commit) rather than left half-wired or commented out.
   generic form hit this.
 - **`BL-B61`'s own measurement list ("all 131 keyword entries...") was not re-derived here** — this
   plan's finding A/B and `BL-B61` were taken as already-measured and read, not re-counted.
+
+### Stage 3 — landed (second pass)
+
+The semantic fork the first pass stopped on turned out to be a fixture defect, not a product
+question — confirmed independently (not re-trusted from the first pass's own account) against the
+real producers before touching anything: `perception.naked_eye_source._classification_for_tier`
+(`hires` → `reporting_name_for` at level 3, falling back to `op_class` at level 2 only when the
+name lookup misses; `medres` → `op_class` at level 2) and `perception.hybrid_source.py:284`
+(hardcoded `classification_level=3`, with its own comment on why). **No real producer ever pairs a
+type-shaped raw string with level 2** — level 2 always carries an `op_class` bucket string. The
+`test_crew_console.py` fixture pairing `classification_raw="BMP-2"`/`classification_level=2`
+(hardcoded in `_observation_at`) was exactly that unreachable state, not a case Stage 3 needed to
+make a product decision about.
+
+**Fixture classification table** (every test touched, reachable vs. not):
+
+| test | fixture | classification | verdict |
+|---|---|---|---|
+| `test_speech.py::test_group_composition_clause_singular_is_bare_noun` | `OP_TRUCK`/class | reachable | unaffected (own OP_* string resolves identically through the lattice) |
+| `test_speech.py::test_group_composition_clause_counts_members_exactly` | `OP_ARMORED`×2, `OP_TRUCK`/class | reachable | unaffected |
+| `test_speech.py::test_render_group_disclosure_differentiated_group_gives_composition` | `OP_ARMORED`×2, `OP_TRUCK`/class | reachable | unaffected |
+| `test_speech.py::test_render_group_disclosure_threat_capable_member_leads_the_line` | `ZSU-23-4 Shilka`/type, `OP_ARMORED`×2/class | reachable | unaffected (`ZSU-23-4` doesn't go through `_group_composition_clause` itself — only the leading-member branch reads it; `envelope_for` behaviour unchanged since `_match_type_row` has no `"ZSU"`/`"Shilka"` row match either way) |
+| `test_speech.py::test_render_group_disclosure_mixed_pair_uses_the_composition_clause` | `OP_ARMORED`, `OP_TRUCK`/class | reachable | unaffected |
+| `test_speech.py::test_render_group_disclosure_first_differentiation_is_full_once` | `Ural truck`/presence + `OP_TRUCK`/class | reachable | unaffected ("something" aggregation preserved via the `label == "unknown"` check on `group_view._subclass_label`'s own gate) |
+| `test_crew_console.py::test_report_speaks_a_persisted_group_as_one_counted_answer` | `BMP-2`/class (hardcoded) | **unreachable** | fixture corrected to `classification_level=3`; assertion unchanged (a type-level value renders verbatim either way, confirmed by mutation below) |
+| `test_crew_console.py::test_report_speaks_an_already_spoken_group_in_full` | `BMP-2`/class (hardcoded, same scene) | **unreachable** | fixture corrected for consistency with its sibling (identical physical scene); its own assertions (`content_signature is not None`, the final `render_report_summary` line) don't pin the literal composition text either way, so this correction changes nothing observable — done for honesty of the fixture, not because this test would otherwise fail |
+
+No other test file calls `_group_composition_clause`/`render_group_disclosure`/
+`render_group_full_disclosure` directly (`grep -rln` across `tests/`), so these seven are the whole
+surface Stage 3 touches.
+
+**What changed in `speech.py`.** `_group_composition_clause` now builds one throwaway `Contact` per
+`facts` dict (`_contact_for_member_facts` — classification + cardinality only; every other `Contact`
+field is a placeholder never read by `collapse_members`, per that module's own docstring) and calls
+`belief.group_view.collapse_members(contacts, CollapseDepth.TYPE, now_sim=0.0)`, then walks the
+tree's leaves (`_leaf_nodes`, depth-first over `CollapseNode.children`) and renders each through the
+*same* vocabulary as before (`_unit_type_display`/`_plural_unit_type_display`/
+`_undifferentiated_phrase`/`_SPOKEN_NUMBERS`) — a leaf labelled `"unknown"`
+(`group_view._subclass_label`'s own name for "no class claim resolves, regardless of why") is
+aggregated as undifferentiated exactly as the old `(value, level)`-literal check was; every other
+leaf is rendered via `_LEAF_LEVEL_WORD` mapping `CollapseDepth.SUBCLASS → "class"` /
+`CollapseDepth.TYPE → "type"` (the only two levels a leaf can hold at `CollapseDepth.TYPE`, per that
+table's own docstring — `group_view._class_children` only emits a bare `CLASS`-level leaf when
+called with `max_depth == CollapseDepth.CLASS`, which this function never requests). `now_sim=0.0`
+is a dead argument at this depth — only a `CollapseDepth.CONTACT` leaf's `confidence` field ever
+reads it, and this function never asks for contact depth.
+
+**Why this is behaviour-preserving for every existing test, not just asserted to be.** The one real
+mechanism change is that a class-level member now buckets by `classification.parent_class_of`
+(the lattice) rather than the literal `(value, level)` string pair — but every reachable class-level
+value in this codebase's real producers *is* already an `op_class` string that resolves through the
+lattice to itself (`classification._op_class_of`'s own early return), so the two groupings coincide
+for every input a real percept can produce. Canonical sort order also changed (alphabetical by
+label at every level, `group_view`'s own invariant, vs. the old first-seen insertion order) — every
+existing composition test's input happens to already be in alphabetical class order
+(`OP_ARMORED` before `OP_TRUCK` in both orderings), so no existing assertion catches this, but it is
+a real, deliberate behaviour change for the live push path: a group whose members are *observed* in
+non-alphabetical class order now always speaks in the same canonical order regardless, which
+removes an existing source of order-dependent wording rather than introducing one.
+
+**Notable discovery not caught by any test, flagged rather than silently fixed or shipped.** A
+`CLASS`-level member whose raw value is literally `object_model.DEFAULT_OP_CLASS`
+("`OP_GROUPSOMETHING`") — reachable via `medres` detecting a type the keyword tables don't
+recognise — used to render through `_OP_CLASS_DISPLAY["OP_GROUPSOMETHING"] = "group"` (added
+2026-09-22 after a live sortie heard the raw enum name; see that table's own comment). Under
+`group_view._subclass_label`, this exact value resolves to `"unknown"` (`classification._op_class_of`
+explicitly excludes `DEFAULT_OP_CLASS` from ever resolving, by design, for the lattice's
+parent-consistency question) — so inside a *group's* composition clause specifically, such a member
+now speaks as part of the undifferentiated aggregate (`"something"`/`"N contacts"`) rather than as
+`"group"`. The single-contact report path (`render_contact_report`/`_contact_report_text`) is
+**not** touched by this — it still reads `_unit_type_display` directly off the facts dict and still
+says `"group"` for this value. No existing test exercises `OP_GROUPSOMETHING` at class level through
+`_group_composition_clause` specifically (`test_render_contact_report_maps_default_op_class_to_
+display_word` tests the single-contact path at `presence` level, not this one), so nothing failed —
+but this is a real, if narrow, wording change for a reachable value, left unfixed because fixing it
+properly means deciding whether `group_view.py` itself (merged Stage 1/2/4 code, out of this stage's
+stated scope) should distinguish "no class claim" from "resolved to the default bucket," which is a
+design question for the architect/user, not something to decide silently inside a migration commit.
+
+**Mutation verification.**
+- `tree = collapse_members(contacts, CollapseDepth.TYPE, now_sim=0.0)` → `CollapseDepth.CLASS`:
+  turned 17 tests red (every test that reaches `_group_composition_clause`, including both corrected
+  `test_crew_console.py` tests), with a `KeyError` on `_LEAF_LEVEL_WORD[CollapseDepth.CLASS]` (the
+  table is deliberately total only over `SUBCLASS`/`TYPE`). Restored; sha
+  `ebe2d70ba9b8a924236ab34bbbaba1fff116f752` before and after.
+- `if leaf.label == "unknown":` → `if False:`: turned
+  `test_render_group_disclosure_first_differentiation_is_full_once` red
+  (`"Truck and unknown."` instead of `"Truck and something."`). Restored; same sha before and after.
+- Reverted `test_report_speaks_a_persisted_group_as_one_counted_answer`'s own fixture correction
+  (`classification_level=3` → `2`, Stage 3 code left intact) to confirm the *fixture* fix itself is
+  load-bearing, not cosmetic: turned it red (`"Three armor..."` instead of `"Three BMP-2..."`) —
+  the exact failure the first pass's revert note described. Restored; sha
+  `de4fb28de8d595a53320262a251b81c148b2d1a8` before and after.
+
+**Latent mismatched sites left alone.** Per the task's scope instruction, only the two fixture call
+sites `_group_composition_clause` actually surfaced were corrected. `_observation_at`'s own default
+(`classification_level=2` with `classification_raw="BMP-2"`) remains the default for every other
+caller — three more call sites in `test_crew_console.py` use it un-corrected (lines ~362, ~1484,
+and the four-contact `report_all` scene), because none of them cohere into a `Group` or reach
+`_group_composition_clause`/`render_group_disclosure`; they exercise `render_report_summary`, which
+already resolves class values through `classification.parent_class_of` directly and was never
+sensitive to this mismatch. `Percept.classification_level`'s own default (`2`) is unchanged, per
+the task's explicit instruction not to touch it.
+
+**Checks (second pass).** `ruff format --check`: pass. `ruff check`: pass. `mypy --strict` (cd
+`body-layer`): pass, 57 source files. `pytest`: **1747 passed, 4 xfailed** — identical to the
+first pass's own already-landed-Stages-1/2/4 baseline; Stage 3 adds no new tests (re-expression of
+an existing function, not new behaviour), only two one-line fixture corrections.
