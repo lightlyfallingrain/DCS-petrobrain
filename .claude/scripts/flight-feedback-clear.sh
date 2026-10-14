@@ -34,6 +34,30 @@
 #
 # Deliberately generous about the filename: the capture may land in a new file or
 # be appended to an existing sortie card, and either counts.
+#
+# **It was not generous enough, and that is the second time this hook was keyed
+# on the wrong observable** (fixed 2026-10-14). Both branches required the
+# filename to contain `feedback` or `sortie`. Four of the last eight captures
+# under `docs/acceptance/` contain neither -- `2026-10-13-tree-cover-direction.md`,
+# `2026-10-13-position-uncertainty-direction.md`,
+# `2026-10-13-group-model-and-attention-tiers.md` and
+# `2026-10-09-four-acceptances-and-the-kola-correction.md` -- because design
+# *direction* captured in conversation is now at least as common as a sortie
+# debrief, and nothing ever said a capture had to be called `sortie`. So the
+# marker set at 2026-10-13T12:18:15Z stayed up through three captures and a
+# full `/explore`, and warned on every planning dispatch for two days.
+#
+# A gate that always fires is a gate nobody reads, which costs more than the
+# narrower miss it was guarding against. The match is now **any `.md` under
+# `docs/acceptance/`**.
+#
+# The tradeoff, stated rather than discovered later: `.md` alone can over-clear --
+# editing an unrelated older card while genuinely-uncaptured feedback is pending
+# would hide the gate, which is the unsafe direction this header warns about
+# above. Accepted deliberately, because the measured failure was the opposite one
+# firing on every dispatch, and because "something was written into the acceptance
+# record" is the right observable at this granularity. `.html` test cards stay
+# excluded -- they are published artifacts of a card, never the capture itself.
 
 set -euo pipefail
 
@@ -49,7 +73,7 @@ cleared=""
 path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
 if [ -n "$path" ]; then
     case "$path" in
-      */docs/acceptance/*feedback*|*/docs/acceptance/*sortie*) cleared="yes" ;;
+      */docs/acceptance/*.md) cleared="yes" ;;
     esac
 fi
 
@@ -70,7 +94,7 @@ fi
 if [ -z "$cleared" ] && [ -z "$path" ]; then
     cd "$PROJECT_DIR" 2>/dev/null || exit 0
     touched=$(git status --porcelain -- docs/acceptance/ 2>/dev/null \
-        | grep -E 'feedback|sortie' || true)
+        | grep -E '\.md$' || true)
     [ -n "$touched" ] && cleared="yes"
 fi
 
