@@ -365,6 +365,51 @@ def test_write_speech_rows_carry_gaze_at_the_moment_of_speech(
     }
 
 
+def test_write_speech_carries_attack_run_fields(tmp_path: Path) -> None:
+    """`plans/attack-run/plan.md` Stage 5 -- the attack-run target, tier,
+    and current azimuth/elevation error, so a sortie's guidance lines can
+    be triaged from this log instead of recalled."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(
+        t_sim=58.6,
+        text="Come left.",
+        urgent=False,
+        attack_run_target_contact_id="CONTACT_1",
+        attack_run_tier=1,
+        attack_run_azimuth_deg=-7.5,
+        attack_run_elevation_deg=0.0,
+    )
+
+    row = json.loads(path.read_text().strip())
+    assert row == {
+        "kind": "speech",
+        "t_sim": 58.6,
+        "text": "Come left.",
+        "urgent": False,
+        "attack_run_target_contact_id": "CONTACT_1",
+        "attack_run_tier": 1,
+        "attack_run_azimuth_deg": -7.5,
+        "attack_run_elevation_deg": 0.0,
+    }
+
+
+def test_write_speech_omits_attack_run_fields_for_an_ordinary_line(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(t_sim=1.0, text="Scanning right.", urgent=False)
+
+    row = json.loads(path.read_text().strip())
+    assert "attack_run_target_contact_id" not in row
+    assert "attack_run_tier" not in row
+    assert "attack_run_azimuth_deg" not in row
+    assert "attack_run_elevation_deg" not in row
+
+
 def test_write_speech_flushes_immediately(tmp_path: Path) -> None:
     """Speech is a handful of lines a minute, and the line most worth
     having is the one written immediately before something went wrong —

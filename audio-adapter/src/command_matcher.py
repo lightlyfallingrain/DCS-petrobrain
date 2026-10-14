@@ -101,6 +101,9 @@ from vocabulary import (
     parse_range_km,
     parse_relative_word,
     parse_sector_word,
+    parse_step_count,
+    parse_step_direction,
+    parse_weapon,
     report_verbs,
 )
 
@@ -295,6 +298,17 @@ _WHERE_SLOT_NAMES: tuple[str, ...] = ("clock", "sector", "relative")
 #: reason `_FOLLOW_VERB`/`_REPORT_VERBS` are: `verb` here is already a
 #: possibly-misheard first word.
 _SELECT_TARGET_VERBS: tuple[str, ...] = ("select", "set")
+
+#: `step`'s own verb (`plans/attack-run/plan.md` Decision 6), fuzzy-
+#: matched for the same reason every other slotted token's verb is.
+_STEP_VERB = "step"
+
+#: `engage`'s own verb (Decision 15), fuzzy-matched for the same reason.
+#: **The spec's `attack`/`attack-run` synonym is deliberately not
+#: admitted** -- see `vocabulary.PHRASES["engage"]`'s own comment for why
+#: (a measured verb-anchor collision with an existing pinned adversarial
+#: test, not an oversight).
+_ENGAGE_VERBS: tuple[str, ...] = ("engage",)
 
 
 @dataclass(frozen=True)
@@ -535,6 +549,63 @@ def _parse_select_slots(text: str) -> dict[str, int | str] | None:
     return slots if slots else None
 
 
+def _parse_step_slots(text: str) -> dict[str, int | str] | None:
+    """`step [<count>] left/right/near/far`'s two slots (`plans/
+    attack-run/plan.md` Decision 6). `None` when no direction is heard --
+    unlike `_parse_select_slots`'s "requires a literal word" cheap check,
+    `step` has no such single committing word (its four direction words
+    already carry the whole command), so the direction slot's own
+    presence is the signal.
+
+    `count` defaults to nothing here, not `1` -- `_handle_step` on the
+    body-layer side is what applies the spec's own `"[count]"` optional-
+    bracket default, so a missing count slot and an explicit `"step 1
+    left"` are indistinguishable at this layer, which is the right
+    behaviour: there is nothing to disambiguate."""
+    direction = parse_step_direction(text)
+    if direction is None:
+        return None
+    slots: dict[str, int | str] = {"direction": direction}
+    count = parse_step_count(text)
+    if count is not None:
+        slots["count"] = count
+    return slots
+
+
+def _parse_engage_slots(text: str) -> dict[str, int | str] | None:
+    """`engage [<what> <where>] [weapon]`'s six slots (`plans/attack-run/
+    plan.md` Decision 15) -- the identical five what/where slots
+    `_parse_select_slots` parses, plus `weapon` (`vocabulary.
+    parse_weapon`). Unlike `_parse_select_slots`, there is no cheap
+    "requires a literal word" check: `engage`/`attack` are `engage`'s own
+    verbs (checked by the caller before this is reached), and a bare
+    `engage`/`engage target` with no slots at all is a legal, common
+    command (resume the already-selected run) -- so this returns `None`
+    only when **nothing** resolves, which `match_transcript`'s own
+    caller then reads as "fall through to the ordinary phrase table,"
+    where the bare forms are recorded phrasings."""
+    slots: dict[str, int | str] = {}
+    descriptor = parse_descriptor(text)
+    if descriptor is not None:
+        slots["descriptor"] = descriptor
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    sector = parse_sector_word(text)
+    if sector is not None:
+        slots["sector"] = sector
+    relative = parse_relative_word(text)
+    if relative is not None:
+        slots["relative"] = relative
+    band = parse_band(text)
+    if band is not None:
+        slots["band"] = band
+    weapon = parse_weapon(text)
+    if weapon is not None:
+        slots["weapon"] = weapon
+    return slots if slots else None
+
+
 def _where_slot_count(slots: dict[str, int | str]) -> int:
     """How many of `_WHERE_SLOT_NAMES` are present. Two or more means the
     transcript named the direction twice in incompatible frames
@@ -643,6 +714,42 @@ def match_transcript(text: str) -> MatchResult:
                 match_ratio=1.0,
                 verb_anchored=True,
                 slots=select_slots,
+            )
+
+    # `step [<count>] left/right/near/far` (`plans/attack-run/plan.md`
+    # Decision 6), tried before the generic phrase table for the
+    # identical reason the three branches above are. `step`'s own verb
+    # does not overlap `follow`/`report`/`select`/`set`, so there is no
+    # collision to order against, but the ordering is kept consistent
+    # with the others (branch order is pinned by a test).
+    if difflib.SequenceMatcher(None, verb, _STEP_VERB).ratio() >= VERB_FLOOR:
+        step_slots = _parse_step_slots(text)
+        if step_slots is not None:
+            return MatchResult(
+                token="step", match_ratio=1.0, verb_anchored=True, slots=step_slots
+            )
+
+    # `engage` (Decision 15), tried before the generic phrase table for
+    # the identical reason. A bare `"engage"`/`"engage target"` parses to
+    # no slots here (`_parse_engage_slots` returns `None`) and falls
+    # through to the phrase table, landing on `engage` with `slots=None`
+    # exactly as before this branch existed -- this branch only
+    # intercepts the slotted form, "select target"/"report"'s own
+    # pattern. (`_ENGAGE_VERBS`' own comment explains why the spec's
+    # `attack`/`attack-run` synonym is not admitted.)
+    if any(
+        difflib.SequenceMatcher(None, verb, engage_verb).ratio() >= VERB_FLOOR
+        for engage_verb in _ENGAGE_VERBS
+    ):
+        engage_slots = _parse_engage_slots(text)
+        if engage_slots is not None:
+            if _where_slot_count(engage_slots) > 1:
+                return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
+            return MatchResult(
+                token="engage",
+                match_ratio=1.0,
+                verb_anchored=True,
+                slots=engage_slots,
             )
 
     heard_words = tuple(words)

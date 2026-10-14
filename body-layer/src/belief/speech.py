@@ -404,6 +404,13 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     "NO_SUCH_COMMAND": "Unable, no such command.",
     "NO_MATCH": "Unable, I don't see it.",
     "NO_LINE_OF_SIGHT": "Unable, no line of sight.",
+    # `step` (`plans/attack-run/plan.md` Decision 6) -- the ungrouped-target
+    # and end-of-ordering cases. Closed tokens, like every other
+    # `render_unable` reason, rather than the plan's own illustrative
+    # pseudocode phrases passed as free text -- see this dict's own
+    # "reason -> spoken text" contract above.
+    "NO_GROUP_MEMBERS": "Unable, no other units in the group.",
+    "LAST_IN_ORDER": "Unable, that's the last one.",
 }
 
 
@@ -445,6 +452,51 @@ def render_target_readback(facts: dict[str, object]) -> OutgoingSpeech:
         if isinstance(clock, int):
             parts.append(f"{clock} o'clock")
     return OutgoingSpeech(text=f"Target, {', '.join(parts)}.", template="readback")
+
+
+def render_engage_readback(facts: dict[str, object]) -> OutgoingSpeech:
+    """`engage`'s own readback (Stage 5, `plans/attack-run/plan.md`
+    "Spoken vocabulary") -- `"Attack run, armour, 2 o'clock, 1.5
+    kilometres."`, **range spoken exactly once, here**, per §1's "no range
+    beyond the initial report" (`render_target_readback`'s own sibling
+    note). A terrain acquisition fragment (§8) is appended when available,
+    exactly as `_contact_report_text` appends one -- not reused directly,
+    since that helper also carries a count clause and a `", moving"` tail
+    neither this milestone's spoken vocabulary nor the direction document
+    calls for here; duplicating the two lines this function actually needs
+    is cheaper than threading unwanted branches through a shared helper.
+    The terrain fragment is **acquisition only** and `render_alignment`
+    never repeats it past `"Lined up."` (§8) -- that boundary is this
+    function's whole job, not something the two share."""
+    classification = facts.get("classification")
+    value = classification.get("value") if isinstance(classification, dict) else None
+    level = classification.get("level") if isinstance(classification, dict) else None
+    parts = [_unit_type_display(value, level)]
+    relative_now = facts.get("relative_now")
+    if isinstance(relative_now, dict):
+        clock = relative_now.get("clock_position")
+        if isinstance(clock, int):
+            parts.append(f"{clock} o'clock")
+        range_m = relative_now.get("range_m")
+        if isinstance(range_m, float):
+            parts.append(_format_range_km(range_m))
+    text = f"Attack run, {', '.join(parts)}."
+    terrain_qualifier = facts.get("terrain_qualifier")
+    if isinstance(terrain_qualifier, str):
+        text = f"{text[:-1]} {terrain_qualifier}."
+    else:
+        semantic = facts.get("semantic")
+        if isinstance(semantic, list) and semantic:
+            best = max(semantic, key=lambda fact: fact["confidence"])
+            text = f"{text[:-1]} {_round_enrichment_fragment(best['text'])}."
+    return OutgoingSpeech(text=text, template="attack_run")
+
+
+def render_attack_run_off() -> OutgoingSpeech:
+    """`disengage`/`stop attack`/`abort` (Decision 2) -- ends the run's
+    phase only; the standing selection (and its own readback vocabulary)
+    is untouched, per that decision's "stop the run, keep the watch.\""""
+    return OutgoingSpeech(text="Attack run off.", template="attack_run")
 
 
 #: One row of an alignment word table (`plans/attack-run/plan.md`
@@ -508,7 +560,7 @@ def render_alignment(
     azimuth_deg: float,
     elevation_deg: float,
     *,
-    tier: int,
+    tier: Literal[1],
     azimuth_table: tuple[_AlignmentWordRow, ...],
     elevation_table: tuple[_AlignmentWordRow, ...],
 ) -> OutgoingSpeech:
@@ -525,11 +577,18 @@ def render_alignment(
 
     `tier` selects the register (Decision 11 REVISED/Decision 17 REVISED).
     **Tier 1 is everything this function builds as of `plans/attack-run/
-    plan.md` Stage 3** -- the full word-table/lined-up/o'clock register
+    plan.md` Stage 5** -- the full word-table/lined-up/o'clock register
     above. Tier 2 (the degraded fallback's `"right, obstructed"` register)
-    is Stage 6, deliberately not built here; `attack_run.decide` never
-    passes `tier=2` until that stage exists, so this branch is reached by
-    no caller yet, not dead code kept "just in case"."""
+    is Stage 6, deliberately not built here. **`tier: Literal[1]`, not
+    `int`** (a Stage 5 refinement, carried over from the Stage 1-3 review's
+    optional list rather than left for Stage 6) -- `attack_run.decide`
+    hardcodes `tier=1` at its one call site, so a future `tier=2` call is
+    now a type error at that call site rather than a trusted runtime
+    raise; the signature will widen to `Literal[1, 2]` when Stage 6 adds
+    the second branch. The runtime guard below is kept anyway: `mypy
+    --strict` does not enable `warn_unreachable`, so it costs nothing and
+    still catches a caller that bypasses the type check (e.g. from
+    untyped test code)."""
     if tier != 1:
         raise NotImplementedError(
             "tier 2 (the degraded fallback's 'obstructed' register) is "

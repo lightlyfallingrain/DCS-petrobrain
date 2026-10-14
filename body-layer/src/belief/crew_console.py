@@ -118,11 +118,13 @@ from belief.escalation import (
 from belief.speech import (
     UrgentCall,
     _contact_report_text,
+    render_attack_run_off,
     render_cancel_readback,
     render_clear,
     render_confirm_request,
     render_contact_report,
     render_disambiguation,
+    render_engage_readback,
     render_group_full_disclosure,
     render_group_report,
     render_lost_contact,
@@ -168,7 +170,7 @@ from belief.voice_commands import (
 )
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
-from perception.geometry import GeoPosition, angular_delta_deg
+from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
 from perception.source import OwnshipState
 
 #: On-ground altitude threshold (metres AGL) for `maybe_apply_on_ground_
@@ -715,6 +717,33 @@ def _describe_token_for_confirm(
         )
     if token == "drop_target":
         return "drop target"
+    if token == "step":
+        # `step [<count>] left/right/near/far` (Decision 6) -- read back
+        # the heard direction and count, the same "expose a mishearing"
+        # job the other slotted branches above serve.
+        direction = slots.get("direction") if slots is not None else None
+        count = slots.get("count") if slots is not None else None
+        parts = []
+        if isinstance(count, int) and count > 1:
+            parts.append(str(count))
+        if isinstance(direction, str):
+            parts.append(direction)
+        return f"step {' '.join(parts)}" if parts else "step"
+    if token == "engage":
+        # `engage [<what> <where>] [weapon]` (Decision 15) -- same
+        # composition shape as `select_target` above; the weapon slot is
+        # read back too (it is accepted even though nothing consumes it).
+        engage_parts: list[str] = []
+        for slot_name in ("descriptor", "clock", "sector", "relative", "band"):
+            value = slots.get(slot_name) if slots is not None else None
+            if slot_name == "clock":
+                if isinstance(value, int) and value in _CLOCK_REPORT_LABELS:
+                    engage_parts.append(f"{_CLOCK_REPORT_LABELS[value]} o'clock")
+            elif isinstance(value, str):
+                engage_parts.append(value)
+        return f"engage {' '.join(engage_parts)}" if engage_parts else "engage"
+    if token == "disengage":
+        return "disengage"
     bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
     if token in ("scan_bearing_deg", "report_bearing_deg") and isinstance(
         bearing_degrees, int
@@ -768,6 +797,14 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # no-return-value exemption.
         "select_target",
         "drop_target",
+        # Stage 4/5 of the same plan -- `step` always returns a readback
+        # or an `"say again"`/`render_unable` line; `engage` always
+        # returns a readback or a "no target selected"/"no such contact"
+        # line; `disengage` always returns `render_attack_run_off`'s one
+        # line unconditionally. None needs the no-return-value exemption.
+        "step",
+        "engage",
+        "disengage",
         "cancel_task",
         "cancel_scan",
         "cancel_watch",
@@ -900,6 +937,18 @@ class CrewConsole:
     #: continues rather than being lowered and immediately re-pointed at
     #: the same target.
     last_command_target_contact_id: str | None = None
+    #: `engage`/`disengage`'s one-shot signal to `logger.py`'s poll loop
+    #: (`plans/attack-run/plan.md` Decision 2, Stage 5's wiring) --
+    #: `AttackRunState` itself lives on `logger.ConsolePerceptionRunner`
+    #: (beside `optic_state`), not on this class, the same division
+    #: `drain_attack_run`'s own docstring already states; this class has
+    #: no way to replace that state directly, so it leaves a narrow
+    #: instruction here instead. Reset to `None` at the top of every
+    #: `handle_command` dispatch (the same convention `last_command_
+    #: target_contact_id` follows), and consumed-and-cleared by the poll
+    #: loop the moment it is applied, so a command that is never repeated
+    #: does not re-fire every poll thereafter.
+    attack_run_transition: Literal["engage", "disengage"] | None = None
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `overlay_client`/`speech_client`: `None` is a true no-op.
@@ -951,7 +1000,15 @@ class CrewConsole:
     #: already use. `logger` supplies a closure that can read the current
     #: gaze and optic at call time, which is the part that makes these
     #: rows answer "what was he looking at when he said that".
-    speech_log_sink: Callable[[str, bool], None] | None = None
+    #:
+    #: **Third parameter (Stage 5, `plans/attack-run/plan.md`)** --
+    #: `attack_run_fields`, a plain dict (`None` for every non-attack-run
+    #: line) carrying the attack-run target's contact id, tier, and
+    #: current azimuth/elevation error, so a sortie's guidance lines are
+    #: triaged from the log instead of recalled. `drain_attack_run` is the
+    #: only caller that ever supplies it, and always for a single-line
+    #: `_print` call -- see that method's own call site.
+    speech_log_sink: Callable[[str, bool, dict[str, object] | None], None] | None = None
     #: `plans/callout-scheduling/plan.md` -- the speech-time scheduler
     #: `drain_events` delegates to. One scheduler per `CrewConsole`
     #: (per-session occupancy state), mirroring every other optional-sink
@@ -1078,8 +1135,23 @@ class CrewConsole:
         rendered fresh from current belief by `self.scheduler.tick`
         (`belief.callouts.CalloutScheduler`, see that module's docstring
         and `_print`'s docstring). Called once per poll from `logger.py`'s
-        `--crew-text` loop, after `ContactStore.tick()`."""
-        spoken = self.scheduler.tick(self.store, now_sim, self.enrichment)
+        `--crew-text` loop, after `ContactStore.tick()`.
+
+        Passes the current attack-run target's contact id, if any
+        (`plans/attack-run/plan.md` Decision 5), so the scheduler can
+        suppress `_WATCHED_ONLY_KINDS` events about that one contact --
+        the struck range countdown chief among them -- for the run's
+        duration, without this method needing to know why."""
+        target_task = self._active_attack_target_task()
+        attack_run_target_contact_id = (
+            target_task.contact_id if target_task is not None else None
+        )
+        spoken = self.scheduler.tick(
+            self.store,
+            now_sim,
+            self.enrichment,
+            attack_run_target_contact_id=attack_run_target_contact_id,
+        )
         # A scheduler-drained line never carries `bypass_gate=True` (only an
         # injected `UrgentCall`, routed through `handle_line`'s
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
@@ -1274,6 +1346,11 @@ class CrewConsole:
         # own docstring for why a stale value from an earlier `follow`
         # must not leak into this command's evaluation.
         self.last_command_target_contact_id = None
+        # Same reset, same reason -- `attack_run_transition`'s own
+        # docstring -- so a stale `"engage"`/`"disengage"` from an earlier
+        # dispatch this poll loop has not yet consumed cannot leak into an
+        # unrelated later command's evaluation this same poll.
+        self.attack_run_transition = None
         if token == "silence":
             # Checked *before* the general `self.silenced = False` reset
             # below, and dispatched before it -- `_handle_silence` is the
@@ -1328,6 +1405,12 @@ class CrewConsole:
             lines = self._handle_select_target(now_sim, slots)
         elif token == "drop_target":
             lines = self._handle_drop_target()
+        elif token == "step":
+            lines = self._handle_step(now_sim, slots)
+        elif token == "engage":
+            lines = self._handle_engage(now_sim, slots)
+        elif token == "disengage":
+            lines = self._handle_disengage()
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         elif token == "cancel_scan":
@@ -1828,7 +1911,9 @@ class CrewConsole:
         if contact_id is None:
             return no_match_lines
 
-        task = attack_target_task(self.store, self.tasks, contact_id, now_sim)
+        task = attack_target_task(
+            self.store, self.tasks, contact_id, now_sim, descriptor=descriptor
+        )
         if task is None:
             return [f"no such contact: {contact_id}"]
 
@@ -1857,6 +1942,244 @@ class CrewConsole:
         `attack_target` included."""
         return self._handle_cancel_task(kinds=("attack_target",))
 
+    def _active_attack_target_task(self) -> PendingIntent | None:
+        """The currently active `attack_target` task, or `None` -- shared
+        by `_handle_step`/`_handle_engage`/`drain_attack_run`/
+        `drain_events`, every one of which needs "what the player has
+        selected," not merely its id. `None` when `self.tasks` is unset
+        (mirrors every other optional-task-store degradation in this
+        class)."""
+        if self.tasks is None:
+            return None
+        return next(
+            (
+                task
+                for task in self.tasks.tasks
+                if task.kind == "attack_target" and task.status != "cancelled"
+            ),
+            None,
+        )
+
+    def _step_candidates(
+        self, now_sim: float, target_id: str, descriptor: str | None
+    ) -> list[str]:
+        """The candidate set `step` orders over (`plans/attack-run/
+        plan.md` Decision 6) -- `target_id`'s own `belief.groups.Group`
+        (`store.group_for_contact`), filtered by `descriptor` via the
+        shared `descriptor_verdict`, dropping only `"wrong"` (an
+        unclassified contact stays a candidate, the identical reasoning
+        `_descriptor_score` already applies for `follow`). `[target_id]`
+        alone when ungrouped or `descriptor is None` with no group --
+        `_handle_step` is what turns "the only candidate is the current
+        target itself" into `render_unable("NO_GROUP_MEMBERS")`, not this
+        method, which only ever reports what exists."""
+        belief_group = self.store.group_for_contact(target_id)
+        if belief_group is None or len(belief_group.member_contact_ids) <= 1:
+            return [target_id]
+        if descriptor is None:
+            return list(belief_group.member_contact_ids)
+        candidates: list[str] = []
+        for member_id in belief_group.member_contact_ids:
+            result = describe_contact(
+                self.store, member_id, now_sim, enrichment=self.enrichment
+            )
+            if result is None:
+                continue
+            if descriptor_verdict(descriptor, result["facts"]) != "wrong":
+                candidates.append(member_id)
+        return candidates
+
+    def _handle_step(
+        self, now_sim: float, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """`step [<count>] left/right/near/far` (`plans/attack-run/
+        plan.md` Decision 6) -- re-orders the current attack-run target's
+        own group, **angularly around the bearing from ownship's present
+        position to the current target, recomputed at every press** (for
+        `left`/`right`), or by current range (for `near`/`far`); never a
+        list fixed at selection time. The user's own words, direction
+        document §3: *"it changes as/if we circle the contacts. Or the
+        contacts move."* `step right` takes the smallest strictly-positive
+        angular delta, `step left` the smallest-magnitude negative one,
+        `step N <dir>` the Nth; `near`/`far` use the identical signed
+        machinery keyed on `range_m` (a positive delta is farther, a
+        negative one nearer -- no angular wraparound applies to range, so
+        the sign convention is simpler but the ordering rule is the same).
+
+        Reads the **world-anchored belief** bearing/range
+        (`facts["relative_now"]`), not the tier-1 relative-direction
+        channel -- Decision 6 explicitly routes `step` through the belief
+        store, and that channel is Decision 16's single-consumer fence
+        (`attack_run.py`/`percept.py` only) in the first place."""
+        direction = slots.get("direction") if slots is not None else None
+        if direction not in ("left", "right", "near", "far"):
+            # Defensive, request-shape check -- unreachable from a real
+            # `step` match (`_parse_step_slots` never returns a token
+            # without a direction), the same posture `_handle_follow`'s
+            # own "malformed/empty slots" check documents.
+            return ["say again -- step needs a direction"]
+        assert isinstance(direction, str)
+        count_raw = slots.get("count") if slots is not None else None
+        count = count_raw if isinstance(count_raw, int) and count_raw >= 1 else 1
+
+        target_task = self._active_attack_target_task()
+        if target_task is None or target_task.contact_id is None:
+            return ["no target selected"]
+        current_id = target_task.contact_id
+
+        if self.enrichment is None:
+            return ["no world-model connection configured"]
+
+        candidate_ids = self._step_candidates(
+            now_sim, current_id, target_task.descriptor
+        )
+        others = [cid for cid in candidate_ids if cid != current_id]
+        if not others:
+            return [render_unable("NO_GROUP_MEMBERS").text]
+
+        def _bearing_and_range(contact_id: str) -> tuple[float, float] | None:
+            """`facts["relative_now"]`'s `bearing_deg`/`range_m` for
+            `contact_id`, or `None` when the contact does not resolve or
+            carries no world-anchored geometry yet -- narrows `object` to
+            `float` explicitly, since `facts` is a plain `dict[str,
+            object]` and `mypy --strict` cannot follow the dict lookup
+            otherwise."""
+            result = describe_contact(
+                self.store, contact_id, now_sim, enrichment=self.enrichment
+            )
+            if result is None:
+                return None
+            relative_now = result["facts"].get("relative_now")
+            if not isinstance(relative_now, dict):
+                return None
+            bearing = relative_now.get("bearing_deg")
+            range_m = relative_now.get("range_m")
+            if not isinstance(bearing, float) or not isinstance(range_m, float):
+                return None
+            return bearing, range_m
+
+        current_geometry = _bearing_and_range(current_id)
+        if current_geometry is None:
+            return [f"no such contact: {current_id}"]
+        current_bearing_deg, current_range_m = current_geometry
+
+        def _signed_delta(candidate_id: str) -> float | None:
+            candidate_geometry = _bearing_and_range(candidate_id)
+            if candidate_geometry is None:
+                return None
+            bearing_deg, range_m = candidate_geometry
+            if direction in ("left", "right"):
+                return signed_angular_delta_deg(current_bearing_deg, bearing_deg)
+            return range_m - current_range_m
+
+        scored: list[tuple[float, str]] = []
+        for candidate_id in others:
+            delta = _signed_delta(candidate_id)
+            if delta is None:
+                continue
+            if direction in ("right", "far") and delta > 0:
+                scored.append((delta, candidate_id))
+            elif direction in ("left", "near") and delta < 0:
+                scored.append((abs(delta), candidate_id))
+        scored.sort(key=lambda item: item[0])
+
+        if len(scored) < count:
+            # End of the ordering: stop, and say so (Decision 6) --
+            # wrapping would silently re-target a unit the pilot has just
+            # stepped past, in the seconds before release.
+            return [render_unable("LAST_IN_ORDER").text]
+        next_id = scored[count - 1][1]
+
+        set_attention(self.store, current_id, "watch", source="attack_target")
+        set_attention(self.store, next_id, "priority", source="attack_target")
+        target_task.contact_id = next_id
+
+        result = describe_contact(
+            self.store, next_id, now_sim, enrichment=self.enrichment
+        )
+        if result is None:
+            return [f"no such contact: {next_id}"]
+        return [render_target_readback(result["facts"]).text]
+
+    def _handle_engage(
+        self, now_sim: float, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """`engage`/`engage target`/`attack`/`attack run`, with or without
+        `<what> <where> [weapon]` (`plans/attack-run/plan.md` Decision 15,
+        the spec's "engage/attack <what> <where>" grammar). When the slots
+        carry a what/where descriptor, first selects a target exactly as
+        `select target` does (Decision 14's tie-break, via `_resolve_
+        attack_target`) and registers (or moves) the standing task, then
+        starts the run on whichever contact ends up selected -- a bare
+        `engage`/`engage target` with no slots instead starts the run on
+        whatever is already selected. The weapon slot, if present, is
+        accepted and discarded (Decision 15: "nothing reads it yet" --
+        `_parse_target_slots` has no weapon field, so it is simply never
+        read here either, the same "accepted into the grammar, never
+        consumed" shape the plan describes)."""
+        descriptor, clock, sector, relative, band = self._parse_target_slots(slots)
+        if (
+            descriptor is not None
+            or clock is not None
+            or sector is not None
+            or relative is not None
+            or band is not None
+        ):
+            if self.enrichment is None:
+                return ["no world-model connection configured"]
+            if self.tasks is None:
+                return ["no task store configured"]
+            contact_id, no_match_lines = self._resolve_attack_target(
+                now_sim, descriptor, clock, sector, relative, band
+            )
+            if contact_id is None:
+                return no_match_lines
+            task = attack_target_task(
+                self.store, self.tasks, contact_id, now_sim, descriptor=descriptor
+            )
+            if task is None:
+                return [f"no such contact: {contact_id}"]
+            belief_group = self.store.group_for_contact(contact_id)
+            if belief_group is not None and len(belief_group.member_contact_ids) > 1:
+                for member_id in belief_group.member_contact_ids:
+                    if member_id == contact_id:
+                        continue
+                    watch_contact_task(
+                        self.store,
+                        self.tasks,
+                        member_id,
+                        now_sim,
+                        source="attack_target",
+                    )
+        else:
+            target_task = self._active_attack_target_task()
+            if target_task is None or target_task.contact_id is None:
+                return ["no target selected"]
+            contact_id = target_task.contact_id
+
+        result = describe_contact(
+            self.store, contact_id, now_sim, enrichment=self.enrichment
+        )
+        if result is None:
+            return [f"no such contact: {contact_id}"]
+        self.attack_run_transition = "engage"
+        return [render_engage_readback(result["facts"]).text]
+
+    def _handle_disengage(self) -> list[str]:
+        """`disengage`/`stop attack`/`abort` (`plans/attack-run/plan.md`
+        Decision 2) -- ends the run's *phase* only (the `attack_run_
+        transition` signal the poll loop applies onto `logger.
+        ConsolePerceptionRunner.attack_run_state`, clearing it); the
+        standing `attack_target` task, and therefore the selection, is left
+        alone -- *"stop the run, keep the watch"* (the 2026-09-24 note),
+        and `drop target`/the existing cancel path are the separate
+        commands that end the selection too. Speaks unconditionally, even
+        if no run was active -- harmless, and simpler than a check this
+        class has no cheap way to make (the run's own phase lives on the
+        caller, not here)."""
+        self.attack_run_transition = "disengage"
+        return [render_attack_run_off().text]
+
     def drain_attack_run(
         self,
         state: AttackRunState | None,
@@ -1865,44 +2188,59 @@ class CrewConsole:
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
-        Stage 3) -- modelled on `logger.decide_optic`'s own `(state_in,
+        Stage 3/5) -- modelled on `logger.decide_optic`'s own `(state_in,
         ...) -> state_out` shape, except the state lives on the *caller*
         (`logger.ConsolePerceptionRunner.attack_run_state`, Stage 5's
-        wiring, not built yet) rather than on this class: this method is
-        called with the current state and returns its replacement, the
-        same contract `decide` itself has.
+        wiring) rather than on this class: this method is called with the
+        current state and returns its replacement, the same contract
+        `decide` itself has.
 
-        **Not called from any poll loop as of this stage** -- `logger.py`
-        never invokes this method yet (Stage 5 wires `_run_crew_text_poll_
-        loop` to call it immediately before `drain_events`, reading
-        `self.scheduler.busy_until_sim` the same way). Built now, fully
-        testable, and inert until that wiring lands.
+        **Wired into `_run_crew_text_poll_loop`, immediately before
+        `drain_events`, as of Stage 5** -- the caller reads `self.
+        scheduler.busy_until_sim` the same way `_print` does, so a
+        deferred guidance line defers the scheduler's own candidates
+        rather than the reverse (Decision 1).
 
-        `None` in (no run), `None` out -- a true no-op when there is no
-        active `attack_target` task, or its target contact no longer
-        resolves (Decision 13's end condition, handled by Stage 5's own
-        wiring, not here: this method simply has nothing to guide on and
-        stays silent)."""
-        if state is None or self.tasks is None:
+        `None` in (not engaged), `None` out -- a true no-op. `state` is
+        not `None` only once `engage` has set it, so a selected-but-not-
+        engaged target produces no guidance at all, matching the spec.
+
+        **Decision 13's end condition is handled here, not deferred to
+        Stage 5's wiring as the Stage 3 docstring once said** -- if the
+        target's own `Contact` no longer resolves (a merge abandoned its
+        id with no successor recorded anywhere; `LOST_THRESHOLD_S`
+        retirement does not do this, per `belief.contacts.ContactStore`'s
+        "full memory, never pruned" posture), guidance has nothing left
+        to guide on. The run ends and says so once (`render_lost_contact`)
+        -- silently continuing against a vanished target is the one thing
+        that would make §4's silence lie -- and the standing task is
+        cancelled too (unlike `disengage`, there is no longer a selection
+        left to keep)."""
+        if state is None:
             return state
-        target_task = next(
-            (
-                task
-                for task in self.tasks.tasks
-                if task.kind == "attack_target" and task.status != "cancelled"
-            ),
-            None,
-        )
+        target_task = self._active_attack_target_task()
         if target_task is None or target_task.contact_id is None:
             return state
         contact = self.store.contact(target_task.contact_id)
         if contact is None:
-            return state
+            if self.tasks is not None:
+                cancel_task(self.store, self.tasks, target_task.id)
+            self._print([render_lost_contact().text], now_sim)
+            return None
         new_state, speech = decide_attack_run(
             state, now_sim=now_sim, ownship=ownship, contact=contact
         )
         if speech is not None and now_sim >= self.scheduler.busy_until_sim:
-            self._print([speech.text], now_sim)
+            self._print(
+                [speech.text],
+                now_sim,
+                attack_run_fields={
+                    "attack_run_target_contact_id": contact.id,
+                    "attack_run_tier": 1,
+                    "attack_run_azimuth_deg": new_state.last_spoken_azimuth_deg,
+                    "attack_run_elevation_deg": new_state.last_spoken_elevation_deg,
+                },
+            )
         return new_state
 
     def _handle_scan(
@@ -2985,7 +3323,11 @@ class CrewConsole:
         return [speech.text], speech.bypass_gate
 
     def _print(
-        self, lines: list[str], now_sim: float, bypass_gate: bool = False
+        self,
+        lines: list[str],
+        now_sim: float,
+        bypass_gate: bool = False,
+        attack_run_fields: dict[str, object] | None = None,
     ) -> None:
         """Prints each line to `output` (unchanged) and, when
         `overlay_client`/`speech_client` are configured, pushes the same
@@ -3044,13 +3386,18 @@ class CrewConsole:
         was actually voiced, which is exactly the "suppressed, not
         deferred" behaviour `silenced`'s own docstring describes -- the
         scheduler keeps pacing choices as if each chosen line had been
-        spoken, so nothing backs up to be dumped once silence ends."""
+        spoken, so nothing backs up to be dumped once silence ends.
+
+        `attack_run_fields` (Stage 5, `plans/attack-run/plan.md`) is
+        threaded straight through to `speech_log_sink` for every line in
+        this call -- meaningful only for `drain_attack_run`'s own
+        always-one-line call, `None` for every other caller."""
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
             if self.speech_log_sink is not None:
                 try:
-                    self.speech_log_sink(line, bypass_gate)
+                    self.speech_log_sink(line, bypass_gate, attack_run_fields)
                 except Exception:
                     # Deliberately broad: a debug log must never be the reason
                     # Petrovich stops talking.

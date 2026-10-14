@@ -1654,6 +1654,79 @@ def test_scanned_but_unwatched_contact_never_speaks_a_range_crossing() -> None:
     assert scheduler.tick(store, now_sim=1.0) == []
 
 
+# --- attack-run target suppression (plans/attack-run/plan.md Decision 5,
+# Stage 5) ---------------------------------------------------------------
+
+
+def test_attack_run_target_never_speaks_a_range_crossing() -> None:
+    """Decision 5 -- the exact fixture `test_watched_contact_speaks_a_
+    range_crossing` uses (a `"priority"`-attention contact crossing a
+    kilometre mark, which an attack-run target's selection raises it to),
+    but with the contact named as the current attack-run target: the
+    range countdown §1 struck must not come back through the `_WATCHED_
+    ONLY_KINDS` back door."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                ownship_x=0.0,
+                ownship_z=0.0,
+                dwp_x=4500.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "priority")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    CalloutScheduler().tick(store, now_sim=0.0)  # drain CONTACT_DETECTED
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))  # range=3000 -> km=3
+
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(store, now_sim=1.0, attack_run_target_contact_id=contact_id)
+
+    assert spoken == []
+
+
+def test_attack_run_suppression_is_narrow_to_the_one_contact_id() -> None:
+    """The gate names one contact id, not every `"priority"`-attention
+    contact -- a second, genuinely watched/prioritised contact's own
+    range crossing must still speak. "An attack run must not blind the
+    intercom to a SAM" (Decision 5's own words)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                ownship_x=0.0,
+                ownship_z=0.0,
+                dwp_x=4500.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "priority")
+    store.tick(now_sim=0.0, ownship=_ownship())
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))
+
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(
+        store, now_sim=1.0, attack_run_target_contact_id="CONTACT_SOME_OTHER_ID"
+    )
+
+    assert spoken == ["Getting closer, BMP-2."]
+
+
 # --- watched-only speech: CONTACT_ENGAGEMENT_CHANGED (plans/watch-reporting/
 # plan.md Stage 4) -----------------------------------------------------
 

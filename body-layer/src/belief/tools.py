@@ -1098,6 +1098,7 @@ def attack_target_task(
     now_sim: float,
     reason: str = "attack_target",
     source: str = "console",
+    descriptor: str | None = None,
 ) -> PendingIntent | None:
     """Select `contact_id` as the standing attack-run target
     (`plans/attack-run/plan.md` Decision 2, 5) -- `watch_contact_task`'s
@@ -1111,6 +1112,13 @@ def attack_target_task(
     this kind also returns the contact's attention to `"normal"`, the same
     "task owns the belief-state effect it registered" rule `watch_contact_
     task`/`scan_area` already follow.
+
+    `descriptor` (Decision 6) is the `<what>` descriptor heard on the
+    selecting command, stored on the task so `step` can later filter its
+    candidate set by the same word without re-parsing the original
+    command. `None` (the default) when none was heard, or for a `step`
+    call that is only moving the existing selection (see `PendingIntent.
+    descriptor`'s own docstring).
 
     Returns `None` -- no task registered, contact left untouched -- when
     `contact_id` does not exist, mirroring `watch_contact_task`'s own
@@ -1126,6 +1134,7 @@ def attack_target_task(
         deadline_sim=math.inf,
         reason=reason,
         contact_id=contact_id,
+        descriptor=descriptor,
     )
 
 

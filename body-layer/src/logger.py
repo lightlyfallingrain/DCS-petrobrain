@@ -125,7 +125,11 @@ runs `belief.crew_console.CrewConsole` -- the player-facing text channel --
 instead of `--console`'s developer debug REPL. Reuses the exact same
 `ConsolePerceptionRunner` poll-loop machinery Stage 4/6 already built
 (`_run_crew_text_poll_loop` mirrors `_run_console_poll_loop` byte-for-byte
-except for two extra calls: after each `runner.run_once()`, it calls
+except for a few extra calls: after each `runner.run_once()`, it applies
+whatever `engage`/`disengage` transition the previous poll's command
+dispatch left and calls `crew_console.drain_attack_run(...)`
+**immediately before** the next call (`plans/attack-run/plan.md` Stage 5,
+Decision 1 -- a guidance line wins the tick by being drained first), then
 `crew_console.drain_events(runner.last_t_sim)` so newly ticked lifecycle
 events get spoken through `belief.speech.route_event`, the same hook point
 `--console --overlay` uses for its own mirroring, and (`plans/brain-layer/
@@ -196,6 +200,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.attack_run import AttackRunState
 from belief.attention import (
     _SECTOR_CENTER_DEG,
     _SECTOR_HALF_WIDTH_DEG,
@@ -249,7 +254,7 @@ from perception.gaze import (
     gaze_at,
     legs_within_wedge,
 )
-from perception.geometry import GeoPosition, open_world_model
+from perception.geometry import GeoPosition, alignment_direction, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
@@ -414,6 +419,20 @@ class ConsolePerceptionRunner:
     #: decision stays a pure function and a replay reproduces it exactly.
     optic_state: OpticState = field(default_factory=OpticState)
 
+    #: The attack run's own phase (`plans/attack-run/plan.md` Decision 2,
+    #: Stage 5's wiring), carried the same way `optic_state` is -- replaced
+    #: wholesale each poll, never mutated. `None` means "not engaged" (no
+    #: standing selection, or selected but not yet `engage`d): `drain_
+    #: attack_run` is a true no-op whenever this is `None`, and `_active_
+    #: gaze` below only claims the gaze while it is not. Set to a fresh
+    #: `AttackRunState()` by `_run_crew_text_poll_loop` the poll after
+    #: `engage` is dispatched, and back to `None` the poll after
+    #: `disengage` -- `CrewConsole` cannot replace this field directly
+    #: (it lives on this class, not that one), so it leaves a one-shot
+    #: `CrewConsole.attack_run_transition` signal for the poll loop to
+    #: apply instead; see that field's own docstring.
+    attack_run_state: AttackRunState | None = None
+
     #: Recent `(t_sim, pitch, bank, heading)` samples, oldest first -- the
     #: steadiness gate's only input. Bounded because it is a *rate*
     #: estimate: a longer history would let a manoeuvre a minute ago still
@@ -509,7 +528,13 @@ class ConsolePerceptionRunner:
                 ownship.heading_true_deg,
             )
         )
-        self.scan_plan = _active_gaze(self.tasks, ownship.heading_true_deg)
+        self.scan_plan = _active_gaze(
+            self.tasks,
+            ownship.heading_true_deg,
+            store=self.store,
+            ownship=ownship,
+            attack_run_engaged=self.attack_run_state is not None,
+        )
         # `plans/dcs-driven-los/plan.md` (X-B29): push the look-direction
         # command only on change (SS9b), from the same `scan_plan` that is
         # about to be handed to `NakedEyePerceptionSource` -- one source of
@@ -584,7 +609,14 @@ class ConsolePerceptionRunner:
         return observations
 
 
-def _active_gaze(tasks: TaskStore, heading_true_deg: float = 0.0) -> ScanPlan:
+def _active_gaze(
+    tasks: TaskStore,
+    heading_true_deg: float = 0.0,
+    *,
+    store: ContactStore | None = None,
+    ownship: OwnshipState | None = None,
+    attack_run_engaged: bool = False,
+) -> ScanPlan:
     """The `ScanPlan` implied by whatever scan is currently commanded
     (`plans/detection-cones-slice2/plan.md`'s 2B, closing `todo/todo.md`'s
     "Scan commands should drive naked-eye perception"; generalised from a
@@ -654,7 +686,50 @@ def _active_gaze(tasks: TaskStore, heading_true_deg: float = 0.0) -> ScanPlan:
     (not) confirmed, never the end of the mode. Only an explicit cancel
     (`TaskStore.cancel`, also fixed by this same sortie finding to actually
     reach a resolved task) or a newer scan command (via this function's own
-    "most recent" tie-break) ends it."""
+    "most recent" tie-break) ends it.
+
+    **The attack run claims the gaze, checked before the `scan_area` loop
+    below** (Decision 9 REVISED, `plans/attack-run/plan.md` -- *"an attack
+    run fixes the look on the target. The cost is accepted: no scanning
+    elsewhere for the run's duration."*). `attack_run_engaged` is `True`
+    only while `ConsolePerceptionRunner.attack_run_state` is non-`None`,
+    i.e. the run has been `engage`d, not merely selected -- the gaze claim
+    tracks the run's *phase*, the same distinction `drain_attack_run`
+    makes. This is what closes the `scan left` + `engage` case: `
+    _SECTOR_LEGS["left"]` has no 12, so without this branch the target
+    ahead would never be looked at and guidance would run silently against
+    an ageing belief. `store`/`ownship` are optional only so every existing
+    call site that has no attack run active keeps working unchanged
+    (`attack_run_engaged` defaults `False`); `run_once` always supplies
+    both. A one-leg `fixed_look` at the target's own *believed* bearing/
+    elevation (`perception.geometry.alignment_direction`, bank removed,
+    same frame Decision 3 uses) rather than a clock-hour `commanded_legs`
+    -- continuous precision keeps the look cone tight on the target, which
+    is what keeps the relative-direction channel (Decision 16) populated
+    reliably poll after poll, rather than discretising to a 30-degree
+    bucket that might drift the target out of frame near a bucket edge."""
+    if attack_run_engaged and store is not None and ownship is not None:
+        target_task = next(
+            (
+                task
+                for task in reversed(tasks.tasks)
+                if task.kind == "attack_target" and task.status != "cancelled"
+            ),
+            None,
+        )
+        if target_task is not None and target_task.contact_id is not None:
+            contact = store.contact(target_task.contact_id)
+            if contact is not None:
+                direction = alignment_direction(
+                    GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m),
+                    contact.last_position,
+                    heading_true_deg=heading_true_deg,
+                    pitch_deg=ownship.pitch_deg,
+                )
+                return ScanPlan.fixed_look_at(
+                    azimuth_deg=direction.azimuth_deg,
+                    elevation_deg=direction.elevation_deg,
+                )
     for task in reversed(tasks.tasks):
         if task.kind != "scan_area" or task.status == "cancelled" or task.area is None:
             continue
@@ -1009,7 +1084,7 @@ def _render_eyesight_frame(
 
 def _speech_log_sink(
     writer: BeliefTruthLogWriter, runner: ConsolePerceptionRunner
-) -> Callable[[str, bool], None]:
+) -> Callable[[str, bool, dict[str, object] | None], None]:
     """Build `CrewConsole.speech_log_sink` -- every spoken line becomes a
     `kind: "speech"` row in the belief-truth log, carrying the gaze and
     optic **as they are at the moment of speech**.
@@ -1022,13 +1097,26 @@ def _speech_log_sink(
     Reads `runner` live rather than capturing values, for the same reason:
     `scan_plan`/`optic` are reassigned every poll, and a closure over the
     runner sees the current ones. Failures are swallowed by the caller --
-    a debug log must never be why Petrovich stops talking."""
+    a debug log must never be why Petrovich stops talking.
 
-    def sink(line: str, urgent: bool) -> None:
+    `attack_run_fields` (Stage 5, `plans/attack-run/plan.md`) is `_print`'s
+    third argument, threaded straight through to `write_speech`'s own
+    four attack-run keyword arguments -- `None` for every line but
+    `drain_attack_run`'s own, which is the only caller that ever supplies
+    it."""
+
+    def sink(
+        line: str, urgent: bool, attack_run_fields: dict[str, object] | None
+    ) -> None:
         now_sim = runner.last_t_sim
         if now_sim is None:
             return
         gaze = gaze_at(now_sim, runner.scan_plan)
+        extra = attack_run_fields or {}
+        target_contact_id = extra.get("attack_run_target_contact_id")
+        tier = extra.get("attack_run_tier")
+        azimuth_deg = extra.get("attack_run_azimuth_deg")
+        elevation_deg = extra.get("attack_run_elevation_deg")
         writer.write_speech(
             t_sim=now_sim,
             text=line,
@@ -1036,6 +1124,16 @@ def _speech_log_sink(
             gaze_label=gaze.label,
             gaze_center_deg=gaze.center_azimuth_deg,
             optic_name=runner.optic.name,
+            attack_run_target_contact_id=(
+                target_contact_id if isinstance(target_contact_id, str) else None
+            ),
+            attack_run_tier=tier if isinstance(tier, int) else None,
+            attack_run_azimuth_deg=(
+                azimuth_deg if isinstance(azimuth_deg, float) else None
+            ),
+            attack_run_elevation_deg=(
+                elevation_deg if isinstance(elevation_deg, float) else None
+            ),
         )
 
     return sink
@@ -1691,6 +1789,28 @@ def _run_crew_text_poll_loop(
                     if runner.last_ownship_state is not None:
                         crew_console.maybe_apply_on_ground_default(
                             runner.last_ownship_state
+                        )
+                        # `plans/attack-run/plan.md` Stage 5 -- apply
+                        # whatever `engage`/`disengage` the previous
+                        # poll's command dispatch left as a one-shot
+                        # signal (`CrewConsole.attack_run_transition`'s
+                        # own docstring on why this class cannot replace
+                        # `runner.attack_run_state` directly), then drain
+                        # one tick of guidance **immediately before**
+                        # `drain_events` -- Decision 1's ordering: a
+                        # guidance line wins the tick by being drained
+                        # first, deferring (never dropping) the
+                        # scheduler's own candidates.
+                        if crew_console.attack_run_transition == "engage":
+                            runner.attack_run_state = AttackRunState()
+                            crew_console.attack_run_transition = None
+                        elif crew_console.attack_run_transition == "disengage":
+                            runner.attack_run_state = None
+                            crew_console.attack_run_transition = None
+                        runner.attack_run_state = crew_console.drain_attack_run(
+                            runner.attack_run_state,
+                            runner.last_t_sim,
+                            runner.last_ownship_state,
                         )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever

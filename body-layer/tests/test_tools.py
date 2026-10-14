@@ -1092,6 +1092,24 @@ def test_attack_target_task_sets_priority_attention_and_registers_a_task() -> No
     assert contact.attention == "priority"
 
 
+def test_attack_target_task_stores_the_descriptor_for_step_to_read_back() -> None:
+    """Decision 6 -- the `<what>` descriptor heard on the selecting
+    command is remembered on the task itself, defaulting to `None` when
+    none is given."""
+    store = _store_with_one_contact()
+    tasks = TaskStore()
+    contact = store.contacts[0]
+
+    task = attack_target_task(store, tasks, contact.id, now_sim=0.0, descriptor="armor")
+
+    assert task is not None
+    assert task.descriptor == "armor"
+
+    bare_task = attack_target_task(store, TaskStore(), contact.id, now_sim=0.0)
+    assert bare_task is not None
+    assert bare_task.descriptor is None
+
+
 def test_attack_target_task_returns_none_for_unknown_contact() -> None:
     store = ContactStore()
     tasks = TaskStore()

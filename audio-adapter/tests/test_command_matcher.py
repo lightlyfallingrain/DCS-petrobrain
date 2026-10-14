@@ -689,6 +689,86 @@ def test_several_confirm_band_answer_words_do_anchor_a_verb() -> None:
         assert match_transcript(word).verb_anchored is True, word
 
 
+# -- plans/attack-run/plan.md Decision 6 (step) --------------------------
+
+
+def test_step_right_resolves_with_direction_slot() -> None:
+    result = match_transcript("step right")
+    assert result.token == "step"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"direction": "right"}
+
+
+def test_step_with_a_count_resolves_both_slots() -> None:
+    result = match_transcript("step two left")
+    assert result.token == "step"
+    assert result.slots == {"direction": "left", "count": 2}
+
+
+def test_step_near_and_far_resolve_via_synonyms() -> None:
+    assert match_transcript("step closer").slots == {"direction": "near"}
+    assert match_transcript("step further").slots == {"direction": "far"}
+
+
+def test_step_with_no_direction_never_reaches_a_command() -> None:
+    """`_parse_step_slots` returns `None` without a direction word --
+    `"step"` has no bare phrasing of its own, so this falls all the way
+    through to no command at all, not a silent pick."""
+    result = match_transcript("step aside")
+    assert result.token is None
+
+
+# -- plans/attack-run/plan.md Decision 15 (engage/disengage) -------------
+
+
+def test_engage_with_slots_resolves_what_and_where() -> None:
+    result = match_transcript("engage armor north")
+    assert result.token == "engage"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"descriptor": "armor", "sector": "north"}
+
+
+def test_engage_accepts_the_weapon_slot() -> None:
+    result = match_transcript("engage armor rockets")
+    assert result.token == "engage"
+    assert result.slots == {"descriptor": "armor", "weapon": "rockets"}
+
+
+def test_engage_bare_falls_through_to_the_phrase_table_with_no_slots() -> None:
+    """A bare `"engage"`/`"engage target"` carries no what/where/weapon
+    slot (`_parse_engage_slots` returns `None`), so it resolves via the
+    ordinary phrase table instead, with `slots=None` -- the same shape
+    `select_target`'s own bare-form tests do not need, since `select
+    target` always requires at least one slot to mean anything, but
+    `engage` does not."""
+    result = match_transcript("engage")
+    assert result.token == "engage"
+    assert result.slots is None
+
+    result = match_transcript("engage target")
+    assert result.token == "engage"
+    assert result.slots is None
+
+
+def test_engage_attack_synonym_is_deliberately_not_admitted() -> None:
+    """`vocabulary.PHRASES["engage"]`'s own comment: the spec's `attack`/
+    `attack-run` synonym is not admitted, because it collides with an
+    existing pinned adversarial sentence (`"tanks"` vs `"attack"` at
+    ratio 0.545, just over `VERB_FLOOR`). A bare `"attack"` must
+    therefore not resolve to `engage`."""
+    result = match_transcript("attack")
+    assert result.token != "engage"
+
+
+def test_disengage_matches_its_phrasings() -> None:
+    for phrase in ("disengage", "stop attack", "abort"):
+        result = match_transcript(phrase)
+        assert result.token == "disengage", phrase
+        assert result.slots is None
+
+
 # --- describe: report's synonym (sortie 2026-10-05 debrief,
 # plans/sortie-2026-10-05-refinements/plan.md Item 2) ---
 

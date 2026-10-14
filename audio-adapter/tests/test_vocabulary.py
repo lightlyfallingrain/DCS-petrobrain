@@ -20,8 +20,10 @@ from vocabulary import (
     RELATIVE_WORDS,
     ROUTING_TOKENS,
     SECTOR_WORDS,
+    STEP_DIRECTION_WORDS,
     TOKENS,
     VOICE_ONLY_TOKENS,
+    WEAPON_WORDS,
     bearing_digits,
     bearing_phrase,
     normalize_for_match,
@@ -33,6 +35,9 @@ from vocabulary import (
     parse_range_km,
     parse_relative_word,
     parse_sector_word,
+    parse_step_count,
+    parse_step_direction,
+    parse_weapon,
     report_verbs,
     spoken_phrases,
     to_gbnf,
@@ -541,3 +546,42 @@ def test_band_words_do_not_collide_with_any_other_slot_vocabulary() -> None:
     assert not set(DESCRIPTOR_WORDS) & set(SECTOR_WORDS)
     assert not set(DESCRIPTOR_WORDS) & set(RELATIVE_WORDS)
     assert not set(SECTOR_WORDS) & set(RELATIVE_WORDS)
+
+
+# -- plans/attack-run/plan.md Decision 6 (step's direction/count slots) --
+
+
+def test_parse_step_direction_reads_every_spoken_form() -> None:
+    for word, direction in STEP_DIRECTION_WORDS.items():
+        assert parse_step_direction(f"step {word}") == direction
+
+
+def test_parse_step_direction_returns_none_without_a_direction_word() -> None:
+    assert parse_step_direction("step") is None
+
+
+def test_parse_step_direction_takes_the_first_word_the_pilot_said() -> None:
+    """Transcript order, the same tie-break `parse_band` uses and for the
+    identical reason: several synonyms per value."""
+    assert parse_step_direction("step left right") == "left"
+
+
+def test_parse_step_count_reads_digits_and_number_words() -> None:
+    assert parse_step_count("step 2 left") == 2
+    assert parse_step_count("step two left") == 2
+
+
+def test_parse_step_count_returns_none_without_a_count() -> None:
+    assert parse_step_count("step left") is None
+
+
+# -- plans/attack-run/plan.md Decision 15 (engage's weapon slot) ---------
+
+
+def test_parse_weapon_reads_each_weapon_word() -> None:
+    for weapon in WEAPON_WORDS:
+        assert parse_weapon(f"engage armor {weapon}") == weapon
+
+
+def test_parse_weapon_returns_none_without_a_weapon_word() -> None:
+    assert parse_weapon("engage armor north") is None

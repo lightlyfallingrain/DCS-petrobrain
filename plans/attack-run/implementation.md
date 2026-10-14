@@ -172,3 +172,202 @@ part of the mandated gate per each subproject's own `CLAUDE.md` "Commands" secti
   (`CONTACT_RANGE_CROSSED` included) with no suppression yet. That is the intended, documented
   gap this stage leaves open, not an oversight: Decision 5's own gate closes it, and that gate is
   Stage 5.
+
+### Stage 4/5 Implementation Summary (2026-10-14, second pass)
+
+Stages 4 (`step`) and 5 (`engage`/`disengage`, the wired tier-1 guidance loop, the gaze claim, the
+suppression gate, the speech-log fields) of `plans/attack-run/plan.md`, per the orchestrator's
+explicit scope. Stages 6-7 (tier 2, projected position) are **not** built — `render_alignment`
+still raises `NotImplementedError` for `tier=2` and no caller ever passes it.
+
+#### Files Changed
+
+**body-layer**
+
+- `src/belief/tasks.py` — `PendingIntent.descriptor: str | None = None` (Decision 6) — the
+  `<what>` descriptor heard on the selecting command, remembered so `step` can filter its
+  candidate set the same way without re-parsing the original text. `TaskStore.create` gained a
+  matching `descriptor` keyword.
+- `src/belief/tools.py` — `attack_target_task` gained `descriptor: str | None = None`, threaded
+  into `tasks.create`.
+- `src/belief/speech.py` — `render_engage_readback(facts)` (range spoken once, plus the terrain
+  acquisition fragment, deliberately **not** sharing `_contact_report_text`'s count/motion
+  clauses, which this milestone's vocabulary never calls for); `render_attack_run_off()`
+  (`"Attack run off."`); two new `_UNABLE_TEMPLATES` entries (`NO_GROUP_MEMBERS`/`LAST_IN_ORDER`,
+  Decision 6's own two closed `step` reasons — the plan's pseudocode phrases are not themselves a
+  valid `render_unable` argument, since that function only maps a closed reason token to text);
+  `render_alignment`'s `tier` parameter narrowed from `int` to `Literal[1]` (the Stage 1-3 review's
+  first optional refinement).
+- `src/belief/crew_console.py` — `attack_run_transition: Literal["engage", "disengage"] | None`
+  field (the one-shot signal to the poll loop, since `AttackRunState` lives on `logger.
+  ConsolePerceptionRunner`, not this class); reset alongside `last_command_target_contact_id` at
+  the top of every `handle_command` dispatch; `_active_attack_target_task()` (factored out of
+  `drain_attack_run`'s own lookup, now shared with `_handle_step`/`_handle_engage`);
+  `_step_candidates`/`_handle_step` (Decision 6's ordering primitive); `_handle_engage`/
+  `_handle_disengage` (Decision 15/2); `drain_attack_run` extended with Decision 13's end
+  condition (contact record vanished -> `render_lost_contact` once, cancel the task, return
+  `None`) and the speech-log `attack_run_fields` payload; `drain_events` now resolves the current
+  attack-run target id and passes it to `scheduler.tick`; `_print`/`speech_log_sink` gained a
+  fourth/third `attack_run_fields` parameter; `step`/`engage`/`disengage` added to `handle_command`'s
+  dispatch table, `DISPATCHED_COMMAND_TOKENS`, and `_describe_token_for_confirm`;
+  `_handle_select_target` now passes `descriptor=` through to `attack_target_task`.
+- `src/belief/callouts.py` — `CalloutScheduler.tick` gained `attack_run_target_contact_id: str |
+  None = None`; one narrow check at the top of the `_WATCHED_ONLY_KINDS` branch suppresses (lost,
+  not deferred — `_consumed.add`) any watched-only event about that one contact id, Decision 5's
+  gate.
+- `src/belief_truth_log.py` — `BeliefTruthLogWriter.write_speech` gained four optional keyword
+  arguments (`attack_run_target_contact_id`/`attack_run_tier`/`attack_run_azimuth_deg`/
+  `attack_run_elevation_deg`), absent-not-null like the existing gaze/optic fields.
+- `src/logger.py` — `ConsolePerceptionRunner.attack_run_state: AttackRunState | None = None`;
+  `_active_gaze` gained `store`/`ownship`/`attack_run_engaged` keyword-only parameters and a
+  branch, checked before the `scan_area` loop, that returns a `ScanPlan.fixed_look_at` toward the
+  target's own believed bearing/elevation (`perception.geometry.alignment_direction`, bank
+  removed) while engaged (Decision 9 REVISED); `run_once`'s own call site updated to pass them;
+  `_speech_log_sink`'s callable type and closure gained the `attack_run_fields` parameter,
+  forwarded into `write_speech`'s four new keywords; `_run_crew_text_poll_loop` applies the
+  `engage`/`disengage` transition and calls `drain_attack_run` immediately before `drain_events`.
+- `src/belief/voice_commands.py` — `drop_target`/`disengage` added to `CANCEL_TOKENS`.
+
+**audio-adapter**
+
+- `src/vocabulary.py` — `"step"`, `"engage"`, `"disengage"` added to `VOICE_ONLY_TOKENS` with
+  `PHRASES` entries; `STEP_DIRECTION_WORDS`/`parse_step_direction`, `parse_step_count` (digits and
+  number words 1-9); `WEAPON_WORDS`/`parse_weapon`.
+- `src/command_matcher.py` — `_STEP_VERB`, `_ENGAGE_VERBS`, `_parse_step_slots`,
+  `_parse_engage_slots`, and two new branches in `match_transcript`, ordered after the
+  `select_target` branch and before the generic phrase table (the plan's own stated ordering
+  rule).
+
+#### A plan gap found and resolved: `attack`/`attack-run` as an `engage` synonym
+
+The plan's own Decision 15 and the spec document (`docs/concept/Attacking target.md`) both name
+`attack`/`attack-run` as legal synonyms for `engage` — `"engage/attack/attack-run <what>
+<where>"`. Implementing that (both as a bare phrase and as `_ENGAGE_VERBS`' second verb) made
+`vocabulary._derive_verb_anchor_words()` pick up `"attack"` as a `VERB_ANCHOR_WORDS` member (its
+derivation takes the first word of every phrasing of every token, the module's own documented,
+deliberate behaviour). Measured directly: `difflib.SequenceMatcher(None, "tanks",
+"attack").ratio() == 0.545`, just over `command_matcher.VERB_FLOOR` (0.5). That flips audio-
+adapter's own pinned adversarial-sentence test,
+`test_non_command_speech_enqueues_with_null_token` (`"the tanks are on the ridge"`), from
+`verb_anchored=False` (falls through to free speech, the correct behaviour for an ordinary
+descriptive remark) to `verb_anchored=True, token=None` ("say again") — a real behaviour change
+for that sentence, not a cosmetic one, since `verb_anchored` is part of `MatchResult`'s own public
+contract and decides which disposition the caller takes.
+
+Per this role's own rules ("do not modify existing tests without explicit permission"; the
+Escalation Rules' "existing tests must be rewritten rather than extended" case), this was not
+resolved by editing the pinned test. **`attack`/`attack-run` are not admitted as `engage`
+synonyms in this implementation** — `engage`/`engage target` (the tokens Stage 5's own wiring
+actually dispatches) are built, `disengage`/`stop attack`/`abort` are unaffected (none of them
+make `"attack"` a first word), and the gap is recorded in `vocabulary.PHRASES["engage"]`'s own
+comment and `command_matcher._ENGAGE_VERBS`' comment so it is not silently rediscovered. Flagging
+this explicitly rather than quietly narrowing scope: if the user wants the `attack`/`attack-run`
+synonym badly enough to accept weakening that adversarial test's guarantee (or to find a
+differently-worded fix), that is a decision for Architect/the user, not one to make unilaterally
+inside an implementation pass.
+
+#### Tests Added
+
+- `body-layer/tests/test_crew_console.py` — `_observation_at_xz`/`_enrichment_context_with_
+  ownship`/`_inject_group`/`_target_left_right_fixture` (new helpers); `step` right/left picking
+  the correct bearing-ordered neighbour and swapping which is "watch"/"priority";
+  **`test_step_recomputes_order_from_ownships_present_position`** — the task's own named
+  requirement: the identical `step right` command, same standing selection, picks a *different*
+  unit when ownship has moved to the far side of the formation (verified by direct computation of
+  `signed_angular_delta_deg` from both vantage points before the fixture was written, not
+  assumed); stop-at-the-end (`render_unable("LAST_IN_ORDER")`, no wrap); ungrouped target
+  (`render_unable("NO_GROUP_MEMBERS")`); no target selected; `near`/`far` ordering by range,
+  reusing the existing `_cohering_contacts_across_a_band_boundary` fixture (with `descriptor=None`
+  — see "Notable Discoveries" below for why); `engage` with slots (select-then-engage), bare
+  `engage` (resumes selection), the weapon slot accepted and ignored, no target selected;
+  `disengage` keeping the selection while clearing `attack_run_transition`, and speaking
+  unconditionally with no run active; `drain_attack_run`'s no-op while unengaged and Decision 13's
+  end condition (contact record deleted mid-run -> `render_lost_contact`, task cancelled).
+- `body-layer/tests/test_callouts.py` — the attack-run target's own `CONTACT_RANGE_CROSSED` is
+  suppressed when named via `attack_run_target_contact_id`, and a second, differently-id'd
+  `"priority"` contact's own range crossing is unaffected (Decision 5's narrow scope).
+- `body-layer/tests/test_logger.py` — `_active_gaze`'s attack-run branch: claims a `fixed_look`
+  at the target's believed position while engaged (overriding a standing `scan left`, the case
+  that settled Decision 9 REVISED), falls through when not engaged, and is a true no-op when
+  `store`/`ownship` are omitted; `_speech_log_sink` forwards the four attack-run fields (and
+  omits them, as `None`, for an ordinary line) — this function had no pre-existing test at all.
+- `body-layer/tests/test_tasks.py`/`test_tools.py` — `attack_target_task`'s new `descriptor`
+  parameter, stored and defaulting to `None`.
+- `body-layer/tests/test_voice_commands.py` — `drop_target`/`disengage` are members of
+  `CANCEL_TOKENS` (the existing `test_every_cancel_token_is_held_to_the_higher_floor` already
+  asserts the *behaviour* generically; this pins the *membership*).
+- `body-layer/tests/test_speech.py` — `render_engage_readback` (range/clock, terrain fragment,
+  the no-`relative_now` degrade), `render_attack_run_off`, the two new `render_unable` reasons.
+- `body-layer/tests/test_belief_truth_log.py` — `write_speech`'s four new fields, present and
+  absent.
+- `audio-adapter/tests/test_command_matcher.py` — `step`'s slotted resolution (direction, count,
+  near/far synonyms), no-direction fallthrough; `engage`'s slotted resolution, the weapon slot,
+  the bare-form fallthrough to the phrase table with `slots=None`, the `attack` synonym's
+  deliberate absence; `disengage`'s three phrasings.
+- `audio-adapter/tests/test_vocabulary.py` — `parse_step_direction`/`parse_step_count`/
+  `parse_weapon` against every table entry, the band-style transcript-order tie-break, and the
+  no-match cases.
+
+Not added: a threaded integration test of `_run_crew_text_poll_loop`'s own engage/disengage-
+transition-and-`drain_attack_run` wiring block. The precedent for driving that function in a real
+thread (`test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block`) needs a built
+world-model region and a live aircraft-layer-client fake; every piece the wiring composes
+(`drain_attack_run`, `_active_gaze`'s branch, the `attack_run_transition` signal/consumption) is
+unit-tested directly instead, the same proportionality `_apply_active_gaze`'s own existing tests
+already apply to a comparable glue block.
+
+#### Checks
+
+**body-layer/**
+
+- `ruff format src tests`: pass (4 files reformatted)
+- `ruff check src tests`: pass
+- `mypy src` (CWD-only config, run from `body-layer/`): pass, no issues in 58 source files
+- `pytest tests -q`: pass — 1820 passed, 4 xfailed (baseline 1790 passed / 4 xfailed + 30 new
+  tests)
+
+**audio-adapter/**
+
+- `ruff format src tests`: pass (no files needed reformatting)
+- `ruff check src tests`: pass
+- `mypy src` (CWD-only config, run from `audio-adapter/`): pass, no issues in 15 source files
+- `pytest tests -q`: pass — 277 passed, 1 skipped (baseline 261 passed / 1 skipped + 16 new
+  tests)
+
+(`mypy tests` on both subprojects reports pre-existing failures unrelated to this change, the
+same non-mandated-gate note the Stage 1-3 pass recorded — confirmed again this pass: every
+reported line in `test_speech.py`/`test_crew_console.py`/`test_logger.py`/`test_callouts.py`
+that is not one of this pass's own new lines was already failing before this branch, and this
+pass's own three new `# type: ignore[attr-defined]` comments on direct `_groups`/`_contacts`
+dict access match the exact style `test_callouts.py`'s own pre-existing `Group` injection already
+uses, line for line.)
+
+#### Notable Discoveries
+
+- **`step`'s "recomputed from ownship's present position" claim needed a geometry fixture no
+  existing test helper could build.** `_observation_for_follow`'s clock-quantised placement (30°
+  per hour) is far too coarse to place two candidates a few degrees apart, and reconciling a real
+  `belief.groups.Group` at that separation would fight (or accidentally satisfy for the wrong
+  reason) the real cohesion-gap formula `GroupStore.reconcile` uses. `_observation_at_xz` (explicit
+  `x`/`z`) plus `_inject_group` (direct `store._groups._groups[...]` injection, mirroring
+  `test_callouts.py`'s own precedent for the identical reason) sidestep both: the candidate
+  geometry is exact and the group membership is asserted rather than fought for. The mirror-flip
+  construction (ownship on the *opposite* side of the target from where it started, along the
+  same axis) was verified by running `perception.geometry.bearing_deg`/`signed_angular_delta_deg`
+  directly before the fixture was written, not derived by hand — trigonometry sign conventions are
+  exactly the kind of thing worth checking against the real function rather than assumed.
+- **The near/far ordering test's first draft was wrong for a reason that is itself worth
+  recording**: reusing `_cohering_contacts_across_a_band_boundary`'s three-type group
+  (armour/truck/infantry) with `descriptor="armor"` set on the task made `_step_candidates` filter
+  out the truck/infantry members as `"wrong"` before range ordering ever ran — Decision 6's own
+  descriptor filter working exactly as designed, not a bug. The fix was `descriptor=None` on the
+  task, which is also the more honest test: it isolates the range-ordering mechanism from the
+  descriptor filter, which is `select_target`'s own concern and already covered elsewhere.
+- **The gaze claim's geometry test did not need a full `run_once()`/`NakedEyePerceptionSource`
+  end-to-end drive.** `_active_gaze` already took `heading_true_deg` as a plain argument before
+  this change, and the new `store`/`ownship`/`attack_run_engaged` parameters are read the same
+  way — a direct unit test against a two-task `TaskStore` (one `attack_target`, one `scan_area
+  left`, so the override is actually proven, not merely the absence of a competing claim) and a
+  one-contact `ContactStore` is enough to pin the override order precisely, matching this file's
+  own existing `_active_gaze` test convention (every one of its ~15 pre-existing tests calls it
+  directly, none through `run_once`).

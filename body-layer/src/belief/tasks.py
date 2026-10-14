@@ -166,6 +166,17 @@ class PendingIntent:
     #: `watch_contact` only -- the contact this task marks watched. `None`
     #: for `scan_area`.
     contact_id: str | None = None
+    #: `attack_target` only (`plans/attack-run/plan.md` Decision 6) -- the
+    #: `<what>` descriptor heard on the command that selected this target
+    #: (or last stepped onto it), remembered so `step`'s candidate set can
+    #: be filtered the same way `select target <what> <where>` filtered its
+    #: own winner, without re-parsing the original command text. `None`
+    #: when no descriptor was heard -- `step` then orders over the whole
+    #: group, unfiltered. Mutated in place by `step` when it moves onto a
+    #: new member (the task is the standing selection; stepping does not
+    #: create a new task, see `PendingIntent`'s own docstring on why
+    #: `contact_id` itself is also mutated, not replaced).
+    descriptor: str | None = None
 
 
 class TaskStore:
@@ -190,6 +201,7 @@ class TaskStore:
         deadline_sim: float,
         reason: str,
         contact_id: str | None = None,
+        descriptor: str | None = None,
     ) -> PendingIntent:
         """Mint a new `PendingIntent`, minting its `id` the same way
         `ContactStore._new_contact_id`/`_new_event_id`/`_new_area_id` mint
@@ -209,7 +221,12 @@ class TaskStore:
         meaningful for exactly one `kind` (see `PendingIntent`'s own
         docstring) -- this constructor does not enforce that pairing, the
         same way it does not enforce `deadline_sim`'s meaning; callers are
-        `tools.py`'s two composing functions, not general call sites."""
+        `tools.py`'s two composing functions, not general call sites.
+
+        `descriptor` (`plans/attack-run/plan.md` Decision 6) is meaningful
+        only for `attack_target`, the same one-kind-at-a-time posture
+        `contact_id` has for `watch_contact`/`attack_target` -- `tools.
+        attack_target_task` is its one caller."""
         task = PendingIntent(
             id=self._new_task_id(),
             kind=kind,
@@ -218,6 +235,7 @@ class TaskStore:
             created_sim=created_sim,
             deadline_sim=deadline_sim,
             reason=reason,
+            descriptor=descriptor,
         )
         self._tasks[task.id] = task
         return task

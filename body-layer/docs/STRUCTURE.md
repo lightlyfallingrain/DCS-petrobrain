@@ -793,16 +793,23 @@ The entries are in the order they were written, which is roughly perception → 
   question, built only from `ReferenceCandidate.why` strings — no id spoken, this module's
   existing convention — capped at the first three candidates for the spoken phrase).
   `plans/attack-run/plan.md` Stage 1/3 adds `render_target_readback(facts)` (`select target`/
-  `step`'s shared "Target, armour, 2 o'clock." readback, no range — the engage readback, not this
+  `step`'s shared "Target, armor, 2 o'clock." readback, no range — the engage readback, not this
   one, speaks range once) and the `render_alignment_*` family: `render_alignment(azimuth_deg,
   elevation_deg, *, tier, azimuth_table, elevation_table)` is the ongoing guidance utterance —
   outside the 12 o'clock sector speaks the clock hour, inside it reads the two word tables
   (`_alignment_phrase_for`, shared by both axes) and says "Lined up." once both clear their own
   gate. The two tables are declared in `belief.attack_run` and passed in as data, never imported
   by this module, so `belief.speech` -> `belief.attack_run` -> `belief.speech` is not a circular
-  import. `tier` is accepted but only `tier == 1` is built (Stage 3) — `tier == 2` (Decision 17
-  REVISED's `"obstructed"` register, Stage 6) raises `NotImplementedError` until that stage lands.
-  `Template` gained `"attack_run"`.
+  import. **`tier: Literal[1]`, not `int`** (narrowed Stage 5, a carried-over Stage 1-3 review
+  refinement — widens to `Literal[1, 2]` when Stage 6 lands) — only `tier == 1` is built; the
+  `tier == 2` runtime guard (Decision 17 REVISED's `"obstructed"` register, Stage 6) raises
+  `NotImplementedError` and is kept even though `mypy --strict` (no `warn_unreachable`) does not
+  require it. `Template` gained `"attack_run"`. Stage 5 adds `render_engage_readback(facts)`
+  (`engage`'s own readback — unit type, clock, *and* range, once, plus an acquisition-only terrain
+  fragment identical in shape to `_contact_report_text`'s own but deliberately not shared with it,
+  since that helper also carries a count clause and a `", moving"` tail this milestone's
+  vocabulary never calls for) and `render_attack_run_off()` (`"Attack run off."`, `disengage`'s
+  readback).
 - `src/belief/attack_run.py` (new, `plans/attack-run/plan.md` Stages 2-6) — BL-14's alignment
   derivation. This module and `percept.py` are the only two files under `belief/` allowed to
   mention `relative_direction`/`RelativeDirection` (grep-fenced, `test_attack_run.py`, mirroring
@@ -820,8 +827,14 @@ The entries are in the order they were written, which is roughly perception → 
   three named constants (`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/`ATTACK_RUN_ELEVATION_GATE_DEG`/
   `ATTACK_RUN_CHANGE_THRESHOLD_DEG`) and the two word tables (`AZIMUTH_WORD_TABLE`/
   `ELEVATION_WORD_TABLE`) are declared here, the single source of truth Decision 11 REVISED calls
-  for. `CrewConsole.drain_attack_run` (Stage 3) is this module's one caller, built but not called
-  from any poll loop until Stage 5.
+  for. `CrewConsole.drain_attack_run` (Stage 3) is this module's one caller — **wired into
+  `logger._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
+  every poll once `ConsolePerceptionRunner.attack_run_state` is non-`None` (set by `engage`, via
+  `CrewConsole.attack_run_transition`'s one-shot signal — this class cannot replace `runner.
+  attack_run_state` directly, so it leaves an instruction for the poll loop instead). Decision
+  13's end condition (the target's own contact record vanishing, e.g. a merge abandoning its id
+  with no successor) is handled inside `drain_attack_run` itself, not deferred to the wiring:
+  speaks `render_lost_contact()` once, cancels the standing task, and returns `None`.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
@@ -1011,7 +1024,44 @@ The entries are in the order they were written, which is roughly perception → 
   confirm`, and `drain_attack_run` (Stage 3) — modelled on `logger.decide_optic`'s `(state_in,
   ...) -> state_out` shape, calling `belief.attack_run.decide` and `_print`ing its speech when
   one is returned, gated on `self.scheduler.busy_until_sim` same as every other reply-lane
-  speaker. Not called from any poll loop until Stage 5 wires `logger.py` to it.
+  speaker.
+
+  **Stage 4 adds `step`** (`_handle_step`, `_step_candidates`) and **`attack_target_task`
+  (`belief.tools`) gains a `descriptor` parameter**, stored on `PendingIntent.descriptor` so a
+  later `step` can filter its candidate set by the same `<what>` word the selecting command heard,
+  via the shared `descriptor_verdict`, without re-parsing the original command. `_step_candidates`
+  reads `store.group_for_contact(target_id)`, never `group_view.collapse` (that function's own
+  `units_hi` can be `math.inf`, and nothing here needs the tree). Ordering is **not** sorted once
+  and indexed — every press recomputes `facts["relative_now"]["bearing_deg"]`/`["range_m"]` (the
+  world-anchored belief channel, deliberately, per Decision 6 — not the tier-1 relative-direction
+  channel, which stays Decision 16's single-consumer fence) for the current target and every
+  candidate, then picks the smallest strictly-signed `perception.geometry.
+  signed_angular_delta_deg`/range delta in the asked direction (`left`/`right` on bearing,
+  `near`/`far` on range) — this is what makes `step right` pick a different unit after the
+  aircraft circles the formation, proven directly in `test_crew_console.py` by issuing the
+  identical command from two different ownship positions. Reaching the end of the ordering speaks
+  `render_unable("LAST_IN_ORDER")` rather than wrapping (wrapping would silently re-target a unit
+  just stepped past); an ungrouped target speaks `render_unable("NO_GROUP_MEMBERS")`.
+
+  **Stage 5 adds `engage`/`disengage`** (`_handle_engage`, `_handle_disengage`) and **`drain_
+  attack_run`'s live wiring**. `_handle_engage` reuses `_parse_target_slots`/`_resolve_attack_
+  target` exactly as `_handle_select_target` does when the heard slots carry a what/where
+  descriptor (select-then-engage, the spec's `"engage <what> <where>"` form); with no slots it
+  resumes whatever is already selected (`_active_attack_target_task`, the helper this stage
+  factors out of `drain_attack_run`'s own lookup and reuses for `_handle_step` too). Neither
+  handler replaces `ConsolePerceptionRunner.attack_run_state` directly — that field lives on the
+  poll-loop runner, not this class (mirroring `OpticState`'s own split) — so each sets `self.
+  attack_run_transition` (`"engage"`/`"disengage"`, reset to `None` at the top of every `handle_
+  command` dispatch, the same convention `last_command_target_contact_id` follows) as a one-shot
+  instruction logger.py's poll loop consumes and clears. `_handle_disengage` clears the phase only
+  ("stop the run, keep the watch," Decision 2) — the standing `attack_target` task, and the
+  selection it represents, survives; `drop_target`/the existing cancel path are the separate
+  commands that end the selection. `drain_events` now also reads `_active_attack_target_task()`'s
+  contact id and threads it to `scheduler.tick`'s new `attack_run_target_contact_id` keyword
+  (Decision 5's suppression gate, below). `_print` gained a fourth `attack_run_fields` argument
+  (and `speech_log_sink`'s own callable type grew a third parameter to match) — `drain_attack_run`
+  is the only caller that ever supplies it, carrying the target contact id, tier, and current
+  azimuth/elevation error for the sortie log.
 - `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
   split) — the act/confirm/say-again band decision (`classify_response`, given `audio_adapter.
   command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import
