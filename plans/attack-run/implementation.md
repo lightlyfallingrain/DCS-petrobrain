@@ -483,3 +483,177 @@ regression):
   flagging for whoever next touches either constant: the two numbers are not currently related by
   any invariant, and a slower placeholder speech rate or a longer typical readback would make this
   collision real rather than a test-fixture artifact.
+
+## Stage 6/7 — tier 2 (the degraded fallback) and projection for a moving target
+
+Implements Stage 6 (tier 2, Decision 17 REVISED) and Stage 7 (projection, Decision 10) of the
+restaged plan. §24 of `docs/acceptance/2026-10-14-attack-run-guidance-direction.md` settled, after
+Stage 5 landed, that losing line of sight must *speak* rather than go silent, so these two stages
+are part of the acceptance sortie rather than a follow-on — see the roadmap's 2026-10-14 (second)
+update for the staging consequence.
+
+### What was built
+
+- `belief/attack_run.py`: `TIER2_AZIMUTH_WORD_TABLE` (one row, bare `"right"`/`"left"`, at
+  `ATTACK_RUN_LINED_UP_AZIMUTH_DEG` — not a subset of `AZIMUTH_WORD_TABLE` reached by withholding a
+  row, a separate narrower table); `_remembered_target_alt_m(contact)` (Decision 4 REVISED's
+  `ownship_at_observation.alt_m + relative.up_m` reconstruction); `_tier2_alignment(ownship,
+  contact, now_sim, last_known_target_alt_m, group)` (world-anchored horizontal, projected forward
+  when `contact.motion.state == "moving"` via `Group.heading_deg` and
+  `association_over_time.contact_growth_rate_mps`, remembered-height vertical); `AttackRunState`
+  gained `last_spoken_tier` and `last_known_target_alt_m`; `decide` gained an optional `group`
+  keyword, tries tier 1 first, falls through to tier 2, and updates `last_known_target_alt_m` on
+  every tick tier 1 succeeds (not gated on whether that tick speaks).
+- `belief/speech.py`: `render_alignment`'s `tier` widened from `Literal[1]` to `Literal[1, 2]`.
+  The `NotImplementedError` guard is gone — tier 2 now renders by appending `", obstructed"` to
+  whatever the existing branches (o'clock, word-table, lined-up) would otherwise have produced,
+  uniformly, rather than a second table of pre-qualified phrases or a tier-specific branch per
+  case.
+- `belief/crew_console.py`: `drain_attack_run` resolves `self.store.group_for_contact(contact.id)`
+  and passes it to `decide`; the speech-log's `attack_run_tier` field now reads
+  `new_state.last_spoken_tier` instead of the Stage 5 hardcoded `1`.
+- `body-layer/docs/STRUCTURE.md`, `body-layer/ROADMAP/BL-14.md`: updated to describe both stages.
+
+### Decisions made during implementation, and which are the coordinator's words rather than mine
+
+**The `"lined up"`-while-obstructed vocabulary gap — settled by the coordinator relaying the
+user's own words, not derived here**: *"lined up, obstructed"*. The qualifier composes with
+`"lined up"` exactly as it does with the directional words — no special case, no silence, no
+alternative phrasing. Two further points arrived the same way and are recorded verbatim because
+they are the specification, not an inference from it:
+
+- **`"lined up, obstructed"` is spoken once on entering the lined-up state, then silence**,
+  mirroring tier 1's own `"lined up"`-then-silence (§4). Do not re-announce it per poll while
+  still lined up and still obstructed.
+- **Regaining sight while still lined up re-speaks a bare `"lined up"` once** (*"yes, re-speak it
+  once on regaining sight"*) — symmetric with entering the obstructed state. The coordinator's own
+  framing, worth keeping because it generalises the rule rather than leaving it as two cases:
+  **a tier change always produces exactly one utterance, in the register of the tier being
+  entered.** Correcting or lined up, entering tier 2 or returning to tier 1 — one line, then the
+  normal cadence resumes.
+
+**How the implementation satisfies this without a tier-aware special case** — this part is mine,
+not relayed, and is the single most load-bearing design choice in these two stages: `render_
+alignment` applies the `", obstructed"` suffix as the *last* step, after the o'clock/word-table/
+lined-up branches have already produced their text, so the qualifier's presence or absence is
+part of the rendered `text` string itself. `_should_emit`'s change-driven cadence (Decision 7)
+already compares the *rendered text* against the last-spoken one, not a decomposed
+(azimuth, elevation, tier) tuple. So a tier transition — in *either* direction, and including the
+lined-up case — is simply a case where `text != state.last_spoken_text`, and the existing
+cadence rule re-fires with no additional code. I verified this is not an accident of the test
+cases chosen rather than a property of the mechanism: `test_decide_lined_up_tier_transition_
+speaks_once_each_way` drives the full six-step sequence (lined up → silent → obstructed-lined-up →
+silent → lined up again → silent) through `decide()` itself, and `test_decide_tier_transition_
+speaks_the_qualifier_without_flipping_direction` does the same for the correcting case, confirming
+the direction word never flips purely from the tier change. Both are regression tests for the
+mechanism, not just the vocabulary.
+
+**The memory mechanism for tier 2's vertical (Decision 4 REVISED), and why it is tested
+numerically rather than by inspection**: `Contact.last_alt_m` is the ownship's own altitude at the
+last look (the finding Decision 4 established and this stage does not touch), so tier 2's
+elevation cannot read it. The honest reconstruction — `ownship_at_observation.alt_m + relative.
+up_m` — lives only on the percept that produced a given tier-1 look, and `Contact.last_percept` is
+overwritten (not folded) on every `ContactStore.ingest`, including by a later percept that carries
+no `relative_direction` at all (naked-eye emits an `Observation` every poll a cluster is admitted,
+whether or not its LOS is clear that specific poll). So the reconstructed altitude would be lost
+the instant sight breaks, unless it is remembered somewhere that outlives the percept — hence
+`AttackRunState.last_known_target_alt_m`, updated independently of whether a given tick speaks.
+`test_decide_falls_through_to_tier_2_once_the_relative_observation_goes_stale` pins this
+numerically: the target is placed 300 m below ownship (reconstructed altitude 200 m against
+ownship's 500 m), and the test asserts the tier-2 utterance still carries the elevation word after
+sight is lost. A wrong implementation that fell back to `ownship.alt_m` here would silently drop
+the elevation word (0° error, inside the gate) rather than raise — the numeric pin is what catches
+that, not a weaker "it doesn't crash" assertion.
+
+**`Contact.motion is None` is treated exactly like `"stopped"`, never as "moving" and never
+specially** — Decision 10's own text. `_tier2_alignment`'s projection gate requires `contact.
+motion is not None and contact.motion.state == "moving"`, so `None` falls through to the
+unprojected (last-known) branch alongside a confirmed `"stopped"` state, by construction rather
+than by a second check. Pinned by `test_tier2_projects_a_moving_target_forward_but_holds_a_stopped_
+one`, which asserts the `None` and `"stopped"` cases produce numerically identical azimuths and the
+`"moving"` case (with a usable `Group.heading_deg`) does not.
+
+**`Group`, not `Contact`, is where projection's direction comes from, because no per-contact
+heading exists** — `belief.association_over_time.contact_growth_rate_mps` already resolves
+per-class speed from `Contact.last_class_raw` (the same table `position_belief`'s elapsed-motion
+inflation and `group_matches`'s displacement bound already share — reused directly, not
+reimplemented), but direction-of-travel is a group-level smoothed estimate
+(`Group.heading_deg`/`_update_heading`) with no per-contact analogue. `decide` therefore takes an
+optional `group: Group | None` parameter that tier 1 never reads (a live look needs no
+projection) and tier 2 uses only when `group.heading_deg is not None` (which already implies
+`movement_state == "moving"` with enough samples, per `_update_heading`'s own gating — checking
+`contact.motion.state` separately is still correct and not redundant, since a contact's own motion
+belief and its group's majority-derived `movement_state` are not the same fold and can disagree).
+
+### Tests Added
+
+All in `body-layer/tests/test_attack_run.py`:
+
+- `test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept` (replaces the Stage 3-era
+  silent test of the same shape) — a contact with no relative observation ever still produces
+  tier-2 guidance (`"Lined up, obstructed."`), since `Contact.position` always exists; elevation
+  never fires (no tier-1 look has ever supplied a remembered height).
+- `test_decide_falls_through_to_tier_2_once_the_relative_observation_goes_stale` (replaces the
+  Stage 3-era silent test of the same shape) — pins the memory mechanism numerically, as described
+  above.
+- `test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction` — the full
+  correcting-case transition sequence (tier 1 → tier 2 → silent → tier 1), asserting the qualifier
+  appears/disappears and the direction word never flips.
+- `test_decide_lined_up_tier_transition_speaks_once_each_way` — the coordinator-relayed rule, the
+  full six-step lined-up transition sequence.
+- `test_tier2_projects_a_moving_target_forward_but_holds_a_stopped_one` — Decision 10/Stage 7,
+  including the `motion is None` case.
+- `test_tier2_azimuth_never_speaks_tier_1s_fine_grained_words` — `TIER2_AZIMUTH_WORD_TABLE`'s shape
+  pinned directly, plus a `render_alignment` call proving `"come"`/`"a bit"` do not appear.
+- `test_render_alignment_tier_2_appends_the_qualifier_outside_the_sector` — o'clock + obstructed.
+- `test_render_alignment_tier_2_appends_the_qualifier_to_the_direction_word` — both signs.
+- `test_render_alignment_tier_2_elevation_word_is_unchanged_from_tier_1` — shared table.
+- `test_render_alignment_tier_2_combines_both_axes_then_the_qualifier` — both axes + qualifier.
+- `test_render_alignment_tier_2_lined_up_speaks_the_qualifier_too` — `"Lined up, obstructed."`
+  directly at the renderer level.
+- `test_render_alignment_tier_2_is_not_built_yet` was removed (tier 2 is now built); its assertion
+  is superseded by the tests above.
+
+### Checks
+
+**body-layer/**:
+- `ruff format --check src tests`: pass (126 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 58 source files`
+- `pytest tests -q`: **1832 passed, 4 xfailed** (baseline 1824 passed / 4 xfailed + 8 net new
+  tests — 10 added, 2 renamed-in-place with no net count change, nothing deleted without
+  replacement)
+
+**audio-adapter/** (no file in this subproject touched by this pass; run anyway to confirm no
+regression, per the plan's explicit scope note that `AA-B5`/`AC-B6`/the 1 s inter-utterance gap
+are filed, not built, here):
+- `ruff format --check src tests`: pass (29 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 15 source files`
+- `pytest tests -q`: **277 passed, 1 skipped** — matches the baseline exactly
+
+### Notable Discoveries
+
+- **The reviewer's "tier 2 is unreachable by construction" finding is now closed by design, not by
+  a value change.** The Stage 3-5 review traced that `decide` hardcoded `tier=1` and the
+  renderer's `tier: Literal[1]` made a `tier=2` call a type error at its one call site. Widening
+  both to `Literal[1, 2]` and adding the `_tier1_alignment is None` fallthrough in `decide` is the
+  whole of what makes tier 2 reachable — confirmed by `test_decide_falls_through_to_tier_2_when_
+  the_contact_has_no_percept`, which reaches tier 2 through exactly the no-fresh-observation path
+  the review asked to see exercised, not through a test-only backdoor.
+- **`contact.last_percept` can regress from "has a relative observation" to "does not," on the
+  same contact, within normal operation** — not a corner case invented for testing. The naked-eye
+  channel emits an `Observation` every poll a cluster is admitted regardless of whether that poll's
+  sightline is clear (`live_los_clear` gates only `relative_direction`, not emission itself), and
+  `Contact.record`/`from_percept` overwrite `last_percept` wholesale rather than folding it. So a
+  contact whose most recent look had a clear sightline can, one poll later, have a `last_percept`
+  with `relative_direction=None` even though the *contact* has not gone anywhere — this is exactly
+  the case `AttackRunState.last_known_target_alt_m` exists to survive, and it is worth naming
+  explicitly for whoever next touches `naked_eye_source.py`'s emission rule: the memory in this
+  module depends on that rule continuing to emit every poll rather than only on a clear sightline.
+- **`Group.heading_deg is not None` already implies `movement_state == "moving"` with enough
+  smoothing samples** (`_update_heading` clears both to `None`/empty the instant movement_state is
+  not `"moving"`), so `_tier2_alignment`'s projection gate checking `group.heading_deg is not None`
+  rather than also re-checking `group.movement_state == "moving"` is not an omission — the second
+  check would be redundant given the first, and keeping only one avoids two conditions that could
+  theoretically drift out of sync if `_update_heading`'s own invariant ever changed.

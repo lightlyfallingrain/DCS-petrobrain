@@ -2188,12 +2188,17 @@ class CrewConsole:
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
-        Stage 3/5) -- modelled on `logger.decide_optic`'s own `(state_in,
-        ...) -> state_out` shape, except the state lives on the *caller*
-        (`logger.ConsolePerceptionRunner.attack_run_state`, Stage 5's
-        wiring) rather than on this class: this method is called with the
-        current state and returns its replacement, the same contract
+        Stage 3/5/6/7) -- modelled on `logger.decide_optic`'s own
+        `(state_in, ...) -> state_out` shape, except the state lives on the
+        *caller* (`logger.ConsolePerceptionRunner.attack_run_state`, Stage
+        5's wiring) rather than on this class: this method is called with
+        the current state and returns its replacement, the same contract
         `decide` itself has.
+
+        **Resolves the target's `belief.groups.Group` and passes it to
+        `decide` as of Stage 7** -- tier 2's own projection input (Decision
+        10's `Group.heading_deg`), `None` whenever the contact is
+        ungrouped; tier 1 never reads it.
 
         **Wired into `_run_crew_text_poll_loop`, immediately before
         `drain_events`, as of Stage 5** -- the caller reads `self.
@@ -2236,8 +2241,9 @@ class CrewConsole:
                 cancel_task(self.store, self.tasks, target_task.id)
             self._print([render_lost_contact().text], now_sim)
             return None
+        group = self.store.group_for_contact(contact.id)
         new_state, speech = decide_attack_run(
-            state, now_sim=now_sim, ownship=ownship, contact=contact
+            state, now_sim=now_sim, ownship=ownship, contact=contact, group=group
         )
         if speech is None:
             return new_state
@@ -2247,7 +2253,7 @@ class CrewConsole:
                 now_sim,
                 attack_run_fields={
                     "attack_run_target_contact_id": contact.id,
-                    "attack_run_tier": 1,
+                    "attack_run_tier": new_state.last_spoken_tier,
                     "attack_run_azimuth_deg": new_state.last_spoken_azimuth_deg,
                     "attack_run_elevation_deg": new_state.last_spoken_elevation_deg,
                 },

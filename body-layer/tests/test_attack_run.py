@@ -1,8 +1,8 @@
-"""Tests for `belief.attack_run` -- `plans/attack-run/plan.md` Stage 3's
-pure alignment derivation (tier 1 only; tier 2 is Stage 6, not built here)
-plus `belief.speech.render_alignment`'s word-table rendering, and the
-grep fence that keeps `Percept.relative_direction` to its two sanctioned
-readers."""
+"""Tests for `belief.attack_run` -- `plans/attack-run/plan.md` Stages 3/6/7's
+pure alignment derivation (tier 1, the live look; tier 2, the degraded
+fallback with Decision 10's projection) plus `belief.speech.
+render_alignment`'s word-table rendering, and the grep fence that keeps
+`Percept.relative_direction` to its two sanctioned readers."""
 
 from __future__ import annotations
 
@@ -21,12 +21,17 @@ from belief.attack_run import (
     ATTACK_RUN_RELATIVE_MAX_AGE_S,
     AZIMUTH_WORD_TABLE,
     ELEVATION_WORD_TABLE,
+    TIER2_AZIMUTH_WORD_TABLE,
     AttackRunState,
     _tier1_alignment,
+    _tier2_alignment,
     decide,
 )
 from belief.contacts import Contact
+from belief.groups import Group
+from belief.motion import MotionBelief, MotionState
 from belief.percept import Percept
+from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import render_alignment
 from perception.source import OwnshipState, RelativeDirection
 
@@ -75,6 +80,24 @@ def _contact_with_relative_direction(
     return Contact.from_percept("CONTACT_1", percept)
 
 
+def _group(
+    *,
+    movement_state: MotionState | None = None,
+    heading_deg: float | None = None,
+    contact_id: str = "CONTACT_1",
+) -> Group:
+    """A minimal `belief.groups.Group` fixture -- Stage 7/Decision 10's own
+    inputs (`movement_state`/`heading_deg`), nothing else populated."""
+    return Group(
+        id="GROUP_1",
+        member_contact_ids=frozenset({contact_id}),
+        established_sim=0.0,
+        last_reconciled_sim=0.0,
+        movement_state=movement_state,
+        heading_deg=heading_deg,
+    )
+
+
 # -- the grep fence (mirrors `test_contacts.
 # test_belief_source_never_references_derived_world_position`) ----------
 
@@ -109,7 +132,15 @@ def test_belief_never_references_relative_direction_except_sanctioned_readers() 
 # -- decide(): tier 1's re-rotation and the two-gate/cadence rules -------
 
 
-def test_decide_is_silent_when_the_contact_has_no_percept() -> None:
+def test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept() -> None:
+    """Stage 6: `Contact.position` always exists (founding requires it),
+    so there is no longer a "nothing to guide on" silence once a target is
+    selected -- `decide` falls straight to tier 2. Elevation is the one
+    thing genuinely absent here (`contact.last_percept.relative_direction`
+    is `None`, so no tier-1 look has ever supplied a remembered height,
+    Decision 4 REVISED's fail-open case): the contact sits dead ahead at
+    the founding bearing/range (0 deg, 1000 m), so tier 2's azimuth is
+    "lined up" and the elevation axis never fires at all."""
     contact = Contact.from_percept(
         "CONTACT_1",
         Percept(
@@ -127,26 +158,43 @@ def test_decide_is_silent_when_the_contact_has_no_percept() -> None:
 
     new_state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
 
-    assert speech is None
-    assert new_state == state
+    assert speech is not None
+    assert speech.text == "Lined up, obstructed."
+    assert new_state.last_spoken_tier == 2
 
 
-def test_decide_is_silent_once_the_relative_observation_goes_stale() -> None:
+def test_decide_falls_through_to_tier_2_once_the_relative_observation_goes_stale() -> (
+    None
+):
+    """Stage 6/Decision 4 REVISED's memory mechanism, pinned numerically:
+    the first (tier-1) call sees the target 300 m *below* ownship
+    (`up_m=-300.0`) and must remember that reconstructed altitude
+    (`ownship_at_observation.alt_m + up_m` = 500 - 300 = 200) rather than
+    falling back to `ownship.alt_m` once sight is lost. If tier 2 wrongly
+    used `ownship.alt_m` as the target's altitude, the elevation axis
+    would read 0 deg (level) instead of ~-16.7 deg, and the rendered text
+    would silently lose the elevation word."""
     contact = _contact_with_relative_direction(
         ownship_at_observation=_ownship(t_sim=0.0),
-        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=-300.0),
         t_sim=0.0,
     )
     state = AttackRunState()
 
-    _state, speech = decide(
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert speech1.text == "A little lower."
+    assert state.last_known_target_alt_m == pytest.approx(200.0)
+
+    _state2, speech2 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.01,
         ownship=_ownship(t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.01),
         contact=contact,
     )
 
-    assert speech is None
+    assert speech2 is not None
+    assert speech2.text == "A little lower, obstructed."
 
 
 def test_decide_dead_ahead_and_level_lines_up_and_speaks_once() -> None:
@@ -271,6 +319,240 @@ def test_decide_change_driven_cadence_resuppresses_unchanged_errors() -> None:
     assert speech2 is None
 
 
+# -- decide(): tier 2, the degraded fallback, and tier transitions -------
+
+
+def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction() -> (
+    None
+):
+    """Both tier transitions speak, and the direction word never flips
+    just because the tier changed -- `_should_emit`'s own text-comparison
+    re-fires on the qualifier appearing/disappearing (no tier-aware code
+    needed, see `_should_emit`'s docstring), while the *sign* of the
+    azimuth error is unaffected because tier 2's world-anchored position
+    is set to agree with tier 1's relative observation here."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=100.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
+    )
+    # Tier 2's world-anchored belief must agree with tier 1's relative
+    # look for this test to isolate the qualifier from genuine geometry
+    # drift between the two channels.
+    contact.position = PositionEstimate(
+        x=1000.0,
+        z=100.0,
+        covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+    )
+    state = AttackRunState()
+
+    # Tier 1, fresh: azimuth ~5.7 deg right -- "a bit right."
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert speech1.text == "A bit right."
+    assert state.last_spoken_tier == 1
+
+    # Tier 1 goes stale -- falls to tier 2. Same geometry, so tier 2's
+    # single-row table reads the same ~5.7 deg as "right" (not "a bit
+    # right": that word is structurally unreachable in tier 2, see
+    # `test_tier2_azimuth_never_speaks_tier_1s_fine_grained_words`), plus
+    # the qualifier.
+    state, speech2 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech2 is not None
+    assert speech2.text == "Right, obstructed."
+    assert state.last_spoken_tier == 2
+
+    # Still stale, unchanged geometry -- silent (the steady-state repeat
+    # suppression tier 1's own "Lined up."-then-silence has).
+    state, speech3 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.1,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech3 is None
+
+    # Regain sight -- a fresh percept with the identical geometry.
+    contact.last_percept = Percept(
+        t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.2,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        observation_id="OBS_2",
+        relative_direction=relative,
+    )
+    state, speech4 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.3,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech4 is not None
+    assert speech4.text == "A bit right."
+    assert state.last_spoken_tier == 1
+
+    # Every utterance agreed on direction -- "right," never "left," across
+    # the whole transition.
+    for speech in (speech1, speech2, speech4):
+        assert "right" in speech.text.lower()
+        assert "left" not in speech.text.lower()
+
+
+def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
+    """The user's own words (2026-10-14, second direction pass):
+    `"lined up, obstructed"` composes exactly like the directional words,
+    spoken once on entering it and once on leaving it -- `"lined up"` and
+    `"lined up, obstructed"` are each spoken exactly once, never repeated
+    while the state holds, mirroring tier 1's own `"Lined up."`-then-
+    silence (§4)."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
+    )
+    contact.position = PositionEstimate(
+        x=1000.0,
+        z=0.0,
+        covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+    )
+    state = AttackRunState()
+
+    # Tier 1: lined up, spoken once.
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None and speech1.text == "Lined up."
+
+    state, speech2 = decide(state, now_sim=0.2, ownship=_ownship(), contact=contact)
+    assert speech2 is None
+
+    # Lose sight -- still lined up, but tier 2: spoken once.
+    state, speech3 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech3 is not None and speech3.text == "Lined up, obstructed."
+
+    state, speech4 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.1,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech4 is None
+
+    # Regain sight -- still lined up, back to tier 1: spoken once, bare.
+    contact.last_percept = Percept(
+        t_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.2,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        observation_id="OBS_2",
+        relative_direction=relative,
+    )
+    state, speech5 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.3,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech5 is not None and speech5.text == "Lined up."
+
+    state, speech6 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.4,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech6 is None
+
+
+def test_tier2_projects_a_moving_target_forward_but_holds_a_stopped_one() -> None:
+    """Decision 10/Stage 7: projection is a tier-2-only concern, gated on
+    `contact.motion.state == "moving"`, direction from `Group.heading_deg`.
+    `contact.motion is None` ("never observed for movement") must be
+    treated exactly like `"stopped"` -- held, never projected, never
+    treated as moving by omission."""
+    ownship = _ownship()
+
+    def _contact_with_motion(motion_state: MotionState | None) -> Contact:
+        contact = Contact.from_percept(
+            "CONTACT_1",
+            Percept(
+                t_sim=0.0,
+                source="naked_eye_visual_filtered",
+                classification_raw="OP_ARMORED",
+                bearing_deg=0.0,
+                range_m=1000.0,
+                ownship_at_observation=ownship,
+                observation_id="OBS_1",
+                relative_direction=None,
+            ),
+        )
+        if motion_state is not None:
+            contact.motion = MotionBelief(
+                state=motion_state, confidence=0.9, established_sim=0.0
+            )
+        return contact
+
+    group = _group(movement_state="moving", heading_deg=90.0)
+
+    az_moving, _el_moving = _tier2_alignment(
+        ownship, _contact_with_motion("moving"), 10.0, None, group
+    )
+    az_stopped, _el_stopped = _tier2_alignment(
+        ownship, _contact_with_motion("stopped"), 10.0, None, group
+    )
+    az_none, _el_none = _tier2_alignment(
+        ownship, _contact_with_motion(None), 10.0, None, group
+    )
+
+    assert az_stopped == pytest.approx(0.0, abs=1e-6)
+    # `motion is None` is held exactly like "stopped" -- never projected.
+    assert az_none == pytest.approx(az_stopped, abs=1e-9)
+    # A moving target with a usable group heading is projected forward,
+    # away from the stationary case.
+    assert az_moving != pytest.approx(az_stopped, abs=1e-3)
+
+
+def test_tier2_azimuth_never_speaks_tier_1s_fine_grained_words() -> None:
+    """Decision 17 REVISED: `TIER2_AZIMUTH_WORD_TABLE` has one row, at the
+    same gate tier 1's own last row uses, with bare direction words --
+    `"come right"`/`"a bit right"` are structurally unreachable through
+    it, not merely withheld by a rule."""
+    for threshold_deg, positive, negative in TIER2_AZIMUTH_WORD_TABLE:
+        assert threshold_deg == ATTACK_RUN_LINED_UP_AZIMUTH_DEG
+        assert positive == "right"
+        assert negative == "left"
+    assert len(TIER2_AZIMUTH_WORD_TABLE) == 1
+
+    # An error that would be "a bit right" in tier 1's table renders as
+    # the bare word in tier 2.
+    speech = render_alignment(
+        6.0,
+        0.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech.text == "Right, obstructed."
+    assert "come" not in speech.text.lower()
+    assert "a bit" not in speech.text.lower()
+
+
 # -- render_alignment: the register switch and the two-gate evaluation ---
 
 
@@ -353,15 +635,74 @@ def test_render_alignment_both_gates_satisfied_is_lined_up() -> None:
     assert speech.text == "Lined up."
 
 
-def test_render_alignment_tier_2_is_not_built_yet() -> None:
-    with pytest.raises(NotImplementedError):
-        render_alignment(
-            0.0,
-            0.0,
-            tier=2,
-            azimuth_table=AZIMUTH_WORD_TABLE,
-            elevation_table=ELEVATION_WORD_TABLE,
-        )
+def test_render_alignment_tier_2_appends_the_qualifier_outside_the_sector() -> None:
+    speech = render_alignment(
+        90.0,
+        0.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech.text == "Three o'clock, obstructed."
+
+
+def test_render_alignment_tier_2_appends_the_qualifier_to_the_direction_word() -> None:
+    speech = render_alignment(
+        10.0,
+        0.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech.text == "Right, obstructed."
+
+    speech_left = render_alignment(
+        -10.0,
+        0.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech_left.text == "Left, obstructed."
+
+
+def test_render_alignment_tier_2_elevation_word_is_unchanged_from_tier_1() -> None:
+    """`"higher"`/`"a little lower"` either way -- `ELEVATION_WORD_TABLE`
+    is shared, not re-declared for tier 2 (its one row carries no
+    large/small split in either tier)."""
+    speech = render_alignment(
+        0.0,
+        -15.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech.text == "A little lower, obstructed."
+
+
+def test_render_alignment_tier_2_combines_both_axes_then_the_qualifier() -> None:
+    speech = render_alignment(
+        10.0,
+        15.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech.text == "Right, higher, obstructed."
+
+
+def test_render_alignment_tier_2_lined_up_speaks_the_qualifier_too() -> None:
+    """The user's own words (2026-10-14, second direction pass):
+    `"lined up, obstructed"` composes exactly like the directional words
+    -- no silence, no alternative phrasing."""
+    speech = render_alignment(
+        1.0,
+        1.0,
+        tier=2,
+        azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+    )
+    assert speech.text == "Lined up, obstructed."
 
 
 def test_both_axes_share_one_table_lookup_helper() -> None:

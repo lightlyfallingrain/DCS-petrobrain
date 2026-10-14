@@ -560,7 +560,7 @@ def render_alignment(
     azimuth_deg: float,
     elevation_deg: float,
     *,
-    tier: Literal[1],
+    tier: Literal[1, 2],
     azimuth_table: tuple[_AlignmentWordRow, ...],
     elevation_table: tuple[_AlignmentWordRow, ...],
 ) -> OutgoingSpeech:
@@ -570,42 +570,53 @@ def render_alignment(
     own half-width is inside it by construction, so "outside" is simply
     "the o'clock register still applies") speaks the clock hour; inside
     it, the register switches to the qualitative word tables, and
-    `"Lined up."` once both axes clear their own gate (the table's own
+    `"lined up"` once both axes clear their own gate (the table's own
     last row), never again until something changes (Decision 7's
     change-driven cadence is the caller's job, not this function's --
     this renders one tick's state, it does not remember the last one).
 
     `tier` selects the register (Decision 11 REVISED/Decision 17 REVISED).
-    **Tier 1 is everything this function builds as of `plans/attack-run/
-    plan.md` Stage 5** -- the full word-table/lined-up/o'clock register
-    above. Tier 2 (the degraded fallback's `"right, obstructed"` register)
-    is Stage 6, deliberately not built here. **`tier: Literal[1]`, not
-    `int`** (a Stage 5 refinement, carried over from the Stage 1-3 review's
-    optional list rather than left for Stage 6) -- `attack_run.decide`
-    hardcodes `tier=1` at its one call site, so a future `tier=2` call is
-    now a type error at that call site rather than a trusted runtime
-    raise; the signature will widen to `Literal[1, 2]` when Stage 6 adds
-    the second branch. The runtime guard below is kept anyway: `mypy
-    --strict` does not enable `warn_unreachable`, so it costs nothing and
-    still catches a caller that bypasses the type check (e.g. from
-    untyped test code)."""
-    if tier != 1:
-        raise NotImplementedError(
-            "tier 2 (the degraded fallback's 'obstructed' register) is "
-            "Stage 6 of plans/attack-run/plan.md, not built yet"
-        )
+    `azimuth_table`/`elevation_table` are supplied by the caller
+    (`attack_run.decide`), not read from a tier-keyed lookup here --
+    tier 1 passes `attack_run.AZIMUTH_WORD_TABLE`/`ELEVATION_WORD_TABLE`,
+    tier 2 passes `attack_run.TIER2_AZIMUTH_WORD_TABLE` and the *same*
+    `ELEVATION_WORD_TABLE` (its one row carries no large/small split
+    either way). This function stays ignorant of which tier's table is
+    which; it only ever applies the one it is handed.
+
+    **Tier 2 (Stage 6) is the qualifier `", obstructed"` appended to
+    whatever the branches above would otherwise have rendered -- one
+    rule, applied uniformly, not a second table of pre-qualified
+    phrases.** This includes the o'clock branch and the `"lined up"`
+    case: the user's own words (2026-10-14, second direction pass) are
+    `"lined up, obstructed"`, composing exactly the way `"right,
+    obstructed"` does, because the qualifier marks *how the information
+    was obtained*, not which branch fired. Confirmed again
+    (2026-10-14, third pass): on regaining sight while still lined up, a
+    bare `"lined up"` is spoken once, symmetric with `"lined up,
+    obstructed"` on losing it -- both are tier *transitions*, and both
+    fall out of `attack_run._should_emit`'s own text-comparison with no
+    tier-aware code here or there, because the qualifier's presence is
+    part of `text` and therefore part of what "changed" means. A
+    *within*-tier-2 repeat (still obstructed, still lined up) renders the
+    identical string as the previous tick and is suppressed by that same
+    comparison, exactly like tier 1's own `"Lined up."`-then-silence."""
     outside_sector_deg = CLOCK_BUCKET_DEG / 2.0
     if abs(azimuth_deg) > outside_sector_deg:
         clock = _alignment_clock_hour(azimuth_deg)
-        return OutgoingSpeech(
-            text=f"{_ALIGNMENT_CLOCK_WORDS[clock]} o'clock.", template="attack_run"
-        )
-    azimuth_phrase = _alignment_phrase_for(azimuth_deg, azimuth_table)
-    elevation_phrase = _alignment_phrase_for(elevation_deg, elevation_table)
-    if azimuth_phrase is None and elevation_phrase is None:
-        return OutgoingSpeech(text="Lined up.", template="attack_run")
-    phrases = [phrase for phrase in (azimuth_phrase, elevation_phrase) if phrase]
-    text = ", ".join(phrases)
+        text = f"{_ALIGNMENT_CLOCK_WORDS[clock]} o'clock"
+    else:
+        azimuth_phrase = _alignment_phrase_for(azimuth_deg, azimuth_table)
+        elevation_phrase = _alignment_phrase_for(elevation_deg, elevation_table)
+        if azimuth_phrase is None and elevation_phrase is None:
+            text = "lined up"
+        else:
+            phrases = [
+                phrase for phrase in (azimuth_phrase, elevation_phrase) if phrase
+            ]
+            text = ", ".join(phrases)
+    if tier == 2:
+        text = f"{text}, obstructed"
     return OutgoingSpeech(text=f"{text[0].upper()}{text[1:]}.", template="attack_run")
 
 

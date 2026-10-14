@@ -797,44 +797,71 @@ The entries are in the order they were written, which is roughly perception → 
   one, speaks range once) and the `render_alignment_*` family: `render_alignment(azimuth_deg,
   elevation_deg, *, tier, azimuth_table, elevation_table)` is the ongoing guidance utterance —
   outside the 12 o'clock sector speaks the clock hour, inside it reads the two word tables
-  (`_alignment_phrase_for`, shared by both axes) and says "Lined up." once both clear their own
+  (`_alignment_phrase_for`, shared by both axes) and says "lined up" once both clear their own
   gate. The two tables are declared in `belief.attack_run` and passed in as data, never imported
   by this module, so `belief.speech` -> `belief.attack_run` -> `belief.speech` is not a circular
-  import. **`tier: Literal[1]`, not `int`** (narrowed Stage 5, a carried-over Stage 1-3 review
-  refinement — widens to `Literal[1, 2]` when Stage 6 lands) — only `tier == 1` is built; the
-  `tier == 2` runtime guard (Decision 17 REVISED's `"obstructed"` register, Stage 6) raises
-  `NotImplementedError` and is kept even though `mypy --strict` (no `warn_unreachable`) does not
-  require it. `Template` gained `"attack_run"`. Stage 5 adds `render_engage_readback(facts)`
+  import. **`tier: Literal[1, 2]`** (widened Stage 6, from the Stage 5 `Literal[1]` narrowing) —
+  tier 2 (Decision 17 REVISED's `"obstructed"` register) is `", obstructed"` appended to whatever
+  the branches above would otherwise have rendered, **uniformly**, including the o'clock branch
+  and the `"lined up"` case (`"lined up, obstructed"`, the user's own words, 2026-10-14 second
+  direction pass) — one rule, not a second table of pre-qualified phrases, and no tier-aware
+  branch in `belief.attack_run._should_emit` either: the qualifier's presence is part of the
+  rendered text, so a tier transition is simply a text change the existing change-driven cadence
+  already re-fires on, in both directions (entering *and* leaving the obstructed register, pinned
+  by `test_decide_lined_up_tier_transition_speaks_once_each_way`/
+  `test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction`). `Template` gained
+  `"attack_run"`. Stage 5 adds `render_engage_readback(facts)`
   (`engage`'s own readback — unit type, clock, *and* range, once, plus an acquisition-only terrain
   fragment identical in shape to `_contact_report_text`'s own but deliberately not shared with it,
   since that helper also carries a count clause and a `", moving"` tail this milestone's
   vocabulary never calls for) and `render_attack_run_off()` (`"Attack run off."`, `disengage`'s
   readback).
-- `src/belief/attack_run.py` (new, `plans/attack-run/plan.md` Stages 2-6) — BL-14's alignment
+- `src/belief/attack_run.py` (new, `plans/attack-run/plan.md` Stages 2-7) — BL-14's alignment
   derivation. This module and `percept.py` are the only two files under `belief/` allowed to
   mention `relative_direction`/`RelativeDirection` (grep-fenced, `test_attack_run.py`, mirroring
   `belief.contacts`'s `derived_world_position` fence). `AttackRunState` (frozen, `last_spoken_
-  azimuth_deg`/`last_spoken_elevation_deg`/`last_spoken_text`) is the change-driven cadence's own
-  baseline (Decision 7) — compared against the *last spoken* value, never the previous sample.
-  `decide(state, *, now_sim, ownship, contact)` is pure, no I/O: it reads `contact.last_percept.
-  relative_direction` (Stage 2's own storage mechanism — a whole `Percept` kept on `Contact`,
-  not a second per-field store), re-derives the *current* azimuth/elevation from the carried
-  offset via `_tier1_alignment` (undo the observing poll's own yaw rotation, add ownship's
+  azimuth_deg`/`last_spoken_elevation_deg`/`last_spoken_text`/`last_spoken_tier`/`last_known_
+  target_alt_m`) is the change-driven cadence's own baseline (Decision 7) — compared against the
+  *last spoken* value, never the previous sample. `last_known_target_alt_m` (Stage 6) is separate
+  memory, not a speech baseline: it is updated on **every** tick tier 1 succeeds, whether or not
+  that tick speaks, so a later tier-2 tick always reads the freshest reconstruction rather than
+  one frozen at the last *spoken* moment.
+  `decide(state, *, now_sim, ownship, contact, group=None)` is pure, no I/O: it reads `contact.
+  last_percept.relative_direction` (Stage 2's own storage mechanism — a whole `Percept` kept on
+  `Contact`, not a second per-field store), re-derives the *current* azimuth/elevation from the
+  carried offset via `_tier1_alignment` (undo the observing poll's own yaw rotation, add ownship's
   translation since the look, re-rotate via `geometry.alignment_direction`), renders through
-  `speech.render_alignment`, and applies the change-driven emit rule. As of Stage 3, tier 1 only
-  — no fresh relative observation (absent, or older than `ATTACK_RUN_RELATIVE_MAX_AGE_S`, two
-  polls) returns `(state, None)`, silence, holding the last spoken state; tier 2 is Stage 6. The
-  three named constants (`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/`ATTACK_RUN_ELEVATION_GATE_DEG`/
-  `ATTACK_RUN_CHANGE_THRESHOLD_DEG`) and the two word tables (`AZIMUTH_WORD_TABLE`/
-  `ELEVATION_WORD_TABLE`) are declared here, the single source of truth Decision 11 REVISED calls
-  for. `CrewConsole.drain_attack_run` (Stage 3) is this module's one caller — **wired into
+  `speech.render_alignment`, and applies the change-driven emit rule. **Tier 2 (Stage 6)**: no
+  fresh relative observation (absent, or older than `ATTACK_RUN_RELATIVE_MAX_AGE_S`, two polls)
+  falls through to `_tier2_alignment` rather than returning silence — `Contact.position` always
+  exists, so there is always *something* to guide on once a target is selected; silence is now
+  only the change-driven cadence rule, never "no tier had anything to say." Tier 2's horizontal is
+  world-anchored belief (`contact.position.x/z`), **projected forward if `contact.motion.state ==
+  "moving"`** (Stage 7/Decision 10) using `group.heading_deg` for direction (`contact.motion is
+  None` — never observed for movement — is held exactly like `"stopped"`, never treated as
+  moving) and `belief.association_over_time.contact_growth_rate_mps` for speed (the same per-class
+  table position-fusion/group-matching already share, not a second one) — **never written back to
+  `Contact.position`**. Tier 2's vertical is the **remembered** relative height
+  (`_remembered_target_alt_m`: `percept.ownship_at_observation.alt_m + relative.up_m`, carried on
+  `AttackRunState.last_known_target_alt_m`), never `Contact.last_alt_m` (the ownship's own
+  altitude at the last look, Decision 4's finding) and never a world-model query (Decision 4
+  REVISED) — `None` (no elevation word at all) only before the very first tier-1 look this
+  contact has ever had. `TIER2_AZIMUTH_WORD_TABLE` is a separate, narrower one-row table (bare
+  `"right"`/`"left"`, not `"come right"`/`"a bit right"` — those words are structurally
+  unreachable through it); the elevation axis reuses `ELEVATION_WORD_TABLE` unchanged in both
+  tiers. The three named constants (`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/
+  `ATTACK_RUN_ELEVATION_GATE_DEG`/`ATTACK_RUN_CHANGE_THRESHOLD_DEG`) and the word tables are
+  declared here, the single source of truth Decision 11 REVISED calls for. `CrewConsole.
+  drain_attack_run` (Stage 3) is this module's one caller — **wired into
   `logger._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
   every poll once `ConsolePerceptionRunner.attack_run_state` is non-`None` (set by `engage`, via
   `CrewConsole.attack_run_transition`'s one-shot signal — this class cannot replace `runner.
-  attack_run_state` directly, so it leaves an instruction for the poll loop instead). Decision
-  13's end condition (the target's own contact record vanishing, e.g. a merge abandoning its id
-  with no successor) is handled inside `drain_attack_run` itself, not deferred to the wiring:
-  speaks `render_lost_contact()` once, cancels the standing task, and returns `None`.
+  attack_run_state` directly, so it leaves an instruction for the poll loop instead); as of Stage
+  7 it also resolves `self.store.group_for_contact(contact.id)` and passes it to `decide` as
+  `group`. Decision 13's end condition (the target's own contact record vanishing, e.g. a merge
+  abandoning its id with no successor) is handled inside `drain_attack_run` itself, not deferred
+  to the wiring: speaks `render_lost_contact()` once, cancels the standing task, and returns
+  `None`.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
