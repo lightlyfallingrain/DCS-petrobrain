@@ -523,6 +523,76 @@ should fall out cleanly, but it is the part to verify rather than assume.
 
 **File, do not build.** Not in `BL-14`'s scope.
 
+## 23. One voice: guidance waits for the readback, plus a 1 s gap
+
+> *"Petrovich can only speak one thing at a time. The first guidance callout will have to wait until
+> the attack command readback is done. Add a 1s delay after that also."*
+
+Arrived while the Stage 4–5 fix was under review, and it **settles a question that was about to be
+answered by reasoning instead of by direction**. The Stage 4–5 review had found that
+`drain_attack_run` recorded a callout as spoken even when channel occupancy suppressed the print, so
+the cadence baseline sat at a value never heard. The fix suppresses the print, keeps the previous
+baseline, and re-offers on the next free tick. The open question was whether the ~5 s occupancy of
+`engage`'s own readback was itself a problem.
+
+**It is not.** Waiting is the correct behaviour: one voice, one utterance at a time, and the first
+guidance callout queues behind the readback by design. What would have been a defect is the callout
+being *lost* rather than *delayed* — which is exactly what the review caught.
+
+**And there is a new requirement**: a **1 s delay after the readback completes** before guidance may
+speak.
+
+**The gap belongs in the audio path, not in the attack run** — settled the same day, once the
+placement question was put to him:
+
+> *"The 1s audio gap could live in the audio path. It's failry natural for humans to pause shortly
+> between utterances, that makes the transition to next topic clear. Simple solution, after every
+> spoken audio, add 1s delay before anything new is accepted. Expection: urgent -tagged items. It'd
+> also be good to have a feedback channel to body/brain of when speaking (=audio playback) has
+> stopped."*
+
+So it is **not** a fourth attack-run constant. It is a property of speaking, applied after every
+utterance, with urgent lines exempt — which is also the more honest model: a pause is how a person
+marks the transition to a new topic. Filed as `audio-adapter/ROADMAP/AA-B5.md`, with the
+playback-stopped feedback channel, and `aircraft-layer/ROADMAP/AC-B6.md` for the collector half.
+**Not `BL-14`'s work.**
+
+**It is also ~80% already built, in the wrong layer.** `belief/callouts.py` has
+`INTER_UTTERANCE_GAP_S = 0.75`, applied by `CalloutScheduler.note_reply` when it extends
+`busy_until_sim`, and `drain_attack_run`'s occupancy gate already waits on it. So the delta to the
+requested second is 0.25 s, not a missing mechanism — found by the Stage 4–5 fix review looking for
+an existing general mechanism before scoping a new one. What is genuinely missing is the *feedback
+channel*: today the gap is applied to a word-count **estimate** (`SPEECH_RATE_WPS = 2.5`, whose own
+comment says "Uncalibrated — needs a live sortie"), and every occupancy decision in the crew layer
+keys on that guess.
+
+## 24. Losing line of sight speaks the remembered position — it does not go silent
+
+> *"If LOS broke, we use remembered position. "<where>, obstructed""*
+
+**This closes the question §23 left open, and it closes it the other way from the staging's
+assumption.** The worry was that with guidance barred until readback + 1 s, the first guidance
+evaluation lands **≥6 s after `engage`** — three times tier 1's `ATTACK_RUN_RELATIVE_MAX_AGE_S` of
+2.0 s — so if line of sight broke during the readback the pilot's first experience of the feature
+would be **silence**. The review reproduced exactly that: correct tier-1 silence, by design rather
+than by defect.
+
+**But silence is not what he wants there.** Losing sight means guidance continues from the
+*remembered* position, in the obstructed register (§19) — `"<where>, obstructed"`. Note the slot:
+**`<where>`**, so the whole positional vocabulary is available in the obstructed form, not only a
+bare direction.
+
+**The staging consequence, which is the point of recording this here**: `BL-14`'s Stage 5 was
+planned as the acceptance sortie with tier 2 arriving in Stage 6. Under this direction, **Stage 5
+alone is knowingly wrong in a case the pilot will hit on the very first run** — and flying it would
+teach him that the feature goes quiet when a vehicle slips behind a berm. So the acceptance sortie
+must cover **Stages 5, 6 and 7** together: tier 2's obstructed register, and the projection that
+makes "remembered position" correct for a *moving* target (§7's own *"If target is moving, projected
+position"*).
+
+That is not scope creep. It is the staging being built on an assumption — that silence was an
+acceptable intermediate state — which this direction removes.
+
 ---
 
 ## Still open
