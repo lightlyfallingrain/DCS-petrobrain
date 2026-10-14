@@ -593,6 +593,39 @@ position"*).
 That is not scope creep. It is the staging being built on an assumption — that silence was an
 acceptable intermediate state — which this direction removes.
 
+### `"lined up, obstructed"`
+
+Asked what `"lined up"` should say while obstructed — the one vocabulary case §4 and §19 together do
+not settle, since silence already means *inside both gates* and the qualifier means *this is
+remembered*, and a lined-up-but-obstructed run is both at once:
+
+> *"lined up, obstructed"*
+
+**So the qualifier simply composes.** The obstructed register is the coarse tier-1 utterance with
+`", obstructed"` appended — `"right, obstructed"`, `"lower, obstructed"`, `"lined up, obstructed"`.
+One rule rather than a per-utterance table, which is also why it was worth asking rather than
+inventing: a derived answer would plausibly have chosen silence (treating lined-up as the absence of
+a correction) and thereby hidden the channel change that §19 exists to make audible.
+
+It is spoken **once** on entering the lined-up state, then silence, mirroring tier 1's
+`"lined up"`-then-silence. The case this settles cleanly: a run lined up in tier 1 that loses sight
+while still lined up now says `"lined up, obstructed"` rather than going quiet — the qualifier
+appearing is the observable in the lined-up case exactly as in the correcting case.
+
+And the symmetric case, confirmed immediately after:
+
+> *"yes, re-speak it once on regaining sight"*
+
+So regaining sight while still lined up speaks a bare `"lined up"` once, then silence. **The general
+rule, which is worth stating as a rule rather than as four cases: a tier change always produces
+exactly one utterance, in the register of the tier being entered.** Correcting or lined up, entering
+tier 2 or returning to tier 1 — one line, then the normal change-driven cadence resumes.
+
+The reason this is not politeness: **the qualifier's presence or absence is the only observable that
+distinguishes a live look from a remembered position**, and an observable nobody speaks is not one.
+Without the return utterance the pilot could learn that belief had gone stale but never that it had
+gone live again.
+
 ---
 
 ## Still open
