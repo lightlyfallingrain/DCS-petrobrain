@@ -223,3 +223,316 @@ mutation-tested from source, not read-and-trusted: each failed with the expected
 the mechanism it claims to protect was reintroduced as a bug, and each was cleanly reverted
 afterward. The grep fence was mutation-tested the same way. No part of this review rests on the
 implementer's account alone where a cheap independent check was available.
+
+---
+
+## Stage 4–5 review (2026-10-14, second pass)
+
+**Scope**: `step` (Stage 4) and wiring the guidance loop — `engage`/`disengage`, tier 1 only, the
+gaze claim, the suppression gate, the speech-log fields (Stage 5) — plus the two carried-over
+refinements from the Stage 1–3 pass (`Literal[1]` on `render_alignment`'s tier; `BL-14.md`'s status
+line). **Stage 5 is this feature's acceptance sortie.** Stages 6–7 (tier 2, projected position) are
+correctly absent — `render_alignment`'s `tier` parameter is now `Literal[1]` at the type level, and
+`decide()` still hardcodes `tier=1` with no caller ever able to pass `2`.
+
+### Address
+
+Reviewed at `feature/bl14-attack-run` tip `67d08f45dab18022212f08c96e91b9cbbe2475c6`. Worktree HEAD
+(`f25c57c…`, from an unrelated prior task — forest-occlusion Stages 1–2) was a strict ancestor of
+the named tip with a clean tree; fast-forwarded with `git merge --ff-only 67d08f4`, confirmed by
+`git rev-parse HEAD` afterward.
+
+### Verification — run myself
+
+**body-layer/** (resolving `body-layer/.venv/bin/{ruff,mypy,pytest}` by absolute path from the main
+checkout, confirmed resolving to *this* worktree's `src` via `pytest --collect-only` before running
+anything for real):
+
+- `ruff format --check src tests`: pass (126 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 58 source files`
+- `pytest tests -q`: **1820 passed, 4 xfailed** — matches the implementer's report exactly
+
+**audio-adapter/** (same pattern):
+
+- `ruff format --check src tests`: pass (29 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 15 source files`
+- `pytest tests -q`: **277 passed, 1 skipped** — matches the implementer's report exactly
+
+### The six specific checks — findings
+
+**1. `step` recomputes from ownship's present position, every press — confirmed by mutation, not
+reading.** `_handle_step` reads `facts["relative_now"]` (world-anchored belief) fresh via
+`describe_contact` on every call, for both the current target and every candidate; nothing is
+sorted or cached outside the call. I mutated `_handle_step` to memoize the scored ordering in an
+instance-level cache keyed on `(current_id, direction)` — exactly the "sort once, index into it"
+bug the task names — and re-ran
+`test_step_recomputes_order_from_ownships_present_position`: it failed immediately
+(`CONTACT_3 != CONTACT_2`, the cached ordering surviving ownship's move to the far side of the
+formation). Reverted; suite green again. The test's own fixture construction (mirror-flip vantage
+point, verified against `signed_angular_delta_deg` before the fixture was written per
+`implementation.md`) is sound and matches the exact pylon-turn case the user's words describe.
+
+**2. The suppression gate — both halves confirmed by mutation.** `CalloutScheduler.tick` suppresses
+`_WATCHED_ONLY_KINDS` only for the event whose `contact_id` equals `attack_run_target_contact_id`,
+via `_consumed.add` (lost, not deferred, matching `WATCH_REPORT_MIN_GAP_S`'s own treatment). I
+verified both halves by mutation, not by reading the two existing pinned tests:
+- Confirmed `test_attack_run_target_never_speaks_a_range_crossing` and
+  `test_attack_run_suppression_is_narrow_to_the_one_contact_id` both pass as-is.
+- Mutated the gate to `if attack_run_target_contact_id is not None:` (suppressing *every*
+  watched-only event whenever a run is active, not just the named contact's) — the narrow test
+  failed immediately (`['BMP-2.'] != ['Getting closer, BMP-2.']`), proving the narrow-scope claim is
+  load-bearing rather than redundant. Reverted; suite green.
+
+**3. Ordering/occupancy — one required fix found here, by direct reproduction.** `drain_attack_run`
+runs immediately before `drain_events` in `_run_crew_text_poll_loop` (confirmed by reading
+`logger.py`'s poll body directly, not the docstring's claim), and `drain_events`'s own
+`CalloutScheduler.tick` returns `[]` without consuming anything when `now_sim < busy_until_sim` —
+so a guidance line that wins the tick genuinely defers the scheduler's own candidates rather than
+dropping them, matching Decision 1. **But the reverse direction is broken**: when the channel is
+already busy *at the moment guidance itself wants to speak*, `drain_attack_run` correctly skips
+`_print` (per `if speech is not None and now_sim >= self.scheduler.busy_until_sim`), but it still
+`return`s `decide_attack_run`'s `new_state` unconditionally — and that state has already had
+`last_spoken_azimuth_deg`/`last_spoken_elevation_deg`/`last_spoken_text` updated by `decide()`
+*as if the line had been spoken*, because `_should_emit`'s change-driven baseline is computed before
+the caller ever checks occupancy. The result: a guidance change that arrives while the channel is
+busy is marked "spoken" without ever being printed, and `_should_emit` will not fire again unless
+the geometry drifts *further* than the already-recorded (fictitious) baseline. **This is lost, not
+deferred — the one failure mode Decision 1 explicitly claims cannot happen.**
+
+Confirmed by direct reproduction, not by reading: built a `Contact` with a tier-1
+`RelativeDirection` 100 m right of boresight (an azimuth error large enough to speak "a bit right"),
+set `console.scheduler.busy_until_sim` ahead of `now_sim`, and called `drain_attack_run` twice —
+once busy, once free with unchanged geometry:
+
+```
+after busy tick: state = AttackRunState(last_spoken_azimuth_deg=5.71, ..., last_spoken_text='A bit right.')
+printed so far: []
+after channel freed, unchanged geometry: state = AttackRunState(last_spoken_azimuth_deg=5.71, ..., last_spoken_text='A bit right.')
+printed so far: []
+```
+
+The line is never spoken, in either call, even once the channel frees. No test in this diff
+exercises `drain_attack_run` against a busy scheduler at all (`grep -n busy_until_sim
+tests/test_attack_run.py tests/test_crew_console.py` finds nothing attack-run-shaped). This is not
+a rare edge case: the `engage` readback itself (`"Attack run, armour, 2 o'clock, 1.5 kilometres."`)
+occupies the channel for several seconds right as the aircraft is mid-turn-in — exactly when the
+first azimuth correction is most likely to be due — so the very first guidance line after `engage`
+is a realistic casualty, and the pilot gets silence where design A promises either a correction or
+`"lined up"`.
+
+**Required fix**: `drain_attack_run` must only commit `new_state`'s "spoken" fields when the line
+was actually printed; when occupancy suppresses the print, it must keep the *previous* state (or an
+equivalent "pending" marker) so the same change is re-offered once the channel frees, rather than
+being silently absorbed into the baseline.
+
+I found no corresponding problem on the "guidance starves the scheduler" direction: because emission
+is change-driven (most polls produce no speech at all), and an injected urgent call
+(`bypass_gate=True`) bypasses `drain_attack_run` entirely and calls `note_urgent`, which forcibly
+resets `busy_until_sim` rather than reading it — an urgent callout cannot be starved by a guidance
+line that is already in flight.
+
+**4. The gaze claim is bounded to the run — one required fix found here, also by direct
+reproduction.** `disengage` works correctly: `_handle_disengage` sets `attack_run_transition =
+"disengage"`, and the poll loop applies it to `runner.attack_run_state = None` before the next
+`_active_gaze` call, which reads `attack_run_engaged=self.attack_run_state is not None` fresh every
+poll. Decision 13's vanished-contact path also works: `drain_attack_run` returns `None` directly
+when the contact record has vanished.
+
+**`drop target` (and the generic `cancel`/`stop` all-kinds path) do not.** `_handle_drop_target`
+delegates to `_handle_cancel_task(kinds=("attack_target",))`, which cancels the `PendingIntent` in
+the task store but never touches `attack_run_transition` or `runner.attack_run_state`. On the next
+poll, `drain_attack_run`'s own guard —
+
+```python
+target_task = self._active_attack_target_task()
+if target_task is None or target_task.contact_id is None:
+    return state
+```
+
+— returns the **unchanged, still-non-`None`** `state` once the task is gone, rather than `None`.
+`runner.attack_run_state` therefore stays permanently non-`None` after a bare `drop target` (no
+`disengage`), and `attack_run_engaged` stays `True` on every subsequent poll. This does not strand
+the gaze on a stale contact, because `_active_gaze`'s own branch re-resolves the *live* task from
+`tasks.tasks` each call and falls through to the ordinary scan logic when none is found — so nothing
+breaks immediately. But it means the engaged flag is now permanently stuck "on" for the rest of the
+session (or until the next explicit `engage`), and the very next unrelated `select target` — issued
+with no `engage` at all — inherits it.
+
+Confirmed by direct reproduction: `engage`d `CONTACT_1`, confirmed `_active_gaze` returns a
+`fixed_look`; `drop_target`; confirmed `attack_run_transition` stays `None` and `drain_attack_run`
+returns the same non-`None` state; then created a *new* `attack_target` task for `CONTACT_2` with no
+`engage` at all, and called `_active_gaze` again with the stale (never-cleared) `attack_run_engaged`
+flag:
+
+```
+gaze plan after re-select WITHOUT engage (should be FREE_SCAN_PLAN, NOT fixed_look):
+ScanPlan(..., fixed_look=Gaze(center_azimuth_deg=0.0, ...))
+BUG? True
+```
+
+A `select target` the pilot never followed with `engage` claims the gaze and stops scanning
+elsewhere — exactly the cost Decision 9 REVISED says is paid only "for the run's duration," now paid
+for a selection that was never run. No test in this diff exercises the drop-target-then-reselect
+sequence; the existing `_active_gaze` tests all pass `attack_run_engaged` as a literal bool directly,
+never exercising whether `runner.attack_run_state` itself gets reset on this path.
+
+**Required fix**: `drain_attack_run` should treat "the standing task is gone" the same way it
+already treats "the contact record is gone" — return `None`, not the unchanged `state` — so
+`drop target`/the all-kinds cancel path end the run's phase (and the gaze claim with it), not only
+the selection.
+
+**5. Tier 2 unreachable, and no-fresh-observation silence — confirmed.** `render_alignment`'s `tier`
+parameter is `Literal[1]` (`speech.py:563`); `decide()`'s only call site passes the literal `1`
+(`attack_run.py:231`); no other call site exists in either subproject except the one test that
+pins the (now type-checked-away) `NotImplementedError`. `_tier1_alignment` returns `None` when
+`contact.last_percept.relative_direction is None` or the percept has aged past
+`ATTACK_RUN_RELATIVE_MAX_AGE_S`, and `decide()` returns `(state, None)` unchanged in that case —
+holding the last spoken state and staying silent, with no exception path. Confirmed by reading the
+full `_tier1_alignment`/`decide` bodies directly, not by trusting the docstring.
+
+**6. Decision 13's end conditions.** `render_lost_contact` speaks once: `drain_attack_run`'s
+`if state is None: return state` guard at the top means a second call after the contact vanished
+returns immediately without re-entering the lost-contact branch, so the line cannot repeat across
+polls. The task is genuinely cancelled (`cancel_task(self.store, self.tasks, target_task.id)` before
+the print), confirmed directly by the existing
+`test_drain_attack_run_ends_the_run_when_the_contact_record_vanishes`, which asserts
+`target_task.status == "cancelled"` — read and additionally exercised (passes as-is).
+
+### The flagged gap — judged
+
+**Declining the `attack`/`attack-run` synonym was the right call, and the case for it is slightly
+stronger than reported.** Independently recomputed: `difflib.SequenceMatcher(None, "tanks",
+"attack").ratio() == 0.5454545454545454` and `...("trucks", "attack").ratio() == 0.5` — both
+confirmed exactly as stated. One sharpening: `command_matcher.py`'s actual floor check is `if
+best_ratio < VERB_FLOOR: ...` (strict less-than, `VERB_FLOOR = 0.5`), so `"trucks"` at *exactly*
+`0.5` would **not** be rejected either — it is not merely "right on the floor" but on the side that
+passes. There is no currently-pinned adversarial test for `"trucks"` the way there is for
+`"the tanks are on the ridge"`, so this is not a second broken test today, but it means the
+real collision surface admitting `attack`/`attack-run` would open is at least two ordinary common
+nouns wide, not one. This is scope judgment, not a defect: `BL-14`'s own vocabulary (`engage`,
+`engage target`, `disengage`, `stop attack`, `abort`) is unaffected, the gap against the spec
+document is recorded in two places in the source (`vocabulary.PHRASES["engage"]`,
+`command_matcher._ENGAGE_VERBS`) rather than silently dropped, and resolving it (a differently-worded
+anchor, or accepting the adversarial-test regression) is exactly the kind of call `AGENTS.md`'s
+Escalation Rules route to the user/Architect, not to an implementer mid-pass. **Correctly deferred,
+not a required fix.**
+
+### Specification rules traced against the direction document
+
+- **Qualitative only, no degrees** — `render_engage_readback`/`render_attack_run_off` add no numeric
+  interpolation; range in the engage readback uses `_format_range_km` (already qualitative-safe,
+  rounds to 0.5 km) exactly once, per §1/the vocabulary table.
+- **Silence is the signal** — unchanged from Stage 1–3; Stage 5 wires it into the live loop but adds
+  no second emission path.
+- **Range spoken once** — `render_engage_readback` is the only place range is spoken for an
+  engage/select sequence; `render_target_readback` (used by `step`'s own readback) still omits it,
+  confirmed by reading both templates directly.
+- **Aligned is the conjunction** — unchanged mechanism from Stage 3; Stage 5 does not touch
+  `render_alignment`.
+- **Cadence baseline is the last spoken value** — `_should_emit` unchanged; the bug in finding 3
+  above is precisely a violation of this contract's *precondition* (that "last spoken" means
+  "actually printed"), not a change to the comparison logic itself.
+- **Terrain reference stops at `"lined up"`** — unaffected by this stage (renderer-level, already
+  verified Stage 1–3).
+- **`silence` mutes guidance, no exemption, and a run cannot begin while muted** — confirmed
+  directly: `handle_command` clears `self.silenced = False` for every token except `"silence"`
+  itself, dispatched *before* `_handle_engage` sets `attack_run_transition = "engage"` — so `engage`
+  always clears silence first, meaning a run genuinely cannot begin while muted (the only reachable
+  case is muting mid-run, which `_print`'s existing `if self.speech_client is not None and not
+  self.silenced` gate already handles with no special-casing, exactly as the plan claims).
+- **Three constants are unchanged agreed guesses** — `ATTACK_RUN_LINED_UP_AZIMUTH_DEG = 5.0`,
+  `ATTACK_RUN_ELEVATION_GATE_DEG = 10.0`, `ATTACK_RUN_CHANGE_THRESHOLD_DEG = 3.0`,
+  `RELATIVE_DIRECTION_SIGMA_DEG = 0.0` — all re-confirmed by grep against their declarations; none
+  retuned in this pass.
+- **The speech log carries target/tier/both axis errors per utterance** — confirmed end to end:
+  `drain_attack_run` passes `attack_run_fields` into `_print`; `_print` forwards it to
+  `speech_log_sink`; `logger._speech_log_sink`'s closure forwards the four fields into
+  `BeliefTruthLogWriter.write_speech`'s new keyword arguments, which conditionally add each to the
+  written row only when not `None`. Traced the whole chain by reading every hop, not just the two
+  endpoints.
+
+### Verification of the implementer's `mypy tests` characterisation — partially inaccurate
+
+The claim ("every reported line in `test_speech.py`/`test_crew_console.py`/`test_logger.py`/
+`test_callouts.py` that is not one of this pass's own new lines was already failing before this
+branch") was checked by diffing `mypy tests` output against the pre-Stage-5 commit (`5d96d62`), not
+accepted. For the four files it names, the claim holds: the three new `# type: ignore[attr-defined]`
+lines (`test_crew_console.py:4402,4410,4845`) produce the same "Unused type: ignore comment" noise
+the pre-existing precedent (`test_callouts.py:651`) already produces in the base commit too — not a
+new category of problem.
+
+**But the claim's own file list is incomplete.** `mypy tests` reports one genuinely new error not
+present in the base commit and not in any of the four named files:
+
+```
+tests/test_attack_run.py:361: error: Argument "tier" to "render_alignment" has incompatible type
+"Literal[2]"; expected "Literal[1]"  [arg-type]
+```
+
+This is a direct, mechanical consequence of this pass's own `Literal[1]` narrowing (the carried-over
+Stage 1–3 refinement) — `test_attack_run.py` itself has no diff in this range
+(`git diff 5d96d62..67d08f4 -- body-layer/tests/test_attack_run.py` is empty), so the line didn't
+change; the type of what it calls did. Low-stakes (`mypy tests` is not a mandated gate per
+`body-layer/CLAUDE.md`'s Commands section, same footing the Stage 1–3 review already noted), and the
+test itself still passes under `pytest` (it is asserting a runtime `NotImplementedError`, which the
+type narrowing does not prevent at runtime — only at the type-checker level). Not a required fix,
+but the self-report should have said "the four files above, plus one new tier-2 type error in
+`test_attack_run.py` from this pass's own `Literal[1]` change" rather than implying completeness.
+
+### Required Fixes
+
+- **`drain_attack_run` commits "spoken" state even when occupancy suppresses the actual print**
+  (finding 3) — a guidance change arriving while the channel is busy is marked spoken and never
+  re-offered, which is lost, not deferred, directly contradicting Decision 1's own stated guarantee.
+  Confirmed by direct reproduction (busy tick → state updated, nothing printed; freed tick, unchanged
+  geometry → still nothing printed). Fix: only commit the "last spoken" fields when the line was
+  actually printed; otherwise carry the previous state forward so the same change is re-offered once
+  the channel frees.
+- **`drop target` (and the generic all-kinds `cancel`/`stop` path) cancel the standing task but
+  never clear `runner.attack_run_state`**, so the engaged flag survives and a subsequent
+  `select target` with no `engage` wrongly inherits the gaze claim (finding 4). Confirmed by direct
+  reproduction (engage CONTACT_1 → drop target → select CONTACT_2 with no engage → `_active_gaze`
+  still returns a `fixed_look`). Fix: `drain_attack_run` should return `None`, not the unchanged
+  `state`, when the standing task is gone (cancelled), the same treatment it already gives a
+  vanished contact record.
+
+### Optional Refinements
+
+- The `mypy tests` self-report should name `test_attack_run.py`'s one new tier-2 type error
+  alongside the four files it already lists, rather than implying the characterisation is complete
+  for the whole diff. Not required — `mypy tests` is not a mandated gate.
+- `attack`/`attack-run` synonym gap: no action needed now; correctly deferred to the user/Architect
+  per the Escalation Rules, with the collision surface now confirmed slightly wider (two ordinary
+  nouns, not one) than the implementer's own note stated.
+
+### Verdict
+
+**NEEDS REVISION** — two required fixes, both confirmed by direct reproduction against this
+worktree's own code, not by reading. Everything else in Stage 4–5's scope (the `step` ordering
+primitive, the suppression gate's narrow scope, tier-2 unreachability, Decision 13's end conditions,
+the spoken-vocabulary/spec trace, the three constants, the speech-log wiring, and the
+`attack`/`attack-run` deferral) checked out clean under the same standard. Given `AGENTS.md`'s
+"A change request ... re-enters the loop" rule, these two fixes should go back through
+Implementer → Reviewer (of the fix) → DoD, not straight to DoD or to the user's acceptance sortie —
+the acceptance sortie flown before the busy-gate fix would risk measuring a run with an intermittently
+silent guidance channel and attributing it to the tuned constants rather than this mechanism.
+
+### Review Confidence (Stage 4–5)
+
+Full read of the plan's Stage 4/5 sections, the direction document, `implementation.md`'s own
+Stage 4/5 summary, and every changed source file in both subprojects (`crew_console.py`'s new
+`_step_candidates`/`_handle_step`/`_handle_engage`/`_handle_disengage`/`drain_attack_run`,
+`callouts.py`'s suppression gate, `logger.py`'s `_active_gaze` branch and poll-loop wiring,
+`tasks.py`/`tools.py`'s `descriptor` threading, `voice_commands.py`'s cancel-token additions,
+`belief_truth_log.py`'s new fields, and both audio-adapter files). All four verification gates run
+directly from inside each subproject against this worktree's own `src`. Both required fixes were
+found and confirmed by **direct reproduction against the real code** (not by reading, and not by
+trusting the implementer's tests, which do not exercise either scenario) — a standalone script built
+a real `Contact`/`CrewConsole`/`TaskStore` and drove `drain_attack_run`/`_active_gaze` through the
+exact sequences described, with printed output showing the defect each time. The `step`-recomputation
+claim and the suppression gate's narrow scope were both confirmed by mutation of the source, with
+each mutation reverted afterward (`git status --porcelain` on `crew_console.py`/`callouts.py` is
+clean). The `mypy tests` characterisation was checked by diffing the full tool output against the
+pre-Stage-5 commit, not accepted at face value.
