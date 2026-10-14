@@ -430,6 +430,13 @@ Note what his own example also does: it drops the magnitude word. Not *"come rig
 inherently the coarse one, which is the same outcome the coarse-register restriction was reaching
 for, arrived at by vocabulary instead of by a rule.
 
+**Both axes carry the qualifier** — confirmed 2026-10-14. His example gave only azimuth; the
+Architect pass extended it to the vertical (*"higher, obstructed"* / *"lower, obstructed"*) as its
+own inference and flagged it as such, and the extension was put to him and confirmed. The reason it
+matters rather than being symmetry for its own sake: a bare *"lower"* during an obstructed stretch
+would sound like it came from a live look, so marking one axis and not the other would make half of
+each callout silently more confident than the other half.
+
 ## 20. Relative direction is exact while the look holds
 
 > *"Relative direction while he's looking at it -> exact."*
