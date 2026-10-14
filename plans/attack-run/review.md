@@ -837,3 +837,183 @@ mid-run staleness finding were verified by direct mutation/reproduction, not acc
 implementer's report or the new tests' passing. `attention`/group-tagging finding (4) was verified
 by reading only, since the code it concerns is outside this diff and there was nothing load-bearing
 to mutate.
+
+## Staleness fix review (2026-10-14) — `AttackRunState` reset on contact identity change
+
+Reviewed `git diff 4a20b83..aa1e0cf` on `feature/bl14-attack-run` (tip `cf23246`, one capture-only
+commit beyond the fix, not part of it). Worktree base (`f25c57c`, forest-occlusion merge) was a
+strict ancestor of the named tip with a clean tree — fast-forwarded, no divergence. Files touched:
+`body-layer/src/belief/attack_run.py` (+39/-9), `body-layer/src/belief/tools.py` (docstring only,
++13/-1), `body-layer/tests/test_attack_run.py` (+155, three new tests), `plans/attack-run/
+implementation.md` (+134), one implementer agent-memory file. Read against this review's own
+finding 5 and `docs/acceptance/2026-10-14-attack-run-guidance-direction.md` §25.
+
+### Findings
+
+1. **The fix closes finding 5 — verified by independent reproduction, not the new tests.** Built a
+   fresh repro script against `decide()` directly (contact A: tier-1 look, remembered altitude
+   1000.0; re-point to contact B: no relative observation at all). Against the fixed code: `new_state.
+   last_known_target_alt_m is None`, `speech_b.text == "Lined up, obstructed."` — no elevation word.
+   Reverted just the `if state.last_contact_id != contact.id: state = AttackRunState(...)` line (a
+   two-line patch, restored afterwards, confirmed by `git status --short` showing no diff) and
+   reran the identical script: `new_state.last_known_target_alt_m == 1000.0` carried from A,
+   `speech_b.text == "Higher, obstructed."` — a wrong elevation call for a target never observed.
+   Fail-then-pass confirmed against the actual bug, independently of the implementer's own tests.
+   **Verified by running/mutating.**
+
+2. **The reset's completeness — right shape, and nothing on the dataclass needs preserving across a
+   re-point.** All five fields (`last_spoken_azimuth_deg`, `last_spoken_elevation_deg`,
+   `last_spoken_text`, `last_spoken_tier`, `last_known_target_alt_m`) are per-contact by the
+   implementation note's own audit, and reading each one's use in `decide`/`_should_emit`/
+   `_tier2_alignment` confirms none of them describes anything run-level (ownship state, group
+   membership, mission phase) rather than this-contact's-last-look. The wholesale-replace shape
+   (`AttackRunState(last_contact_id=contact.id)` rather than clearing named fields) is right for
+   today, but it is a trap waiting for the next field added to this dataclass: a future field that
+   *is* run-level (e.g. a cumulative "ticks spent on this attack run" counter, should one ever be
+   added) would be silently discarded by this reset with no test catching it, because the reset's
+   correctness is currently accidental (every field happens to be per-contact) rather than
+   structural (nothing enforces that a future field must be). Worth a one-line docstring note on
+   `AttackRunState` itself ("adding a field here means auditing whether `decide`'s identity-change
+   reset should still discard it") — not required now, since no such field exists, but cheap
+   insurance against the exact failure mode this finding was. **Verified by reading** (there is
+   nothing to mutate against a field that does not exist).
+
+3. **The `last_spoken_tier` structural claim — confirmed true today, confirmed fragile, exactly as
+   flagged.** Mutated `belief/speech.py`'s `render_alignment` to drop the `if tier == 2: text =
+   f"{text}, obstructed"` line (the one place that guarantees tier-1/tier-2 text never collides).
+   Result: `test_last_spoken_tier_cannot_silently_carry_a_wrong_value_across_a_retarget` failed
+   immediately (`'Lined up.' != 'Lined up.'`), along with ten other tests across the same file —
+   the claim is real and the dedicated test does pin it. Restored the file, confirmed all 29 tests
+   in `test_attack_run.py` pass again. **This confirms the argument is true by construction today,
+   not by luck** — the dedicated test would catch a future renderer change that reintroduced a
+   collision, which is exactly what the implementer's note claims it is for. Note for the record
+   (not a fix): this structural guarantee is a property of `render_alignment`, not of the
+   identity-change reset — with the reset in place, `last_spoken_tier` is reset to `None` on every
+   re-point regardless of whether tiers collide, so the two protections are independent and either
+   alone would currently hold the field correct across a re-point. The audit's own framing ("not
+   because a distinct reachable bug required it") is accurate. **Verified by mutation.**
+
+4. **The reset point versus `logger.py`'s `engage`-transition reset — not redundant, not
+   contradictory, but broader than `decide`'s own trigger in one case worth naming.** Read
+   `logger.py`'s poll loop (`crew_console.attack_run_transition == "engage"` branch,
+   `runner.attack_run_state = AttackRunState()`) against `_handle_engage`
+   (`crew_console.py` ~2104–2167): a **bare** `"engage"` with no target slots — i.e. re-confirming
+   the *already-selected, unchanged* target — still falls through to `self.attack_run_transition =
+   "engage"` unconditionally at the end of that handler. That means the call-site reset fires on
+   every explicit `engage` command, including one that names no new contact at all, whereas
+   `decide`'s own reset fires only when `contact.id` actually changes. The two are not
+   contradictory (both produce a fresh `AttackRunState` on the overlapping case — an actual
+   re-point) and the call-site reset is not dead code (it is the only thing that resets state on a
+   same-target re-confirm, a case `decide`'s identity check cannot and should not fire on). But it
+   does mean a bare re-`"engage"` on the same target throws away the cadence baseline and spoken
+   altitude memory even when nothing about the target changed — read as intentional ("restate the
+   current alignment on every explicit engage") rather than a bug, since it predates this diff
+   entirely (`logger.py` is untouched by `git diff 4a20b83..aa1e0cf`) and is not part of this
+   finding. Flagging per the task's own question: two reset paths for one state is exactly the
+   shape that goes wrong later if either is changed without checking the other's trigger condition.
+   **Verified by reading**, both handlers, not mutated — this is a pre-existing path outside the
+   diff.
+
+5. **Spurious firing — checked, not found.** `ContactStore._new_contact_id` mints a contact id once
+   at `Contact.from_percept` creation (`contacts.py` ~1176); `association_over_time`'s spatial gate
+   resolves a later poll's observation of the *same* physical entity back onto the *same* existing
+   contact id rather than minting a new one, so `contact.id` is stable across a continuously-tracked
+   contact's life. The one case where a contact's id does change under the pilot's nose is a genuine
+   loss-and-reacquisition (`CONTACT_LOST` then a fresh `CONTACT_DETECTED`, minting a new id) — and
+   resetting the cadence/altitude memory there is the *correct* behaviour, not a spurious fire: a
+   reacquired contact's belief state starts over regardless, so there is nothing stale to preserve.
+   No path was found where the same physical target keeps a stable identity in belief while
+   `attack_run.decide` sees a changing `contact.id`. **Verified by reading** (grepped `_new_
+   contact_id`'s call sites and `association_over_time`'s resolution path; no mutation attempted,
+   since there is no live DCS session available to generate a reachable counter-example and the
+   store's own invariant — one id per continuously-tracked entity — is enforced structurally by the
+   association gate, not by a check this round touches).
+
+6. **The singleton invariant (§25) — confirmed by grep, not accepted from the implementer's
+   report.** `belief.tasks.PendingIntent.contact_id: str | None` (`tasks.py:168`) — a single
+   identifier, never a collection, confirmed by reading the field declaration directly.
+   `attack_target_task` (`tools.py` ~1157–1161) cancels every still-`!= "cancelled"` `attack_target`
+   task before minting the new one — unchanged by this diff, confirmed against the actual loop, not
+   the docstring describing it. `CrewConsole._handle_step` (`crew_console.py` ~2089–2092) walks a
+   group one contact at a time by `target_task.contact_id = next_id` — a direct attribute mutation
+   on the existing `PendingIntent`, never a second `tasks.create(...)` call — confirmed by reading
+   the actual assignment, not the docstring's claim that it does. The docstring sentence added to
+   `attack_target_task` ("The attack target is always exactly one contact (user direction,
+   2026-10-14)") states the invariant as a standing fact with its direction attributed, not merely a
+   description of what the code happens to do today. **Verified by grep/reading**, each of the
+   three claims checked against its own call site rather than taken from the implementation note.
+
+7. **Nothing else moved.** `git diff 4a20b83..aa1e0cf --stat`: five files, matching the task's own
+   description exactly (`attack_run.py`, `tools.py` docstring-only, the new tests, the
+   implementation note, one memory file). No constant retuned
+   (`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/`ATTACK_RUN_ELEVATION_GATE_DEG`/
+   `ATTACK_RUN_CHANGE_THRESHOLD_DEG`/`ATTACK_RUN_RELATIVE_MAX_AGE_S` all untouched), no vocabulary
+   change, no `CalloutScheduler` change, no group-as-target mechanism or tightness test built.
+   **Verified by reading the diff stat and grepping the constant names.**
+
+### Verification — run myself
+
+Both subprojects, all four gates, from inside each subproject directory with its own `.venv`
+(this worktree has none of its own; borrowed the main checkout's by absolute path — confirmed
+`mypy src` resolves against *this* tree's `src` since config discovery and `mypy_path` are
+CWD-relative and the CWD was this worktree's `body-layer/`):
+
+- **body-layer**: `ruff format --check src tests` — 126 files, pass. `ruff check src tests` —
+  pass. `mypy src` (from `cd body-layer`) — `Success: no issues found in 58 source files`.
+  `pytest -q` — **1841 passed, 4 xfailed**, matching the implementer's reported count exactly.
+- **audio-adapter** (untouched by this diff; run anyway to confirm no regression): `ruff format
+  --check src tests` — 29 files, pass. `ruff check src tests` — pass. `mypy src` — `Success: no
+  issues found in 15 source files`. `pytest -q` — **277 passed, 1 skipped**, matching exactly.
+
+### Required Fixes
+
+None.
+
+### Suggestions (optional)
+
+- A one-line docstring note on `AttackRunState` flagging that the identity-change reset's
+  completeness is currently accidental (every field happens to be per-contact today) rather than
+  structural, so a future field addition gets checked against it explicitly (finding 2). Cheap,
+  not required.
+- No action needed on finding 4 (the broader `logger.py` reset) unless the "restate on bare
+  re-engage" behaviour is ever found to be unwanted in a sortie — it predates this diff and is not
+  part of this finding.
+
+### Verdict
+
+**APPROVE.**
+
+The fix closes finding 5, confirmed by an independent reproduction built from scratch and a
+fail-then-pass against the actual two-line patch (not the implementer's own tests). The one
+load-bearing structural claim (`last_spoken_tier` cannot silently collide) was tested by mutating
+the renderer it depends on, not accepted from the audit's prose. The singleton-target invariant
+(§25) was confirmed by reading each of the three call sites the implementer named, not from the
+report. Nothing outside the stated scope moved. All four gates pass in both subprojects with
+counts matching the implementer's report exactly. This clears the Implementer → Reviewer loop for
+the staleness fix; proceed to Definition of Done.
+
+### What Definition of Done should carry into the acceptance sortie
+
+Two things already known for the card, per the dispatch: a possibly-sluggish `step` against a
+large group (`BL-B49`'s enrichment cost, not the recogniser) and `engage`'s readback occupying the
+channel before the first guidance callout (correct behaviour per user direction, not a stall).
+
+One more thing worth telling the pilot to expect, from reading this fix closely: **a bare `"engage"`
+re-confirm on the already-selected target will re-speak the current alignment line, even if
+nothing about the target or geometry has changed** (finding 4 above) — this predates the fix, is
+unrelated to it, and is very likely intentional, but on a sortie it will sound like "why did he say
+that again" the first time it's heard with the fix now also silently resetting on every genuine
+re-point. Worth the pilot being told both reset triggers exist so a repeated callout right after
+saying "engage" again reads as expected, not as a glitch.
+
+### Review Confidence (staleness fix review)
+
+Full read of both source-affecting files (`attack_run.py`, `tools.py`'s docstring) plus the three
+call sites the singleton-invariant claim rests on (`tasks.py`'s `PendingIntent.contact_id`,
+`tools.py`'s cancel-then-promote loop, `crew_console.py`'s `_handle_step`). The fix itself, the
+tier-collision structural claim, and `logger.py`'s overlapping reset path were each verified by
+running, mutating, or reading against the actual code — not accepted from the implementation note.
+Finding 5 (spurious reset triggers) was verified by reading the contact-id minting/resolution path
+only, since no live DCS session was available to construct a reachable counter-example; the
+store's own invariant (one id per continuously-tracked entity) is structural rather than a check
+this round touches, so there was nothing distinctive to mutate.
