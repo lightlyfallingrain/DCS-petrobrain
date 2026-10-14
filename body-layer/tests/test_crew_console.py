@@ -47,7 +47,7 @@ from belief.speech import (
     render_group_full_disclosure,
     render_no_contact,
 )
-from belief.tasks import TaskStore
+from belief.tasks import PendingIntent, TaskStore
 from belief.tools import attack_target_task, describe_contact
 from belief.voice_commands import (
     ACT_FLOOR,
@@ -4245,6 +4245,238 @@ def test_select_target_tags_other_group_members_watch_not_priority(
     assert truck_contact.attention == "watch"
 
 
+def _store_with_armor_and_truck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ContactStore, TaskStore, CrewConsole, Contact, Contact]:
+    """Two grouped, individually-selectable-by-descriptor contacts --
+    `plans/attack-run/security-review.md`'s "Required fix in detail"
+    reproduction needs two distinct targets reachable by ordinary
+    `select target <descriptor>`/`engage <descriptor>` commands with no
+    intervening cancel. Returns `(store, tasks, console, armor, truck)`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=8,  # the maximal clock delta from 2 -- opposite side,
+                # so armor/truck are never clustered into one `belief.
+                # groups.Group`; this fixture is for the stale-task fix
+                # itself, not Decision 5's group-tagging split, which
+                # `test_select_target_tags_other_group_members_watch_
+                # not_priority` already covers on its own grouped fixture.
+                range_m=5000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    armor_contact = next(c for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    truck_contact = next(c for c in store.contacts if c.last_class_raw == "OP_TRUCK")
+    return store, tasks, console, armor_contact, truck_contact
+
+
+def _active_attack_target_tasks(tasks: TaskStore) -> list[PendingIntent]:
+    return [
+        task
+        for task in tasks.tasks
+        if task.kind == "attack_target" and task.status != "cancelled"
+    ]
+
+
+def test_reselecting_a_different_target_via_select_target_cancels_the_stale_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/attack-run/security-review.md`'s required fix, reproduced
+    with its own exact two-command sequence: `select target armor` then,
+    with no intervening `drop target`/`disengage`/`cancel`, `select target
+    <something else>`. Before the fix, `TaskStore.tasks` held two
+    `"pending"` `attack_target` tasks and every reader of "the current
+    target" (`_active_attack_target_task`'s `next(... not cancelled)`)
+    resolved to the *oldest* one -- the stale target -- even though the
+    readback just spoke the new selection. This is the fail-before/
+    pass-after reproduction: reverting the fix in `tools.attack_target_
+    task` (dropping the cancel-existing-active-tasks loop) makes this test
+    fail with `active[0].contact_id == armor.id` (the stale task
+    resolving as "the" target) rather than `truck.id`, and leaves `armor.
+    attention == "priority"` instead of demoting to `"normal"` -- both
+    asserted below."""
+    _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
+
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    assert armor.attention == "priority"
+
+    lines = console.handle_command(
+        "select_target", now_sim=1.0, slots={"descriptor": "truck"}
+    )
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == truck.id
+    # The old target's attention demotes -- `cancel_task` undoes the
+    # belief-state effect `attack_target_task` registered for it, the same
+    # "task owns the effect it registered" rule `watch_contact_task`/
+    # `scan_area` already follow.
+    assert armor.attention == "normal"
+    assert truck.attention == "priority"
+    # The resolution every reader of "the current target" shares
+    # (`drain_attack_run`, `_handle_step`, bare `engage`, `drain_events`'s
+    # `_WATCHED_ONLY_KINDS` suppression) now agrees with the readback.
+    active_task = console._active_attack_target_task()
+    assert active_task is not None
+    assert active_task.contact_id == truck.id
+    assert "truck" in lines[0].lower()
+
+
+def test_reselecting_a_different_target_via_engage_descriptor_cancels_the_stale_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same stale-target bug, reached via `engage <what> <where>`'s
+    descriptor branch instead of `select target` -- the review's finding
+    names both call sites (`_handle_select_target` and `_handle_engage`),
+    since both call `tools.attack_target_task` unconditionally."""
+    _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
+
+    console.handle_command("engage", now_sim=0.0, slots={"descriptor": "armor"})
+    assert armor.attention == "priority"
+
+    console.handle_command("engage", now_sim=1.0, slots={"descriptor": "truck"})
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == truck.id
+    assert armor.attention == "normal"
+    assert truck.attention == "priority"
+
+
+def test_bare_engage_after_reselection_follows_the_newly_selected_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `engage` after a reselect must start the run on the newly
+    selected contact, not the stale one -- bare `engage` never mints a
+    task itself, it only reads back whatever `_active_attack_target_task`
+    resolves, so this is a direct check that the resolution the fix
+    guarantees actually reaches that reader."""
+    _store, _tasks, console, _armor, _truck = _store_with_armor_and_truck(monkeypatch)
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    console.handle_command("select_target", now_sim=1.0, slots={"descriptor": "truck"})
+
+    lines = console.handle_command("engage", now_sim=2.0, slots=None)
+
+    assert console.attack_run_transition == "engage"
+    assert "truck" in lines[0].lower()
+
+
+def test_step_after_a_reselect_operates_on_the_newly_selected_targets_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`step` mutates the *existing* active task's `contact_id` in place
+    (`PendingIntent.descriptor`'s own docstring) rather than minting a new
+    one, so it was never itself vulnerable to the insertion-order bug --
+    but it must still operate on the group of whichever contact is
+    currently active, not a stale one left over from an earlier re-point
+    that the fix is supposed to have cancelled. Reselecting `L` onto the
+    `T`-selected fixture (simulating a second `select target`/`engage`
+    call with no intervening cancel) and then stepping must move within
+    `L`'s own left/right ordering."""
+    store, tasks, console, t_id, l_id, _r_id = _target_left_right_fixture(monkeypatch)
+    # Simulate a second `select target`/`engage` call re-pointing onto `L`
+    # without cancelling the `T` selection first -- the exact shape the
+    # fix guards against, reached here by calling the fixed primitive
+    # directly rather than re-deriving `L`'s own command-level descriptor.
+    second_task = attack_target_task(store, tasks, l_id, 1.0, descriptor="armor")
+    assert second_task is not None
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == l_id
+    assert store.contact(t_id).attention == "normal"  # type: ignore[union-attr]
+    assert store.contact(l_id).attention == "priority"  # type: ignore[union-attr]
+
+    lines = console.handle_command("step", now_sim=2.0, slots={"direction": "right"})
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    # `L` (330 deg) stepping right crosses `T` (0 deg) before `R` (30 deg).
+    assert active[0].contact_id == t_id
+    assert lines
+
+
+def test_reselecting_the_same_target_does_not_demote_its_own_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guards the fix's own ordering: cancelling *every* active
+    `attack_target` task (including one that already names `contact_id`)
+    before promoting `contact_id` to `"priority"` must still leave that
+    contact at `"priority"`, not `"normal"`, when the "new" selection is
+    actually the same contact -- `cancel_task`'s demote and `attack_target_
+    task`'s own promote must run in that order, not the reverse."""
+    _store, tasks, console, armor, _truck = _store_with_armor_and_truck(monkeypatch)
+
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    console.handle_command("select_target", now_sim=1.0, slots={"descriptor": "armor"})
+
+    assert armor.attention == "priority"
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == armor.id
+
+
+def test_reselecting_mid_run_repoints_the_run_to_the_new_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mid-run reselection (engaged, then `select target` something else)
+    is not covered by `docs/acceptance/2026-10-14-attack-run-guidance-
+    direction.md` -- resolved here by matching the precedent `step`
+    already sets while engaged (`_handle_step` mutates the active task's
+    `contact_id` in place with no special-case for "a run is active," and
+    `drain_attack_run`/`drain_events` both resolve the target fresh every
+    tick via `_active_attack_target_task` rather than caching it at
+    `engage` time): re-pointing, not refusing, is the existing shape for
+    "change the target while engaged," so a reselect takes the same path,
+    with nothing in `_handle_select_target` that refuses or special-cases
+    an in-progress run.
+
+    This test does not re-assert `attack_run_transition` after the second
+    command -- that field is a one-shot per-dispatch signal for the poll
+    loop (`_act`'s own reset, "so a stale `\"engage\"`/`\"disengage\"`...
+    cannot leak into an unrelated later command"), reset to `None` at the
+    top of *every* `handle_command` call regardless of what the previous
+    command did; the run's actual engaged/disengaged phase lives one layer
+    up, on `logger.ConsolePerceptionRunner.attack_run_state`, which this
+    test does not model. What matters here, and is asserted, is that
+    `select target` neither refuses nor is itself gated by a prior
+    `engage` -- it re-points the standing task exactly as it would with no
+    run active."""
+    _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    lines = console.handle_command("engage", now_sim=0.5, slots=None)
+    assert console.attack_run_transition == "engage"
+    assert lines
+
+    console.handle_command("select_target", now_sim=1.0, slots={"descriptor": "truck"})
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == truck.id
+    assert armor.attention == "normal"
+    assert truck.attention == "priority"
+
+
 def test_drop_target_cancels_the_attack_target_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4405,7 +4637,7 @@ def _inject_group(
     = group`), with `_last_reconciled_sim` set to match so `GroupStore.
     groups`/`group_for_contact` (filtered to *currently observed* groups)
     find it immediately with no further `tick()` needed."""
-    store._groups._last_reconciled_sim = now_sim  # type: ignore[attr-defined]
+    store._groups._last_reconciled_sim = now_sim
     group = Group(
         id=f"GROUP_TEST_{now_sim}",
         member_contact_ids=member_ids,
@@ -4413,7 +4645,7 @@ def _inject_group(
         last_reconciled_sim=now_sim,
         last_observed_sim=now_sim,
     )
-    store._groups._groups[group.id] = group  # type: ignore[attr-defined]
+    store._groups._groups[group.id] = group
 
 
 def _target_left_right_fixture(
@@ -4848,7 +5080,7 @@ def test_drain_attack_run_ends_the_run_when_the_contact_record_vanishes(
     assert task is not None
     # Simulate the id being abandoned by a merge, with no successor --
     # `ContactStore.contact` returns `None` for a removed id.
-    del store._contacts[contact_id]  # type: ignore[attr-defined]
+    del store._contacts[contact_id]
 
     result = console.drain_attack_run(
         AttackRunState(), now_sim=1.0, ownship=_ownship(x=0.0, z=0.0)
@@ -4899,7 +5131,7 @@ def test_drain_attack_run_reoffers_the_line_once_the_channel_frees() -> None:
     ownship = _ownship(x=0.0, z=0.0)
     store = ContactStore()
     contact_id = "CONTACT_1"
-    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
         contact_id, ownship_at_observation=ownship
     )
     tasks = TaskStore()
@@ -4940,7 +5172,7 @@ def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
     ownship = _ownship(x=0.0, z=0.0)
     store = ContactStore()
     contact_id = "CONTACT_1"
-    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
         contact_id, ownship_at_observation=ownship
     )
     tasks = TaskStore()
@@ -4981,7 +5213,7 @@ def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
     # every poll, so refresh the percept's own `t_sim` rather than letting
     # it go stale for a reason this test is not about.
     freed_now_sim = console.scheduler.busy_until_sim
-    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
         contact_id, ownship_at_observation=ownship, t_sim=freed_now_sim
     )
     freed_state = console.drain_attack_run(
@@ -5007,7 +5239,7 @@ def test_drain_attack_run_ends_the_run_after_drop_target(
     ownship = _ownship(x=0.0, z=0.0)
     store = ContactStore()
     contact_id = "CONTACT_1"
-    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
         contact_id, ownship_at_observation=ownship
     )
     tasks = TaskStore()
@@ -5036,7 +5268,7 @@ def test_drain_attack_run_ends_the_run_after_the_generic_cancel_task(
     ownship = _ownship(x=0.0, z=0.0)
     store = ContactStore()
     contact_id = "CONTACT_1"
-    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
         contact_id, ownship_at_observation=ownship
     )
     tasks = TaskStore()

@@ -657,3 +657,138 @@ are filed, not built, here):
   rather than also re-checking `group.movement_state == "moving"` is not an omission — the second
   check would be redundant given the first, and keeping only one avoids two conditions that could
   theoretically drift out of sync if `_update_heading`'s own invariant ever changed.
+
+## BL-14 security fix round (2026-10-14) — stale `attack_target` task on reselection
+
+Fixes the one required finding from the deep security review
+(`plans/attack-run/security-review.md`, "Required fix in detail"): `select target`/`engage
+<what> <where>` minted a new `attack_target` task unconditionally, never cancelling an existing
+active one. `TaskStore.tasks` is insertion-ordered and every reader of "the current target"
+(`CrewConsole._active_attack_target_task`'s `next(... not cancelled)`) resolved to the *oldest*
+still-active match — so reselecting a different contact with no intervening `drop target`/
+`disengage`/`cancel` left guidance, `step`, bare `engage`, and the `_WATCHED_ONLY_KINDS`
+suppression gate all silently still pointed at the stale target, while the readback for the new
+selection already spoke as if it had taken effect.
+
+### Fix shape chosen, and why
+
+**Cancel-then-create, at the single mint point (`tools.attack_target_task`), not at each of
+`crew_console.py`'s two call sites.** Both `_handle_select_target` and `_handle_engage`'s
+descriptor branch call `tools.attack_target_task` to mint, and `belief.console`'s dev
+`attack-target <id>` command (line ~401) calls the exact same function — fixing the shared
+primitive closes all three call sites in one change, rather than duplicating cancel-then-create
+logic at each caller (the in-place-mutation alternative the review also named would have needed
+duplicating at both `crew_console.py` sites, since `belief.console`'s dev command has no
+"existing task" concept to mutate into).
+
+This also means `_handle_step`'s bare mutation-in-place of the active task's `contact_id`, bare
+`engage`, `drain_attack_run`, and `drain_events`'s suppression gate all needed **no code change at
+all** — every one of them reads "the current target" via `_active_attack_target_task`, and once
+`attack_target_task` guarantees at most one active `attack_target` task exists at a time, that
+resolution is correct for free. `test_step_after_a_reselect_operates_on_the_newly_selected_targets_
+group`/`test_bare_engage_after_reselection_follows_the_newly_selected_target` in `test_crew_
+console.py` exist to prove this transitive correctness, not because `step`/bare `engage` needed
+their own fix.
+
+**Ordering inside the fix matters and was gotten wrong once before being pinned down by a test**
+(`test_reselecting_the_same_target_does_not_demote_its_own_attention`): `attack_target_task` first
+confirms `contact_id` exists (via `_find_contact`, no side effect) — so a bad reselection target
+returns `None` with the existing good selection left untouched, rather than destroying it to make
+room for a failed replacement — then cancels **every** still-active `attack_target` task
+(regardless of whether it already names `contact_id`) before promoting `contact_id` to
+`"priority"`. Cancelling unconditionally rather than skipping same-contact tasks, and promoting
+*after* all cancellations rather than before, is what keeps the final state correct whether the
+reselection is a genuinely different contact or a repeat of the same one — doing it the other way
+round (promote-then-cancel, or skip-cancel-on-same-contact) demotes the just-promoted contact back
+to `"normal"` the moment `cancel_task` runs. This also happens to close the review's noted
+non-blocking side effect of unbounded `TaskStore` growth under repeated `select target`/`engage`
+calls, for `attack_target` specifically, as the review itself anticipated a cancel-then-create fix
+would.
+
+### Attention-demotion answer
+
+`cancel_task` already resets the cancelled task's contact to `"normal"` (pre-existing behaviour,
+unchanged). **What the fix adds is a second, separate effect worth naming**: when the reselected
+target shares a `belief.groups.Group` with the contact being demoted — the ordinary case, since
+`_handle_select_target`/`_handle_engage` always tag a selected target's other group-mates
+`"watch"` — the demoted contact does not stay at `"normal"`; the group-tagging loop that runs
+*after* `attack_target_task` returns immediately raises it back to `"watch"`. This is correct,
+existing Decision 5 behaviour (`test_select_target_tags_other_group_members_watch_not_priority`
+already pins it for a fresh selection), not a regression this fix introduces — but it meant the
+reproduction fixture (`_store_with_armor_and_truck`) had to place its two contacts far enough
+apart (opposite clock positions, different ranges) that they are never grouped, so the
+stale-task test's own demotion assertion (`armor.attention == "normal"`) tests the fix's actual
+effect rather than the orthogonal group-tagging rule. A grouped-reselection variant would
+legitimately assert `"watch"`, not `"normal"`, and is out of this fix's scope since the review's
+finding is about task resolution, not attention levels.
+
+### Mid-run reselection decision
+
+Not covered by `docs/acceptance/2026-10-14-attack-run-guidance-direction.md`. Resolved by
+**matching the precedent `step` already sets while a run is engaged**: `_handle_step` mutates the
+active task's `contact_id` in place with no special-case for "a run is in progress," and
+`drain_attack_run`/`drain_events` both resolve the target fresh every tick via
+`_active_attack_target_task` rather than caching it at `engage` time — so the existing design
+already treats "change the target while engaged" as re-point, not refuse, for `step`. A reselect
+via `select target` takes the same path with no new logic: `_handle_select_target` contains no
+check for an in-progress run, and after this fix it simply re-points the standing task exactly as
+it would with no run active. `attack_run_transition` is a one-shot per-dispatch signal consumed
+by the poll loop, not durable run state, so it is unaffected either way and was not a candidate for
+special-casing. **This is a judgment call, not a requirement derivable from the direction
+document** — flagging it here rather than treating it as settled, in case a future sortie finds
+"re-selecting mid-run without an explicit `drop target` first" surprising in practice and wants it
+to require an explicit `drop target`/`disengage` instead.
+
+### Files Changed (this round)
+
+- `body-layer/src/belief/tools.py` — `attack_target_task`: cancels every still-active
+  `attack_target` task before minting/promoting the new one, after confirming the new
+  `contact_id` exists. See "Fix shape chosen" above.
+- `body-layer/tests/test_crew_console.py` — six new tests (see below), plus `PendingIntent` added
+  to the `belief.tasks` import.
+
+### Tests Added (this round)
+
+- `test_reselecting_a_different_target_via_select_target_cancels_the_stale_task` — the review's
+  own two-command reproduction (`select target armor` then `select target truck`, no intervening
+  cancel) via `select_target` twice. **Fail-before/pass-after verified**: reverting the fix (by
+  checksum-restored diff) left `TaskStore.tasks` holding two simultaneously-`"pending"`
+  `attack_target` tasks, failing at `assert len(active) == 1` with `2 == 1`.
+- `test_reselecting_a_different_target_via_engage_descriptor_cancels_the_stale_task` — the same
+  reproduction via `engage <what> <where>`'s descriptor branch instead of `select target`, per the
+  review naming both call sites.
+- `test_bare_engage_after_reselection_follows_the_newly_selected_target` — bare `engage` after a
+  reselect starts the run on the new target, not the stale one.
+- `test_step_after_a_reselect_operates_on_the_newly_selected_targets_group` — reselecting onto a
+  different member of a grouped fixture (`_target_left_right_fixture`'s `T`/`L`/`R`) and then
+  `step`-ping operates on the newly-active target's own ordering, with exactly one active task
+  throughout.
+- `test_reselecting_the_same_target_does_not_demote_its_own_attention` — guards the fix's own
+  cancel-then-promote ordering: reselecting the *same* contact must not transiently demote it.
+- `test_reselecting_mid_run_repoints_the_run_to_the_new_target` — the mid-run reselection decision
+  above, exercised: engaged, then `select target` something else, re-points without being refused.
+
+### Checks (this round)
+
+**body-layer/**:
+- `ruff format --check src tests`: pass (126 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 58 source files`
+- `pytest -q`: **1838 passed, 4 xfailed** (baseline 1832 passed / 4 xfailed + 6 net new tests)
+
+**audio-adapter/** (untouched by this round; run to confirm no regression):
+- `ruff format --check src tests`: pass (29 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 15 source files`
+- `pytest -q`: **277 passed, 1 skipped** — matches baseline exactly
+
+### Scope notes
+
+- `Contact.last_percept`'s optional `field(repr=False)` refinement (security review, "Optional
+  Refinements" #1) was **not** taken — out of this round's required-fix scope, and the task
+  framing it was dispatched under asked for the required fix only.
+- `ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/`ATTACK_RUN_ELEVATION_GATE_DEG`/
+  `ATTACK_RUN_CHANGE_THRESHOLD_DEG`/`ATTACK_RUN_RELATIVE_MAX_AGE_S` — untouched, per scope
+  discipline.
+- `clustering._extent_count`'s pre-existing `math.floor` hazard — untouched, explicitly not a
+  BL-14 finding.

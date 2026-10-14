@@ -1122,10 +1122,36 @@ def attack_target_task(
 
     Returns `None` -- no task registered, contact left untouched -- when
     `contact_id` does not exist, mirroring `watch_contact_task`'s own
-    contract."""
-    found = set_attention(store, contact_id, "priority", source=source)
-    if not found:
+    contract.
+
+    **Cancels any still-active `attack_target` task before minting a new
+    one** (BL-14 deep security review's required fix, `plans/attack-run/
+    security-review.md` "Required fix in detail"). `TaskStore.tasks` is
+    insertion-ordered and every reader of "the current attack-run target"
+    (`CrewConsole._active_attack_target_task`) resolves it via `next(...
+    not cancelled)`, i.e. the *oldest* still-active match -- so minting a
+    second `attack_target` task without cancelling the first left guidance,
+    `step`, bare `engage`, and the routine-callout suppression gate all
+    silently still pointed at the stale target, while the readback for the
+    new selection already spoke as if it had taken effect. Checking
+    existence *before* cancelling means a bad `contact_id` (unknown
+    contact) returns `None` with the existing selection left untouched,
+    rather than destroying a good selection to make room for a failed one.
+    Cancelling unconditionally -- even when the existing task already
+    names `contact_id` -- rather than only when the contact differs, keeps
+    the final attention state correct regardless of overlap: `cancel_task`
+    always demotes to `"normal"` first, and the `set_attention` call below
+    always promotes `contact_id` to `"priority"` last, so the order can
+    never leave the freshly-selected contact demoted. This also closes the
+    review's noted (non-blocking) side effect of unbounded `TaskStore`
+    growth under repeated `select target`/`engage` calls."""
+    if _find_contact(store, contact_id) is None:
         return None
+    for existing in tasks.tasks:
+        if existing.kind == "attack_target" and existing.status != "cancelled":
+            cancel_task(store, tasks, existing.id)
+    found = set_attention(store, contact_id, "priority", source=source)
+    assert found, "contact_id existence already confirmed above"
     kind: TaskKind = "attack_target"
     return tasks.create(
         kind=kind,
