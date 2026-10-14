@@ -553,6 +553,161 @@ def test_tier2_azimuth_never_speaks_tier_1s_fine_grained_words() -> None:
     assert "a bit" not in speech.text.lower()
 
 
+# -- decide(): mid-run reselection resets the per-contact state --------
+#
+# BL-14 security-fix review, finding 5 (`plans/attack-run/review.md`): the
+# security fix made mid-run reselection a sanctioned re-point (confirmed
+# standing, user direction 2026-10-14) rather than a refusal, which means
+# `decide` can be called with a state carried forward from the *previous*
+# target. Every field on `AttackRunState` describes that previous target's
+# last look -- these tests call `decide` directly, not through `drain_
+# attack_run`, per the review's own note that the wrapper's occupancy gate
+# can mask the exact tick a staleness bug would show.
+
+
+def test_decide_does_not_derive_the_new_targets_elevation_from_the_old_targets_altitude() -> (
+    None
+):
+    """The reviewer's own reproduction: engage contact A (tier 1 succeeds,
+    remembered altitude = ownship alt + 500 m), re-point to contact B mid-
+    run with no fresh relative observation for B at all. Before the fix,
+    tier 2's elevation axis read B's altitude off A's remembered value and
+    spoke a confidently wrong "Higher."/"A little lower." for a target
+    whose own altitude has never been observed. After the fix, the contact
+    id change resets `last_known_target_alt_m` to `None`, so B's elevation
+    axis fails open (no elevation word) exactly as it would for a target
+    that has never had a tier-1 look at all."""
+    ownship = _ownship(alt_m=500.0)
+    contact_a = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(alt_m=500.0),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=500.0),
+        t_sim=0.0,
+    )
+    state, speech_a = decide(
+        AttackRunState(), now_sim=0.1, ownship=ownship, contact=contact_a
+    )
+    assert speech_a is not None
+    # Tier 1 succeeded and remembered A's altitude as 500 + 500 = 1000.
+    assert state.last_known_target_alt_m == pytest.approx(1000.0)
+    assert state.last_contact_id == "CONTACT_1"
+
+    contact_b = Contact.from_percept(
+        "CONTACT_2",
+        Percept(
+            t_sim=0.1,
+            source="naked_eye_visual_filtered",
+            classification_raw="OP_ARMORED",
+            bearing_deg=0.0,
+            range_m=1000.0,
+            ownship_at_observation=ownship,
+            observation_id="OBS_2",
+            relative_direction=None,
+        ),
+    )
+
+    new_state, speech_b = decide(state, now_sim=0.2, ownship=ownship, contact=contact_b)
+
+    assert new_state.last_contact_id == "CONTACT_2"
+    # The bug: without the reset this would stay 1000.0, carried over from
+    # A, and tier 2 would compute B's elevation from it.
+    assert new_state.last_known_target_alt_m is None
+    assert speech_b is not None
+    assert "higher" not in speech_b.text.lower()
+    assert "lower" not in speech_b.text.lower()
+
+
+def test_decide_speaks_the_first_callout_about_a_retargeted_contact_even_if_the_old_cadence_baseline_matches() -> (
+    None
+):
+    """The cadence-baseline half of the same finding: if `last_spoken_*`
+    carried over from the old target, a new target whose geometry happens
+    to render the same text/axes as the old target's last-spoken values
+    would be wrongly suppressed as "unchanged" -- silent about a target
+    the pilot just deliberately selected, which is exactly backwards (the
+    first callout about a newly re-pointed target must speak)."""
+    ownship = _ownship()
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact_a = _contact_with_relative_direction(
+        ownship_at_observation=ownship, relative=relative, t_sim=0.0
+    )
+    state, speech_a = decide(
+        AttackRunState(), now_sim=0.1, ownship=ownship, contact=contact_a
+    )
+    assert speech_a is not None
+    assert speech_a.text == "Lined up."
+
+    # Contact B: identical geometry to A's last-spoken state, so a carried-
+    # over baseline would read "nothing has changed" and stay silent.
+    contact_b = Contact.from_percept(
+        "CONTACT_2",
+        Percept(
+            t_sim=0.1,
+            source="naked_eye_visual_filtered",
+            classification_raw="OP_ARMORED",
+            bearing_deg=0.0,
+            range_m=1000.0,
+            ownship_at_observation=ownship,
+            observation_id="OBS_2",
+            relative_direction=relative,
+        ),
+    )
+
+    new_state, speech_b = decide(state, now_sim=0.2, ownship=ownship, contact=contact_b)
+
+    assert speech_b is not None
+    assert speech_b.text == "Lined up."
+    assert new_state.last_contact_id == "CONTACT_2"
+    # The tier half of the same finding: the spoken utterance must carry
+    # *this* tick's own tier (1, contact B's fresh look), never a tier
+    # left over from A -- same call, same assertion point, since a wrong
+    # carried-over tier and a wrongly-suppressed callout are the same
+    # underlying defect here (see the next test for why they cannot be
+    # separated further).
+    assert new_state.last_spoken_tier == 1
+
+
+def test_last_spoken_tier_cannot_silently_carry_a_wrong_value_across_a_retarget() -> (
+    None
+):
+    """Documents a structural property discovered while auditing `last_
+    spoken_tier` for the same finding (`plans/attack-run/review.md`
+    finding 5): a *wrong* carried-over tier number cannot actually survive
+    `_should_emit`'s suppression, because `render_alignment` always
+    appends tier 2's `", obstructed"` qualifier -- so a tier-1 text and a
+    tier-2 text can never be equal strings, and `_should_emit`'s own
+    `text != state.last_spoken_text` check fires (forcing an emit, hence a
+    fresh, correct `tier`) *whenever the two ticks' tiers actually
+    differ*. The only way `last_spoken_tier` goes stale is when the old
+    and new tiers are the **same** -- in which case the stale value is
+    also the correct one, so there is no reachable case where this field
+    is silently wrong (only the reachable case, covered by the previous
+    test, where it is silently *unspoken*). Mechanical check, not a
+    reproduction: tier 1 and tier 2 renders of the same angle never
+    collide."""
+    for azimuth_deg, elevation_deg in (
+        (0.0, 0.0),
+        (6.0, 0.0),
+        (0.0, 12.0),
+        (20.0, 0.0),
+        (6.0, 12.0),
+    ):
+        tier1_speech = render_alignment(
+            azimuth_deg,
+            elevation_deg,
+            tier=1,
+            azimuth_table=AZIMUTH_WORD_TABLE,
+            elevation_table=ELEVATION_WORD_TABLE,
+        )
+        tier2_speech = render_alignment(
+            azimuth_deg,
+            elevation_deg,
+            tier=2,
+            azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
+            elevation_table=ELEVATION_WORD_TABLE,
+        )
+        assert tier1_speech.text != tier2_speech.text
+
+
 # -- render_alignment: the register switch and the two-gate evaluation ---
 
 

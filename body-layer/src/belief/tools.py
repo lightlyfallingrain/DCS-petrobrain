@@ -1144,7 +1144,19 @@ def attack_target_task(
     always promotes `contact_id` to `"priority"` last, so the order can
     never leave the freshly-selected contact demoted. This also closes the
     review's noted (non-blocking) side effect of unbounded `TaskStore`
-    growth under repeated `select target`/`engage` calls."""
+    growth under repeated `select target`/`engage` calls.
+
+    **The attack target is always exactly one contact** (user direction,
+    2026-10-14) -- `contact_id` is a single `str`, never a collection, and
+    this function's own cancel-every-active-then-promote-one sequence
+    above is what keeps at most one `attack_target` task ever active at
+    once, so two individual units can never be simultaneous targets. A
+    tight group is not a second case the mechanism has to accommodate:
+    `step` (Decision 6) walks the selection *within* a group one contact
+    at a time by mutating this same task's `contact_id` in place
+    (`CrewConsole._handle_step`), and the pilot approximates attacking a
+    group by selecting one member of it -- group-as-target is out of
+    scope by the same direction, not a precondition this code is missing."""
     if _find_contact(store, contact_id) is None:
         return None
     for existing in tasks.tasks:

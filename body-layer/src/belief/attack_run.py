@@ -177,16 +177,28 @@ class AttackRunState:
     tick actually speaks -- it is memory, not a speech baseline, so it
     must not go stale just because a steady run stays under the
     change-driven cadence's threshold. `None` only before the very first
-    tier-1 look this contact has ever had (possible for a handful of polls
-    right after `engage`, before the gaze claim's first look lands); tier
-    2's own elevation axis fails open in that case (no elevation word at
-    all) rather than fabricating a value -- see `_tier2_alignment`."""
+    tier-1 look *this contact* has ever had within the current `(state,
+    contact)` pairing (possible for a handful of polls right after
+    `engage` or right after a mid-run re-point, before the gaze claim's
+    first look lands for the new target); tier 2's own elevation axis
+    fails open in that case (no elevation word at all) rather than
+    fabricating a value -- see `_tier2_alignment`.
+
+    `last_contact_id` is the run-level/per-contact seam itself (the
+    security-fix review's finding 5, `plans/attack-run/review.md`): every
+    other field above describes *this contact's* last look, never the
+    run's in general, so `decide` resets the whole state to fresh the
+    moment the task it is called for names a different contact than the
+    one that produced the carried-forward state -- see `decide`'s own
+    docstring for why that reset lives there and not at the call site.
+    `None` only for a state that has never been passed through `decide`."""
 
     last_spoken_azimuth_deg: float | None = None
     last_spoken_elevation_deg: float | None = None
     last_spoken_text: str | None = None
     last_spoken_tier: Literal[1, 2] | None = None
     last_known_target_alt_m: float | None = None
+    last_contact_id: str | None = None
 
 
 def _tier1_alignment(
@@ -384,10 +396,29 @@ def decide(
     reads is always as fresh as the most recent look, not merely the most
     recent *spoken* one.
 
-    **No I/O, no store access beyond the `contact`/`group` handed in** --
-    this is the pure core `plans/attack-run/plan.md` Stage 3 calls for,
-    testable against hand-built `OwnshipState`/`Contact`/`Group` fixtures
-    with no `ContactStore` in the loop at all."""
+    **Resets `state` to fresh the moment `contact.id` differs from
+    `state.last_contact_id`** (the security-fix review's finding 5): a
+    mid-run re-point (BL-14's security fix made this a sanctioned,
+    silent re-point rather than a refusal -- confirmed standing, user
+    direction 2026-10-14) hands this function the *same* `AttackRunState`
+    it was carrying for the old target, and every field on it describes
+    that old target's last look, not the new one's. Resetting here, at
+    the one place that already sees both `state` and `contact` together
+    on every call, means the invariant holds regardless of which command
+    path produced the re-point (`select target`, `engage <what> <where>`
+    while already engaged, or any future caller) -- resetting at a call
+    site instead would have to be repeated at every such path and was
+    exactly the gap this finding describes (`logger.py`'s own reset only
+    fires on an explicit `engage` transition, never on a bare
+    reselection). The reset clears `last_known_target_alt_m` (closes the
+    reported bug: the new target's elevation can no longer be computed
+    from the old target's remembered altitude) and the `last_spoken_*`
+    cadence baseline/tier (so the first utterance about the newly
+    selected target always speaks -- `_should_emit` sees `last_spoken_
+    text=None` and emits unconditionally -- and carries the tier that
+    utterance actually used, never the old target's)."""
+    if state.last_contact_id != contact.id:
+        state = AttackRunState(last_contact_id=contact.id)
     tier: Literal[1, 2]
     alignment = _tier1_alignment(ownship, contact, now_sim)
     if alignment is not None:
@@ -426,5 +457,6 @@ def decide(
         last_spoken_text=speech.text,
         last_spoken_tier=tier,
         last_known_target_alt_m=target_alt_m,
+        last_contact_id=contact.id,
     )
     return new_state, speech

@@ -792,3 +792,137 @@ to require an explicit `drop target`/`disengage` instead.
   discipline.
 - `clustering._extent_count`'s pre-existing `math.floor` hazard — untouched, explicitly not a
   BL-14 finding.
+
+## Security-fix review round 2 — `AttackRunState` run-level state surviving a re-point (2026-10-14)
+
+Fixes the security-fix review's finding 5 (`plans/attack-run/review.md`, "Security fix review"
+section): `AttackRunState` carried run-level state that survived a mid-run re-point to a different
+contact, so a newly-selected target's tier-2 elevation guidance could be computed from the
+*previous* target's remembered altitude.
+
+### Per-field audit of `AttackRunState`
+
+Each field, checked against "does this describe the run or this contact":
+
+- **`last_known_target_alt_m`** — **per-contact; the reported bug.** Reconstructed from a
+  tier-1 look of one specific contact (`_remembered_target_alt_m`). Before this fix it was
+  read/written with no contact identity attached at all, so a re-point carried the old target's
+  altitude straight into the new target's tier-2 fallback. Fixed by the reset below.
+- **`last_spoken_azimuth_deg` / `last_spoken_elevation_deg` / `last_spoken_text`** — **per-contact.**
+  The change-driven cadence baseline (`_should_emit`) compares the *new* target's geometry/text
+  against the *old* target's last-spoken values. Confirmed by direct reproduction
+  (`test_decide_speaks_the_first_callout_about_a_retargeted_contact_even_if_the_old_cadence_baseline_matches`):
+  built contact A (tier 1, "Lined up."), re-pointed to contact B with matching geometry so the
+  carried baseline reads "unchanged" — pre-fix, `decide` returns `speech=None`, silencing the very
+  first utterance about a target the pilot just selected. This is the cadence form of the same
+  underlying defect, not a second bug.
+- **`last_spoken_tier`** — **per-contact in principle, but structurally cannot be silently wrong.**
+  Audited and reproduced separately
+  (`test_last_spoken_tier_cannot_silently_carry_a_wrong_value_across_a_retarget`): `render_alignment`
+  always appends tier 2's `", obstructed"` qualifier, so a tier-1 render and a tier-2 render of the
+  same angle can never produce equal text strings. `_should_emit`'s `text != state.last_spoken_text`
+  check therefore always fires whenever the old and new ticks' tiers genuinely differ, forcing an
+  emit with a freshly-computed (correct) `tier` — there is no reachable case where a *wrong* tier
+  number survives suppression, only the reachable case (covered by the cadence test above) where the
+  correct tier is silently never spoken at all. The fix still resets this field for cleanliness and
+  because `AttackRunState`'s own invariant ("every field describes this contact") should hold
+  uniformly, not because a distinct reachable bug required it.
+- **`last_contact_id`** — new field, added by this fix. The run-level/per-contact seam itself: the
+  one piece of information `decide` was missing to tell "the same contact, another tick" apart from
+  "a different contact entirely."
+
+### The fix
+
+`belief/attack_run.py`'s `decide()`: if `state.last_contact_id != contact.id`, replace `state` with
+a fresh `AttackRunState(last_contact_id=contact.id)` before computing anything else. Both of
+`decide`'s own state-construction sites (the no-emit `replace()` and the emit-path `AttackRunState`
+literal) already carry `last_contact_id` forward correctly once the reset has run.
+
+**Reset chosen inside `decide()`, not at the call site**, per the task's own framing of this as a
+design decision: `decide()` is the one place that already sees both `state` and `contact` together
+on every call, so the invariant ("this state describes this contact") holds regardless of which
+command path produced the re-point. The call site
+(`logger.py`'s `crew_console.attack_run_transition == "engage"` branch, which resets
+`runner.attack_run_state = AttackRunState()`) only fires on an *explicit* `engage` transition —
+confirmed by reading `logger.py`'s poll loop — and does **not** fire for a bare mid-run `select
+target`/`engage <what> <where>` reselection while already engaged, which is exactly the path the
+security fix's own task-identity change made a sanctioned re-point. Resetting only at that call site
+would have left this exact bug in place for the most common re-point path; resetting inside `decide`
+closes it for every caller, present and future.
+
+The first callout about a newly re-pointed target **speaks**, by design — confirmed deliberately,
+not merely as a side effect of the reset: `AttackRunState()`'s defaults have every `last_spoken_*`
+field `None`, which `_should_emit` already treats as "always emit the first utterance."
+
+### The singleton-target invariant (user direction, 2026-10-14)
+
+User direction confirmed two things mid-task, both addressed by checking rather than building:
+
+1. **Mid-run re-point is confirmed standing** ("re-point is fine") — not an open question; the fix
+   above is exactly why the carried state needs the reset.
+2. **The attack target is always exactly one contact**, never two individual units simultaneously —
+   checked, not assumed:
+   - `belief.tasks.PendingIntent.contact_id` is typed `str | None`, a single identifier, never a
+     collection — the type itself forecloses "two contacts" as a representable state.
+   - `belief.tools.attack_target_task` cancels every still-active `attack_target` task before
+     minting a new one (the earlier round's required fix), so at most one such task is ever active.
+   - `CrewConsole._handle_step` moves the existing single task's `contact_id` in place
+     (`target_task.contact_id = next_id`) to walk within a group — it never creates a second task,
+     confirmed by reading `_handle_step` directly.
+   - A one-line invariant sentence was added to `attack_target_task`'s own docstring
+     (`belief/tools.py`) stating this explicitly, since the user named it a stated invariant that
+     deserves to be verifiable rather than incidental.
+3. **Group-as-target is out of scope, not deferred** — a later user clarification during this round
+   ("I can myself approximate attacking a group by picking an individual unit there. No need to
+   build targeting group if not supported already."). Nothing was built for it; the docstring
+   sentence above says so in one line rather than filing it as an open risk, per that direction.
+
+### Tests added
+
+All four in `body-layer/tests/test_attack_run.py`, calling `decide()` directly (per the task's own
+note that `drain_attack_run`'s occupancy gate between the wrapper and the pure core can mask exactly
+the tick a staleness bug would show):
+
+- `test_decide_does_not_derive_the_new_targets_elevation_from_the_old_targets_altitude` — the
+  reviewer's own reproduction: contact A (tier 1, remembered altitude 1000 = 500 ownship + 500
+  up_m), re-pointed to contact B with no relative observation. Fails before the fix
+  (`new_state.last_known_target_alt_m == 1000.0`, carried from A; rendered "Higher, obstructed.");
+  passes after (resets to `None`, no elevation word).
+- `test_decide_speaks_the_first_callout_about_a_retargeted_contact_even_if_the_old_cadence_baseline_matches`
+  — the cadence case: contact B's geometry matches A's last-spoken baseline exactly, so the carried
+  baseline would wrongly suppress. Fails before the fix (`speech_b is None`); passes after (always
+  speaks on first callout about the new target) and also pins the tier (`last_spoken_tier == 1`,
+  contact B's own fresh tier-1 look).
+- `test_last_spoken_tier_cannot_silently_carry_a_wrong_value_across_a_retarget` — documents the
+  structural property found while auditing the tier field (see above): tier-1 and tier-2 renders of
+  the same angle never produce equal text, for five sample angles including the lined-up/off-sector
+  boundary. Not a reproduction (passes identically before and after this fix) — a mechanical check
+  recording *why* the tier field needed no distinct reproduction of its own.
+
+**Fail-then-pass evidence**: reverted the `if state.last_contact_id != contact.id: state =
+AttackRunState(last_contact_id=contact.id)` line, confirmed the first two tests above fail for the
+stated reasons (`shasum` of `attack_run.py` recorded before/after: `1e0c8891640ca54669c510006aee1c6b804a72c2`
+both times, confirming an exact restore), then restored and confirmed all three pass.
+
+### Checks (this round)
+
+**body-layer/**:
+- `ruff format --check src tests`: pass (126 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 58 source files`
+- `pytest -q`: **1841 passed, 4 xfailed** (baseline 1838 passed / 4 xfailed + 3 net new tests)
+
+**audio-adapter/** (untouched by this round; run to confirm no regression):
+- `ruff format --check src tests`: pass (29 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 15 source files`
+- `pytest -q`: **277 passed, 1 skipped** — matches baseline exactly
+
+### Scope notes
+
+- `ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/`ATTACK_RUN_ELEVATION_GATE_DEG`/
+  `ATTACK_RUN_CHANGE_THRESHOLD_DEG`/`ATTACK_RUN_RELATIVE_MAX_AGE_S` — untouched, per scope
+  discipline.
+- No vocabulary, tier-rule, `CalloutScheduler`, or task-identity-fix change. No group-as-target or
+  tightness test built — confirmed unreachable/out-of-scope rather than silently satisfied, per the
+  "singleton-target invariant" section above.
