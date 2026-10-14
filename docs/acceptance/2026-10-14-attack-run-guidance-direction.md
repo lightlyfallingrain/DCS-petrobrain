@@ -407,6 +407,80 @@ vector is a subtraction and a frame rotation. What it must carry is a **bound**:
 the target is actually being looked at with line of sight clear, which is what makes it a perception
 rather than a map read.
 
+## 19. Lost sight is spoken as a qualifier on the guidance, not as an event
+
+> *"When lost sight -> "right/left, obstructed"."*
+
+**This refines §7 rather than contradicting it.** §7 said *"Say nothing"*, and that still holds for
+the thing it was about: **losing the target is not announced as an event** — there is no *"lost
+contact"*, no interruption, no change of task. What changes is that the ongoing guidance callout
+**carries a qualifier**: `"right, obstructed"` / `"left, obstructed"`.
+
+**Why this is better than the alternative that was about to be chosen.** The Architect pass had found
+that guiding on projected belief while circling carries ~3.9° of error at 1σ (see §20), against a
+5° lined-up band — so a silent switch between channels could move the aim point ~4° and fire a
+spurious *"come left"* at an aircraft the pilot had not moved. The proposed fix was to restrict the
+fallback to coarse words so a 4° shift would produce no utterance. **The user's answer is better: one
+word tells the pilot which channel he is hearing.** The transition becomes *observable* without being
+*announced*, silence keeps meaning exactly one thing, and the pilot can discount the precision
+himself rather than the system pretending to a precision it does not have.
+
+Note what his own example also does: it drops the magnitude word. Not *"come right, obstructed"* or
+*"a bit right, obstructed"* — just **direction plus the qualifier**. So the obstructed register is
+inherently the coarse one, which is the same outcome the coarse-register restriction was reaching
+for, arrived at by vocabulary instead of by a rule.
+
+## 20. Relative direction is exact while the look holds
+
+> *"Relative direction while he's looking at it -> exact."*
+
+Confirms §18's stated assumption. `RELATIVE_DIRECTION_SIGMA_DEG = 0.0`, present as a parameter so a
+value can be given later with no rewrite (§17's structural requirement), and **pilot pointing error
+stays the pilot's** — consistent with ballistics staying his.
+
+For scale, so the zero is a decision rather than an oversight: at 1 km, 1° of pointing error is 17 m
+of cross-track against a 5° band, so a non-zero sigma would be felt as occasional chatter near the
+band edge.
+
+## 21. Why a finished angle cannot be carried — three reasons, and the third reaches another subproject
+
+The Architect pass established that the crew loop polls at 1.0 s and a 45° bank turn at 220 km/h
+yaws at `g·tan45/V` = **9.2°/s**, so an azimuth frozen at the observing poll is ~9° stale one poll
+later — nearly twice the lined-up band. Hence the datum carries an ownship-frame **offset**, re-rotated
+against current attitude each poll. The user added three things that reframe what that means:
+
+> *"1 - it takes some time to speak the words, so any update is a couple of second old by the time I
+> hear it. 2 - angle changes fast when turning in for attack run. When the target is in 12 o'clock
+> sector, also the ownship movements become more gentle. 3 - this could be a good reason to separate
+> telemetry updates to different frequency than world object updates. The target position is not
+> going to change by that much, but ownship angles might change quickly."*
+
+**1. Speech latency bounds the useful precision.** A callout is already a couple of seconds old by
+the time it is heard, so precision beyond that is spent on nothing. This is an argument against
+chasing freshness past a point, and it belongs next to the cadence rule (§10): *what* is said should
+be worth saying by the time it arrives.
+
+**2. The register and the dynamics co-vary, so the design self-balances.** Angular rate is highest
+during turn-in — which is exactly the o'clock phase, where the words are 30° buckets and 9° of
+staleness is immaterial. Once the target is in the 12 o'clock sector the movements are gentle, which
+is exactly where the words become fine. **The phase where precision matters is the phase where the
+geometry is calm.** This is why the poll split below is an optimisation rather than a prerequisite,
+and it should be stated in the plan so nobody treats the 9.2°/s figure as a blocker.
+
+**3. Ownship telemetry and world objects should update at different rates** — and this corrects a
+filed assumption. `aircraft-layer/ROADMAP/AC-B3.md` ("Split the export throttle", raised 2026-09-09)
+proposes exactly this and dismisses it as *"Not urgent — no measured FPS cost yet to react to… a pure
+export-cost/latency tradeoff, **not a belief-quality one**."* Attack-run guidance is the first
+consumer for which attitude freshness **is** a quality driver, so that last clause no longer holds
+and `AC-B3` has its first real motivation.
+
+**But the binding constraint is not where `AC-B3` puts it.** Aircraft-layer already exports at 5 Hz
+(`EXPORT_INTERVAL_S = 0.2`); **body-layer polls everything once a second in one loop**
+(`logger.py`'s `_DEFAULT_POLL_INTERVAL_S = 1.0`, one `run_once()` polling ownship telemetry and then
+every source). So attitude reaching the guidance layer is ≤1 s old *regardless of export rate*, and
+splitting the export throttle alone would deliver none of this. The split has to exist on **both**
+sides, and body-layer's is the one that binds. File it; do not build it inside `BL-14`.
+
 ---
 
 ## Still open
