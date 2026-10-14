@@ -478,8 +478,43 @@ and `AC-B3` has its first real motivation.
 (`EXPORT_INTERVAL_S = 0.2`); **body-layer polls everything once a second in one loop**
 (`logger.py`'s `_DEFAULT_POLL_INTERVAL_S = 1.0`, one `run_once()` polling ownship telemetry and then
 every source). So attitude reaching the guidance layer is ≤1 s old *regardless of export rate*, and
-splitting the export throttle alone would deliver none of this. The split has to exist on **both**
-sides, and body-layer's is the one that binds. File it; do not build it inside `BL-14`.
+splitting the export throttle alone would deliver none of this.
+
+## 22. The fast lane is **selective**, not a global rate change
+
+> *"for body layer poll rate, we should have a selective more frequent poll: ownship telemetry and
+> currect target data. Not all world objects, just ownship and current target. Could be that 5 Hz.
+> We'll need both anyway for 9K113 missile guidance to be precise."*
+
+**This supersedes §21 point 3's framing** (and the "both sides must split" reading recorded above).
+The shape is not *telemetry fast, world objects slow*. It is a **fast lane carrying exactly two
+things — ownship telemetry and the currently selected target — at perhaps 5 Hz**, with bulk world
+objects left on their own slower rate.
+
+**Why this is tidier than the general split:**
+
+- **It is attack-run-scoped by construction.** A "current target" exists only while one is selected,
+  so the lane turns on with the run and off with it. No global rate change, and no cost at all when
+  not attacking.
+- **It needs no aircraft-layer change to start.** World objects are *already* published at 5 Hz;
+  body-layer's 1 Hz poll is the only throttle between that and guidance. So a body-side selective
+  fast poll gets 5 Hz target data today. `AC-B3` becomes a prerequisite only *if* it lands and slows
+  bulk world objects for FPS — at which point the selected target needs its own fast publication on
+  the aircraft side too. **The dependency runs that way round, not the other.**
+- **It has a second consumer already named**: *"We'll need both anyway for 9K113 missile guidance to
+  be precise."* The 9K113 run requires the copilot to hold the sight on the target for the missile's
+  whole flight, so continuous precise tracking is a known future requirement rather than speculative
+  scope. The lane is therefore a **reusable seam**, not an attack-run optimisation.
+
+**The constraint that decides whether this is buildable at all:** the fast lane **cannot** be the
+poll loop running five times faster. `BL-B26`'s measured worst tick is **1,579 ms** and
+`group_salient_ids` alone is ~300 ms of every poll, so a 5 Hz full perception tick is not merely
+expensive — it is impossible. The lane has to be a narrow path refreshing only ownship attitude and
+the selected target's relative-direction datum: no clustering, no group reconciliation, no
+enrichment, no callout scheduling. That is exactly what the re-rotation design consumes, so it
+should fall out cleanly, but it is the part to verify rather than assume.
+
+**File, do not build.** Not in `BL-14`'s scope.
 
 ---
 
