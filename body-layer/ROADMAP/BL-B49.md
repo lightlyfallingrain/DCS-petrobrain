@@ -41,3 +41,17 @@
 
   Not related to [[BL-B48]]: closing the `belief.groups` cohesion defect will not change this path's
   cost either way, because BL-13's summary never walks a group roster.
+
+  **Second confirmed caller: `[[BL-14]]`'s `step`, found by the Performance Reviewer during BL-14's
+  whole-feature pass, 2026-10-14 (verdict APPROVED — MONITOR,
+  `plans/attack-run/performance-review.md`).** `_step_candidates`/`_handle_step` call
+  `describe_contact` once for the current target and once per "other" candidate on every press,
+  paying the same uncached `terrain_divide_qualifier` term (6.77 ms/contact) unconditionally — up
+  to `2G+1` calls for a group of size `G`. Illustratively (not reproduced against a live sortie):
+  a 15–20 member group costs ~210–280 ms of terrain-query time alone per `step` press, a
+  synchronous stall of the same kind this entry already describes, through the same shared
+  function, with a new caller. Not a `BL-14` defect — `step` is correctly recomputed from
+  ownship's present position on every press by user direction, and the expensive part is this
+  entry's mechanism, not that one. **Whichever mitigation is picked here should be sized against
+  both callers** — `report`'s narrow-query path and `step`'s per-press ordering — not resolved
+  against one and rediscovered against the other.

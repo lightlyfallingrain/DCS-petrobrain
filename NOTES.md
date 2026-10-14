@@ -1110,3 +1110,54 @@ two functions that must agree (2026-09-19).
   Architect. Lesson: a plan's cost/rate arguments need their inputs checked against the current
   value in code, not just checked for internal consistency — a wrong constant and a consistent
   argument built on it both read as "checked."
+
+## Attack-run guidance design (BL-14)
+
+- **A spoken number earns its place only when it names a reference the pilot already reads.**
+  O'clock and kilometres survive because they point at something he can independently check out the
+  window; "4 degrees right" does not, because it is a measurement he would have to convert first.
+  This retroactively explains why the degree-based register (both azimuth-down and the periodic
+  range countdown) was struck from `BL-14`'s guidance despite being the cheaper thing to compute —
+  computability and usefulness are different properties (`docs/acceptance/
+  2026-10-14-attack-run-guidance-direction.md` §§1, 9).
+- **"Where is it on the map" and "where is it relative to me right now" are two different
+  questions with two different error models, and conflating them injects an error nobody meant to
+  model.** `BEARING_SIGMA_DEG` models the cost of *stating* a bearing in words, not anything DCS
+  reports — its own docstring says so — and is the right model for an o'clock-and-km report, the
+  wrong one for live alignment guidance while looking straight at the target (where most of the
+  error is ownship's own, which cancels in a relative observation). `BL-14` had to introduce a
+  second perception datum (`RelativeDirection`, `RELATIVE_DIRECTION_SIGMA_DEG`) rather than reuse
+  the existing world-anchored belief, specifically because the reused model would have put a
+  stating-precision error into a channel that needed none.
+- **A stated invariant turns a defect into a violation, and the code should read that way.** "One
+  thing only can be the target of an attack run" — because one azimuth/elevation solution cannot
+  point at two places — is why a stale `attack_target` task silently surviving a re-selection
+  mattered: the system briefly had two targets, which the invariant says cannot exist. The fix
+  (cancel every active task, then promote) is the invariant's enforcement point, not just a bug
+  patch, and is documented as such in `attack_target_task`'s own docstring.
+- **Check a review brief's own premise, not only the mechanism it asks about.** A review brief
+  stated `Percept` carries `derived_world_position` and now also `relative_direction`, implying a
+  widened truth-adjacent surface. It doesn't: that field exists only on `Observation`, and `Percept`
+  is deliberately stripped of every truth field. The premise came from the orchestrator's framing,
+  not from the code, and would have gone unchecked if the reviewer had answered the question as
+  asked instead of verifying what `Percept` actually carries first.
+- **Look for an existing general mechanism before scoping a new constant for a request that sounds
+  feature-specific.** A user request for "a 1s delay after the readback, before guidance speaks"
+  turned out to be a 0.25s calibration delta on `callouts.py`'s pre-existing `INTER_UTTERANCE_GAP_S`
+  (0.75s), which already gated every reply's trailing silence, attack-run or not. Treating it as a
+  new attack-run-local constant would have duplicated ~80% of an existing mechanism and fragmented
+  one scheduling concern across two modules.
+- **An occupancy gate sitting between a public method and its pure decision core is exactly the
+  place a staleness bug hides**, because calling the public method at the wrong simulated time can
+  silently swallow the symptom. `drain_attack_run`'s "spoken state committed even when the channel
+  was busy and nothing printed" bug was invisible when reproduced through `CrewConsole.
+  drain_attack_run` at one particular `now_sim` (the busy-gate happened to suppress the print on
+  that exact tick) and only surfaced when `belief.attack_run.decide` was called directly,
+  bypassing the wrapper. When a wrapper and its pure core disagree about state, call the pure core
+  directly to decide which one is lying.
+- **A number cited from an earlier measurement needs checking against the current codebase, not
+  just against the earlier report's own arithmetic.** A performance review's budget context reused
+  `BL-11`'s `group_salient_ids`/worst-tick figures; the median had since improved 26× while the
+  *maximum* (1,579 ms → 1,615 ms) had not moved at all — citing only the improved median would have
+  misrepresented the actual tail risk a new per-press cost (`step`'s uncached `describe_contact`
+  enrichment) was being measured against.
