@@ -1091,6 +1091,44 @@ def watch_contact_task(
     )
 
 
+def attack_target_task(
+    store: ContactStore,
+    tasks: TaskStore,
+    contact_id: str,
+    now_sim: float,
+    reason: str = "attack_target",
+    source: str = "console",
+) -> PendingIntent | None:
+    """Select `contact_id` as the standing attack-run target
+    (`plans/attack-run/plan.md` Decision 2, 5) -- `watch_contact_task`'s
+    direct sibling, with one difference: the attention level is
+    `"priority"`, not `"watch"`, so the target's own routine callouts are
+    suppressed for the run's duration (`belief.callouts`'s
+    `_WATCHED_ONLY_KINDS` gate, Decision 5) rather than merely raised into
+    the watched-callout family. Like `watch_contact_task`, this has no
+    success/timeout lifecycle (`TaskStore.tick` never resolves a task
+    whose `area` is `None`) -- it continues until `cancel_task`, which for
+    this kind also returns the contact's attention to `"normal"`, the same
+    "task owns the belief-state effect it registered" rule `watch_contact_
+    task`/`scan_area` already follow.
+
+    Returns `None` -- no task registered, contact left untouched -- when
+    `contact_id` does not exist, mirroring `watch_contact_task`'s own
+    contract."""
+    found = set_attention(store, contact_id, "priority", source=source)
+    if not found:
+        return None
+    kind: TaskKind = "attack_target"
+    return tasks.create(
+        kind=kind,
+        area=None,
+        created_sim=now_sim,
+        deadline_sim=math.inf,
+        reason=reason,
+        contact_id=contact_id,
+    )
+
+
 def cancel_task(store: ContactStore, tasks: TaskStore, task_id: str) -> bool:
     """Cancel a still-pending task and undo the belief-state effect it
     registered -- an `AttentionArea` for a `scan_area` task (the plan's

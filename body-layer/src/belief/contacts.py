@@ -468,6 +468,22 @@ class Contact:
     #: `belief.decay.OBSERVED_WINDOW_S` of its own `last_seen_sim`, and as
     #: unknown (fail-open) otherwise -- see that block's own comments.
     live_los_clear: bool | None = None
+    #: The most recent `Percept` folded into this contact, kept whole
+    #: (`plans/attack-run/plan.md` Decision 16's "`ContactStore` already
+    #: keeps the latest percept per contact, so no new store") rather than
+    #: pulling one more field out of it the way `last_class_raw`/
+    #: `live_los_clear` above do. An overwrite, not a fold, same posture
+    #: as those two -- there is no ordering/specificity relation between
+    #: two percepts to fold over. Exists so `belief.attack_run` (its one
+    #: sanctioned reader, per the grep fence that module's own test file
+    #: carries) has a single place to read a field on `Percept` that
+    #: module alone may touch, without a second per-contact store. Every
+    #: other `belief/` module must keep reading the specific fields
+    #: already pulled out above (`last_class_raw`, `live_los_clear`, ...),
+    #: never this whole object -- it exists for that one consumer, not as
+    #: a general escape hatch around the fields this class already
+    #: exposes.
+    last_percept: Percept | None = None
     #: `plans/group-cohesion-admission-gate/plan.md` (`BL-B58`) -- metres of
     #: this contact's fused-position displacement attributable to a Stage 3
     #: within-group ambiguity fold (`ContactStore._fold_target_for_ambiguous_
@@ -635,6 +651,7 @@ class Contact:
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
         self.live_los_clear = percept.live_los_clear
+        self.last_percept = percept
         self._extend_or_open_span(percept)
 
     def _extend_or_open_span(self, percept: Percept) -> None:
@@ -704,6 +721,7 @@ class Contact:
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
             live_los_clear=percept.live_los_clear,
+            last_percept=percept,
         )
         contact.contributing_observation_ids.append(percept.observation_id)
         contact.sighting_spans.append(

@@ -618,6 +618,51 @@ def test_follow_with_no_recognisable_slots_says_again() -> None:
     assert result.token is None
 
 
+# -- plans/attack-run/plan.md Decision 14 (select_target/drop_target) ---
+
+
+def test_select_target_with_descriptor_and_clock_resolves() -> None:
+    result = match_transcript("select target armor two o'clock")
+    assert result.token == "select_target"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"descriptor": "armor", "clock": 2}
+
+
+def test_set_target_is_the_second_legal_verb() -> None:
+    result = match_transcript("set target north")
+    assert result.token == "select_target"
+    assert result.slots == {"sector": "north"}
+
+
+def test_select_target_with_only_a_descriptor() -> None:
+    result = match_transcript("select target the sam")
+    assert result.token == "select_target"
+    assert result.slots == {"descriptor": "sam"}
+
+
+def test_select_without_the_word_target_never_reaches_the_slot_parser() -> None:
+    """`"target"` must actually be heard -- `_parse_select_slots` must
+    refuse (returning `None`) so `match_transcript` falls through to the
+    ordinary phrase table rather than acting on slots nobody said."""
+    result = match_transcript("select the armor two o'clock")
+    assert result.slots is None
+
+
+def test_set_the_throttle_does_not_false_fire() -> None:
+    """A real adversarial sentence: `"set"` anchors as a verb (it is a
+    legal first word of `select_target`'s own phrase table), but with no
+    `"target"` and no slot this must not resolve to any command."""
+    result = match_transcript("set the throttle to idle")
+    assert result.token is None
+
+
+def test_drop_target_matches_the_exact_phrase() -> None:
+    result = match_transcript("drop target")
+    assert result.token == "drop_target"
+    assert result.slots is None
+
+
 def test_several_confirm_band_answer_words_do_anchor_a_verb() -> None:
     """A cross-subproject fact `body-layer` depends on, recorded here
     because this is the side that owns it.

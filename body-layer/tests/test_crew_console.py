@@ -28,6 +28,7 @@ from belief.brain_client import BrainLayerClient
 from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import (
+    _NOTHING_TO_STOP,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -42,6 +43,7 @@ from belief.speech import (
     group_membership_state,
     render_group_disclosure,
     render_group_full_disclosure,
+    render_no_contact,
 )
 from belief.tasks import TaskStore
 from belief.voice_commands import (
@@ -4131,6 +4133,181 @@ def test_follow_readback_survives_the_confirm_round_trip(
         now_sim=1.0,
     )
     assert store.contacts[0].attention == "watch"
+
+
+# --- BL-14 attack-run selection (plans/attack-run/plan.md Decisions
+# 2/5/14, Stage 1) ---
+
+
+def test_select_target_resolves_and_sets_priority_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command(
+        "select_target", now_sim=0.0, slots={"descriptor": "armor"}
+    )
+
+    assert "armor" in lines[0].lower()
+    assert "2 o'clock" in lines[0]
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.contact_id == contact.id
+    assert target_task.status == "pending"
+
+
+def test_select_target_with_no_qualifiers_says_again() -> None:
+    console = CrewConsole(store=ContactStore())
+    lines = console.handle_command("select_target", now_sim=0.0)
+    assert lines == ["say again -- select target needs what and/or where"]
+
+
+def test_select_target_with_no_match_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    lines = console.handle_command(
+        "select_target", now_sim=0.0, slots={"descriptor": "armor"}
+    )
+    assert lines == [render_no_contact().text]
+
+
+def test_select_target_tags_other_group_members_watch_not_priority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 5's split: only the selected contact itself reaches
+    `"priority"` -- its group-mates get the ordinary one-time `"watch"`
+    tag, never overridden back onto the target itself."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+
+    armor_contact = next(c for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    truck_contact = next(c for c in store.contacts if c.last_class_raw == "OP_TRUCK")
+    assert armor_contact.attention == "priority"
+    assert truck_contact.attention == "watch"
+
+
+def test_drop_target_cancels_the_attack_target_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+
+    lines = console.handle_command("drop_target", now_sim=1.0)
+
+    assert lines
+    assert contact.attention == "normal"
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.status == "cancelled"
+
+
+def test_drop_target_with_nothing_selected_says_nothing_to_stop() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("drop_target", now_sim=0.0)
+    assert lines == [_NOTHING_TO_STOP]
+
+
+def test_cancel_task_also_drops_the_attack_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The existing cancel/stop path also deselects, per Decision 2 --
+    `cancel_task`'s bare all-modes form cancels every active task kind,
+    `attack_target` included."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    contact = store.contacts[0]
+
+    console.handle_command("cancel_task", now_sim=1.0)
+
+    assert contact.attention == "normal"
 
 
 # --- the slotted query's filter slots (plans/crew-query-path/plan.md

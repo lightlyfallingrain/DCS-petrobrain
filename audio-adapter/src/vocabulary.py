@@ -169,6 +169,15 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # is a separate job. A zero-slot `"report"`/`"describe"` still
         # falls through to `report_all` through the ordinary phrase table.
         "report",
+        # `select|set target <what> <where>` / `drop target` (`plans/
+        # attack-run/plan.md` Decision 14, BL-14 Stage 1) -- `select_
+        # target` carries the same five slots `report` above does
+        # (`descriptor`/`clock`/`sector`/`relative`/`band`), parsed, never
+        # enumerated, for the identical combinatorial reason. `drop_target`
+        # is a plain, slot-free phrase matched by the ordinary phrase
+        # table, like `cancel_watch`.
+        "select_target",
+        "drop_target",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -451,6 +460,15 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "report armor north",
         "describe group far",
     ),
+    # `select target`/`set target` (`plans/attack-run/plan.md` Decision
+    # 14) -- like `report`, the slots are parsed (`command_matcher.py`'s
+    # select-slot branch), never enumerated here; these two phrasings are
+    # recogniser bias hints only, one per verb synonym.
+    "select_target": ("select target armor north", "set target two o'clock"),
+    # `drop target` (Decision 2) -- a plain, slot-free phrase, one exact
+    # wording, matching `cancel_watch`'s own posture for a short command
+    # with no recorded ambiguity to hedge against yet.
+    "drop_target": ("drop target",),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a

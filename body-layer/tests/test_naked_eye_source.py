@@ -558,6 +558,72 @@ def test_a_newly_visible_candidate_emits_one_observation() -> None:
     assert obs.derived_world_position.z == 0.0
 
 
+def test_admitted_candidate_with_clear_live_los_carries_a_relative_direction() -> None:
+    """`plans/attack-run/plan.md` Decision 16, Stage 2 -- an admitted
+    cluster whose live LOS resolves clear gets the ownship-relative
+    observation populated, yaw-removed at the observing poll's own
+    (here, zero) heading. Ownship sits at `(0, 0, 500)` facing north;
+    the candidate sits 100 m north (`x=100`) at the same altitude, so
+    `forward_m` is the full 100 m, `right_m`/`up_m` are both ~0."""
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.live_los_clear is True
+    assert obs.relative_direction is not None
+    assert obs.relative_direction.forward_m == pytest.approx(100.0)
+    assert obs.relative_direction.right_m == pytest.approx(0.0, abs=1e-6)
+    assert obs.relative_direction.up_m == pytest.approx(0.0, abs=1e-6)
+
+
+def test_detection_trace_records_relative_direction_set_on_admission() -> None:
+    """Stage 2's own stated acceptance alongside the test suite -- one
+    detection-trace field, `DetectionTrace.relative_direction_set`,
+    answering "was this look good enough for attack-run guidance" without
+    joining against belief."""
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    trace = DetectionTraceCollector()
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        trace_sink=trace,
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    admitted = [
+        record
+        for record in trace.records
+        if record.object_id == 1 and record.outcome is GateOutcome.ADMITTED
+    ]
+    assert len(admitted) == 1
+    assert admitted[0].relative_direction_set is True
+
+
+def test_a_candidate_whose_live_los_is_blocked_never_reaches_emission() -> None:
+    """The bound, restated at the field level (`perception.source.
+    RelativeDirection`'s own docstring): gate 4 is fail-closed (`BL-11`
+    Stage 4), so a candidate whose live LOS is not confirmed clear is
+    rejected before clustering ever runs -- there is no reachable
+    "admitted but unclear" case for `relative_direction` to guess at."""
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects, blocked_unit_names=frozenset({"unit_1"}))
+
+    assert source.poll(0.0, _ownship()) == []
+
+
 def test_still_visible_candidate_is_not_re_emitted_on_the_next_poll() -> None:
     world_objects = {
         "objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]

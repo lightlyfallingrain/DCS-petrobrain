@@ -30,6 +30,7 @@ from belief.tools import (
     _format_range_km,
     _highest_attention_contact,
     acknowledge_event,
+    attack_target_task,
     cancel_task,
     describe_contact,
     describe_our_position,
@@ -1071,6 +1072,45 @@ def test_cancel_task_returns_false_for_unknown_id() -> None:
     store = ContactStore()
     tasks = TaskStore()
     assert cancel_task(store, tasks, "TASK_999") is False
+
+
+def test_attack_target_task_sets_priority_attention_and_registers_a_task() -> None:
+    """`plans/attack-run/plan.md` Decision 2/5 -- `attack_target_task`'s
+    one difference from `watch_contact_task`: the attention level is
+    `"priority"`, not `"watch"`."""
+    store = _store_with_one_contact()
+    tasks = TaskStore()
+    contact = store.contacts[0]
+
+    task = attack_target_task(store, tasks, contact.id, now_sim=0.0)
+
+    assert task is not None
+    assert task.kind == "attack_target"
+    assert task.contact_id == contact.id
+    assert task.area is None
+    assert task.status == "pending"
+    assert contact.attention == "priority"
+
+
+def test_attack_target_task_returns_none_for_unknown_contact() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+
+    assert attack_target_task(store, tasks, "CONTACT_999", now_sim=0.0) is None
+    assert list(tasks.tasks) == []
+
+
+def test_cancel_task_on_an_attack_target_task_returns_attention_to_normal() -> None:
+    store = _store_with_one_contact()
+    tasks = TaskStore()
+    contact = store.contacts[0]
+    task = attack_target_task(store, tasks, contact.id, now_sim=0.0)
+    assert task is not None
+
+    assert cancel_task(store, tasks, task.id) is True
+
+    assert get_task_status(tasks, task.id).status == "cancelled"  # type: ignore[union-attr]
+    assert contact.attention == "normal"
 
 
 def test_cancel_task_reaches_an_already_succeeded_task_and_removes_its_area() -> None:

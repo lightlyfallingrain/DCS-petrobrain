@@ -1,7 +1,12 @@
 """`PendingIntent`/`TaskStore` -- BL-6 (`plans/bl6-commands-inspect-adapt/
 plan.md`), the belief-side half of `scan_area`'s command lifecycle, joined
 by `watch_contact` (`plans/watch-as-standing-mode/plan.md`) as this store's
-second `TaskKind`.
+second `TaskKind`, and by `attack_target` (`plans/attack-run/plan.md`
+Decision 2) as its third -- the exact same shape `watch_contact` already
+has (`area=None`, `deadline_sim=math.inf`, `contact_id=<selected target>`):
+a standing mode with no success/timeout lifecycle, ending only on an
+explicit cancel. `tools.attack_target_task` creates it; nothing else about
+this module changes for it.
 
 For a `scan_area` task, a `PendingIntent` is created when a scan is
 requested, and `tick` decides whether it has `succeeded` (a `belief.
@@ -104,7 +109,7 @@ from belief.contacts import ContactStore
 #: mark-and-hold lifecycle (`plans/watch-as-standing-mode/plan.md`). A
 #: `Literal` (not a bare `str`) so a future third kind is a type-checked,
 #: additive change, not a silent string-typo risk.
-TaskKind = Literal["scan_area", "watch_contact"]
+TaskKind = Literal["scan_area", "watch_contact", "attack_target"]
 
 #: **`"cancelled"` is the only true terminal state (cones 2C sortie fix,
 #: `docs/concept/STATE_TRANSITIONS.md`'s "Modes" section).** `tick` still

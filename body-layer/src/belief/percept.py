@@ -25,7 +25,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from perception.source import Observation, OwnshipState, PositionUncertainty
+from perception.source import (
+    Observation,
+    OwnshipState,
+    PositionUncertainty,
+    RelativeDirection,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +81,21 @@ class Percept:
     everything else here: the moment a naked-eye observation is admitted
     is itself proof the ray was clear (see the plan's own "why this is not
     a boundary violation" section). Belief remembers this value; it never
-    re-derives it."""
+    re-derives it.
+
+    `relative_direction` carries `Observation.relative_direction` through
+    unchanged (`plans/attack-run/plan.md` Decision 16) -- a genuine
+    ownship-relative *perception*, bounded by the look (see that field's
+    own docstring on `perception.source.RelativeDirection`), not a map
+    read. **Its only sanctioned reader outside this module is `belief.
+    attack_run`** -- a grep test (`test_attack_run.py`) fences every other
+    file under `belief/` from even mentioning the name, mirroring
+    `belief.contacts`' own `derived_world_position` fence. This is a
+    narrower boundary than every other field on this class: those are
+    perceived metadata with no path back to a world position; this one
+    carries true relative geometry that, combined with ownship's own
+    exact telemetry, is convertible to one -- see Decision 16 item 4 for
+    the full argument."""
 
     t_sim: float
     source: str
@@ -91,6 +110,7 @@ class Percept:
     apparent_motion: bool | None = None
     position_uncertainty: PositionUncertainty | None = None
     live_los_clear: bool | None = None
+    relative_direction: RelativeDirection | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -113,4 +133,5 @@ def percept_of(observation: Observation) -> Percept:
         apparent_motion=observation.apparent_motion,
         position_uncertainty=observation.position_uncertainty,
         live_los_clear=observation.live_los_clear,
+        relative_direction=observation.relative_direction,
     )

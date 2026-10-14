@@ -294,7 +294,9 @@ Belief — observation *consumption*:
 - `src/belief/cardinality.py` — `classification.py`'s deliberate twin over ED's count vocabulary; interval containment stands in for specificity level.
 - `src/belief/enrichment.py` — world-enrichment orchestration (`SemanticFact`, `semantic_facts_for`, `WorldEnrichmentCache`, `relative_geometry`, `EnrichmentContext`).
 - `src/belief/mission_phase.py` — mission-phase relevance (BL-7).
-- `src/belief/tools.py` — the brain-facing query API's body, minus a transport; returns the `{facts, summary, phrasing_hints}` triple. Note its **absent-not-null** convention for `facts`.
+- `src/belief/tools.py` — the brain-facing query API's body, minus a transport; returns the `{facts, summary, phrasing_hints}` triple. Note its **absent-not-null** convention for `facts`. `attack_target_task` (BL-14) mirrors `watch_contact_task`, setting attention `"priority"` instead of `"watch"`.
+- `src/belief/tasks.py` — `PendingIntent`/`TaskStore`. `TaskKind` is `"scan_area"`/`"watch_contact"`/`"attack_target"` (BL-14) — the last two share `watch_contact`'s shape exactly (no area, no success/timeout lifecycle).
+- `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6.
 
 Surfaces and transports:
 

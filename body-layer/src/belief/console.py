@@ -33,6 +33,7 @@ here -- see `tools.py`'s own module docstring on why `set_attention`/
     task-status <id>                            -> tools.get_task_status
     cancel-task <id>                            -> tools.cancel_task
     watch-task <id>                             -> tools.watch_contact_task
+    attack-target <id>                          -> tools.attack_target_task
 
 `events`/`ack <id>` map to `tools.list_events`/`tools.acknowledge_event`
 directly, which is exactly `tools.poll_events`'s own semantics (BL-5,
@@ -103,6 +104,7 @@ from belief.tools import (
     ContactResult,
     ToolResult,
     acknowledge_event,
+    attack_target_task,
     cancel_task,
     describe_contact,
     describe_our_position,
@@ -290,6 +292,8 @@ def _dispatch(
         return _handle_cancel_task(store, tasks, rest)
     if command == "watch-task":
         return _handle_watch_task(store, tasks, rest, now_sim)
+    if command == "attack-target":
+        return _handle_attack_target(store, tasks, rest, now_sim)
     return [f"unknown command: {command}"]
 
 
@@ -382,6 +386,22 @@ def _handle_watch_task(
     if task is None:
         return [f"no such contact: {rest}"]
     return [f"watch task {task.id} created (contact {rest})"]
+
+
+def _handle_attack_target(
+    store: ContactStore, tasks: TaskStore, rest: str, now_sim: float
+) -> list[str]:
+    """`attack-target <id>` -- this debug console's own thin wrapper over
+    `tools.attack_target_task` (`plans/attack-run/plan.md` Decision 2/5),
+    mirroring `_handle_watch_task`'s shape exactly: registers the standing
+    `"attack_target"` task and sets the contact's attention to
+    `"priority"`, rather than only setting the mark."""
+    if not rest:
+        return ["usage: attack-target <id>"]
+    task = attack_target_task(store, tasks, rest, now_sim)
+    if task is None:
+        return [f"no such contact: {rest}"]
+    return [f"attack target task {task.id} created (contact {rest})"]
 
 
 def _handle_attention(store: ContactStore, rest: str) -> list[str]:

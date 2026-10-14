@@ -431,3 +431,18 @@ def test_cluster_centroid_is_the_mean_of_its_members() -> None:
 
 def test_empty_candidate_list_yields_no_clusters() -> None:
     assert _cluster([]) == []
+
+
+def test_cluster_centroid_alt_m_is_the_mean_of_its_members_own_altitude() -> None:
+    """`plans/attack-run/plan.md` Decision 4 REVISED/16 -- the cluster's
+    real altitude, not ownship's own (the flat-projection convention
+    `naked_eye_source._build_observation` substitutes elsewhere)."""
+    candidates = [
+        _candidate(1, x=500.0, z=0.0, alt_m=499.0),
+        _candidate(2, x=510.0, z=0.0, range_m=510.0, alt_m=501.0),
+    ]
+
+    clusters = _cluster(candidates)
+
+    assert len(clusters) == 1
+    assert clusters[0].centroid_alt_m == 500.0

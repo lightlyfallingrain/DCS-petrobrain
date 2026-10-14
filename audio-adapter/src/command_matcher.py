@@ -290,6 +290,12 @@ _REPORT_VERBS: tuple[str, ...] = report_verbs()
 #: failure, not a conjunction -- see `_where_slot_count`.
 _WHERE_SLOT_NAMES: tuple[str, ...] = ("clock", "sector", "relative")
 
+#: `select_target`'s two legal verbs (`plans/attack-run/plan.md` Decision
+#: 14, "`set|select target <what> <where>`"), fuzzy-matched for the same
+#: reason `_FOLLOW_VERB`/`_REPORT_VERBS` are: `verb` here is already a
+#: possibly-misheard first word.
+_SELECT_TARGET_VERBS: tuple[str, ...] = ("select", "set")
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -493,6 +499,42 @@ def _parse_report_slots(text: str) -> dict[str, int | str] | None:
     return slots if slots else None
 
 
+def _parse_select_slots(text: str) -> dict[str, int | str] | None:
+    """`select|set target <what> <where>`'s five slots (`plans/attack-run/
+    plan.md` Decision 14) -- the identical five-slot schema `_parse_report_
+    slots` already parses (`BL-13` Stage 1), reused verbatim rather than
+    shared via a helper: the two commands' slot shapes happen to coincide
+    today, but nothing ties them together, and body-layer's own `_parse_
+    target_slots` makes the same independence call for the same reason.
+
+    **Requires the literal word `"target"` to appear at all.** `"select"`/
+    `"set"` are common English verbs on their own (`"set the throttle to
+    idle"` anchors against `"set"` at ratio 1.0, same as any other real
+    verb-anchor word) -- `"target"` is what the phrase actually commits to
+    saying, and its absence is the cheap, sufficient signal that this is
+    not this command at all, before any slot is even looked at."""
+    words = normalize_for_match(text).split()
+    if "target" not in words:
+        return None
+    slots: dict[str, int | str] = {}
+    descriptor = parse_descriptor(text)
+    if descriptor is not None:
+        slots["descriptor"] = descriptor
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    sector = parse_sector_word(text)
+    if sector is not None:
+        slots["sector"] = sector
+    relative = parse_relative_word(text)
+    if relative is not None:
+        slots["relative"] = relative
+    band = parse_band(text)
+    if band is not None:
+        slots["band"] = band
+    return slots if slots else None
+
+
 def _where_slot_count(slots: dict[str, int | str]) -> int:
     """How many of `_WHERE_SLOT_NAMES` are present. Two or more means the
     transcript named the direction twice in incompatible frames
@@ -578,6 +620,29 @@ def match_transcript(text: str) -> MatchResult:
                 return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
             return MatchResult(
                 token="report", match_ratio=1.0, verb_anchored=True, slots=report_slots
+            )
+
+    # `select target`/`set target` (`plans/attack-run/plan.md` Decision
+    # 14), tried before the generic phrase table for the identical reason
+    # `follow`/`report` are -- a clock-only "select two o'clock" would
+    # otherwise collide with "report two o'clock"/"scan two o'clock" under
+    # the word-sequence score. Ordered after `follow`/`report`: neither
+    # verb set ("select"/"set") overlaps either of theirs, so there is no
+    # collision to order against, but the same defensive ordering is kept
+    # for consistency with the other two slot-resolution branches.
+    if any(
+        difflib.SequenceMatcher(None, verb, select_verb).ratio() >= VERB_FLOOR
+        for select_verb in _SELECT_TARGET_VERBS
+    ):
+        select_slots = _parse_select_slots(text)
+        if select_slots is not None:
+            if _where_slot_count(select_slots) > 1:
+                return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
+            return MatchResult(
+                token="select_target",
+                match_ratio=1.0,
+                verb_anchored=True,
+                slots=select_slots,
             )
 
     heard_words = tuple(words)

@@ -213,7 +213,7 @@ from belief.classification import (
     parent_class_of,
 )
 from belief.contacts import Contact, ContactStore
-from belief.enrichment import EnrichmentContext
+from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext
 from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
@@ -233,7 +233,9 @@ from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
 from perception.geometry import angular_delta_deg
 
-Template = Literal["readback", "contact_report", "lifecycle_event", "threat_reaction"]
+Template = Literal[
+    "readback", "contact_report", "lifecycle_event", "threat_reaction", "attack_run"
+]
 Urgency = Literal["normal", "critical"]
 
 
@@ -424,6 +426,128 @@ def render_lost_contact() -> OutgoingSpeech:
     the pilot asked for something and deserves to know why nothing
     happened (D4's own wording)."""
     return OutgoingSpeech(text="Lost him.", template="readback")
+
+
+def render_target_readback(facts: dict[str, object]) -> OutgoingSpeech:
+    """`select target`/`step`'s shared readback (`plans/attack-run/plan.md`
+    "Spoken vocabulary") -- `"Target, armour, 2 o'clock."`: unit type
+    plus clock only, deliberately **no range** here -- range is spoken
+    once, by `engage`'s own readback (Stage 5, not this function), per
+    §1's "no range beyond the initial report." Reuses `_unit_type_display`
+    exactly as every other readback in this module does."""
+    classification = facts.get("classification")
+    value = classification.get("value") if isinstance(classification, dict) else None
+    level = classification.get("level") if isinstance(classification, dict) else None
+    parts = [_unit_type_display(value, level)]
+    relative_now = facts.get("relative_now")
+    if isinstance(relative_now, dict):
+        clock = relative_now.get("clock_position")
+        if isinstance(clock, int):
+            parts.append(f"{clock} o'clock")
+    return OutgoingSpeech(text=f"Target, {', '.join(parts)}.", template="readback")
+
+
+#: One row of an alignment word table (`plans/attack-run/plan.md`
+#: Decision 11 REVISED, rule 1): `(threshold_deg, positive_phrase,
+#: negative_phrase)`, descending by `threshold_deg` -- the table's own
+#: last (smallest) row is the axis's gate, not a separate concept.
+#: `belief.attack_run` declares the actual tables (`AZIMUTH_WORD_TABLE`/
+#: `ELEVATION_WORD_TABLE`) and passes them in here as data, rather than
+#: this module importing them, so that `belief.attack_run` can import
+#: `render_alignment` below without a circular import.
+_AlignmentWordRow = tuple[float, str, str]
+
+#: All twelve clock hours, spoken as words -- `_CLOCK_REPORT_LABELS`
+#: (`crew_console.py`) only carries the nine *forward* hours (the
+#: no-omniscience rule for routine reporting), but an attack-run target
+#: the pilot has already selected can legitimately sit anywhere around
+#: the nose as the aircraft manoeuvres, so this table is not narrowed the
+#: same way.
+_ALIGNMENT_CLOCK_WORDS: dict[int, str] = {
+    1: "One",
+    2: "Two",
+    3: "Three",
+    4: "Four",
+    5: "Five",
+    6: "Six",
+    7: "Seven",
+    8: "Eight",
+    9: "Nine",
+    10: "Ten",
+    11: "Eleven",
+    12: "Twelve",
+}
+
+
+def _alignment_phrase_for(
+    signed_error_deg: float, table: tuple[_AlignmentWordRow, ...]
+) -> str | None:
+    """The first (largest) threshold in `table` that `signed_error_deg`'s
+    magnitude exceeds, descending order -- `None` means the error is at or
+    below the table's own last (smallest) threshold, i.e. inside that
+    axis's gate (Decision 11 REVISED, rule 1). Shared by both axes'
+    `render_alignment` calls below -- the test this rule names
+    (`test_attack_run.py`) asserts both go through this one helper,
+    not two independently-maintained branches."""
+    abs_error_deg = abs(signed_error_deg)
+    for threshold_deg, positive_phrase, negative_phrase in table:
+        if abs_error_deg > threshold_deg:
+            return positive_phrase if signed_error_deg > 0 else negative_phrase
+    return None
+
+
+def _alignment_clock_hour(azimuth_deg: float) -> int:
+    """`azimuth_deg` (signed, `0` = nose, positive = right) reduced to a
+    1-12 clock hour, mirroring `belief.enrichment._clock_position`'s own
+    formula over a `[0, 360)` relative bearing."""
+    hour = round((azimuth_deg % 360.0) / CLOCK_BUCKET_DEG) % 12
+    return 12 if hour == 0 else hour
+
+
+def render_alignment(
+    azimuth_deg: float,
+    elevation_deg: float,
+    *,
+    tier: int,
+    azimuth_table: tuple[_AlignmentWordRow, ...],
+    elevation_table: tuple[_AlignmentWordRow, ...],
+) -> OutgoingSpeech:
+    """The ongoing attack-run guidance utterance (`plans/attack-run/
+    plan.md`'s "Spoken vocabulary") -- outside the 12 o'clock sector
+    (the wider of `azimuth_table`'s rows plus half of `CLOCK_BUCKET_DEG`'s
+    own half-width is inside it by construction, so "outside" is simply
+    "the o'clock register still applies") speaks the clock hour; inside
+    it, the register switches to the qualitative word tables, and
+    `"Lined up."` once both axes clear their own gate (the table's own
+    last row), never again until something changes (Decision 7's
+    change-driven cadence is the caller's job, not this function's --
+    this renders one tick's state, it does not remember the last one).
+
+    `tier` selects the register (Decision 11 REVISED/Decision 17 REVISED).
+    **Tier 1 is everything this function builds as of `plans/attack-run/
+    plan.md` Stage 3** -- the full word-table/lined-up/o'clock register
+    above. Tier 2 (the degraded fallback's `"right, obstructed"` register)
+    is Stage 6, deliberately not built here; `attack_run.decide` never
+    passes `tier=2` until that stage exists, so this branch is reached by
+    no caller yet, not dead code kept "just in case"."""
+    if tier != 1:
+        raise NotImplementedError(
+            "tier 2 (the degraded fallback's 'obstructed' register) is "
+            "Stage 6 of plans/attack-run/plan.md, not built yet"
+        )
+    outside_sector_deg = CLOCK_BUCKET_DEG / 2.0
+    if abs(azimuth_deg) > outside_sector_deg:
+        clock = _alignment_clock_hour(azimuth_deg)
+        return OutgoingSpeech(
+            text=f"{_ALIGNMENT_CLOCK_WORDS[clock]} o'clock.", template="attack_run"
+        )
+    azimuth_phrase = _alignment_phrase_for(azimuth_deg, azimuth_table)
+    elevation_phrase = _alignment_phrase_for(elevation_deg, elevation_table)
+    if azimuth_phrase is None and elevation_phrase is None:
+        return OutgoingSpeech(text="Lined up.", template="attack_run")
+    phrases = [phrase for phrase in (azimuth_phrase, elevation_phrase) if phrase]
+    text = ", ".join(phrases)
+    return OutgoingSpeech(text=f"{text[0].upper()}{text[1:]}.", template="attack_run")
 
 
 def render_stand_by() -> OutgoingSpeech:

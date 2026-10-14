@@ -94,6 +94,8 @@ from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.attack_run import AttackRunState
+from belief.attack_run import decide as decide_attack_run
 from belief.attention import _SECTOR_CENTER_DEG, SECTORS, RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_reply import validate_brain_reply
@@ -133,6 +135,7 @@ from belief.speech import (
     render_scan_readback,
     render_silence_ack,
     render_stand_by,
+    render_target_readback,
     render_unable,
     render_watch_group_readback,
     render_watch_nearest_readback,
@@ -141,6 +144,7 @@ from belief.speech import (
 from belief.tasks import PendingIntent, TaskKind, TaskStore
 from belief.tools import (
     _find_contact,
+    attack_target_task,
     cancel_task,
     describe_contact,
     get_contacts,
@@ -691,6 +695,26 @@ def _describe_token_for_confirm(
             elif isinstance(value, str):
                 report_parts.append(value)
         return f"report {' '.join(report_parts)}" if report_parts else "report"
+    if token == "select_target":
+        # `select target <what> <where>` (`plans/attack-run/plan.md`
+        # Decision 14) -- same composition shape as the `report` branch
+        # above, for the identical reason: the confirm prompt's job is to
+        # expose a mishearing, so every slot heard is read back.
+        select_parts: list[str] = []
+        for slot_name in ("descriptor", "clock", "sector", "relative", "band"):
+            value = slots.get(slot_name) if slots is not None else None
+            if slot_name == "clock":
+                if isinstance(value, int) and value in _CLOCK_REPORT_LABELS:
+                    select_parts.append(f"{_CLOCK_REPORT_LABELS[value]} o'clock")
+            elif isinstance(value, str):
+                select_parts.append(value)
+        return (
+            f"select target {' '.join(select_parts)}"
+            if select_parts
+            else "select target"
+        )
+    if token == "drop_target":
+        return "drop target"
     bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
     if token in ("scan_bearing_deg", "report_bearing_deg") and isinstance(
         bearing_degrees, int
@@ -736,6 +760,14 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "watch_nearest",
         "watch_nearest_air_defence",
         "follow",
+        # BL-14's standing attack-run target selection (`plans/attack-run/
+        # plan.md` Decisions 2/14) -- `select_target` always returns a
+        # readback or a "say again"/"no such contact" line; `drop_target`
+        # delegates to `_handle_cancel_task`, which always returns
+        # something (`_NOTHING_TO_STOP` at worst), so neither needs the
+        # no-return-value exemption.
+        "select_target",
+        "drop_target",
         "cancel_task",
         "cancel_scan",
         "cancel_watch",
@@ -1292,6 +1324,10 @@ class CrewConsole:
             lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
         elif token == "follow":
             lines = self._handle_follow(now_sim, slots)
+        elif token == "select_target":
+            lines = self._handle_select_target(now_sim, slots)
+        elif token == "drop_target":
+            lines = self._handle_drop_target()
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         elif token == "cancel_scan":
@@ -1662,6 +1698,212 @@ class CrewConsole:
         if marked > 1:
             return [render_watch_group_readback(marked).text]
         return [render_watch_nearest_readback(result["facts"]).text]
+
+    def _resolve_attack_target(
+        self,
+        now_sim: float,
+        descriptor: str | None,
+        clock: int | None,
+        sector: Sector | None,
+        relative: RelativeSector | None,
+        band: str | None,
+    ) -> tuple[str | None, list[str]]:
+        """`select target <what> <where>`'s own tie-break (`plans/
+        attack-run/plan.md` Decision 14): units matching `<what>`/
+        `<where>`, **watched beats unwatched, then closest**.
+
+        **Does not reuse `_resolve_follow_target`** -- that resolver's own
+        docstring forbids it ("a stopgap... delete the resolver and these
+        constants with it; do not tune them as if they modelled anything
+        real"). Its weighted score plus `FOLLOW_SEPARATION` ambiguity
+        refusal is a different rule from the spec's own tie-break. Candidate
+        set and `<where>` filtering instead reuse `_report_scope` directly,
+        exactly as `_handle_report` does -- the same five-slot schema
+        (`descriptor`/`clock`/`sector`/`relative`/`band`) `BL-13` Stage 1
+        already parses.
+
+        Refusing as ambiguous (the `follow` family's own answer to a tie)
+        would be wrong here: `step` is the spec's own correction mechanism,
+        so picking one and letting the pilot step is strictly better than a
+        "say again"."""
+        if self.enrichment is None:
+            return None, ["no world-model connection configured"]
+        scope = self._report_scope(
+            now_sim,
+            clock=clock,
+            sector=sector,
+            descriptor=descriptor,
+            relative=relative,
+            band=band,
+        )
+        if not scope.facts:
+            return None, [render_no_contact().text]
+
+        def _range_m(facts: dict[str, object]) -> float:
+            relative_now = facts.get("relative_now")
+            assert isinstance(relative_now, dict)
+            range_m = relative_now["range_m"]
+            assert isinstance(range_m, float)
+            return range_m
+
+        def _is_watched(facts: dict[str, object]) -> bool:
+            return facts.get("attention") in ("watch", "priority")
+
+        winner = min(
+            scope.facts, key=lambda facts: (not _is_watched(facts), _range_m(facts))
+        )
+        contact_id = winner["id"]
+        assert isinstance(contact_id, str)
+        return contact_id, []
+
+    def _parse_target_slots(
+        self, slots: dict[str, int | str] | None
+    ) -> tuple[
+        str | None, int | None, Sector | None, RelativeSector | None, str | None
+    ]:
+        """`select target <what> <where>`'s five slots, validated against
+        the exact tables that own their values -- the identical validation
+        `_handle_slotted_report` already performs for `report`'s own
+        five-slot schema, duplicated rather than shared: the two commands'
+        slot shapes happen to coincide today, but nothing ties them
+        together, and sharing a private helper across two independent
+        commands would make a future divergence between them silent."""
+        descriptor: str | None = None
+        clock: int | None = None
+        sector: Sector | None = None
+        relative: RelativeSector | None = None
+        band: str | None = None
+        if slots is not None:
+            raw_descriptor = slots.get("descriptor")
+            if isinstance(raw_descriptor, str) and (
+                raw_descriptor in _FOLLOW_DESCRIPTOR_OP_CLASSES
+                or raw_descriptor == "group"
+            ):
+                descriptor = raw_descriptor
+            raw_clock = slots.get("clock")
+            if isinstance(raw_clock, int) and raw_clock in _CLOCK_REPORT_LABELS:
+                clock = raw_clock
+            raw_sector = slots.get("sector")
+            if isinstance(raw_sector, str):
+                sector = _SECTOR_FOR_WORD.get(raw_sector)
+            raw_relative = slots.get("relative")
+            if isinstance(raw_relative, str) and raw_relative in RELATIVE_SECTORS:
+                relative = raw_relative
+            raw_band = slots.get("band")
+            if isinstance(raw_band, str) and raw_band in _REPORT_BAND_BOUNDS_M:
+                band = raw_band
+        return descriptor, clock, sector, relative, band
+
+    def _handle_select_target(
+        self, now_sim: float, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """`select|set target <what> <where>` (`plans/attack-run/plan.md`
+        Decision 14) -- resolves via `_resolve_attack_target`, then sets
+        the winner's own attention to `"priority"` and registers the
+        standing `attack_target` task (`tools.attack_target_task`,
+        Decision 2). Every *other* member of the winner's `belief.groups.
+        Group`, if it has more than one, gets the ordinary one-time
+        `"watch"` tag (Decision 5's own split: only the selected target
+        itself reaches `"priority"` -- its group-mates get the same static
+        tag a plain `watch` already gives a group, never overridden back to
+        `"watch"` on the target itself, which is why this does not simply
+        call `_mark_watched_with_group`)."""
+        descriptor, clock, sector, relative, band = self._parse_target_slots(slots)
+        if (
+            descriptor is None
+            and clock is None
+            and sector is None
+            and relative is None
+            and band is None
+        ):
+            return ["say again -- select target needs what and/or where"]
+        if self.enrichment is None:
+            return ["no world-model connection configured"]
+        if self.tasks is None:
+            return ["no task store configured"]
+
+        contact_id, no_match_lines = self._resolve_attack_target(
+            now_sim, descriptor, clock, sector, relative, band
+        )
+        if contact_id is None:
+            return no_match_lines
+
+        task = attack_target_task(self.store, self.tasks, contact_id, now_sim)
+        if task is None:
+            return [f"no such contact: {contact_id}"]
+
+        belief_group = self.store.group_for_contact(contact_id)
+        if belief_group is not None and len(belief_group.member_contact_ids) > 1:
+            for member_id in belief_group.member_contact_ids:
+                if member_id == contact_id:
+                    continue
+                watch_contact_task(
+                    self.store, self.tasks, member_id, now_sim, source="attack_target"
+                )
+
+        result = describe_contact(
+            self.store, contact_id, now_sim, enrichment=self.enrichment
+        )
+        if result is None:
+            return [f"no such contact: {contact_id}"]
+        return [render_target_readback(result["facts"]).text]
+
+    def _handle_drop_target(self) -> list[str]:
+        """`drop target` (`plans/attack-run/plan.md` Decision 2) -- ends
+        the run and deselects, scoped to the one `attack_target` task kind
+        rather than `_handle_cancel_task`'s all-modes form. The existing
+        cancel/stop path (`cancel_task`'s bare `kinds=None` form) also
+        deselects, for free -- it cancels every active task of every kind,
+        `attack_target` included."""
+        return self._handle_cancel_task(kinds=("attack_target",))
+
+    def drain_attack_run(
+        self,
+        state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+    ) -> AttackRunState | None:
+        """Pulls one tick of attack-run guidance and speaks it, if
+        `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
+        Stage 3) -- modelled on `logger.decide_optic`'s own `(state_in,
+        ...) -> state_out` shape, except the state lives on the *caller*
+        (`logger.ConsolePerceptionRunner.attack_run_state`, Stage 5's
+        wiring, not built yet) rather than on this class: this method is
+        called with the current state and returns its replacement, the
+        same contract `decide` itself has.
+
+        **Not called from any poll loop as of this stage** -- `logger.py`
+        never invokes this method yet (Stage 5 wires `_run_crew_text_poll_
+        loop` to call it immediately before `drain_events`, reading
+        `self.scheduler.busy_until_sim` the same way). Built now, fully
+        testable, and inert until that wiring lands.
+
+        `None` in (no run), `None` out -- a true no-op when there is no
+        active `attack_target` task, or its target contact no longer
+        resolves (Decision 13's end condition, handled by Stage 5's own
+        wiring, not here: this method simply has nothing to guide on and
+        stays silent)."""
+        if state is None or self.tasks is None:
+            return state
+        target_task = next(
+            (
+                task
+                for task in self.tasks.tasks
+                if task.kind == "attack_target" and task.status != "cancelled"
+            ),
+            None,
+        )
+        if target_task is None or target_task.contact_id is None:
+            return state
+        contact = self.store.contact(target_task.contact_id)
+        if contact is None:
+            return state
+        new_state, speech = decide_attack_run(
+            state, now_sim=now_sim, ownship=ownship, contact=contact
+        )
+        if speech is not None and now_sim >= self.scheduler.busy_until_sim:
+            self._print([speech.text], now_sim)
+        return new_state
 
     def _handle_scan(
         self,
@@ -2177,6 +2419,11 @@ class CrewConsole:
         fallback's own bare `"the scan"`."""
         if task.kind == "watch_contact":
             return "watch"
+        if task.kind == "attack_target":
+            # `plans/attack-run/plan.md` Decision 2 -- same "no ids in
+            # speech" rule, same terse shape as `watch_contact`'s own
+            # `"watch"` above.
+            return "target"
         if task.kind != "scan_area":
             return None
         area = task.area

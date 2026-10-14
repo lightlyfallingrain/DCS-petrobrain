@@ -85,6 +85,20 @@ def angular_delta_deg(a: float, b: float) -> float:
     return abs((a - b + 180.0) % 360.0 - 180.0)
 
 
+def signed_angular_delta_deg(from_deg: float, to_deg: float) -> float:
+    """Signed angular delta from `from_deg` to `to_deg`, in `(-180, 180]`,
+    positive clockwise -- `angular_delta_deg`'s signed sibling
+    (`plans/attack-run/plan.md` Decision 6). `angular_delta_deg` above
+    answers "how far apart" (always non-negative, direction discarded);
+    this answers "which way and how far" -- `step`'s own ordering primitive
+    needs the sign to tell `step left` from `step right`, and the
+    change-driven emit rule (`attack_run.AttackRunState`) needs the sign to
+    compare a *direction* of error against the last spoken one, not just
+    its magnitude."""
+    diff = (to_deg - from_deg) % 360.0
+    return diff - 360.0 if diff > 180.0 else diff
+
+
 def range_m(observer: GeoPosition, target: GeoPosition) -> float:
     """Straight-line (slant) range from `observer` to `target`, metres.
     Includes the altitude component -- ground range alone would understate
@@ -293,6 +307,38 @@ def body_relative_direction(
     azimuth_deg = math.degrees(math.atan2(right2, forward1))
     elevation_deg = math.degrees(math.atan2(up2, math.hypot(forward1, right2)))
     return BodyRelativeDirection(azimuth_deg=azimuth_deg, elevation_deg=elevation_deg)
+
+
+def alignment_direction(
+    observer: GeoPosition,
+    target: GeoPosition,
+    *,
+    heading_true_deg: float,
+    pitch_deg: float,
+) -> BodyRelativeDirection:
+    """`body_relative_direction` called with `bank_deg=0.0` -- attack-run
+    guidance's own named wrapper (`plans/attack-run/plan.md` Decision 3).
+
+    **The zero is the whole implementation, and naming it here is the
+    point.** Rolling in at 45 degrees of bank, the full airframe frame
+    mixes azimuth and elevation -- at 90 degrees of bank a target dead
+    ahead and low reads as a pure *azimuth* error, and the guidance would
+    say "come left" when the pilot needs to pull. With bank removed,
+    `azimuth_deg` is a **heading** error ("come left" = turn) and
+    `elevation_deg` is a **pitch** error ("higher" = pull), which are the
+    pilot's two controls -- `body_relative_direction`'s steps 1-2 (yaw,
+    pitch) are exactly that decomposition; step 3 (bank) is skipped by
+    fixing this one argument, rather than re-deriving the rotation here.
+    A bare `body_relative_direction(..., bank_deg=0.0)` call site would
+    read as a forgotten argument to the next reader; this name says it is
+    deliberate."""
+    return body_relative_direction(
+        observer,
+        target,
+        heading_true_deg=heading_true_deg,
+        pitch_deg=pitch_deg,
+        bank_deg=0.0,
+    )
 
 
 def elevation_at(
