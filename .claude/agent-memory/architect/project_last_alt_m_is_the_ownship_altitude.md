@@ -1,6 +1,6 @@
 ---
 name: last-alt-m-is-the-ownship-altitude
-description: Contact.last_alt_m is the OWNSHIP's altitude at the last look, not the target's ground elevation — so any elevation angle, depression or vertical-separation derivation read off Contact.last_position is garbage; use geometry.elevation_at instead
+description: Contact.last_alt_m is the OWNSHIP's altitude at the last look, not the target's ground elevation — so any elevation angle or vertical-separation derivation read off Contact.last_position is garbage; the fix is the unit's own altitude from the aircraft feed, NOT a world-model elevation query
 metadata:
   type: project
 ---
@@ -21,24 +21,36 @@ from it reports how much the aircraft has climbed or descended since the last lo
 target is. `BL-14`'s *"higher"/"lower"* word would have been pure noise, and the defect would have
 looked like a tuning problem rather than a wrong input.
 
-**How to apply.** Any plan needing the target's altitude — elevation angle, depression, vertical
-separation between two contacts, slant-vs-ground range, loft geometry — must take it from
-`perception.geometry.elevation_at(conn, theatre, x, z)` (terrain MSL at a point, `None` when
-unavailable) against `contact.position.x/z`, with `conn`/`theatre` off `EnrichmentContext`. Cache on
-the quantised `(x, z)` as `WorldEnrichmentCache` already does; it changes only when the target moves.
-**Never route it through `describe_contact`/`_report_scope`** — `BL-B49` measured 63.25 ms/contact of
-enrichment that path computes and discards.
+**How to apply — CORRECTED by the user, 2026-10-14** (`docs/acceptance/2026-10-14-attack-run-
+guidance-direction.md` §17): *"No world elevation necessary since unit data has elevation."*
 
-Two honesty constraints that come with it: `elevation_at` returns `None` where the grid has no
-coverage, and the coarse grid has been measured placing a real unit "underground"
-(`debugger/project_terrain_los_grid_error_permanent_miss`). Decide the fail-open/fail-closed
-direction explicitly — in `BL-14` the vertical half fails open, so a missing grid omits a word and
-can never withhold *"lined up"*.
+**The target's own altitude arrives with the unit.** `aircraft-layer/src/schema/world_objects.py`
+carries a per-object `altitude_m` (MSL metres, `alt_m` on the wire), and `OwnshipState.alt_m`'s
+docstring says MSL is the right frame for comparing against a contact's own altitude. Inside
+body-layer it survives as far as `clustering.ClusterCandidate.alt_m` and is then **dropped**:
+`Cluster` has no altitude field and `naked_eye_source._build_observation` substitutes
+`ownship_state.alt_m` into the centroid. So the fix for any vertical derivation is to carry the
+unit's own altitude through perception, not to query the world model.
 
-`enrichment.py`'s `project_terrain_aware` is a *different* thing: it re-projects bearing+range to a
-terrain-aware ground point for world-model landmark lookup. It does not write `last_alt_m` back, and
-it is the expensive iterative path. For "elevation at a position I already know", `elevation_at` is
-the right call.
+> **Superseded.** This read: *take it from `perception.geometry.elevation_at(conn, theatre, x, z)`
+> against `contact.position.x/z`, cached on the quantised `(x, z)`.* Two things wrong with it. (1)
+> It is unnecessary — the unit's altitude is already in the feed. (2) It was **reinventing a cache
+> that exists**: `belief/enrichment.py`'s `WorldEnrichmentCache`/`_terrain_aware_world_position`
+> already caches a terrain-aware target position on a quantised key, and `relative_geometry` already
+> computes `relative_alt_m` from it. Writing a second one into the same module would have been the
+> duplication the no-new-abstractions rule is about.
+
+What the superseded remedy got *right* and is worth keeping: whatever the source, decide the
+fail-open/fail-closed direction explicitly (in `BL-14` the vertical half fails open — an absent
+input omits a word and can never withhold *"lined up"*), and **never route an altitude lookup
+through `describe_contact`/`_report_scope`** (`BL-B49` measured 63.25 ms/contact of enrichment that
+path computes and discards).
+
+**The transferable lesson, which is bigger than the altitude:** before planning a world-model query
+to recover a quantity, check whether the quantity is already on the wire and merely discarded
+downstream. Two layers of this codebase drop real data on the floor for good local reasons
+(`Cluster` has no altitude because clustering did not need one), and that absence reads as "the data
+does not exist" to anyone reading from the belief side.
 
 See also [[project_three_projections_of_a_group_roster]] — same lesson shape: check the field's
 actual provenance and resolver before building on its name.
