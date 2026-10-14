@@ -253,14 +253,48 @@ gates) is weapon-independent. Accepting it now means the grammar does not have t
 something does consume it; requiring it now would be a slot with no consumer, which is the shape
 `BL-13`'s own findings warn about.
 
+## 15. The run claims the gaze
+
+Settled 2026-10-14, after the Architect pass surfaced the concrete case: `_SECTOR_LEGS["left"]` is
+hours `(11, 10, 9)` and contains **no 12**, so a standing `scan left` followed by `engage` would mean
+**the target ahead is never looked at** — guidance running silently against an ageing belief, which
+is the one circumstance that makes §4's silence a lie.
+
+**So an attack run fixes the look on the target.** The cost is accepted: no scanning elsewhere for
+the run's duration. The mechanism is already seamed for it — `ScanPlan.__post_init__` deliberately
+permits a `fixed_look` alongside a commanded sector.
+
+Note what this does *not* change: **routine reporting about everything else continues.** An attack
+run must not blind the intercom to a SAM.
+
+## 16. `silence` mutes guidance too — no exemption
+
+Settled 2026-10-14. `silence` stays absolute, as it was deliberately built to be. Guidance is not
+exempt.
+
+The reason this costs nothing in practice: **a run cannot begin while muted**, because any command
+clears silence. So the only reachable case is the pilot muting Petrovich *during* a run, which is an
+instruction to stop talking, and taking it literally is the whole point of the command.
+
 ---
 
-## Still open, for a later pass
+## Still open
 
-Nothing blocking a plan. Two values are deliberately unset and belong to a sortie, not to analysis:
-the **lined-up azimuth band** (§5), the **elevation gate** (§11, wide), and the **change threshold**
-that drives cadence (§10). All three are agreed guesses in this project's usual sense — one named
-constant each, one place, stated as an assumption, tuned from flying.
+**The elevation gate's form.** The Architect pass found that §11's two statements pull apart
+arithmetically: at 120 m AGL two vehicles at 1.0 and 1.5 km are **2.3°** apart in elevation
+(6.8° vs 4.6° below the nose), while a nose lofted for rockets sits several degrees up — so a gate
+wide enough to ignore the loft is several times wider than the separation it exists to resolve, and
+the vertical word would almost never fire and would discriminate nothing when it did. Offered a wide
+absolute gate versus a *discrimination test* (speak when the nose's elevation would put it on a
+different candidate than the selected one), the user's answer was **"Wait, I will explain in more
+detail"** — so this is **deliberately unresolved pending his explanation**, and nothing about the
+vertical axis should be built or re-derived until it lands.
+
+Two values remain deliberately unset and belong to a sortie, not to analysis: the **lined-up azimuth
+band** (§5) and the **change threshold** that drives cadence (§10). Both are agreed guesses in this
+project's usual sense — one named constant each, one place, stated as an assumption, tuned from
+flying. The Architect's proposed values are 5.0° and 3.0°, with their bounds reasoned in
+`plans/attack-run/plan.md`.
 
 Related: `body-layer/ROADMAP/BL-14.md`, `docs/concept/Attacking target.md` (his spec, 2026-10-11),
 `plans/brain-layer/explore-notes.md` §"Attack run (user-raised, 2026-09-24)",
