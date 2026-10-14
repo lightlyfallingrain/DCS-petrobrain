@@ -699,3 +699,141 @@ passed, 4 xfailed**; audio-adapter **277 passed, 1 skipped** (untouched, run to 
 regression). The readback-occupancy interaction was tested by direct reproduction of the LOS-blip
 scenario (frozen percept, `busy_until_sim=6.0`), not accepted from the implementer's fixture-note
 framing.
+
+---
+
+## Security fix review — BL-14's stale `attack_target` task on reselection (2026-10-14)
+
+Reviewed `9475af80af7c899bc23e857d483694733ac53ea4` on `feature/bl14-attack-run`. Worktree base
+(`f25c57c`) was a strict ancestor of the named tip with a clean tree — fast-forwarded, no
+divergence. `git diff 296fa81..9475af8`: `body-layer/src/belief/tools.py` (32 lines),
+`body-layer/tests/test_crew_console.py` (6 new tests, 250 lines), `plans/attack-run/
+implementation.md` (135 lines), one implementer agent-memory file. Read against `plans/attack-run/
+security-review.md`'s "Required fix in detail" and `docs/acceptance/2026-10-14-attack-run-guidance-
+direction.md`.
+
+### Findings, each checked by running or mutating rather than by reading alone
+
+1. **The fix itself — closes the finding.** `attack_target_task` now confirms `contact_id` exists
+   (no side effect) before cancelling every still-active `attack_target` task and promoting the new
+   one. Confirmed by running the six new tests (`pytest -k "reselect or stale"`, 7 passed) and, since
+   the task said not to rely on tests written by the fix's own pass, by an independent reproduction
+   script against `CrewConsole.drain_attack_run`/`_active_attack_target_task` directly (not kept in
+   the tree). **Verified by running.**
+
+2. **The cancel-before-promote ordering claim — verified by mutation, and it is exactly as fragile
+   as the implementer says.** Reordered the two operations in `tools.py` (promote, then cancel) and
+   reran `test_reselecting_the_same_target_does_not_demote_its_own_attention`: it failed,
+   `armor.attention == 'normal'` where the test asserts `'priority'` — a same-contact reselect
+   transiently demotes the contact it just promoted, exactly the regression the implementer's note
+   describes. Reverted immediately after confirming the failure; current ordering (cancel first,
+   confirmed clean) restored and reran to confirm green. **Verified by mutation.**
+
+3. **Every `attack_target` mint point is closed.** Grepped for `kind="attack_target"`/
+   `kind='attack_target'`/`tasks.create(` outside `tools.py` — none found; `belief.console`'s dev
+   `attack-target <id>` command (line ~401) calls `tools.attack_target_task` itself, the same shared
+   primitive. No test helper constructs an `attack_target` `PendingIntent` directly either (the new
+   tests all go through `attack_target_task` or `handle_command`). **Verified by grep.**
+
+4. **Attention demotion — pre-existing, not a new leak, confirmed by reading the unchanged code
+   path.** `cancel_task`'s demote-to-`"normal"` is untouched by this diff. The group-mate "re-raise
+   to `watch`" the implementer describes (`_handle_engage`'s/`_handle_select_target`'s tagging loop,
+   `crew_console.py` ~2143–2153) is also untouched by this diff and runs unconditionally after every
+   select/engage, independent of whether a reselection happened — so it is accurately described as
+   existing behaviour, not something this fix introduces. No path leaves a contact stuck at
+   `"priority"` after its task is cancelled: `cancel_task` demotes unconditionally on every
+   cancellation, including the ones this fix newly triggers. **Verified by reading** (the code
+   this bullet concerns is outside the diff, so there was nothing to usefully mutate).
+
+5. **Mid-run reselection — re-point is the right call for task identity, but it exposes a real,
+   separate staleness bug in `AttackRunState` that neither the plan, the security review, nor this
+   fix's own implementation note catches.** `AttackRunState.last_known_target_alt_m` (`attack_run.py`)
+   is a single run-level field, not per-contact, and `decide()`'s tier-2 fallback
+   (`_tier2_alignment`) reads it from the *state passed in*, falling open to "no elevation word"
+   only when that field is `None` — which the docstring frames as "no tier-1 look has ever
+   succeeded for this contact," but the implementation has no contact identity attached to the
+   value at all. Reselecting mid-run (exactly the path this security fix makes a sanctioned,
+   silent re-point rather than a refusal) carries the *old* target's remembered altitude into the
+   *new* target's first tier-2 tick, if tier 1 has not yet produced a fresh look for it.
+
+   **Confirmed by direct reproduction, not by reading the docstring's claim.** Built two contacts —
+   one with a fresh `relative_direction` (tier 1 succeeds, remembered altitude = ownship alt + 500m),
+   one with none at all (tier 1 can never succeed for it). Ran `drain_attack_run` on the first,
+   captured the returned state (`last_known_target_alt_m=1500.0`), re-pointed the task to the second
+   contact, then called `belief.attack_run.decide` directly with the carried-forward state against
+   the second contact: it returned `tier=2`, `elevation_deg` computed from `1500.0` — the *first*
+   contact's altitude — rendering `"Higher, obstructed."` for a target whose own altitude belief
+   has never been observed. The docstring's "`None` only before the very first tier-1 look this
+   contact has ever had" is false as implemented; it is "`None` only before the very first tier-1
+   look *this run* has ever had," which silently becomes wrong the moment a run survives a
+   reselection. (In my own `console.drain_attack_run` call — as opposed to calling `decide()`
+   directly — the scheduler's busy-gate happened to suppress the print on the tick I tested, which
+   would have hidden this from a test that only exercised the public method at that exact `now_sim`;
+   calling `decide()` directly bypassed that and is what actually surfaces the bug.) **Verified by
+   mutation/reproduction**, not accepted from the docstring.
+
+   This is **not a defect in this security-fix diff** — `attack_run.py` is untouched by it, and the
+   bug predates this round. It is called out here because item 5 of the dispatch asked specifically
+   whether re-pointing mid-run leaves anything stale, and the honest answer is yes, in a way the
+   implementer's own "Mid-run reselection decision" note does not mention (that note covers task
+   identity/attention only). The security fix's own choice — re-point rather than refuse — is what
+   makes this latent bug reachable from an ordinary command sequence rather than only from a
+   contrived direct call to `attack_run.decide`.
+
+6. **Nothing else moved.** `git diff 296fa81..9475af8 --stat` is four files; no constant, no
+   vocabulary, no `CalloutScheduler` change. The optional `field(repr=False)` refinement was
+   correctly not taken. **Verified by reading the diff.**
+
+### Verification — run myself
+
+- `ruff format --check src tests`: pass (126 files)
+- `ruff check src tests`: pass
+- `mypy src` (from `cd body-layer`): `Success: no issues found in 58 source files`
+- `pytest -q`: **1838 passed, 4 xfailed** — matches the implementer's reported count exactly
+- audio-adapter untouched by this diff (confirmed by file list); not rerun
+
+### Required Fixes
+
+None.
+
+### Suggestions (optional)
+
+- Consider widening `AttackRunState.last_known_target_alt_m`'s fail-open condition so it cannot
+  outlive the contact it was observed for — either reset it to `None` whenever the active
+  `attack_target` task's `contact_id` changes (the natural hook, since `drain_attack_run` already
+  resolves that task every tick), or key the remembered value by contact id. Not required here: the
+  bug is pre-existing, outside this diff's files, and not part of the finding this round fixes.
+
+### Verdict
+
+**APPROVE.**
+
+The one required finding from the deep security review is fixed at the correct single mint point,
+the fix's own subtle ordering requirement is verified by mutation (not just by reading), every
+other reader of "the current target" is confirmed to route through the same now-correct resolution,
+and nothing outside the fix's stated scope moved. This clears the Implementer → Reviewer loop for
+the security change request; proceed to Definition of Done.
+
+### Flag for Definition of Done
+
+**Put the Finding 5 staleness bug in front of DoD before or alongside the Stage 5/6/7 acceptance
+sortie.** It is not a blocker for merging this security fix — it predates this round and is outside
+the diff — but DoD is explicitly arranging a sortie covering Stages 5, 6, and 7 together, and this
+bug is reachable from an ordinary in-cockpit sequence: `select target X` → `engage` → (while
+engaged) `select target Y` → if Y has no fresh naked-eye/HelperAI look within
+`ATTACK_RUN_RELATIVE_MAX_AGE_S` (2.0s) of the reselect, the very next guidance tick can speak an
+elevation word ("Higher."/"A little lower.") derived from X's altitude, not Y's. On a real sortie
+this would most often show up as a wrong-feeling elevation call for one or two ticks right after
+switching targets mid-run, before tier 1 catches up — worth either reproducing in the sortie or
+filing as a dated backlog item (`BL-B<n>`) rather than letting it surface only as "that callout felt
+wrong" with no record of why.
+
+### Review Confidence (security fix review)
+
+Full read of the diff's two source-affecting files plus the console dispatch paths the finding
+touches (`crew_console.py`'s `_handle_select_target`/`_handle_engage`/`_active_attack_target_task`/
+`drain_attack_run`, `belief/console.py`'s dev command). Both the fix's required ordering and the
+mid-run staleness finding were verified by direct mutation/reproduction, not accepted from the
+implementer's report or the new tests' passing. `attention`/group-tagging finding (4) was verified
+by reading only, since the code it concerns is outside this diff and there was nothing load-bearing
+to mutate.
