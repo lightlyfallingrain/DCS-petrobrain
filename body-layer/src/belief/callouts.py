@@ -960,13 +960,22 @@ class CalloutScheduler:
         store: ContactStore,
         now_sim: float,
         enrichment: EnrichmentContext | None = None,
+        *,
+        attack_run_target_contact_id: str | None = None,
     ) -> list[str]:
         """Speak at most one thing, chosen fresh from current belief. See
         module docstring for the full algorithm; this is `plans/
         group-reporting/plan.md`'s Stage 4 design, section 4, "`tick`'s
         shape, end to end" -- two candidate sources (`store.
         unacknowledged_events`, `store.groups`) feeding one shared priority
-        sort, no `Event` ever minted for a group's own trigger."""
+        sort, no `Event` ever minted for a group's own trigger.
+
+        `attack_run_target_contact_id` (`plans/attack-run/plan.md`
+        Decision 5) narrowly suppresses `_WATCHED_ONLY_KINDS` for that one
+        contact id -- see the check inside the main loop below for why.
+        `None` (the default, every caller but `CrewConsole.drain_events`)
+        is a true no-op: this push-path push method has no other reason
+        to know an attack run exists."""
         if now_sim < self.busy_until_sim:
             return []
 
@@ -992,6 +1001,26 @@ class CalloutScheduler:
                 # (Stage 4 design, section 1).
                 continue
             if event.kind in _WATCHED_ONLY_KINDS:
+                if event.contact_id == attack_run_target_contact_id:
+                    # `plans/attack-run/plan.md` Decision 5 -- the gate
+                    # that stops the struck range countdown (and every
+                    # other watched-only kind) from returning about the
+                    # contact the alignment channel is already narrating.
+                    # Raising the attack-run target to `"priority"`
+                    # attention enrols it in `_WATCHED_ONLY_KINDS` by the
+                    # same mechanism every other watched contact uses --
+                    # without this check it would speak *"getting
+                    # closer"* mid-run, which is exactly the range
+                    # countdown §1 struck, reintroduced through the back
+                    # door. Narrow to this one contact id: routine
+                    # reporting about every other contact (including this
+                    # one's own group-mates) continues unchanged -- an
+                    # attack run must not blind the intercom to a SAM.
+                    # `_consumed`, not a bare `continue`: lost, not
+                    # deferred, the same treatment `WATCH_REPORT_MIN_
+                    # GAP_S` below gives a suppressed watched-only event.
+                    self._consumed.add(event.id)
+                    continue
                 belief_group = store.group_for_contact(event.contact_id)
                 if belief_group is not None:
                     if belief_group.id not in group_keeper:

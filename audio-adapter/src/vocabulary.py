@@ -169,6 +169,32 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # is a separate job. A zero-slot `"report"`/`"describe"` still
         # falls through to `report_all` through the ordinary phrase table.
         "report",
+        # `select|set target <what> <where>` / `drop target` (`plans/
+        # attack-run/plan.md` Decision 14, BL-14 Stage 1) -- `select_
+        # target` carries the same five slots `report` above does
+        # (`descriptor`/`clock`/`sector`/`relative`/`band`), parsed, never
+        # enumerated, for the identical combinatorial reason. `drop_target`
+        # is a plain, slot-free phrase matched by the ordinary phrase
+        # table, like `cancel_watch`.
+        "select_target",
+        "drop_target",
+        # `step [<count>] left/right/near/far` (`plans/attack-run/plan.md`
+        # Decision 6, BL-14 Stage 4) -- `direction`/`count` are parsed
+        # slots (`parse_step_direction`/`parse_step_count` below), not
+        # enumerated phrases, for the same reason `follow`/`report`'s
+        # slots are: 4 directions x several counts is small enough to
+        # enumerate, but the recorded phrasings below are still bias
+        # hints only, not the closed set this token accepts.
+        "step",
+        # `engage [<what> <where>] [guns|rockets|missiles]` /
+        # `attack [<what> <where>]` (Decision 15, BL-14 Stage 5) -- the
+        # same five what/where slots `select_target` parses, plus one new
+        # weapon slot (`parse_weapon` below) that nothing on the body-
+        # layer side reads yet (Decision 15: accepted, not required).
+        "engage",
+        # `disengage` / `stop attack` / `abort` (Decision 2) -- a plain,
+        # slot-free phrase, like `drop_target`.
+        "disengage",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -451,6 +477,43 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "report armor north",
         "describe group far",
     ),
+    # `select target`/`set target` (`plans/attack-run/plan.md` Decision
+    # 14) -- like `report`, the slots are parsed (`command_matcher.py`'s
+    # select-slot branch), never enumerated here; these two phrasings are
+    # recogniser bias hints only, one per verb synonym.
+    "select_target": ("select target armor north", "set target two o'clock"),
+    # `drop target` (Decision 2) -- a plain, slot-free phrase, one exact
+    # wording, matching `cancel_watch`'s own posture for a short command
+    # with no recorded ambiguity to hedge against yet.
+    "drop_target": ("drop target",),
+    # `step [<count>] left/right/near/far` (`plans/attack-run/plan.md`
+    # Decision 6) -- slots parsed (`command_matcher.py`'s step-slot
+    # branch), never enumerated; these phrasings are recogniser bias
+    # hints only, one per direction plus one with a count.
+    "step": ("step left", "step right", "step 2 left", "step near", "step far"),
+    # `engage [<what> <where>] [weapon]` (Decision 15) -- like
+    # `select_target`, the what/where/weapon slots are parsed, never
+    # enumerated; these phrasings are recogniser bias hints only.
+    #
+    # **`attack`/`attack-run` (the spec's own synonym verbs, `docs/
+    # concept/Attacking target.md`) are deliberately NOT admitted here.**
+    # `_derive_verb_anchor_words` would pick up `"attack"` as a
+    # `VERB_ANCHOR_WORDS` member from either phrasing's first word, and
+    # `difflib.SequenceMatcher(None, "tanks", "attack").ratio() ==
+    # 0.545` -- just over `command_matcher.VERB_FLOOR` (0.5). That flips
+    # `test_non_command_speech_enqueues_with_null_token`'s own pinned
+    # adversarial sentence ("the tanks are on the ridge") from
+    # `verb_anchored=False` (silently falls through to free speech) to
+    # `verb_anchored=True, token=None` ("say again") -- a real behaviour
+    # change for an ordinary descriptive remark, not a cosmetic one, and
+    # one this implementer may not fix by rewriting a pinned test
+    # (`AGENTS.md`'s own rule). `engage`/`engage target` cover the token
+    # the plan's Stage 5 wiring actually dispatches; the `attack`
+    # synonym is flagged here rather than silently dropped.
+    "engage": ("engage", "engage target"),
+    # `disengage` / `stop attack` / `abort` (Decision 2) -- a plain,
+    # slot-free phrase, matching `drop_target`'s own posture.
+    "disengage": ("disengage", "stop attack", "abort"),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
@@ -993,6 +1056,101 @@ def parse_band(text: str) -> str | None:
         band = BAND_WORDS.get(word)
         if band is not None:
             return band
+    return None
+
+
+#: `step`'s own direction slot (`plans/attack-run/plan.md` Decision 6,
+#: `docs/concept/Attacking target.md`'s *"step [count]
+#: left/right/near|closer|close/far|further/away"*) -- several spoken
+#: forms per value, the same reasoning `BAND_WORDS` above gives, since
+#: this is another slot with more than one synonym per value.
+#: Deliberately reuses the same words `RELATIVE_WORDS`/`BAND_WORDS`
+#: already carry for a *different* slot (`report`/`select_target`'s
+#: `where`/`how far`) -- there is no collision because `step`'s own verb
+#: anchors the branch before this table is ever consulted
+#: (`command_matcher.py`'s step-slot branch), so "report left" and "step
+#: left" are never compared against each other.
+STEP_DIRECTION_WORDS: dict[str, str] = {
+    "left": "left",
+    "right": "right",
+    "near": "near",
+    "closer": "near",
+    "close": "near",
+    "far": "far",
+    "further": "far",
+    "farther": "far",
+    "away": "far",
+}
+
+
+def parse_step_direction(text: str) -> str | None:
+    """`step`'s direction slot -- the first `STEP_DIRECTION_WORDS` key
+    found anywhere in the normalised transcript, **transcript order**
+    (the same tie-break `parse_band` uses, for the identical reason: a
+    direction has several synonyms, so "whichever the pilot said first"
+    is the only ordering that means anything). `None` if no direction
+    word is present."""
+    for word in normalize_for_match(text).split():
+        direction = STEP_DIRECTION_WORDS.get(word)
+        if direction is not None:
+            return direction
+    return None
+
+
+#: `step`'s optional count slot -- small number words only (1-9), unlike
+#: `_RANGE_NUMBER_WORDS`' wider 1-20: a step count names how many units
+#: to skip within one group, which this project's own measured undercount
+#: (`BL-12`: 4 records for 6 real units) bounds well below a range in
+#: kilometres.
+_STEP_COUNT_WORDS: dict[str, int] = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+}
+
+
+def parse_step_count(text: str) -> int | None:
+    """`step [<count>] left/right/near/far`'s optional count slot -- the
+    first number word or digit anywhere in the normalised transcript, or
+    `None` when the player said no count at all (`_parse_step_slots`
+    then defaults to 1, matching the spec's own `"[count]"` optional-
+    bracket notation). Both digits (`"2"`) and number words (`"two"`) are
+    recognised, mirroring `parse_range_km`'s identical two-form handling.
+    """
+    for word in normalize_for_match(text).split():
+        if word.isdigit():
+            value = int(word)
+            if value >= 1:
+                return value
+        else:
+            count = _STEP_COUNT_WORDS.get(word)
+            if count is not None:
+                return count
+    return None
+
+
+#: `engage`'s weapon slot (`plans/attack-run/plan.md` Decision 15) --
+#: *"allow weapon token, but do not require it. Nothing consumes it yet,
+#: but it will become important later"*. Three words, closed, since this
+#: is naming one of the aircraft's own weapon classes, not an open set.
+WEAPON_WORDS: tuple[str, ...] = ("guns", "rockets", "missiles")
+
+
+def parse_weapon(text: str) -> str | None:
+    """The weapon slot -- the first `WEAPON_WORDS` member found anywhere
+    in the normalised transcript, or `None`. Whole-word matching and
+    `WEAPON_WORDS` order as the tie-break, exactly as `parse_sector_word`/
+    `parse_relative_word` above."""
+    words = set(normalize_for_match(text).split())
+    for weapon in WEAPON_WORDS:
+        if weapon in words:
+            return weapon
     return None
 
 

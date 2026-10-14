@@ -213,7 +213,7 @@ from belief.classification import (
     parent_class_of,
 )
 from belief.contacts import Contact, ContactStore
-from belief.enrichment import EnrichmentContext
+from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext
 from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
@@ -233,7 +233,9 @@ from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
 from perception.geometry import angular_delta_deg
 
-Template = Literal["readback", "contact_report", "lifecycle_event", "threat_reaction"]
+Template = Literal[
+    "readback", "contact_report", "lifecycle_event", "threat_reaction", "attack_run"
+]
 Urgency = Literal["normal", "critical"]
 
 
@@ -402,6 +404,13 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     "NO_SUCH_COMMAND": "Unable, no such command.",
     "NO_MATCH": "Unable, I don't see it.",
     "NO_LINE_OF_SIGHT": "Unable, no line of sight.",
+    # `step` (`plans/attack-run/plan.md` Decision 6) -- the ungrouped-target
+    # and end-of-ordering cases. Closed tokens, like every other
+    # `render_unable` reason, rather than the plan's own illustrative
+    # pseudocode phrases passed as free text -- see this dict's own
+    # "reason -> spoken text" contract above.
+    "NO_GROUP_MEMBERS": "Unable, no other units in the group.",
+    "LAST_IN_ORDER": "Unable, that's the last one.",
 }
 
 
@@ -424,6 +433,191 @@ def render_lost_contact() -> OutgoingSpeech:
     the pilot asked for something and deserves to know why nothing
     happened (D4's own wording)."""
     return OutgoingSpeech(text="Lost him.", template="readback")
+
+
+def render_target_readback(facts: dict[str, object]) -> OutgoingSpeech:
+    """`select target`/`step`'s shared readback (`plans/attack-run/plan.md`
+    "Spoken vocabulary") -- `"Target, armour, 2 o'clock."`: unit type
+    plus clock only, deliberately **no range** here -- range is spoken
+    once, by `engage`'s own readback (Stage 5, not this function), per
+    §1's "no range beyond the initial report." Reuses `_unit_type_display`
+    exactly as every other readback in this module does."""
+    classification = facts.get("classification")
+    value = classification.get("value") if isinstance(classification, dict) else None
+    level = classification.get("level") if isinstance(classification, dict) else None
+    parts = [_unit_type_display(value, level)]
+    relative_now = facts.get("relative_now")
+    if isinstance(relative_now, dict):
+        clock = relative_now.get("clock_position")
+        if isinstance(clock, int):
+            parts.append(f"{clock} o'clock")
+    return OutgoingSpeech(text=f"Target, {', '.join(parts)}.", template="readback")
+
+
+def render_engage_readback(facts: dict[str, object]) -> OutgoingSpeech:
+    """`engage`'s own readback (Stage 5, `plans/attack-run/plan.md`
+    "Spoken vocabulary") -- `"Attack run, armour, 2 o'clock, 1.5
+    kilometres."`, **range spoken exactly once, here**, per §1's "no range
+    beyond the initial report" (`render_target_readback`'s own sibling
+    note). A terrain acquisition fragment (§8) is appended when available,
+    exactly as `_contact_report_text` appends one -- not reused directly,
+    since that helper also carries a count clause and a `", moving"` tail
+    neither this milestone's spoken vocabulary nor the direction document
+    calls for here; duplicating the two lines this function actually needs
+    is cheaper than threading unwanted branches through a shared helper.
+    The terrain fragment is **acquisition only** and `render_alignment`
+    never repeats it past `"Lined up."` (§8) -- that boundary is this
+    function's whole job, not something the two share."""
+    classification = facts.get("classification")
+    value = classification.get("value") if isinstance(classification, dict) else None
+    level = classification.get("level") if isinstance(classification, dict) else None
+    parts = [_unit_type_display(value, level)]
+    relative_now = facts.get("relative_now")
+    if isinstance(relative_now, dict):
+        clock = relative_now.get("clock_position")
+        if isinstance(clock, int):
+            parts.append(f"{clock} o'clock")
+        range_m = relative_now.get("range_m")
+        if isinstance(range_m, float):
+            parts.append(_format_range_km(range_m))
+    text = f"Attack run, {', '.join(parts)}."
+    terrain_qualifier = facts.get("terrain_qualifier")
+    if isinstance(terrain_qualifier, str):
+        text = f"{text[:-1]} {terrain_qualifier}."
+    else:
+        semantic = facts.get("semantic")
+        if isinstance(semantic, list) and semantic:
+            best = max(semantic, key=lambda fact: fact["confidence"])
+            text = f"{text[:-1]} {_round_enrichment_fragment(best['text'])}."
+    return OutgoingSpeech(text=text, template="attack_run")
+
+
+def render_attack_run_off() -> OutgoingSpeech:
+    """`disengage`/`stop attack`/`abort` (Decision 2) -- ends the run's
+    phase only; the standing selection (and its own readback vocabulary)
+    is untouched, per that decision's "stop the run, keep the watch.\""""
+    return OutgoingSpeech(text="Attack run off.", template="attack_run")
+
+
+#: One row of an alignment word table (`plans/attack-run/plan.md`
+#: Decision 11 REVISED, rule 1): `(threshold_deg, positive_phrase,
+#: negative_phrase)`, descending by `threshold_deg` -- the table's own
+#: last (smallest) row is the axis's gate, not a separate concept.
+#: `belief.attack_run` declares the actual tables (`AZIMUTH_WORD_TABLE`/
+#: `ELEVATION_WORD_TABLE`) and passes them in here as data, rather than
+#: this module importing them, so that `belief.attack_run` can import
+#: `render_alignment` below without a circular import.
+_AlignmentWordRow = tuple[float, str, str]
+
+#: All twelve clock hours, spoken as words -- `_CLOCK_REPORT_LABELS`
+#: (`crew_console.py`) only carries the nine *forward* hours (the
+#: no-omniscience rule for routine reporting), but an attack-run target
+#: the pilot has already selected can legitimately sit anywhere around
+#: the nose as the aircraft manoeuvres, so this table is not narrowed the
+#: same way.
+_ALIGNMENT_CLOCK_WORDS: dict[int, str] = {
+    1: "One",
+    2: "Two",
+    3: "Three",
+    4: "Four",
+    5: "Five",
+    6: "Six",
+    7: "Seven",
+    8: "Eight",
+    9: "Nine",
+    10: "Ten",
+    11: "Eleven",
+    12: "Twelve",
+}
+
+
+def _alignment_phrase_for(
+    signed_error_deg: float, table: tuple[_AlignmentWordRow, ...]
+) -> str | None:
+    """The first (largest) threshold in `table` that `signed_error_deg`'s
+    magnitude exceeds, descending order -- `None` means the error is at or
+    below the table's own last (smallest) threshold, i.e. inside that
+    axis's gate (Decision 11 REVISED, rule 1). Shared by both axes'
+    `render_alignment` calls below -- the test this rule names
+    (`test_attack_run.py`) asserts both go through this one helper,
+    not two independently-maintained branches."""
+    abs_error_deg = abs(signed_error_deg)
+    for threshold_deg, positive_phrase, negative_phrase in table:
+        if abs_error_deg > threshold_deg:
+            return positive_phrase if signed_error_deg > 0 else negative_phrase
+    return None
+
+
+def _alignment_clock_hour(azimuth_deg: float) -> int:
+    """`azimuth_deg` (signed, `0` = nose, positive = right) reduced to a
+    1-12 clock hour, mirroring `belief.enrichment._clock_position`'s own
+    formula over a `[0, 360)` relative bearing."""
+    hour = round((azimuth_deg % 360.0) / CLOCK_BUCKET_DEG) % 12
+    return 12 if hour == 0 else hour
+
+
+def render_alignment(
+    azimuth_deg: float,
+    elevation_deg: float,
+    *,
+    tier: Literal[1, 2],
+    azimuth_table: tuple[_AlignmentWordRow, ...],
+    elevation_table: tuple[_AlignmentWordRow, ...],
+) -> OutgoingSpeech:
+    """The ongoing attack-run guidance utterance (`plans/attack-run/
+    plan.md`'s "Spoken vocabulary") -- outside the 12 o'clock sector
+    (the wider of `azimuth_table`'s rows plus half of `CLOCK_BUCKET_DEG`'s
+    own half-width is inside it by construction, so "outside" is simply
+    "the o'clock register still applies") speaks the clock hour; inside
+    it, the register switches to the qualitative word tables, and
+    `"lined up"` once both axes clear their own gate (the table's own
+    last row), never again until something changes (Decision 7's
+    change-driven cadence is the caller's job, not this function's --
+    this renders one tick's state, it does not remember the last one).
+
+    `tier` selects the register (Decision 11 REVISED/Decision 17 REVISED).
+    `azimuth_table`/`elevation_table` are supplied by the caller
+    (`attack_run.decide`), not read from a tier-keyed lookup here --
+    tier 1 passes `attack_run.AZIMUTH_WORD_TABLE`/`ELEVATION_WORD_TABLE`,
+    tier 2 passes `attack_run.TIER2_AZIMUTH_WORD_TABLE` and the *same*
+    `ELEVATION_WORD_TABLE` (its one row carries no large/small split
+    either way). This function stays ignorant of which tier's table is
+    which; it only ever applies the one it is handed.
+
+    **Tier 2 (Stage 6) is the qualifier `", obstructed"` appended to
+    whatever the branches above would otherwise have rendered -- one
+    rule, applied uniformly, not a second table of pre-qualified
+    phrases.** This includes the o'clock branch and the `"lined up"`
+    case: the user's own words (2026-10-14, second direction pass) are
+    `"lined up, obstructed"`, composing exactly the way `"right,
+    obstructed"` does, because the qualifier marks *how the information
+    was obtained*, not which branch fired. Confirmed again
+    (2026-10-14, third pass): on regaining sight while still lined up, a
+    bare `"lined up"` is spoken once, symmetric with `"lined up,
+    obstructed"` on losing it -- both are tier *transitions*, and both
+    fall out of `attack_run._should_emit`'s own text-comparison with no
+    tier-aware code here or there, because the qualifier's presence is
+    part of `text` and therefore part of what "changed" means. A
+    *within*-tier-2 repeat (still obstructed, still lined up) renders the
+    identical string as the previous tick and is suppressed by that same
+    comparison, exactly like tier 1's own `"Lined up."`-then-silence."""
+    outside_sector_deg = CLOCK_BUCKET_DEG / 2.0
+    if abs(azimuth_deg) > outside_sector_deg:
+        clock = _alignment_clock_hour(azimuth_deg)
+        text = f"{_ALIGNMENT_CLOCK_WORDS[clock]} o'clock"
+    else:
+        azimuth_phrase = _alignment_phrase_for(azimuth_deg, azimuth_table)
+        elevation_phrase = _alignment_phrase_for(elevation_deg, elevation_table)
+        if azimuth_phrase is None and elevation_phrase is None:
+            text = "lined up"
+        else:
+            phrases = [
+                phrase for phrase in (azimuth_phrase, elevation_phrase) if phrase
+            ]
+            text = ", ".join(phrases)
+    if tier == 2:
+        text = f"{text}, obstructed"
+    return OutgoingSpeech(text=f"{text[0].upper()}{text[1:]}.", template="attack_run")
 
 
 def render_stand_by() -> OutgoingSpeech:

@@ -276,6 +276,10 @@ class BeliefTruthLogWriter:
         gaze_label: str | None = None,
         gaze_center_deg: float | None = None,
         optic_name: str | None = None,
+        attack_run_target_contact_id: str | None = None,
+        attack_run_tier: int | None = None,
+        attack_run_azimuth_deg: float | None = None,
+        attack_run_elevation_deg: float | None = None,
     ) -> None:
         """Write one `kind: "speech"` row -- what Petrovich actually said,
         on the same timeline as the belief-versus-truth rows.
@@ -297,7 +301,16 @@ class BeliefTruthLogWriter:
         Rows carry `kind` so a reader can tell them apart. Belief-truth rows
         written before this existed have no `kind` field, so **treat a
         missing `kind` as `"belief_truth"`** rather than skipping the row --
-        there are already such files on the user's disk."""
+        there are already such files on the user's disk.
+
+        `attack_run_target_contact_id`/`attack_run_tier`/`attack_run_
+        azimuth_deg`/`attack_run_elevation_deg` (`plans/attack-run/
+        plan.md` Stage 5) carry one attack-run guidance utterance's own
+        context -- the target, which tier produced it, and the current
+        axis errors -- so a sortie can be triaged from this log instead of
+        recalled. `None` (the default, every row that is not attack-run
+        guidance) omits all four, the same absent-not-null convention
+        `gaze_label`/`gaze_center_deg`/`optic_name` already follow."""
         row: dict[str, object] = {
             "kind": "speech",
             "t_sim": t_sim,
@@ -310,6 +323,14 @@ class BeliefTruthLogWriter:
             row["gaze_center_deg"] = gaze_center_deg
         if optic_name is not None:
             row["optic_name"] = optic_name
+        if attack_run_target_contact_id is not None:
+            row["attack_run_target_contact_id"] = attack_run_target_contact_id
+        if attack_run_tier is not None:
+            row["attack_run_tier"] = attack_run_tier
+        if attack_run_azimuth_deg is not None:
+            row["attack_run_azimuth_deg"] = attack_run_azimuth_deg
+        if attack_run_elevation_deg is not None:
+            row["attack_run_elevation_deg"] = attack_run_elevation_deg
         if self._disabled:
             return
         try:

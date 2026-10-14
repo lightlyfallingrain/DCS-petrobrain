@@ -618,6 +618,51 @@ def test_follow_with_no_recognisable_slots_says_again() -> None:
     assert result.token is None
 
 
+# -- plans/attack-run/plan.md Decision 14 (select_target/drop_target) ---
+
+
+def test_select_target_with_descriptor_and_clock_resolves() -> None:
+    result = match_transcript("select target armor two o'clock")
+    assert result.token == "select_target"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"descriptor": "armor", "clock": 2}
+
+
+def test_set_target_is_the_second_legal_verb() -> None:
+    result = match_transcript("set target north")
+    assert result.token == "select_target"
+    assert result.slots == {"sector": "north"}
+
+
+def test_select_target_with_only_a_descriptor() -> None:
+    result = match_transcript("select target the sam")
+    assert result.token == "select_target"
+    assert result.slots == {"descriptor": "sam"}
+
+
+def test_select_without_the_word_target_never_reaches_the_slot_parser() -> None:
+    """`"target"` must actually be heard -- `_parse_select_slots` must
+    refuse (returning `None`) so `match_transcript` falls through to the
+    ordinary phrase table rather than acting on slots nobody said."""
+    result = match_transcript("select the armor two o'clock")
+    assert result.slots is None
+
+
+def test_set_the_throttle_does_not_false_fire() -> None:
+    """A real adversarial sentence: `"set"` anchors as a verb (it is a
+    legal first word of `select_target`'s own phrase table), but with no
+    `"target"` and no slot this must not resolve to any command."""
+    result = match_transcript("set the throttle to idle")
+    assert result.token is None
+
+
+def test_drop_target_matches_the_exact_phrase() -> None:
+    result = match_transcript("drop target")
+    assert result.token == "drop_target"
+    assert result.slots is None
+
+
 def test_several_confirm_band_answer_words_do_anchor_a_verb() -> None:
     """A cross-subproject fact `body-layer` depends on, recorded here
     because this is the side that owns it.
@@ -642,6 +687,86 @@ def test_several_confirm_band_answer_words_do_anchor_a_verb() -> None:
     """
     for word in ("roger", "ok", "okay", "negative", "nope", "belay", "disregard"):
         assert match_transcript(word).verb_anchored is True, word
+
+
+# -- plans/attack-run/plan.md Decision 6 (step) --------------------------
+
+
+def test_step_right_resolves_with_direction_slot() -> None:
+    result = match_transcript("step right")
+    assert result.token == "step"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"direction": "right"}
+
+
+def test_step_with_a_count_resolves_both_slots() -> None:
+    result = match_transcript("step two left")
+    assert result.token == "step"
+    assert result.slots == {"direction": "left", "count": 2}
+
+
+def test_step_near_and_far_resolve_via_synonyms() -> None:
+    assert match_transcript("step closer").slots == {"direction": "near"}
+    assert match_transcript("step further").slots == {"direction": "far"}
+
+
+def test_step_with_no_direction_never_reaches_a_command() -> None:
+    """`_parse_step_slots` returns `None` without a direction word --
+    `"step"` has no bare phrasing of its own, so this falls all the way
+    through to no command at all, not a silent pick."""
+    result = match_transcript("step aside")
+    assert result.token is None
+
+
+# -- plans/attack-run/plan.md Decision 15 (engage/disengage) -------------
+
+
+def test_engage_with_slots_resolves_what_and_where() -> None:
+    result = match_transcript("engage armor north")
+    assert result.token == "engage"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"descriptor": "armor", "sector": "north"}
+
+
+def test_engage_accepts_the_weapon_slot() -> None:
+    result = match_transcript("engage armor rockets")
+    assert result.token == "engage"
+    assert result.slots == {"descriptor": "armor", "weapon": "rockets"}
+
+
+def test_engage_bare_falls_through_to_the_phrase_table_with_no_slots() -> None:
+    """A bare `"engage"`/`"engage target"` carries no what/where/weapon
+    slot (`_parse_engage_slots` returns `None`), so it resolves via the
+    ordinary phrase table instead, with `slots=None` -- the same shape
+    `select_target`'s own bare-form tests do not need, since `select
+    target` always requires at least one slot to mean anything, but
+    `engage` does not."""
+    result = match_transcript("engage")
+    assert result.token == "engage"
+    assert result.slots is None
+
+    result = match_transcript("engage target")
+    assert result.token == "engage"
+    assert result.slots is None
+
+
+def test_engage_attack_synonym_is_deliberately_not_admitted() -> None:
+    """`vocabulary.PHRASES["engage"]`'s own comment: the spec's `attack`/
+    `attack-run` synonym is not admitted, because it collides with an
+    existing pinned adversarial sentence (`"tanks"` vs `"attack"` at
+    ratio 0.545, just over `VERB_FLOOR`). A bare `"attack"` must
+    therefore not resolve to `engage`."""
+    result = match_transcript("attack")
+    assert result.token != "engage"
+
+
+def test_disengage_matches_its_phrasings() -> None:
+    for phrase in ("disengage", "stop attack", "abort"):
+        result = match_transcript(phrase)
+        assert result.token == "disengage", phrase
+        assert result.slots is None
 
 
 # --- describe: report's synonym (sortie 2026-10-05 debrief,

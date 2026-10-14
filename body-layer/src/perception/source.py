@@ -179,6 +179,40 @@ class PositionUncertainty:
 
 
 @dataclass(frozen=True, slots=True)
+class RelativeDirection:
+    """One look's ownship-relative offset to a target -- `plans/
+    attack-run/plan.md` Decision 16's new perception datum, carried as an
+    offset to be re-rotated against *current* attitude rather than as a
+    finished azimuth/elevation. `forward_m`/`right_m`/`up_m` are an
+    ownship-frame offset at the observing poll: **yaw removed** (rotated
+    by the observing poll's own `Observation.ownship_at_observation.
+    heading_true_deg`, the same step 1 `perception.geometry.
+    body_relative_direction` performs), but **pitch and bank are NOT
+    removed** -- a consumer re-derives the current alignment by undoing
+    this yaw rotation with the *observation's own* heading, applying the
+    ownship translation since the look, and re-rotating by the *current*
+    heading/pitch (bank removed, per `geometry.alignment_direction`).
+
+    Carrying a finished angle instead would go stale fast: a 45-degree
+    bank turn at 220 km/h yaws at ~9.2 deg/s, so an azimuth frozen at the
+    observing poll (the crew loop polls at 1.0 s) would be up to ~9
+    degrees stale one poll later -- nearly twice the proposed 5-degree
+    lined-up band. Carrying the offset and re-rotating removes that term
+    entirely; what remains is ownship *translation* and target motion,
+    both an order of magnitude below the band (plan Decision 16).
+
+    **The offset is relative on purpose, not a formality.** Nothing here
+    is a map coordinate -- a consumer adds ownship's own displacement
+    since the observation (a telemetry delta) and rotates, so the channel
+    keeps working unchanged if ownship world position is later made
+    ambiguous (the plan's pre-GPS framing)."""
+
+    forward_m: float
+    right_m: float
+    up_m: float
+
+
+@dataclass(frozen=True, slots=True)
 class DerivedWorldPosition:
     """A target position derived from bearing/range rather than read
     directly off ground truth -- `plans/body-layer/plan.md` §5's
@@ -277,6 +311,16 @@ class Observation:
     #: set by `naked_eye_source.py` only for admitted candidates; the hybrid
     #: channel has no geometric gate to source it from and never sets this.
     live_los_clear: bool | None = None
+    #: `plans/attack-run/plan.md` Decision 16, Stage 2 -- the ownship-
+    #: relative observation (see `RelativeDirection`'s own docstring).
+    #: `None` is the default (every construction site that predates this
+    #: field, test fixtures included, keeps compiling) and also the
+    #: permanent value for a source with no geometric gate to bound it
+    #: from, and for a naked-eye candidate that is not currently admitted
+    #: with a clear sightline -- see `naked_eye_source.py`'s own
+    #: population rule, which is the only place that ever sets this to
+    #: something other than `None`.
+    relative_direction: RelativeDirection | None = None
 
 
 @runtime_checkable

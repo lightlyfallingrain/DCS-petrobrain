@@ -17,6 +17,10 @@ The entries are in the order they were written, which is roughly perception → 
 - `src/perception/source.py` — the tier-independent `PerceptionSource` protocol
   (`poll(now_sim, ownship_state) -> list[Observation]`) plus the `OwnshipState`/`Observation`
   dataclasses every tier's implementation returns. No concrete tier lives here.
+  `RelativeDirection` (`plans/attack-run/plan.md` Decision 16) and `Observation.
+  relative_direction` are BL-14's ownship-relative perception datum — only `naked_eye_source.py`
+  ever sets it, and only `belief.percept`/`belief.attack_run` may read the field name past the
+  belief boundary (grep-fenced, `test_attack_run.py`).
 - `src/perception/geometry.py` — bearing/range helpers, shared by every tier (per both
   investigator sessions, no tier has a native range field). Calls world-model's
   `query.describe_position` for a single-point elevation lookup. `line_of_sight_clear` (LOS
@@ -25,7 +29,10 @@ The entries are in the order they were written, which is roughly perception → 
   point-A-to-point-B primitive, not body-layer-owned logic — `plans/
   world-model-los-generalization/plan.md`); this module's own docstring on the
   `sample_grid`-vs-`describe_position` sampling-cost tradeoff moved with it into that new
-  module's docstring, not duplicated here.
+  module's docstring, not duplicated here. `signed_angular_delta_deg` (signed sibling of
+  `angular_delta_deg`) and `alignment_direction` (`body_relative_direction` with `bank_deg=0.0`
+  pinned) are `plans/attack-run/plan.md` Decisions 3/6 — the bank-stabilised frame BL-14's
+  guidance derivation reads both axes from.
 - `src/perception/association.py` — pure, fixture-testable single-detection <-> world-object
   resolution: a range-cap + forward-hemisphere plausibility filter (no coalition/IFF filtering)
   over a `LoGetWorldObjects` candidate pool, keyword-overlap type-match scoring, and a
@@ -184,7 +191,10 @@ The entries are in the order they were written, which is roughly perception → 
   class-agnostic, position-only; class only shapes the *label* a cluster reports, never whether it
   forms. This module's own reporting-quantisation range-bucket table (`_RANGE_BUCKETS_M` and
   friends) moved back to `belief.association_over_time` — this module has no use for a reporting
-  quantisation of its own any more, only true angular geometry.
+  quantisation of its own any more, only true angular geometry. `Cluster.centroid_alt_m`
+  (`plans/attack-run/plan.md` Decision 4 REVISED/16) is the mean of the members' own `alt_m` — the
+  cluster's real altitude, distinct from the flat-projection convention `naked_eye_source.
+  _build_observation` substitutes for `derived_world_position`/`last_alt_m` elsewhere.
 - `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6, clustering added Stage 2 of
   `plans/group-contact-model/plan.md`) — `NakedEyePerceptionSource`, the naked-eye/binocular
   channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s gates and `geometry.py`'s
@@ -233,6 +243,12 @@ The entries are in the order they were written, which is roughly perception → 
   ForestOcclusion | None = None` (`plans/forest-occlusion/plan.md` Stage 2) is constructed by
   `logger._build_sources` only when `--forest-occlusion` is passed and threaded straight into every
   `check_visibility` call this poll, alongside `trace_sink` — `None` (the default) is a true no-op.
+  `_build_observation` populates `Observation.relative_direction` (`plans/attack-run/plan.md`
+  Decision 16, Stage 2) only when the emitted cluster's `live_los_clear is True` — truth-to-truth
+  geometry (the cluster's own `centroid_alt_m`, not ownship's), yaw-only rotated into the ownship
+  frame at the observing poll's own heading, then run through `estimation.
+  perturbed_relative_direction` (identity at `RELATIVE_DIRECTION_SIGMA_DEG == 0.0`). `trace_sink.
+  annotate_admission` gained `relative_direction_set` alongside it, same call site.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API
   (`GET /telemetry/latest`, `GET /world_objects/latest`, `GET /petrovich_indication/latest`). A
   real network call, unlike the world-model seam. `push_text_line` (BL-2.5,
@@ -636,7 +652,10 @@ The entries are in the order they were written, which is roughly perception → 
   everywhere, a true no-op — proven, not just asserted, by
   `tests/test_detection_trace.py::test_trace_sink_does_not_perturb_the_observation_contact_or_event_streams`,
   which replays the same fixture twice (trace attached vs. not) and asserts the resulting
-  `Observation`/`Contact`/`Event` streams are identical.
+  `Observation`/`Contact`/`Event` streams are identical. `DetectionTrace.relative_direction_set`
+  (`plans/attack-run/plan.md` Decision 16, Stage 2's own stated acceptance alongside the test
+  suite) records whether the emitted `Observation`'s `relative_direction` was populated, set via
+  `annotate_admission`'s new keyword-only parameter.
 - `src/detection_trace_writer.py` (BL-9) — `DetectionTraceWriter`, the one module in this
   codebase deliberately allowed to hold both ground truth and belief at once: given a
   `DetectionTraceCollector` and a `ContactStore`, it resolves each admitted entry's `Contact.id`
@@ -773,6 +792,76 @@ The entries are in the order they were written, which is roughly perception → 
   `render_stand_by()` ("Stand by.", D8), and `render_disambiguation(candidates)` (D9's A/B
   question, built only from `ReferenceCandidate.why` strings — no id spoken, this module's
   existing convention — capped at the first three candidates for the spoken phrase).
+  `plans/attack-run/plan.md` Stage 1/3 adds `render_target_readback(facts)` (`select target`/
+  `step`'s shared "Target, armor, 2 o'clock." readback, no range — the engage readback, not this
+  one, speaks range once) and the `render_alignment_*` family: `render_alignment(azimuth_deg,
+  elevation_deg, *, tier, azimuth_table, elevation_table)` is the ongoing guidance utterance —
+  outside the 12 o'clock sector speaks the clock hour, inside it reads the two word tables
+  (`_alignment_phrase_for`, shared by both axes) and says "lined up" once both clear their own
+  gate. The two tables are declared in `belief.attack_run` and passed in as data, never imported
+  by this module, so `belief.speech` -> `belief.attack_run` -> `belief.speech` is not a circular
+  import. **`tier: Literal[1, 2]`** (widened Stage 6, from the Stage 5 `Literal[1]` narrowing) —
+  tier 2 (Decision 17 REVISED's `"obstructed"` register) is `", obstructed"` appended to whatever
+  the branches above would otherwise have rendered, **uniformly**, including the o'clock branch
+  and the `"lined up"` case (`"lined up, obstructed"`, the user's own words, 2026-10-14 second
+  direction pass) — one rule, not a second table of pre-qualified phrases, and no tier-aware
+  branch in `belief.attack_run._should_emit` either: the qualifier's presence is part of the
+  rendered text, so a tier transition is simply a text change the existing change-driven cadence
+  already re-fires on, in both directions (entering *and* leaving the obstructed register, pinned
+  by `test_decide_lined_up_tier_transition_speaks_once_each_way`/
+  `test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction`). `Template` gained
+  `"attack_run"`. Stage 5 adds `render_engage_readback(facts)`
+  (`engage`'s own readback — unit type, clock, *and* range, once, plus an acquisition-only terrain
+  fragment identical in shape to `_contact_report_text`'s own but deliberately not shared with it,
+  since that helper also carries a count clause and a `", moving"` tail this milestone's
+  vocabulary never calls for) and `render_attack_run_off()` (`"Attack run off."`, `disengage`'s
+  readback).
+- `src/belief/attack_run.py` (new, `plans/attack-run/plan.md` Stages 2-7) — BL-14's alignment
+  derivation. This module and `percept.py` are the only two files under `belief/` allowed to
+  mention `relative_direction`/`RelativeDirection` (grep-fenced, `test_attack_run.py`, mirroring
+  `belief.contacts`'s `derived_world_position` fence). `AttackRunState` (frozen, `last_spoken_
+  azimuth_deg`/`last_spoken_elevation_deg`/`last_spoken_text`/`last_spoken_tier`/`last_known_
+  target_alt_m`) is the change-driven cadence's own baseline (Decision 7) — compared against the
+  *last spoken* value, never the previous sample. `last_known_target_alt_m` (Stage 6) is separate
+  memory, not a speech baseline: it is updated on **every** tick tier 1 succeeds, whether or not
+  that tick speaks, so a later tier-2 tick always reads the freshest reconstruction rather than
+  one frozen at the last *spoken* moment.
+  `decide(state, *, now_sim, ownship, contact, group=None)` is pure, no I/O: it reads `contact.
+  last_percept.relative_direction` (Stage 2's own storage mechanism — a whole `Percept` kept on
+  `Contact`, not a second per-field store), re-derives the *current* azimuth/elevation from the
+  carried offset via `_tier1_alignment` (undo the observing poll's own yaw rotation, add ownship's
+  translation since the look, re-rotate via `geometry.alignment_direction`), renders through
+  `speech.render_alignment`, and applies the change-driven emit rule. **Tier 2 (Stage 6)**: no
+  fresh relative observation (absent, or older than `ATTACK_RUN_RELATIVE_MAX_AGE_S`, two polls)
+  falls through to `_tier2_alignment` rather than returning silence — `Contact.position` always
+  exists, so there is always *something* to guide on once a target is selected; silence is now
+  only the change-driven cadence rule, never "no tier had anything to say." Tier 2's horizontal is
+  world-anchored belief (`contact.position.x/z`), **projected forward if `contact.motion.state ==
+  "moving"`** (Stage 7/Decision 10) using `group.heading_deg` for direction (`contact.motion is
+  None` — never observed for movement — is held exactly like `"stopped"`, never treated as
+  moving) and `belief.association_over_time.contact_growth_rate_mps` for speed (the same per-class
+  table position-fusion/group-matching already share, not a second one) — **never written back to
+  `Contact.position`**. Tier 2's vertical is the **remembered** relative height
+  (`_remembered_target_alt_m`: `percept.ownship_at_observation.alt_m + relative.up_m`, carried on
+  `AttackRunState.last_known_target_alt_m`), never `Contact.last_alt_m` (the ownship's own
+  altitude at the last look, Decision 4's finding) and never a world-model query (Decision 4
+  REVISED) — `None` (no elevation word at all) only before the very first tier-1 look this
+  contact has ever had. `TIER2_AZIMUTH_WORD_TABLE` is a separate, narrower one-row table (bare
+  `"right"`/`"left"`, not `"come right"`/`"a bit right"` — those words are structurally
+  unreachable through it); the elevation axis reuses `ELEVATION_WORD_TABLE` unchanged in both
+  tiers. The three named constants (`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`/
+  `ATTACK_RUN_ELEVATION_GATE_DEG`/`ATTACK_RUN_CHANGE_THRESHOLD_DEG`) and the word tables are
+  declared here, the single source of truth Decision 11 REVISED calls for. `CrewConsole.
+  drain_attack_run` (Stage 3) is this module's one caller — **wired into
+  `logger._run_crew_text_poll_loop` as of Stage 5**, called immediately before `drain_events`
+  every poll once `ConsolePerceptionRunner.attack_run_state` is non-`None` (set by `engage`, via
+  `CrewConsole.attack_run_transition`'s one-shot signal — this class cannot replace `runner.
+  attack_run_state` directly, so it leaves an instruction for the poll loop instead); as of Stage
+  7 it also resolves `self.store.group_for_contact(contact.id)` and passes it to `decide` as
+  `group`. Decision 13's end condition (the target's own contact record vanishing, e.g. a merge
+  abandoning its id with no successor) is handled inside `drain_attack_run` itself, not deferred
+  to the wiring: speaks `render_lost_contact()` once, cancels the standing task, and returns
+  `None`.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
@@ -954,6 +1043,52 @@ The entries are in the order they were written, which is roughly perception → 
   reachable today via `!voice silence <ratio> <confidence> 1 0` in the typed harness, and will be
   reachable for real once either side's vocabulary is extended, with no further body-layer change
   needed (`handle_command` already dispatches the token generically).
+  `plans/attack-run/plan.md` Stage 1/3 adds `select_target`/`drop_target` to
+  `DISPATCHED_COMMAND_TOKENS` (`_handle_select_target`/`_handle_drop_target`,
+  `_resolve_attack_target`'s own "watched beats unwatched, then closest" tie-break reusing
+  `_report_scope` directly — not `_resolve_follow_target`, whose docstring forbids reuse),
+  `attack_target` branches in `_describe_task_for_speech` (`"target"`) and `_describe_token_for_
+  confirm`, and `drain_attack_run` (Stage 3) — modelled on `logger.decide_optic`'s `(state_in,
+  ...) -> state_out` shape, calling `belief.attack_run.decide` and `_print`ing its speech when
+  one is returned, gated on `self.scheduler.busy_until_sim` same as every other reply-lane
+  speaker.
+
+  **Stage 4 adds `step`** (`_handle_step`, `_step_candidates`) and **`attack_target_task`
+  (`belief.tools`) gains a `descriptor` parameter**, stored on `PendingIntent.descriptor` so a
+  later `step` can filter its candidate set by the same `<what>` word the selecting command heard,
+  via the shared `descriptor_verdict`, without re-parsing the original command. `_step_candidates`
+  reads `store.group_for_contact(target_id)`, never `group_view.collapse` (that function's own
+  `units_hi` can be `math.inf`, and nothing here needs the tree). Ordering is **not** sorted once
+  and indexed — every press recomputes `facts["relative_now"]["bearing_deg"]`/`["range_m"]` (the
+  world-anchored belief channel, deliberately, per Decision 6 — not the tier-1 relative-direction
+  channel, which stays Decision 16's single-consumer fence) for the current target and every
+  candidate, then picks the smallest strictly-signed `perception.geometry.
+  signed_angular_delta_deg`/range delta in the asked direction (`left`/`right` on bearing,
+  `near`/`far` on range) — this is what makes `step right` pick a different unit after the
+  aircraft circles the formation, proven directly in `test_crew_console.py` by issuing the
+  identical command from two different ownship positions. Reaching the end of the ordering speaks
+  `render_unable("LAST_IN_ORDER")` rather than wrapping (wrapping would silently re-target a unit
+  just stepped past); an ungrouped target speaks `render_unable("NO_GROUP_MEMBERS")`.
+
+  **Stage 5 adds `engage`/`disengage`** (`_handle_engage`, `_handle_disengage`) and **`drain_
+  attack_run`'s live wiring**. `_handle_engage` reuses `_parse_target_slots`/`_resolve_attack_
+  target` exactly as `_handle_select_target` does when the heard slots carry a what/where
+  descriptor (select-then-engage, the spec's `"engage <what> <where>"` form); with no slots it
+  resumes whatever is already selected (`_active_attack_target_task`, the helper this stage
+  factors out of `drain_attack_run`'s own lookup and reuses for `_handle_step` too). Neither
+  handler replaces `ConsolePerceptionRunner.attack_run_state` directly — that field lives on the
+  poll-loop runner, not this class (mirroring `OpticState`'s own split) — so each sets `self.
+  attack_run_transition` (`"engage"`/`"disengage"`, reset to `None` at the top of every `handle_
+  command` dispatch, the same convention `last_command_target_contact_id` follows) as a one-shot
+  instruction logger.py's poll loop consumes and clears. `_handle_disengage` clears the phase only
+  ("stop the run, keep the watch," Decision 2) — the standing `attack_target` task, and the
+  selection it represents, survives; `drop_target`/the existing cancel path are the separate
+  commands that end the selection. `drain_events` now also reads `_active_attack_target_task()`'s
+  contact id and threads it to `scheduler.tick`'s new `attack_run_target_contact_id` keyword
+  (Decision 5's suppression gate, below). `_print` gained a fourth `attack_run_fields` argument
+  (and `speech_log_sink`'s own callable type grew a third parameter to match) — `drain_attack_run`
+  is the only caller that ever supplies it, carrying the target contact id, tier, and current
+  azimuth/elevation error for the sortie log.
 - `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
   split) — the act/confirm/say-again band decision (`classify_response`, given `audio_adapter.
   command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import

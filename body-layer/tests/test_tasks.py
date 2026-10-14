@@ -359,6 +359,32 @@ def test_watch_contact_task_is_cancellable() -> None:
     assert tasks.get(task.id).status == "cancelled"  # type: ignore[union-attr]
 
 
+def test_attack_target_task_never_resolves_via_tick() -> None:
+    """`attack_target` (`plans/attack-run/plan.md` Decision 2) has the
+    exact same shape `watch_contact` already does -- no `area`, so `tick`
+    must leave it `"pending"` forever regardless of contacts appearing or
+    the deadline passing."""
+    store = ContactStore()
+    tasks = TaskStore()
+    task = tasks.create(
+        kind="attack_target",
+        area=None,
+        created_sim=10.0,
+        deadline_sim=40.0,
+        reason="attack_target",
+        contact_id="CONTACT_1",
+    )
+
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=15.0, range_m=100.0)], now_sim=15.0
+    )
+    tasks.tick(store, now_sim=100.0)
+
+    resolved = tasks.get(task.id)
+    assert resolved is not None
+    assert resolved.status == "pending"
+
+
 def test_tick_falls_back_to_captured_area_when_the_live_area_is_gone() -> None:
     """`TaskStore.tick`'s `store.get_area(task.area.id) or task.area`
     fallback -- documented as a safety net for an invariant violation, not

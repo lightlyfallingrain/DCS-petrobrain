@@ -45,10 +45,12 @@ from belief.speech import (
     _round_enrichment_fragment,
     _unit_type_display,
     group_membership_state,
+    render_attack_run_off,
     render_clear,
     render_confirm_request,
     render_contact_report,
     render_disambiguation,
+    render_engage_readback,
     render_group_disclosure,
     render_group_full_disclosure,
     render_lost_contact,
@@ -200,6 +202,15 @@ def test_render_unable_known_reasons() -> None:
     assert render_unable("NO_LINE_OF_SIGHT").text == "Unable, no line of sight."
 
 
+def test_render_unable_step_reasons() -> None:
+    """`plans/attack-run/plan.md` Decision 6 -- `step`'s own two closed
+    reasons."""
+    assert (
+        render_unable("NO_GROUP_MEMBERS").text == "Unable, no other units in the group."
+    )
+    assert render_unable("LAST_IN_ORDER").text == "Unable, that's the last one."
+
+
 def test_render_unable_unrecognised_reason_degrades_plainly() -> None:
     speech = render_unable("SOMETHING_MADE_UP")
     assert speech.text == "Unable."
@@ -216,6 +227,45 @@ def test_render_stand_by() -> None:
     speech = render_stand_by()
     assert speech.text == "Stand by."
     assert speech.template == "readback"
+
+
+def test_render_engage_readback_includes_range_and_clock() -> None:
+    """`plans/attack-run/plan.md` Stage 5's own "range spoken once, here"
+    readback -- unit type, clock, and range, unlike `render_target_
+    readback`'s deliberately range-less form."""
+    facts: dict[str, object] = {
+        "classification": {"value": "OP_ARMORED", "level": "class"},
+        "relative_now": {"clock_position": 2, "range_m": 1500.0},
+    }
+    speech = render_engage_readback(facts)
+    assert speech.text == "Attack run, armor, 2 o'clock, 1.5 kilometres."
+    assert speech.template == "attack_run"
+
+
+def test_render_engage_readback_appends_terrain_qualifier() -> None:
+    """Acquisition-only terrain fragment (§8) -- appended once, exactly
+    as `_contact_report_text`'s own does for the push-path report."""
+    facts: dict[str, object] = {
+        "classification": {"value": "OP_ARMORED", "level": "class"},
+        "relative_now": {"clock_position": 2, "range_m": 1500.0},
+        "terrain_qualifier": "next valley",
+    }
+    speech = render_engage_readback(facts)
+    assert speech.text == "Attack run, armor, 2 o'clock, 1.5 kilometres next valley."
+
+
+def test_render_engage_readback_with_no_relative_now_omits_clock_and_range() -> None:
+    facts: dict[str, object] = {
+        "classification": {"value": "OP_ARMORED", "level": "class"},
+    }
+    speech = render_engage_readback(facts)
+    assert speech.text == "Attack run, armor."
+
+
+def test_render_attack_run_off() -> None:
+    speech = render_attack_run_off()
+    assert speech.text == "Attack run off."
+    assert speech.template == "attack_run"
 
 
 def test_render_disambiguation_two_candidates() -> None:

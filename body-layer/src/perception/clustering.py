@@ -281,6 +281,18 @@ class Cluster:
     members: tuple[ClusterCandidate, ...]
     centroid_x: float
     centroid_z: float
+    #: Mean of the members' own `ClusterCandidate.alt_m` (`plans/
+    #: attack-run/plan.md` Decision 4 REVISED/16) -- the cluster's real
+    #: altitude, carried the same way `centroid_x`/`centroid_z` already
+    #: are. Until this field existed, every caller substituted `ownship_
+    #: state.alt_m` instead (`naked_eye_source._build_observation`'s own
+    #: "target at observer's own altitude" convention) -- the flat
+    #: projection Decision 4's finding is about. This field does not
+    #: change that convention by itself (`derived_world_position` still
+    #: uses it); it only makes the real per-unit altitude available to a
+    #: caller that wants it, starting with the ownship-relative
+    #: observation channel.
+    centroid_alt_m: float
     classification_raw: str
     classification_level: int
     count_bucket: str
@@ -353,6 +365,7 @@ def _extent_count(members: Sequence[ClusterCandidate], observer: GeoPosition) ->
 def _build_cluster(members: list[ClusterCandidate], observer: GeoPosition) -> Cluster:
     centroid_x = sum(member.x for member in members) / len(members)
     centroid_z = sum(member.z for member in members) / len(members)
+    centroid_alt_m = sum(member.alt_m for member in members) / len(members)
 
     first = members[0]
     if all(
@@ -374,6 +387,7 @@ def _build_cluster(members: list[ClusterCandidate], observer: GeoPosition) -> Cl
         members=tuple(members),
         centroid_x=centroid_x,
         centroid_z=centroid_z,
+        centroid_alt_m=centroid_alt_m,
         classification_raw=classification_raw,
         classification_level=classification_level,
         count_bucket=count_bucket_for(_extent_count(members, observer)),

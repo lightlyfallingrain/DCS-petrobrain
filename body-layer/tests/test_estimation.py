@@ -19,9 +19,11 @@ import statistics
 from perception.estimation import (
     BEARING_SIGMA_DEG,
     RANGE_FRACTIONAL_SIGMA,
+    RELATIVE_DIRECTION_SIGMA_DEG,
     SYSTEMATIC_BIAS_FRACTION,
     naked_eye_sigma_m,
     perturbed_bearing_range,
+    perturbed_relative_direction,
     systematic_bias_m,
 )
 
@@ -147,3 +149,38 @@ def test_systematic_bias_scaled_to_declared_fraction_of_single_look_sigma() -> N
 
     assert math.isclose(cross_2x, cross_1x * 2.0)
     assert math.isclose(down_2x, down_1x * 2.0)
+
+
+# -- plans/attack-run/plan.md Decision 16 item 5 / Decision 11 REVISED ---
+
+
+def test_relative_direction_sigma_is_zero_as_settled_by_the_user() -> None:
+    """Settled by §20, 2026-10-14 -- *"Relative direction while he's
+    looking at it -> exact."*"""
+    assert RELATIVE_DIRECTION_SIGMA_DEG == 0.0
+
+
+def test_perturbed_relative_direction_is_identity_at_zero_sigma() -> None:
+    """At `RELATIVE_DIRECTION_SIGMA_DEG == 0.0` the perturbation must be a
+    true identity function, not merely a draw scaled to zero -- so §18's
+    "exact while the look holds" is a parameter, not a structural
+    property that happens to read zero (Decision 11 REVISED)."""
+    forward_m, right_m, up_m = perturbed_relative_direction(
+        observation_id="OBS_1", forward_m=950.0, right_m=120.0, up_m=-40.0
+    )
+
+    assert forward_m == 950.0
+    assert right_m == 120.0
+    assert up_m == -40.0
+
+
+def test_perturbed_relative_direction_identity_holds_for_degenerate_offset() -> None:
+    """A zero-length offset must not raise (the division-by-zero case the
+    angular reconstruction would otherwise hit) -- the identity short-
+    circuit at `RELATIVE_DIRECTION_SIGMA_DEG == 0.0` skips the trig
+    entirely, so this is safe regardless."""
+    forward_m, right_m, up_m = perturbed_relative_direction(
+        observation_id="OBS_1", forward_m=0.0, right_m=0.0, up_m=0.0
+    )
+
+    assert (forward_m, right_m, up_m) == (0.0, 0.0, 0.0)

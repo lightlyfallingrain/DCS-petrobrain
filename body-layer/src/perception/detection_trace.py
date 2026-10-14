@@ -190,6 +190,14 @@ class DetectionTrace:
     #: name.
     optic: str = "unaided"
 
+    #: Whether the emitted `Observation`'s own `relative_direction` field
+    #: was populated for this candidate's cluster (`plans/attack-run/
+    #: plan.md` Decision 16, Stage 2) -- `False` by default (unset, or no
+    #: trace sink in the loop at all), `True` only on an `ADMITTED` row
+    #: whose cluster's `live_los_clear` verdict was `True` this poll. See
+    #: `DetectionTraceCollector.annotate_admission`'s own docstring.
+    relative_direction_set: bool = False
+
 
 @dataclass
 class DetectionTraceCollector:
@@ -217,16 +225,28 @@ class DetectionTraceCollector:
         object_id: int,
         cluster_member_object_ids: tuple[int, ...],
         observation_id: str,
+        *,
+        relative_direction_set: bool = False,
     ) -> None:
         """Fill in the cluster/observation detail on `object_id`'s most
         recently recorded entry -- a no-op if that entry doesn't exist or
         wasn't `ADMITTED` (defensive; every real caller only calls this for
-        an object it just admitted and clustered)."""
+        an object it just admitted and clustered).
+
+        `relative_direction_set` (`plans/attack-run/plan.md` Decision 16,
+        Stage 2) is whether the emitted `Observation`'s own
+        `relative_direction` field was populated for this candidate's
+        cluster -- answers "was this look good enough for attack-run
+        guidance" from a detection trace without needing to join against
+        belief, the stage's own stated acceptance alongside the test
+        suite. Defaults `False` so every pre-existing call site (test
+        fixtures included) keeps compiling and behaves exactly as before."""
         entry = self._last_by_object_id.get(object_id)
         if entry is None or entry.outcome is not GateOutcome.ADMITTED:
             return
         entry.cluster_member_object_ids = cluster_member_object_ids
         entry.observation_id = observation_id
+        entry.relative_direction_set = relative_direction_set
 
     def annotate_motion(
         self,

@@ -231,6 +231,7 @@ Each `poll()`:
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import time
 from collections import Counter
@@ -251,7 +252,11 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
-from perception.estimation import naked_eye_sigma_m, perturbed_bearing_range
+from perception.estimation import (
+    naked_eye_sigma_m,
+    perturbed_bearing_range,
+    perturbed_relative_direction,
+)
 from perception.forest import ForestOcclusion
 from perception.gaze import (
     FREE_SCAN_PLAN,
@@ -276,6 +281,7 @@ from perception.source import (
     Observation,
     OwnshipState,
     PositionUncertainty,
+    RelativeDirection,
 )
 from perception.visibility import LiveLosCoverage, VisibilityResult, check_visibility
 
@@ -692,7 +698,11 @@ class NakedEyePerceptionSource:
                 member_ids = tuple(member.object_id for member in cluster.members)
                 for member in cluster.members:
                     self.trace_sink.annotate_admission(
-                        member.object_id, member_ids, observation.id
+                        member.object_id,
+                        member_ids,
+                        observation.id,
+                        relative_direction_set=observation.relative_direction
+                        is not None,
                     )
         return observations
 
@@ -981,6 +991,40 @@ class NakedEyePerceptionSource:
             for member in cluster.members
         }
         live_los_clear = next(iter(member_los)) if len(member_los) == 1 else None
+
+        # `plans/attack-run/plan.md` Decision 16, Stage 2: the ownship-
+        # relative observation, set only when the cluster was genuinely
+        # looked at this poll (it was admitted) *and* the sightline is
+        # clear for every member -- the same bound `live_los_clear`
+        # itself already enforces, restated here because this field's own
+        # "no omniscience" argument depends on it. Truth-to-truth geometry
+        # (the cluster's real `centroid_alt_m`, not the flat-projection
+        # `derived_world_position` below), yaw-only rotated into the
+        # ownship frame at the observing poll's own heading -- pitch/bank
+        # are deliberately NOT removed here, see `RelativeDirection`'s own
+        # docstring for why a consumer re-derives those against *current*
+        # attitude instead of freezing them now.
+        relative_direction: RelativeDirection | None = None
+        if live_los_clear is True:
+            true_target = GeoPosition(
+                x=cluster.centroid_x, z=cluster.centroid_z, alt_m=cluster.centroid_alt_m
+            )
+            north_m = true_target.x - observer.x
+            east_m = true_target.z - observer.z
+            up_m = true_target.alt_m - observer.alt_m
+            heading_rad = math.radians(ownship_state.heading_true_deg)
+            forward_m = north_m * math.cos(heading_rad) + east_m * math.sin(heading_rad)
+            right_m = -north_m * math.sin(heading_rad) + east_m * math.cos(heading_rad)
+            forward_m, right_m, up_m = perturbed_relative_direction(
+                observation_id=observation_id,
+                forward_m=forward_m,
+                right_m=right_m,
+                up_m=up_m,
+            )
+            relative_direction = RelativeDirection(
+                forward_m=forward_m, right_m=right_m, up_m=up_m
+            )
+
         return Observation(
             id=observation_id,
             contact_id=None,
@@ -1006,6 +1050,7 @@ class NakedEyePerceptionSource:
             ),
             apparent_motion=apparent_motion,
             live_los_clear=live_los_clear,
+            relative_direction=relative_direction,
         )
 
 

@@ -114,8 +114,22 @@ ACT_FLOOR_CANCEL: float = 0.80
 #: existing reference to save nothing -- the module docstring is where the
 #: real definition ("the higher floor for an asymmetric-cost misfire")
 #: lives, and that's where it's read.
+#: **`drop_target`/`disengage` joined this set (`plans/attack-run/plan.md`
+#: Affected Modules, Stage 5).** `drop_target` destroys the standing
+#: `attack_target` task (and the selection with it) exactly as `cancel_
+#: watch` destroys a `watch_contact` task; `disengage` destroys the run's
+#: own phase (`AttackRunState`). Both are a mishearing away from ending
+#: state a misfire cannot cheaply undo, the identical reasoning every
+#: other member of this set already carries.
 CANCEL_TOKENS: frozenset[str] = frozenset(
-    {"cancel_task", "cancel_scan", "cancel_watch", "silence"}
+    {
+        "cancel_task",
+        "cancel_scan",
+        "cancel_watch",
+        "silence",
+        "drop_target",
+        "disengage",
+    }
 )
 
 #: Below this, nothing fires and Petrovich asks the player to say it

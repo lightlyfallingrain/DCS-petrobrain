@@ -312,3 +312,14 @@ def test_a_non_cancel_token_acts_at_that_same_confidence() -> None:
 
 def test_the_narrow_cancels_are_in_the_cancel_set() -> None:
     assert {"cancel_task", "cancel_scan", "cancel_watch"} <= CANCEL_TOKENS
+
+
+def test_attack_run_destroying_tokens_are_in_the_cancel_set() -> None:
+    """`plans/attack-run/plan.md`'s Affected Modules -- `drop_target`
+    destroys the standing selection, `disengage` destroys the run's own
+    phase; both are a mishearing away from ending state a misfire cannot
+    cheaply undo, the identical reasoning every other member of this set
+    already carries (`test_every_cancel_token_is_held_to_the_higher_
+    floor` above already asserts the *behaviour* for every member of
+    this set generically; this pins the *membership*)."""
+    assert {"drop_target", "disengage"} <= CANCEL_TOKENS

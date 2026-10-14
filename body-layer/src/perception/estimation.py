@@ -76,6 +76,21 @@ BEARING_SIGMA_DEG: Final[float] = 3.0
 #: averages out across repeated looks.
 SYSTEMATIC_BIAS_FRACTION: Final[float] = 0.4
 
+#: The ownship-relative observation channel's own noise term
+#: (`plans/attack-run/plan.md` Decision 16 item 5, settled by the user's
+#: own §20, 2026-10-14: *"Relative direction while he's looking at it ->
+#: exact."*). `0.0` makes `perturbed_relative_direction` below an identity
+#: function -- present as a parameter, not a structural property, so a
+#: future non-zero value is a one-line change rather than a rewrite
+#: (Decision 11 REVISED). **Not the same error model as `BEARING_SIGMA_
+#: DEG` above, and must never be set from it**: that constant models
+#: *stating* a bearing from memory, this one models *pointing* at a
+#: target while looking straight at it -- the plan's own "two mechanisms"
+#: argument (§18). At 1 km, 1 degree of pointing error is 17 m against
+#: the proposed 5-degree lined-up band, which is why a non-zero value
+#: would be felt as chatter near the band edge rather than being free.
+RELATIVE_DIRECTION_SIGMA_DEG: Final[float] = 0.0
+
 
 def _deterministic_unit_gaussian_pair(seed_text: str) -> tuple[float, float]:
     """Two independent, deterministic standard-normal draws from
@@ -117,6 +132,46 @@ def systematic_bias_m(
     return (
         z_cross * SYSTEMATIC_BIAS_FRACTION * sigma_cross_m,
         z_down * SYSTEMATIC_BIAS_FRACTION * sigma_down_m,
+    )
+
+
+def perturbed_relative_direction(
+    *, observation_id: str, forward_m: float, right_m: float, up_m: float
+) -> tuple[float, float, float]:
+    """Perturb one look's ownship-relative offset
+    (`perception.source.RelativeDirection`'s three fields) by
+    `RELATIVE_DIRECTION_SIGMA_DEG` -- applied to the azimuth/elevation
+    angles the offset implies, not to `forward_m`/`right_m`/`up_m`
+    directly, since a crewman's pointing precision is an angular
+    quantity, the same reasoning `perturbed_bearing_range` above already
+    applies to a stated bearing. Deterministic, hashed off `observation_
+    id` alone via `_deterministic_unit_gaussian_pair`, same idiom as
+    `perturbed_bearing_range`'s own per-look draw.
+
+    **At `RELATIVE_DIRECTION_SIGMA_DEG == 0.0` this is an identity
+    function** -- the draw is skipped entirely rather than taken and
+    scaled to zero, so §18's "exact while the look holds" (`plans/
+    attack-run/plan.md` Decision 16 item 5) is a parameter, not a
+    structural property (Decision 11 REVISED): changing the constant is
+    what turns this into a real perturbation, no code path changes."""
+    if RELATIVE_DIRECTION_SIGMA_DEG == 0.0:
+        return forward_m, right_m, up_m
+    horizontal_m = math.hypot(forward_m, right_m)
+    slant_m = math.hypot(horizontal_m, up_m)
+    if slant_m <= 0.0:
+        return forward_m, right_m, up_m
+    azimuth_rad = math.atan2(right_m, forward_m)
+    elevation_rad = math.atan2(up_m, horizontal_m)
+    z_azimuth, z_elevation = _deterministic_unit_gaussian_pair(
+        f"relative:{observation_id}"
+    )
+    azimuth_rad += math.radians(z_azimuth * RELATIVE_DIRECTION_SIGMA_DEG)
+    elevation_rad += math.radians(z_elevation * RELATIVE_DIRECTION_SIGMA_DEG)
+    new_horizontal_m = slant_m * math.cos(elevation_rad)
+    return (
+        new_horizontal_m * math.cos(azimuth_rad),
+        new_horizontal_m * math.sin(azimuth_rad),
+        slant_m * math.sin(elevation_rad),
     )
 
 

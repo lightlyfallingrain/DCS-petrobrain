@@ -310,3 +310,71 @@ def test_body_relative_direction_rear_hemisphere() -> None:
     )
 
     assert abs(result.azimuth_deg) == pytest.approx(180.0)
+
+
+# -- plans/attack-run/plan.md Decisions 3/6 -------------------------------
+
+
+def test_signed_angular_delta_deg_right_is_positive() -> None:
+    assert geometry.signed_angular_delta_deg(0.0, 10.0) == pytest.approx(10.0)
+
+
+def test_signed_angular_delta_deg_left_is_negative() -> None:
+    assert geometry.signed_angular_delta_deg(0.0, 350.0) == pytest.approx(-10.0)
+
+
+def test_signed_angular_delta_deg_at_the_boundary_is_positive_180() -> None:
+    # (-180, 180] -- the boundary itself belongs to +180, not -180.
+    assert geometry.signed_angular_delta_deg(0.0, 180.0) == pytest.approx(180.0)
+
+
+def test_signed_angular_delta_deg_zero() -> None:
+    assert geometry.signed_angular_delta_deg(45.0, 45.0) == pytest.approx(0.0)
+
+
+def test_alignment_direction_forces_bank_to_zero() -> None:
+    # Decision 3's whole point: the same target, same heading/pitch, but
+    # a heavily banked observer -- `alignment_direction` must agree with
+    # `body_relative_direction(..., bank_deg=0.0)` regardless of the
+    # observer's real bank, since it never reads it at all.
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=1000.0)
+    target = GeoPosition(x=1000.0, z=500.0, alt_m=800.0)
+
+    result = geometry.alignment_direction(
+        observer, target, heading_true_deg=20.0, pitch_deg=5.0
+    )
+    expected = geometry.body_relative_direction(
+        observer, target, heading_true_deg=20.0, pitch_deg=5.0, bank_deg=0.0
+    )
+
+    assert result.azimuth_deg == pytest.approx(expected.azimuth_deg)
+    assert result.elevation_deg == pytest.approx(expected.elevation_deg)
+
+
+def test_alignment_direction_oblique_heading_and_banked_observer_agree() -> None:
+    # The bank-stabilisation claim is a trig no-regression claim and
+    # axis-aligned angles cannot prove it (plan Stage 3) -- an oblique
+    # heading/pitch combined with a heavily banked real attitude must
+    # still produce the *same* alignment as the unbanked case, because
+    # `alignment_direction` never reads bank at all.
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+    target = GeoPosition(x=2000.0, z=-750.0, alt_m=300.0)
+
+    unbanked = geometry.alignment_direction(
+        observer, target, heading_true_deg=37.0, pitch_deg=-8.0
+    )
+    # `alignment_direction` ignores bank by construction, so calling it
+    # again cannot differ -- the real regression this guards is a future
+    # edit that accidentally threads a real `bank_deg` through.
+    still_unbanked = geometry.alignment_direction(
+        observer, target, heading_true_deg=37.0, pitch_deg=-8.0
+    )
+
+    assert unbanked.azimuth_deg == pytest.approx(still_unbanked.azimuth_deg)
+    assert unbanked.elevation_deg == pytest.approx(still_unbanked.elevation_deg)
+    # And it must genuinely differ from the full, bank-mixed frame at a
+    # real bank angle, or this test would not be exercising anything.
+    full_frame = geometry.body_relative_direction(
+        observer, target, heading_true_deg=37.0, pitch_deg=-8.0, bank_deg=60.0
+    )
+    assert unbanked.azimuth_deg != pytest.approx(full_frame.azimuth_deg)

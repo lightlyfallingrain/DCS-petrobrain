@@ -100,6 +100,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B59]] — The same fold drift that absorbs an unrelated contact also evicts a real member
 - [[BL-B60]] — A misclassified fast mover is now tracked worse than before the fold-displacement bound
 - [[BL-B61]] — `group_matches` test 4 cannot tell kinds apart at class level (5th `BL-B47`-family occurrence)
+- [[BL-B62]] — The ownship-relative observation channel is general, and only `BL-14` uses it
+- [[BL-B63]] — A selective fast lane for ownship telemetry and the currently-selected target
 - [[BL-B64]] — the 9K113 sight: the whole capability, spec at `docs/concept/9K113.md`
 - [[BL-B65]] — weapons safety circuit switch, before any ATGM attack run
 

@@ -1091,6 +1091,91 @@ def watch_contact_task(
     )
 
 
+def attack_target_task(
+    store: ContactStore,
+    tasks: TaskStore,
+    contact_id: str,
+    now_sim: float,
+    reason: str = "attack_target",
+    source: str = "console",
+    descriptor: str | None = None,
+) -> PendingIntent | None:
+    """Select `contact_id` as the standing attack-run target
+    (`plans/attack-run/plan.md` Decision 2, 5) -- `watch_contact_task`'s
+    direct sibling, with one difference: the attention level is
+    `"priority"`, not `"watch"`, so the target's own routine callouts are
+    suppressed for the run's duration (`belief.callouts`'s
+    `_WATCHED_ONLY_KINDS` gate, Decision 5) rather than merely raised into
+    the watched-callout family. Like `watch_contact_task`, this has no
+    success/timeout lifecycle (`TaskStore.tick` never resolves a task
+    whose `area` is `None`) -- it continues until `cancel_task`, which for
+    this kind also returns the contact's attention to `"normal"`, the same
+    "task owns the belief-state effect it registered" rule `watch_contact_
+    task`/`scan_area` already follow.
+
+    `descriptor` (Decision 6) is the `<what>` descriptor heard on the
+    selecting command, stored on the task so `step` can later filter its
+    candidate set by the same word without re-parsing the original
+    command. `None` (the default) when none was heard, or for a `step`
+    call that is only moving the existing selection (see `PendingIntent.
+    descriptor`'s own docstring).
+
+    Returns `None` -- no task registered, contact left untouched -- when
+    `contact_id` does not exist, mirroring `watch_contact_task`'s own
+    contract.
+
+    **Cancels any still-active `attack_target` task before minting a new
+    one** (BL-14 deep security review's required fix, `plans/attack-run/
+    security-review.md` "Required fix in detail"). `TaskStore.tasks` is
+    insertion-ordered and every reader of "the current attack-run target"
+    (`CrewConsole._active_attack_target_task`) resolves it via `next(...
+    not cancelled)`, i.e. the *oldest* still-active match -- so minting a
+    second `attack_target` task without cancelling the first left guidance,
+    `step`, bare `engage`, and the routine-callout suppression gate all
+    silently still pointed at the stale target, while the readback for the
+    new selection already spoke as if it had taken effect. Checking
+    existence *before* cancelling means a bad `contact_id` (unknown
+    contact) returns `None` with the existing selection left untouched,
+    rather than destroying a good selection to make room for a failed one.
+    Cancelling unconditionally -- even when the existing task already
+    names `contact_id` -- rather than only when the contact differs, keeps
+    the final attention state correct regardless of overlap: `cancel_task`
+    always demotes to `"normal"` first, and the `set_attention` call below
+    always promotes `contact_id` to `"priority"` last, so the order can
+    never leave the freshly-selected contact demoted. This also closes the
+    review's noted (non-blocking) side effect of unbounded `TaskStore`
+    growth under repeated `select target`/`engage` calls.
+
+    **The attack target is always exactly one contact** (user direction,
+    2026-10-14) -- `contact_id` is a single `str`, never a collection, and
+    this function's own cancel-every-active-then-promote-one sequence
+    above is what keeps at most one `attack_target` task ever active at
+    once, so two individual units can never be simultaneous targets. A
+    tight group is not a second case the mechanism has to accommodate:
+    `step` (Decision 6) walks the selection *within* a group one contact
+    at a time by mutating this same task's `contact_id` in place
+    (`CrewConsole._handle_step`), and the pilot approximates attacking a
+    group by selecting one member of it -- group-as-target is out of
+    scope by the same direction, not a precondition this code is missing."""
+    if _find_contact(store, contact_id) is None:
+        return None
+    for existing in tasks.tasks:
+        if existing.kind == "attack_target" and existing.status != "cancelled":
+            cancel_task(store, tasks, existing.id)
+    found = set_attention(store, contact_id, "priority", source=source)
+    assert found, "contact_id existence already confirmed above"
+    kind: TaskKind = "attack_target"
+    return tasks.create(
+        kind=kind,
+        area=None,
+        created_sim=now_sim,
+        deadline_sim=math.inf,
+        reason=reason,
+        contact_id=contact_id,
+        descriptor=descriptor,
+    )
+
+
 def cancel_task(store: ContactStore, tasks: TaskStore, task_id: str) -> bool:
     """Cancel a still-pending task and undo the belief-state effect it
     registered -- an `AttentionArea` for a `scan_area` task (the plan's

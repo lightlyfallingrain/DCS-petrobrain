@@ -22,12 +22,14 @@ import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
+from belief.attack_run import AttackRunState
 from belief.attention import RelativeSector, Sector
 from belief.audio_client import AudioAdapterError
 from belief.brain_client import BrainLayerClient
 from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.crew_console import (
+    _NOTHING_TO_STOP,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
     CrewConsole,
@@ -38,12 +40,15 @@ from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
+from belief.percept import Percept
 from belief.speech import (
     group_membership_state,
     render_group_disclosure,
     render_group_full_disclosure,
+    render_no_contact,
 )
-from belief.tasks import TaskStore
+from belief.tasks import PendingIntent, TaskStore
+from belief.tools import attack_target_task, describe_contact
 from belief.voice_commands import (
     ACT_FLOOR,
     CONFIRM_FLOOR,
@@ -52,7 +57,12 @@ from belief.voice_commands import (
 )
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
-from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from perception.source import (
+    DerivedWorldPosition,
+    Observation,
+    OwnshipState,
+    RelativeDirection,
+)
 
 
 class FakeOverlayClient:
@@ -4131,6 +4141,1149 @@ def test_follow_readback_survives_the_confirm_round_trip(
         now_sim=1.0,
     )
     assert store.contacts[0].attention == "watch"
+
+
+# --- BL-14 attack-run selection (plans/attack-run/plan.md Decisions
+# 2/5/14, Stage 1) ---
+
+
+def test_select_target_resolves_and_sets_priority_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command(
+        "select_target", now_sim=0.0, slots={"descriptor": "armor"}
+    )
+
+    assert "armor" in lines[0].lower()
+    assert "2 o'clock" in lines[0]
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.contact_id == contact.id
+    assert target_task.status == "pending"
+
+
+def test_select_target_with_no_qualifiers_says_again() -> None:
+    console = CrewConsole(store=ContactStore())
+    lines = console.handle_command("select_target", now_sim=0.0)
+    assert lines == ["say again -- select target needs what and/or where"]
+
+
+def test_select_target_with_no_match_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    lines = console.handle_command(
+        "select_target", now_sim=0.0, slots={"descriptor": "armor"}
+    )
+    assert lines == [render_no_contact().text]
+
+
+def test_select_target_tags_other_group_members_watch_not_priority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 5's split: only the selected contact itself reaches
+    `"priority"` -- its group-mates get the ordinary one-time `"watch"`
+    tag, never overridden back onto the target itself."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+
+    armor_contact = next(c for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    truck_contact = next(c for c in store.contacts if c.last_class_raw == "OP_TRUCK")
+    assert armor_contact.attention == "priority"
+    assert truck_contact.attention == "watch"
+
+
+def _store_with_armor_and_truck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ContactStore, TaskStore, CrewConsole, Contact, Contact]:
+    """Two grouped, individually-selectable-by-descriptor contacts --
+    `plans/attack-run/security-review.md`'s "Required fix in detail"
+    reproduction needs two distinct targets reachable by ordinary
+    `select target <descriptor>`/`engage <descriptor>` commands with no
+    intervening cancel. Returns `(store, tasks, console, armor, truck)`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=8,  # the maximal clock delta from 2 -- opposite side,
+                # so armor/truck are never clustered into one `belief.
+                # groups.Group`; this fixture is for the stale-task fix
+                # itself, not Decision 5's group-tagging split, which
+                # `test_select_target_tags_other_group_members_watch_
+                # not_priority` already covers on its own grouped fixture.
+                range_m=5000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    armor_contact = next(c for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    truck_contact = next(c for c in store.contacts if c.last_class_raw == "OP_TRUCK")
+    return store, tasks, console, armor_contact, truck_contact
+
+
+def _active_attack_target_tasks(tasks: TaskStore) -> list[PendingIntent]:
+    return [
+        task
+        for task in tasks.tasks
+        if task.kind == "attack_target" and task.status != "cancelled"
+    ]
+
+
+def test_reselecting_a_different_target_via_select_target_cancels_the_stale_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/attack-run/security-review.md`'s required fix, reproduced
+    with its own exact two-command sequence: `select target armor` then,
+    with no intervening `drop target`/`disengage`/`cancel`, `select target
+    <something else>`. Before the fix, `TaskStore.tasks` held two
+    `"pending"` `attack_target` tasks and every reader of "the current
+    target" (`_active_attack_target_task`'s `next(... not cancelled)`)
+    resolved to the *oldest* one -- the stale target -- even though the
+    readback just spoke the new selection. This is the fail-before/
+    pass-after reproduction: reverting the fix in `tools.attack_target_
+    task` (dropping the cancel-existing-active-tasks loop) makes this test
+    fail with `active[0].contact_id == armor.id` (the stale task
+    resolving as "the" target) rather than `truck.id`, and leaves `armor.
+    attention == "priority"` instead of demoting to `"normal"` -- both
+    asserted below."""
+    _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
+
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    assert armor.attention == "priority"
+
+    lines = console.handle_command(
+        "select_target", now_sim=1.0, slots={"descriptor": "truck"}
+    )
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == truck.id
+    # The old target's attention demotes -- `cancel_task` undoes the
+    # belief-state effect `attack_target_task` registered for it, the same
+    # "task owns the effect it registered" rule `watch_contact_task`/
+    # `scan_area` already follow.
+    assert armor.attention == "normal"
+    assert truck.attention == "priority"
+    # The resolution every reader of "the current target" shares
+    # (`drain_attack_run`, `_handle_step`, bare `engage`, `drain_events`'s
+    # `_WATCHED_ONLY_KINDS` suppression) now agrees with the readback.
+    active_task = console._active_attack_target_task()
+    assert active_task is not None
+    assert active_task.contact_id == truck.id
+    assert "truck" in lines[0].lower()
+
+
+def test_reselecting_a_different_target_via_engage_descriptor_cancels_the_stale_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same stale-target bug, reached via `engage <what> <where>`'s
+    descriptor branch instead of `select target` -- the review's finding
+    names both call sites (`_handle_select_target` and `_handle_engage`),
+    since both call `tools.attack_target_task` unconditionally."""
+    _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
+
+    console.handle_command("engage", now_sim=0.0, slots={"descriptor": "armor"})
+    assert armor.attention == "priority"
+
+    console.handle_command("engage", now_sim=1.0, slots={"descriptor": "truck"})
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == truck.id
+    assert armor.attention == "normal"
+    assert truck.attention == "priority"
+
+
+def test_bare_engage_after_reselection_follows_the_newly_selected_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `engage` after a reselect must start the run on the newly
+    selected contact, not the stale one -- bare `engage` never mints a
+    task itself, it only reads back whatever `_active_attack_target_task`
+    resolves, so this is a direct check that the resolution the fix
+    guarantees actually reaches that reader."""
+    _store, _tasks, console, _armor, _truck = _store_with_armor_and_truck(monkeypatch)
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    console.handle_command("select_target", now_sim=1.0, slots={"descriptor": "truck"})
+
+    lines = console.handle_command("engage", now_sim=2.0, slots=None)
+
+    assert console.attack_run_transition == "engage"
+    assert "truck" in lines[0].lower()
+
+
+def test_step_after_a_reselect_operates_on_the_newly_selected_targets_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`step` mutates the *existing* active task's `contact_id` in place
+    (`PendingIntent.descriptor`'s own docstring) rather than minting a new
+    one, so it was never itself vulnerable to the insertion-order bug --
+    but it must still operate on the group of whichever contact is
+    currently active, not a stale one left over from an earlier re-point
+    that the fix is supposed to have cancelled. Reselecting `L` onto the
+    `T`-selected fixture (simulating a second `select target`/`engage`
+    call with no intervening cancel) and then stepping must move within
+    `L`'s own left/right ordering."""
+    store, tasks, console, t_id, l_id, _r_id = _target_left_right_fixture(monkeypatch)
+    # Simulate a second `select target`/`engage` call re-pointing onto `L`
+    # without cancelling the `T` selection first -- the exact shape the
+    # fix guards against, reached here by calling the fixed primitive
+    # directly rather than re-deriving `L`'s own command-level descriptor.
+    second_task = attack_target_task(store, tasks, l_id, 1.0, descriptor="armor")
+    assert second_task is not None
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == l_id
+    assert store.contact(t_id).attention == "normal"  # type: ignore[union-attr]
+    assert store.contact(l_id).attention == "priority"  # type: ignore[union-attr]
+
+    lines = console.handle_command("step", now_sim=2.0, slots={"direction": "right"})
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    # `L` (330 deg) stepping right crosses `T` (0 deg) before `R` (30 deg).
+    assert active[0].contact_id == t_id
+    assert lines
+
+
+def test_reselecting_the_same_target_does_not_demote_its_own_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guards the fix's own ordering: cancelling *every* active
+    `attack_target` task (including one that already names `contact_id`)
+    before promoting `contact_id` to `"priority"` must still leave that
+    contact at `"priority"`, not `"normal"`, when the "new" selection is
+    actually the same contact -- `cancel_task`'s demote and `attack_target_
+    task`'s own promote must run in that order, not the reverse."""
+    _store, tasks, console, armor, _truck = _store_with_armor_and_truck(monkeypatch)
+
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    console.handle_command("select_target", now_sim=1.0, slots={"descriptor": "armor"})
+
+    assert armor.attention == "priority"
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == armor.id
+
+
+def test_reselecting_mid_run_repoints_the_run_to_the_new_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mid-run reselection (engaged, then `select target` something else)
+    is not covered by `docs/acceptance/2026-10-14-attack-run-guidance-
+    direction.md` -- resolved here by matching the precedent `step`
+    already sets while engaged (`_handle_step` mutates the active task's
+    `contact_id` in place with no special-case for "a run is active," and
+    `drain_attack_run`/`drain_events` both resolve the target fresh every
+    tick via `_active_attack_target_task` rather than caching it at
+    `engage` time): re-pointing, not refusing, is the existing shape for
+    "change the target while engaged," so a reselect takes the same path,
+    with nothing in `_handle_select_target` that refuses or special-cases
+    an in-progress run.
+
+    This test does not re-assert `attack_run_transition` after the second
+    command -- that field is a one-shot per-dispatch signal for the poll
+    loop (`_act`'s own reset, "so a stale `\"engage\"`/`\"disengage\"`...
+    cannot leak into an unrelated later command"), reset to `None` at the
+    top of *every* `handle_command` call regardless of what the previous
+    command did; the run's actual engaged/disengaged phase lives one layer
+    up, on `logger.ConsolePerceptionRunner.attack_run_state`, which this
+    test does not model. What matters here, and is asserted, is that
+    `select target` neither refuses nor is itself gated by a prior
+    `engage` -- it re-points the standing task exactly as it would with no
+    run active."""
+    _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    lines = console.handle_command("engage", now_sim=0.5, slots=None)
+    assert console.attack_run_transition == "engage"
+    assert lines
+
+    console.handle_command("select_target", now_sim=1.0, slots={"descriptor": "truck"})
+
+    active = _active_attack_target_tasks(tasks)
+    assert len(active) == 1
+    assert active[0].contact_id == truck.id
+    assert armor.attention == "normal"
+    assert truck.attention == "priority"
+
+
+def test_drop_target_cancels_the_attack_target_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+
+    lines = console.handle_command("drop_target", now_sim=1.0)
+
+    assert lines
+    assert contact.attention == "normal"
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.status == "cancelled"
+
+
+def test_drop_target_with_nothing_selected_says_nothing_to_stop() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("drop_target", now_sim=0.0)
+    assert lines == [_NOTHING_TO_STOP]
+
+
+def test_cancel_task_also_drops_the_attack_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The existing cancel/stop path also deselects, per Decision 2 --
+    `cancel_task`'s bare all-modes form cancels every active task kind,
+    `attack_target` included."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    contact = store.contacts[0]
+
+    console.handle_command("cancel_task", now_sim=1.0)
+
+    assert contact.attention == "normal"
+
+
+# --- BL-14 attack-run `step` (plans/attack-run/plan.md Decision 6,
+# Stage 4) ---
+
+
+def _observation_at_xz(
+    *,
+    obs_id: str,
+    t_sim: float,
+    classification_raw: str,
+    classification_level: int,
+    x: float,
+    z: float,
+) -> Observation:
+    """`_observation_for_follow`'s sibling, placing a contact's `relative_
+    now` geometry at an explicit `(x, z)` rather than a quantised clock
+    hour -- needed for `step`'s own tests, which require two candidates
+    at a controlled few-degree separation that no integer clock hour can
+    express. Exploits the identical mechanism that fixture's own
+    docstring documents: `_enrichment_context`'s stubbed `project_
+    terrain_aware` is a passthrough of its `observer` argument, and
+    `_terrain_aware_world_position` passes the contributing percept's own
+    `ownship_at_observation` as that argument -- so a contact's `relative_
+    now` reads exactly the `(x, z)` given here, regardless of where
+    `implied_position` (a separate, unrelated computation) would place
+    `Contact.last_position` itself."""
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(x=x, z=z),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=classification_level,
+    )
+
+
+def _enrichment_context_with_ownship(
+    monkeypatch: pytest.MonkeyPatch, ownship: OwnshipState
+) -> EnrichmentContext:
+    """`_enrichment_context`'s twin with a caller-controlled ownship
+    *position* (not just heading, `_enrichment_context_with_heading`'s
+    own axis) -- `step`'s own "recomputed from ownship's present
+    position" test needs to move ownship itself, not merely look a
+    different way, since `relative_now["bearing_deg"]` is the *true*
+    compass bearing, unaffected by heading. Same monkeypatches as
+    `_enrichment_context`."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "divides_between",
+        lambda conn, theatre, observer, target: 0,
+    )
+    return EnrichmentContext(conn=_FAKE_CONN, theatre="Syria", ownship=ownship)
+
+
+def _inject_group(
+    store: ContactStore, now_sim: float, member_ids: frozenset[str]
+) -> None:
+    """Directly installs a synthetic `Group` spanning `member_ids`,
+    bypassing real spatial reconciliation entirely -- `step`'s own tests
+    need candidates separated by a few degrees of bearing (to prove the
+    angular-order claim precisely), far closer than any real `GroupStore.
+    reconcile` cohesion bound would tolerate for distinct contacts, so
+    this constructs the belief directly instead of fighting the
+    clustering formula to produce it. Same injection shape `test_callouts.
+    py` already uses for the identical reason (`store._groups._groups[...]
+    = group`), with `_last_reconciled_sim` set to match so `GroupStore.
+    groups`/`group_for_contact` (filtered to *currently observed* groups)
+    find it immediately with no further `tick()` needed."""
+    store._groups._last_reconciled_sim = now_sim
+    group = Group(
+        id=f"GROUP_TEST_{now_sim}",
+        member_contact_ids=member_ids,
+        established_sim=now_sim,
+        last_reconciled_sim=now_sim,
+        last_observed_sim=now_sim,
+    )
+    store._groups._groups[group.id] = group
+
+
+def _target_left_right_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ContactStore, TaskStore, CrewConsole, str, str, str]:
+    """Three armour contacts at a controlled bearing spread from origin
+    ownship -- `T` dead ahead (bearing 0), `R` 30 degrees right, `L` 30
+    degrees left, all at ~2 km range (measured via `perception.geometry.
+    bearing_deg`/`signed_angular_delta_deg` directly, not hand-derived
+    trigonometry, before writing this fixture). `T` is selected and
+    grouped with `L`/`R` via `_inject_group`. Returns `(store, tasks,
+    console, t_id, l_id, r_id)`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at_xz(
+                obs_id="OBS_T",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                x=2000.0,
+                z=0.0,
+            ),
+            _observation_at_xz(
+                obs_id="OBS_L",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                x=1732.0508,
+                z=-1000.0,
+            ),
+            _observation_at_xz(
+                obs_id="OBS_R",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                x=1732.0508,
+                z=1000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    # The three contacts resolve by their own `relative_now["bearing_
+    # deg"]` rather than assumed ingest order, since contact ids are
+    # minted, not controllable.
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    by_bearing: dict[int, str] = {}
+    for contact in store.contacts:
+        result = describe_contact(store, contact.id, 0.0, enrichment=console.enrichment)
+        assert result is not None
+        relative_now = result["facts"]["relative_now"]
+        assert isinstance(relative_now, dict)
+        by_bearing[round(relative_now["bearing_deg"])] = contact.id
+    t_id = by_bearing[0]
+    r_id = by_bearing[30]
+    l_id = by_bearing[330]
+    _inject_group(store, 0.0, frozenset({t_id, l_id, r_id}))
+    # Selected directly, bypassing `select_target`'s own closest-when-
+    # unwatched tie-break -- all three sit at ~2 km, within float noise of
+    # each other, so that tie-break would not reliably land on `T`.
+    task = attack_target_task(store, tasks, t_id, 0.0, descriptor="armor")
+    assert task is not None
+    return store, tasks, console, t_id, l_id, r_id
+
+
+def test_step_right_and_left_pick_neighbours_by_current_bearing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, tasks, console, t_id, _l_id, r_id = _target_left_right_fixture(monkeypatch)
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.contact_id == t_id
+
+    lines = console.handle_command("step", now_sim=1.0, slots={"direction": "right"})
+    assert store.contact(r_id) is not None
+    assert target_task.contact_id == r_id
+    assert store.contact(r_id).attention == "priority"  # type: ignore[union-attr]
+    assert store.contact(t_id).attention == "watch"  # type: ignore[union-attr]
+    assert lines and "armor" in lines[0].lower()
+
+    lines = console.handle_command("step", now_sim=2.0, slots={"direction": "left"})
+    assert target_task.contact_id == t_id
+    assert store.contact(t_id).attention == "priority"  # type: ignore[union-attr]
+    assert store.contact(r_id).attention == "watch"  # type: ignore[union-attr]
+    assert lines
+
+
+def test_step_recomputes_order_from_ownships_present_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 6's own named requirement, and the user's own words
+    (direction document §3): *"it changes as/if we circle the contacts."*
+    From origin ownship, `step right` of `T` picks `R` (30 degrees
+    clockwise of `T`'s own bearing). Flying to the *opposite* side of the
+    formation (ownship at `(4000, 0)`, `T` now directly *behind*) mirrors
+    the angular order -- `signed_angular_delta_deg` confirms `R` moves to
+    the *left* of `T` and `L` to the *right* from that vantage, verified
+    by direct computation before this fixture was written, not assumed.
+    So the *same* `step right` command, issued from the *same* standing
+    selection, must now pick `L` -- a different unit -- proving the order
+    is recomputed at press time from ownship's current position, never a
+    list fixed at selection time."""
+    _store, tasks, console, t_id, l_id, r_id = _target_left_right_fixture(monkeypatch)
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+
+    console.handle_command("step", now_sim=1.0, slots={"direction": "right"})
+    assert target_task.contact_id == r_id
+
+    # Re-select T and swap to the far-side vantage.
+    target_task.contact_id = t_id
+    console.enrichment = _enrichment_context_with_ownship(
+        monkeypatch,
+        OwnshipState(t_sim=2.0, x=4000.0, z=0.0, alt_m=500.0, heading_true_deg=0.0),
+    )
+
+    console.handle_command("step", now_sim=2.0, slots={"direction": "right"})
+
+    assert target_task.contact_id == l_id, (
+        "step right picked the same unit from a different ownship "
+        "position -- the order was not recomputed"
+    )
+
+
+def test_step_stops_at_the_end_rather_than_wrapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 6: wrapping would silently re-target a unit the pilot has
+    just stepped past, in the seconds before release -- stop, and say
+    so."""
+    _store, tasks, console, _t_id, _l_id, r_id = _target_left_right_fixture(monkeypatch)
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    console.handle_command("step", now_sim=1.0, slots={"direction": "right"})
+    assert target_task.contact_id == r_id
+
+    lines = console.handle_command("step", now_sim=2.0, slots={"direction": "right"})
+
+    assert lines == ["Unable, that's the last one."]
+    assert target_task.contact_id == r_id  # unchanged
+
+
+def test_step_with_ungrouped_target_says_no_other_units(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+
+    lines = console.handle_command("step", now_sim=1.0, slots={"direction": "right"})
+
+    assert lines == ["Unable, no other units in the group."]
+
+
+def test_step_with_no_target_selected_says_so() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("step", now_sim=0.0, slots={"direction": "left"})
+    assert lines == ["no target selected"]
+
+
+def test_step_near_and_far_order_by_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`near`/`far` use the identical signed machinery keyed on `range_m`
+    instead of angle (Decision 6) -- same-bearing, different-range
+    members, the exact shape `_cohering_contacts_across_a_band_boundary`
+    already builds (reused here rather than duplicated)."""
+    store = _cohering_contacts_across_a_band_boundary()
+    assert len(store.groups) == 1
+    near = next(c for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    medium = next(c for c in store.contacts if c.last_class_raw == "OP_TRUCK")
+    far = next(c for c in store.contacts if c.last_class_raw == "OP_INFANTRY")
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    # `descriptor=None` -- this test is about the range-ordering
+    # mechanism, not the descriptor filter (`_step_candidates`'s own
+    # tests cover that); the three members are different classes
+    # (armour/truck/infantry) on purpose, straddling a band boundary, and
+    # a descriptor would drop two of them as `"wrong"` before ordering
+    # ever ran.
+    task = attack_target_task(store, tasks, near.id, 0.0)
+    assert task is not None
+    target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
+
+    lines = console.handle_command("step", now_sim=1.0, slots={"direction": "far"})
+
+    assert target_task.contact_id == medium.id
+    assert far.id != medium.id  # sanity: a real third candidate exists
+    assert lines
+
+
+# --- BL-14 attack-run `engage`/`disengage` (plans/attack-run/plan.md
+# Decisions 1/2/15, Stage 5) ---
+
+
+def test_engage_with_no_selection_starts_the_run_via_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`engage <what> <where>` (Decision 15) -- selects exactly as
+    `select_target` does, then sets `attack_run_transition` to signal the
+    poll loop (`logger.py`'s own wiring, not exercised by this test)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("engage", now_sim=0.0, slots={"descriptor": "armor"})
+
+    assert console.attack_run_transition == "engage"
+    assert lines[0].startswith("Attack run, armor, 2 o'clock,")
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.contact_id == contact.id
+
+
+def test_engage_bare_resumes_the_already_selected_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `engage`/`engage target` (no slots) starts the run on
+    whatever is already selected, rather than requiring the target to be
+    named again."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+
+    lines = console.handle_command("engage", now_sim=1.0, slots=None)
+
+    assert console.attack_run_transition == "engage"
+    assert lines and lines[0].startswith("Attack run,")
+
+
+def test_engage_accepts_and_ignores_the_weapon_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 15: the weapon token parses and nothing reads it. Pinned
+    so the grammar's own acceptance does not silently change when
+    something does consume it."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command(
+        "engage", now_sim=0.0, slots={"descriptor": "armor", "weapon": "rockets"}
+    )
+
+    assert lines[0].startswith("Attack run, armor,")
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.contact_id == store.contacts[0].id
+
+
+def test_engage_with_no_target_selected_says_so() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("engage", now_sim=0.0, slots=None)
+    assert lines == ["no target selected"]
+    assert console.attack_run_transition is None
+
+
+def test_disengage_signals_transition_and_keeps_the_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 2: `disengage` ends the run's own phase only -- "stop the
+    run, keep the watch" -- the standing `attack_target` task (and its
+    `"priority"` attention) survives."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1500.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+    console.handle_command("engage", now_sim=1.0, slots=None)
+
+    lines = console.handle_command("disengage", now_sim=2.0)
+
+    assert lines == ["Attack run off."]
+    assert console.attack_run_transition == "disengage"
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+    target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
+    assert target_task.status == "pending"
+
+
+def test_disengage_speaks_unconditionally_even_with_no_run_active() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("disengage", now_sim=0.0)
+    assert lines == ["Attack run off."]
+
+
+def test_drain_attack_run_is_noop_while_not_engaged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`state=None` means "selected but not engaged" (Stage 5's own
+    contract) -- `drain_attack_run` must not compute or speak anything."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+        output=None,
+    )
+    console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
+
+    result = console.drain_attack_run(None, now_sim=1.0, ownship=_ownship(x=0.0, z=0.0))
+
+    assert result is None
+
+
+def test_drain_attack_run_ends_the_run_when_the_contact_record_vanishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 13 -- a merge that abandons the target's own contact id
+    with no successor recorded anywhere leaves nothing to guide on. The
+    run ends and says so once (`render_lost_contact`), and the standing
+    task is cancelled too -- unlike `disengage`, there is no selection
+    left to keep."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=12,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    contact_id = store.contacts[0].id
+    task = attack_target_task(store, tasks, contact_id, now_sim=0.0)
+    assert task is not None
+    # Simulate the id being abandoned by a merge, with no successor --
+    # `ContactStore.contact` returns `None` for a removed id.
+    del store._contacts[contact_id]
+
+    result = console.drain_attack_run(
+        AttackRunState(), now_sim=1.0, ownship=_ownship(x=0.0, z=0.0)
+    )
+
+    assert result is None
+    target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
+    assert target_task.status == "cancelled"
+
+
+def _attack_run_contact_off_boresight(
+    contact_id: str, *, ownship_at_observation: OwnshipState, t_sim: float = 0.0
+) -> Contact:
+    """A `Contact` carrying a real off-boresight `RelativeDirection` --
+    mirrors `test_attack_run.py`'s own `_contact_with_relative_direction`
+    helper (kept as a local copy per this file's per-test-file fixture
+    convention). 100 m right of boresight at ~1000 m forward is the
+    Stage 4-5 review's own reproduction figure (`atan(100/1000)` =~ 5.71
+    degrees): past `ATTACK_RUN_LINED_UP_AZIMUTH_DEG` (5.0) but inside the
+    "a bit right" band (half the 12 o'clock sector, 7.5), so `decide`
+    renders `"A bit right."` and wants to speak on the first call -- real
+    geometry, not a stubbed `decide_attack_run`, per this plan's own
+    "confirmed by direct reproduction" standard."""
+    percept = Percept(
+        t_sim=t_sim,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=ownship_at_observation,
+        observation_id="OBS_1",
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=100.0, up_m=0.0),
+    )
+    return Contact.from_percept(contact_id, percept)
+
+
+def test_drain_attack_run_reoffers_the_line_once_the_channel_frees() -> None:
+    """Stage 4-5 review, required fix 1: a guidance change that arrives
+    while `scheduler.busy_until_sim` is still ahead of `now_sim` must not
+    be recorded as spoken -- `_should_emit`'s baseline is the last
+    *spoken* value (direction doc Sec 10), and `decide()` already updates
+    `last_spoken_*` as if the line had been heard, before the caller ever
+    checks occupancy. Reproduces the reviewer's own busy-then-free
+    sequence directly against `drain_attack_run`, with no `engage` in the
+    way, then asserts the fixed behaviour: nothing printed while busy, the
+    carried-forward state unchanged, and the line spoken once the channel
+    frees with the geometry never having moved."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+
+    import io
+
+    output = io.StringIO()
+    console = CrewConsole(store=store, tasks=tasks, output=output)
+    # Well inside `ATTACK_RUN_RELATIVE_MAX_AGE_S` (2.0 s) of the percept's
+    # own `t_sim=0.0` -- this test is about occupancy, not staleness, so
+    # the busy window is kept short enough that the percept is still
+    # trusted when the channel frees.
+    console.scheduler.busy_until_sim = 1.0
+
+    busy_state = console.drain_attack_run(
+        AttackRunState(), now_sim=0.0, ownship=ownship
+    )
+
+    assert output.getvalue() == ""
+    assert busy_state == AttackRunState()
+
+    freed_state = console.drain_attack_run(busy_state, now_sim=1.0, ownship=ownship)
+
+    assert output.getvalue() == "A bit right.\n"
+    assert freed_state is not None
+    assert freed_state.last_spoken_text == "A bit right."
+
+
+def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The realistic casualty the review names: `engage`'s own readback
+    occupies the channel (`CalloutScheduler.note_reply`, via `_print`)
+    right as the run begins, which is exactly when the first alignment
+    correction is due. Confirms the fix holds through the real `engage`
+    path, not only a hand-set `busy_until_sim`."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+
+    import io
+
+    output = io.StringIO()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+        output=output,
+    )
+
+    engage_lines = console.handle_command("engage", now_sim=0.0, slots=None)
+
+    assert engage_lines[0].startswith("Attack run,")
+    # `note_reply` claimed the channel for the readback's own duration --
+    # the precondition the rest of this test depends on.
+    assert console.scheduler.busy_until_sim > 0.0
+    printed_after_engage = output.getvalue()
+
+    # The poll loop's own first tick after `engage` (`logger.py`): a fresh
+    # `AttackRunState()`, drained immediately, same `now_sim` the readback
+    # was spoken at -- the channel is still busy.
+    busy_state = console.drain_attack_run(
+        AttackRunState(), now_sim=0.0, ownship=ownship
+    )
+
+    assert output.getvalue() == printed_after_engage  # nothing new printed
+    assert busy_state == AttackRunState()  # not falsely marked spoken
+
+    # The channel frees. The engage readback alone occupies several
+    # seconds (per the review's own finding), longer than `ATTACK_RUN_
+    # RELATIVE_MAX_AGE_S` (2.0 s) -- exactly as it would in a live flight,
+    # the naked-eye channel keeps re-observing the same unchanged geometry
+    # every poll, so refresh the percept's own `t_sim` rather than letting
+    # it go stale for a reason this test is not about.
+    freed_now_sim = console.scheduler.busy_until_sim
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
+        contact_id, ownship_at_observation=ownship, t_sim=freed_now_sim
+    )
+    freed_state = console.drain_attack_run(
+        busy_state, now_sim=freed_now_sim, ownship=ownship
+    )
+
+    assert output.getvalue() == printed_after_engage + "A bit right.\n"
+    assert freed_state is not None
+    assert freed_state.last_spoken_text == "A bit right."
+
+
+def test_drain_attack_run_ends_the_run_after_drop_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 4-5 review, required fix 2: `drop target` cancels the
+    standing `attack_target` task but (before this fix) left `drain_
+    attack_run` returning the unchanged, still-non-`None` state once the
+    task was gone -- the engaged flag then survived to wrongly claim the
+    gaze for whatever was selected next. `drain_attack_run` must treat
+    "the standing task is gone" exactly like the vanished-contact branch:
+    return `None`, which is what `logger.py` assigns straight onto
+    `runner.attack_run_state`, clearing `attack_run_engaged`."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("engage", now_sim=0.0, slots=None)
+
+    console.handle_command("drop_target", now_sim=1.0)
+
+    target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
+    assert target_task.status == "cancelled"
+    result = console.drain_attack_run(AttackRunState(), now_sim=2.0, ownship=ownship)
+    assert result is None
+
+
+def test_drain_attack_run_ends_the_run_after_the_generic_cancel_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same guard, exercised through the generic all-kinds `cancel_task`
+    token (`"cancel"`/`"stop"`) rather than `drop_target` -- the Stage
+    4-5 review's point that fixing the single shared guard in `drain_
+    attack_run` is what makes the fix hold for this path too, found by
+    reproduction rather than by reading."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("engage", now_sim=0.0, slots=None)
+
+    console.handle_command("cancel_task", now_sim=1.0)
+
+    target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
+    assert target_task.status == "cancelled"
+    result = console.drain_attack_run(AttackRunState(), now_sim=2.0, ownship=ownship)
+    assert result is None
 
 
 # --- the slotted query's filter slots (plans/crew-query-path/plan.md

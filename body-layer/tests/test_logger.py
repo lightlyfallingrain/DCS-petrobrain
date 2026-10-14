@@ -57,6 +57,7 @@ from logger import (
     _run_console_poll_loop,
     _run_console_repl,
     _run_crew_text_poll_loop,
+    _speech_log_sink,
     _warn_live_los_coverage_gap_once,
     format_observation_line,
     main,
@@ -1227,6 +1228,196 @@ def test_active_gaze_compass_conversion_handles_the_360_0_wrap() -> None:
     assert plan_0.commanded_legs == (11, 12, 1)
     assert plan_10.commanded_legs == (11, 12, 1)
     assert plan_350 == plan_0 == plan_10
+
+
+# --- attack run claims the gaze (plans/attack-run/plan.md Decision 9
+# REVISED, Stage 5) -------------------------------------------------
+
+
+def _contact_at_bearing_range(
+    store: ContactStore, bearing_deg: float, range_m: float
+) -> str:
+    """Ingests one contact whose `Contact.last_position` resolves to the
+    given true bearing/range from `(0, 0)` ownship (`implied_position`'s
+    own formula, `belief.association_over_time`) and returns its minted
+    id. `_active_gaze`'s attack-run branch reads `Contact.last_position`
+    directly, unlike `CrewConsole`'s enrichment-mediated facts -- no
+    `EnrichmentContext` stub needed here."""
+    store.ingest(
+        [
+            Observation(
+                id=f"OBS_{bearing_deg}_{range_m}",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-2",
+                bearing_deg=bearing_deg,
+                range_m=range_m,
+                ownship_at_observation=OwnshipState(
+                    t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+                ),
+                derived_world_position=DerivedWorldPosition(
+                    x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    return store.contacts[-1].id
+
+
+def test_active_gaze_claims_a_fixed_look_at_the_engaged_attack_run_target() -> None:
+    """Decision 9 REVISED -- *"an attack run fixes the look on the
+    target"*, checked **before** the `scan_area` loop: a standing `scan
+    left` command (registered here specifically because `_SECTOR_LEGS
+    ["left"]` has no 12 -- the case that settled this decision) must be
+    overridden while the run is engaged."""
+    store = ContactStore()
+    contact_id = _contact_at_bearing_range(store, bearing_deg=0.0, range_m=1000.0)
+    tasks = TaskStore()
+    tasks.create(
+        "attack_target",
+        None,
+        created_sim=0.0,
+        deadline_sim=float("inf"),
+        reason="attack_target",
+        contact_id=contact_id,
+    )
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=0.0,
+        deadline_sim=600.0,
+        reason="scan-area",
+    )
+    ownship = OwnshipState(t_sim=1.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
+
+    plan = _active_gaze(
+        tasks,
+        ownship.heading_true_deg,
+        store=store,
+        ownship=ownship,
+        attack_run_engaged=True,
+    )
+
+    assert plan == ScanPlan.fixed_look_at(azimuth_deg=0.0, elevation_deg=0.0)
+
+
+def test_active_gaze_ignores_attack_run_when_not_engaged() -> None:
+    """`attack_run_engaged=False` (selected but not `engage`d) must fall
+    through to whatever is actually commanded -- the gaze claim tracks
+    the run's *phase*, not the standing selection."""
+    store = ContactStore()
+    contact_id = _contact_at_bearing_range(store, bearing_deg=0.0, range_m=1000.0)
+    tasks = TaskStore()
+    tasks.create(
+        "attack_target",
+        None,
+        created_sim=0.0,
+        deadline_sim=float("inf"),
+        reason="attack_target",
+        contact_id=contact_id,
+    )
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=0.0,
+        deadline_sim=600.0,
+        reason="scan-area",
+    )
+    ownship = OwnshipState(t_sim=1.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
+
+    plan = _active_gaze(
+        tasks,
+        ownship.heading_true_deg,
+        store=store,
+        ownship=ownship,
+        attack_run_engaged=False,
+    )
+
+    assert plan == ScanPlan(commanded_sector="left", command_t_sim=0.0)
+
+
+def test_active_gaze_attack_run_branch_is_a_true_noop_without_store_or_ownship() -> (
+    None
+):
+    """`store`/`ownship` default to `None` so every existing call site
+    that does not know about attack runs keeps working unchanged --
+    `attack_run_engaged=True` with either missing must not raise and
+    must fall through to the ordinary scan resolution."""
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=0.0,
+        deadline_sim=600.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks, 0.0, attack_run_engaged=True)
+
+    assert plan == ScanPlan(commanded_sector="left", command_t_sim=0.0)
+
+
+class _RecordingSpeechWriter:
+    """A `BeliefTruthLogWriter` double that records every `write_speech`
+    call's kwargs -- `_speech_log_sink` has no pre-existing test, so this
+    also covers the generic gaze/optic-forwarding behaviour this change
+    did not intend to touch, not only the new `attack_run_fields`
+    threading."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def write_speech(self, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
+def test_speech_log_sink_forwards_attack_run_fields() -> None:
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 5.0
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink(
+        "Come left.",
+        False,
+        {
+            "attack_run_target_contact_id": "CONTACT_1",
+            "attack_run_tier": 1,
+            "attack_run_azimuth_deg": -7.5,
+            "attack_run_elevation_deg": 0.0,
+        },
+    )
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["text"] == "Come left."
+    assert call["attack_run_target_contact_id"] == "CONTACT_1"
+    assert call["attack_run_tier"] == 1
+    assert call["attack_run_azimuth_deg"] == -7.5
+    assert call["attack_run_elevation_deg"] == 0.0
+
+
+def test_speech_log_sink_omits_attack_run_fields_for_an_ordinary_line() -> None:
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 5.0
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Scanning right.", False, None)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["text"] == "Scanning right."
+    assert call["attack_run_target_contact_id"] is None
+    assert call["attack_run_tier"] is None
+    assert call["attack_run_azimuth_deg"] is None
+    assert call["attack_run_elevation_deg"] is None
 
 
 def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
