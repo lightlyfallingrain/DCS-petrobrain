@@ -536,3 +536,166 @@ claim and the suppression gate's narrow scope were both confirmed by mutation of
 each mutation reverted afterward (`git status --porcelain` on `crew_console.py`/`callouts.py` is
 clean). The `mypy tests` characterisation was checked by diffing the full tool output against the
 pre-Stage-5 commit, not accepted at face value.
+
+---
+
+## Stage 4-5 fix review (2026-10-14)
+
+Reviewed the two required-fix commits at `feature/bl14-attack-run` `1b62a3b10826fab1a087cb4ef1192db000c61a34`
+(fast-forwarded cleanly from this worktree's stale base `f25c57c`, which was a strict ancestor — no
+divergence, no cherry-pick needed). Diff scope: `body-layer/src/belief/crew_console.py`
+(`drain_attack_run` only), `body-layer/tests/test_crew_console.py` (4 new tests + one local helper),
+`plans/attack-run/implementation.md` (an appended "Stage 4-5 review fixes" section). No other file
+touched.
+
+### Both findings, re-reproduced against the fixed code
+
+**Finding 1 (occupancy falsely committed `last_spoken_*`).** Reproduced the original busy-then-free
+sequence directly (no test harness) against the fixed `drain_attack_run`: a contact 100m right of
+boresight at 1000m, `busy_until_sim` set ahead of `now_sim`. Fixed behaviour: nothing printed, the
+returned state is `AttackRunState()` (unchanged baseline) rather than the falsely-advanced one the
+pre-fix code returned. Confirmed the fix, not just the test.
+
+**Finding 2 (`drop target`/generic `cancel` left the gaze claim set).** Read the single-guard fix at
+`crew_console.py:2219-2232`: the "task is gone" branch now returns `None` (was `return state`),
+routing through the same `runner.attack_run_state = None` assignment the vanished-contact branch and
+`disengage` already used. Confirmed via mutation (below) rather than by reading alone.
+
+### Mutation testing (not reading, not trusting the new tests)
+
+Reverted each fix in turn on this worktree's own checkout, ran the full `drain_attack_run` test
+selection, then restored (`git status --porcelain` on `crew_console.py` clean after each revert):
+
+- **Fix 1 reverted** (`return state` → `return new_state` on the occupancy path): both
+  `test_drain_attack_run_reoffers_the_line_once_the_channel_frees` and
+  `test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel` failed exactly as
+  claimed — `busy_state` carried `last_spoken_azimuth_deg=5.710593137499642`,
+  `last_spoken_text='A bit right.'` though nothing was printed. The other 4 `drain_attack_run`
+  tests (both Fix 2 tests included) stayed green: **2 failed, 4 passed**, matching the
+  implementer's own account exactly.
+- **Fix 2 reverted** (top-of-function guard `return None` → `return state`): both
+  `test_drain_attack_run_ends_the_run_after_drop_target` and
+  `test_drain_attack_run_ends_the_run_after_the_generic_cancel_task` failed on
+  `assert result is None`, returning the stale non-`None` `AttackRunState` instead. Same split:
+  **2 failed, 4 passed**.
+
+Both reversions matched the implementer's "Fail-then-pass evidence" section verbatim. The
+fail-then-pass claim is verified, not merely accepted.
+
+### Check 2 — "dropped, not queued"
+
+Confirmed against `decide()` (`attack_run.py`): `decide` returns `(state, None)` unchanged — never a
+partially-advanced state — whenever either tier 1 has no fresh alignment (`_tier1_alignment` is
+`None`) or `_should_emit` says no. It only ever returns a *new* state together with non-`None`
+speech. So `drain_attack_run`'s `speech is None` branch (`return new_state`) is always a no-op
+returning the same object as `state`, and the occupancy branch's `return state` is the only place
+that needed fixing — there is no third path that could leak an advanced-but-unspoken state. Dropping
+rather than queuing is correct given the stated constraint (no deferral machinery on the reply lane);
+since `decide` re-derives from live geometry every tick with no memory of "what it meant to say," a
+dropped line is always re-offered the instant the channel frees, provided the input data is still
+fresh — which is exactly where the real risk turns out to live (see "Readback-occupancy interaction"
+below), not in the drop/queue choice itself.
+
+### Check 3 — soundness across every path
+
+Traced `AttackRunState | None` through all five return points: `state is None` guard (early
+`return state`, a `None` stays `None`); the task-gone guard (now `return None`); the vanished-contact
+guard (`return None`, unchanged by this fix); `speech is None` (`return new_state`, always `≡ state`
+per Check 2); the occupancy split (`return new_state` when printed, `return state` when suppressed).
+No two of these can both apply to the same call — each is a distinct `if`/`elif`-shaped branch,
+mutually exclusive by construction, not an ordering question. No state value is reachable that mixes
+"task gone" with "advanced-but-unspoken": the task-gone guard returns before `decide_attack_run` is
+even called. Sound.
+
+### Readback-occupancy interaction — superseded by user direction mid-review
+
+The brief asked me to test the implementer's "harmless live, fixture-only" framing of the ~5s
+readback vs. 2.0s `ATTACK_RUN_RELATIVE_MAX_AGE_S` gap. User direction landed during this review
+(2026-10-14) settling part of that question and raising a new required item. Recording both what I
+found and what changed:
+
+**What I confirmed by direct reproduction (not by reading).** Built a real `Contact`/`TaskStore`/
+`CrewConsole` with the percept frozen at `t_sim=0.0` and `busy_until_sim=6.0` (standing in for a
+readback plus the new 1s gap, see below), then called `drain_attack_run(AttackRunState(), now_sim=6.0,
+...)`. Result: nothing printed, state returned as `AttackRunState()` — correctly silent, not falsely
+marked spoken. This is **not** the same defect class as Finding 1: Finding 1 was a state wrongly
+advanced past what was actually heard; this is `decide()`'s documented Stage-3/5 behaviour ("silence,
+holding the last spoken state... exactly as Stage 5 describes for a run flown before tier 2 exists")
+correctly doing nothing when it has nothing fresh to guide on. Separately confirmed that as long as
+gaze/LOS/FOV hold continuously, `NakedEyePerceptionSource` refreshes `Contact.last_percept.t_sim` on
+every 1Hz poll regardless of how long the speech channel stays busy (`runner.run_once()` in
+`_run_crew_text_poll_loop` runs unconditionally, not gated on `busy_until_sim`) — so the percept's
+*age* at the moment the channel frees depends on whether LOS broke at some point during the busy
+window, not on how long that window was. The implementer's "re-observes every poll" claim holds for
+the continuously-visible case; the gap is specifically an LOS blip during the busy window with no
+recovery before the next poll, which produces one tick of (correct, self-correcting) silence rather
+than a lost callout — the run is not ended and the next successful observation is spoken immediately
+against the still-unmoved `None` baseline. **Not a required fix**: it is an accepted, pre-existing
+tier-1-only limitation (tier 2/"obstructed" is Stage 6), not something this patch introduced or
+worsened in kind — though the new 1s delay below does widen the exposure window somewhat, since it
+lengthens how long an LOS blip has to occur within to matter. Worth one line in the plan's Risks
+section so a flight that hears nothing on the first callout is read correctly rather than as a
+mystery; not worth gating this fix on.
+
+**What changed under me: a pre-existing mechanism already does most of what the new instruction
+asks.** `CalloutScheduler.note_reply` (`callouts.py:817-839`) already extends `busy_until_sim` by
+`estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S` (0.75s) for *every* reply, including
+`engage`'s own readback (`handle_command` calls `self._print(lines, now_sim)` unconditionally at its
+end, and `_print`'s non-`bypass_gate` branch calls `note_reply` for every line). `drain_attack_run`'s
+existing `now_sim >= self.scheduler.busy_until_sim` gate therefore **already** waits for "readback
+done, plus a breathing gap" before the first guidance line — this is not new mechanism to build, it
+is already wired, and already general (every reply, not attack-run-specific). The user's "add a 1s
+delay after that also" is a ~0.25s calibration gap above what already exists, not a missing feature.
+
+**My read on placement, since I was asked for it.** Keep it general, in `callouts.py` beside
+`INTER_UTTERANCE_GAP_S`/`SPEECH_RATE_WPS`/`MIN_UTTERANCE_S` — not attack-run-local, and not a new
+constant in `attack_run.py` alongside its three deliberately-unset *geometry* constants (those are
+about alignment/cadence, not channel pacing; mixing a scheduling constant in would blur the module
+boundary `docs/STRUCTURE.md` draws between the two). Two ways to land it, in order of preference:
+
+1. **Bump `INTER_UTTERANCE_GAP_S` from 0.75 to 1.0.** One constant, no new mechanism, "mechanism and
+   calibration never share a commit" stays satisfied (this *is* a calibration-only change). Changes
+   spacing after *every* reply, not only `engage`'s — which matches the user's own stated reasoning
+   ("Petrovich can only speak one thing at a time... add a 1s delay after that *also*", read as a
+   general pacing statement about how a crewman talks, not an attack-run carve-out) and costs
+   nothing architecturally. This is what I'd recommend absent a stated reason to keep the general
+   gap at 0.75 and add an attack-run-specific extra second on top.
+2. **A second, attack-run-specific constant** (lives beside #1 in `callouts.py`, not in
+   `attack_run.py`) only if the user wants ordinary replies to keep their current 0.75s spacing while
+   guidance specifically waits longer. This needs the scheduler to expose *why* it is busy (a
+   reply vs. a routine callout) to let `drain_attack_run` apply the extra second only after a reply —
+   `busy_until_sim` alone does not currently carry that distinction, so this path is strictly more
+   mechanism than #1, not just a bigger number.
+
+Not reviewing the 1s-delay change itself here — it has not been implemented yet; this is input for
+the implementer/architect on where it belongs, per the dispatch.
+
+### Verdict (Stage 4-5 fix review)
+
+**APPROVED**, for the two required fixes as implemented. Both are correct, both were confirmed by
+reproduction and mutation (not by reading the new tests and not by trusting the implementer's
+account), and nothing outside the stated scope moved — no constant tuned, no tier-2 work, no queue,
+no vocabulary edit. The readback-occupancy interaction raised in my brief is not a required fix on
+this commit; it surfaces a separate, not-yet-implemented required change (the 1s post-readback delay)
+that the user has already decided to dispatch regardless of my verdict here.
+
+### What Performance Reviewer / Security should look at specifically
+
+- **Performance Reviewer**: nothing new on the hot path from this fix itself (one extra `if`,
+  returning an existing object rather than constructing one). If the 1s-delay follow-up lands as
+  option 2 above (scheduler exposing busy-reason), that is the piece worth a performance look —
+  it adds a field read on every `_print` call, trivial, but worth confirming it stays trivial.
+- **Security**: nothing in this diff touches I/O, parsing, or trust boundaries — pure in-process
+  state transitions over already-validated `AttackRunState`/`Contact` objects. No new surface.
+
+### Review Confidence (Stage 4-5 fix review)
+
+Full read of both changed source files and the implementer's own account in `implementation.md`.
+Both required fixes verified by direct reproduction and by mutation-testing each fix independently
+(reverted, re-ran, restored, confirmed clean). All four verification gates (ruff format/check, mypy
+--strict, pytest) run directly from inside each subproject's own venv against this worktree's `src`
+(confirmed by import-path check, not assumed from `pythonpath` config alone) — body-layer **1824
+passed, 4 xfailed**; audio-adapter **277 passed, 1 skipped** (untouched, run to confirm no
+regression). The readback-occupancy interaction was tested by direct reproduction of the LOS-blip
+scenario (frozen percept, `busy_until_sim=6.0`), not accepted from the implementer's fixture-note
+framing.
