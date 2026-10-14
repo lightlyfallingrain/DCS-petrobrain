@@ -122,6 +122,7 @@ Group model, contact-report flood and the tick-cost/LOS workstream:
 - [[BL-W2]] — Redundant group disclosure
 - [[BL-11]] — Tick cost, and making silent degradation visible
 - [[BL-12]] — Group-level contact identity and continuity
+- [[BL-W39]] — `collapse(group, depth)` — the group tree, derived at read time
 
 Ahead:
 

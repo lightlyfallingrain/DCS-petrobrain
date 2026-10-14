@@ -205,7 +205,13 @@ from belief.attention import (
     Sector,
     effective_attention,
 )
-from belief.classification import AIR_DEFENSE_OP_CLASSES, parent_class_of
+from belief.cardinality import CardinalityBelief
+from belief.classification import (
+    AIR_DEFENSE_OP_CLASSES,
+    ClassificationBelief,
+    SpecificityLevel,
+    parent_class_of,
+)
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
@@ -219,7 +225,9 @@ from belief.events import (
     CONTACT_REACQUIRED,
     Event,
 )
+from belief.group_view import CollapseDepth, CollapseNode, collapse_members
 from belief.groups import Group
+from belief.position_belief import Covariance2D, PositionEstimate
 from belief.threat import envelope_for
 from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
@@ -1790,13 +1798,6 @@ def _classification_key(facts: dict[str, object]) -> tuple[object, object]:
 #: indefinite_article` rather than growing it.
 
 
-#: `_classification_level`'s undifferentiated levels, named here too so
-#: `_group_composition_clause` can test for them without importing a
-#: function whose own name reads oddly applied to a bare `(value, level)`
-#: key rather than a facts dict.
-_UNDIFFERENTIATED_LEVELS: Final = ("presence", "unknown")
-
-
 def _undifferentiated_phrase(count: int) -> str:
     """How `_group_composition_clause` names member(s) with no class/type
     yet, aggregated into one phrase rather than one `"a ground"` per member
@@ -1820,29 +1821,147 @@ def _undifferentiated_phrase(count: int) -> str:
     return "many contacts"
 
 
+#: `belief.group_view.CollapseNode.level` -> `_unit_type_display`/
+#: `_plural_unit_type_display`'s own level vocabulary. `_group_composition_
+#: clause` only ever requests `CollapseDepth.TYPE`, and at that depth
+#: `group_view._class_children` never returns a bare `CLASS`-level leaf
+#: (that rung only leafs when called with `max_depth == CollapseDepth.
+#: CLASS` itself, see that function's own docstring) -- so a leaf this
+#: function actually sees is always `SUBCLASS` (an `op_class` string, the
+#: same shape a real `class`-level belief holds) or `TYPE` (a specific type
+#: string). This table is total over both.
+_LEAF_LEVEL_WORD: Final[dict[CollapseDepth, str]] = {
+    CollapseDepth.SUBCLASS: "class",
+    CollapseDepth.TYPE: "type",
+}
+
+
+def _leaf_nodes(node: CollapseNode) -> list[CollapseNode]:
+    """Depth-first leaves of a collapsed tree (`belief.group_view.
+    CollapseNode`) -- the per-class/sub-class/type buckets `_group_
+    composition_clause` renders. `group_view`'s own "sorted at every level"
+    invariant means this traversal order is canonical, not an accident of
+    how `member_facts` happened to be ordered."""
+    if not node.children:
+        return [node]
+    leaves: list[CollapseNode] = []
+    for child in node.children:
+        leaves.extend(_leaf_nodes(child))
+    return leaves
+
+
+def _contact_for_member_facts(facts: dict[str, object]) -> Contact:
+    """A throwaway `Contact`, built from one `describe_contact` facts
+    dict's own `classification`/`cardinality` sub-dicts, so that
+    `_group_composition_clause` (below) can call `belief.group_view.
+    collapse_members` -- which takes `Contact`s, since that module reads
+    `Contact.classification`/`Contact.cardinality` directly and nothing
+    else (`group_view`'s own module docstring). No other field this
+    synthetic `Contact` carries is ever read by `collapse_members`, so
+    `id`/`position`/`last_alt_m`/`last_class_raw` below are placeholders
+    satisfying `Contact`'s required fields, not real belief state.
+
+    An absent `cardinality` key is treated as exactly one, the same
+    reading `_summary_count_clause` already gives it (`tools.
+    _cardinality_facts` omits the key precisely when the held claim is the
+    cardinality lattice's root -- "no cardinality claim at all," which is
+    the ordinary case for a single vehicle) -- `_group_composition_clause`
+    itself never reads this field (it counts members via `CollapseNode.
+    contacts`, not summed cardinality), but `collapse_members` still needs
+    a valid `CardinalityBelief` to build one."""
+    classification_facts = facts["classification"]
+    assert isinstance(classification_facts, dict)
+    value = classification_facts.get("value")
+    level_name = classification_facts.get("level")
+    assert isinstance(level_name, str)
+    level = SpecificityLevel[level_name.upper()]
+
+    lo = 1
+    hi = 1.0
+    cardinality_facts = facts.get("cardinality")
+    if isinstance(cardinality_facts, dict):
+        raw_lo = cardinality_facts.get("lo")
+        raw_hi = cardinality_facts.get("hi")
+        if isinstance(raw_lo, int):
+            lo = raw_lo
+        if isinstance(raw_hi, (int, float)):
+            hi = float(raw_hi)
+
+    zero_covariance = Covariance2D(xx=0.0, zz=0.0, xz=0.0)
+    placeholder_position = PositionEstimate(
+        x=0.0,
+        z=0.0,
+        covariance=zero_covariance,
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=zero_covariance,
+    )
+    return Contact(
+        id="",
+        position=placeholder_position,
+        last_alt_m=0.0,
+        last_class_raw=value if isinstance(value, str) else "",
+        classification=ClassificationBelief(
+            value=value if isinstance(value, str) else None,
+            level=level,
+            confidence=0.0,
+            established_sim=0.0,
+        ),
+        cardinality=CardinalityBelief(
+            lo=lo, hi=hi, confidence=0.0, established_sim=0.0
+        ),
+    )
+
+
 def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     """The per-class member breakdown for `render_group_disclosure`'s
     composition line (`plans/group-reporting/plan.md` Stage 3's worked
-    example, rows 2-4): buckets `member_facts` by `_classification_key` and
-    counts real members per bucket -- an **exact** count, never a
-    `_cardinality_phrase` hedge, because this is a literal groupby over
-    already-individuated, already-identified `Contact`s (the plan's own
-    "not new belief machinery" framing), not an estimate of how many real
-    objects one unresolved cluster stands for. Reuses `_SPOKEN_NUMBERS`/
-    `_unit_type_display`/`_plural_unit_type_display` exactly as the
-    single-contact vocabulary already does, so a mass-noun class (e.g.
-    `"armor"`, which has no distinct plural form) reads the same way here
-    as it already does in a single contact's own count clause -- a known,
-    accepted quirk of that vocabulary, not new to this function.
+    example, rows 2-4) -- re-expressed over `belief.group_view.
+    collapse_members` at `CollapseDepth.TYPE`, per `plans/group-collapse/
+    plan.md` Stage 3: the collapse supplies the grouping *structure* (which
+    members share a class, sub-class or exact type), this function supplies
+    the *words*.
 
-    **Undifferentiated (`presence`/`unknown` level) members are aggregated
-    into one trailing phrase, never counted as their own noun phrase per
-    member.** This was a real defect (`plans/group-cohesion-redesign/review.md`
+    **An exact count, never a `_cardinality_phrase` hedge** -- `CollapseNode.
+    contacts` is `len(members)` for that bucket (never `units_lo`/`units_hi`,
+    `group_view`'s own invariant), matching this function's pre-existing
+    "literal groupby over already-individuated, already-identified
+    `Contact`s" framing exactly. Reuses `_SPOKEN_NUMBERS`/`_unit_type_
+    display`/`_plural_unit_type_display` exactly as the single-contact
+    vocabulary already does, so a mass-noun class (e.g. `"armor"`, which has
+    no distinct plural form) reads the same way here as it already does in
+    a single contact's own count clause -- a known, accepted quirk of that
+    vocabulary, not new to this function.
+
+    **Reads `Contact.classification` through the lattice
+    (`classification.parent_class_of`), not the literal `(value, level)`
+    pair `_classification_key` extracts** -- the one real behaviour change
+    this re-expression carries, and it is the collapse's whole point: a
+    class-level air-defence belief (`"OP_LRSAM"`) and a type-level one now
+    bucket by the *class* they actually share rather than only by an exact
+    string match, matching `_group_view`'s canonical, order-independent
+    grouping. Every existing caller of this function already held a
+    reachable `(value, level)` pairing under this reading (a type-shaped
+    raw string is only ever observed at `SpecificityLevel.TYPE`,
+    `perception.naked_eye_source._classification_for_tier`/`perception.
+    hybrid_source.py`'s only two producers) -- see `plans/group-collapse/
+    plan.md`'s Stage 3 risk note and this plan's own implementation notes
+    for the fixture correction this required.
+
+    **Undifferentiated (`presence`/`unknown` level, or a class/type value
+    the lattice cannot resolve at all) members are aggregated into one
+    trailing phrase, never counted as their own noun phrase per member.**
+    This was a real defect (`plans/group-cohesion-redesign/review.md`
     Finding 2): calling `_unit_type_display(None, "presence")` per member
     and composing it like a real class produced `"a ground and a truck"`
     for a 2-member group with one undifferentiated member -- `"ground"` is
     `_unit_type_display`'s internal fallback word, not something a crew
-    member says about an unclassified contact. See `_undifferentiated_
+    member says about an unclassified contact. `belief.group_view.
+    _subclass_label` already names this same bucket `"unknown"` (gated on
+    `SpecificityLevel.CLASS` before touching the value at all, so a
+    presence-level member's own incidentally keyword-matchable raw string
+    is never promoted), so this function treats any leaf so labelled as
+    the aggregate rather than a real class -- see `_undifferentiated_
     phrase` for the aggregated wording, matched against the user's own
     examples (*"SAM and something"*).
 
@@ -1852,32 +1971,33 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     this function deliberately leaves to the caller rather than rendering
     itself (a composition clause with nothing differentiated to lead with
     is a different sentence shape, not this one with an empty prefix)."""
-    order: list[tuple[object, object]] = []
-    counts: dict[tuple[object, object], int] = {}
-    undifferentiated_count = 0
-    for facts in member_facts:
-        key = _classification_key(facts)
-        _, level = key
-        if level in _UNDIFFERENTIATED_LEVELS:
-            undifferentiated_count += 1
-            continue
-        if key not in counts:
-            order.append(key)
-            counts[key] = 0
-        counts[key] += 1
+    leaves: list[CollapseNode] = []
+    contacts = [_contact_for_member_facts(facts) for facts in member_facts]
+    if contacts:
+        # `now_sim` is irrelevant at `CollapseDepth.TYPE`: only a
+        # `CONTACT`-depth leaf's `confidence` field reads it
+        # (`group_view`'s own "grouping is decay-free" docstring note), and
+        # this function never requests `CONTACT` depth.
+        tree = collapse_members(contacts, CollapseDepth.TYPE, now_sim=0.0)
+        leaves = _leaf_nodes(tree)
 
     phrases: list[str] = []
-    for key in order:
-        value, level = key
-        count = counts[key]
+    undifferentiated_count = 0
+    for leaf in leaves:
+        if leaf.label == "unknown":
+            undifferentiated_count += leaf.contacts
+            continue
+        level_word = _LEAF_LEVEL_WORD[leaf.level]
+        count = leaf.contacts
         if count == 1:
-            phrases.append(_unit_type_display(value, level))
+            phrases.append(_unit_type_display(leaf.label, level_word))
         elif count in _SPOKEN_NUMBERS:
             phrases.append(
-                f"{_SPOKEN_NUMBERS[count]} {_plural_unit_type_display(value, level)}"
+                f"{_SPOKEN_NUMBERS[count]} "
+                f"{_plural_unit_type_display(leaf.label, level_word)}"
             )
         else:
-            phrases.append(f"many {_plural_unit_type_display(value, level)}")
+            phrases.append(f"many {_plural_unit_type_display(leaf.label, level_word)}")
 
     if undifferentiated_count:
         phrases.append(_undifferentiated_phrase(undifferentiated_count))

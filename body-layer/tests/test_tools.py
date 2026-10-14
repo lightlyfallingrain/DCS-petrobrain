@@ -12,7 +12,8 @@ import pytest
 
 from belief import enrichment as enrichment_module
 from belief import tools as tools_module
-from belief.contacts import ContactStore
+from belief.classification import SpecificityLevel, new_classification_belief
+from belief.contacts import Contact, ContactStore
 from belief.decay import IDENTITY_HALF_LIFE_S, LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.mission_phase import (
@@ -21,6 +22,7 @@ from belief.mission_phase import (
     MissionPhaseTracker,
     MissionUnderstandingData,
 )
+from belief.position_belief import Covariance2D, PositionEstimate
 from belief.tasks import TaskStore
 from belief.tools import (
     DEFAULT_SCAN_DEADLINE_S,
@@ -1125,3 +1127,133 @@ def test_group_fact_present_for_a_cohering_trio() -> None:
         group = store.group_for_contact(contact_id)
         assert group is not None
         assert group_facts["group_id"] == group.id
+
+
+def test_group_fact_tree_present_with_a_class_level_breakdown() -> None:
+    """`plans/group-collapse/plan.md` Stage 2 -- `facts["group"]["tree"]`
+    is a shallow (`CollapseDepth.SUBCLASS`) `belief.group_view.collapse`,
+    present whenever `store.tick` has never run with `ownship` (this
+    store's own observability bookkeeping is untracked, so the gate is a
+    no-op, same as `ContactStore.callout_observable`'s own documented
+    default)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                bearing_deg=0.0,
+                classification_raw="OP_ARMORED",
+            ),
+            _observation(
+                obs_id="OBS_2",
+                t_sim=0.0,
+                bearing_deg=1.0,
+                classification_raw="OP_TRUCK",
+            ),
+            _observation(
+                obs_id="OBS_3",
+                t_sim=0.0,
+                bearing_deg=2.0,
+                classification_raw="OP_TRUCK",
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+
+    result = describe_contact(store, contact_id, now_sim=0.0)
+    assert result is not None
+    group_facts = result["facts"]["group"]
+    assert isinstance(group_facts, dict)
+    tree = group_facts["tree"]
+    assert isinstance(tree, dict)
+    assert tree["level"] == "group"
+    assert tree["contacts"] == 3
+    labels = sorted(child["label"] for child in tree["children"])
+    assert labels == ["OP_ARMORED", "OP_TRUCK"]
+
+
+def _direct_contact_for_observability_test(
+    contact_id: str, x: float, *, class_raw: str
+) -> Contact:
+    """A `Contact` built directly, with no observation/geometry behind it
+    -- this test only cares about `last_observable_sim`'s *bookkeeping*
+    (set by hand below), not about whether a real bearing/range projection
+    would actually be masked, which `test_contacts.py`'s own mask tests
+    already cover."""
+    cov = Covariance2D(xx=0.0, zz=0.0, xz=0.0)
+    return Contact(
+        id=contact_id,
+        position=PositionEstimate(
+            x=x,
+            z=0.0,
+            covariance=cov,
+            as_of_sim=0.0,
+            fused_at_sim=0.0,
+            fused_covariance=cov,
+        ),
+        last_alt_m=0.0,
+        last_class_raw=class_raw,
+        classification=new_classification_belief(
+            value=class_raw, level=SpecificityLevel.CLASS, established_sim=0.0
+        ),
+    )
+
+
+def test_group_fact_tree_absent_when_no_member_is_observable() -> None:
+    """The cost-pruning gate, Decision 6/6a: once `ContactStore.callout_
+    observable`'s own bookkeeping is tracked and no member has ever been
+    confirmed observable, the whole group is not observable -- `tree` is
+    omitted, the same absent-not-null convention as every other optional
+    fact key, never a filtered/empty tree. `last_observable_sim` is set by
+    hand (see `_direct_contact_for_observability_test`) rather than via a
+    real geometry/mask walk, which is `test_contacts.py`'s job."""
+    store = ContactStore()
+    members = [
+        _direct_contact_for_observability_test("C1", 0.0, class_raw="OP_ARMORED"),
+        _direct_contact_for_observability_test("C2", 10.0, class_raw="OP_TRUCK"),
+        _direct_contact_for_observability_test("C3", 20.0, class_raw="OP_TRUCK"),
+    ]
+    for member in members:
+        store._contacts[member.id] = member
+        member.last_observable_sim = None  # never confirmed observable
+    store._observability_tracked = True
+    store._groups.reconcile(members, now_sim=0.0)
+    contact_id = members[0].id
+    assert store.group_for_contact(contact_id) is not None
+
+    result = describe_contact(store, contact_id, now_sim=0.0)
+    assert result is not None
+    group_facts = result["facts"]["group"]
+    assert isinstance(group_facts, dict)
+    assert "tree" not in group_facts
+
+
+def test_group_fact_tree_present_when_one_member_is_observable() -> None:
+    """Companion to the test above -- **any** member observable is enough
+    (`belief.callouts.CalloutScheduler.tick`'s own group loop, reused
+    here, not re-derived): two members never confirmed observable, one
+    confirmed observable `now_sim`, and the tree still renders."""
+    store = ContactStore()
+    members = [
+        _direct_contact_for_observability_test("C1", 0.0, class_raw="OP_ARMORED"),
+        _direct_contact_for_observability_test("C2", 10.0, class_raw="OP_TRUCK"),
+        _direct_contact_for_observability_test("C3", 20.0, class_raw="OP_TRUCK"),
+    ]
+    members[0].last_observable_sim = 0.0  # confirmed observable this tick
+    members[1].last_observable_sim = None
+    members[2].last_observable_sim = None
+    for member in members:
+        store._contacts[member.id] = member
+    store._observability_tracked = True
+    store._groups.reconcile(members, now_sim=0.0)
+    contact_id = members[0].id
+    assert store.group_for_contact(contact_id) is not None
+
+    result = describe_contact(store, contact_id, now_sim=0.0)
+    assert result is not None
+    group_facts = result["facts"]["group"]
+    assert isinstance(group_facts, dict)
+    assert "tree" in group_facts

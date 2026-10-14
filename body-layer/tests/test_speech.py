@@ -2197,6 +2197,56 @@ def test_group_composition_clause_counts_members_exactly() -> None:
     assert _group_composition_clause(facts) == "two armor and truck"
 
 
+def test_group_composition_clause_folds_op_groupsomething_into_undifferentiated() -> (
+    None
+):
+    """**Pinning, not fixing** -- `plans/group-collapse/review.md`'s second
+    required fix. A `CLASS`-level member whose raw value is literally
+    `object_model.DEFAULT_OP_CLASS` (`"OP_GROUPSOMETHING"`) now speaks as
+    part of the undifferentiated aggregate inside a group's composition
+    clause, not as `"group"` -- a real, narrow wording change the reviewer
+    examined and approved as-is (verdict (a): a deliberate, defensible
+    reading, not a defect), rather than something to "fix" in
+    `group_view.py` here.
+
+    **Why this must not go untested.** `classification.parent_class_of
+    ("OP_GROUPSOMETHING")` returns `None` (`_op_class_of`'s own exclusion of
+    `DEFAULT_OP_CLASS`), so `group_view._subclass_label` resolves this value
+    to `"unknown"` *by design*. The value is reachable in real play --
+    naked-eye `medres` emits it at class level for a type the keyword
+    tables don't recognise -- and it has now been wrongly assumed
+    unreachable **twice**: once before `_OP_CLASS_DISPLAY["OP_GROUPSOMETHING"]
+    = "group"` was added (2026-09-22 live sortie, *"unit at 9 o'clock, very
+    close is OP_GROUPSOMETHING"*), and again in this plan's own first
+    implementation pass (`plans/group-collapse/implementation.md`'s
+    "Notable discovery not caught by any test" section). This test is what
+    stops a third silent change to this wording -- the next person who
+    touches `_subclass_label` or `_OP_CLASS_DISPLAY` sees a failing test
+    here, not an unnoticed behaviour drift.
+
+    **The single-contact path is deliberately untouched and diverges.**
+    `render_contact_report`/`_contact_report_text` still read `_unit_type_
+    display` directly off the facts dict, bypassing `group_view` entirely,
+    and still say `"group"` for this exact value at class level (see
+    `test_unit_type_display`-style direct calls elsewhere in this file).
+    The two paths now deliberately disagree on this one value -- worth
+    pinning against an accidental future "unification," since the
+    asymmetry is itself a considered outcome, not an oversight."""
+    assert _unit_type_display("OP_GROUPSOMETHING", "class") == "group"
+
+    pure_facts = [
+        {"classification": {"value": "OP_GROUPSOMETHING", "level": "class"}},
+        {"classification": {"value": "OP_GROUPSOMETHING", "level": "class"}},
+    ]
+    assert _group_composition_clause(pure_facts) == "two contacts"
+
+    mixed_facts = [
+        {"classification": {"value": "OP_TRUCK", "level": "class"}},
+        {"classification": {"value": "OP_GROUPSOMETHING", "level": "class"}},
+    ]
+    assert _group_composition_clause(mixed_facts) == "truck and something"
+
+
 def test_render_group_disclosure_undifferentiated_group_says_bare_group() -> None:
     """Row 1 of the plan's worked example: all members still at `presence`
     level says the bare word, no composition detail to give yet."""
