@@ -33,6 +33,9 @@ on the index without opening anything.
 - [[X-T25]] — Compact the agent-memory indexes — **FIRST TASK OF THE NEXT SESSION** (user direction
   2026-10-11: queued deliberately, ahead of resuming [[BL-12]]; two indexes are at the read limit
   and six agents in one session correctly declined to fix it)
+- [[X-T26]] — Make behaviour-affecting constants configurable — queued 2026-10-14, after the
+  `BL-14` merge and before the `BL-B64` 9K113 Architect pass; scope narrowed to behaviour-affecting
+  constants by user direction, not every literal
 - [[X-T1]] — Fly the contact/terrain sortie — **USER**
 - [[X-T2]] — `/explore` the location-fragment rewrite — **USER**
 
