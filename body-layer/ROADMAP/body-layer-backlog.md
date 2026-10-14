@@ -101,6 +101,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B60]] — A misclassified fast mover is now tracked worse than before the fold-displacement bound
 - [[BL-B61]] — `group_matches` test 4 cannot tell kinds apart at class level (5th `BL-B47`-family occurrence)
 - [[BL-B62]] — The ownship-relative observation channel is general, and only `BL-14` uses it
+- [[BL-B63]] — A selective fast lane for ownship telemetry and the currently-selected target
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root

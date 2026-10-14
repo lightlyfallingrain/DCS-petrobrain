@@ -10,6 +10,23 @@
 > settle what were open decisions 2 and 3. Superseded text is kept in place with a forward pointer,
 > per `docs/PROCESS.md` "Superseding a decision" — it is why the revisions make sense.
 
+> **Amended 2026-10-14, third Architect pass (small).** §19–§21 of the same direction document
+> settle the two items the second pass had left open as Decisions A and B, plus a scoping note.
+> **§19** settles A, but not as recommended: tier 2 speaks a qualifier (`"right, obstructed"`) in
+> its own words rather than a withheld row inside tier 1's vocabulary, and the sticky lined-up band
+> the recommendation asked for is struck as no longer needed — see Decision 17 REVISED, which also
+> makes Stage 6 cockpit-observable rather than log-only. **§20** settles B as planned, confirming
+> `RELATIVE_DIRECTION_SIGMA_DEG = 0.0` — see Decision 16 item 5. **§21** adds three reasons the
+> re-rotation design (Decision 16) is right beyond the 9.2°/s figure already in this plan. The
+> third reached a different subproject and was itself reshaped by a second round of direction the
+> same day: not a general telemetry/world-objects rate split, but a selective fast lane carrying
+> only ownship telemetry and the currently-selected target, scoped to a run and framed as a
+> reusable seam for the deferred 9K113 missile-guidance work too. Filed as a correction on
+> `aircraft-layer/ROADMAP/AC-B3.md` and a rewritten `body-layer/ROADMAP/BL-B63.md` — filed, not
+> built, no stage boundary in this plan moves, and the stale pre-`BL-11` performance figures that
+> had briefly argued the fast lane was impossible are corrected in place rather than carried
+> forward.
+
 ### Goal
 
 Give the pilot a commanded attack-run mode in which Petrovich holds one selected unit, lets the
@@ -437,7 +454,7 @@ feature:
 | `ATTACK_RUN_LINED_UP_AZIMUTH_DEG` | `5.0` | unchanged — see the table below |
 | `ATTACK_RUN_ELEVATION_GATE_DEG` | `10.0` | unchanged in value; the *tension* noted below is now a recorded consequence rather than an open fork, since §17 declined the discrimination test and §11 says a flight decides the number |
 | `ATTACK_RUN_CHANGE_THRESHOLD_DEG` | `3.0` | unchanged — see the table below |
-| `estimation.RELATIVE_DIRECTION_SIGMA_DEG` | `0.0` | **New.** §18's *"guide to it exactly because we look at it"*, read as v1 treating the relative direction as exact while the look holds. At `0.0` the perturbation is an identity function, so the channel is **parametrically** exact rather than structurally exact — a future value needs no rewrite. Flagged as a stated assumption, not settled: see Decisions Requiring User Input |
+| `estimation.RELATIVE_DIRECTION_SIGMA_DEG` | `0.0` | §18's *"guide to it exactly because we look at it"*, read as v1 treating the relative direction as exact while the look holds. At `0.0` the perturbation is an identity function, so the channel is **parametrically** exact rather than structurally exact — a future value needs no rewrite. **Settled by §20, 2026-10-14** (was flagged as an assumption awaiting confirmation; see Decision 16 item 5 and Decisions Requiring User Input) |
 
 One thing the revision deliberately does **not** do: lower `ATTACK_RUN_CHANGE_THRESHOLD_DEG` even
 though its stated justification (*"do not re-speak until the error has moved by more than belief's
@@ -529,6 +546,82 @@ that term entirely. What remains is ownship *translation* (≤61 m/s × 1 s, ~1.
 and ~0° when flying at the target) and target motion (8 m/s armour ⇒ ~0.5° at 1 km). Both are an
 order below the band.
 
+**Why a finished angle cannot be carried — three further reasons (§21, amendment pass), and the
+third corrects a filed assumption in a different subproject.** The 9.2°/s figure above answers "is
+re-rotation necessary"; the user's three points reframe what it means:
+
+1. **Speech latency bounds the useful precision.** A callout is already a couple of seconds old by
+   the time it is heard, so freshness past that point buys nothing — worth holding next to Decision
+   7's cadence rule, the other place "how fresh is fresh enough" gets decided.
+2. **The register and the dynamics co-vary, so the design self-balances.** Angular rate peaks
+   during turn-in — the o'clock phase, where the words are 30° buckets and 9° of staleness is
+   immaterial. Once the target is in the 12 o'clock sector the movements are gentle, which is
+   exactly where the words become fine. **Stated explicitly so the 9.2°/s figure above is not read
+   as a blocker**: it is the reason re-rotation is correct engineering, not evidence this loop is
+   marginal.
+3. **A selective fast lane — ownship telemetry and the currently selected target only, not bulk
+   world objects — is a real future seam, scoped to whatever has one.** *(Reshaped by a second
+   round of user direction, same day, after the first reading of this point had the split
+   backwards.)* The user's own words: *"for body layer poll rate, we should have a selective more
+   frequent poll: ownship telemetry and current target data. Not all world objects, just ownship
+   and current target. Could be that 5 Hz. We'll need both anyway for 9K113 missile guidance to be
+   precise."* This is **not** "telemetry fast, world objects slow" (the first reading, now
+   corrected) — it is a narrow two-thing fast lane that exists only while something is selected,
+   not a general rate split.
+
+   **Dependency direction, checked, and the opposite of the first reading.** Aircraft-layer already
+   exports at 5 Hz (`EXPORT_INTERVAL_S = 0.2`, `aircraft-layer/dcs-export/Export.lua:143`), and
+   `aircraft-layer/ROADMAP/AC-B3.md` ("Split the export throttle") is about *slowing* bulk
+   world-object export to save FPS cost, not speeding anything up. So a body-side selective fast
+   poll gets 5 Hz target data **today, with no aircraft-layer change**. `AC-B3` only becomes a
+   *prerequisite* for this seam if it lands and slows bulk world objects for FPS reasons — at which
+   point the selected target would need its own fast publication carved back out on the aircraft
+   side. `AC-B3`'s own entry now carries a correction note stating this dependency the right way
+   round, filed by this amendment pass.
+
+   **The constraint that actually matters: the fast lane cannot be the existing poll loop running
+   5× faster, and the figures that would have argued otherwise are stale.** `BL-B26`'s originally
+   filed 1,579 ms worst tick and `group_salient_ids`'s originally filed ~300 ms/poll were both
+   measured **before** `BL-11` landed (2026-10-06): `group_salient_ids` is now **1.1 ms median, 5.5
+   ms max** (`BL-11` Stage 2, `BL-B30`), and the realised poll-work median is **12.6 ms**, down from
+   330 ms (`BL-11`'s live-acceptance-debt entry). Checked rather than carried forward from the
+   user's own framing, because those specific numbers no longer support "a 5 Hz full tick is
+   impossible" as written — at 12.6 ms median there is headroom inside a 200 ms budget.
+   **The architectural point survives the correction anyway, on different grounds**: `BL-11`'s own
+   figure is a *median* against one bench scale, enrichment-cache misses still cost ~42 ms each
+   (2.3 % of calls, `BL-11` Stage 3b), and nothing bounds the worst case the way the median is
+   bounded — so running the *whole* perception tick (clustering, group reconciliation, enrichment,
+   callout scheduling) five times more often multiplies a cost that is not guaranteed flat, for
+   work most of which (every contact that is not the selected target) a fast lane has no reason to
+   touch at all. A narrow path is the right design independent of whether today's worst case is
+   1,579 ms or 42 ms.
+
+   **Whether the narrow path falls out of what already exists: yes, for the ownship half; the
+   target half needs one open question flagged rather than resolved here.** Decision 16's
+   relative-observation design already needs nothing from clustering/group reconciliation/
+   enrichment/callout scheduling to refresh — it re-rotates a carried offset against *current*
+   ownship attitude, which is one `get_telemetry_latest()` call and a trig re-derivation, not a
+   perception tick. So a fast *ownship*-telemetry poll is a clean fit, outside the heavy loop
+   entirely. The *target* half is less clean to resolve without building it: aircraft-layer's API
+   has no per-object filter (`aircraft-layer/src/api/server.py`'s `/world_objects/latest` always
+   returns the full cached snapshot, same shape as telemetry), so a fast poll of "just the current
+   target" means either filtering the existing bulk payload client-side at 5 Hz (cheap per the
+   figures above, since the heavy cost was never the HTTP/JSON step) or a new filtered endpoint —
+   and whether the narrow path is a second loop or a sub-tick inside the existing one is the same
+   open question. Left for whoever builds `BL-B63`, not settled here.
+
+   **9K113 missile guidance is named as the second consumer, which makes this a known future
+   requirement rather than speculative scope** — *"We'll need both anyway for 9K113 missile
+   guidance to be precise."* `BL-B63` below is framed as a reusable seam for that reason, not as an
+   attack-run-specific optimisation.
+
+   **Filed, not built, and attack-run-scoped by construction.** A correction note on `AC-B3` and a
+   rewritten `BL-B63` for the fast lane, cross-linked to each other and to `BL-14`. Neither is in
+   `BL-14`'s scope: this plan's own staleness budget already closes with re-rotation alone at the
+   existing 1 Hz rate (point 2 above), so the fast lane is an optimisation/future-requirement for a
+   tighter-budget consumer, not a prerequisite for this one. No stage boundary in this plan moves —
+   the fast lane is pure future scope, not a dependency of any stage below.
+
 **The offset is relative on purpose, not as a formality.** Nothing on this datum is a map
 coordinate: guidance adds ownship's own *displacement* since the observation (a telemetry delta,
 not an absolute position) and rotates. So the channel keeps working unchanged if ownship world
@@ -587,6 +680,12 @@ reconstructing it:
      projected position, and for the same reason.
 5. **Exactness is a parameter, not a property.** `RELATIVE_DIRECTION_SIGMA_DEG = 0.0` (Decision 11
    REVISED) with the perturbation wired in at `0.0`, so a non-zero value is a one-line change.
+   **Settled by §20, 2026-10-14** — *"Relative direction while he's looking at it -> exact."* This
+   was open decision B below; the value and the reasoning stand unchanged, so what moves is only
+   that it is no longer flagged as an assumption awaiting confirmation. For scale, so the zero
+   reads as a decision rather than an oversight: at 1 km, 1° of pointing error is 17 m against the
+   proposed 5° lined-up band, so a non-zero sigma would be felt as occasional chatter near the band
+   edge.
 
 **What this costs.** One new field on two dataclasses, one mean on `Cluster`, one truth-to-truth
 subtraction per admitted cluster per poll — mechanically cheaper than the world-anchored path it
@@ -628,24 +727,67 @@ into cross-range as the aircraft circles the target, giving **~3.9° at 1σ, at 
 written for. The elevation figure is sound but depends on the depression angle, roughly doubling at
 300 m AGL; it is not a constant.
 
-**What follows, and it is a behavioural choice rather than arithmetic** — see Decisions Requiring
-User Input:
+**What follows, and it was a behavioural choice rather than arithmetic** — originally left open as
+Decision A (see Decisions Requiring User Input), and the bullets below record the recommendation
+that was made at the time:
 
-- **Tier 2 speaks the coarse register only**: o'clock (§6) and *"come left/right"* / *"higher"* /
+- ~~**Tier 2 speaks the coarse register only**: o'clock (§6) and *"come left/right"* / *"higher"* /
   *"lower"*. It never speaks *"a bit left/right"*, and it never re-opens a band it has already
   called *"lined up"*. Both tiers use **one vocabulary**; tier 2 uses a subset of it, and the subset
-  is exactly the words its ~3.9° residual can support.
-- **The tier transition is silent, and that is only defensible with the restriction above.** §7 is
+  is exactly the words its ~3.9° residual can support.~~
+- ~~**The tier transition is silent, and that is only defensible with the restriction above.** §7 is
   explicit that losing sight is not announced. But a silent tier change that moves the aim point by
   ~4° would, on its own, fire a spurious *"come left"* about an aircraft the pilot has not moved —
   Petrovich talking in the seconds before release, which is the one failure design A exists to
   prevent. With the fine word withheld and the lined-up band sticky, a ~4° shift inside a 5° band
   produces **no utterance at all**, so the transition is genuinely unobservable rather than merely
-  unannounced.
+  unannounced.~~
 - **Silence keeps one meaning across the transition**: *you are pointed at where the target is
-  believed to be*. True in both tiers, which is what §7 requires.
+  believed to be*. True in both tiers, which is what §7 requires. *(Kept — still true under the
+  revision below, which is why it is not struck.)*
 - **Guidance gets more accurate as the run develops** (§18), because tier 1 is the normal state once
-  the gaze is claimed and tier 1 has no range-dependent error at all.
+  the gaze is claimed and tier 1 has no range-dependent error at all. *(Kept, unaffected.)*
+
+> **Superseded by Decision 17 REVISED below (§19, 2026-10-14).** The two struck bullets above were
+> the recommendation under Decision A; the user settled it differently. Kept in place, struck
+> rather than deleted, because the arithmetic that motivated them is still the reason a mechanism
+> is needed at all — only the mechanism changed.
+
+**17 REVISED (§19, 2026-10-14). Tier 2 speaks a qualifier, not a restricted vocabulary — and the
+sticky band is no longer needed.**
+
+> *"When lost sight -> "right/left, obstructed"."*
+
+The user's answer puts the tier **in the words**, rather than in a rule about which words tier 2 is
+allowed to use:
+
+- **Tier 2's utterance is `"right, obstructed"` / `"left, obstructed"` — direction plus qualifier,
+  nothing else.** Not *"come right, obstructed"*, not *"a bit right, obstructed"*: the user's own
+  example drops the magnitude word entirely, so the obstructed register ends up coarse by
+  vocabulary rather than by a withholding rule layered onto tier 1's table. It reaches the same
+  place the struck recommendation was reaching for — tier 2's ~3.9° residual cannot support a word
+  that means "within a few degrees" — without a second mechanism. (The example given names the
+  azimuth axis; the vertical analogue, by the same pattern, is `"higher, obstructed"` /
+  `"a little lower, obstructed"` when the elevation gate is the one that fired — kept symmetric
+  with azimuth rather than silencing the vertical axis in tier 2, consistent with Decision 11
+  REVISED's rule that nothing in the renderer may special-case one axis. This symmetric extension
+  is this plan's own inference, not quoted, and is worth confirming on the first sortie that
+  exercises it.)
+- **Why this is better than the struck recommendation.** A silent tier change inside the band would
+  have produced no utterance at all — unobservable by design, but at the cost of a second mechanism
+  (the sticky band) existing only to hide the transition. The qualifier instead makes the
+  *transition itself* audible without being *announced*: the pilot hears which channel he is on,
+  and discounts the precision himself rather than the system pretending to a precision it does not
+  have. Silence still keeps one meaning (§7, kept above); the distinction now rides on the word, not
+  on silence's absence.
+- **The sticky lined-up band is struck, not kept belt-and-braces.** It existed only to make a ~4°
+  silent shift inside the 5° band produce no utterance. With the tier named in the words, a
+  transition is allowed to be heard, so there is nothing left for stickiness to protect.
+- **This refines §7 rather than contradicting it, and both halves need stating because a reader who
+  has seen only one will read them as opposed.** Losing sight is **still not announced as an
+  event** — no *"lost contact"*, no interruption, no task change (§7/§15). What changes is that the
+  *ongoing guidance callout*, when it is sourced from tier 2, now carries a qualifier. The event
+  stays silent; the register does not.
 
 ---
 
@@ -662,16 +804,27 @@ User Input:
 | inside **both** gates | `"Lined up."` once, then **silence** |
 | `disengage` | `"Attack run off."` |
 | target record gone (Decision 13) | `render_lost_contact` |
+| tier 2 — no fresh relative observation, azimuth out of alignment (Decision 17 REVISED, §19) | `"Right, obstructed."` / `"Left, obstructed."` |
+| tier 2 — elevation gate fired instead (symmetric extension, flagged above) | `"Higher, obstructed."` / `"A little lower, obstructed."` |
 
 Reuse `_format_range_km` (rounds to 0.5 km, spells `"kilometre"`), `_unit_type_display` and
 `_round_enrichment_fragment` rather than new phrasing. The terrain fragment is **acquisition only**
 and stops at `"lined up"` (§8).
 
-**One vocabulary, two tiers (Decision 17).** Every row above is spoken in either tier except
-*"a bit left"* / *"a bit right"*, which **tier 2 withholds** — its ~3.9° residual cannot support a
-word that means "you are within a few degrees". The renderer takes the tier as an argument and
-selects the threshold table; it does not have a second code path, and the withheld row is a table
-entry, not a branch (Decision 11 REVISED, rule 3).
+**Two tiers, two vocabularies (Decision 17 REVISED, §19) — struck note below the table is kept for
+history.** Tier 1 speaks every row above the tier-2 rows, selected by the two threshold tables
+exactly as written (Decision 11 REVISED). Tier 2 does not share that table at all: it speaks one of
+the two qualified rows added above, for as long as the degraded channel holds, and nothing from
+tier 1's table leaks through — no o'clock, no *"come left"*, no *"lined up"*. The renderer still
+takes the tier as an argument; what changed from the struck recommendation is that tier 2 is no
+longer a *subset* of tier 1's table reached by withholding one row, but a separate, narrower
+rendering path selected by the same argument.
+
+> ~~**One vocabulary, two tiers (Decision 17).** Every row above is spoken in either tier except
+> *"a bit left"* / *"a bit right"*, which **tier 2 withholds** — its ~3.9° residual cannot support a
+> word that means "you are within a few degrees". The renderer takes the tier as an argument and
+> selects the threshold table; it does not have a second code path, and the withheld row is a table
+> entry, not a branch (Decision 11 REVISED, rule 3).~~ *(Superseded by §19 — see above.)*
 
 ---
 
@@ -733,11 +886,18 @@ the speech log, so a sortie can be triaged afterwards instead of recalled.
 rule under any standing scan, and under `scan left` it never holds at all — so an acceptance sortie
 flown before it would be measuring the fallback while believing it was measuring guidance.
 
-**Stage 6 — tier 2, the degraded fallback (Decision 17). Flyable; acceptance is the log.** *(new)*
-Projection from world-anchored belief plus the remembered relative height, the coarse-register
-restriction, the sticky lined-up band, and the silent transition. Hard to observe by ear **by
-design** — a correctly-built tier transition makes no sound — so its acceptance is a log pass showing
-the tier changing without an utterance, not a callout the pilot waits for.
+**Stage 6 — tier 2, the degraded fallback (Decision 17 REVISED, §19). Flyable, and now audibly so
+— moved from "acceptance is the log" by the amendment pass.** *(new)*
+Projection from world-anchored belief plus the remembered relative height, and the qualified
+utterance (`"right, obstructed"` / `"left, obstructed"`, and the vertical analogue) that replaces
+the struck coarse-register-restriction/sticky-band mechanism. This stage was originally staged as
+"hard to observe by ear by design — a correctly-built tier transition makes no sound", because the
+transition *was* designed to be silent. That is no longer true: the qualifier is audible by
+construction, so the tier change can be heard directly. Acceptance is therefore the same shape as
+Stage 5's — fly an occlusion into the run (a vehicle slipping behind a berm mid-attack is the
+realistic trigger; see Risks) and listen for *"obstructed"* to appear and disappear — with the
+speech log kept as the way to confirm both axis errors per utterance, not as the only evidence the
+stage worked.
 
 **Stage 7 — projected position for a moving target (Decision 10). Flyable; acceptance is the log.**
 *(was Stage 5)*
@@ -781,7 +941,8 @@ target, the tier, and both axis errors per utterance.
     o'clock the pilot does not see. The pilot's recourse is another `step`, which is the spec's own
     mechanism.
   - **Tier 2 re-inherits it in full**, on top of the ~3.9° bias residual (Decision 17). The two
-    compound, which is the quantitative case for tier 2 withholding the fine word.
+    compound, which is the quantitative case for tier 2's narrower vocabulary (Decision 17 REVISED)
+    rather than reasoning in the abstract.
   - **The sortie can now separate the two questions**, which the original risk said it could not:
     the speech log carries the tier, so "the band is too narrow" and "the belief was stale" are
     distinguishable after one pass rather than confounded.
@@ -796,7 +957,8 @@ target, the tier, and both axis errors per utterance.
   steps to tier 2 and its ~3.9° residual for as long as that lasts. Not a defect — the
   all-members-agree rule is deliberate and `live_los_clear` follows it for the same reason — but it
   means tier 2 is reachable far more often than "the target went behind a ridge" suggests, and it is
-  why Decision 17's restriction is load-bearing rather than belt-and-braces.
+  why Decision 17 REVISED's narrower tier-2 vocabulary is load-bearing rather than belt-and-braces:
+  the pilot will hear *"obstructed"* on a routine basis, not only on a dramatic loss of sight.
 - **Guidance aims at the cluster centroid, which can be empty ground.** The attack-run target is a
   `Contact`, and a `Contact` stands for a cluster, so `RelativeDirection` is the centroid's. Three
   vehicles spread 30 m at 1 km is ~1.7° of spread — inside the band, so harmless for *alignment*,
@@ -887,10 +1049,16 @@ fence doing the actual work, and replacing it needs a considered answer rather t
 
 > **Amended 2026-10-14.** All three original decisions are now **settled by the user** — §17 closed
 > 1 against the discrimination test, §15 settled 2 yes, §16 settled 3 yes. They are kept below with
-> their outcomes. Two new items replace them, and only the first is a fork.
+> their outcomes. Two new items, A and B, replaced them.
+>
+> **Second amendment, same day: A and B are now settled too.** §19 settled A — not as recommended
+> (see Decision 17 REVISED, which replaces the struck recommendation below with the vocabulary
+> mechanism the user specified). §20 settled B, confirming the assumption as planned (see Decision
+> 16 item 5). Both are kept below with their outcomes, same convention as the three above. Nothing
+> in "Still open" (below) is touched by either.
 
 **A. Tier 2 speaks the coarse register only — confirm or overrule.** *(Decision 17, and it is a real
-behavioural choice, not arithmetic.)* The arithmetic is settled: the fallback's azimuth residual is
+behavioural choice, not arithmetic.)* ~~The arithmetic is settled: the fallback's azimuth residual is
 ~1.2° at 1σ from the same aspect but **~3.9° after a quarter-turn around the target**, because the
 down-range bias (3.2× larger in metres) rotates into cross-range — 78% of the 5° band at 1σ, over it
 at 2σ. The question is what Petrovich does with that. **Recommendation: withhold *"a bit left/right"*
@@ -898,15 +1066,25 @@ in tier 2 and make the lined-up band sticky**, so a silent tier change inside th
 utterance and §7's "say nothing" stays honest. The alternative — speak the same words in both tiers —
 is simpler and would occasionally have Petrovich correcting a correctly-flown aircraft in the last
 seconds of a run, which is the one failure design A exists to prevent. Your call because it decides
-what the pilot hears, not how it is computed.
+what the pilot hears, not how it is computed.~~
 
-**B. The exactness assumption, flagged as an assumption per §18's own invitation.** §18's *"guide to
+> **Settled by §19, 2026-10-14 — not the recommendation above.** The arithmetic above is unchanged
+> and is still the reason a mechanism is needed; the user answered with vocabulary instead of a
+> restriction: tier 2 speaks `"right, obstructed"` / `"left, obstructed"`, not a withheld row inside
+> tier 1's table, and the sticky band this recommendation asked for is struck as no longer needed.
+> See Decision 17 REVISED.
+
+**B. The exactness assumption, flagged as an assumption per §18's own invitation.** ~~§18's *"guide to
 it exactly because we look at it"* is being planned as **v1 treats the relative direction as exact
 while the look holds**, with the noise term present as `RELATIVE_DIRECTION_SIGMA_DEG = 0.0` so a value
 can be given later without a rewrite. §18 itself says *"if a small error was meant from the start,
 this is the line to correct"* — so this is a confirm-or-correct, not a blocker, and either answer
 costs the same because the parameter exists either way. Worth knowing before you answer: at 1 km, 1°
-of pointing error is 17 m, and the proposed lined-up band is 5°.
+of pointing error is 17 m, and the proposed lined-up band is 5°.~~
+
+> **Settled by §20, 2026-10-14: as planned.** *"Relative direction while he's looking at it ->
+> exact."* `RELATIVE_DIRECTION_SIGMA_DEG = 0.0` stands, confirmed rather than corrected. See
+> Decision 16 item 5.
 
 ---
 

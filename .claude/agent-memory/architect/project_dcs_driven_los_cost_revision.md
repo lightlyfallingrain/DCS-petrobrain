@@ -46,4 +46,16 @@ called noise. **How to apply:** a sweep differential whose "control" baseline is
 sampling can be an artifact of the baseline, not a finding about the call under test. Prefer the aimed
 test, and prefer designs that are correct under both hypotheses so the question stops being a gate.
 
+**6. The same pattern recurred 2026-10-14 with the direction reversed: the user's own cost
+argument, not a research note, carried the stale figure.** `BL-14`'s attack-run amendment cited
+`BL-B26`'s "1,579 ms worst tick" and `group_salient_ids`'s "~300 ms/poll" to argue a 5 Hz
+perception tick was impossible — both numbers were real once, and both were fixed by `BL-11`
+(2026-10-06): `group_salient_ids` is now 1.1 ms median, poll-work median is 12.6 ms. The
+architectural conclusion (don't run the full tick 5×; build a narrow fast lane) survived on
+different grounds, but the headline numbers would have been wrong in the plan if not checked
+against the roadmap entry that fixed them. **How to apply:** this is lesson 3 again, but note it
+applies even when the stale figure arrives *from the user themselves* in a direction document —
+"check the project's own logs for N" does not get to skip itself because the claim sounds
+authoritative.
+
 See also [[provenance-confidence-pattern]], [[investigator-gating-pattern]].
