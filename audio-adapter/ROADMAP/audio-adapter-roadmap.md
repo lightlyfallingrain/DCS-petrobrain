@@ -68,6 +68,7 @@ renumbered, done items included (root `CLAUDE.md`, "Backlog Management").
 - [[AA-B2]] — Process supervision
 - [[AA-B3]] — `POST /audio/play` has no request-size cap
 - [[AA-B4]] — anchor a verb on sentence position, not the word alone (blocks `attack`/`attack-run`)
+- [[AA-B5]] — the inter-utterance gap belongs in the audio path, plus a playback-stopped channel
 
 ## Keeping this current
 
