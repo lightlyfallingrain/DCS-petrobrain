@@ -626,6 +626,48 @@ distinguishes a live look from a remembered position**, and an observable nobody
 Without the return utterance the pilot could learn that belief had gone stale but never that it had
 gone live again.
 
+## 25. One thing is the target — a contact, or a tight group, never two units
+
+> *"re-point is fine. Also, one thing only can be target of attack. Thing could be a tight group,
+> but it can't be two individual units, because then the guidance cannot separate them."*
+
+Two settlements in one line.
+
+**Re-point is confirmed.** Re-selecting a target mid-run re-points the run rather than refusing it.
+This had been decided by the implementer on precedent (`_handle_step` already mutates the selection
+in place with no run-active special case) and flagged as a judgement call; it is now the user's.
+
+**And the target is singular, for a mechanical reason rather than a stylistic one.** One azimuth and
+one elevation cannot point at two places, so *"the guidance cannot separate them"* — a target must be
+one contact, or a group tight enough that a single solution serves all of it.
+
+**Why this is worth recording as an invariant rather than as a preference**: it is the *reason* the
+task-identity defect mattered. The security deep analysis found that re-selecting a target minted a
+second `attack_target` task without cancelling the first, leaving guidance, `step` and the callout
+suppression pointing at the old contact while the readback spoke the new one — in other words, the
+system briefly had **two** targets, which this invariant says is not a thing that can exist. The fix
+(cancel every active task, then promote) is therefore not just a bug fix but the enforcement point
+for a rule, and it should read that way in the code.
+
+**The "tight group" half is not reachable today**: selection resolves a single contact, and `step`
+walks *within* the group rather than targeting it. So the invariant holds trivially.
+
+**And group-as-target is dropped rather than deferred**, settled immediately after:
+
+> *"I can myself approximate attacking a froup by picking an individual unit there. No need to build
+> targeting group if not supported already."*
+
+So the tightness qualifier is **not** an unmet precondition and should not be filed as a plan risk —
+there is no future feature to precondition. The pilot approximates attacking a group by selecting one
+unit in it, and that is sufficient for him. The invariant reduces to its simplest form: **the target
+is exactly one contact.**
+
+Worth noting what this is an instance of, because the same shape has appeared repeatedly today: a
+capability was about to be filed as owed, on the strength of a qualifier in the user's own sentence,
+when the pilot's own workaround makes it unnecessary. The cheap question — *"would you just do X
+instead?"* — removed it. Compare the F10 contact-list menu and the planned transport, both removed
+the same way.
+
 ---
 
 ## Still open
