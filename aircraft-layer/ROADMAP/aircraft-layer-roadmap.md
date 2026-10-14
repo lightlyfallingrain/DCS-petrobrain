@@ -39,6 +39,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B3]] — Split the export throttle
 - [[AC-B4]] — Measure `LoGetWorldObjects` FPS cost live
 - [[AC-B5]] — A probe Hook left deployed taxes every sortie
+- [[AC-B6]] — report when audio playback has actually stopped
 
 ## Keeping this current
 
