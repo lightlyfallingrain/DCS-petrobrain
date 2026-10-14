@@ -513,33 +513,35 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 12 Oct 2026</span>
+      <span>Derived from ROADMAP.md · 14 Oct 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems, two hundred and sixty-one tracked items &mdash; and the rule this
-      board has called <em>untouched</em> for three cycles is now <strong>inverted</strong>.
-      <code>BL-12</code> merged: <strong>group identity, not per-unit identity, is what survives
-      losing sight</strong>. A remembered group is matched against a freshly observed cluster on
-      kind, composition, movement and plausible displacement, and ambiguity inside a group now
-      resolves <em>toward</em> the remembered contact instead of founding a duplicate. The
-      measurement that forced it: nearest-neighbour spacing between distinct tracked objects is
-      <strong>16&nbsp;m median</strong>, against a gate that inflates to <strong>600&nbsp;m after
-      30&nbsp;s unseen</strong>. No radius is both, so per-unit identity is not recoverable from
-      position at real DCS spacing &mdash; at the group grain the numbers invert and become
-      workable. Petrovich can also now say <em>&ldquo;still moving north&rdquo;</em> about a group he
-      has kept, and says <strong>nothing</strong> about a bearing too wide to be true. One known
-      defect shipped with it <em>deliberately</em>, and it is the direction that makes him go quiet
-      about something real. What remains unheard in the air is still everything about <em>what he
-      says</em> &mdash; now six merged cards' worth, behind one flight.</p>
+    <p class="lede">Six subsystems, two hundred and seventy-eight tracked items &mdash; and the
+      question the attack run was about to be planned around has been <strong>dissolved rather than
+      answered</strong>. The open question was whether <code>BL-14</code> needs a contact record per
+      unit or merely better positions for the records Petrovich holds. Your own answer was neither:
+      <strong>resolution is a function of attention</strong>. At range, the fold's undercount is not
+      tolerable but <em>correct</em> &mdash; <em>few/several/many</em> and a rough class is all a low
+      or medium tier owes. At high tier &mdash; watched, selected as a target, or asked about &mdash;
+      Petrovich is looking near-constantly, so the evidence to resolve individuals actually exists.
+      What that exposes is a <strong>prerequisite nobody had filed</strong>: bounding the fold fixes
+      accuracy and <em>cannot fix existence</em>. Two of six real units had no record at all before
+      the bound and still have none after it, because a collapsed view only ever projects members
+      that were founded. So <code>BL-14</code> is not a consumer of today's group model; it needs a
+      resolution mechanism that does not exist. Two of your other directions this cycle cut the same
+      way: position uncertainty must key on <strong>observed movement, not class</strong> &mdash; a
+      T-72 sitting still is a 0&nbsp;m/s problem &mdash; and <em>&ldquo;anything in forest is not
+      seen&rdquo;</em> is now merged and will fire on almost no ordinary sortie. Still unheard in the
+      air: eight merged cards, behind one flight.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>139</b><span>Done</span></div>
+    <div class="count is-done"><b>149</b><span>Done</span></div>
     <div class="count is-active"><b>16</b><span>In progress</span></div>
-    <div class="count is-open"><b>94</b><span>Open</span></div>
+    <div class="count is-open"><b>101</b><span>Open</span></div>
     <div class="count is-hold"><b>12</b><span>Deferred</span></div>
-    <div class="count is-block"><b>4</b><span>Await you</span></div>
+    <div class="count is-block"><b>5</b><span>Await you</span></div>
   </div>
 
   <section>
@@ -597,18 +599,17 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
         <div class="bar"><i style="width:96%"></i></div>
-        <span class="chip done">BL-12 merged &mdash; group identity survives losing sight</span>
-        <p class="next">Two milestones landed since the last board. <code>BL-13</code> made
-          <code>report</code>/<code>describe</code> one slotted command answering with a single
-          summary whose job is to <em>aim the pilot's eyes</em>, not transfer the picture.
-          <code>BL-12</code> then replaced the identity model underneath it: a remembered
-          <b>group</b> is matched against an observed cluster, ambiguity inside a group folds onto
-          the remembered contact, per-class plausible speed replaced a flat 20&nbsp;m/s worst case
-          for everything, and a heading is spoken only when the group is narrow enough for one
-          bearing to be true. <b>Next:</b> one flight settles six cards, and the question underneath
-          is unchanged and still yours &mdash; what should he <em>say</em> when sixteen
-          separately-resolvable vehicles sit in one sector? <code>BL-B59</code> is the known defect
-          merged with BL-12 on purpose, and it is next in line.</p>
+        <span class="chip done">BL-B59 closed &mdash; the fold now has a displacement budget</span>
+        <p class="next"><code>BL-12</code>'s knowingly-shipped defect is fixed, and you chose the
+          cheaper of the two options: bound how far one ambiguity fold may move a fused position at
+          <code>plausible_speed &times; elapsed</code>, with <b>no new constant</b>. It closes both
+          halves &mdash; eviction (12 membership transitions to <b>0</b> over 60 ticks) and
+          absorption, which means <code>BL-12</code>'s own Stage&nbsp;3.5 admission gate is now a
+          no-op in the incident that motivated it and is kept only as a safety net. Forest occlusion
+          merged the same day: a unit inside mapped forest is simply not detected.
+          <b>Next:</b> one flight settles eight cards &mdash; and the two directions you gave on
+          2026-10-13 reshape what comes after it, because neither the attention tiers nor
+          movement-keyed uncertainty is a tuning change to this code.</p>
         <span class="more">Details</span>
       </article>
 
@@ -694,8 +695,11 @@ flowchart LR
   BL13["BL-13 crew query path&lt;br/&gt;one slotted command, one summary"]:::done
   SPACING["16 m median spacing&lt;br/&gt;vs a 600 m gate"]:::done
   BL12["BL-12 group identity&lt;br/&gt;stages 0–4, ambiguity inverted"]:::done
-  B59["BL-B59 eviction&lt;br/&gt;merged knowingly, next up"]:::open
-  CBS["On main, still unheard&lt;br/&gt;six cards (four accepted 10-09)"]:::block
+  BL14["BL-14 attack run&lt;br/&gt;needs a resolution mechanism"]:::open
+  B59["BL-B59 · BL-B58&lt;br/&gt;one fold's displacement bounded"]:::done
+  TIERS["Attention tiers&lt;br/&gt;resolution depends on attention"]:::active
+  COLL["collapse(group, depth)&lt;br/&gt;DoD-passed, awaiting merge"]:::active
+  CBS["On main, still unheard&lt;br/&gt;eight cards (four accepted 10-09)"]:::block
 
   PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
   DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
@@ -703,7 +707,7 @@ flowchart LR
   LOS["LOS tolerance&lt;br/&gt;grid error buried a unit"]:::done
   BRIDGE["Bridge cost measured&lt;br/&gt;568 units, 1.99 ms"]:::done
   TREE["Tree LOS probe&lt;br/&gt;no DCS call sees trees"]:::done
-  OSMV["OSM landcover&lt;br/&gt;the shipping answer"]:::open
+  OSMV["Forest gate, Mac-side&lt;br/&gt;in forest = not seen"]:::done
   DLOS["DCS answers LOS&lt;br/&gt;units + statics, fail closed"]:::done
   SURF[".surface5 payload wall&lt;br/&gt;hit twice, deferred"]:::hold
 
@@ -743,10 +747,15 @@ flowchart LR
   NOISE --> SPACING --> BL12 --> CBS
   COH --> BL12
   BL13 -.->|"nine findings filed, not improvised"| BL12
-  BL12 -->|"the half it did not fix"| B59
+  BL12 -->|"the half it did not fix"| B59 --> CBS
+  B59 -.->|"fixing accuracy exposed existence"| TIERS
+  BL12 --> TIERS
+  TIERS -->|"serves the reporting half only"| COLL
+  TIERS -->|"per-unit records, attention-driven"| BL14
+  COLL -.->|"no resolution, no audible change"| BL14
   AL --> PROBE --> DMG
   AL --> BRIDGE --> TREE
-  TREE --> OSMV
+  TREE --> OSMV --> CBS
   TREE -.->|"placement exists, unaddressable"| SURF
   BRIDGE --> DLOS
   LOS -.->|"a mitigation; DLOS was the fix"| DLOS
@@ -772,10 +781,11 @@ flowchart LR
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
     <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing
-      that is done. The perception group is where this cycle moved: the ambiguity rule it was built
-      around has been inverted, and the group did not shrink &mdash; two of its nodes are now open
-      <em>because nothing has re-measured them</em>, and two more arrived as known defects shipped
-      knowingly. The largest group is still the one that cannot be reasoned about from a desk.</p>
+      that is done. This cycle the groups changed membership rather than size: the perception group
+      lost its knowingly-shipped defect and gained two of your 2026-10-13 directions, and a
+      <em>new</em> group appeared for the attack run &mdash; the only chain here whose first node is
+      a mechanism nobody has built. The largest group is still the one that cannot be reasoned about
+      from a desk.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -789,48 +799,52 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  SORTIE["Still unheard in the air&lt;br/&gt;four cards, one flight"]:::block
+  SORTIE["Still unheard in the air&lt;br/&gt;eight cards, one flight"]:::block
   SAY["What does he SAY about&lt;br/&gt;sixteen vehicles in one sector?"]:::block
+  FOREST["Forest gate: flip the default?&lt;br/&gt;needs units parked in canopy"]:::block
 
   subgraph REPORT ["Crew behaviour &mdash; everything here is downstream of the flight"]
     direction LR
-    GBOUND["Cohesion constants are guesses&lt;br/&gt;500 m cap · 20 unit widths"]:::open
-    GC5["Group stage 5&lt;br/&gt;common fate"]:::hold
-    POL["Callout policy follow-ons&lt;br/&gt;repetition · sector fairness"]:::open
+    GBOUND["Cohesion constants are guesses&lt;br/&gt;500 m cap · 20 unit widths · stage 5"]:::open
+    POL["Callout policy follow-ons&lt;br/&gt;repetition · sector fairness · damage"]:::open
     OVER["Over-suppression risk&lt;br/&gt;a real split sounds like an echo"]:::open
-    DMG["Damage + fire reporting&lt;br/&gt;probes answered it"]:::open
   end
 
-  subgraph PERC ["Perception"]
+  subgraph PERC ["Perception &mdash; two of your 10-13 directions land here"]
     direction LR
     CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
     COND["Conditions&lt;br/&gt;f(condition, optical path) + a ceiling"]:::open
-    FRAG["X-B6 outpost fragments&lt;br/&gt;diagnosed, not the noise cause"]:::open
     AMB["BL-B24 · BL-B25&lt;br/&gt;rule inverted; neither re-measured"]:::open
-    B59["BL-B59 fold drift evicts&lt;br/&gt;a real member — suppresses"]:::open
-    B57["BL-B57 class-level SAM&lt;br/&gt;misses the entrenched speed"]:::open
+    MOTION["Uncertainty keyed on observed&lt;br/&gt;movement, not on class"]:::open
+    SPEEDT["BL-B57 · BL-B60&lt;br/&gt;the speed table is asserted, not measured"]:::open
+    TREELINE["Treeline: near, not inside&lt;br/&gt;needs altitude data we dropped"]:::hold
+  end
+
+  subgraph ATTACK ["The attack run &mdash; the chain that does not exist yet"]
+    direction LR
+    TIERS["Attention tiers&lt;br/&gt;low · medium · high"]:::open
+    RESOLVE["Promotion resolves a group&lt;br/&gt;into individuals — unbuilt"]:::open
+    BL14["BL-14 attack run&lt;br/&gt;spec written, no plan"]:::open
   end
 
   subgraph LOSG ["Line of sight &mdash; closed; what is left is budget and hygiene"]
     direction LR
     CAP128["BL-B42 the 128 cap binds&lt;br/&gt;amortise, do not enlarge"]:::open
-    TRACE["BL-B43 · BL-B44&lt;br/&gt;writer-level rows · drop the footer"]:::open
-    PROBE["AC-B5 probe-Hook teardown&lt;br/&gt;two stutters, same cause class"]:::open
-    SURF["X-B32 per-tree placement&lt;br/&gt;behind the payload wall"]:::hold
+    HYG["Trace + probe-Hook hygiene&lt;br/&gt;BL-B43 · BL-B44 · AC-B5"]:::open
+    BUILD["X-B31 buildings half&lt;br/&gt;gated on the LAN topology"]:::open
   end
 
   subgraph LANDF ["Landform &mdash; detection solved, nothing consumes it"]
     direction LR
     PARK["Callout stages 3–5&lt;br/&gt;adjacency · bearing · the phrase"]:::open
     DENS["Density is a product question&lt;br/&gt;234,799 lines, few worth speaking"]:::open
-    GRID["Retire the elevation grid&lt;br/&gt;49 MB, and few readers left"]:::hold
+    GRID["Retire the elevation grid&lt;br/&gt;49 MB, and no live readers left"]:::hold
   end
 
   subgraph BRAINCHAIN ["The brain layer"]
     direction LR
     D10["Structured candidates&lt;br/&gt;follow still cannot pick"]:::open
     BR3["Stage 3 &mdash; answer questions&lt;br/&gt;from belief, never truth"]:::open
-    IDLE["Idle consumers&lt;br/&gt;mission phase, MI-5 questions"]:::hold
   end
 
   subgraph SPEECH ["Speech"]
@@ -840,30 +854,33 @@ flowchart LR
   end
 
   BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
-  THEATRE["Multi-theatre&lt;br/&gt;approved, unmerged, builds user-run"]:::open
+  THEATRE["Multi-theatre&lt;br/&gt;Caucasus + Kola, builds user-run"]:::open
 
-  SORTIE --> GBOUND --> GC5
+  SORTIE --> GBOUND
   SORTIE --> POL
   SORTIE --> OVER
-  SORTIE -.->|"judge after flying"| FRAG
   SORTIE --> CAP
   SORTIE -.->|"judge after flying"| COND
   SORTIE --> LAT
   SORTIE -.->|"needs many flights"| BL8
   SORTIE -.->|"tunes the prompts"| D10
   SORTIE --> SAY --> POL
+  SORTIE -.->|"watch for a lagging fast mover"| SPEEDT
   OVER -.->|"BL-12 inverted the rule; the claim is unverified"| AMB
-  FRAG -.-> AMB
-  B59 -->|"prioritised next, not parked"| SORTIE
-  B59 -.->|"same machinery, opposite direction"| AMB
-  B57 -.->|"only a flight shows it"| SORTIE
-  DMG --> POL
+  MOTION -.->|"same one table, re-keyed"| SPEEDT
+  MOTION -.->|"a stopped unit stops inflating the gate"| AMB
+  FOREST -->|"the A/B is also the treeline's only evidence"| TREELINE
+  FOREST -.->|"same occluder layer, other half"| BUILD
+  SAY --> TIERS
+  TIERS --> RESOLVE --> BL14
+  TIERS -.->|"low/medium want the fold kept"| AMB
+  BL14 -.->|"9K113 channel unbuilt: no ATGM guidance"| RESOLVE
   CAP128 -.->|"unblocked: the grid lost its last live reader"| GRID
   PARK --> DENS
   SAY -.->|"same question, different data"| DENS
   D10 --> BR3
-  BR3 -.-> IDLE
   BR3 -.->|"a question needs a contact resolver"| D10
+  BR3 -.->|"high tier is reached by asking"| TIERS
 </pre>
       </div>
     </div>
@@ -892,16 +909,24 @@ flowchart LR
       they are superseded; nothing re-measured the 554-contacts-for-444-objects churn on the new
       code, so they were left open on recheck notes rather than closed on a design claim. A rule
       changing is not the same as its consequence being observed.</p>
-    <p class="section-note"><strong>A known defect was merged on purpose, and that is a new shape on
-      this board.</strong> <code>BL-B59</code> is the other half of the drift that
-      <code>BL-12</code> Stage 3.5 fixed: the same fold that could pull an unrelated unit
-      <em>into</em> a group can also <strong>evict a real member</strong> &mdash; including an
-      air-defence one, which means a threat warning that is never spoken. It was measured,
-      reproduced, filed, and deliberately scoped out so the fix that <em>was</em> built could stay a
-      single mechanism with no new constant. It is visible in the sortie trace rather than silent,
-      and it is bounded: a contact that has already spoken for itself survives eviction. Everything
-      else on this board is either done or not yet started; this one is knowingly shipped and
-      waiting.</p>
+    <p class="section-note"><strong>A new group appeared, and it is the first one gated entirely
+      behind something that does not exist.</strong> The known defect this note used to describe
+      (<code>BL-B59</code>, the fold evicting a real member) is fixed &mdash; and fixing it is what
+      produced the <code>ATTACK</code> chain. The bound made held positions accurate; it could not
+      make absent records exist, and two of six real units had no record either way. So
+      <code>BL-14</code> does not depend on a constant being tuned or a plan being written: it
+      depends on <strong>promotion to high attention resolving a group into individuals</strong>, a
+      mechanism nothing on this board has started. Everything else open here is downstream of a
+      flight or of a decision. This chain is downstream of a build, and the drawing is where that
+      distinction becomes visible.</p>
+    <p class="section-note"><strong>And one merged item cannot enter the funnel at all.</strong>
+      Every other card on <code>main</code> is settled by flying the aircraft somewhere. The forest
+      gate is not: it fires on 1&ndash;3% of ground positions theatre-wide and <strong>0% of 300
+      sampled points at Latakia itself</strong>, so an ordinary sortie produces no evidence either
+      way &mdash; a <em>clean</em> flight would say nothing about it. It needs a mission built to
+      exercise it, which makes it the first thing here that asks you for <em>setup</em> rather than
+      for ears. That same setup is the only route to the treeline model you asked about, which is
+      why the drawing points the two at each other.</p>
     <p class="section-note"><strong>Closing the live path unblocked something nobody
       filed.</strong> The elevation grid's retirement had been gated on &ldquo;whatever removes its
       last live reader&rdquo;, and that is exactly what <code>BL-11</code> Stage 4 did: with
@@ -923,23 +948,29 @@ flowchart LR
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Four. Nothing here was cleared this cycle and the flight got heavier: two more milestones
-        merged ahead of their sortie, both of which change what you actually hear. What is left is
-        one batched flight, one small check that can ride along with it, a design conversation, and
-        a theatre build only your machine can run.</p>
+      <p>Five. Nothing here was cleared this cycle and the flight got heavier again: two more
+        merges landed ahead of their sortie, and one of them is the first thing on this board that
+        <em>cannot</em> be judged by flying wherever you like &mdash; the forest gate fires on 1&ndash;3%
+        of ground positions theatre-wide and <strong>0% of 300 points at Latakia itself</strong>, so
+        it needs units deliberately parked in canopy or nothing happens. The rest: one batched
+        flight, one small check that rides along with it, a design conversation, and a theatre build
+        only your machine can run.</p>
       <ul class="blockers">
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>Six cards left on <code>main</code>, up from four</b>
+            <b>Eight cards left on <code>main</code>, up from six</b>
             <p>Four were accepted outright on 2026-10-09 without a debrief &mdash; the 10&nbsp;km
               player bubble, the 12&nbsp;m line-of-sight tolerance, the group lines that stopped
-              restating known members, and <code>silence</code>. Two more have arrived since:
+              restating known members, and <code>silence</code>. Four more have arrived since:
               <code>BL-13</code>'s crew query path (does a summary beat an enumeration over an
-              intercom in a hover, and is ~10&nbsp;s too long there?) and <code>BL-12</code>'s group
+              intercom in a hover, and is ~10&nbsp;s too long there?), <code>BL-12</code>'s group
               identity (does the churn actually stop, does <em>&ldquo;still moving north&rdquo;</em>
-              appear, and is anything placed in a group it visibly is not in?). Branch to check out:
-              <code>main</code> &mdash; both are merged. What still wants ears alongside them: the
+              appear, and is anything placed in a group it visibly is not in?),
+              <code>BL-B59</code>'s bounded fold &mdash; where what to listen for is a
+              <strong>misclassified fast mover whose position visibly lags</strong>, not silence
+              &mdash; and the forest gate, which has its own entry below because it needs a
+              deliberate setup. Branch to check out: <code>main</code> &mdash; all four are merged. What still wants ears alongside them: the
               confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, and
               the cohesion redesign. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
               all of them reduce what you hear, and a genuine contact split immediately after a merge
@@ -947,6 +978,26 @@ flowchart LR
               is an accepted cost on paper; whether it is ever <em>noticed</em> is a cockpit
               question. Fly with <code>--detection-trace</code> &mdash; the belief log structurally
               cannot record a <em>rejected</em> candidate.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="forest">
+          <span class="chip block">Your setup, then your call</span>
+          <div>
+            <b>The forest gate ships off by default, and only you can turn it on</b>
+            <p><em>&ldquo;Anything in forest is not seen&rdquo;</em> is built and merged &mdash;
+              flat, binary, no directionality, no altitude term, exactly as you specified. Stages 1
+              and 2 are the mechanism and the wiring; <strong>Stage 3 is flipping the default on, and
+              that is deliberately yours to decide after flying the A/B</strong>. The obstacle is
+              that an ordinary sortie will not exercise it: 9,710 of the theatre's 44,811 landcover
+              polygons are forest, but only <strong>1&ndash;3% of ground positions sit inside
+              one</strong> (2.8% Latakia region, 0.0% Palmyra, 0% of 300 sampled points at Latakia
+              itself), so units have to be parked <em>in</em> canopy and at its edge for the gate to
+              fire at all. The densest belt is the coast north-east of Latakia at 3.2% areal. That
+              setup is also what would generate the evidence for the deferred treeline
+              <code>/explore</code> &mdash; the case you flagged yourself, where canopy blocks some
+              bearings and not others. Branch: <code>main</code>. Card:
+              <code>plans/forest-occlusion/dod-check.md</code> and the published acceptance
+              artifact.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="saywhat">
@@ -1049,11 +1100,64 @@ flowchart LR
             different unit&rdquo; is a cheap explanation, and you say DCS is not that world. So
             <code>BL-B24</code> and <code>BL-B25</code> stay <em>open</em> on recheck notes rather
             than closed: the plan claims supersession, but the 554-contacts-for-444-objects figure
-            has not been re-measured on the new code. <code>BL-B59</code> joins them &mdash; the
-            same fold drift can evict a real member, which suppresses a report rather than
-            duplicating one.</p>
+            has not been re-measured on the new code. <code>BL-B59</code> &mdash; the same drift
+            evicting a real member &mdash; <strong>is now fixed</strong>, by bounding the fold rather
+            than by adding a retention term.</p>
         </div>
         <span class="chip open">Inverted, unverified</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="tiers">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>The attack run needs a mechanism nobody had filed &mdash; and the fold is not the
+            obstacle, <em>unconditional</em> folding is</b>
+          <p>Your <code>/explore</code> answer reframed the question rather than settling it:
+            <strong>resolution depends on attention</strong>, in three tiers. Low and medium owe
+            <em>few/several/many</em> and a rough class, which is exactly what a collapsed group
+            gives &mdash; so the undercount there is correct, not tolerated. High tier (watched,
+            selected, asked about) gets near-constant eyes-on, so the evidence to resolve
+            individuals exists. The consequence is sharp: <code>BL-14</code> cannot be planned as a
+            consumer of today's group model, because <b>bounding the fold fixes accuracy and cannot
+            fix existence</b> &mdash; two of six real units had no record before the bound and have
+            none after. <code>step right</code> walks what you see out the window, so it would land
+            on the fourth record while your eye is on a sixth vehicle.</p>
+        </div>
+        <span class="chip open">Needs a plan, not a fix</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="motion">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Uncertainty is keyed on class, and you say it should be keyed on what was seen</b>
+          <p><code>BL-12</code> Stage&nbsp;2b made position uncertainty grow per class &mdash; 0 for
+            entrenched, 2&nbsp;m/s infantry, 8 armour, 15 trucks, every row a stated assumption. Your
+            direction: <em>&ldquo;position uncertainty caused by movement must be based on whether
+            movement is observed or not.&rdquo;</em> A T-72 sitting still is not an 8&nbsp;m/s
+            problem. Class becomes the fallback for a unit that <em>is</em> moving or was never
+            observed moving, not the rule. The datum already exists and sits where it is needed
+            (<code>Contact.motion</code>, honestly <code>None</code> when no channel supplied
+            evidence), and there is <b>one</b> shared speed table both consumers call &mdash; so the
+            change has an obvious shape and still is not a tweak: it changes what the gate is a model
+            <em>of</em>.</p>
+        </div>
+        <span class="chip open">Direction captured</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="b60">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>The fold bound makes one case worse, and it is filed rather than buried in a plan</b>
+          <p>The bound reads a contact's <em>believed</em> plausible speed as the ceiling. When the
+            belief is right it is byte-identical to the old behaviour (12.5&nbsp;m at t=40, measured).
+            When the class belief is <em>wrong</em> &mdash; a misclassified fast mover &mdash; the cap
+            sits below the unit's real speed and the position lags further with every fold:
+            <b>104.2&nbsp;m against the unbounded baseline's 49.8&nbsp;m</b>. Accepted, not fixed
+            here: the classification fold should correct the class over time, and Stage&nbsp;3.5's
+            looser gate remains the safety net for an uncalibrated speed table. The real fix is
+            measuring DCS unit speeds instead of asserting them.</p>
+        </div>
+        <span class="chip open">Known regression</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
@@ -1092,10 +1196,12 @@ flowchart LR
           <b>Three cohesion constants, all of them agreed guesses</b>
           <p>Twenty <em>unit widths</em> bounds an ordinary group, so the boundary scales with what the
             units are rather than being a flat distance. A real SAM installation gets its own
-            500&nbsp;m cap, grounded in S-75/S-125 emplacement doctrine. Infantry merge with no
-            backstop at all &mdash; <em>&ldquo;ok to merge infantry too eagerly&rdquo;</em> &mdash;
-            which also bridges two non-infantry vehicles into one group through an infantry member
-            between them. Every one of those wants ears, not another review round.</p>
+            500&nbsp;m cap, grounded in S-75/S-125 emplacement doctrine. Infantry merge eagerly by
+            your own direction &mdash; <em>&ldquo;ok to merge infantry too eagerly&rdquo;</em> &mdash;
+            and the part of that which was <em>not</em> intended is closed: the bridge that pulled
+            two non-infantry contacts into one group through an infantry member between them (6&nbsp;km
+            apart, measured) was fixed by <code>BL-12</code> Stage&nbsp;0a/0b. What is left is the
+            constants themselves, and they want ears, not another review round.</p>
         </div>
         <span class="chip open">Needs a flight</span>
       </div>
@@ -1315,7 +1421,7 @@ flowchart TB
   DCS ==>|"telemetry, world objects,&lt;br/&gt;HelperAI indication"| AL
   AL ==>|"text overlay, F10/voice&lt;br/&gt;commands, audio playback"| DCS
   AL -->|"HTTP/JSON"| BL
-  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)&lt;br/&gt;terrain semantics only &mdash; LOS left&lt;br/&gt;the live path 2026-10-09"| WM
+  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)&lt;br/&gt;terrain semantics + landcover &mdash; LOS&lt;br/&gt;left the live path 2026-10-09"| WM
   BL -->|"HTTP/JSON"| AA
   AA -->|"HTTP/JSON"| AL
   MI -.->|"HTTP/JSON, offline query"| WM
@@ -1400,6 +1506,60 @@ flowchart TB
 
 <script>
 const DETAIL = {
+  forest: {
+    kicker: "body-layer/ + world-model/", title: "Anything in forest is not seen", chip: ["block", "Merged off by default; Stage 3 is yours"],
+    facts: [["Your direction", "2026-10-13, flat and binary"], ["Forest polygons", "9,710 of 44,811 landcover"], ["Positions inside forest", "1-3% theatre-wide; 0% at Latakia"], ["Query cost", "0.075 ms median / 0.271 ms p95"]],
+    sections: [
+      { h: "What was built, and what was deliberately not", p: "Your words were the specification: <em>&ldquo;Proceed with simple model of anything in forest is not seen and let's explore later what near the trees could be and if it is possible and worth it.&rdquo;</em> So a unit whose own position sits inside a mapped forest polygon is not detected &mdash; no directionality, no altitude term, no partial attenuation. It is gate 5 in <code>perception.check_visibility</code>, reading the landcover polygons world-model already holds, <strong>entirely Mac-side</strong>, needing no DCS bridge and no world-model change at all. Stages 1&ndash;2 (mechanism, then wiring) are merged with the flag <strong>off</strong>; Stage 3 is flipping the default and is explicitly reserved for you after flying the A/B." },
+      { h: "This is not where the backlog said it would go, and the reason matters", p: "<code>X-B31</code> had trees as <em>occluders along the sightline</em> inside <code>query/line_of_sight.py</code>. <code>BL-11</code> Stage 4 then removed that primitive from the live path entirely, so an occluder added there would change the offline oracle and <strong>nothing Petrovich does in the air</strong>. The gate was therefore built against the <em>target's own position</em> instead. The sightline shape is not wrong &mdash; it stays right for the offline oracle and for the chord-length treeline model &mdash; it is simply no longer the live path. What remains of <code>X-B31</code> is the buildings half, which is where its real architectural question lives (a LAN bridge per candidate per poll)." },
+      { h: "Why an ordinary sortie will not test it", p: "Measured on the real <code>syria-full</code> store rather than estimated: <strong>1&ndash;3% of ground positions sit inside forest</strong> (2.8% in the Latakia region, 0.0% at Palmyra), and <strong>0% of 300 points sampled at Latakia itself</strong>. The densest belt is the coast north-east of Latakia at 3.2% areal. So the gate's blast radius is small by construction &mdash; which is reassuring for regression risk and fatal for acceptance: a clean flight says nothing. Units have to be parked inside canopy, and at its edge, for any evidence to exist." },
+      { h: "A third of the theatre has no landcover at all, and that had to be decided", p: "<strong>42&ndash;96% of positions have no mapped landcover</strong>, depending on region. <code>None</code> is therefore read as <em>not forest</em> &mdash; the gate fails open. The alternative would blind Petrovich across most of the map on missing data. Security's one finding was in the same family and was fixed: a non-finite <code>x</code>/<code>z</code> reaching <code>math.floor</code> unguarded, now guarded and failing open." },
+      { h: "The treeline is deferred, and your own framing is the obstacle", p: "You described the hard case precisely: canopy as a 10 m opaque block makes visibility depend on <strong>direction</strong> (is the target behind the canopy or in front of it from this bearing) and on <strong>altitude difference</strong> (high above you see over it; down among the trees it hides both of you symmetrically). And then named why it is hard &mdash; it <em>&ldquo;would need detailed altitude data that we decided to drop.&rdquo;</em> Any later proposal has to answer that rather than route around it. The deliberate-parking setup above is the only thing that would produce evidence for it." }
+    ],
+    items: [["done","Stage 1: the gate, wired but off"],["done","Stage 2: wired into check_visibility, still off"],["done","Security fix: non-finite x/z guarded, fails open"],["block","Stage 3: flip the default - your call after the A/B"],["open","Stage 4: in-loop cost measurement"],["open","X-B31: the buildings half, gated on topology"],["hold","Treeline: direction + altitude, needs its own /explore"]],
+    src: "docs/acceptance/2026-10-13-tree-cover-direction.md, plans/forest-occlusion/{plan,dod-check}.md, todo/backlog/X-B31.md"
+  },
+
+  tiers: {
+    kicker: "body-layer/", title: "Resolution depends on attention &mdash; and that is a prerequisite, not a tweak", chip: ["open", "Direction captured; BL-14 has no plan yet"],
+    facts: [["Your direction", "2026-10-13, from the BL-14 /explore"], ["Tiers", "low / medium / high"], ["The gap", "2 of 6 real units had no record at all"], ["Your framing", "“Not final word, but concept.”"]],
+    sections: [
+      { h: "The question that was asked, and the answer that dissolved it", p: "The open question was whether <code>BL-14</code> needs a contact record per unit, or merely better positions for the records Petrovich holds. The measured dilemma: <strong>bounding the fold fixes accuracy and cannot fix existence</strong> (two of six real units had no record before the bound or after it), while <em>not</em> folding reverses an earlier decision and produces 82 contacts for 2 units. Your tiers dissolve it &mdash; resolution is a function of <strong>attention</strong>, not a global policy. The fold is not the enemy of the attack run; <em>unconditional</em> folding is." },
+      { h: "The three tiers, as you stated them", p: "<strong>Low</strong> &mdash; beyond class-detection distance: <em>where</em>, far/mid, few/several/many, collapsed to a group-level report. <strong>Medium</strong> &mdash; inside 5 km: adds how far and a rough class (<em>&ldquo;there's armor&rdquo;</em>). <strong>High</strong> &mdash; watched units, units selected as targets, units you ask about: per-classification counts, individual units selectable with exact positions, and <em>&ldquo;target units get constant eyes-on &hellip; knows their position as perfectly as belief allows, should be practically perfect at near distance.&rdquo;</em> At low and medium the fold's undercount is not tolerated but <strong>correct</strong>; at high tier the evidence to resolve individuals genuinely exists, because he is looking." },
+      { h: "Why step right cannot be served by the belief store as it stands", p: "<em>&ldquo;When I say step right, select the next target to the right from ownship perspective, i.e. what I see out the window.&rdquo;</em> The list being stepped is <strong>the world, not the store</strong>. A group resolved into four records while six vehicles sit there means your third press lands on his fourth record while your eye is on a vehicle he never founded. Per-unit records are a confirmed requirement for <em>selectable targets</em> &mdash; and only there, which is what makes the tiers an answer rather than a reversal." },
+      { h: "A correction to the tiers' own framing, found by building half of it", p: "The capture says the tier's job <em>becomes choosing a depth</em>. A <code>collapse(group, depth)</code> derivation was then built and DoD-passed (awaiting merge) to serve exactly that &mdash; a cheap, derived, depth-bounded view, the right shape for per-target reporting. It supplies <strong>no resolution</strong>: it only ever projects a group's <em>existing</em> members, so the two missing units are still missing after it. Choosing a depth is the reporting half; the tiers also need a resolution mechanism, and that half is unbuilt. Worth knowing before the framing is used as a plan." },
+      { h: "And the ATGM half has a hard prerequisite that is not about groups at all", p: "You split the aiming requirement by <strong>channel, not accuracy</strong>: <em>&ldquo;ATGM guidance is with 9K113 only, there is no naked eye channel for ATGM guidance.&rdquo;</em> So the 40 m held-position figure is acceptable for guns and rockets &mdash; you close the loop with your own eyes &mdash; and simply the wrong instrument for the 9K113 question. The 9K113 sight <strong>does not exist in code</strong>: <code>perception/optics.py</code> declares only unaided and binocular optics, and four other files say so about themselves. ATGM guidance is therefore gated on building that channel, independent of everything above." }
+    ],
+    items: [["done","collapse(group, depth) - the reporting half, DoD-passed"],["open","Attention tiers: low / medium / high"],["open","Promotion resolves a group into individuals - unbuilt"],["open","BL-14: spec written 2026-10-11, no plan, /explore owed"],["open","BL-B61: class-level group identity gap under step left/right"],["hold","The 9K113 channel - hard prerequisite for ATGM guidance"]],
+    src: "docs/acceptance/2026-10-13-group-model-and-attention-tiers.md, body-layer/ROADMAP/BL-14.md, plans/group-collapse/dod-check.md"
+  },
+
+  motion: {
+    kicker: "body-layer/", title: "Position uncertainty must key on observed movement, not on class", chip: ["open", "Captured 2026-10-13, nothing built"]
+    ,facts: [["Your words", "“Not all units move. Many of them don't.”"], ["Today's key", "op_class + installation_component"], ["The table", "0 entrenched / 2 infantry / 8 armour / 15 trucks"], ["The datum", "Contact.motion, already folded per contact"]],
+    sections: [
+      { h: "What you said, and what it overturns", p: "<em>&ldquo;Regarding position going stale from unit movement. Not all units move. Many of them don't. Therefore if unit is not moving, it is expected not to move in near future &hellip; Position uncertainty caused by movement must be based on whether movement is observed or not.&rdquo;</em> <code>BL-12</code> Stage 2b had just made that growth <strong>per class</strong> &mdash; one shared table feeding both the association gate's elapsed-motion inflation and the group matcher's displacement bound, every row a stated assumption. Your direction says class is the wrong <em>primary</em> key: a T-72 sitting still is not an 8 m/s problem, and what distinguishes the two is observation, not type." },
+      { h: "Why this is not a tuning change", p: "It changes what the gate is a model <em>of</em>. Today it models &ldquo;how far could a thing of this type have gone&rdquo;; you are asking for &ldquo;how far could <em>this</em> thing have gone, given what was seen of it&rdquo;. That is the same move this project already made from quantised range buckets to a fused covariance &mdash; from a property of the <strong>category</strong> to a property of the <strong>belief</strong>. Class survives as the fallback for a unit that is moving, or whose motion was never observed." },
+      { h: "The datum exists and sits where it is needed", p: "Verified rather than assumed: <code>MotionState</code> is built, <code>Contact.motion</code> is folded per contact and is honestly <code>None</code> when no channel supplied motion evidence, <code>Group.movement_state</code> is the members' majority and equally honest about absence. And there is <strong>one</strong> shared speed function both consumers already call &mdash; so motion state becomes an input to that function, which keeps the one-table rule intact rather than growing a second table that drifts." },
+      { h: "It also touches two open items from the other end", p: "Keying on observation is the natural place to re-examine the asserted speed rows (<code>BL-B57</code>, <code>BL-B60</code>): a sustained large residual under repeated folds is itself evidence the believed class is wrong. And a <em>stopped</em> unit stops inflating the association gate at all, which is the same churn <code>BL-B24</code>/<code>BL-B25</code> are open on &mdash; so re-measuring those is better done after this than before." }
+    ],
+    items: [["done","MotionState + Contact.motion, folded per contact"],["done","Group.movement_state (BL-12 stage 4)"],["open","Re-key plausible_speed_mps on observed motion"],["open","BL-B57 / BL-B60: the speed rows are asserted, not measured"]],
+    src: "docs/acceptance/2026-10-13-position-uncertainty-direction.md, body-layer/src/belief/{motion,position_belief,contacts}.py"
+  },
+
+  b60: {
+    kicker: "body-layer/", title: "The fold bound's one measured regression", chip: ["open", "Filed, accepted, unfixed"]
+    ,facts: [["Trigger", "a misclassified fast mover, repeat ambiguous folds"], ["Belief right (2 m/s truth)", "12.5 m - byte-identical to baseline"], ["Belief wrong (8 m/s truth)", "104.2 m vs 49.8 m unbounded"], ["Filed by", "the DoD pass, 2026-10-13"]],
+    sections: [
+      { h: "The mechanism, stated plainly", p: "The bound caps a fold's displacement at the contact's <em>believed</em> <code>plausible_speed_mps</code> times elapsed time. A unit genuinely moving faster than its believed class's row &mdash; the stated case being a misclassification, e.g. believed infantry that is actually something faster &mdash; is capped <strong>below its real speed</strong>, so its held position lags further behind with every repeat fold. It is tracked <em>worse</em> than before the bound existed." },
+      { h: "Why it is accepted rather than fixed in the same branch", p: "The bound is <strong>exactly neutral</strong> when the association and the believed class are both right &mdash; the common case, confirmed byte-identical to baseline at 12.5 m. The cost falls specifically where the belief itself is wrong. Two mitigations already exist rather than being proposed here: the Stage 3.5 admission gate stays load-bearing at a 3&times; looser bound, which is this project's existing safety net for an uncalibrated speed table, and the classification fold should correct a wrong class over time, at which point the right row re-resolves." },
+      { h: "Why it got its own entry instead of a risk paragraph", p: "It is measured, reproducible and has a clear trigger, and this project's convention is to file a defect of that shape rather than trust it to survive in a plan nobody re-reads once the feature merges. The real fix is <strong>calibrating the speed table against measured DCS unit speeds</strong> &mdash; the table's own docstring already says the rows are assumptions &mdash; or treating a sustained large unclamped residual as evidence the class belief is wrong. Neither is scoped." },
+      { h: "What to listen for in the air", p: "Not silence. A fast-moving unit &mdash; a truck column at speed, or anything the naked-eye channel holds at a slower class than it is &mdash; whose reported position <strong>visibly lags well behind where it actually is</strong>, worse than the pre-bound behaviour would have shown. Watch for that specifically on the first flight of this branch, not generically." }
+    ],
+    items: [["done","Measured and reproduced (probe_o2_motion.py)"],["done","Filed as BL-B60 rather than left in the plan"],["open","Calibrate the speed table against measured DCS speeds"],["open","Or: treat a sustained residual as a re-classification nudge"]],
+    src: "body-layer/ROADMAP/BL-B60.md, plans/bounded-fold-displacement/{plan,dod-check}.md"
+  },
+
   wmb6: {
     kicker: "world-model/", title: "Landforms: detected, gated, accepted", chip: ["open", "Cleared 2026-10-05; no consumer yet"],
     facts: [["Unparked", "2026-10-01, the same day it was parked"], ["Accepted on", "your 2026-10-04 23:59 syria-full rebuild"], ["Stored", "122,567 ridge + 112,232 valley = 234,799"], ["Store size", "720 MB, against 2.4-2.5 GB predicted"]],
@@ -1451,13 +1611,13 @@ const DETAIL = {
     sections: [
       { h: "What changed, 2026-10-12", p: "<code>BL-12</code> Stage 3 inverted this rule <strong>within one believed group</strong>: ambiguity resolves toward the nearest remembered member rather than founding a third contact. The reasoning was never that the old logic was faulty &mdash; it was that its <em>premise</em> was. Refusing to guess is correct in a saturated world where a different unit is a cheap alternative explanation; you said DCS is not that world, and nothing had ever written that assumption down, which is why it survived unexamined. Air defence is carved out: a visible duplicate is the safe direction for a threat, a wrong fold is not, and that gate reads the classification lattice rather than the DCS-type table that made four of five SAM classes invisible to it." },
       { h: "Why these entries are still open rather than closed", p: "The plan claims BL-12 supersedes <code>BL-B24</code> and <code>BL-B25</code>. The DoD pass declined to close them on that claim, because the churn figure that motivated them &mdash; 554 contacts for 444 real objects &mdash; <strong>has not been re-measured on the new code</strong>. A rule changing is not the same as its consequence being observed, and the sortie trace BL-12 added is what would settle it." },
-      { h: "BL-B59, the half that was not fixed", p: "Stage 3 fold moves a contact fused position. Stage 3.5 stopped that drift pulling an <em>unrelated</em> unit into the group; the same drift can still <strong>evict a real member</strong>, by shifting the median nearest-neighbour gap and tightening the relative threshold. That direction suppresses a report rather than duplicating one, including for an air-defence member, which is why it is prioritised next rather than parked. It is visible in the group trace and bounded: a contact that already spoke for itself survives eviction untouched." },
+      { h: "BL-B59 is fixed, and the option you chose fixed its sibling too", p: "Stage 3's fold moves a contact's fused position; Stage 3.5 stopped that drift pulling an <em>unrelated</em> unit in, while the same drift could still <strong>evict a real member</strong> &mdash; suppressing a report, including an air-defence one. Offered a retention term or a bound on the fold itself, you took the bound: a single fold may move a fused position no further than <code>plausible_speed_mps &times; elapsed</code>, <strong>no new constant</strong>. Measured: 12 membership transitions over 60 ticks become <strong>0</strong>, and independently, Stage 3.5's admission gate becomes a <em>no-op</em> in the very incident that motivated it &mdash; so the absorption half is now fixed at its source and the gate is retained only as a safety net for an uncalibrated speed table." },
       { h: "The rule is correct and the symptoms are real at the same time", p: "When a percept has two or more plausible existing contacts, <code>ingest</code> refuses to pick one and founds a new contact instead. That is the no-omniscience invariant working as designed &mdash; guessing which identical truck this is would be exactly the omniscience this project forbids. The cost is that ambiguity <em>creates</em> contacts, and each new contact makes the next look more ambiguous." },
       { h: "BL-B24: two contacts can become ambiguous for each other", p: "The association gate inflates with elapsed time since a contact was last seen, which is right in itself &mdash; a unit unobserved for two minutes could genuinely have moved. But two contacts ~17 m apart, both reacquired in the same poll after a 120 s gap, each fall inside the other's inflated gate. Real traffic routes around it: naked-eye and hybrid observations both carry a continuation id that resolves the pairing without consulting the gate. <strong>So the honest first step is establishing whether an observation ever arrives without one in production</strong> &mdash; if it does not, the right outcome is a test and a comment, not a change to the gate." },
       { h: "BL-B25: the suppression predicate forgets", p: "Found by Reviewer on the group-disclosure fix and recorded rather than fixed. Whether a member was merge-echo-suppressed is re-evaluated against <em>current</em> belief, not snapshotted at the moment it happened &mdash; so if the earlier contact has since gone lost or drifted, a genuinely suppressed member stops counting as already-reported and the group can re-speak it. It risks one extra line, never a missed one, and it is bounded to the first-disclosure window. Fixing it would mean adding per-contact state this project has so far avoided; worth doing only if it is ever actually heard." },
       { h: "Why these three sit in one node now", p: "The fragmenting outpost, the duplication runaway and <code>BL-B24</code> are the same engine with different triggers &mdash; range-scaled sigma, elapsed-time inflation, and a merge. Everything shipped this cycle muted them at the speech layer. That was the right call for a cockpit problem, and it means the count of contacts Petrovich believes in is still wrong where it was wrong before; he is simply quieter about it." }
     ],
-    items: [["done","BL-12 Stage 3 - the rule inverted inside a group"],["done","BL-12 Stage 3.5 - the absorption half of the drift"],["open","Re-measure 554-for-444 on the new code"],["open","BL-B59 - the eviction half, prioritised next"],["open","Establish when a percept arrives with no continuation id"],["hold","BL-B25 - fix only if heard"]],
+    items: [["done","BL-12 Stage 3 - the rule inverted inside a group"],["done","BL-12 Stage 3.5 - the absorption half of the drift"],["open","Re-measure 554-for-444 on the new code"],["done","BL-B59 - the eviction half, bounded at source"],["open","BL-B60 - the bound's one measured regression"],["open","Establish when a percept arrives with no continuation id"],["hold","BL-B25 - fix only if heard"]],
     src: "body-layer/ROADMAP/ (BL-B24, BL-B25, BL-B59), plans/group-contact-identity/, plans/group-cohesion-admission-gate/"
   },
 
@@ -1553,7 +1713,7 @@ const DETAIL = {
       { h: "What BL-12 deliberately did not do", p: "Stage 5 (road-following) is skipped <em>entirely</em> &mdash; the whole of it, including the cheap anisotropic half, goes to <code>BL-8</code>, where the ten-minute horizon makes a road decisive and a disc useless. Stage 6 would have shortened <code>OBJECT_ID_MEMORY_S</code> from ten minutes to the belief layer's own 60 s, and is deferred, which means <strong>the omniscience shortcut it would close is still live</strong>: beyond the re-identification window, continuity still rests on a DCS object id rather than on a judgement a crew could make. The milestone's no-omniscience claim holds at the short horizon only, and says so." },
       { h: "What's next", p: "The flight. Six acceptance cards are queued on <code>main</code> and nothing else in this subproject is worth starting ahead of them, because most of what remains is calibration the air decides. Behind it: sector fairness (<code>BL-B20</code>, needs its own <code>/explore</code>), attention capture, and the question of what he should say about sixteen vehicles in one sector &mdash; which is yours, not the code's." }
     ],
-    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["done","Cohesion redesign (merged, unflown)"],["done","10 km player bubble - no observable, waived"],["done","BL-B23 - lost contacts out of clustering"],["done","silence command (merged, unflown)"],["done","Merge-echo + group-disclosure suppression (unflown)"],["done","BL-13 crew query path, stages 1-3 (unflown)"],["done","BL-12 group identity, stages 0-4 + 3.5 (unflown)"],["open","BL-B59 - fold drift evicts a real member"],["open","BL-B20 sector fairness"],["open","BL-B24/B25 - inverted, not re-measured"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
+    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["done","Cohesion redesign (merged, unflown)"],["done","10 km player bubble - no observable, waived"],["done","BL-B23 - lost contacts out of clustering"],["done","silence command (merged, unflown)"],["done","Merge-echo + group-disclosure suppression (unflown)"],["done","BL-13 crew query path, stages 1-3 (unflown)"],["done","BL-12 group identity, stages 0-4 + 3.5 (unflown)"],["done","BL-B59 - bounded fold displacement (unflown)"],["done","Forest occlusion stages 1-2 (unflown, off by default)"],["open","BL-B60 - misclassified fast mover tracked worse"],["open","Attention tiers - resolution by attention"],["open","BL-B20 sector fairness"],["open","BL-B24/B25 - inverted, not re-measured"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
     src: "body-layer/ROADMAP.md"
   },
   srs: {
