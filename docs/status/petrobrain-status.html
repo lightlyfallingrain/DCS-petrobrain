@@ -1466,9 +1466,12 @@ flowchart TB
     <code>todo/backlog.md</code> and each subproject's own <code>BACKLOG.md</code>. This page is a
     view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
     files is a bug in this page, not in them. Everything the counts cover lives on <code>main</code>, including
-    <code>BL-11</code>'s closure (merge <code>b961977</code>). The open count rose this cycle rather
-    than falling, and that is not drift: a single day's work filed seven new backlog items, which is
-    what closing a long chain tends to produce.
+    <code>BL-B59</code>'s bounded fold and the forest gate. Two things are deliberately drawn here
+    that <code>main</code> does not yet hold: the <code>collapse(group, depth)</code> derivation,
+    DoD-passed on <code>feature/group-collapse</code> and awaiting merge, and the attention-tier
+    direction, which lives as a captured <code>/explore</code> in <code>docs/acceptance/</code> and
+    has no roadmap entry yet. The open count rose again &mdash; 94 to 101 &mdash; which is still not
+    drift: finishing a mechanism is what produces the entries describing what it did not do.
   </footer>
 
 </div>
