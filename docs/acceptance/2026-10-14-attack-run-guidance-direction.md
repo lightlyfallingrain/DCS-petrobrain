@@ -276,19 +276,140 @@ The reason this costs nothing in practice: **a run cannot begin while muted**, b
 clears silence. So the only reachable case is the pilot muting Petrovich *during* a run, which is an
 instruction to stop talking, and taking it literally is the whole point of the command.
 
+## 17. Elevation is a real boresight-relative angle — two vectors, and the discrimination test is **not** what was wanted
+
+Asked to choose between a wide absolute gate and a *discrimination test* (speak when the nose's
+elevation would put it on a different candidate), he declined the fork and specified the mechanism
+instead:
+
+> *"Elevation guidance is about target relative to boresight.*
+>
+> *We need two things: ownship -> target LOS vector and ownship boresight (unit) vector. Then azimuth
+> guidance is the lateral angle between boresight and target LOS vectors. Vertical guidance is
+> horizontal angle between ownship boresight and target LOS vector.*
+>
+> *Ownship boresight vector we get from DCS ownship telemetry data.*
+>
+> *Ownship -> target LOS vector needs ownship x,y,z and target x,y,z. Then it's a simple vector
+> between them. No LOS calculation necessary since DCS will do that for us. No world elevation
+> necessary since unit data has elevation.*
+>
+> *BTW, design approach so that fine grained elevation guidance is possible with just changing
+> parameters. It may be needed, a flight will tell once there's the callouts to test."*
+
+**So both axes are one derivation, not two mechanisms.** Form the ownship→target vector, form the
+boresight unit vector, and decompose the angle between them into its lateral and vertical parts.
+Azimuth guidance is the lateral component; elevation guidance is the vertical one. There is no
+separate vertical model, no candidate comparison, and no second code path.
+
+### What this corrects in the Architect's plan
+
+The plan's finding 3 established that `Contact.last_alt_m` is set from the flat projection and its
+altitude convention is `percept.ownship_at_observation.alt_m` — i.e. **the aircraft's own altitude at
+the last look**, documented as not fused. That finding stands and is worth keeping: an elevation
+angle read off that field reports how much the aircraft has climbed since, not where the target is.
+
+**Its remedy does not.** The plan's answer was to take terrain MSL from
+`geometry.elevation_at(conn, theatre, x, z)`, cached on the quantised position. That is now
+superseded: *"No world elevation necessary since unit data has elevation."* The target's own altitude
+arrives from the aircraft layer with the unit, so the vertical axis needs **no world-model query at
+all** — which removes an in-loop dependency, a cache, and the `BL-B49`-shaped risk of routing
+through enrichment to get it.
+
+### Fine-grained elevation must be reachable by parameter alone
+
+> *"design approach so that fine grained elevation guidance is possible with just changing
+> parameters. It may be needed, a flight will tell once there's the callouts to test."*
+
+This is a **structural requirement on the design, not a value**. Whatever the elevation gate starts
+at, going from a coarse nudge to fine-grained guidance must be a parameter change — not a rewrite,
+not a new code path, and not a second renderer. Concretely: the word thresholds and the gate are data,
+the derivation is one function, and nothing in the renderer may assume the vertical axis is coarse.
+The flight decides the value; the design must not decide the resolution.
+
+## 18. Two mechanisms: world-anchored belief, and ownship-relative observation
+
+**This is the most consequential thing in the conversation and it reaches past `BL-14`.** It arrived
+in answer to a no-omniscience objection — that reading the target's DCS altitude at callout time
+would make one axis of the callout omniscient while the other carried a deliberate bias — and it
+dissolves the objection rather than trading against it.
+
+> *"It sounds like we may need two mechanisms. There's the belief where the unit is* on the map*.
+> That is what we have now.*
+>
+> *Then there's "I'm looking at it, I can tell where it is relative to ownship" and that not not a
+> question of where is it in world, it's a ownship relative observation. That is what we need for
+> guidance.*
+>
+> *I (or Petrovich) could be wrong about the world position by a lot and still see the unit plainly
+> at bearing 355, 1.5 km and be able to guide to it exactly because we look at it and see it's
+> relative position. (At some much later stage we may build ownship world position ambihuity as
+> well, but that's much later. This is pre-GPS are aircraft after all, we might get lost, but still
+> see units and world outside the aircraft and how it is* relative to ownship*.)"*
+
+### The distinction
+
+| | question it answers | error model | what uses it |
+|---|---|---|---|
+| **world-anchored belief** (today's `PositionBelief`) | *where is this unit on the map* | `BEARING_SIGMA_DEG = 3.0`, `RANGE_FRACTIONAL_SIGMA = 0.17`, plus a per-object systematic bias at `SYSTEMATIC_BIAS_FRACTION = 0.4` of single-look sigma that **never averages out** | reporting, grouping, memory, world-feature references |
+| **ownship-relative observation** (new) | *where is it relative to me, right now* | direct — not mediated by the map at all | **attack-run guidance** |
+
+**Why the relative one is more accurate, and it is not that Petrovich knows more:** most of the
+world-position error is *ownship's own* error, and in a relative observation it cancels. A crewman
+watching a vehicle can align the aircraft with it far better than he can state its azimuth in
+degrees. `BEARING_SIGMA_DEG = 3.0` is a model of **stating** a bearing — its own docstring says it is
+*"the crewman's own pointing precision, not anything DCS reports"*, bounded between the optical
+resolution floor and the 15° clock half-bucket. It is the right model for *"ground, two o'clock, two
+kilometres"* and the wrong one for *"come left"* while looking straight at the thing.
+
+**His pre-GPS framing is the proof the two are independent**: an Mi-24P crew can be badly lost — wrong
+about where they are on the map by a lot — and still guide a gun run exactly, because the guidance
+never passes through the map. Ownship world-position ambiguity is explicitly **deferred to much
+later**, and this design does not block it: when it arrives it degrades the world-anchored belief and
+leaves the relative channel untouched, which is the correct coupling.
+
+### What this changes in the plan
+
+- **Guidance derives from the relative observation, never from `Contact.last_position`** while the
+  target is being looked at. The attack run fixes the gaze (§15), so during a run that is the normal
+  state rather than a lucky one.
+- **The cluster-bias-anchor risk evaporates for guidance.** The bias is hashed off
+  `min(member.object_id)` of the cluster (`naked_eye_source.py:957`, a documented limitation), so a
+  mid-run membership change — destroying one vehicle of a group, exactly when a re-attack happens —
+  shifts the *world-anchored* believed position by the bias delta. At 300 m a 20 m shift is 3.8°,
+  enough to fire a spurious *"come left"*. **Guidance never reads that channel while looking**, so
+  the risk applies to reporting, not to the run.
+- **§7's fallback becomes a clean second tier rather than a special case.** Looking → relative
+  observation. Lost sight → project from world-anchored belief against ownship position, inheriting
+  ~1.2° azimuth / ~0.4° elevation of bias-driven error at 1 km (computed from the constants above).
+  Both are inside the proposed 5° band, and silence keeps meaning one thing. *"Last known position.
+  If target is moving, projected position"* is exactly this tier.
+- **Guidance gets *more* accurate as the run develops** — the opposite of what reading map belief
+  would have produced.
+- **No world-model elevation query, and no live truth read into belief.** §17's mechanism stands;
+  the invariant objection is answered by the channel being a genuine relative perception rather than
+  a map lookup.
+
+### The reading being planned against, stated as an assumption
+
+*"guide to it exactly because we look at it"* is read as: **v1 treats the relative direction as exact
+while the look holds**, with the noise term present as a parameter fixed at zero so a value can be
+given later without a rewrite — the same structural requirement as §17's fine-grained elevation.
+Pilot pointing error stays the pilot's, consistent with ballistics staying his. If a small error was
+meant from the start, this is the line to correct.
+
+### Scope note
+
+This is a **new perception datum**, not a reinterpretation of an existing one, so it is scope the
+earlier stages did not carry. It is also mechanically *simpler* than the world-anchored path — the
+aircraft layer already publishes unit `x`/`y`/`z` and ownship position plus attitude, so the relative
+vector is a subtraction and a frame rotation. What it must carry is a **bound**: it exists only while
+the target is actually being looked at with line of sight clear, which is what makes it a perception
+rather than a map read.
+
 ---
 
 ## Still open
-
-**The elevation gate's form.** The Architect pass found that §11's two statements pull apart
-arithmetically: at 120 m AGL two vehicles at 1.0 and 1.5 km are **2.3°** apart in elevation
-(6.8° vs 4.6° below the nose), while a nose lofted for rockets sits several degrees up — so a gate
-wide enough to ignore the loft is several times wider than the separation it exists to resolve, and
-the vertical word would almost never fire and would discriminate nothing when it did. Offered a wide
-absolute gate versus a *discrimination test* (speak when the nose's elevation would put it on a
-different candidate than the selected one), the user's answer was **"Wait, I will explain in more
-detail"** — so this is **deliberately unresolved pending his explanation**, and nothing about the
-vertical axis should be built or re-derived until it lands.
 
 Two values remain deliberately unset and belong to a sortie, not to analysis: the **lined-up azimuth
 band** (§5) and the **change threshold** that drives cadence (§10). Both are agreed guesses in this
