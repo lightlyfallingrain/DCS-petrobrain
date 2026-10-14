@@ -41,3 +41,23 @@
 
   Not related to [[BL-B48]]: closing the `belief.groups` cohesion defect will not change this path's
   cost either way, because BL-13's summary never walks a group roster.
+
+  **A second caller arrived with [[BL-14]], and this one does walk a group roster** (whole-feature
+  performance review, 2026-10-14, `plans/attack-run/performance-review.md`). `step`'s per-press
+  candidate ordering calls `belief.tools.describe_contact` once or twice **per group member**, purely
+  to read bearing and range -- and `describe_contact` has no narrow path, so each call runs the full
+  enrichment pipeline including the never-cached `terrain_divide_qualifier` (6.77 ms/contact) and
+  `semantic_facts_for` (63.25 ms/contact cold). This entry's exact cost with a new, wider caller:
+  not a new mechanism.
+
+  **Why it matters more than the per-query case above.** `handle_command` runs inside the poll body,
+  group size is not tightly bounded (both [[BL-B61]] and [[BL-B48]] argue a *believed* group can be
+  wider than a real platoon), and the press happens in the seconds before weapon release. So a
+  `step` against a large or loosely-grouped formation could stall the poll loop **200+ ms on terrain
+  cost alone**, at the worst possible moment.
+
+  Judged MONITOR rather than a required fix for `BL-14` -- it is one press rather than per-poll, and
+  the fix belongs here rather than in a local workaround. But it raises this entry's priority and
+  **changes its shape**: the three written-up mitigations were sized against a single-contact query,
+  and the chosen one now has to serve a *roster-walking* caller too. **Watch for sluggish `step`
+  response on the `BL-14` acceptance sortie.**
