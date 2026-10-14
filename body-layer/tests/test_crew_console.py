@@ -27,7 +27,7 @@ from belief.attention import RelativeSector, Sector
 from belief.audio_client import AudioAdapterError
 from belief.brain_client import BrainLayerClient
 from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.crew_console import (
     _NOTHING_TO_STOP,
     DISPATCHED_COMMAND_TOKENS,
@@ -40,6 +40,7 @@ from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.groups import Group
+from belief.percept import Percept
 from belief.speech import (
     group_membership_state,
     render_group_disclosure,
@@ -56,7 +57,12 @@ from belief.voice_commands import (
 )
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
-from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from perception.source import (
+    DerivedWorldPosition,
+    Observation,
+    OwnshipState,
+    RelativeDirection,
+)
 
 
 class FakeOverlayClient:
@@ -4851,6 +4857,201 @@ def test_drain_attack_run_ends_the_run_when_the_contact_record_vanishes(
     assert result is None
     target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
     assert target_task.status == "cancelled"
+
+
+def _attack_run_contact_off_boresight(
+    contact_id: str, *, ownship_at_observation: OwnshipState, t_sim: float = 0.0
+) -> Contact:
+    """A `Contact` carrying a real off-boresight `RelativeDirection` --
+    mirrors `test_attack_run.py`'s own `_contact_with_relative_direction`
+    helper (kept as a local copy per this file's per-test-file fixture
+    convention). 100 m right of boresight at ~1000 m forward is the
+    Stage 4-5 review's own reproduction figure (`atan(100/1000)` =~ 5.71
+    degrees): past `ATTACK_RUN_LINED_UP_AZIMUTH_DEG` (5.0) but inside the
+    "a bit right" band (half the 12 o'clock sector, 7.5), so `decide`
+    renders `"A bit right."` and wants to speak on the first call -- real
+    geometry, not a stubbed `decide_attack_run`, per this plan's own
+    "confirmed by direct reproduction" standard."""
+    percept = Percept(
+        t_sim=t_sim,
+        source="naked_eye_visual_filtered",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=ownship_at_observation,
+        observation_id="OBS_1",
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=100.0, up_m=0.0),
+    )
+    return Contact.from_percept(contact_id, percept)
+
+
+def test_drain_attack_run_reoffers_the_line_once_the_channel_frees() -> None:
+    """Stage 4-5 review, required fix 1: a guidance change that arrives
+    while `scheduler.busy_until_sim` is still ahead of `now_sim` must not
+    be recorded as spoken -- `_should_emit`'s baseline is the last
+    *spoken* value (direction doc Sec 10), and `decide()` already updates
+    `last_spoken_*` as if the line had been heard, before the caller ever
+    checks occupancy. Reproduces the reviewer's own busy-then-free
+    sequence directly against `drain_attack_run`, with no `engage` in the
+    way, then asserts the fixed behaviour: nothing printed while busy, the
+    carried-forward state unchanged, and the line spoken once the channel
+    frees with the geometry never having moved."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+
+    import io
+
+    output = io.StringIO()
+    console = CrewConsole(store=store, tasks=tasks, output=output)
+    # Well inside `ATTACK_RUN_RELATIVE_MAX_AGE_S` (2.0 s) of the percept's
+    # own `t_sim=0.0` -- this test is about occupancy, not staleness, so
+    # the busy window is kept short enough that the percept is still
+    # trusted when the channel frees.
+    console.scheduler.busy_until_sim = 1.0
+
+    busy_state = console.drain_attack_run(
+        AttackRunState(), now_sim=0.0, ownship=ownship
+    )
+
+    assert output.getvalue() == ""
+    assert busy_state == AttackRunState()
+
+    freed_state = console.drain_attack_run(busy_state, now_sim=1.0, ownship=ownship)
+
+    assert output.getvalue() == "A bit right.\n"
+    assert freed_state is not None
+    assert freed_state.last_spoken_text == "A bit right."
+
+
+def test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The realistic casualty the review names: `engage`'s own readback
+    occupies the channel (`CalloutScheduler.note_reply`, via `_print`)
+    right as the run begins, which is exactly when the first alignment
+    correction is due. Confirms the fix holds through the real `engage`
+    path, not only a hand-set `busy_until_sim`."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+
+    import io
+
+    output = io.StringIO()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+        output=output,
+    )
+
+    engage_lines = console.handle_command("engage", now_sim=0.0, slots=None)
+
+    assert engage_lines[0].startswith("Attack run,")
+    # `note_reply` claimed the channel for the readback's own duration --
+    # the precondition the rest of this test depends on.
+    assert console.scheduler.busy_until_sim > 0.0
+    printed_after_engage = output.getvalue()
+
+    # The poll loop's own first tick after `engage` (`logger.py`): a fresh
+    # `AttackRunState()`, drained immediately, same `now_sim` the readback
+    # was spoken at -- the channel is still busy.
+    busy_state = console.drain_attack_run(
+        AttackRunState(), now_sim=0.0, ownship=ownship
+    )
+
+    assert output.getvalue() == printed_after_engage  # nothing new printed
+    assert busy_state == AttackRunState()  # not falsely marked spoken
+
+    # The channel frees. The engage readback alone occupies several
+    # seconds (per the review's own finding), longer than `ATTACK_RUN_
+    # RELATIVE_MAX_AGE_S` (2.0 s) -- exactly as it would in a live flight,
+    # the naked-eye channel keeps re-observing the same unchanged geometry
+    # every poll, so refresh the percept's own `t_sim` rather than letting
+    # it go stale for a reason this test is not about.
+    freed_now_sim = console.scheduler.busy_until_sim
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+        contact_id, ownship_at_observation=ownship, t_sim=freed_now_sim
+    )
+    freed_state = console.drain_attack_run(
+        busy_state, now_sim=freed_now_sim, ownship=ownship
+    )
+
+    assert output.getvalue() == printed_after_engage + "A bit right.\n"
+    assert freed_state is not None
+    assert freed_state.last_spoken_text == "A bit right."
+
+
+def test_drain_attack_run_ends_the_run_after_drop_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 4-5 review, required fix 2: `drop target` cancels the
+    standing `attack_target` task but (before this fix) left `drain_
+    attack_run` returning the unchanged, still-non-`None` state once the
+    task was gone -- the engaged flag then survived to wrongly claim the
+    gaze for whatever was selected next. `drain_attack_run` must treat
+    "the standing task is gone" exactly like the vanished-contact branch:
+    return `None`, which is what `logger.py` assigns straight onto
+    `runner.attack_run_state`, clearing `attack_run_engaged`."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("engage", now_sim=0.0, slots=None)
+
+    console.handle_command("drop_target", now_sim=1.0)
+
+    target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
+    assert target_task.status == "cancelled"
+    result = console.drain_attack_run(AttackRunState(), now_sim=2.0, ownship=ownship)
+    assert result is None
+
+
+def test_drain_attack_run_ends_the_run_after_the_generic_cancel_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same guard, exercised through the generic all-kinds `cancel_task`
+    token (`"cancel"`/`"stop"`) rather than `drop_target` -- the Stage
+    4-5 review's point that fixing the single shared guard in `drain_
+    attack_run` is what makes the fix hold for this path too, found by
+    reproduction rather than by reading."""
+    ownship = _ownship(x=0.0, z=0.0)
+    store = ContactStore()
+    contact_id = "CONTACT_1"
+    store._contacts[contact_id] = _attack_run_contact_off_boresight(  # type: ignore[attr-defined]
+        contact_id, ownship_at_observation=ownship
+    )
+    tasks = TaskStore()
+    assert attack_target_task(store, tasks, contact_id, now_sim=0.0) is not None
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_command("engage", now_sim=0.0, slots=None)
+
+    console.handle_command("cancel_task", now_sim=1.0)
+
+    target_task = next(t for t in tasks.tasks if t.kind == "attack_target")
+    assert target_task.status == "cancelled"
+    result = console.drain_attack_run(AttackRunState(), now_sim=2.0, ownship=ownship)
+    assert result is None
 
 
 # --- the slotted query's filter slots (plans/crew-query-path/plan.md

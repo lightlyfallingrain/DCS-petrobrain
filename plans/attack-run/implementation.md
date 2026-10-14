@@ -371,3 +371,115 @@ uses, line for line.)
   one-contact `ContactStore` is enough to pin the override order precisely, matching this file's
   own existing `_active_gaze` test convention (every one of its ~15 pre-existing tests calls it
   directly, none through `run_once`).
+
+### Stage 4-5 review fixes (2026-10-14)
+
+Both required fixes from `plans/attack-run/review.md`'s Stage 4-5 pass, applied to
+`body-layer/src/belief/crew_console.py::CrewConsole.drain_attack_run`. No other file changed;
+no constants tuned; no stage 6/7 work added.
+
+**Fix 1 (occupancy falsely marks a line "spoken").** `decide_attack_run` always returns a
+`new_state` with `last_spoken_*` already updated for the line it wants to say, before the caller
+ever checks `self.scheduler.busy_until_sim`. `drain_attack_run` used to return that `new_state`
+unconditionally, so a line suppressed by occupancy was recorded as if it had been heard, and
+`_should_emit`'s change-driven baseline then measured against a baseline nobody actually spoke.
+
+Fix: branch on whether the print actually happened. `speech is None` returns `new_state`
+unchanged (no-op path, same as before). `speech is not None` and the channel is free: print and
+return `new_state`, unchanged behaviour. `speech is not None` and the channel is busy: return the
+**previous** `state` (not `new_state`), so `last_spoken_*` stays at whatever was last actually
+spoken.
+
+**Decision: drop the suppressed line, do not queue it.** The task explicitly ruled out adding a
+queue (the scheduler's own deferral machinery is for the push path, not the reply lane this method
+is on), so the only two options were drop-and-rely-on-re-evaluation or build a pending-line marker.
+Dropping is correct here because carrying the previous `state` forward is self-correcting: the next
+`drain_attack_run` call re-derives the same (or a further-drifted) alignment from live geometry —
+tier 1 has no memory of what it *meant* to say, only what it last *did* say — and `_should_emit`
+compares against the untouched baseline, which still differs from the current text/azimuth/
+elevation exactly as much as it did on the suppressed tick (or more, if the geometry kept moving).
+So the same change is re-offered on the very next tick the channel is free, with no gap in
+coverage and no stale backlog to drain once it is. Verified directly in
+`test_drain_attack_run_reoffers_the_line_once_the_channel_frees` and
+`test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel`.
+
+**Fix 2 (`drop target`/generic `cancel`/`stop` never clear the gaze claim).** `drain_attack_run`'s
+top-of-function guard — "is there still an active `attack_target` task?" — used to `return state`
+(the unchanged, still-non-`None` state) once the task was gone, rather than `None`. `disengage` and
+the vanished-contact branch both already correctly produce `None`; this guard was the one path that
+did not, and it is the single chokepoint every task-gone case (not only `drop target` — the generic
+all-kinds `cancel_task` token hits the identical guard, since it cancels every active task
+regardless of kind) passes through. Fix: return `None` instead of `state`. `logger.py`'s poll loop
+assigns the return value straight onto `runner.attack_run_state`, so this is also what
+`_active_gaze`'s `attack_run_engaged` flag reads — the single-guard fix is therefore what makes it
+hold for the generic cancel path too, without a second change anywhere.
+
+**Fail-then-pass evidence (both fixes).** For each fix, the new tests were run once against the
+code with only that fix reverted (the other fix left in place), confirmed to fail for the exact
+stated reason, then the fix was restored and the full `drain_attack_run`-selected test set
+re-confirmed green:
+
+- Fix 1 reverted: `test_drain_attack_run_reoffers_the_line_once_the_channel_frees` and
+  `test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel` both failed on
+  `assert busy_state == AttackRunState()` — the busy-tick return value carried a non-`None`
+  `last_spoken_azimuth_deg=5.71...`/`last_spoken_text='A bit right.'` though nothing had been
+  printed, exactly the "marked spoken but never heard" defect the review named. The other four
+  `drain_attack_run` tests (including both Fix 2 tests) stayed green.
+- Fix 2 reverted: `test_drain_attack_run_ends_the_run_after_drop_target` and
+  `test_drain_attack_run_ends_the_run_after_the_generic_cancel_task` both failed on
+  `assert result is None`, returning the stale `AttackRunState(...)` instead — the engaged flag
+  surviving a cancelled task, exactly as reported. The other four stayed green.
+
+### Tests Added (Stage 4-5 review fixes)
+
+All in `body-layer/tests/test_crew_console.py`, alongside a new local helper
+`_attack_run_contact_off_boresight` (mirrors `test_attack_run.py`'s own
+`_contact_with_relative_direction`, inserted directly into `store._contacts` the same way the
+existing vanished-contact test already reaches into that dict):
+
+- `test_drain_attack_run_reoffers_the_line_once_the_channel_frees` — busy tick (nothing printed,
+  state unchanged) followed by a freed tick with the same unchanged geometry (line now spoken).
+  No `engage` involved; isolates the occupancy mechanism from the command path.
+- `test_drain_attack_run_first_utterance_after_engage_survives_a_busy_channel` — the realistic
+  casualty the review named: `engage`'s own readback claims the channel via `note_reply`, and the
+  very next `drain_attack_run` tick (same `now_sim` the readback was spoken at) must not be lost
+  once the channel frees. The percept is refreshed to a current `t_sim` immediately before the
+  freed-tick call (same geometry) to stay inside `ATTACK_RUN_RELATIVE_MAX_AGE_S` — the engage
+  readback's own realistic occupancy duration (~5 s, from its word count) is longer than tier 1's
+  2 s staleness window, which a live naked-eye channel would never hit since it re-observes every
+  poll; the test approximates that by re-inserting a contact with the identical relative offset at
+  the later `t_sim`.
+- `test_drain_attack_run_ends_the_run_after_drop_target` — `engage` then `drop_target`; asserts
+  the standing task is cancelled and the next `drain_attack_run` call returns `None`.
+- `test_drain_attack_run_ends_the_run_after_the_generic_cancel_task` — same shape, through the
+  generic `cancel_task` token instead, confirming the single-guard fix covers that path too.
+
+### Checks (Stage 4-5 review fixes)
+
+**body-layer/**:
+- `ruff format --check src tests`: pass (126 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 58 source files`
+- `pytest tests -q`: **1824 passed, 4 xfailed** (baseline 1820 passed / 4 xfailed + 4 new tests)
+
+**audio-adapter/** (no file in this subproject touched by this pass; run anyway to confirm no
+regression):
+- `ruff format --check src tests`: pass (29 files)
+- `ruff check src tests`: pass
+- `mypy src`: `Success: no issues found in 15 source files`
+- `pytest tests -q`: **277 passed, 1 skipped** — matches the baseline exactly
+
+### Notable Discoveries (Stage 4-5 review fixes)
+
+- **The engage readback's own realistic occupancy duration exceeds tier 1's staleness window.**
+  `estimate_speech_duration_s`'s placeholder rate (`MIN_UTTERANCE_S` + word_count /
+  `SPEECH_RATE_WPS`) puts the `engage` readback used in these tests (11 words) at ~5.0 s of
+  claimed channel time, while `ATTACK_RUN_RELATIVE_MAX_AGE_S` is 2.0 s. In a live flight this never
+  collides — the naked-eye channel re-observes every poll, so the percept backing tier 1's
+  alignment is never more than one poll interval old regardless of how long the channel stays busy
+  — but it meant the busy-then-free test fixture needed to refresh the contact's percept before
+  the freed tick, or the channel freeing would coincide with tier 1 going silent for an unrelated
+  reason (staleness, not occupancy) and the test would not isolate what it claims to. Worth
+  flagging for whoever next touches either constant: the two numbers are not currently related by
+  any invariant, and a slower placeholder speech rate or a longer typical readback would make this
+  collision real rather than a test-fixture artifact.

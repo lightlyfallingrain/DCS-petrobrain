@@ -2220,7 +2220,16 @@ class CrewConsole:
             return state
         target_task = self._active_attack_target_task()
         if target_task is None or target_task.contact_id is None:
-            return state
+            # The standing task is gone (cancelled by `drop target`, or the
+            # generic all-kinds `cancel`/`stop` path) -- treat this exactly
+            # like the vanished-contact branch below: the run's phase ends
+            # and `None` propagates out to `runner.attack_run_state`, which
+            # is what `_active_gaze`'s `attack_run_engaged` reads. Returning
+            # the unchanged `state` here (the bug the Stage 4-5 review
+            # found by reproduction) left the gaze claim stuck on after a
+            # bare `drop target`, inherited by the next `select target`
+            # that never called `engage` at all.
+            return None
         contact = self.store.contact(target_task.contact_id)
         if contact is None:
             if self.tasks is not None:
@@ -2230,7 +2239,9 @@ class CrewConsole:
         new_state, speech = decide_attack_run(
             state, now_sim=now_sim, ownship=ownship, contact=contact
         )
-        if speech is not None and now_sim >= self.scheduler.busy_until_sim:
+        if speech is None:
+            return new_state
+        if now_sim >= self.scheduler.busy_until_sim:
             self._print(
                 [speech.text],
                 now_sim,
@@ -2241,7 +2252,19 @@ class CrewConsole:
                     "attack_run_elevation_deg": new_state.last_spoken_elevation_deg,
                 },
             )
-        return new_state
+            return new_state
+        # Occupancy suppressed the print (Stage 4-5 review, required fix
+        # 1): `new_state` already has `last_spoken_*` updated by `decide()`
+        # as if the line had been spoken, which would make `_should_emit`
+        # hold its baseline against a line nobody heard. Carry the
+        # *previous* `state` forward instead, so the same change is
+        # re-offered on the next tick the channel is free -- dropped, not
+        # queued (no deferral machinery here; the reply lane does not
+        # defer, Decision 1 scopes that to the push path), and safe to drop
+        # because the baseline not having moved means the next evaluation
+        # re-fires immediately once the geometry (or the now-unchanged
+        # comparison) says to.
+        return state
 
     def _handle_scan(
         self,
