@@ -1,7 +1,12 @@
 """Tests for `perception.optics.within_optic_fov` and the two named optics
 (`UNAIDED_OPTIC`, `BINOCULAR_OPTIC`) -- `plans/detection-cones-slice1/
 plan.md`, updated by slice 2B (`plans/detection-cones-slice2/plan.md`) for
-`within_optic_fov`'s new boresight parameter and `Optic.peripheral`.
+`within_optic_fov`'s new boresight parameter and `Optic.peripheral`, and by
+`BL-B64` Stage 1 (`plans/9k113-sight/plan.md`, direction §14) for
+`UNAIDED_OPTIC.fov_half_angle_deg`'s `None` -> `90.0` change. The sight
+optics themselves (`SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`) are not tested
+here -- they carry no new mechanism, only new data (`test_naked_eye_source.py`
+and `test_estimation.py` are where their numbers get exercised).
 
 Pure mechanism tests, mirroring `test_cockpit_mask.py`'s posture: exercised
 against small synthetic `Optic` instances, not the shipped table, so a
@@ -103,11 +108,44 @@ def test_elevation_offset_alone_can_fail_the_gate() -> None:
     )
 
 
-def test_unaided_optic_has_no_fov_restriction() -> None:
+def test_unaided_optic_has_a_90_degree_half_angle() -> None:
+    """`BL-B64` Stage 1, direction §14: `UNAIDED_OPTIC.fov_half_angle_deg`
+    moved from `None` to `90.0` -- "a fairly sane 180 degree naked eye max
+    FOV" (peripheral vision, not focus). No optic in this table carries
+    `None` any more; see `within_optic_fov`'s own docstring for why that
+    branch is kept anyway."""
     assert UNAIDED_OPTIC.presence_range_mult == pytest.approx(1.0)
     assert UNAIDED_OPTIC.class_range_mult == pytest.approx(1.0)
     assert UNAIDED_OPTIC.type_range_mult == pytest.approx(1.0)
-    assert UNAIDED_OPTIC.fov_half_angle_deg is None
+    assert UNAIDED_OPTIC.fov_half_angle_deg == pytest.approx(90.0)
+
+
+def test_unaided_optic_field_of_view_still_admits_anything_within_90_degrees() -> None:
+    """The naked eye's own 90-degree half-angle is wide enough that an
+    ordinary off-boresight candidate -- not near the 90-degree edge -- is
+    unaffected by the `None` -> `90.0` change."""
+    assert within_optic_fov(
+        UNAIDED_OPTIC, boresight_azimuth_deg=0.0, azimuth_deg=80.0, elevation_deg=10.0
+    )
+
+
+def test_unaided_optic_field_of_view_now_rejects_past_90_degrees_true_separation() -> (
+    None
+):
+    """The one real behavioural difference the direction document calls
+    out: a candidate whose true angular separation from the boresight
+    exceeds 90 degrees (not just its azimuth) is now rejected, where the
+    old `None` half-angle admitted everything regardless of elevation.
+    `boresight_azimuth_deg=0.0, boresight_elevation_deg=30.0`, candidate at
+    `azimuth_deg=80.0, elevation_deg=-40.0` -- separation computes to
+    ~102 degrees, past the new 90-degree half-angle."""
+    assert not within_optic_fov(
+        UNAIDED_OPTIC,
+        boresight_azimuth_deg=0.0,
+        azimuth_deg=80.0,
+        elevation_deg=-40.0,
+        boresight_elevation_deg=30.0,
+    )
 
 
 def test_binocular_optic_has_the_btr_60_derived_per_tier_multipliers() -> None:
@@ -207,11 +245,12 @@ class TestBoresightElevation:
             elevation_deg=0.0,
         )
 
-    def test_the_unaided_eye_ignores_the_boresight_entirely(self) -> None:
-        assert within_optic_fov(
-            UNAIDED_OPTIC,
-            boresight_azimuth_deg=0.0,
-            azimuth_deg=80.0,
-            elevation_deg=-40.0,
-            boresight_elevation_deg=30.0,
-        )
+    # This class's original `test_the_unaided_eye_ignores_the_boresight_
+    # entirely` asserted this exact (boresight, candidate) pair passed,
+    # true only while `UNAIDED_OPTIC.fov_half_angle_deg` was `None`.
+    # `BL-B64` Stage 1 (direction §14) gave it a real 90-degree half-angle,
+    # and this pair's true separation is ~102 degrees -- past it. Moved to
+    # `test_unaided_optic_field_of_view_now_rejects_past_90_degrees_true_
+    # separation` above (now asserting the opposite), where it sits next
+    # to the companion case that still passes, rather than left here
+    # asserting something that is no longer true.

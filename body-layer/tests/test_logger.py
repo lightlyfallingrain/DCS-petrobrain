@@ -1448,6 +1448,82 @@ def test_apply_active_gaze_resets_to_free_scan_when_nothing_is_pending() -> None
     assert naked_eye.scan_plan == FREE_SCAN_PLAN
 
 
+# -- _apply_active_gaze's desired/actual aim split (plans/9k113-sight/
+# plan.md section 15a) -----------------------------------------------------
+
+
+def test_apply_active_gaze_builds_the_scan_plan_from_actual_aim() -> None:
+    """With no prior `optic_state`, `advance_sight_aim`'s pass-through
+    body makes actual equal desired instantly -- the `ScanPlan` the naked
+    eye source receives must still come from the decision's own azimuth/
+    elevation, same as before this field split existed."""
+    from belief.optic_policy import OpticDecision
+    from perception.optics import BINOCULAR_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=BINOCULAR_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze([naked_eye], TaskStore(), decision=decision)
+
+    assert naked_eye.scan_plan == ScanPlan.fixed_look_at(
+        azimuth_deg=12.0, elevation_deg=-3.0
+    )
+
+
+def test_apply_active_gaze_returns_the_updated_optic_state_with_actual_aim_set() -> (
+    None
+):
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=BINOCULAR_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    updated_state = _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
+    )
+
+    assert updated_state is not None
+    assert updated_state.actual_aim_azimuth_deg == 12.0
+    assert updated_state.actual_aim_elevation_deg == -3.0
+
+
+def test_apply_active_gaze_clears_actual_aim_when_no_look_is_commanded() -> None:
+    """A stale actual aim from the last glass phase must not linger once
+    `decide` has gone back to `SCANNING` (no fixed look, `OpticDecision`'s
+    azimuth/elevation both `None`) -- mirrors `OpticState.look_azimuth_
+    deg`'s own None-while-scanning contract."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import UNAIDED_OPTIC
+
+    naked_eye = _naked_eye_source()
+    prior_state = OpticState(actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-3.0)
+    decision = OpticDecision(optic=UNAIDED_OPTIC)
+
+    updated_state = _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=prior_state
+    )
+
+    assert updated_state is not None
+    assert updated_state.actual_aim_azimuth_deg is None
+    assert updated_state.actual_aim_elevation_deg is None
+
+
+def test_apply_active_gaze_returns_none_when_optic_state_was_never_given() -> None:
+    """Every pre-existing caller (including the two tests above this
+    section) passes no `optic_state` at all -- the return value must stay
+    `None` for them, not manufacture a state nobody asked for."""
+    naked_eye = _naked_eye_source()
+
+    updated_state = _apply_active_gaze([naked_eye], TaskStore())
+
+    assert updated_state is None
+
+
 def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
     # End-to-end: a pending scan-left task registered on the store the
     # runner ticks must be visible to a real NakedEyePerceptionSource by

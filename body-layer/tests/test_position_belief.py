@@ -434,7 +434,7 @@ def test_fold_position_repeated_identical_look_still_tightens() -> None:
     maximally near-parallel (bearing separation zero). Uses the same
     (60, 800) sigma pair as this file's other new tests -- a different
     pair, (157.08, 510.0) (an ordinary 3km naked-eye look,
-    `naked_eye_sigma_m(3000.0)`), was tried first and exposed a separate,
+    `look_sigma_m(3000.0, UNAIDED_OPTIC)`), was tried first and exposed a separate,
     pre-existing latent bug in `Covariance2D.inverse`'s determinant floor
     (an absolute `1e-9`, calibrated for covariance-scale determinants
     ~1e9, but an information-matrix determinant after only one fold can
@@ -718,7 +718,7 @@ def test_fold_position_repeated_identical_look_is_exact_at_floor_triggering_sigm
 ):
     """`plans/position-belief-runaway/debug.md`'s 2026-09-25 addendum: with
     the old absolute `_MIN_DETERMINANT = 1e-9` floor, this exact sigma pair
-    -- `naked_eye_sigma_m(3000.0)`, an entirely ordinary 3km naked-eye look,
+    -- `look_sigma_m(3000.0, UNAIDED_OPTIC)`, an entirely ordinary 3km naked-eye look,
     and the same pair `test_optic_policy.py`'s own ten-fold calibration
     test uses -- pushed every `info_sum.inverse()` call below the floor
     from the very first fold, corrupting the fused *mean*: a repeated,

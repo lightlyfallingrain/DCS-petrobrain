@@ -274,6 +274,29 @@ class OpticState:
     #: requiring full envelope-overlap testing. `None` while `SCANNING` or
     #: `SEARCHING`.
     look_contact_id: str | None = None
+    #: Where the sight head *actually* points, as distinct from
+    #: `look_azimuth_deg`/`look_elevation_deg` above (belief's *desired*
+    #: aim) -- `plans/9k113-sight/plan.md` §15a, direction §12. `None`
+    #: exactly when no fixed look is commanded, mirroring `look_azimuth_
+    #: deg`'s own contract. Advanced by `advance_sight_aim` at the one
+    #: place `OpticDecision`'s desired aim becomes a `Gaze`
+    #: (`logger._apply_active_gaze`) -- carried here, not computed inside
+    #: `gaze_at`, because `gaze_at` must stay a pure function of `t_sim`
+    #: alone for replay determinism, which is exactly what this class's own
+    #: "frozen and replaced rather than mutated" rule protects. Today
+    #: `actual := desired` unconditionally (`advance_sight_aim`'s own
+    #: docstring) -- permanently correct for the naked eye and binoculars,
+    #: a stated placeholder for a sighted optic until `[[BL-B66]]` inserts
+    #: a real controller between these two fields without moving this one.
+    #:
+    #: **Every branch of `decide` below that constructs a fresh `OpticState`
+    #: (rather than `replace`-ing one) must carry these two fields forward
+    #: explicitly** -- they are not part of this cycle's own phase
+    #: bookkeeping, so there is no phase-transition reason to reset them,
+    #: and a future controller needs continuity across polls to converge at
+    #: all.
+    actual_aim_azimuth_deg: float | None = None
+    actual_aim_elevation_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -285,6 +308,37 @@ class OpticDecision:
     #: alone" -- the scan phase does not override the gaze at all.
     look_azimuth_deg: float | None = None
     look_elevation_deg: float | None = None
+
+
+def advance_sight_aim(
+    actual_azimuth_deg: float | None,
+    actual_elevation_deg: float | None,
+    desired_azimuth_deg: float | None,
+    desired_elevation_deg: float | None,
+    *,
+    dt_s: float,
+) -> tuple[float | None, float | None]:
+    """Converge the sight's *actual* pointing direction toward belief's
+    *desired* one, one poll at a time -- `plans/9k113-sight/plan.md` §15a,
+    direction §12/§12a. Called from the one conversion point where
+    `OpticDecision`'s desired aim becomes the `Gaze`/cone perception
+    actually uses (`logger._apply_active_gaze`), so a future controller
+    replaces this function's body without moving that call site.
+
+    **Perception-stage body: a pure pass-through.** The sight is slewed by
+    a rate-commanded control loop in reality -- read where it is, command
+    a deflection, repeat (direction §12) -- but that loop belongs to the
+    effector stage (`[[BL-B66]]`), which has not landed. Until it does,
+    `actual := desired` instantly: *permanently* correct for the naked eye
+    and binoculars (a head turn is instant against a 1 Hz poll), a stated
+    placeholder for a sighted optic.
+
+    `dt_s` is accepted and unused here -- reserved for the rate-limited
+    controller `[[BL-B66]]` adds, which needs it to bound how far `actual`
+    may move in one poll. Keeping it in the signature now, even though
+    this body ignores it, is what lets that controller drop in without
+    changing the call site or its callers."""
+    return desired_azimuth_deg, desired_elevation_deg
 
 
 def _step_centres_deg(half_width_deg: float, fov_full_width_deg: float) -> list[float]:
@@ -854,6 +908,13 @@ def decide(
                     search_pattern_steps=tuple(search),
                     attempted_at_range_m=dict(state.attempted_at_range_m),
                     attempted_at_time_sim=dict(state.attempted_at_time_sim),
+                    # Not part of this phase's own bookkeeping -- carried
+                    # forward explicitly (`OpticState.actual_aim_azimuth_
+                    # deg`'s own docstring) rather than reset, since a
+                    # fresh `OpticState(...)` here (not `replace`) would
+                    # otherwise drop them.
+                    actual_aim_azimuth_deg=state.actual_aim_azimuth_deg,
+                    actual_aim_elevation_deg=state.actual_aim_elevation_deg,
                 ),
                 OpticDecision(
                     optic=BINOCULAR_OPTIC,
@@ -912,6 +973,10 @@ def decide(
             pending_attempted_at_range_m=pending,
             attempted_at_time_sim=dict(state.attempted_at_time_sim),
             look_contact_id=chosen.contact_id,
+            # Carried forward explicitly, same reason as the SEARCHING
+            # branch above.
+            actual_aim_azimuth_deg=state.actual_aim_azimuth_deg,
+            actual_aim_elevation_deg=state.actual_aim_elevation_deg,
         ),
         OpticDecision(
             optic=BINOCULAR_OPTIC,

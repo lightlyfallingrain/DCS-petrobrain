@@ -17,6 +17,7 @@ from belief.optic_policy import (
     LookTarget,
     OpticPhase,
     OpticState,
+    advance_sight_aim,
     choose_look,
     decide,
     improvement_window_m,
@@ -1272,3 +1273,79 @@ def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stal
         "and never advances classification should still become eligible "
         "again once OPTIC_RETRY_INTERVAL_S has elapsed"
     )
+
+
+class TestAdvanceSightAim:
+    """`plans/9k113-sight/plan.md` §15a -- the perception stage's own body
+    is a pure pass-through; the effector stage (`[[BL-B66]]`) replaces it
+    with a rate-limited controller without moving the call site."""
+
+    def test_actual_becomes_desired_instantly(self) -> None:
+        actual_azimuth, actual_elevation = advance_sight_aim(
+            10.0, -2.0, 45.0, 6.0, dt_s=1.0
+        )
+
+        assert actual_azimuth == 45.0
+        assert actual_elevation == 6.0
+
+    def test_actual_becomes_desired_even_with_no_prior_actual(self) -> None:
+        """The first poll of a look has no prior actual aim at all
+        (`OpticState.actual_aim_azimuth_deg` defaults to `None`) -- the
+        pass-through must not require one."""
+        actual_azimuth, actual_elevation = advance_sight_aim(
+            None, None, 45.0, 6.0, dt_s=0.0
+        )
+
+        assert actual_azimuth == 45.0
+        assert actual_elevation == 6.0
+
+    def test_dt_s_is_accepted_but_does_not_change_the_result(self) -> None:
+        """Reserved for the effector stage's controller -- the perception
+        stage's own body ignores it entirely."""
+        at_zero = advance_sight_aim(10.0, -2.0, 45.0, 6.0, dt_s=0.0)
+        at_large = advance_sight_aim(10.0, -2.0, 45.0, 6.0, dt_s=100.0)
+
+        assert at_zero == at_large
+
+
+class TestOpticStateActualAimCarriesForward:
+    """`OpticState.actual_aim_azimuth_deg`/`actual_aim_elevation_deg` are
+    not part of `decide`'s own phase bookkeeping, so a phase transition
+    must never reset them -- a future controller needs continuity across
+    polls to converge at all (the field's own docstring)."""
+
+    def test_entering_glassing_carries_the_prior_actual_aim_forward(self) -> None:
+        state, decision = decide(
+            OpticState(
+                phase_started_sim=0.0,
+                actual_aim_azimuth_deg=12.0,
+                actual_aim_elevation_deg=-3.0,
+            ),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.actual_aim_azimuth_deg == 12.0
+        assert state.actual_aim_elevation_deg == -3.0
+
+    def test_entering_searching_carries_the_prior_actual_aim_forward(self) -> None:
+        sweep = [(-10.0, -2.0), (0.0, -2.0)]
+        state, decision = decide(
+            OpticState(
+                phase_started_sim=0.0,
+                actual_aim_azimuth_deg=12.0,
+                actual_aim_elevation_deg=-3.0,
+            ),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        assert state.phase is OpticPhase.SEARCHING
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.actual_aim_azimuth_deg == 12.0
+        assert state.actual_aim_elevation_deg == -3.0

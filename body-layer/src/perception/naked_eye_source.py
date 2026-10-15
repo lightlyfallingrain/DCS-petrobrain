@@ -253,7 +253,7 @@ from perception.detection_trace import (
     GateOutcome,
 )
 from perception.estimation import (
-    naked_eye_sigma_m,
+    look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
 )
@@ -965,7 +965,13 @@ class NakedEyePerceptionSource:
         self._observation_count += 1
         observation_id = f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}"
         bias_object_id = min(member.object_id for member in cluster.members)
-        sigma_cross_m, sigma_down_m = naked_eye_sigma_m(true_range_m)
+        # `BL-B64` Stage 1b (`BL-B55`, folded in): `self.optic` is the
+        # active optic for this whole poll (module docstring on that
+        # attribute), so this one call is both "per-optic position sigma"
+        # and "a group ranged once with a shared draw" -- `_build_
+        # observation` already runs once per cluster, so there is no
+        # per-member ranging to avoid.
+        sigma_cross_m, sigma_down_m = look_sigma_m(true_range_m, self.optic)
         estimated_bearing_deg, estimated_range_m = perturbed_bearing_range(
             observation_id=observation_id,
             object_id=bias_object_id,

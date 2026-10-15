@@ -446,10 +446,17 @@ NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 #:
 #: Still not a measured limit: nothing was photographed beyond 8.89 km, so
 #: whether real DCS visibility ends at 10 km, 15 km, or further is unknown.
-#: With the calibrated `lowres` threshold a 7 m vehicle reaches 9333 m from
-#: the formula, just inside this cap -- so for ordinary ground vehicles the
-#: size curve still does the discriminating and the cap binds only ships
-#: and other outsized objects.
+#:
+#: **Stale figure corrected, 2026-10-15 (`plans/9k113-sight/plan.md` §11,
+#: found while checking this cap's reach for the 9K113 work).** This
+#: comment used to claim a 7 m vehicle reaches 9333 m from the formula,
+#: "just inside this cap" -- that was from a `LOWRES_ANGULAR_RADIUS_RAD`
+#: threshold (0.00075) that no longer exists. With the current value
+#: (0.003), a 7 m vehicle's naked-eye `lowres` presence threshold is
+#: `7 / 0.003 = 2333 m`, far short of this cap -- so for an ordinary
+#: ground vehicle the size curve does the discriminating at a much shorter
+#: range than this paragraph used to say, and the cap binds only ships and
+#: other outsized objects, as the next sentence already said.
 #:
 #: Note this no longer matches `association.RANGE_CAP_M` (5000). The two
 #: were aligned when both were guesses; this one now has data behind it and
@@ -782,12 +789,16 @@ def check_visibility(
 
     The FOV gate is a new cone on top of the cockpit mask, not a
     replacement for it -- an optic can only narrow what the mask already
-    admits. For `UNAIDED_OPTIC` (`fov_half_angle_deg is None`)
-    `within_optic_fov` always passes, so the gate is a no-op for the
-    default path. `BINOCULAR_OPTIC` now carries a real field-of-view value
-    (`optics.py`'s own docstring), but is not wired into any concrete
-    `PerceptionSource` yet -- passing it is possible today only by an
-    explicit caller, none of which exist.
+    admits. **Until `BL-B64` (direction §14), `UNAIDED_OPTIC` had
+    `fov_half_angle_deg is None` and this gate was a documented no-op for
+    the default path** -- the one optic in this table whose FOV gate never
+    fired. It now carries a real 90-degree half-angle, so the gate is live
+    for the default path too (see `optics.py`'s own docstring for the one
+    behavioural difference: it is a true 90-degree *separation* bound, not
+    a restatement of the gaze gate's azimuth-only +/-90). `BINOCULAR_OPTIC`
+    carries a real field-of-view value too (`optics.py`'s own docstring),
+    but is not wired into any concrete `PerceptionSource` yet -- passing it
+    is possible today only by an explicit caller, none of which exist.
 
     `trace` (`perception.detection_trace`, BL-9) is additive and defaults
     to `None` -- a true no-op, same pattern `overlay_client`/`speech_client`

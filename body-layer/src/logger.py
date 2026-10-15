@@ -195,7 +195,7 @@ import time
 import urllib.error
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, TextIO
 
@@ -224,6 +224,7 @@ from belief.optic_policy import (
     OpticDecision,
     OpticPhase,
     OpticState,
+    advance_sight_aim,
     is_steady,
     look_target_for,
     lower_binoculars,
@@ -563,9 +564,24 @@ class ConsolePerceptionRunner:
             search=_search_sweep(self.scan_plan, ownship),
         )
         self.optic = optic_decision.optic
-        _apply_active_gaze(
-            self.sources, self.tasks, scan_plan=self.scan_plan, decision=optic_decision
+        # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the
+        # *previous* poll's own `t_sim` here (it is updated later in this
+        # method), so this is an ordinary poll-to-poll delta, 0.0 on the
+        # first poll -- unused by `advance_sight_aim`'s current body, kept
+        # threaded through for the effector stage's controller.
+        dt_s = ownship.t_sim - (
+            self.last_t_sim if self.last_t_sim is not None else ownship.t_sim
         )
+        updated_optic_state = _apply_active_gaze(
+            self.sources,
+            self.tasks,
+            scan_plan=self.scan_plan,
+            decision=optic_decision,
+            optic_state=self.optic_state,
+            dt_s=dt_s,
+        )
+        if updated_optic_state is not None:
+            self.optic_state = updated_optic_state
         observations = [
             observation
             for source in self.sources
@@ -851,7 +867,9 @@ def _apply_active_gaze(
     *,
     scan_plan: ScanPlan | None = None,
     decision: OpticDecision | None = None,
-) -> None:
+    optic_state: OpticState | None = None,
+    dt_s: float = 0.0,
+) -> OpticState | None:
     """Assigns the resolved scan plan and optic onto whichever `sources`
     entry is a `NakedEyePerceptionSource` -- a true no-op for every other
     source, and for a `sources` list (e.g. in tests) that holds no
@@ -873,22 +891,75 @@ def _apply_active_gaze(
     holding one direction rather than a special case in the source: the
     source already resolves `gaze_at(now_sim, scan_plan)` every poll, so a
     plan whose every leg is the same direction *is* a fixed stare, and no
-    branch is needed anywhere downstream."""
+    branch is needed anywhere downstream.
+
+    **This is the conversion point `plans/9k113-sight/plan.md` §15a
+    names**: `decision.look_azimuth_deg`/`look_elevation_deg` are belief's
+    *desired* aim; `advance_sight_aim` converts that into the sight's
+    *actual* pointing direction, and the `ScanPlan`/`Gaze` built below
+    reads *actual*, never desired. `optic_state` is optional (`None` for
+    every pre-existing caller, including the several tests that call this
+    directly with no decision) -- when given, the returned `OpticState`
+    (or `None` if nothing changed) is what the caller must persist back
+    onto its own `optic_state` field, the same way `run_once` already
+    persists `decide_optic`'s return value. `dt_s` is threaded through to
+    `advance_sight_aim` unused today -- see that function's own docstring."""
     resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
     optic = decision.optic if decision is not None else UNAIDED_OPTIC
+    updated_state = optic_state
     if (
         decision is not None
         and decision.look_azimuth_deg is not None
         and decision.look_elevation_deg is not None
     ):
+        prior_azimuth = (
+            optic_state.actual_aim_azimuth_deg if optic_state is not None else None
+        )
+        prior_elevation = (
+            optic_state.actual_aim_elevation_deg if optic_state is not None else None
+        )
+        actual_azimuth_deg, actual_elevation_deg = advance_sight_aim(
+            prior_azimuth,
+            prior_elevation,
+            decision.look_azimuth_deg,
+            decision.look_elevation_deg,
+            dt_s=dt_s,
+        )
+        # `advance_sight_aim`'s perception-stage body is `return desired`,
+        # and both desired values are non-`None` on this branch (checked
+        # above) -- so `actual` cannot be `None` here. A future controller
+        # must preserve that: it never has a desired aim to converge
+        # toward without one to converge *from*.
+        assert actual_azimuth_deg is not None
+        assert actual_elevation_deg is not None
+        if optic_state is not None:
+            updated_state = replace(
+                optic_state,
+                actual_aim_azimuth_deg=actual_azimuth_deg,
+                actual_aim_elevation_deg=actual_elevation_deg,
+            )
         resolved_plan = ScanPlan.fixed_look_at(
-            azimuth_deg=decision.look_azimuth_deg,
-            elevation_deg=decision.look_elevation_deg,
+            azimuth_deg=actual_azimuth_deg,
+            elevation_deg=actual_elevation_deg,
+        )
+    elif optic_state is not None and (
+        optic_state.actual_aim_azimuth_deg is not None
+        or optic_state.actual_aim_elevation_deg is not None
+    ):
+        # No fixed look is commanded this poll -- actual aim goes back to
+        # `None` too, mirroring `OpticState.look_azimuth_deg`'s own
+        # None-while-not-glassing contract, rather than holding a stale
+        # direction from the last glass phase.
+        updated_state = replace(
+            optic_state,
+            actual_aim_azimuth_deg=None,
+            actual_aim_elevation_deg=None,
         )
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = resolved_plan
             source.optic = optic
+    return updated_state
 
 
 def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:

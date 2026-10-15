@@ -14,6 +14,36 @@ radians(BEARING_SIGMA_DEG) * true_range_m` (a declared judgement constant,
 see that name's own docstring). Both scale with range, so the model
 behaves sensibly at every distance without a lookup table.
 
+**Per-optic, as of `BL-B64` Stage 1b (`BL-B55`, folded into that entry --
+`plans/9k113-sight/plan.md` §14).** `look_sigma_m` (renamed from
+`naked_eye_sigma_m` -- it is no longer naked-eye-only) takes the active
+`perception.optics.Optic` and scales both axes by it. `UNAIDED_OPTIC` and
+`BINOCULAR_OPTIC` are unaffected by construction (both scales are 1.0,
+pinned by `test_estimation.py`) -- only the two sight optics get tighter
+numbers, because that is what is sourced/judged so far; the live asymmetry
+`BL-B55`'s own roadmap entry flags for binoculars (seeing further while
+believed no more precisely) is not fixed for binoculars in this pass,
+deliberately: there is no sourced figure to assign it, and fixing the
+9K113 case first is what this entry exists to do. **Down-range and
+cross-range scale differently, because they come from different
+instruments** (direction §2/§11): down-range from the sight's stadiametric
+aid (`_RANGE_SIGMA_SCALE_BY_OPTIC`, one judgement constant per
+sight optic, tunable), cross-range from the sight's own field of view
+relative to the binocular FOV `BEARING_SIGMA_DEG` is itself calibrated
+against (`_SIGHT_BEARING_SIGMA_SCALE_BY_OPTIC`, derived from the FOV
+ratio, not an independent judgement call). **Never derived from
+`UNAIDED_OPTIC`'s own `fov_half_angle_deg`** -- that field is a
+peripheral-vision envelope as of direction §14, not a measure of pointing
+precision, so it has no bearing on this scale at all.
+
+**A group is ranged once, with a shared draw, by construction, not by a
+special case here** (direction §11). `naked_eye_source._build_observation`
+calls `look_sigma_m`/`perturbed_bearing_range` exactly once per cluster
+already (one `Observation` per group), so threading the active optic
+through that one existing call is what makes a group's position error a
+single shared draw -- nothing in this module has to know what a "group"
+is for that to hold.
+
 **Perturb, don't just declare** (plan Decision 1, user-approved): stating
 an uncertainty on an exact-truth number would make `belief/percept.py`'s
 no-omniscience boundary a comment, not a mechanism -- a heavily-observed
@@ -44,6 +74,12 @@ import math
 from typing import Final
 
 import tuning
+from perception.optics import (
+    BINOCULAR_OPTIC,
+    SIGHT_NARROW_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    Optic,
+)
 
 #: Down-range (along line-of-sight) 1-sigma error as a fraction of true
 #: range. Derived, not invented, from ED's own `OP_D*` range-bucket ladder
@@ -95,6 +131,64 @@ SYSTEMATIC_BIAS_FRACTION: Final[float] = 0.4
 #: would be felt as chatter near the band edge rather than being free.
 RELATIVE_DIRECTION_SIGMA_DEG: Final[float] = 0.0
 
+#: Down-range fractional-sigma coefficient for a 9K113 wide look --
+#: `BL-B64` Stage 1b (`plans/9k113-sight/plan.md` §14). Mirrors
+#: `RANGE_FRACTIONAL_SIGMA`'s own shape (a fraction of true range), with a
+#: smaller coefficient reflecting the stadiametric aid the sight carries
+#: that the naked eye does not -- the Mi-24P manual's own reticle
+#: calibration (5000 m / 2.5 m, 1000 m / 2.5 m; `body-layer/research/
+#: 2026-09-20-9k113-sight-optics-from-manual.md`). **A stated assumption,
+#: not a measurement** -- the plan's own phrase -- tuned from flying like
+#: every perception constant before its first sortie.
+SIGHT_WIDE_RANGE_SIGMA_SCALE: Final[float] = tuning.real(
+    "perception.estimation.SIGHT_WIDE_RANGE_SIGMA_SCALE",
+    0.5,
+    lo=0.05,
+    hi=1.0,
+    status="judgement",
+)
+
+#: Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10)
+#: setting -- smaller, because the x10 magnification reads the same
+#: stadiametric marks at finer resolution.
+SIGHT_NARROW_RANGE_SIGMA_SCALE: Final[float] = tuning.real(
+    "perception.estimation.SIGHT_NARROW_RANGE_SIGMA_SCALE",
+    0.3,
+    lo=0.05,
+    hi=1.0,
+    status="judgement",
+)
+
+#: Down-range scale per optic for `look_sigma_m` below -- `1.0` (no
+#: change) for every optic not named here, which is both `UNAIDED_OPTIC`
+#: and `BINOCULAR_OPTIC` today (module docstring's "unaffected by
+#: construction"). Keyed by `Optic.name`, not by identity, so a synthetic
+#: test `Optic` sharing a sight's name picks up its scale too -- the same
+#: reasoning `Optic.name` is a plain string for elsewhere in this
+#: codebase.
+_RANGE_SIGMA_SCALE_BY_OPTIC: Final[dict[str, float]] = {
+    SIGHT_WIDE_OPTIC.name: SIGHT_WIDE_RANGE_SIGMA_SCALE,
+    SIGHT_NARROW_OPTIC.name: SIGHT_NARROW_RANGE_SIGMA_SCALE,
+}
+
+#: Cross-range scale per optic -- **derived from the FOV ratio against
+#: `BINOCULAR_OPTIC`, not an independent judgement constant**
+#: (`BEARING_SIGMA_DEG`'s own docstring: "this is what sets the binocular
+#: sweep width," i.e. that is the regime it is already calibrated
+#: against). A narrower field is a tighter bearing read (direction §11);
+#: the 9K113's wide setting has a *wider* true field than compact
+#: binoculars despite its magnification (11.5 deg full vs. ~8.5 deg --
+#: `optics.py`'s own docstring), so its scale is honestly > 1.0, while
+#: narrow's tighter field gives < 1.0. Computed once at import, from the
+#: optics' own sourced `fov_half_angle_deg` values, not duplicated as a
+#: separate literal that could drift from them.
+_SIGHT_BEARING_SIGMA_SCALE_BY_OPTIC: Final[dict[str, float]] = {
+    SIGHT_WIDE_OPTIC.name: (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 1.0)
+    / (BINOCULAR_OPTIC.fov_half_angle_deg or 1.0),
+    SIGHT_NARROW_OPTIC.name: (SIGHT_NARROW_OPTIC.fov_half_angle_deg or 1.0)
+    / (BINOCULAR_OPTIC.fov_half_angle_deg or 1.0),
+}
+
 
 def _deterministic_unit_gaussian_pair(seed_text: str) -> tuple[float, float]:
     """Two independent, deterministic standard-normal draws from
@@ -114,11 +208,22 @@ def _deterministic_unit_gaussian_pair(seed_text: str) -> tuple[float, float]:
     return radius * math.cos(angle), radius * math.sin(angle)
 
 
-def naked_eye_sigma_m(true_range_m: float) -> tuple[float, float]:
-    """`(sigma_cross_m, sigma_down_m)` for a naked-eye look at
-    `true_range_m` -- see module docstring's "The model"."""
-    sigma_cross_m = math.radians(BEARING_SIGMA_DEG) * true_range_m
-    sigma_down_m = RANGE_FRACTIONAL_SIGMA * true_range_m
+def look_sigma_m(true_range_m: float, optic: Optic) -> tuple[float, float]:
+    """`(sigma_cross_m, sigma_down_m)` for a look through `optic` at
+    `true_range_m` -- see module docstring's "The model" and its
+    "Per-optic" section. Renamed from `naked_eye_sigma_m` (`BL-B64` Stage
+    1b) -- it was never structurally naked-eye-only, only unconditionally
+    so until this entry.
+
+    `UNAIDED_OPTIC`/`BINOCULAR_OPTIC` (any `optic.name` not in either
+    per-optic dict below) reproduce the pre-`BL-B64` formula exactly --
+    both scales resolve to `1.0` via `dict.get`'s default, so this is a
+    behaviour-preserving rename for every caller that existed before this
+    entry, pinned by `test_estimation.py`."""
+    bearing_scale = _SIGHT_BEARING_SIGMA_SCALE_BY_OPTIC.get(optic.name, 1.0)
+    range_scale = _RANGE_SIGMA_SCALE_BY_OPTIC.get(optic.name, 1.0)
+    sigma_cross_m = math.radians(BEARING_SIGMA_DEG * bearing_scale) * true_range_m
+    sigma_down_m = RANGE_FRACTIONAL_SIGMA * range_scale * true_range_m
     return sigma_cross_m, sigma_down_m
 
 

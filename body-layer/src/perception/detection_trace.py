@@ -55,11 +55,12 @@ class GateOutcome(str, Enum):
     GAZE = "gaze"
     COCKPIT_MASK = "cockpit_mask"
     #: The optic's own field of view rejected it -- a narrower cone on top
-    #: of the cockpit mask (`perception.optics`, cones slice 1). Never fires
-    #: for `UNAIDED_OPTIC`, whose `fov_half_angle_deg` is `None`, so it is
-    #: dormant on every path that exists today; added at the BL-9/cones
-    #: merge so that the gate cannot silently return without a trace entry
-    #: once slice 2 makes a non-default optic selectable.
+    #: of the cockpit mask (`perception.optics`, cones slice 1). **Could
+    #: never fire for `UNAIDED_OPTIC` until `BL-B64`** (direction §14 gave
+    #: it a real 90-degree half-angle in place of `None`) -- added at the
+    #: BL-9/cones merge so that the gate cannot silently return without a
+    #: trace entry once a non-default optic is selectable (still not the
+    #: case for `BINOCULAR_OPTIC`/the sight optics as of this entry).
     OPTIC_FOV = "optic_fov"
     RANGE_OR_SIZE = "range_or_size"
     TERRAIN_LOS = "terrain_los"

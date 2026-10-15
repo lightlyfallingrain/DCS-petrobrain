@@ -16,28 +16,33 @@ doc's "why they come from the BTR-60 alone" section) -- `UNAIDED_OPTIC` is
 1.0/1.0/1.0 by construction (the baseline observer, distinctiveness and
 per-tier multipliers all inert), `BINOCULAR_OPTIC` is 2.42/3.50/3.00.
 
-**The 9K113 sight's multipliers (wide 3.55/7.00/6.50, narrow
-5.81/13.75/15.00) are deliberately NOT added here as named `Optic`
-instances.** The sight itself stays out of scope this slice (see the
-scope-cut paragraph below, unchanged) -- adding it as a selectable table
-entry would let a concrete `PerceptionSource` select it, which is exactly
-what `plans/detection-cones-slice2/plan.md`'s "Explicitly out of scope"
-section defers to its own backlog item. Its values live in the decisions
-doc and in `perception.clustering`'s own docstring (the floor-fix
-derivation needs the narrow sight's 5.81 to state why the floor had to
-become optic-parametric), not as an importable constant here.
+**The 9K113 sight is now two named `Optic` instances (`BL-B64`,
+`plans/9k113-sight/plan.md` §11, Stage 1).** `SIGHT_WIDE_OPTIC`/
+`SIGHT_NARROW_OPTIC` carry the multipliers measured in detection-cones
+slice 2A (wide 3.55/7.00/6.50, narrow 5.81/13.75/15.00) and the FOV figures
+sourced in `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`
+(wide 11.5 deg full angle, narrow 6.0 deg full angle -- half-angles below).
+**Nothing selects either of them yet** -- the same posture `BINOCULAR_OPTIC`
+held between slice 2A and `plans/binocular-optic/plan.md`, and for the same
+reason: the table entry and the policy that reaches it (`BL-B64` Stage 2,
+not built here) are separate decisions with separate risks. A concrete
+`PerceptionSource` that selects `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`
+would also need the field-of-regard check and the player-bubble cone
+(`BL-B64` Stage 2 and §12 of the plan) -- neither exists yet, so passing
+either optic to `check_visibility` today would be well-formed but is not
+wired into any live path.
 
-**Scope cut (user, 2026-09-20): the 9K113 sight is deferred entirely.**
-This module names only `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`. The 9K113's
-own magnification/field-of-view/field-of-regard figures, sourced and
-unverified alike, stay recorded in `body-layer/research/
-2026-09-20-9k113-sight-optics-from-manual.md` until the sight itself gets
-its own slice. `Optic` therefore carries no field-of-regard fields (how
-far an optic can be *pointed*, as opposed to what it shows once pointed):
-with no sighted optic in this table, every entry's regard would be `None`
-and unexercised by any test, so those fields were cut along with the
-9K113 entries that were their only reason to exist. A future 9K113 slice
-adds them back, sourced fields intact in the research note above.
+**`Optic` gains three field-of-regard fields** (`regard_azimuth_half_deg`,
+`regard_elevation_up_deg`, `regard_elevation_down_deg`) -- how far an optic
+can be *pointed*, as opposed to what it shows once pointed
+(`fov_half_angle_deg`) or the cockpit occlusion mask. `None` on
+`UNAIDED_OPTIC`/`BINOCULAR_OPTIC` (pointed by the head, unrestricted);
+sourced on the two sight optics from the English-language Mi-24P manual's
+§3.4 (±60 deg azimuth, +20/-15 deg elevation -- the research note above,
+"The sight's real angular limits"). Three fields, not one, because the
+elevation envelope is asymmetric. **Nothing reads these yet** -- the field
+of regard is unenforced data until `BL-B64` Stage 2 (or `[[BL-B66]]`) adds
+the check; recorded here now because the sight optics exist to carry it.
 
 **`Optic.boresight_azimuth_deg` is deleted (slice 2B, `plans/
 detection-cones-slice2/plan.md`).** `within_optic_fov` now takes the
@@ -72,6 +77,22 @@ look at it specifically. Real observation is naked-eye by default;
 binoculars are a deliberate, narrower, raised-to-the-eyes act, which is
 exactly what `BINOCULAR_OPTIC.fov_half_angle_deg` now being a real number
 (not `None`) encodes -- see that optic's own docstring below.
+
+**`UNAIDED_OPTIC.fov_half_angle_deg`: `None` -> `90.0` (user direction,
+`docs/acceptance/2026-10-15-9k113-sight-direction.md` §14, done alongside
+the 9K113 table work above).** `perception.gaze.FULL_GAZE` is already
+`half_width_deg = 90.0` and the gaze gate runs before this one, so this
+mostly restates an existing bound rather than changing behaviour -- see
+that constant's own docstring just below for the one real difference
+(`within_gaze` is azimuth-only, `within_optic_fov` is not) and for why the
+naked eye's own `None`-means-no-op branch is being retired rather than
+exercised for the first time. It also closes the one asymmetry `BL-B64`'s
+cone work depends on: before this, the naked eye was the one optic whose
+FOV gate was a documented no-op, which made "LOS is bounded by the optic's
+FOV" false of the default optic specifically. 180 deg is explicitly
+peripheral vision (the user's own framing) -- a narrower *focus* FOV,
+reconciled against `perception.gaze.FOCUS_CONE_HALF_WIDTH_DEG`, is a later
+refinement, not this one.
 
 **`BINOCULAR_RANGE_MULTIPLIER` is retired, not carried forward (slice
 2A).** It lived in `visibility.py` and was imported here as
@@ -112,14 +133,23 @@ class Optic:
     are BTR-60-derived (module docstring); `UNAIDED_OPTIC` is 1.0 on all
     three by construction.
 
-    `fov_half_angle_deg` is `None` for an optic with no FOV restriction
-    (the naked eye -- the cockpit occlusion mask is its only envelope);
-    `BINOCULAR_OPTIC` below is the first optic in this table to carry a
-    real value.
+    `fov_half_angle_deg` was `None` for an optic with no FOV restriction;
+    as of `BL-B64` (direction §14) that is no longer any shipped optic --
+    `UNAIDED_OPTIC` carries a real value (90.0) too, so `within_optic_fov`'s
+    `None` branch is unreachable from this table today (kept for a future
+    pseudo-optic, see that function's own docstring). `BINOCULAR_OPTIC` was
+    the first optic in this table to carry a real value; it no longer is
+    the only one.
 
     `peripheral` (slice 2B) is `True` iff this optic retains a wide,
     change-detecting peripheral channel alongside its focused view --
-    module docstring."""
+    module docstring.
+
+    `regard_azimuth_half_deg`/`regard_elevation_up_deg`/
+    `regard_elevation_down_deg` (`BL-B64` Stage 1) are the field of
+    regard -- how far this optic can be *pointed* -- `None` for an optic
+    pointed by the head (unrestricted). Three fields because the
+    elevation envelope need not be symmetric (the 9K113's is: +20/-15)."""
 
     name: str
     presence_range_mult: float
@@ -129,19 +159,30 @@ class Optic:
     #: Defaults `True` so every existing synthetic test `Optic(...)` still
     #: constructs unchanged -- only `BINOCULAR_OPTIC` sets this `False`.
     peripheral: bool = True
+    #: `None` for every optic pointed by the head (`UNAIDED_OPTIC`,
+    #: `BINOCULAR_OPTIC`); sourced from the Mi-24P manual's English edition
+    #: for the two sight optics below.
+    regard_azimuth_half_deg: float | None = None
+    regard_elevation_up_deg: float | None = None
+    regard_elevation_down_deg: float | None = None
 
 
-#: 1.0 on every tier, no FOV restriction -- the cockpit mask is the naked
-#: eye's only envelope. **The default `check_visibility` optic as of
-#: 2026-09-20** (was `BINOCULAR_OPTIC` -- see module docstring's "Naked eye
-#: is now the default" note for why). The baseline observer every other
-#: optic's multipliers are measured against.
+#: 1.0 on every tier -- the cockpit mask is the naked eye's only range
+#: envelope. **The default `check_visibility` optic as of 2026-09-20** (was
+#: `BINOCULAR_OPTIC` -- see module docstring's "Naked eye is now the
+#: default" note for why). The baseline observer every other optic's
+#: multipliers are measured against.
+#:
+#: `fov_half_angle_deg=90.0`, not `None` (`BL-B64`, direction §14) -- see
+#: the module docstring's own section on this change for why it is nearly
+#: a no-op (`perception.gaze.FULL_GAZE` already bounds the naked eye to
+#: +/-90 deg) and what the one real difference is.
 UNAIDED_OPTIC: Final[Optic] = Optic(
     name="unaided",
     presence_range_mult=1.0,
     class_range_mult=1.0,
     type_range_mult=1.0,
-    fov_half_angle_deg=None,
+    fov_half_angle_deg=90.0,
     peripheral=True,
 )
 
@@ -179,6 +220,71 @@ BINOCULAR_OPTIC: Final[Optic] = Optic(
     peripheral=False,
 )
 
+#: The 9K113 Raduga-Sh sight, wide (x3.3) setting -- `BL-B64` Stage 1,
+#: `plans/9k113-sight/plan.md` §11. **Nothing selects this yet** (module
+#: docstring).
+#:
+#: `presence_range_mult=3.55`/`class_range_mult=7.00`/`type_range_mult=
+#: 6.50` -- measured in detection-cones slice 2A, sitting unused in this
+#: module's history until now (previously recorded only in the decisions
+#: doc and `perception.clustering`'s own docstring).
+#:
+#: `fov_half_angle_deg=5.75` -- half of the sourced 11.5 deg full field
+#: (`body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`,
+#: "Field of view per magnification"; that note flags both FOV figures as
+#: user-supplied and explicitly unverified against either manual edition,
+#: unlike the field-of-regard figures below).
+#:
+#: `regard_azimuth_half_deg=60.0`, `regard_elevation_up_deg=20.0`,
+#: `regard_elevation_down_deg=-15.0` -- the sight head's own angular
+#: limits, sourced from the English-language Mi-24P manual's §3.4
+#: ("The sight's real angular limits -- SOURCED"), distinct from and far
+#: wider than the FOV above: the sight *sees* a few degrees at a time and
+#: can be *pointed* across a much wider arc.
+SIGHT_WIDE_OPTIC: Final[Optic] = Optic(
+    name="sight_wide",
+    presence_range_mult=3.55,
+    class_range_mult=7.00,
+    type_range_mult=6.50,
+    fov_half_angle_deg=5.75,
+    peripheral=False,
+    regard_azimuth_half_deg=60.0,
+    regard_elevation_up_deg=20.0,
+    regard_elevation_down_deg=-15.0,
+)
+
+#: The 9K113 Raduga-Sh sight, narrow (x10) setting -- same source and
+#: caveats as `SIGHT_WIDE_OPTIC` above.
+#:
+#: `presence_range_mult=5.81`/`class_range_mult=13.75`/`type_range_mult=
+#: 15.00` -- measured in detection-cones slice 2A; `perception.clustering`'s
+#: own floor-fix derivation already names the 5.81 figure (module
+#: docstring).
+#:
+#: `fov_half_angle_deg=3.00` -- half the sourced 6.0 deg full field. The
+#: research note flags one internal inconsistency worth repeating here:
+#: magnification rises 3.03x (x3.3 -> x10) while this field narrows only
+#: 1.92x (11.5 -> 6.0 deg); a single optical train sharing one objective
+#: would put the narrow field nearer 3.8 deg. Not proof of an error --
+#: separate optical paths can legitimately break that relation -- but if
+#: exactly one of the two sourced FOVs is wrong, the note says 6.0 deg is
+#: the one to doubt.
+#:
+#: Field of regard is identical to `SIGHT_WIDE_OPTIC`'s -- both settings
+#: share one sight head, so what angles it can be *pointed* to does not
+#: depend on which magnification is selected.
+SIGHT_NARROW_OPTIC: Final[Optic] = Optic(
+    name="sight_narrow",
+    presence_range_mult=5.81,
+    class_range_mult=13.75,
+    type_range_mult=15.00,
+    fov_half_angle_deg=3.00,
+    peripheral=False,
+    regard_azimuth_half_deg=60.0,
+    regard_elevation_up_deg=20.0,
+    regard_elevation_down_deg=-15.0,
+)
+
 
 def within_optic_fov(
     optic: Optic,
@@ -196,7 +302,12 @@ def within_optic_fov(
     active).
 
     `optic.fov_half_angle_deg is None` means "no restriction," always
-    `True` (`UNAIDED_OPTIC`). Otherwise compares the true angular
+    `True`. **No optic in this table sets it any more as of `BL-B64`**
+    (direction §14 gave `UNAIDED_OPTIC` a real 90-degree value) -- this
+    branch is kept rather than deleted because it is the documented
+    contract of a `None` half-angle, and a future pseudo-optic (e.g. a
+    peripheral-awareness channel genuinely wider than 90 degrees) may still
+    want it. Otherwise compares the true angular
     separation between `(azimuth_deg, elevation_deg)` and
     `(boresight_azimuth_deg, 0.0)` against the half-angle -- small-angle-
     safe great-circle-style separation via the standard spherical law of

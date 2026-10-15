@@ -63,6 +63,16 @@ POSITION_HALF_LIFE_S = 30.0
 # source: perception/estimation.py:BEARING_SIGMA_DEG
 BEARING_SIGMA_DEG = 3.0
 
+# Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10) setting -- smaller, because the x10 magnification reads the same stadiametric marks at finer resolution.
+# status: judgement | range: 0.05 .. 1.0
+# source: perception/estimation.py:SIGHT_NARROW_RANGE_SIGMA_SCALE
+SIGHT_NARROW_RANGE_SIGMA_SCALE = 0.3
+
+# Down-range fractional-sigma coefficient for a 9K113 wide look -- `BL-B64` Stage 1b (`plans/9k113-sight/plan.md` §14).
+# status: judgement | range: 0.05 .. 1.0
+# source: perception/estimation.py:SIGHT_WIDE_RANGE_SIGMA_SCALE
+SIGHT_WIDE_RANGE_SIGMA_SCALE = 0.5
+
 [perception.gaze]
 # How long the focus cone dwells on one o'clock position before stepping to the next (user decision, 2026-09-21).
 # status: judgement | range: 0.5 .. 5.0

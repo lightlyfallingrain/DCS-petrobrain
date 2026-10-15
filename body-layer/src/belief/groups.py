@@ -382,11 +382,13 @@ GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
 #:   `optics.BINOCULAR_OPTIC.presence_range_mult` 2.42.
 #:
 #: (`NAKED_EYE_RANGE_CAP_M` 10 000 m does not bind at any of them.) **The
-#: 9K113 is not implemented at all** -- `perception.optics` declares only
-#: `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`, the sight having been deferred
-#: entirely by the user's scope cut of 2026-09-20 -- so the optic that
-#: could see infantry at multiple kilometres does not exist in this code.
-#: Below ~1.4 km, `sigma_delta` is <= 338 m, inside this cap.
+#: 9K113 exists in `perception.optics` as of `BL-B64` Stage 1
+#: (`SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`) but nothing selects it** -- no
+#: concrete `PerceptionSource` passes either sight optic to
+#: `check_visibility` (that is `BL-B64` Stage 2, not built here), so the
+#: optic that could see infantry at multiple kilometres still cannot reach
+#: this cap through any live path. Below ~1.4 km, `sigma_delta` is <= 338 m,
+#: inside this cap.
 #:
 #: **Accepted by the user's decision of 2026-10-11, not overlooked**
 #: (`docs/acceptance/2026-10-11-infantry-detectability-feedback.md`):
@@ -399,12 +401,16 @@ GROUP_REPORTING_INSTALLATION_COHESION_CAP_M: Final[float] = 500.0
 #: for. **It must not be retuned to cover it**: widening it would loosen
 #: every close-range infantry pair, where the geometry above is sound, to
 #: buy the least important class one band under a deliberately raised
-#: optic. The *error model* is what should change -- `[[BL-B55]]`:
-#: `perception.estimation.naked_eye_sigma_m(true_range_m)` takes range
-#: only, at one call site (`perception/naked_eye_source.py`), so a
-#: binocular look already sees 2.42x further while being believed no more
-#: precisely than the naked eye. `estimation.py` is optic-blind while
-#: `visibility.py` is optic-aware; that asymmetry is the defect, and this
+#: optic. The *error model* is what should change -- `[[BL-B55]]`, closed
+#: as `BL-B64` Stage 1b for the 9K113's own two optics
+#: (`perception.estimation.look_sigma_m(true_range_m, optic)` now takes
+#: the active optic, at the same one call site, `perception/
+#: naked_eye_source.py`). **Binoculars are not fixed by that pass** --
+#: `BINOCULAR_OPTIC` still resolves to the naked-eye-grade scale (`1.0`,
+#: `look_sigma_m`'s own per-optic dicts), so a binocular look still sees
+#: 2.42x further while being believed no more precisely than the naked
+#: eye. There is no sourced figure to assign it yet; this is a known,
+#: carried-forward gap, not a defect this pass claims to have closed. This
 #: cap sits downstream of it.
 #:
 #: **Equal to `GROUP_REPORTING_INSTALLATION_COHESION_CAP_M` by coincidence,
