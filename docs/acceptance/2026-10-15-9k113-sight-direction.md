@@ -338,6 +338,34 @@ rework the user is asking to avoid.
 
 ---
 
+## §13 — LOS is only ever needed inside the current FOV, and that is already true
+
+> *"We only ever need LOS for the units that are in the current FOV. And that is dependent on the
+> optics type: naked eye, binoculars, 9K113 wide and narrow. While 9K113, especially narrow, can see
+> *far* it is a very narrow FOV, so it limits the LOS calculations a a fairly narrow sector."*
+
+**This confirms the existing design rather than changing it.** `check_visibility` already gates
+cheap-before-expensive — **gaze → cockpit mask → optic FOV → range/size → LOS**
+(`plans/player-bubble/performance.md`) — so LOS has never been computed for a candidate outside the
+current optic's field of view. Recorded because it is now a **stated invariant**: the perception
+entry may not reorder those gates for convenience.
+
+**The consequence the plan had not drawn, and it cuts against that plan's own cost estimate.**
+`UNAIDED_OPTIC` has `fov_half_angle_deg is None`, so for the naked eye the FOV gate is a **no-op**
+(`visibility.py:785-786` states this) — the eye is bounded only by the gaze gate and the 10 km cap.
+**The 9K113 is the first optic that genuinely narrows the gate.** Selecting narrow bounds the LOS
+set to a 6° sector; the naked eye bounds it to nothing comparable.
+
+So the directional cone and the FOV gate are **the same shape**, and the honest statement is that
+the cone admits approximately what the FOV gate would have admitted anyway, out to a longer range.
+Whether that is more or less LOS work than the naked eye performs today depends on unit density in
+the pointed sector, and cannot be decided from geometry — which is exactly why it is measured.
+
+**What the benchmark counts, therefore:** candidates **reaching the LOS step, per optic**, with the
+naked eye as the baseline — not candidates admitted by the bubble.
+
+---
+
 ## What this leaves open
 
 - **The two remaining plan decisions** — the missile word, and the launch-callout interim — are both

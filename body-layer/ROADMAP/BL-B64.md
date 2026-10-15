@@ -102,9 +102,26 @@
   specific guidance vocabulary, and per-unit ranging). The growth is concentrated in two places: the
   `optic_policy` resting-phase refactor, and the cone-plus-cap pair whose downstream LOS cost needs a
   **bench measurement** (plan §12b — estimated +20–40% on a 12.6 ms tick, bounded by area at 5–10%
-  more candidates). Cheap lever if it measures high: **the cone is only load-bearing for narrow
-  mode** — wide reaches ~8.3 km for a 7 m vehicle, *inside* the existing bubble — so dropping wide
-  from phase 1 halves the added cost for almost no product loss.
+  more candidates). ~~Cheap lever if it measures high: the cone is only load-bearing for narrow
+  mode — wide reaches ~8.3 km for a 7 m vehicle, *inside* the existing bubble — so dropping wide
+  from phase 1 halves the added cost for almost no product loss.~~
+
+  **The lever is withdrawn — user direction, 2026-10-15: both cones are in phase 1.** The
+  narrow-only fallback is not available, so the cost analysis above stands without a cheaper
+  position to retreat to. Build both.
+
+  **And the same direction reframes what the measurement is for.** *"We only ever need LOS for the
+  units that are in the current FOV. And that is dependent on the optics type."* That is already how
+  `check_visibility` gates — gaze → cockpit mask → optic FOV → range/size → LOS — so **this entry
+  must not reorder those gates**; it is a confirmation, not a change.
+
+  The consequence worth carrying: `UNAIDED_OPTIC` has `fov_half_angle_deg is None`, so for the naked
+  eye **the FOV gate is a no-op** and the eye is bounded only by gaze and the 10 km cap. The 9K113
+  is the first optic that genuinely narrows it, and the cone has the *same shape* as that gate — so
+  the cone admits roughly what the FOV gate would have admitted anyway, just further out. Whether
+  that is more or less LOS work than the naked eye does today depends on unit density in the pointed
+  sector and **cannot be settled from geometry**. So the benchmark counts **candidates reaching the
+  LOS step, per optic, against the naked eye as baseline** — not candidates admitted by the bubble.
 
   **Direction §12 is net negative work for this entry**: it removed the slew rate limit the plan was
   going to carry here and replaced it with the field split above.

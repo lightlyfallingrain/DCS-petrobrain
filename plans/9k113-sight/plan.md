@@ -951,3 +951,51 @@ The five from the first pass are settled or deferred above. These are new.
    direction's own *"acceptable first phase implementation is that distance measurement is
    instant"*. **Recommendation: defer** — the approximation is what matters and it is in phase 1;
    the cost is a second eyes-busy interval on a field that does not exist yet.
+
+---
+
+### All four answered — user direction, 2026-10-15
+
+| # | question | answer |
+|---|---|---|
+| 7 | wide cone in phase 1? | **Both.** Recommendation (narrow-only) **not taken.** |
+| 8 | `BL-B64` as the perception entry? | **Yes, as done.** |
+| 9 | the ~2 s ranging cost? | **Defer.** As recommended. |
+| 10 | when to measure the cone's LOS cost? | **Reframed — see below.** The user answered the design question the scheduling question rested on. |
+
+**On 7 — both cones, so the measurement loses the lever this plan offered it.** The narrow-only
+recommendation was built on wide reaching only ~8.3 km, inside the existing bubble. The user wants
+both, so phase 1 carries the full cone area and the cheap halving is not available. Build both;
+§17's cost analysis stands, it simply has no fallback position. *(This is a recommendation declined
+on the user's own call, recorded as such rather than re-argued.)*
+
+**On 10 — the question was wrong, and the answer is already in the code.** The user:
+
+> *"We only ever need LOS for the units that are in the current FOV. And that is dependent on the
+> optics type: naked eye, binoculars, 9K113 wide and narrow. While 9K113, especially narrow, can see
+> *far* it is a very narrow FOV, so it limits the LOS calculations a a fairly narrow sector."*
+
+**That is already how `check_visibility` works** — it gates cheap-before-expensive, **gaze → cockpit
+mask → optic FOV → range/size → LOS** (`plans/player-bubble/performance.md`), so LOS has never run
+for a candidate outside the current optic's FOV. The direction is therefore a confirmation of the
+existing ordering rather than a change to it, and **nothing in the perception entry may reorder
+those gates.**
+
+**But it carries a consequence this plan had not drawn, and it points the other way from §17's
+estimate.** `UNAIDED_OPTIC` has `fov_half_angle_deg is None`, so for the naked eye **the FOV gate is
+a no-op** (`visibility.py:785-786` says so explicitly) — the eye's only restrictions are the gaze
+gate and the 10 km cap. **The 9K113 is the first optic that genuinely narrows the gate.** With
+narrow selected, the set reaching LOS is bounded by a 6° sector; with the naked eye it is bounded by
+nothing but gaze and range.
+
+So the cone and the FOV gate are the *same shape*, and the honest statement of the cost is: **the
+cone admits approximately what the FOV gate would have admitted anyway, out to a longer range.**
+Whether that is more or less LOS work than the naked eye does today is **not predictable from the
+geometry** — it depends on unit density in the pointed sector — which is precisely why it must be
+measured rather than argued.
+
+**What the benchmark must count, restated:** candidates **reaching the LOS step, per optic**, with
+the naked eye as the baseline to compare against — not candidates admitted by the bubble. The
+harness exists (`plans/player-bubble/performance.md`); `detection_trace`'s histogram already carries
+the per-gate counts. Run it after the optics land, before the cone is wired, as recommended — the
+schedule was never the contested part.
