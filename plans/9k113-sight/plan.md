@@ -585,13 +585,42 @@ adds a `bearing_deg` only for candidates that *fail* the radius test (~325 of th
 order as `range_m`: **~0.16 ms/tick against a 12.6 ms tick, ~1.3%.** Guard the whole branch on
 `sight_cone is not None` so an OBSERV-off tick pays nothing at all.
 
-**Downstream cost: this is the real one, and it is the number that decides the design.** ~5–10 extra
+> **MEASURED AND SUPERSEDED, 2026-10-15 — `plans/9k113-sight/performance-cone-gate.md`.** The
+> paragraph below is wrong by **~125×**, and the error is a stale citation rather than bad
+> reasoning: the **540 µs/candidate** figure it inherits from `plans/player-bubble/performance.md`
+> was measured when `check_visibility` called world-model's sqlite `sample_grid` raycast directly —
+> **a code path `BL-11` Stage 4's fail-closed rewrite deleted.** Terrain LOS is now a boolean read
+> off `candidate.live_los_clear`, joined upstream by a dict lookup; the real raycast moved into the
+> DCS-side Lua Hook (`X-B29`), a separate and already-bounded subsystem.
+>
+> **Measured today: 4.3 µs/candidate** for the whole gate chain through `ADMITTED` (200 000 calls,
+> pinned venv). The cone's net added cost at sustained density is **0.02–0.11% of the 12.6 ms
+> tick**, wide and narrow alike — three orders of magnitude under the estimate below. **Build the
+> cone as planned; no bounding mechanism is needed.**
+>
+> Direction §13's hypothesis is confirmed rather than merely plausible: the narrow cone's projected
+> admission (median 0.5, p90 2.8, p99 3.3 candidates/tick) is **smaller than the naked eye's
+> existing per-tick LOS reach at every percentile measured** (median 6, p90 22, p99 60).
+>
+> **Stated limitation, not buried:** the trace records world/geographic bearing with no ownship
+> heading, so the azimuthal-admission fraction is a uniform-density *projection*, not a
+> measurement — the same assumption class as this section's own area argument. The hedge is a
+> break-even instead of a point estimate: narrow would need **~44× the measured p99 density** to
+> cost 5% of the tick, and only one debris-burst outlier in the whole trace clears that.
+>
+> **One finding worth carrying into the implementation:** wide's 20 km reach is nearly moot for this
+> mission's unit mix — only **4.7%** of the raw 10–20 km population is a type wide's ×3.55 could
+> admit past 10 km, and then barely (10.65 km). **Narrow is where the extra depth earns its keep**
+> (57.1%, every 6–7 m+ vehicle). Both are still built, per user direction; this says where the value
+> is, not what to drop.
+
+~~**Downstream cost: this is the real one, and it is the number that decides the design.** ~5–10 extra
 candidates entering `check_visibility`'s gate chain cost ~nothing at the cheap gates but **~540 µs
 each if they reach terrain LOS** — **~2.7–5.4 ms/tick, i.e. +20–40% on a 12.6 ms tick.** That is not
 negligible. The upper end is also pessimistic: a candidate past 10 km survives only while the sight
 is active *and pointed at it*, which is at most one 6° wedge, so the realistic count is a handful
 rather than ten, and the cheap gates (the new per-optic cap, the FOV cone, the cockpit mask) run
-first by construction — `check_visibility`'s gate order is cheap-before-LOS.
+first by construction — `check_visibility`'s gate order is cheap-before-LOS.~~
 
 **What must be measured, and it is a re-run rather than new instrumentation.**
 `plans/player-bubble/performance.md` already has the harness, the trace and the per-candidate costs:
