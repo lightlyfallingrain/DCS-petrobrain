@@ -560,6 +560,7 @@ def look_sweep(
     centre_elevation_deg: float,
     bearing_uncertainty_deg: float,
     fov_full_width_deg: float,
+    regard_optic: Optic | None = None,
 ) -> list[tuple[float, float]]:
     """The steps one binocular identification look works through, sweeping
     the believed bearing's own angular uncertainty instead of staring at
@@ -590,12 +591,68 @@ def look_sweep(
     fits inside one field of view, the sweep is a single step at the
     believed direction for the whole look. The stare is this function's
     degenerate case, not a branch elsewhere.
+
+    **`regard_optic` truncates the sweep at the mount's own field of regard
+    (`BL-B64` security follow-up, `plans/9k113-sight/security.md`'s
+    "Notable Discoveries").** `_decide_sighting` already rejects a *chosen*
+    target outside the sight's field of regard before this function ever
+    runs -- but the sweep this function builds *around* that validated
+    target still reaches `bearing_uncertainty_deg` past it on either side,
+    and a fresh contact's 15-degree default uncertainty is wider than the
+    narrow sight's own 3-degree half-angle, so a target only a few degrees
+    inside the boundary swept steps well past it. Every such step was
+    committed as `look_azimuth_deg` exactly as the chosen target itself
+    would have been, feeding the player-bubble cone from a direction the
+    9K113 cannot physically point -- the same leak the required fix closed,
+    one level downstream.
+
+    **Truncated, not narrowed.** Dropping the out-of-regard steps (rather
+    than shrinking `bearing_uncertainty_deg` before sweeping) keeps every
+    step on the reachable side at its full width, so the half of the
+    uncertainty that is *not* adjacent to the boundary is swept exactly as
+    before. Narrowing the envelope instead would have reduced coverage on
+    the unconstrained side too, for no benefit -- the contact may just as
+    well have drifted away from the boundary as into it, and nothing about
+    the boundary makes that direction less likely. A mount that cannot
+    swing past its limit does not search less on the side it *can* reach
+    either; it searches that side in full and simply does not visit the
+    side it cannot. This is the same "reject, not clamp" choice
+    `within_field_of_regard`'s own docstring makes at the selection point,
+    carried through to this sweep: a step outside the envelope is dropped,
+    never pulled back to the boundary and attributed to a bearing it was
+    not generated for.
+
+    **A true no-op when `regard_optic` is `None`** (the default, and the
+    only value `GLASSING`'s binocular call ever passes -- `BINOCULAR_OPTIC.
+    regard_azimuth_half_deg` is `None`, so filtering by it would have been
+    a no-op there regardless; passing `None` through this parameter
+    instead keeps that unconditional, not merely incidental). Also a
+    no-op, field by field, for any `regard_optic` whose own `regard_*`
+    attributes are `None` -- `within_field_of_regard` already treats an
+    unset bound as unrestricted, and this function relies on that rather
+    than re-deriving it.
+
+    **The centre step (offset zero) always survives the filter.** It is
+    exactly `(centre_azimuth_deg, centre_elevation_deg)` -- the chosen
+    target's own validated direction, by every caller's construction -- so
+    this function never returns an empty list for a `regard_optic` whose
+    bound that direction already satisfies. It does not re-validate that
+    precondition itself; a caller that swept around an already-rejected
+    centre would be a bug upstream of this function, not one this filter
+    can repair.
     """
     half_width = max(bearing_uncertainty_deg, 0.0)
     azimuths = sorted(
         _step_centres_deg(half_width, fov_full_width_deg), key=lambda a: (abs(a), a)
     )
-    return [(centre_azimuth_deg + offset, centre_elevation_deg) for offset in azimuths]
+    steps = [(centre_azimuth_deg + offset, centre_elevation_deg) for offset in azimuths]
+    if regard_optic is not None:
+        steps = [
+            step
+            for step in steps
+            if within_field_of_regard(regard_optic, step[0], step[1])
+        ]
+    return steps
 
 
 def is_steady(
@@ -1197,12 +1254,22 @@ def _decide_sighting(
     # Starting a new look at the chosen target -- same shape as `decide`'s
     # own SCANNING-at-home body entering `GLASSING`, swept against the
     # narrow sight's own field of view rather than the binoculars'.
+    #
+    # `regard_optic=SIGHT_WIDE_OPTIC` truncates the sweep at the mount's
+    # own field of regard (`look_sweep`'s own docstring has the full
+    # reasoning) -- `chosen` already passed `within_field_of_regard` above,
+    # but the sweep built *around* it can still reach past the boundary on
+    # a wide-uncertainty contact close to the edge. `SIGHT_WIDE_OPTIC` is
+    # read for the same reason the candidate filter above reads it: one
+    # optic has to be named and the two sight optics' `regard_*` fields are
+    # identical.
     fov_full_width_deg = (SIGHT_NARROW_OPTIC.fov_half_angle_deg or 0.0) * 2.0
     sweep = look_sweep(
         centre_azimuth_deg=chosen.azimuth_deg,
         centre_elevation_deg=chosen.elevation_deg,
         bearing_uncertainty_deg=chosen.bearing_uncertainty_deg,
         fov_full_width_deg=fov_full_width_deg,
+        regard_optic=SIGHT_WIDE_OPTIC,
     )
     envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
 

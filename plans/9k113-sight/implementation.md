@@ -1,3 +1,172 @@
+## Pass 5 — closing the residual field-of-regard leak in `look_sweep`
+
+### Implementation Summary
+
+Closes the residual leak Pass 4 flagged under Notable Discoveries and the follow-on memory note
+(`.claude/agent-memory/implementer/feedback_declared_bound_check_at_selection_not_at_consumer.md`):
+`_decide_sighting` rejects a *chosen* target outside the sight's field of regard before `choose_look`
+ever sees it, but the sweep `look_sweep` then builds *around* that validated target still spreads
+`chosen.azimuth_deg ± bearing_uncertainty_deg`, and a fresh contact's default 15° bearing uncertainty
+is wider than the narrow sight's own 3° half-angle — so a target only a few degrees inside the 60°
+boundary swept steps well past it, each committed as `look_azimuth_deg` on some poll and feeding the
+player-bubble cone from a direction the 9K113 cannot physically point. Built in a worktree checked
+out directly from `feature/9k113-sight` at `aac182834487e0b354262c8f36450e17046eeb54` (HEAD matched
+the named tip exactly; no merge needed, since the branch itself was not advanced past that commit).
+
+**Reproduced first, by direct execution, before any fix:** a target at 55° azimuth (5° inside the
+60° limit), default bearing uncertainty, driven through `decide()` for 30 simulated polls —
+`look_azimuth_deg` reached 67° (7° past the limit) on two of the five sweep steps. Confirmed the new
+tests go red for the stated reason (not import/collection failure) by stashing the source fix alone
+and re-running them: the integration test failed with `assert 67.0 <= 60.0`, the unit tests with
+`TypeError` (missing `regard_optic` parameter). Restored by `git stash pop` and confirmed the file's
+checksum matched the fixed version exactly (`shasum`, not by eye) before re-running the full suite.
+
+### Chosen fix: truncate `look_sweep`'s own output, not narrow the envelope
+
+**A third option was available and is not either of the two named in the dispatch brief** — not
+"clamp the sweep's output to the boundary" and not "cap `envelope_half_width` against the remaining
+margin" — but a close relative of the first: **drop the out-of-regard steps from the sweep's output
+list, rather than clamping them to the boundary value.** Reasoning:
+
+- **Consistent with the required fix's own "reject, not clamp" choice**, carried one level
+  downstream: a step the sight cannot physically reach is dropped from consideration entirely, not
+  pulled back to the edge and attributed to a bearing it was never generated for. Clamping would
+  have reintroduced exactly the attribution problem `within_field_of_regard`'s own docstring argues
+  against at the selection point.
+- **Truncating is asymmetric about the target; narrowing would have been symmetric but worse.** The
+  dispatch brief named this tradeoff explicitly. A mount that cannot swing past its physical limit
+  does not search *less* on the side it can reach — it searches that side in full and simply never
+  visits the side it cannot. Narrowing `envelope_half_width` instead would have shrunk the sweep on
+  *both* sides equally, for no benefit on the unconstrained side: the contact may just as well have
+  drifted away from the boundary as toward it, and nothing about the boundary makes that direction
+  less likely to hold the true position. Narrowing trades away real coverage (on the safe side) to
+  avoid a problem (the leak) that truncation already removes without that cost. I prefer the physical
+  honesty and the lower information loss of truncation; the asymmetry it produces is not a bias to
+  correct, it is what the mechanical limit actually does.
+- **One choke point, not two.** `look_sweep` is the sole producer of azimuth values for `SIGHTING`
+  that `_decide_sighting` ever commits as `look_azimuth_deg` — both the "new look" path (`sweep[0]`)
+  and the "continuing an existing look" path (`state.search_pattern_steps[index]`) read from the same
+  list this function returns. Filtering inside `look_sweep` itself, gated on a new optional
+  `regard_optic: Optic | None = None` parameter (default `None`, a true no-op — `GLASSING`'s
+  binocular call never passes it), fixes both call sites in one place rather than needing a second
+  check wherever a sweep step is read back out.
+- **The centre step always survives.** `look_sweep`'s step at offset zero is exactly
+  `(centre_azimuth_deg, centre_elevation_deg)` — the chosen target's own direction, already validated
+  by `_decide_sighting`'s `within_field_of_regard` filter before `look_sweep` is ever called — so the
+  function can never return an empty sweep for a `regard_optic` whose bound that direction satisfies.
+  This is a structural consequence of the existing filter order, not a second check inside
+  `look_sweep`; a caller that swept around an already-rejected centre would be a bug upstream of this
+  function, not one `look_sweep` tries to repair.
+
+### Elevation
+
+**`look_sweep` never varies elevation across a sweep** (`centre_elevation_deg` is held constant,
+per its own pre-existing docstring) — so every step shares the chosen target's own elevation, which
+was already checked against the asymmetric +20°/−15° bound at selection. There is no elevation
+analogue of the azimuth leak: nothing in the sweep can push elevation past either bound, because
+nothing in the sweep moves elevation at all. The fix's filter still calls `within_field_of_regard`
+with each step's (unvarying) elevation, so a future change that *does* vary elevation across the
+sweep would be caught by the same mechanism rather than silently exempted.
+
+### Files Changed
+
+- `src/belief/optic_policy.py` — `look_sweep` gains `regard_optic: Optic | None = None`; when set,
+  filters the generated `(azimuth, elevation)` steps through `within_field_of_regard`, dropping any
+  step outside the optic's mount limit. `_decide_sighting`'s one `look_sweep` call site (the "new
+  look" path) now passes `regard_optic=SIGHT_WIDE_OPTIC` — the same optic the candidate-filter check
+  above it already reads from, for the same reason (one optic has to be named; both sight optics'
+  `regard_*` fields are identical). `GLASSING`'s own `look_sweep` call (binoculars) is untouched —
+  `regard_optic` defaults to `None`, and `BINOCULAR_OPTIC.regard_azimuth_half_deg` is `None` in any
+  case, so passing it through would have been a no-op regardless.
+- `tests/test_optic_policy.py` — six new tests: five pure-function tests on `look_sweep` itself
+  (`TestLookSweep`: no-op with no `regard_optic`, no-op with an optic whose `regard_*` fields are all
+  `None`, truncation past a real boundary, the centre step surviving, elevation staying consistent
+  under the filter) plus one integration test through the real `decide()` dispatch
+  (`TestFieldOfRegardEnforcement::test_the_swept_look_never_commits_an_aim_past_the_boundary`),
+  stepping 30 simulated polls and asserting every committed `look_azimuth_deg` stays inside ±60°.
+
+### Tests Added
+
+- `test_no_regard_optic_is_a_true_no_op` — the default produces identical output to passing `None`
+  explicitly.
+- `test_an_optic_with_no_regard_data_filters_nothing` — `BINOCULAR_OPTIC` (all `regard_*` fields
+  `None`) filters exactly as much as `None` itself.
+- `test_a_regard_optic_truncates_steps_past_its_boundary` — the exact leak scenario (55° centre, 15°
+  uncertainty, 60° limit): every surviving step is within ±60°, and the unconstrained side keeps
+  steps beyond the symmetric-narrowing alternative would have reached, confirming truncation rather
+  than narrowing.
+- `test_the_centre_step_always_survives_the_filter` — a centre at 59.9° (just inside the boundary)
+  is never itself dropped.
+- `test_elevation_truncation_follows_the_same_rule` — a centre near the −15° down limit: the sweep
+  is non-empty and every step's elevation stays at the validated value.
+- `test_the_swept_look_never_commits_an_aim_past_the_boundary` — the integration reproduction, through
+  `decide()`, over 30 simulated polls.
+
+### Checks
+
+(body-layer/ only — the only subproject touched)
+
+- `ruff format --check .`: fails only on the pre-existing out-of-scope
+  `research/2026-10-05-security-audit.md`, as predicted.
+- `ruff check .`: All checks passed.
+- `mypy src`: Success: no issues found in 59 source files.
+- `pytest -q`: **1953 passed, 4 xfailed** (baseline 1947 passed, 4 xfailed; net +6, matching the 6 new
+  tests exactly). All 6 confirmed by name in unfiltered `-v` output, not via `-k`. Zero removed, zero
+  modified tests — `GLASSING`'s own sweep call is untouched (default parameter), confirmed by the
+  unchanged `test_binocular_cycle_is_unaffected_by_field_of_regard` passing without modification and
+  by the dedicated no-op tests above.
+
+### Widened audit — every other producer or mutator of a committed aim value, after the target is validated
+
+Per the dispatch brief's sharper question (not "which declared bounds are unenforced" but "what else
+produces or mutates a committed aim value, anywhere in the chain, after the target has been
+validated"), traced every assignment to `look_azimuth_deg`/`look_elevation_deg`/
+`actual_aim_azimuth_deg`/`actual_aim_elevation_deg` in `optic_policy.py` and `logger.py`:
+
+- **`_decide_sighting`** (the only function that can select a `SIGHTING` look target) has exactly one
+  producer of a non-`None` azimuth/elevation pair: the list `look_sweep` returns, read either as
+  `sweep[0]` (new look) or `state.search_pattern_steps[index]` (continuing an existing look). Both
+  are now filtered. Every other assignment in this function sets `None` (idle, or the current look's
+  natural end).
+- **`_back_to_home`, `_start_glance_away`, `_force_observ_off`** — all three only clear
+  `look_azimuth_deg`/`look_elevation_deg` to `None` or dispatch to `_back_to_home`; none of them
+  produces a new aim value.
+- **`advance_sight_aim`** (the one conversion point, `logger._apply_active_gaze`, where desired aim
+  becomes actual) is a pure pass-through in this stage (`return desired`) — it cannot push a value
+  past what `decide()` already committed as `look_azimuth_deg`/`look_elevation_deg`. This is the
+  stage's own documented deferral (the slew controller is `[[BL-B66]]`'s), not a second gap: nothing
+  here generates a value `_decide_sighting` did not already validate.
+- **`decide`'s `SEARCHING`/`GLASSING` branches** (lines further down the same file) also call
+  `look_sweep`, but always with `BINOCULAR_OPTIC`, whose `regard_*` fields are all `None` — there is
+  no field of regard to leak past for either of those phases, confirmed by reading `optics.py`'s own
+  table rather than assumed from the phase name.
+- **No consumer outside `optic_policy.py`/`logger.py` reads `look_azimuth_deg`, `look_elevation_deg`,
+  `look_envelope_azimuth_deg`, `look_envelope_half_width_deg`, or `search_pattern_steps`** — confirmed
+  by `grep` across `src/*.py` and `src/*/*.py`, empty result. `SightCone` (the player-bubble
+  exemption) is built in `logger.py` from `actual_aim_azimuth_deg`/`actual_aim_elevation_deg` alone,
+  which is itself downstream of the one chokepoint above.
+
+**List is otherwise empty** — `look_sweep` was the sole remaining unguarded producer; nothing else in
+the chain between a validated target and a committed aim value generates or mutates an azimuth or
+elevation that bypasses `within_field_of_regard`.
+
+### Notable Discoveries
+
+- **The fix lives entirely inside `look_sweep` itself, which is the structural answer to the dispatch
+  brief's choke-point question.** Both of `_decide_sighting`'s commit sites (new look, continuing
+  look) read from the same returned list, so one filter at the point the list is built closes both
+  without a second check at either read site — the same shape the memory note's own lesson
+  recommends ("fix at the point of choice, not the consumer"), just applied one function lower than
+  the original required fix, because `look_sweep` is itself a second producer downstream of
+  `_decide_sighting`'s selection.
+- **No cross-key coupling found between this fix and any tunable constant.** `bearing_uncertainty_deg`
+  is not a `tuning.*` constant (it is derived per-contact from `LOOK_SWEEP_SIGMA` or the fixed
+  default), and `regard_azimuth_half_deg`/the elevation bounds are plain `float` literals on the two
+  sight `Optic` rows, not pilot-tunable — so there is no sortie-time adjustment that could widen the
+  sweep back past the boundary the fix now enforces.
+
+---
+
 ## Pass 4 — the required fix from the security deep analysis (field of regard was declared, never enforced)
 
 ### Implementation Summary

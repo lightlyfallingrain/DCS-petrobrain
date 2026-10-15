@@ -49,3 +49,18 @@ cheaper than re-reading every docstring by eye. Here it found exactly one other 
 scope-cut paragraph being rewritten away (not a live deferral) -- worth running even when you expect
 it to come back empty, because an empty result is the actual evidence the audit was done, not an
 assumption.
+
+**Follow-up, closed (`plans/9k113-sight/implementation.md` Pass 5):** the flagged `look_sweep` leak
+was fixed by adding an optional `regard_optic: Optic | None = None` parameter to `look_sweep` itself
+(default `None`, a true no-op for `GLASSING`'s binocular call) that filters the generated steps
+through `within_field_of_regard` -- **truncating, not narrowing** the envelope, because narrowing
+would have shrunk coverage on the side of the sweep that was never near the boundary, for no
+corresponding safety gain. The choke point this time was `look_sweep` itself: both of
+`_decide_sighting`'s commit sites (new look via `sweep[0]`, continuing look via
+`state.search_pattern_steps[index]`) read from the one list it returns, so filtering inside the
+producer fixed both without a second check at either read site -- the general version of the lesson
+above, one function lower than the original fix. Re-running the widened audit ("what else produces
+or mutates a committed aim after the target is validated") found nothing further: `advance_sight_aim`
+is a documented pass-through, `_back_to_home`/`_start_glance_away`/`_force_observ_off` only clear
+values to `None`, and `SEARCHING`/`GLASSING` use `BINOCULAR_OPTIC` whose `regard_*` fields are all
+`None`, so there was nothing left to leak past.

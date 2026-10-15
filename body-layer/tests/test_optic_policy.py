@@ -847,6 +847,109 @@ class TestLookSweep:
         # And the sweep genuinely covers the span, not just its centre.
         assert max(abs(azimuth) for azimuth, _ in sweep) > 8.5 / 2.0
 
+    def test_no_regard_optic_is_a_true_no_op(self) -> None:
+        """The default (`regard_optic=None`, every pre-existing caller
+        including `GLASSING`'s binocular sweep) must produce the exact
+        same steps as before this parameter existed."""
+        from belief.optic_policy import look_sweep
+
+        with_default = look_sweep(
+            centre_azimuth_deg=55.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+        )
+        explicit_none = look_sweep(
+            centre_azimuth_deg=55.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+            regard_optic=None,
+        )
+        assert with_default == explicit_none
+        # And unfiltered, this sweep genuinely does reach past a 60 deg
+        # boundary -- the premise the next test's truncation checks.
+        assert max(azimuth for azimuth, _ in with_default) > 60.0
+
+    def test_an_optic_with_no_regard_data_filters_nothing(self) -> None:
+        """`BINOCULAR_OPTIC`'s `regard_*` fields are all `None`, so passing
+        it through `regard_optic` must filter exactly as much as passing
+        `None` itself -- the no-op is `within_field_of_regard`'s own
+        unrestricted convention, not a special case in `look_sweep`."""
+        from belief.optic_policy import look_sweep
+        from perception.optics import BINOCULAR_OPTIC
+
+        unfiltered = look_sweep(
+            centre_azimuth_deg=55.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+        )
+        filtered_by_binoculars = look_sweep(
+            centre_azimuth_deg=55.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+            regard_optic=BINOCULAR_OPTIC,
+        )
+        assert unfiltered == filtered_by_binoculars
+
+    def test_a_regard_optic_truncates_steps_past_its_boundary(self) -> None:
+        """The residual leak `BL-B64`'s security follow-up flagged: a
+        target 5 deg inside the sight's 60 deg azimuth limit, swept at the
+        default 15 deg bearing uncertainty, would otherwise reach 67 deg --
+        7 deg past the mount's own limit. `regard_optic=SIGHT_WIDE_OPTIC`
+        drops those steps rather than clamping them to the boundary."""
+        from belief.optic_policy import look_sweep
+        from perception.optics import SIGHT_WIDE_OPTIC
+
+        sweep = look_sweep(
+            centre_azimuth_deg=55.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+            regard_optic=SIGHT_WIDE_OPTIC,
+        )
+        assert all(abs(azimuth) <= 60.0 for azimuth, _ in sweep)
+        # Truncated, not narrowed: the unconstrained (leftward) side keeps
+        # its full-width steps rather than the whole envelope shrinking.
+        assert min(azimuth for azimuth, _ in sweep) < 55.0 - 8.5
+
+    def test_the_centre_step_always_survives_the_filter(self) -> None:
+        """The chosen target's own (already-validated) direction is never
+        itself dropped, even when every other step is."""
+        from belief.optic_policy import look_sweep
+        from perception.optics import SIGHT_WIDE_OPTIC
+
+        sweep = look_sweep(
+            centre_azimuth_deg=59.9,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+            regard_optic=SIGHT_WIDE_OPTIC,
+        )
+        assert (59.9, 0.0) in sweep
+
+    def test_elevation_truncation_follows_the_same_rule(self) -> None:
+        """`look_sweep` never moves elevation itself, but a `regard_optic`
+        whose elevation bound the centre is close to must still be
+        honoured consistently -- here the centre sits just inside the
+        down limit, and because elevation never varies across the sweep,
+        every step shares the same (in-bounds) elevation and none is
+        dropped on that axis alone."""
+        from belief.optic_policy import look_sweep
+        from perception.optics import SIGHT_WIDE_OPTIC
+
+        sweep = look_sweep(
+            centre_azimuth_deg=0.0,
+            centre_elevation_deg=-14.9,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=6.0,
+            regard_optic=SIGHT_WIDE_OPTIC,
+        )
+        assert sweep  # not emptied
+        assert all(elevation == -14.9 for _, elevation in sweep)
+
 
 class TestSweepStepsWithTime:
     """`decide`'s `GLASSING` branch is step-indexed the way `SEARCHING`
@@ -1749,6 +1852,34 @@ class TestFieldOfRegardEnforcement:
         )
         assert state.look_contact_id == "IN_REGARD"
         assert decision.optic is SIGHT_NARROW_OPTIC
+
+    def test_the_swept_look_never_commits_an_aim_past_the_boundary(self) -> None:
+        """The residual leak flagged in `plans/9k113-sight/implementation.md`'s
+        Notable Discoveries: a target 5 deg inside the 60 deg azimuth
+        limit, with a fresh contact's default 15 deg bearing uncertainty,
+        would sweep steps out to 67 deg -- 7 deg past the mount's own
+        limit -- each committed as `look_azimuth_deg` on some poll. Stepped
+        through every poll of a full dwell and asserts every committed
+        azimuth stays inside the boundary, not just the first one."""
+        state = self._sighting_state()
+        target = _target(azimuth_deg=55.0)
+        max_committed_azimuth = 0.0
+        for poll_index in range(30):
+            state, decision = decide(
+                state,
+                now_sim=float(poll_index),
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[target],
+                steady=True,
+            )
+            if decision.look_azimuth_deg is not None:
+                max_committed_azimuth = max(
+                    max_committed_azimuth, abs(decision.look_azimuth_deg)
+                )
+        assert max_committed_azimuth <= 60.0
+        # And the look still happened -- this is truncation, not rejection
+        # of the whole target (that is the required fix's own test above).
+        assert max_committed_azimuth > 0.0
 
     def test_binocular_cycle_is_unaffected_by_field_of_regard(self) -> None:
         """`GLASSING` (binoculars, `regard_* is None`) never calls through
