@@ -13,10 +13,17 @@ Responsibilities:
 - preserve separation of concerns
 - ensure the design fits existing project structure
 - identify risks before coding begins
+- when the plan introduces a phase/mode state machine with more than one co-moving field (at
+  least one written externally — a pilot command, an F10 item, a voice token — and at least one
+  written by internal logic), name every transition's effect on every field explicitly, as a
+  Co-moving Fields table in the plan — see `.claude/agents/architect.md` step 6a. Reviewer/Security
+  cannot be relied on to find this one field at a time: tests written against a consistent pair of
+  fields never construct the diverged pair that exposes the gap (`BL-B64`'s `phase`/`home_phase`
+  divergence is the worked example).
 
 Priorities: 1. Preserve invariants from `CLAUDE.md` 2. Keep module responsibilities clear 3. Avoid premature abstraction 4. Keep the design incrementally implementable
 
-Should produce: short implementation plan, affected modules/files, key risks/unknowns, decisions requiring user input, and at least one second-order effect this feature has on later milestones (if any — state "none identified" if truly isolated).
+Should produce: short implementation plan, affected modules/files, key risks/unknowns, decisions requiring user input, a Co-moving Fields table whenever the trigger above fires, and at least one second-order effect this feature has on later milestones (if any — state "none identified" if truly isolated).
 
 Must not: write large amounts of code before the plan is accepted; introduce new abstractions without clear need; expand scope silently.
 
