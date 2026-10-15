@@ -37,3 +37,8 @@ graphify-out/
 # Python bytecode cache -- generated wherever a .claude/scripts/*.py is run directly
 # (doc_provenance.py, doc_tags.py, ...), never worth tracking.
 __pycache__/
+
+# Per-subproject tuning overrides (plans/configurable-constants/plan.md) --
+# the pilot's own, hand-written, sparse PETROBRAIN_TUNING file. The
+# generated, committed default is */config/defaults.toml, never this.
+*/config/tuning.toml

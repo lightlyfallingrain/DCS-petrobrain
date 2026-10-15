@@ -43,6 +43,7 @@ import math
 from dataclasses import dataclass, replace
 from typing import Final, Literal
 
+import tuning
 from belief.association_over_time import contact_growth_rate_mps
 from belief.contacts import Contact
 from belief.enrichment import CLOCK_BUCKET_DEG
@@ -74,7 +75,13 @@ _SECTOR_HALF_DEG: Final[float] = CLOCK_BUCKET_DEG / 2.0
 #: o'clock sector. The real driver is the crosswind offset §5 names and is
 #: unmeasured. Tier 1 (this stage) has no bearing noise at all, so here
 #: the band's job is purely "does this read as pointed at it."
-ATTACK_RUN_LINED_UP_AZIMUTH_DEG: Final[float] = 5.0
+ATTACK_RUN_LINED_UP_AZIMUTH_DEG: Final[float] = tuning.real(
+    "belief.attack_run.ATTACK_RUN_LINED_UP_AZIMUTH_DEG",
+    5.0,
+    lo=0.5,
+    hi=14.0,
+    status="agreed-guess",
+)
 #: `ATTACK_RUN_ELEVATION_GATE_DEG` (10.0): deliberately wide (§11: "it's
 #: there to make me aim at the correct unit, not wrong one"), so a lofted
 #: nose stays inside it. §17 declined the discrimination-test alternative
@@ -82,19 +89,37 @@ ATTACK_RUN_LINED_UP_AZIMUTH_DEG: Final[float] = 5.0
 #: the resulting tension (a gate wide enough to ignore ballistic loft is
 #: wider than the vertical separation it is meant to resolve) as a known
 #: consequence, not an open fork -- a flight decides the number.
-ATTACK_RUN_ELEVATION_GATE_DEG: Final[float] = 10.0
+ATTACK_RUN_ELEVATION_GATE_DEG: Final[float] = tuning.real(
+    "belief.attack_run.ATTACK_RUN_ELEVATION_GATE_DEG",
+    10.0,
+    lo=1.0,
+    hi=45.0,
+    status="agreed-guess",
+)
 #: `ATTACK_RUN_CHANGE_THRESHOLD_DEG` (3.0): `BEARING_SIGMA_DEG` again --
 #: do not re-speak until the error has moved by more than belief's own
 #: noise would. Tier 1 has zero noise, so this constant's real job under
 #: design A is channel economy (how often to re-speak an unchanged-enough
 #: error), not noise rejection -- kept at 3.0 anyway rather than lowered,
 #: since a sortie, not this implementation, decides the cadence.
-ATTACK_RUN_CHANGE_THRESHOLD_DEG: Final[float] = 3.0
+ATTACK_RUN_CHANGE_THRESHOLD_DEG: Final[float] = tuning.real(
+    "belief.attack_run.ATTACK_RUN_CHANGE_THRESHOLD_DEG",
+    3.0,
+    lo=0.5,
+    hi=14.0,
+    status="agreed-guess",
+)
 
 #: How stale a relative observation may be and still be trusted for tier 1
 #: (Decision 16) -- two polls at the crew loop's `_DEFAULT_POLL_INTERVAL_S`
 #: (1.0 s), so a single missed poll does not immediately drop to silence.
-ATTACK_RUN_RELATIVE_MAX_AGE_S: Final[float] = 2.0
+ATTACK_RUN_RELATIVE_MAX_AGE_S: Final[float] = tuning.real(
+    "belief.attack_run.ATTACK_RUN_RELATIVE_MAX_AGE_S",
+    2.0,
+    lo=0.5,
+    hi=10.0,
+    status="judgement",
+)
 
 #: One row of an alignment word table: `(threshold_deg, positive_phrase,
 #: negative_phrase)`, descending by `threshold_deg` -- `belief.speech.

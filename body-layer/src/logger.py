@@ -262,6 +262,7 @@ from perception.source import Observation, OwnshipState, PerceptionSource
 from run_log_paths import per_run_log_path
 from speech_log import SpeechLogWriter
 from store.reader import load_only_region
+from tuning import render_print_tuning, render_startup_block, validate_against_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -2209,9 +2210,23 @@ def main() -> None:
     _configure_logger_for_main()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--print-tuning",
+        action="store_true",
+        help=(
+            "print every tuning.py-registered constant's resolved value, "
+            "default, status, and (if rejected) the reason, then exit 0 -- "
+            "plans/configurable-constants/plan.md, 'Verifying a changed "
+            "value took effect'. The only flag that works without "
+            "--aircraft-layer-url, since nothing else runs."
+        ),
+    )
+    parser.add_argument(
         "--aircraft-layer-url",
-        required=True,
-        help="aircraft-layer LAN API base URL, e.g. http://192.168.1.50:7791",
+        default=None,
+        help=(
+            "aircraft-layer LAN API base URL, e.g. http://192.168.1.50:7791 "
+            "-- required unless --print-tuning is given"
+        ),
     )
     parser.add_argument(
         "--theatre",
@@ -2496,6 +2511,23 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    # plans/configurable-constants/plan.md Stage 2: validate the override
+    # file against the full config/defaults.toml registry (independent of
+    # import order) and render the result -- before any other validation,
+    # since --print-tuning must work standalone. This call also builds the
+    # live registry's final classification: every tunable module above
+    # has already been imported by the time this line runs.
+    tuning_resolution = validate_against_defaults()
+    if args.print_tuning:
+        print(render_print_tuning(tuning_resolution))
+        return
+    print(render_startup_block(tuning_resolution))
+
+    if args.aircraft_layer_url is None:
+        parser.error(
+            "--aircraft-layer-url is required (omit only together with --print-tuning)"
+        )
 
     if args.crew_text and args.console:
         parser.error("--crew-text is mutually exclusive with --console")
