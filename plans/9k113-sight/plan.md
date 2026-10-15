@@ -235,6 +235,31 @@ unverified-community-claim-as-fact the project forbids. So:
   is marked in-development. The spec's own example names the missile the sim does not have. The user
   has been told; his document is not edited. Decision 4 below asks which word he wants.
 
+> **AMENDED 2026-10-15 — the data gap is closed and the framing was wrong.** The user supplied the
+> missile sources himself, with the framing *"Hind can carry **either** 9K114 Shturm **or** 9M120
+> Ataka"*. Full figures and consequences: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`,
+> "Addendum, 2026-10-15". In short:
+>
+> - **Speed and max range are known**: Shturm 345 m/s / 400–5,000 m; Ataka 400 m/s average
+>   (550 m/s peak) / 400–6,000 m. Flight time is therefore computable — **~14.5 s to 5 km,
+>   ~15 s to 6 km** — so the interim above (speak the word, suppress the time) **loses its
+>   premise**. It was correct only while the numbers were unknown.
+> - **In-range / out-of-range becomes implementable**, bounded by a **400 m minimum** that both
+>   families share and that `BL-14`'s attack-run guidance currently has no concept of.
+> - **The missile word is a loadout read, not a constant.** "Shturm" is right *today* only because
+>   DCS has not shipped the Ataka family; a hardcoded word is wrong for half the loadouts the moment
+>   it does. Derive from the loaded store, fall back to generic `"missile"`. This strengthens
+>   Decision 4's second option rather than settling Decision 4 — the question of which word to speak
+>   when the store *can* be read is still the user's.
+> - **Speed and max range belong in `X-T26`'s configurable set as two per-family profiles**, not as
+>   inline numbers. The ~40% speed difference is large enough to be audible in a spoken flight time.
+>
+> **One caution that keeps the original reasoning alive:** these are Wikipedia figures, not DCS's
+> own weapons tables. The paragraph above was right that an unverified community number must not be
+> encoded as fact, and that still applies — DCS's shipped `db_weapons*.lua` remains the
+> authoritative read (a file read, not a flight) before any of these numbers reaches a callout the
+> pilot trusts.
+
 ---
 
 ## 6. Autonomous OBSERV — not designed here
