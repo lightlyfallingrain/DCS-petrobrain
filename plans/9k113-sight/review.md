@@ -349,3 +349,121 @@ of them keeps `phase`/`home_phase` in agreement; the gap only shows up once they
 pushed out of agreement the way the real command path does. No part of this review was
 spot-checked due to time-boxing; the only thing not exercised live is the real DCS poll
 loop end to end, which is the acceptance sortie's job, not this review's.
+
+---
+
+## Pass 3 — review of the fix for Pass 2's required finding (commit `1a3c6e8`)
+
+Scope: this is a review of the single commit `1a3c6e8338ab62a86d88e355b4aab76019f4aa2a`,
+not a re-review of the whole Stage 2 entry. Built on `feature/9k113-sight` directly at the
+named tip (HEAD matched exactly, no merge needed).
+
+### What was checked
+
+- **Reran the Pass 2 reproduction myself, not from the report.** Built the diverged state
+  (`phase=SIGHTING`, `home_phase=SCANNING`, an active look) and stepped `decide()` for 8
+  simulated seconds against the pre-fix code (`git show bd0fae5:…/optic_policy.py` swapped
+  into the worktree in place, run, then restored — `git status --porcelain` empty
+  afterwards): `phase` stays `SIGHTING`/`sight_wide` for all 8 polls, exactly the reported
+  defect. Against the fixed code: `phase` is `SCANNING`/`unaided` from the very first
+  poll. Confirmed by execution, not read off the report.
+- **The look-in-progress drop.** Read `_back_to_home` directly (`optic_policy.py:912-953`):
+  `look_contact_id=None`, `look_started_sim=None`, and `pending_attempted_at_range_m={}`
+  are all named in the `replace(...)`, so an in-progress look is discarded, not committed —
+  matches the claim. Checked this against `lower_binoculars`'s own "already home → no-op"
+  branch (`optic_policy.py:1032-1034`, `if state.phase is state.home_phase: ... return
+  state`) for the earlier bug's shape: the new `decide()` check only ever calls
+  `_back_to_home` when `state.home_phase is not state.phase` (the opposite condition), and
+  it passes `state.home_phase` through unmodified rather than hardcoding a destination, so
+  the "already home" no-op case cannot be reached from this new call site. Not the same bug
+  recurring from the other direction.
+- **The cone stops in the same tick.** Read `_apply_active_gaze` (`logger.py:877-1009`)
+  directly rather than taking the implementer's account: `_back_to_home`'s
+  `OpticDecision(optic=UNAIDED_OPTIC)` carries no `look_azimuth_deg`, so the first `if`
+  branch (desired-aim convergence) is skipped and the `elif` (`updated_state.
+  actual_aim_azimuth_deg is not None`) fires, clearing `actual_aim_azimuth_deg` to `None`
+  on the same call; `sight_cone` then requires `updated_state.actual_aim_azimuth_deg is not
+  None`, which is now false, so `sight_cone` is `None` from that poll with no one-poll gap.
+  During the 1 s hands-busy window specifically, `decide()`'s hands-busy branch
+  (`optic_policy.py:1273`) returns before the `SIGHTING` dispatch is even reached, with
+  `OpticDecision(optic=UNAIDED_OPTIC, suppressed=True)` and no `look_azimuth_deg` either —
+  same `elif` clears the cone, and `suppressed_until_sim` additionally blanks the naked-eye
+  source's observations for that window. Chain holds in both phases of the transition.
+- **The dispatch-branch table.** Independently re-derived rather than just checked against
+  the implementer's table: `hands_busy_until_sim` is read unconditionally at the very top
+  of `decide()` (`optic_policy.py:1273`), before any phase branch, so it cannot have the
+  per-branch asymmetry this defect shape depends on — it already applies to every phase by
+  construction. `SEARCHING`/`GLASSING` not reading `home_phase` is pinned by
+  `TestObservOn::test_setting_home_phase_mid_glassing_does_not_interrupt_the_look`
+  (`test_optic_policy.py:1423`), which does set `home_phase=SIGHTING` mid-`GLASSING` and
+  asserts the look is *not* interrupted — read the test body, not just its name, and it
+  does construct the diverged state and assert the asymmetric (non-interrupting) outcome.
+  Agree with the implementer's judgment: entering OBSERV mid-activity is "start when
+  convenient" (the same phase-boundary rule the binocular cycle already enforces for a
+  *home*-side scan), leaving it is "stop now" — §6 of the direction document makes both the
+  pilot's call, and nothing in the direction document carves out a "let the look finish"
+  exception for leaving OBSERV the way it implicitly does for entering it.
+- **Is there a seventh?** Checked `hands_busy_until_sim`, `actual_aim_*`,
+  `suppressed_until_sim`, `observ_transition` against the same shape. `hands_busy_until_sim`
+  is global as above. `actual_aim_*`/`suppressed_until_sim` are recomputed unconditionally
+  every poll in `_apply_active_gaze` from the current decision, never read back into a
+  phase-dispatch branch, so they cannot go stale the way `home_phase` did.
+  `observ_transition` is drained entirely inside `logger.py`'s poll loop into `home_phase`/
+  `hands_busy_until_sim` and never read directly by `decide()` — it is the trigger, not a
+  second instance of the carried state. No seventh found.
+- **Mutation test.** Changed the new condition to `if False and state.home_phase is not
+  OpticPhase.SIGHTING:` and reran the new tests: 4 of 5 fail as expected
+  (`test_observ_off_while_idle_sighting_exits_on_the_next_poll`,
+  `test_observ_off_mid_look_drops_the_look_on_the_next_poll`,
+  `test_observ_off_never_reaches_sight_max_dwell_s`,
+  `test_observ_off_command_stops_the_sight_through_the_real_poll_loop`); the fifth
+  (`test_observ_still_on_through_sighting_is_unaffected`, the counter-test for the
+  agreeing-state case) correctly still passes, since that case never reaches the mutated
+  branch. Reverted; `git status --porcelain` empty afterwards. Did not separately mutate
+  the docstring — a docstring change cannot affect test outcomes by construction, and
+  stating that is sufficient without re-running the suite to prove a tautology.
+
+### Verification
+
+```
+cd body-layer && .venv/bin/ruff format --check . && .venv/bin/ruff check . && .venv/bin/mypy src && .venv/bin/pytest -q
+```
+
+- `ruff format --check .`: 1 file would be reformatted — the pre-existing, out-of-scope
+  `research/2026-10-05-security-audit.md` (code-fence reformatting unrelated to this
+  change). Matches the claim.
+- `ruff check .`: all checks passed.
+- `mypy src`: success, 0 errors, 59 source files.
+- `pytest -q`: **1934 passed, 4 xfailed.** Matches the claimed count exactly.
+- Zero-removed/zero-modified test claim verified directly: `git diff bd0fae5..1a3c6e8 --
+  'body-layer/tests/*'` has no `-` lines outside diff headers — the test diff is purely
+  additive.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None beyond what Pass 2 already carried forward (group-ranged-once, narrow-≤-wide
+ordering) — unchanged by this commit, not re-litigated here.
+
+### Verdict
+APPROVED
+
+The fix is correctly scoped (one dispatch-site check, reusing the existing interruption
+path rather than inventing a new one), the reproduction confirms the defect is gone, the
+look-drop and cone-stop claims both hold on direct inspection of the code they depend on,
+the dispatch-branch asymmetry is intentional and correctly pinned by existing tests, no
+sibling field has the same exposure, and the mutation test confirms the new tests actually
+exercise the fix rather than merely existing. Proceeds to Performance Reviewer and
+Security, then DoD.
+
+### Review Confidence
+Full read. The fix diff, both doc updates, and all 5 new tests were read in full; the
+reproduction was rerun from the actual pre-fix and post-fix source (not from the report)
+by swapping file contents in place inside the worktree and restoring; the cone/suppression
+chain was traced through `_apply_active_gaze`'s actual branches rather than taken from the
+implementation note; the dispatch table was independently re-derived against the cited
+tests' bodies, not just their names; and the required fix was confirmed removable by
+mutation. Nothing in this pass was spot-checked or time-boxed.

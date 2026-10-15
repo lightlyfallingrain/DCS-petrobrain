@@ -42,3 +42,16 @@ user-visible symptom (a readback that lies about system state), not a cosmetic l
 Related but distinct from [[feedback_boundary_only_tested_via_fixture]] (that one is about a single
 threshold lacking a dedicated test; this one is about two *fields* whose relationship is assumed
 rather than checked, and the gap only appears once they're deliberately pushed out of sync).
+
+**Follow-up (Pass 3, commit `1a3c6e8`): the fix and how it was verified.** The implementer put the
+check at the dispatch site (`decide()`'s own `SIGHTING` branch), not inside `_decide_sighting`'s
+body — so the body's precondition became true by construction instead of merely documented. Three
+things made this reviewable rather than just trustable: (1) rerun the reproduction from the actual
+pre-fix source, not the report — swap the old file's content into the worktree in place, run, restore,
+confirm `git status --porcelain` empty; (2) mutate the new condition to `if False and ...` and confirm
+exactly the new tests fail, not the whole suite, and that the one counter-test (agreeing-state case)
+still passes; (3) when the fix report claims "I checked every other branch for the same shape" (a
+table), re-derive it independently rather than checking the table against itself — read the *cited
+test's body*, not its name, and separately ask whether any field that is genuinely read unconditionally
+at the top of the function (like `hands_busy_until_sim` here) could even have the asymmetry in
+question, since a global check can't have a per-branch gap by construction.
