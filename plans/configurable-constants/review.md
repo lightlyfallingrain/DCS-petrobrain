@@ -333,3 +333,188 @@ reproduced live, not inferred. Not independently re-derived: the full AST-walkin
 comments instead, which is where the cosmetic artifacts were found) and the ~150 pre-existing
 `mypy` errors in `tests/` (confirmed their line numbers fall outside anything this feature touched,
 did not read all 150).
+
+---
+
+## Fix pass 2 review — security.md's one Recommended finding (commit `8339a57`)
+
+Reviewed in isolation: the single commit `8339a570f5774bc1640f5aeb2865bd847a429666`, in a dedicated
+worktree at that exact tip (`git worktree add --detach /Users/sg/Code/worktrees/review-xt26-fixpass2
+8339a57...`), base verified by `git rev-parse HEAD` before any check ran. Scope is the one
+Recommended finding in `security.md` — the undefended `RESOLUTION_ANGULAR_RADIUS_RAD <=
+LOWRES_ANGULAR_RADIUS_RAD` coupling — not a re-review of the whole feature, which stands as already
+APPROVED by Reviewer, Performance and Security.
+
+### The duplicated-literal question — resolved, no action needed
+
+Both of the implementer's reasons for writing the literal `0.00128` rather than a name reference
+are independently verified true, not merely plausible:
+
+1. **Module order.** `grep -n` on `body-layer/src/perception/visibility.py` confirms
+   `LOWRES_ANGULAR_RADIUS_RAD` (line 312) and `MEDRES_ANGULAR_RADIUS_RAD` (line 327) are both bound
+   by `tuning.real(...)` calls that execute at line 312/327, strictly before
+   `RESOLUTION_ANGULAR_RADIUS_RAD`'s own assignment at line 405. A forward `Name` reference there
+   would raise `NameError` at import — confirmed by reading execution order, not inferred from
+   position in the file alone (Python binds top-to-bottom at module load, so textual order here is
+   execution order).
+2. **The generator's AST literal-reader.** `body-layer/tools/generate_defaults.py`'s `_literal()`
+   (lines 64-78) matches only `ast.Constant`, `ast.Tuple`, `ast.List`, `ast.Dict`, and
+   `ast.UnaryOp(USub)`; anything else falls through to `raise ValueError(f"unsupported literal
+   node: {ast.dump(node)}")`. There is no `ast.Name` branch. A name reference in `lo=`/`hi=` would
+   make `generate_defaults.py --write`/the staleness test fail loudly with that `ValueError`, not
+   silently misrender.
+
+Both failure modes are loud (`NameError` at import, `ValueError` at generation), not silent, so the
+residual risk from the duplicated literal is exactly what the implementer's own in-line comments
+say it is: if `RESOLUTION_ANGULAR_RADIUS_RAD` is ever changed, these two `lo=` bounds silently stop
+matching the floor they exist to enforce, and **nothing fails** — the two failure modes above guard
+against a *reference*, not against the two copies drifting apart by independent edits. **A cheap,
+concrete guard is available and I recommend adding it, but not as a blocker**: a test that calls
+`generate_defaults.collect_declarations()` and asserts
+`decl.lo == RESOLUTION_ANGULAR_RADIUS_RAD` for the `LOWRES`/`MEDRES` keys would read the *current*
+value of the floor dynamically (not a second hardcoded `0.00128`) and would fail the moment the two
+go out of sync. The in-line comment naming the source constant is honest and well-written, but a
+comment is read, not enforced. Given this coupling's low churn and the explicit two-directional
+comments already in place, I would not block merge on this, but it belongs in `todo/backlog/` as a
+named follow-up rather than only in this review.
+
+### Required Fix — the three new "approximate range" figures are wrong by ~4x
+
+Judging the new sentences as the pilot-facing text they are (per the dispatch), two of the three
+claims each sentence makes are correct — the inverse-relationship direction, and that `lo` is the
+dangerous bound — but the **numeric range each one states is wrong**, and wrong in a way that
+re-introduces exactly the failure mode the original security finding exists to prevent: a reader
+trusting a stated number that doesn't match the code.
+
+Each new sentence states both a formula and a figure:
+
+- `LOWRES`: "`range = size_m / threshold`... the default puts the presence boundary at **~9.3 km**
+  for a 7 m vehicle."
+- `MEDRES`: "...the default puts the classification boundary at **~2.0 km** for a 7 m vehicle."
+- `HIRES`: "...the default puts the type-ID boundary at **~1.0 km** for a 7 m vehicle."
+
+Applying the sentence's own stated formula to the actual default values (`LOWRES=0.003`,
+`MEDRES=0.014`, `HIRES=0.028`, confirmed by reading the `tuning.real(...)` calls) gives:
+
+- `7 / 0.003 ≈ 2333 m` (**~2.3 km**, not 9.3 km)
+- `7 / 0.014 = 500 m` (**~0.5 km**, not 2.0 km)
+- `7 / 0.028 = 250 m` (**~0.25 km**, not 1.0 km)
+
+All three stated figures are exactly ~4x the value the sentence's own formula produces. That 4x is
+not noise — it is the retired flat `BINOCULAR_RANGE_MULTIPLIER` (confirmed in
+`perception/optics.py`: "`BINOCULAR_RANGE_MULTIPLIER` is retired, not carried forward"), and the
+9333 m / ~1990 m / ~1000 m figures the new sentences quote are lifted from the pre-existing
+calibration note two paragraphs above them in the same docstring, which derives them with
+`size / threshold * BINOCULAR_RANGE_MULTIPLIER` (explicitly, in its own prose) — a binocular-ladder
+figure, not a plain-naked-eye one. The function these constants actually feed
+(`_recognition_thresholds_m`/`_achieved_tier` in the same file) defaults its `optic` parameter to
+`UNAIDED_OPTIC`, whose `presence_range_mult`/`class_range_mult`/`type_range_mult` are all `1.0`
+(confirmed in `perception/optics.py` lines 141-143) — so "the default", read as the function's own
+default parameter, is the naked-eye case, and the naked-eye case is the ~2.3/0.5/0.25 km figures,
+not the binocular ones the new text states.
+
+**This is a correctness bug in new pilot-facing prose, not a style nit**, and it sits in the exact
+sentence the security finding asked for specifically because a pilot without it "moving a number
+the 'safe' direction" has no way to judge the consequence — a wrong number is worse than no number,
+because it reads as authoritative. Fix: either state the correct naked-eye figures (~2.3 km / ~0.5
+km / ~0.25 km) or, if the binocular figures are intended as the illustrative case, say so explicitly
+and include the multiplier in the stated formula rather than presenting `range = size_m / threshold`
+as complete.
+
+### Recommended (disclosed by implementer, not hidden) — the new text never reaches the file the finding was about
+
+`security.md`'s own framing of this finding is explicit: *"Nothing in **the rendered file** says
+the relationship is inverse... nothing says a value below 0.00128 breaks a documented invariant."*
+"The rendered file" is `config/defaults.toml` — its own header says "To override a value, copy the
+key you want into `config/tuning.toml`", i.e. it is the document a pilot actually reads before
+tuning. I confirmed by direct inspection that the two changed entries in
+`body-layer/config/defaults.toml` read:
+
+```
+# Presence tier ("something is there") -- see the block above for the calibration this is the `lowres` row of.
+# status: measured | range: 0.00128 .. 0.01
+```
+
+— identical prose to before the fix, with only the `range:` lower bound changed. None of the three
+new inverse-relationship sentences appear, because `generate_defaults.py`'s `_first_sentence()`
+(and the plan's own Stage 1 design: *"The short description is the first sentence of the
+constant's `#:` block"*, `plan.md` line 129) takes only the comment block's first sentence, and the
+new sentences are the second in each block. The implementer disclosed this plainly in
+`implementation.md`'s Fix pass 2 writeup ("Descriptions unchanged in the rendered file because the
+generator takes only the comment's first sentence") — this is not a hidden gap, and I want to credit
+that it was caught and reported rather than silently left.
+
+Net effect: the numeric floor itself (the actual defect — an override could put `LOWRES`/`MEDRES`
+below the optical-resolution floor `clustering.py`'s proof relies on) **is fixed and tested**; the
+pilot still cannot learn the inverse-relationship/consequence story from the one file
+`security.md` named as the problem. Given the parent finding was Recommended, not Required, and
+explicitly reserved the "how much to invest here" call to the user (Options A-D), I read this as the
+same shape of residual risk, now partially addressed and explicitly logged rather than resolved. Not
+a blocker on its own. Suggest a short `todo/backlog/` item: either extend
+`generate_defaults.py`'s rendering for these three keys (or generally) to carry a second line, or
+accept that the pilot-facing warning lives in source only. The 4x math error above is independent of
+this and blocks regardless of where the text ends up rendering.
+
+### Tier-ordering check — no new finding
+
+Checked whether tightening only `LOWRES`/`MEDRES`'s `lo` leaves any override combination that
+inverts `type <= class <= presence` range ordering. It does not: `_recognition_thresholds_m` chains
+`class_threshold_m = min(presence_threshold_m, ...)` and `type_threshold_m =
+min(class_threshold_m, ...)` (confirmed by reading the function), so tier-range ordering is a
+structural `min()` guarantee independent of the angular-radius constants' own relative values — the
+module's own docstring states this explicitly ("this is what makes tier monotonicity... a structural
+guarantee"). `HIRES_ANGULAR_RADIUS_RAD`'s `lo=0.002` unchanged is correct: `0.002 > 0.00128`, so no
+floor violation exists there, confirmed by direct comparison.
+
+### Verification — actual output, not claimed counts
+
+Worktree `.venv` was absent (gitignored), rebuilt matching the root checkout's installed tool
+versions exactly (`ruff 0.16.6`, `mypy 2.3.1`, `pytest 9.1.1`, confirmed identical before running
+anything):
+
+- `ruff format --check .` — fails on exactly one file, the pre-existing out-of-scope
+  `research/2026-10-05-security-audit.md`, matching the claimed baseline.
+- `ruff check .` — all checks passed.
+- `mypy src` — success, 59 source files, no issues.
+- `pytest -q` — **1870 passed, 4 xfailed**, matching the claimed count exactly.
+- Mutated the new test: reverted `LOWRES_ANGULAR_RADIUS_RAD`'s `lo` back to `0.0005` and re-ran
+  `test_lowres_override_below_the_resolution_floor_is_rejected` alone — it failed red
+  (`AssertionError: assert '0.0005' == '0.003'`), confirming the test is not decorative. Restored
+  the fix afterward; `git diff` on the file is empty.
+- Re-ran the implementer's own sanity check (`PETROBRAIN_TUNING` pointing at a file with
+  `LOWRES_ANGULAR_RADIUS_RAD = 0.0005`): process starts, constant resolves to `0.003`, and
+  `render_startup_block` shows `rejected (1)` with `perception.visibility.LOWRES_ANGULAR_RADIUS_RAD:
+  out of range (0.0005 out of range [0.00128, 0.01])` — matches the claim exactly, new bound
+  included.
+
+### Fix-pass-2 Verdict
+
+**NEEDS REVISION.** The numeric-floor fix itself (the actual security-relevant defect) is correct,
+tested, and verified by mutation. The duplicated-literal decision is sound and needs no change. But
+the three new pilot-facing sentences state range figures that are wrong by ~4x against their own
+stated formula — a factual error in new text whose whole purpose was to prevent exactly this kind of
+unverified number reaching the pilot. That has to be fixed before this re-enters the Reviewer →
+Security/Performance → DoD sequence. The defaults.toml non-propagation is a real, disclosed
+residual gap but not, on its own, a blocker — recommend a `todo/backlog/` item rather than holding
+the merge for it, unless the user wants it closed now.
+
+**Required fix:** correct the three stated range figures in
+`body-layer/src/perception/visibility.py`'s `LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD` comments
+(~2.3 km / ~0.5 km / ~0.25 km for the stated `range = size_m / threshold` formula and the default
+`UNAIDED_OPTIC`), or state plainly that the quoted figures are the binocular-ladder case and include
+the multiplier in the formula — either is acceptable, but the sentence must not claim a plain
+formula and a multiplier-inclusive number together.
+
+### Fix-pass-2 Review Confidence
+
+Full read of the one commit's diff. Verified by direct execution and mutation, not by trusting the
+report: ran the full format/lint/type/test gate myself with real output inspected (not summarized
+counts accepted on faith), reverted and re-ran the new test to see it fail red, re-ran the
+implementer's sanity check independently, read the actual module source to confirm both halves of
+the duplicated-literal claim (module order by line number, the AST matcher's exact branch list) and
+to recompute the range figures from the actual default constants and the actual default optic's
+multipliers, and read `generate_defaults.py`'s `_first_sentence`/`plan.md`'s Stage 1 design note to
+confirm the defaults.toml-propagation gap is structural, not a bug introduced by this pass. Not
+independently re-derived: the pre-existing calibration note's own screenshot-ladder measurements
+(503 m–8.89 km) — taken as given, since they predate this commit and are out of this review's
+scope.
