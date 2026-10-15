@@ -70,6 +70,7 @@ from perception.optics import (
     SIGHT_WIDE_OPTIC,
     UNAIDED_OPTIC,
     Optic,
+    within_field_of_regard,
 )
 from perception.visibility import tier_ranges
 
@@ -1157,8 +1158,23 @@ def _decide_sighting(
             ),
         )
 
+    # `BL-B64` security finding (`plans/9k113-sight/security.md`, required
+    # fix 1): a target outside the sight's own field of regard is excluded
+    # from the candidate list before `choose_look` ever sees it -- rejected,
+    # not clamped (`within_field_of_regard`'s own docstring has the
+    # attribution argument against clamping). `SIGHT_WIDE_OPTIC`'s
+    # `regard_*` fields are read rather than `SIGHT_NARROW_OPTIC`'s only
+    # because one has to be named and the two are identical (`optics.py`'s
+    # own docstring: "both settings share one sight head, so what angles it
+    # can be pointed to does not depend on which magnification is
+    # selected").
     worth_looking = [
-        target for target in targets if is_worth_a_look(target, state, now_sim)
+        target
+        for target in targets
+        if is_worth_a_look(target, state, now_sim)
+        and within_field_of_regard(
+            SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg
+        )
     ]
     chosen = choose_look(worth_looking)
     if chosen is None:

@@ -1633,6 +1633,142 @@ class TestSightingDwellCycle:
         assert decision.optic is UNAIDED_OPTIC
 
 
+class TestFieldOfRegardEnforcement:
+    """`BL-B64` security finding (`plans/9k113-sight/security.md`): the
+    sight's physical +-60 deg azimuth / +20/-15 deg elevation pointing
+    envelope was declared as data (`Optic.regard_*`) but never enforced --
+    `_decide_sighting` could and did pick a look target past the sight's
+    own mechanical limit. These pin the fix: a target outside the
+    envelope is excluded from `choose_look`'s candidates before selection,
+    never committed as `look_azimuth_deg`/`look_elevation_deg`."""
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    def test_the_security_agents_own_reproduction_is_rejected(self) -> None:
+        """The exact scenario from `plans/9k113-sight/security.md`: a
+        contact at 85 deg body-relative azimuth, 25 deg past the sight's
+        own 60 deg limit. Before the fix this was picked and pointed at
+        directly -- confirmed by direct execution in that report."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(azimuth_deg=85.0)],
+            steady=True,
+        )
+        assert state.look_contact_id is None
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert decision.look_azimuth_deg is None
+
+    def test_a_target_just_inside_the_azimuth_limit_is_still_picked(self) -> None:
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(azimuth_deg=59.0)],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+    def test_elevation_above_the_up_limit_is_rejected(self) -> None:
+        """+20 deg up limit."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(elevation_deg=25.0)],
+            steady=True,
+        )
+        assert state.look_contact_id is None
+        assert decision.optic is SIGHT_WIDE_OPTIC
+
+    def test_elevation_below_the_down_limit_is_rejected(self) -> None:
+        """-15 deg down limit -- the one most likely to bite in practice
+        (a close ground contact sits well below the horizon). A
+        symmetric +-15 implementation would wrongly accept this at the
+        same magnitude the up-limit test rejects at +25, which is exactly
+        the bug a symmetric bound would hide."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(elevation_deg=-20.0)],
+            steady=True,
+        )
+        assert state.look_contact_id is None
+        assert decision.optic is SIGHT_WIDE_OPTIC
+
+    def test_a_target_at_minus_14_degrees_elevation_is_still_picked(self) -> None:
+        """Just inside the -15 deg down limit -- confirms the asymmetric
+        bound is not a symmetric +-20 in disguise (which would also pass
+        this, but for the wrong reason)."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(elevation_deg=-14.0)],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+    def test_a_target_at_plus_19_degrees_elevation_is_still_picked(self) -> None:
+        """Just inside the +20 deg up limit."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(elevation_deg=19.0)],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+    def test_an_in_regard_target_is_still_picked_when_an_out_of_regard_one_exists(
+        self,
+    ) -> None:
+        """Rejection removes only the offending target from consideration
+        -- it does not make the sight pick nothing at all when something
+        reachable is also worth a look."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[
+                _target("OUT_OF_REGARD", azimuth_deg=85.0),
+                _target("IN_REGARD", azimuth_deg=10.0),
+            ],
+            steady=True,
+        )
+        assert state.look_contact_id == "IN_REGARD"
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+    def test_binocular_cycle_is_unaffected_by_field_of_regard(self) -> None:
+        """`GLASSING` (binoculars, `regard_* is None`) never calls through
+        `_decide_sighting` at all -- this pins that an out-of-regard-for-
+        the-sight azimuth is nonetheless glassed normally via the ordinary
+        `SCANNING`-at-home -> `GLASSING` path, confirming the fix changed
+        nothing outside `SIGHTING`."""
+        state = OpticState(phase=OpticPhase.SCANNING, phase_started_sim=0.0)
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(azimuth_deg=85.0)],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.look_contact_id == "CONTACT_1"
+
+
 class TestManoeuvreForcesObservOff:
     """Direction §8: *"Gyros are sensitive to violent manouvres and OBSERV
     must be swithced OFF is pilot manouvres violently."* Unlike a normal

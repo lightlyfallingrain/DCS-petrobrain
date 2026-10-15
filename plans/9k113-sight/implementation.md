@@ -1,4 +1,176 @@
-## Pass 3 — the required fix from the Pass 2 review (commanding "Observ off" did not stop the sight)
+## Pass 4 — the required fix from the security deep analysis (field of regard was declared, never enforced)
+
+### Implementation Summary
+
+Fixes the sole required finding from `plans/9k113-sight/security.md`: `Optic.regard_azimuth_half_deg`/
+`regard_elevation_up_deg`/`regard_elevation_down_deg` (the 9K113's physical ±60° azimuth / +20°/−15°
+elevation pointing envelope, sourced from the manual) were added as data in Stage 1 with a docstring
+saying enforcement was deferred to Stage 2. Stage 2 landed and never added the check —
+`_decide_sighting` could and did select a look target 25° past the sight's own azimuth limit, and
+the player-bubble cone built from that aim then admitted real candidates out to 20 km in a direction
+the 9K113 cannot physically point. Confirmed by direct execution before and after the fix (see
+below). Built on `feature/9k113-sight` at `0f3ef9a0a6c0d594fd28aa705dfcfca67f2161e4` (HEAD matched
+the named tip exactly, no merge needed).
+
+**Reject, not clamp.** Security's own report left the choice open but flagged the tradeoff: clamping
+points the sight at the envelope edge and reports whatever is actually there, which is not the
+contact that triggered the look — any resulting observation would be falsely attributed to a contact
+the sight was never actually pointed at. Rejecting means that contact is simply excluded from this
+cycle's candidates; the sight rests wide, pointed ahead, exactly as it does when nothing else is
+worth a look. This mirrors what the physical limit actually does to a real gunner (the mount will not
+swing that far, so he does not look there at all) and avoids inventing an attribution rule for a
+value that was never really observed. Clamping would also have needed a second mechanism — some way
+to mark "this look happened, but not at the contact that caused it" — that is strictly more code for
+a less honest result.
+
+### Files Changed
+
+- `src/perception/optics.py` — new `within_field_of_regard(optic, azimuth_deg, elevation_deg) ->
+  bool`, a sibling of `within_optic_fov` but testing the mount limit rather than what the optic shows
+  once pointed. `optic.regard_azimuth_half_deg is None` is a true no-op (unrestricted, matching
+  `UNAIDED_OPTIC`/`BINOCULAR_OPTIC`). Azimuth is tested symmetrically about body-relative zero;
+  elevation is tested against the two bounds independently (`regard_elevation_up_deg`,
+  `regard_elevation_down_deg`), not a single ± figure — the 9K113's envelope is +20/-15, and a
+  symmetric implementation would misjudge exactly the direction (down) that matters most in practice
+  (a close ground contact sits well below the horizon). Each of the three fields is read only if set,
+  rather than assuming all three travel together, so a future optic that restricts only one axis
+  degrades gracefully instead of raising. Docstrings on `Optic`'s three `regard_*` fields and the
+  module docstring updated to say the data is now enforced and to point at this function, closing the
+  "Nothing reads these yet" sentence the security report named as the reason three prior review
+  passes missed the gap.
+- `src/belief/optic_policy.py` — `_decide_sighting`'s `worth_looking` filter now also requires
+  `within_field_of_regard(SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg)`, in addition to
+  `is_worth_a_look`. `SIGHT_WIDE_OPTIC` is used to read the bound only because one optic has to be
+  named and the two sight optics' `regard_*` fields are identical (`optics.py`'s own docstring: one
+  sight head, field of regard independent of magnification). Nothing else changed — the `GLASSING`
+  path (binoculars, `regard_* is None`) is untouched, so it is a true no-op there by construction, not
+  by a test asserting it.
+- `tests/test_optics.py` — new pure-function tests for `within_field_of_regard` (see below); import
+  list gains `SIGHT_WIDE_OPTIC` and `within_field_of_regard`; module docstring updated to say this
+  file now also covers the field-of-regard mechanism.
+- `tests/test_optic_policy.py` — new `TestFieldOfRegardEnforcement` (8 tests, see below), inserted
+  between `TestSightingDwellCycle` and `TestManoeuvreForcesObservOff`.
+
+### Tests Added
+
+- `test_optics.py::test_an_optic_with_no_regard_data_is_always_unrestricted` — `UNAIDED_OPTIC`/
+  `BINOCULAR_OPTIC` stay a true no-op.
+- `test_optics.py::test_the_security_agents_own_reproduction_is_rejected` — the pure-function version
+  of the security report's own scenario: 85° azimuth against `SIGHT_WIDE_OPTIC`'s 60° limit.
+- `test_optics.py::test_azimuth_is_symmetric_about_zero` — boundary at exactly ±60°, and just past it
+  on both sides.
+- `test_optics.py::test_elevation_is_not_symmetric` — the asymmetric +20/-15 boundary, plus the pair
+  (+18°, −18°) that a symmetric ±15 or ±20 implementation would get wrong in one direction.
+- `test_optics.py::test_a_field_with_only_one_bound_set_restricts_only_that_bound` — a synthetic optic
+  with only `regard_azimuth_half_deg` set confirms elevation stays unrestricted.
+- `test_optic_policy.py::TestFieldOfRegardEnforcement::test_the_security_agents_own_reproduction_is_rejected`
+  — the same scenario through the real `decide()` dispatch: a target at 85° is not picked, the sight
+  rests on `SIGHT_WIDE_OPTIC` with `look_azimuth_deg is None`.
+- `...::test_a_target_just_inside_the_azimuth_limit_is_still_picked` — 59° is picked normally.
+- `...::test_elevation_above_the_up_limit_is_rejected` / `...::test_elevation_below_the_down_limit_is_rejected`
+  — both directions of the asymmetric bound, through `decide()`.
+- `...::test_a_target_at_minus_14_degrees_elevation_is_still_picked` / `...::test_a_target_at_plus_19_degrees_elevation_is_still_picked`
+  — just inside each bound, confirming the asymmetry is not a symmetric bound in disguise.
+- `...::test_an_in_regard_target_is_still_picked_when_an_out_of_regard_one_exists` — rejection removes
+  only the offending candidate; a reachable target alongside it is still picked.
+- `...::test_binocular_cycle_is_unaffected_by_field_of_regard` — the ordinary `SCANNING` →
+  `GLASSING` path (binoculars) with a target at 85° (out of the *sight's* regard, irrelevant to
+  binoculars) is glassed normally, confirming the fix changed nothing outside `SIGHTING`.
+
+### Before/after reproduction (direct execution, not just reading)
+
+Before the fix (`git stash` back to the pre-fix tree), calling `_decide_sighting` directly with a
+contact at 85° body-relative azimuth:
+
+```
+decision.optic:            sight_narrow
+decision.look_azimuth_deg: 85.0
+new_state.look_contact_id: c1
+```
+
+After the fix, same call:
+
+```
+is_worth_a_look:                True   (range/tier gate alone still says yes)
+decision.optic:                 sight_wide   (idle rest, not narrow)
+decision.look_azimuth_deg:      None
+new_state.look_contact_id:      None
+```
+
+### Checks
+
+- `cd body-layer && .venv/bin/ruff format --check .` — fails only on the pre-existing out-of-scope
+  `research/2026-10-05-security-audit.md` (unrelated to this change, named as the expected exception
+  in the dispatch brief).
+- `.venv/bin/ruff check .` — All checks passed.
+- `.venv/bin/mypy src` — Success: no issues found in 59 source files.
+- `.venv/bin/pytest -q` — **1947 passed, 4 xfailed** (baseline 1934 passed / 4 xfailed + 13 new tests
+  = 1947; confirmed by name in `-v` output, not a `-k` filter).
+
+### Docstring fix (security's second required item)
+
+`optics.py`'s module docstring and the `Optic.regard_*` field docstring both said "Nothing reads
+these yet" / "unenforced data until `BL-B64` Stage 2 ... adds the check." Both rewritten to say the
+data is enforced by `within_field_of_regard`, called from `_decide_sighting`, closing the deferral
+that the security report identified as the reason three prior review passes did not catch the gap.
+
+### Systematic check for the same class (declared-but-unenforced bound), per the dispatch brief
+
+Audited every Stage 1/Stage 2 docstring and field addition in this feature
+(`git diff b1682f6..1a3c6e8` over `optics.py`, `estimation.py`, `naked_eye_source.py`,
+`optic_policy.py`, `logger.py`, `groups.py`, `association.py`, `visibility.py`, `clustering.py`) for
+"deferred"/"not yet"/"nothing reads/enforces"/"Stage N adds" language, plus the specific fields named
+in the dispatch brief:
+
+- `Optic.range_cap_m` — **enforced**, read at both call sites in `visibility.py` (the sanity-bound
+  range gate and the size-curve threshold), confirmed by `grep` rather than assumed; already verified
+  by the security report too.
+- `SightCone`'s own fields (`azimuth_deg`, `half_angle_deg`, `depth_m`) — **enforced**, all three read
+  in `association.filter_player_bubble`; `azimuth_deg` is `OpticState.actual_aim_azimuth_deg`, which
+  with this fix can no longer hold an out-of-regard value in the first place, so the one gap the
+  security report named at this site (`logger.py:983`'s `is not None` boolean-only read) is closed at
+  the source rather than needing a second check downstream.
+- The four `tuning.real(...)` constants (`HANDS_BUSY_DURATION_S`, `SIGHT_STEADY_RATE_LIMIT_DEG_S`,
+  `SIGHT_MAX_DWELL_S`, `SIGHT_GLANCE_AWAY_S`) — **enforced**, each has a real call site outside its
+  own declaration (`logger.py` for the first two, `_decide_sighting`/`decide` for the latter two),
+  confirmed by `grep` for each symbol.
+- The feature's Stage 1/2 diff contains exactly one other "deferred"/"unenforced" sentence besides
+  the field of regard itself, and it is the scope-cut paragraph being *rewritten away* (the 9K113
+  sight's own prior "deferred entirely" note, superseded by this feature's existence) — not a live
+  deferral.
+
+**List is otherwise empty** — no other declared bound in this feature's diff was found unenforced.
+
+### Notable Discoveries
+
+- **A residual, narrower version of the same leak exists in the swept look, and was deliberately not
+  fixed here — flagging per the "say what would make X false" rule rather than silently leaving it.**
+  `_decide_sighting` rejects a *chosen* target outside the field of regard, but once a target just
+  inside the boundary is chosen, `look_sweep` generates steps spanning
+  `chosen.azimuth_deg ± bearing_uncertainty_deg` — and `bearing_uncertainty_deg` defaults to 15°
+  (`CLOCK_BUCKET_DEG / 2.0`) for any contact without a refined `PositionEstimate`. A target at, say,
+  55° azimuth (5° inside the 60° limit) with the 15° default sweeps steps out to 70°, 10° past the
+  mechanical limit — each such step is committed as `look_azimuth_deg`, becomes `actual_aim_azimuth_deg`
+  via the pass-through `advance_sight_aim`, and feeds the cone exactly as the originally-reported
+  leak did, just at a narrower margin and only for edge-adjacent targets with wide uncertainty. The
+  dispatch brief's required fix is explicitly "reject or clamp **a look target** ... at the point the
+  target is chosen" and lists the sweep controller/slew mechanism as out of scope (`BL-B66`); I read
+  the sweep-step generation as belonging to that same "not yet" territory (it is where the desired-aim
+  value is produced, one level below the target-selection point named as the fix site) rather than a
+  second instance of the required fix, so I did not change `look_sweep` or clamp its output. **This
+  should be weighed against `BL-B66`'s own scope, or fixed as a small follow-up** (bounding
+  `look_sweep`'s output to the optic's field of regard, or capping `envelope_half_width` against the
+  remaining margin to the boundary) before relying on edge-adjacent targets with wide bearing
+  uncertainty being fully safe. Not fixed here because it was not named in the required fix and
+  fixing it changes `look_sweep`'s own contract (shared with `GLASSING`), which is a larger, separate
+  change than the one-line filter this report's fix is.
+- `within_field_of_regard`'s azimuth test uses `abs(azimuth_deg) > regard_azimuth_half_deg` rather
+  than a boresight parameter (unlike `within_optic_fov`, which takes one) because the field of regard
+  is a mount limit fixed to the airframe (body-relative zero), not a function of where the head/sight
+  currently looks — confirmed by re-reading `optics.py`'s own docstring ("how far an optic can be
+  *pointed*... distinct from... the cockpit occlusion mask") and the manual source note, not assumed.
+
+
 
 ### Implementation Summary
 

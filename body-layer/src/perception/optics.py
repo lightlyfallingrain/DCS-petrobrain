@@ -40,9 +40,16 @@ can be *pointed*, as opposed to what it shows once pointed
 sourced on the two sight optics from the English-language Mi-24P manual's
 §3.4 (±60 deg azimuth, +20/-15 deg elevation -- the research note above,
 "The sight's real angular limits"). Three fields, not one, because the
-elevation envelope is asymmetric. **Nothing reads these yet** -- the field
-of regard is unenforced data until `BL-B64` Stage 2 (or `[[BL-B66]]`) adds
-the check; recorded here now because the sight optics exist to carry it.
+elevation envelope is asymmetric. **Enforced by `within_field_of_regard`
+below, called from `belief.optic_policy._decide_sighting`** (`BL-B64`
+security finding, `plans/9k113-sight/security.md`, required fix 1) --
+Stage 2 landed without reading this data as a bound at all, so
+`_decide_sighting` could and did pick a look target 25 deg past the
+sight's own ±60 deg limit, and the player-bubble cone built from that aim
+then admitted real candidates out to 20 km in a direction the 9K113
+cannot physically point. A target outside the envelope is excluded from
+`choose_look`'s candidates before selection, never clamped to the
+boundary -- see `within_field_of_regard`'s own docstring for why.
 
 **`Optic.boresight_azimuth_deg` is deleted (slice 2B, `plans/
 detection-cones-slice2/plan.md`).** `within_optic_fov` now takes the
@@ -146,7 +153,8 @@ class Optic:
     module docstring.
 
     `regard_azimuth_half_deg`/`regard_elevation_up_deg`/
-    `regard_elevation_down_deg` (`BL-B64` Stage 1) are the field of
+    `regard_elevation_down_deg` (`BL-B64` Stage 1, enforced by
+    `within_field_of_regard` as of the security fix) are the field of
     regard -- how far this optic can be *pointed* -- `None` for an optic
     pointed by the head (unrestricted). Three fields because the
     elevation envelope need not be symmetric (the 9K113's is: +20/-15).
@@ -370,3 +378,65 @@ def within_optic_fov(
     # on the half-angle boundary can land a few ULPs over and be rejected,
     # which would make "exactly at the boundary" an untestable case.
     return separation_deg <= optic.fov_half_angle_deg + 1e-9
+
+
+def within_field_of_regard(
+    optic: Optic, azimuth_deg: float, elevation_deg: float
+) -> bool:
+    """True if `(azimuth_deg, elevation_deg)` -- a body-relative direction,
+    the same convention `within_optic_fov` tests in -- falls inside
+    `optic`'s field of regard: how far this optic can be *pointed at all*,
+    as distinct from what it shows once pointed (`within_optic_fov`'s
+    `fov_half_angle_deg`) or the cockpit occlusion mask.
+
+    **`BL-B64` security finding** (`plans/9k113-sight/security.md`,
+    required fix 1): `regard_azimuth_half_deg`/`regard_elevation_up_deg`/
+    `regard_elevation_down_deg` were added as data in Stage 1 and never
+    read as a bound anywhere -- `belief.optic_policy._decide_sighting`
+    could and did select a look target 25 deg past the sight's own ±60 deg
+    azimuth limit, and the player-bubble cone built from that aim then
+    admitted real candidates out to 20 km in a direction the 9K113 cannot
+    physically point. This function is the missing check; the caller
+    (`_decide_sighting`) uses it to **reject** a candidate target outright
+    rather than clamp it to the boundary -- clamping would point the sight
+    at the envelope edge and observe whatever is actually there, which is
+    not the contact that was chosen, so any resulting observation would be
+    falsely attributed. Rejecting means that contact simply is not looked
+    at through the sight this cycle (the player may still see it some
+    other way); that is what the mechanical limit actually does to a real
+    gunner.
+
+    `optic.regard_azimuth_half_deg is None` means "no restriction" (an
+    optic pointed by the head -- `UNAIDED_OPTIC`/`BINOCULAR_OPTIC`),
+    always `True`, matching `within_optic_fov`'s own `None`-means-
+    unrestricted convention -- so this is a true no-op for every optic
+    that does not declare a field of regard.
+
+    **Azimuth is tested symmetrically about zero** (body-relative dead
+    ahead -- the sight head's own boresight, not the current gaze/look
+    direction: the mount limit is fixed to the airframe, unlike
+    `within_optic_fov`'s boresight parameter, which follows wherever the
+    head currently points). **Elevation is not symmetric**: the 9K113's
+    envelope is +20/-15 deg, so this checks `regard_elevation_down_deg <=
+    elevation_deg <= regard_elevation_up_deg` against the two bounds
+    independently rather than a single ± figure -- a ground contact close
+    in sits well below the horizon, so the down limit is the one that
+    actually bites in ordinary geometry, not the up limit. The three
+    fields are each tested only if set (rather than assuming all three are
+    `None` or all three are real together), so a future optic that
+    restricts only azimuth, or only one elevation direction, degrades to
+    "unrestricted on the field not supplied" instead of raising."""
+    if (
+        optic.regard_azimuth_half_deg is not None
+        and abs(azimuth_deg) > optic.regard_azimuth_half_deg
+    ):
+        return False
+    if (
+        optic.regard_elevation_up_deg is not None
+        and elevation_deg > optic.regard_elevation_up_deg
+    ):
+        return False
+    return not (
+        optic.regard_elevation_down_deg is not None
+        and elevation_deg < optic.regard_elevation_down_deg
+    )
