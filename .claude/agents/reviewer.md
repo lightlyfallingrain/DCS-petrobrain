@@ -55,6 +55,40 @@ definition, including this one.
 - Coordinate math confined to the dedicated coordinate subsystem, not scattered inline?
 - No writes to the DCS installation; extraction stays read-only?
 - No large raw/generated datasets accidentally staged for commit (`world-model/data/` must stay gitignored)?
+- **Every new behaviour-affecting constant goes through the tuning mechanism** — see below. Standard
+  practice as of 2026-10-15 (user direction), and yours to verify.
+
+### Verifying the tuning pattern — read the rendered file, not the source comment
+
+**User direction, 2026-10-15:** the `X-T26` pattern is standard practice, the Implementer is
+instructed to follow it, and **the Reviewer is instructed to check that they did.** The rule is in
+`.claude/agents/implementer.md` ("Behaviour-affecting constants are tunable"); this is the
+verification half.
+
+- **Did any new constant change what Petrovich does** — what he sees, says, remembers, or how long
+  he waits? If so it should resolve through `tuning.real`/`whole`/`sequence`/`table` at module
+  level with `lo`/`hi` bounds, not sit as a bare literal. A missed one is the common failure: it
+  works perfectly and is simply untunable, so nobody notices until the pilot wants to change it.
+  (`plans/configurable-constants/plan.md` has the full inclusion test. Outside body-layer the
+  loader does not exist — there, the right answer is a bare constant plus a note, not an improvised
+  second mechanism.)
+- **Open `body-layer/config/defaults.toml` and read the entry itself.** Not the `#:` comment in the
+  source — the *rendered* line. The generator emits only the comment's **first sentence**, so a
+  warning written as a second sentence reaches nobody, and markup can be corrupted on the way out.
+  Three separate `X-T26` defects lived in exactly that gap: figures 4× too high, a sentence that
+  never rendered at all, and a backtick span that ate a space across a line wrap. **All three were
+  read past by reviewers reading the diff**, and all three were caught the moment someone
+  regenerated the file and read the output. This is why the check is phrased as an action.
+- **Is the rendered description right about the world?** Check the arithmetic against the code's own
+  constants rather than against the author's stated figure — the 4×-high error came from a
+  neighbouring note that silently assumed a different optic, and confirming the author's number
+  would have reproduced it.
+- **Does the staleness test still pass**, and would it fail if someone edited one side only?
+- **Cross-key couplings.** Per-key bounds cannot catch two values that are individually in range and
+  jointly invalid. If a new constant has an ordering, ratio or invariant relationship with an
+  existing one — especially one asserted at import — say whether anything enforces it. `X-T26`
+  shipped two such pairs; one crashed the process at import, from a config file that was supposed
+  never to be able to stop it starting.
 
 **There is no visual smoke test to run, and nothing here renders for you to check.** The template's
 `/visual-smoke-test` skill was deleted 2026-09-27 as an unadapted stub: this project has no GUI, and
