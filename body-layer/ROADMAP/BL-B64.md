@@ -69,3 +69,32 @@
   before the ATGM run), `[[BL-14]]` (the naked-eye/binocular attack run, which ships without any of
   this), `[[BL-B62]]` (relative-versus-map perception channels; the ATGM run is one of its named
   candidate consumers).
+
+  ---
+
+  **Planned 2026-10-15 (architect, planning only — not implemented by user direction):**
+  `plans/9k113-sight/plan.md`. Investigator findings it builds on:
+  `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md` (plus its 2026-10-15 addendum,
+  which closes the missile speed/range gap from sources the user supplied).
+
+  **The plan splits this item along a seam the brief did not anticipate: perception versus
+  effectors.** Axis A — sight-grade detection/recognition range and position precision — depends on
+  nothing outside body-layer, and the optic multipliers it needs were already measured (they sit in
+  a `perception/optics.py` docstring, deliberately not instantiated), so **it needs no calibration
+  sortie**. Axis B — real cockpit switches, the ASP-17 mark, the ATGM run — depends on an unverified
+  write channel on devices 6/7, a sub-1 s loop ([[BL-B63]]/`AC-B3`, filed not built), and a
+  readiness lamp with no read path. The plan recommends Axis A as its own entry, merged, before Axis
+  B is decided.
+
+  **[[BL-B55]] is not a separate prerequisite to schedule ahead of this — it is Axis A's own stage,
+  and the two must not be separated.** A sight seeing to 8 km while still carrying naked-eye range
+  error (`σ_down ≈ 0.17·R`) would report a precise-sounding range wrong by ~1.4 km, which is worse
+  than having no sight. So `BL-B55` closes as part of this work.
+
+  **Five decisions remain the user's**, listed in the plan: whether a perception-only 9K113 is an
+  acceptable interim; what *"poor vertical understanding"* actually means mechanically (the sourced
+  FOVs are symmetric, so nothing in the optics supports it — and if it means the sight cannot
+  separate two vertically-stacked units, ATGM target selection cannot work the way `BL-14`'s does);
+  whether autonomous OBSERV is in scope at all (`/explore` owed); the missile word; and the launch
+  callout's interim now that the flight-time numbers exist.
+
