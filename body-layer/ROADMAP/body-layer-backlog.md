@@ -113,6 +113,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B72]] — a firing unit gives itself away, out to the player bubble (detection only)
 - [[BL-B73]] — gun fire makes its firer visible out to the player bubble
 - [[BL-B74]] — a SAM launch's smoke trail shows where the launcher was
+- [[BL-B75]] — smoke and flare markers as emitters, if DCS exports them `[>]` deferred
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
