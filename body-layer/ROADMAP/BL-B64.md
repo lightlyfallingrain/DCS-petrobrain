@@ -62,9 +62,19 @@
     is **not involved**. `PLAYER_BUBBLE_RADIUS_M = 10000.0` is a cost filter of our own choosing.
     The design was already prescribed by that constant's own docstring: evaluate the exemption
     *inside* `filter_player_bubble()`, narrowed to the sight's FOV, **never by raising the radius**.
-  - **Slew takes time** (§8) — *"we cannot expect instant alignment with anything."* The plan
-    recommends the perception entry own a slew **rate limit** and the effector entry own the closed
-    loop (plan §15, open decision 6).
+  - **Slew is deferred to the effectors, but one field split is owed here** (§8, settled by **§12**).
+    The sight is slewed by a **rate**-commanding joystick — *"The axis input is the slew speed. Not
+    desired angle, but angular speed of slew"* — so pointing it is a control loop, not an action with
+    an argument, and *"We don't need this modeled before the effectors, but we must be ready for how
+    it will work with the effectors so we don't have to redo much of the mechanism."*
+    **The requirement on this entry: keep *desired aim* and *actual sight direction* distinct from
+    the start**, even while `actual := desired` instantly. Today they are collapsed — but on **one
+    line** (`logger.py` ~881–885, where `OpticDecision.look_azimuth_deg` becomes a `Gaze`), and every
+    consumer downstream already reads the *actual* side. So the cost is a field pair on `OpticState`
+    (already carried across polls, already frozen-and-replaced, so replay determinism is preserved
+    by construction), one trivially-bodied `advance_sight_aim()` at that call site, and building both
+    the `Gaze` **and the §7 cone** from actual. ~A dozen lines. Must be **per-optic**: for the eye and
+    binoculars `actual := desired` is permanently correct, not a placeholder. Plan §15a.
   - **An inverted dwell shape** (§9): long dwell at the sight, brief glances away and back — the
     opposite of binoculars. Shared mechanism, different constants, but it inverts `optic_policy`'s
     *resting phase*, which is a shape change rather than a retune (plan §13).
@@ -95,6 +105,9 @@
   more candidates). Cheap lever if it measures high: **the cone is only load-bearing for narrow
   mode** — wide reaches ~8.3 km for a 7 m vehicle, *inside* the existing bubble — so dropping wide
   from phase 1 halves the added cost for almost no product loss.
+
+  **Direction §12 is net negative work for this entry**: it removed the slew rate limit the plan was
+  going to carry here and replaced it with the field split above.
 
   Related: `[[BL-B55]]` (closes here), `[[BL-B66]]`, `[[BL-B67]]`, `[[BL-B62]]` (the
   relative-versus-map channel — its named consumer is the ATGM run, so `BL-B67`, not this entry),

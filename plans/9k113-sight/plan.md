@@ -693,7 +693,80 @@ reasoning stands unchanged: a sight seeing to 13–19 km while every look carrie
 reports a precise-sounding range wrong by **~2.3–3.3 km at those ranges** (worse than the 1.4 km the
 8 km case gave), which is worse than having no sight.
 
-## 15. Slew time belongs in the perception stage — recommendation, with the argument
+## 15. Slew: ANSWERED by direction §12 — deferred to the effectors, but the perception stage must not collapse two fields into one
+
+> **DECISION 6 ANSWERED 2026-10-15 (direction §12), and my recommendation below was wrong in its
+> conclusion while right in its reasoning.** The sight is slewed by a joystick-like device whose
+> axes command angular **speed**: *"The axis input is the slew speed. Not desired angle, but angular
+> speed of slew… we need a constant inspect and adapt loop… There's a maximum to angular velocity of
+> course, and that is why it takes time to move the 9K113 from one point to another."*
+>
+> So **"point the sight at X" is not an action with an argument — there is no angle to write.** It is
+> a closed loop, and slew time is the *consequence* of a rate limit inside it rather than a delay to
+> wait out. The user's ruling: *"We don't need this modeled before the effectors, but we must be
+> ready for how it will work with the effectors so we don't have to redo much of the mechanism."*
+>
+> **What survives from the reasoning below:** point 3 — that the cone gives the pointing direction a
+> consumer — was the right observation and it is why this is not a plain deferral. It no longer
+> argues for modelling slew *time* here; it argues for the **actual** pointing direction existing as
+> a real field here, because the cone must be pointed at where the sight *is*, not at where belief
+> wishes it were. Points 1, 2 and 4 are superseded: a rate limit in the perception stage would be
+> the wrong mechanism, not merely an early one.
+
+### 15a. The requirement the perception entry does carry
+
+**Keep *desired aim direction* and *actual sight direction* as two distinct things from the start**,
+even while the perception stage sets `actual := desired` instantly. The effector stage then inserts
+a controller between two fields that already exist. Collapsing them into a single "where Petrovich is
+looking" *is* the rework §12 asks to avoid.
+
+**Evaluated against the code rather than adopted, and the answer is better than it looks: the
+distinction is collapsed today, but the collapse sits on one line, and everything downstream of it
+is already shaped correctly.**
+
+The chain today is:
+
+```
+OpticDecision.look_azimuth_deg      (belief's DESIRED aim — optic_policy.decide)
+  -> ScanPlan.fixed_look_at(...)    (logger.py ~881-885  <-- the collapse, one place)
+  -> Gaze.center_azimuth_deg        (semantically the ACTUAL pointing direction)
+  -> check_visibility(boresight_azimuth_deg=gaze.center_azimuth_deg)
+```
+
+- **Not carried today**: one value plays both roles. `logger.py` converts belief's desired look
+  straight into the `Gaze` that perception treats as fact, so `actual == desired` by construction.
+- **But every consumer already reads *actual*.** They read a `Gaze`, whose meaning is already "where
+  the head/sight is pointed" — `within_optic_fov` even takes the boresight as a *parameter*
+  precisely because *"an optic is pointed by the head, not bolted to the airframe"*. So there is no
+  "everything that assumed one field" to refactor. **The coordinator's concern is real but its blast
+  radius is one conversion point, not the model.**
+- **What is genuinely missing is persistence.** `gaze_at` is a *pure function of `t_sim`* and
+  recomputes the direction from the plan every poll, so nothing *holds* an actual aim that could lag
+  a desired one. A converging sight needs state.
+
+**Cheapest non-collapsing shape, and it costs the perception entry very little:**
+
+1. **Put the actual aim on `OpticState`** (`actual_aim_azimuth_deg`, `actual_aim_elevation_deg`),
+   which the runner already carries across polls and which is already *"frozen and replaced rather
+   than mutated"*. That preserves replay determinism **by construction** — the property `gaze_at`'s
+   purity exists to protect — rather than smuggling state into a pure function. This is the one
+   design constraint that could have cost real money, and `OpticState` already solves it.
+2. **One named function, one call site**: `advance_sight_aim(actual, desired, dt, …)`, called at the
+   `logger.py` conversion point. Its perception-stage body is `return desired`; the effector stage
+   replaces that body with the rate-limited controller. Nothing else moves.
+3. **Build the `Gaze` from *actual*, and point the §7 cone at *actual*.** This is the part that earns
+   its place immediately rather than as future-proofing.
+4. **Per-optic, not global.** For the naked eye and binoculars `actual := desired` is not a
+   placeholder but *permanently correct* — a head turn is instant against a 1 Hz poll — so the
+   controller must never be imposed on them. A global rate limit would be a regression in the
+   existing channels.
+
+**Cost: one field pair, one trivially-bodied function, one call site, and the discipline that the
+boresight comes from actual.** Call it a dozen lines and a naming decision. It is worth doing even
+on its own merits, because *"desired"* and *"actual"* sharing a name is the kind of collapse that
+makes a later bug unreadable.
+
+### 15b. The superseded recommendation, kept for its point 3
 
 **Recommendation: the perception entry owns a slew *rate limit*; the effector entry owns the *closed
 loop*.** Two different things, and only the second needs anything unmeasured.
@@ -719,8 +792,28 @@ loop*.** Two different things, and only the second needs anything unmeasured.
    The unmeasured conversion blocks *reading back* where the sight actually went, which is
    `[[BL-B66]]`'s inspect-and-adapt loop — not modelling a plausible rate here.
 
-**This is a view, not a decision** — it is open question 4 in the direction's own list, and it is
-Decision 6 below.
+~~**This is a view, not a decision** — it is open question 4 in the direction's own list, and it is
+Decision 6 below.~~ **Settled by §12; see §15 and §15a above.**
+
+### 15c. What §12 does to the effector entry — three constraints, recorded here and in `[[BL-B66]]`
+
+Not this entry's work, but it changes `[[BL-B66]]`'s shape enough to be worth stating where the
+reasoning lives:
+
+1. **The sight's current angle must be readable every iteration**, or the loop has no feedback term.
+   **This promotes the deferred cockpit probe from useful to load-bearing** for that stage —
+   specifically whether arg **876**'s degrees-per-unit is measurable and whether the OBSERV readout
+   (arg **886**) can be sampled at loop rate. Still not dispatched from here; it gates that stage's
+   own plan.
+2. **Loop rate becomes a correctness property, not a performance preference.** A rate-commanded loop
+   closed at body-layer's current **1 Hz would overshoot every time**. So `[[BL-B63]]`'s selective
+   fast lane is a **hard dependency of the effector stage**, not the optional optimisation its entry
+   reads as today — the same mechanism it was already filed for (missile guidance), arriving one
+   stage earlier than it expects.
+3. **Maximum angular velocity is a constant** and belongs in `X-T26`'s tunable set
+   (`body-layer/config/defaults.toml` + `src/tuning.py`, merged to `main` 2026-10-15). Overshoot,
+   deadband and settling become real concerns there too — a loop that chatters would be visible in
+   the cockpit and, during an ATGM run, a guidance failure.
 
 ## 16. Risks this amendment adds
 
@@ -738,8 +831,15 @@ Decision 6 below.
 - **The `home_phase` refactor touches the most behaviour-critical function in the belief layer**, and
   near a live defect (§13a). Pinned-behaviour tests for the OBSERV-off path are the mitigation, and
   they are cheap because the default is unchanged.
-- **The slew rate is a modelling choice, not a measurement** — replacing the retired instant-slew
-  risk. One constant, in `X-T26`'s configurable set, tuned from flying.
+- ~~**The slew rate is a modelling choice, not a measurement.**~~ **Retired 2026-10-15 (direction
+  §12): no slew rate is modelled in this entry at all.** It is replaced by a smaller, different
+  risk — **that the desired/actual collapse gets rebuilt by accident.** It is one line in
+  `logger.py` (§15a) and nothing downstream enforces the distinction, so a later change that reads
+  the boresight from `OpticDecision` instead of from `OpticState`'s actual aim would silently
+  reinstate it. Cheap guard: a test asserting the cone and the `Gaze` are both built from the actual
+  aim, in the spirit of the existing `test_player_bubble_radius_is_not_…` pair.
+- **The effector stage now has a correctness-level dependency on `[[BL-B63]]`** (§15c) that its own
+  entry does not yet reflect. Noted on `BL-B63` as part of this pass.
 - **`NAKED_EYE_RANGE_CAP_M`'s docstring is stale** (§11) and is the figure a reader would check the
   sight's reach against.
 
@@ -763,8 +863,10 @@ including the entire ASP-17 use case and the OBSERV `/explore`.
    with a cost question that needs a bench measurement, and the first change that lets contacts be
    created beyond 10 km.
 
-Everything else the direction added is genuinely small: two table rows (§11), a rate limit (§15), a
-coefficient and a per-group draw (§14).
+Everything else the direction added is genuinely small: two table rows (§11), the desired/actual
+field split (§15a — ~a dozen lines, and §12 *removed* the slew rate limit this entry was going to
+carry), a coefficient and a per-group draw (§14). **§12 is net negative work for this entry**: it
+took slew modelling out and put in one field pair.
 
 **One cheap lever, identified before the measurement rather than after it.** If §12b's LOS cost
 comes back at the top of the range, **narrow the cone rather than optimise LOS** — and the right cut
@@ -803,11 +905,11 @@ that has to be solved in that entry rather than assumed away.
 
 The five from the first pass are settled or deferred above. These are new.
 
-6. **Does slew time belong in the perception entry, or with the effectors?** §15 recommends
-   **perception**, on the ground that the cone consumes the pointing direction, so an instantly
-   teleporting sight is an omniscience leak rather than a labelled placeholder. Cost is one rate
-   limit on state `OpticState` already carries. The counter-argument is that it adds a constant with
-   no measurement behind it.
+6. ~~**Does slew time belong in the perception entry, or with the effectors?**~~ **ANSWERED by
+   direction §12 — the effectors.** No longer open. What replaced it is a requirement rather than a
+   choice (§15a): keep desired and actual aim distinct from the start. Evaluated against the code,
+   that costs ~a dozen lines, because the collapse is one line in `logger.py` and every downstream
+   consumer already reads the *actual* side.
 7. **Should the wide cone be in phase 1 at all?** §17: wide reaches ~8.3 km for a 7 m vehicle, which
    is *inside* the existing bubble, while costing twice narrow's cone area. **Recommendation:
    narrow-only cone in phase 1**, wide added if a sortie shows something missed. This is cheap to

@@ -62,6 +62,19 @@
   the fast lane is a second loop or a sub-tick inside the existing one is the same open design
   question, left to whoever builds this.
 
+  **Amended 2026-10-15 — this became a hard dependency of a named stage, one stage earlier than this
+  entry expects, and on correctness grounds rather than performance ones.**
+  `docs/acceptance/2026-10-15-9k113-sight-direction.md` §12 establishes that the 9K113 is slewed by a
+  joystick-like device whose axes command angular **speed**, not a desired angle — *"The axis input
+  is the slew speed. Not desired angle, but angular speed of slew… we need a constant inspect and
+  adapt loop"* — so pointing the sight is a closed loop. **A rate-commanded loop closed at the
+  current 1 Hz would overshoot every time.** That makes this fast lane a **hard dependency of the
+  9K113 effector stage (`[[BL-B66]]`)**, not the optional optimisation the rest of this entry reads
+  as, and it arrives *before* the missile-guidance consumer named below rather than with it. The
+  mechanism asked for is unchanged; what changes is that **loop rate is now a correctness property**
+  for that consumer, so "an optimisation for a tighter-budget future consumer" (below) no longer
+  describes the whole picture. Still accurate for `[[BL-14]]`, which needs nothing here.
+
   **Why framed as a reusable seam rather than an attack-run-specific optimisation.** The user names
   9K113 missile guidance as the second consumer explicitly — *"We'll need both anyway for 9K113
   missile guidance to be precise"* — which makes this a known future requirement, not speculative
