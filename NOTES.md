@@ -1161,3 +1161,12 @@ two functions that must agree (2026-09-19).
   *maximum* (1,579 ms → 1,615 ms) had not moved at all — citing only the improved median would have
   misrepresented the actual tail risk a new per-press cost (`step`'s uncached `describe_contact`
   enrichment) was being measured against.
+- **Verify the rendered artifact, not the source comment, whenever a generation step sits between
+  an edit and the file a human actually reads.** A diff against source prose reviews intent, not
+  effect. `X-T26`'s `config/defaults.toml` generator was wrong three separate times across three
+  review passes — a second sentence that `_first_sentence()` never rendered, figures ~4x too high,
+  and a backtick span eaten across a line wrap — and every one of the three was caught only by
+  regenerating the file and reading its actual output, never by re-reading the `#:` source comment
+  the fix had changed. This generalises past this one generator: any fix whose claimed effect is
+  "this now appears in `<generated file>`" needs that file opened after the fix, not inferred from
+  a correct-looking source diff.

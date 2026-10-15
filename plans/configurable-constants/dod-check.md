@@ -70,30 +70,52 @@ open.
   binding constraint, the cross-key coupling fix, and the two-registry design; each constant's `#:`
   comment carries its own provenance (`status: judgement|measured|agreed-guess|uncalibrated`).
 - Three accepted-but-not-closed items from the review cycle are durably filed, not just mentioned in
-  chat: `X-B36` (`tools/` outside every subproject's documented gate), `X-B37` (generator renders
-  only a first sentence + leaks markdown), `X-B38` (duplicated `0.00128` literal + two disclosed
-  untested edge cases). All three exist on `main` (merged via `chore/xt26-followups`,
-  `eb988e2`) but **not yet on this feature branch** — `feature/configurable-constants` and `main`
-  have diverged (neither is an ancestor of the other; confirmed via
-  `git merge-base --is-ancestor` both directions, both `no`). They will be present after the
-  `--no-ff` merge brings `main`'s history in. Confirmed this is the situation, not a gap to fix now.
+  chat: `X-B36` (`tools/` outside every subproject's documented gate — the gap I hit myself running
+  `mypy tools` manually above), `X-B37` (generator renders only a first sentence, leaks markdown,
+  **and**, as of a commit on `main` today, the `_join_comment_lines()` backtick-span-across-line-wrap
+  defect found during fix pass 3), `X-B38` (the duplicated `0.00128` literal the floor fix
+  introduced, with nothing asserting it tracks `RESOLUTION_ANGULAR_RADIUS_RAD`, plus the double-fault
+  misclassification and two disclosed untested edge cases). All three exist on `main` (merged via
+  `chore/xt26-followups`, `eb988e2`, plus `X-B37`'s later addition) but **not yet on this feature
+  branch** — `feature/configurable-constants` and `main` have diverged (neither is an ancestor of
+  the other; confirmed via `git merge-base --is-ancestor` both directions, both `no`). They will be
+  present after the `--no-ff` merge brings `main`'s history in. Confirmed this is the situation, not
+  a gap to fix now.
 
 ## Security — PASS, under the current cadence (not a gap)
 
 `plans/configurable-constants/security.md` is a single deep-analysis pass, **APPROVED**, with one
-Recommended (non-blocking) finding: the three visibility-tier `lo` bounds permit ranges 6–14x past
-the measured calibration and one is below a fixed invariant floor (`RESOLUTION_ANGULAR_RADIUS_RAD`)
-elsewhere in `clustering.py`, with the generated description giving no hint of either. Security's own
-recommendation is option (B): file to backlog, don't block. **No `security-plan-review.md` exists,
-and that is correct** — root `CLAUDE.md`'s "Agents" section states the cadence enabled 2026-09-24:
-Security runs once per whole feature, immediately before DoD, superseding the two-pass
-plan-review/deep-review template in `AGENTS.md`'s general sequence diagram. Confirmed against this
-role's own memory (`project_current_cadence_one_security_pass_per_feature.md`), which recorded this
-exact situation on `WM-B6`.
+Recommended (non-blocking) finding at the time it was written: the three visibility-tier `lo`
+bounds permitted ranges 6–14x past the measured calibration and one sat below a fixed invariant
+floor (`RESOLUTION_ANGULAR_RADIUS_RAD`) elsewhere in `clustering.py`, with the generated description
+giving no hint of either. **No `security-plan-review.md` exists, and that is correct** — root
+`CLAUDE.md`'s "Agents" section states the cadence enabled 2026-09-24: Security runs once per whole
+feature, immediately before DoD, superseding the two-pass plan-review/deep-review template in
+`AGENTS.md`'s general sequence diagram. Confirmed against this role's own memory
+(`project_current_cadence_one_security_pass_per_feature.md`), which recorded this exact situation on
+`WM-B6`.
 
-**The Recommended finding (visibility-tier `lo` bounds) is not yet filed to backlog.** Flagging this
-to the user/orchestrator below — it's the kind of finding Security explicitly deferred to a human
-decision (options A–D in `security.md`), not something DoD should silently file itself.
+**Both halves of that finding were subsequently addressed, on this branch, before this gate ran —
+corrected here after the orchestrator pointed this out, since my first pass through the git log
+missed it:**
+- The invariant-floor half was **fixed in code**: commit `8339a57` floors `LOWRES`/
+  `MEDRES_ANGULAR_RADIUS_RAD`'s `lo` at `RESOLUTION_ANGULAR_RADIUS_RAD` (`0.00128`), with a test
+  pinning the rejection of anything below it. Confirmed by reading `visibility.py:303-330` — both
+  `lo=0.00128` literals are present, with a comment explaining why a literal rather than a named
+  reference.
+- The description half was **fixed in code**: commit `58c0114` rewrote all three tier descriptions
+  in `config/defaults.toml` to state the inverse relationship explicitly, name `UNAIDED_OPTIC`,
+  give the default's boundary distance, and say `lo` is the dangerous direction. Confirmed by
+  reading the rendered `config/defaults.toml` output directly (lines 80-91), not the source comment.
+- **What remains — the general range headroom (`lo` still permits several km past calibration even
+  with the floor in place) — is a decided, not an outstanding, item.** Narrowing how much rope the
+  pilot has while tuning is a product decision reserved to him; he instructed the implementer not
+  to touch it. Recorded here as decided-and-left-wide-on-purpose, not as an unfiled finding needing
+  backlog action.
+
+**`mypy tools` (run manually above, in the Code Quality section) was clean** — relevant to `X-B36`,
+which will want to know whether widening the documented gate to include `tools/` would immediately
+fail on this branch's own tool: it would not.
 
 ## Performance — PASS
 
@@ -130,7 +152,16 @@ pilot-facing file) argues the generator's rendering contract should be settled *
 fixing it once per already-rendered batch. This doesn't block this merge (Stage 3 isn't started),
 but it's worth deciding before Stage 3's Architect pass rather than rediscovering it there.
 
+## Acceptance testing — CONFIRMED
+
+The feature was pre-authorised for merge ("review, DoD and then merge"), and this gate's own direct
+execution of all three test cases and both edge cases (cold read, valid override, three bad-value
+classes, missing file, `--print-tuning`-vs-startup-block agreement, deliberate staleness-test break)
+**is** the acceptance evidence — a startup-path mechanism with no behaviour change has nothing a
+sortie would add past what was already run here. Confirmed by the user via the orchestrator.
+
 ## Overall verdict: **PASS**
 
-Clear to merge, scoped to tip `da6ceb32bdcf6791775bf96c9cbdc4cd1bd31499`. Acceptance testing plan
-below pending the user's own confirmation.
+Clear to merge, scoped to tip `da6ceb32bdcf6791775bf96c9cbdc4cd1bd31499` (DoD's own commit,
+`e66415e`, lands on top). The user will perform the merge directly in the repo root, where `main`
+is checked out — not this DoD pass.
