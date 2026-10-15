@@ -72,6 +72,64 @@ genuinely unverified:
 **This is the one thing that could make the item much more expensive than it reads**, so it should
 be probed before the plan is written, not after.
 
+## Answers, same conversation
+
+### Terrain blocks; tree cover does not — question 1 closed
+
+> *"Terrain does block, of course. I could see bring flashes through trees and tracer fire raising
+> from the forest, that makes it visible. Terrain just blocks LOS."*
+
+So the rule is exactly the inference, with the physical reason stated: **flashes show through trees
+and tracers rise above the canopy**, while terrain is simply an opaque obstruction. Line of sight
+keeps its ordinary meaning and keeps `", obstructed"`'s new semantics (§8 of the attack-run
+feedback) intact — this feature does not weaken them.
+
+### SAM launch is the same rule with a long tail
+
+> *"SAM launch is comparable. SAM missiles leave smoke trail, so that especially gives away the
+> launcher position. Pick a constant to simulate smoke trail dissipation -> SAM launch shows where
+> the launcher was for quite a while."*
+
+**This is the first perception source in the project with a decaying *external* lifetime.** Gun fire
+is visible only between start and stop; a SAM launch stays visible *after the event has ended*,
+because the smoke hangs. Two consequences worth separating:
+
+- **It reveals where the launcher *was*.** The user's own phrasing. The trail marks a position at a
+  past moment, which is precisely what belief already models — a sighting with an age — rather than
+  a current observation. It should not read as "there is a launcher there now".
+- **The dissipation constant is a behaviour-affecting number and belongs in the tuning file**
+  (standard practice as of 2026-10-15). It is also exactly the kind of value a sortie retunes:
+  too short and the pilot never gets the warning, too long and Petrovich keeps pointing at smoke.
+
+**`S_EVENT_SHOT` is the right event for this one, not `SHOOTING_START`** — see the dependency note
+below: `S_EVENT_SHOT` covers missiles and excludes rapid-fire guns, which is the opposite split from
+the gun case and happens to be exactly what each half of this feature needs.
+
+### The export mechanism already exists — my "blocked on a probe" framing was too pessimistic
+
+> *"DCS debrief log has shooting events and some earlier investigation was about can it be detected,
+> it was when tracers was explored. I think we wound that unit firing is exportable event while
+> tracers are not."*
+
+The user is right and the note is on disk:
+**`aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md`**. It settles
+most of what I filed as unknown:
+
+- These are reachable over the **mission-scripting bridge** — `net.dostring_in("scripting", ...)`
+  polled at 1 Hz from a Hook — **which is already shipping in production** for F10 commands
+  (2026-09-13) and unit velocity (2026-09-22). So the "can a GameGUI Hook see mission-scripting
+  events" worry is answered: it does not have to.
+- **`S_EVENT_SHOT` fires for any unit firing a weapon but explicitly excludes machine-gun and
+  autocannon fire**, which is routed to `S_EVENT_SHOOTING_START` instead. Both have paired end
+  events. So **the gun case and the missile case need different events** — the feature needs both.
+- **The one genuinely open point**, flagged in that note as *"the single most important unresolved
+  point"*: whether **ground AAA** (ZU-23, Shilka, 2S6) actually raises `S_EVENT_SHOOTING_START`, or
+  whether only aircraft cannon do. The wiki's wording is unit-generic but every worked example is an
+  aircraft gun. **That is the probe**, and it is much narrower than "can we get firing events at
+  all" — it is one mission, one AAA unit, one log line.
+
+---
+
 ## Open questions for `/explore`
 
 1. **Does terrain LOS still block a firing unit?** The user named *tree cover* explicitly and said
