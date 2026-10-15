@@ -143,6 +143,44 @@ without the pilot asking for it.
 
 ---
 
+## §7 — The ladder runs both ways: least capable optic that can see the target
+
+> *"for guidance using other than ATGM - use the least capable optic that can see the target. Switch
+> from more capable to less capable as range decreases."*
+>
+> *"In ATGM case, 9K113 is a must, but can switch from narrow to wide when wide is enough for precise
+> guidance."*
+
+**This generalises §6 and corrects its shape.** §6 read as a one-way escalation — reach for something
+better when the naked eye cannot resolve the target. It is really a **standing rule with a minimum,
+evaluated continuously in both directions**: at every moment, use the *least* capable optic that can
+still see the target.
+
+| case | floor | rule |
+|---|---|---|
+| guidance, non-ATGM | naked eye | least capable optic that resolves the target; **de-escalate as range closes** |
+| ATGM run | **9K113 (mandatory)** | narrow while narrow is needed; **widen to wide as soon as wide suffices** |
+
+**Why least-capable rather than best-available, stated because the code will otherwise drift the
+other way:** a more capable optic is a *narrower* one. The 9K113 narrow is 6° of field against the
+naked eye's 180°. Reaching for magnification he does not need costs Petrovich everything else he
+would have noticed — the whole point of the optic model since binoculars stopped being the default
+(`optics.py`'s own module docstring). **Capability and awareness trade against each other, so the
+cheapest sufficient instrument is the correct one, not a compromise.**
+
+The ATGM floor is the exception that proves it: during a missile run the sight is mandatory
+regardless of range, because the guidance channel *is* the sight (`BL-14` explore: *"ATGM guidance
+is with 9K113 only, there is no naked eye channel"*). Even there the same instinct applies one level
+down — widen from narrow to wide the moment wide is precise enough.
+
+**The engineering risk this creates, which the plan must address rather than discover:** a threshold
+crossed by a closing range will be crossed repeatedly if range oscillates, and every switch costs the
+1 s hands-busy interval during which Petrovich sees nothing. **Hysteresis is not a refinement here,
+it is load-bearing** — the same conclusion the 9K113's slew deadband reached for the same reason.
+A ladder that thrashes at the boundary would be worse than one that never de-escalates at all.
+
+---
+
 ## What this leaves open for `/explore`
 
 - **§2:** does flying past *end* the run, or only silence it? And is "behind the cockpit mask" the
