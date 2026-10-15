@@ -38,10 +38,11 @@ and found sound.
 
 ## A. Still-open list (what needs checking, in plain language)
 
-Ordered cheapest/most-valuable first. Items 1–5 all ride on **one ordinary ground-attack sortie**
-with a mix of grouped contacts, some scanning/reporting, and one odd phrase thrown in — nothing
-about them needs a special setup. Items 6–7 need a deliberate scenario. Item 8 is a read of logs
-you already have, not a flying task.
+Ordered cheapest/most-valuable first. Items 1–5 and 10–12 all ride on **one ordinary ground-attack
+sortie** with a mix of grouped contacts, some scanning/reporting, cancelling a command, and one odd
+phrase thrown in — nothing about them needs a special setup. Items 6–7 need a deliberate scenario.
+Item 8 is a read of logs you already have, not a flying task. Item 9 needs a specific location
+(coastal woods NE of Latakia).
 
 1. **Petrovich's free-text answers have never actually been heard.** Every "report"/"describe" so
    far matched a known voice command. Say something that isn't in the command vocabulary (e.g. ask
@@ -191,6 +192,11 @@ marker on inspection — flagging that discrepancy rather than silently dropping
 - **AC-8 and WM-W2** are two roadmap entries (different subprojects) describing the *same* piece of
   work and the same residual open question (feed availability) — don't track them as two separate
   things to check.
+- **`BL-W5` (confirm-band affirmatives) and `todo/todo/X-T8.md`** describe the *exact same* defect
+  and fix (`fix/confirm-band-affirmatives`, merged `583d786`, 2026-09-28) and are both still open —
+  confirmed directly against the logs that no "cancel"→"confirm" round trip has been spoken in any
+  sortie since. Recommend closing one as a duplicate of the other once flown, so the same flight
+  doesn't get recorded as clearing two different backlog items.
 - **`BL-B59` and `X-B31`** are not the same item (different mechanisms: bounded fold-displacement
   vs. a forest-occlusion gate on the target's own position) but their flight checks are both
   "dense/forested scene nobody has deliberately flown yet," and a sortie built to exercise one
