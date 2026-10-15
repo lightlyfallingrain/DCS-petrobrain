@@ -653,7 +653,7 @@ def render_alignment(
 
 
 def render_attack_run_lost_sight(
-    phrase: str, what: str, where: str, ago_s: float
+    phrase: str, what: str, where: str | None, ago_s: float
 ) -> OutgoingSpeech:
     """BL-B70 §10's "losing sight" transition (`plans/
     attack-run-sortie-fixes/plan.md`) -- spoken once, the moment the
@@ -663,9 +663,21 @@ def render_attack_run_lost_sight(
     `phrase` is `alignment_phrase`'s bare guidance word; `belief.
     attack_run.decide` tracks whether this has already been spoken for
     the current too-far episode (`AttackRunState.last_spoken_unresolved`),
-    this function has no memory of its own."""
+    this function has no memory of its own.
+
+    `where` is `None` (the reviewer's required fix 2,
+    `plans/attack-run-sortie-fixes/review.md`) when `belief.attack_run.
+    decide` judges that it would restate `phrase` verbatim -- `phrase`
+    outside the 12 o'clock sector is itself a clock-hour phrase, so a
+    `<where>` clause there spoke the same position twice, once worded and
+    once as a bare digit, which was the defect. This function only omits
+    the clause on `None`; it is never the one deciding when that applies."""
     age = _attack_run_last_seen_phrase(ago_s)
-    sentence = f"{phrase[0].upper()}{phrase[1:]} {what} {where}, last seen {age} ago"
+    capitalized_phrase = f"{phrase[0].upper()}{phrase[1:]}"
+    if where is None:
+        sentence = f"{capitalized_phrase} {what}, last seen {age} ago"
+    else:
+        sentence = f"{capitalized_phrase} {what} {where}, last seen {age} ago"
     return OutgoingSpeech(text=f"{sentence}.", template="attack_run")
 
 

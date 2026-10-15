@@ -650,13 +650,33 @@ def test_no_look_cause_obstructed_only_on_a_fresh_false_verdict() -> None:
 def test_no_look_cause_too_far_beyond_naked_eye_presence_range() -> None:
     """§5/§6: beyond the naked eye's own presence threshold for this
     object's profile (`UNAIDED_OPTIC`, `BL-B71`'s ladder out of scope),
-    the cause is `"too_far"` -- checked after masking/LOS, matching
-    `check_visibility`'s own gate order."""
+    the cause is `"too_far"` -- checked after masking but *before* LOS,
+    matching `check_visibility`'s own gate order (range/size is gate 3,
+    terrain LOS is gate 4)."""
     near = _contact_at(bearing_deg=0.0, range_m=1000.0)
     assert _no_look_cause(_ownship(), near, now_sim=0.0) == "unknown"
 
     far = _contact_at(bearing_deg=0.0, range_m=2000.0)
     assert _no_look_cause(_ownship(), far, now_sim=0.0) == "too_far"
+
+
+def test_no_look_cause_too_far_wins_over_a_fresh_obstructed_verdict() -> None:
+    """The reviewer's own mutation proof (`plans/attack-run-sortie-fixes/
+    review.md`): a contact that is simultaneously (fresh
+    `live_los_clear=False`, beyond the naked eye's presence range) must
+    report `"too_far"`, not `"obstructed"` -- `check_visibility` itself
+    would have rejected it on range (gate 3) before ever reaching terrain
+    LOS (gate 4), so `"obstructed"` would be a misattribution. Before the
+    fix this asserted `"obstructed"` and passed; swapping the two checks
+    in `_no_look_cause` back to the wrong order makes this fail."""
+    far = _contact_at(bearing_deg=0.0, range_m=2000.0)
+    far.live_los_clear = False
+    far.last_seen_sim = 0.0
+
+    assert (
+        _no_look_cause(_ownship(), far, now_sim=ATTACK_TARGET_LOS_MAX_AGE_S - 0.1)
+        == "too_far"
+    )
 
 
 def test_decide_masked_tick_is_silent_and_run_stays_engaged() -> None:
@@ -738,17 +758,34 @@ def test_decide_losing_and_regaining_sight_keys_on_resolvability_not_masking() -
     assert state.last_spoken_unresolved is False
 
 
-def test_decide_losing_sight_where_phrase_reports_the_clock_hour() -> None:
-    """The losing-sight sentence's `<where>` clause is the clock hour,
-    same convention a contact report uses, not a repeat of the guidance
-    word."""
+def test_decide_losing_sight_where_suppressed_when_it_restates_the_clock_hour() -> None:
+    """Review's required fix 2 (`plans/attack-run-sortie-fixes/review.md`):
+    outside the 12 o'clock sector, `phrase` is itself a worded clock-hour
+    phrase (`"Three o'clock"`), so the `<where>` clause is suppressed
+    rather than restating the same position as a bare digit (the old,
+    defective `"Three o'clock armor 3 o'clock, last seen..."`)."""
     contact = _contact_at(bearing_deg=90.0, range_m=2000.0)  # 3 o'clock, too far
     state = AttackRunState()
 
     state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
 
     assert speech is not None
-    assert speech.text.startswith("Three o'clock armor 3 o'clock, last seen")
+    assert speech.text.startswith("Three o'clock armor, last seen")
+    assert "3 o'clock" not in speech.text
+
+
+def test_decide_losing_sight_where_phrase_kept_in_the_qualitative_register() -> None:
+    """Inside the 12 o'clock sector, `phrase` is a qualitative word
+    (`"lined up"`/`"come left"`) that carries no position at all, so the
+    `<where>` clause still earns its place there -- `"ahead"` -- unlike
+    the clock-hour case above, where it would be a pure repeat."""
+    contact = _contact_at(bearing_deg=0.0, range_m=2000.0)  # 12 o'clock, too far
+    state = AttackRunState()
+
+    state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+
+    assert speech is not None
+    assert speech.text.startswith("Lined up armor ahead, last seen")
 
 
 def test_decide_retarget_resets_last_spoken_unresolved() -> None:

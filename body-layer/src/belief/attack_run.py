@@ -399,15 +399,22 @@ def _tier2_alignment(
 #: Why Petrovich has no fresh look at the attack target right now,
 #: computed in `check_visibility`'s own gate order so the two cannot
 #: disagree about precedence (`plans/attack-run-sortie-fixes/plan.md`
-#: BL-B70's cause taxonomy):
+#: BL-B70's cause taxonomy). **Gate order matters**: `check_visibility`
+#: (`visibility.py:997-1023`) checks range/size (gate 3) *before* terrain
+#: LOS (gate 4), so a contact beyond presence range is "too far" even if
+#: its last live LOS verdict happened to be a fresh `False` -- a reviewer
+#: (`plans/attack-run-sortie-fixes/review.md`) found this module's first
+#: cut inverted that order, confirmed reachable by mutation (swapping the
+#: two checks back left the full suite passing, since nothing exercised a
+#: contact simultaneously fresh-LOS-blocked and beyond presence range):
 #:
 #: - `"masked"` -- behind the cockpit mask. Silence (§2); the run stays
 #:   engaged.
+#: - `"too_far"` -- naked-eye presence range exceeded. The remembered-
+#:   sighting transition register (§10).
 #: - `"obstructed"` -- a fresh DCS live LOS verdict says blocked by
 #:   terrain or buildings. `", obstructed"` -- the word's only remaining
 #:   caller (§8).
-#: - `"too_far"` -- naked-eye presence range exceeded. The remembered-
-#:   sighting transition register (§10).
 #: - `"unknown"` -- no fresh live LOS verdict either way. Fail-open, no
 #:   qualifier at all (F2) -- the same posture `ContactStore.tick`'s own
 #:   engagement term already takes for a missing/stale verdict.
@@ -423,6 +430,17 @@ def _no_look_cause(
     `Contact.live_los_clear`, `visibility.tier_ranges`), never from
     `perception.detection_trace.DetectionTrace` (a diagnostic channel;
     using it as a control input would make the log load-bearing).
+
+    **Checks range (gate 3) before terrain LOS (gate 4), matching
+    `check_visibility`'s real order** (`visibility.py:997-1023`): mask,
+    then range/size, then terrain LOS, then forest. A contact beyond the
+    naked eye's presence range is `"too_far"` even when its last live LOS
+    verdict happened to be a fresh `False` -- that is the cause
+    `check_visibility` itself would have rejected it on first, and
+    reporting `"obstructed"` instead is the misattribution §5/§8 exist to
+    end. (A first cut of this function checked LOS before range; a
+    reviewer found the inversion and confirmed it reachable by mutation
+    -- see the module docstring's cause-taxonomy comment.)
 
     **The mask test uses the true, banked body-relative direction**
     (`geometry.body_relative_direction` with `ownship.bank_deg`), *not*
@@ -455,11 +473,6 @@ def _no_look_cause(
         co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
     ):
         return "masked"
-    if (
-        contact.live_los_clear is False
-        and (now_sim - contact.last_seen_sim) <= ATTACK_TARGET_LOS_MAX_AGE_S
-    ):
-        return "obstructed"
     profile = profile_for(contact.last_class_raw)
     # Aspect is unknown for a belief the same way `improvement_window_m`
     # treats it -- the profile's own extent, not a guess from a stale
@@ -474,6 +487,11 @@ def _no_look_cause(
     )
     if range_m(observer, contact.last_position) > presence_threshold_m:
         return "too_far"
+    if (
+        contact.live_los_clear is False
+        and (now_sim - contact.last_seen_sim) <= ATTACK_TARGET_LOS_MAX_AGE_S
+    ):
+        return "obstructed"
     return "unknown"
 
 
@@ -650,8 +668,17 @@ def decide(
         what = _unit_type_display(
             contact.classification.value, contact.classification.level.name.lower()
         )
-        where_hour = alignment_clock_hour(azimuth_deg)
-        where = f"{where_hour} o'clock" if where_hour is not None else "ahead"
+        # §10's `<where>` clause is suppressed, not worded, when it would
+        # restate `phrase` verbatim (review's required fix 2): outside the
+        # 12 o'clock sector `phrase` is itself a clock-hour phrase (e.g.
+        # "Three o'clock"), via the same `alignment_clock_hour` sector
+        # test `alignment_phrase` uses internally -- a second `<where>`
+        # clause there would speak the same position twice, once as a
+        # word and once as a digit if it were not suppressed. Inside the
+        # sector `phrase` is a qualitative word ("come left"/"lined up")
+        # that carries no position at all, so `<where>` still earns its
+        # place there, as "ahead".
+        where = "ahead" if alignment_clock_hour(azimuth_deg) is None else None
         speech = render_attack_run_lost_sight(
             phrase, what, where, now_sim - contact.last_seen_sim
         )

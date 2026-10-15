@@ -301,3 +301,85 @@ measure, not this log.
   the *actual* profile regardless of which one fires), but it means the `_no_look_cause` tests had to
   be positioned at 1000 m ("near")/2000 m ("far") rather than the plan's own 2.3 km figure, which is
   specific to a real 7 m vehicle's keyword-matched profile, not the default one these fixtures get.
+
+---
+
+### Fix pass: `plans/attack-run-sortie-fixes/review.md`'s two required findings (2026-10-15)
+
+Both required fixes from the review, nothing else. `BL-B71`'s optic ladder confirmed still untouched.
+
+**Required fix 1 — `_no_look_cause`'s gate order.** Swapped the range/size check (`"too_far"`)
+to run *before* the terrain-LOS check (`"obstructed"`), matching `check_visibility`'s real order
+(`visibility.py:997-1023`: mask → optic FOV → range/size gate 3 → terrain LOS gate 4 → forest).
+Updated the module docstring, `_no_look_cause`'s own docstring, and
+`test_no_look_cause_too_far_beyond_naked_eye_presence_range`'s docstring, all of which previously
+asserted a mirroring the code did not have.
+
+Added `test_no_look_cause_too_far_wins_over_a_fresh_obstructed_verdict` — a contact that is
+simultaneously (fresh `live_los_clear=False`, beyond presence range) must report `"too_far"`.
+**Mutation proof, by hand**: swapped the two checks back to the wrong order (`shasum` of
+`attack_run.py` recorded before and after), re-ran — the new test failed with
+`AssertionError: assert 'obstructed' == 'too_far'`, for exactly the stated reason; restored the
+file and confirmed the checksum matched the pre-mutation value and all 4 `no_look_cause` tests
+passed again.
+
+**Required fix 2 — the `<where>` clause's digit/word mismatch and duplication.** Read: the review
+offered two options — "word the hour" (minimal mechanical fix) or "suppress `<where>` when it
+would restate `phrase`" (design question). **Took the second, which subsumes the first**: when
+`alignment_clock_hour(azimuth_deg)` is not `None` (outside the 12 o'clock sector), `phrase` is
+itself a worded clock-hour phrase (`"Three o'clock"`) and `<where>` is now suppressed entirely
+(`where=None`) rather than worded — there is no digit left to mismatch, because there is no
+separate `<where>` token at all in that case. When inside the sector, `phrase` is a qualitative
+word (`"come left"`/`"lined up"`) carrying no position, so `<where>` still renders as `"ahead"`,
+unchanged from before. `render_attack_run_lost_sight(phrase, what, where, ago_s)`'s `where`
+parameter is now `str | None`; `None` omits the clause from the composed sentence rather than
+rendering an empty or malformed one.
+
+Rewrote the test that pinned the old defective string
+(`test_decide_losing_sight_where_phrase_reports_the_clock_hour` →
+`test_decide_losing_sight_where_suppressed_when_it_restates_the_clock_hour`, asserting
+`"Three o'clock armor, last seen..."` and that `"3 o'clock"` is absent) and added
+`test_decide_losing_sight_where_phrase_kept_in_the_qualitative_register` to pin the unchanged
+`"ahead"` case (`"Lined up armor ahead, last seen..."`), so the two registers' different outcomes
+are both covered rather than only the one the review flagged.
+
+**On `Contact.live_los_clear`'s reachability (not in scope, reported per the brief).** Traced the
+only two writers of `Contact.live_los_clear` (`contacts.py:676`/`751`, both an unconditional
+overwrite from `Percept.live_los_clear`) back through `belief/percept.py:191` (a straight
+passthrough of `Observation.live_los_clear`) to `naked_eye_source.py`. There,
+`live_los_clear_by_object_id` (line ~775) is built only from the `visible` list — candidates for
+which `check_visibility` returned non-`None` — and gate 4 (`visibility.py:1023`,
+`if not candidate.live_los_clear: return None`) is fail-closed with no emitter bypass (the
+bypass covers gates 3 and 5 only), so every member of `visible` already has
+`candidate.live_los_clear is True` by construction. The per-cluster fold at line ~1115
+(`live_los_clear = next(iter(member_los)) if len(member_los) == 1 else None`) can therefore never
+produce `False` either — its input set is all-`True` or empty, never mixed. Every other perception
+source (`source.py:313`'s own docstring: "the hybrid channel has no geometric gate to source it
+from and never sets this") leaves the field at its `None` default. **So `Contact.live_los_clear`
+can be `True` or `None` through the live pipeline, but never `False` — the `"obstructed"` branch
+fixed above is structurally unreachable in live play, reachable only through a test fixture or
+`replay.py`'s offline path.** This means §8's word has no live caller today; it is pre-existing
+machinery outside this plan's Affected Modules, so not fixed here, but worth an architect's or
+debugger's attention since it means the `"obstructed"` qualifier the sortie feedback was about may
+never actually fire against real DCS data.
+
+**Verification**: `ruff format --check .` fails only on the pre-existing out-of-scope
+`research/2026-10-05-security-audit.md`, `ruff check .` and `mypy src` clean, `pytest -q` →
+**2016 passed, 4 xfailed** (baseline 2014/4; +2 from the two new tests, net of the one rewritten in
+place). Re-ran the §1/§2 sortie-log replay independently (`125 → 78` emissions, `47` suppressed;
+`41` of `66` "obstructed" calls masked) — both figures unchanged by either fix, as expected, since
+neither fix touches `_should_emit`'s text-veto or the cockpit-mask gate.
+
+#### Files Changed (this pass)
+
+- `body-layer/src/belief/attack_run.py` — `_no_look_cause`'s gate order swapped (range before LOS);
+  module/function docstrings corrected; `decide`'s losing-sight branch suppresses `<where>` instead
+  of wording a mismatched digit.
+- `body-layer/src/belief/speech.py` — `render_attack_run_lost_sight`'s `where` parameter is now
+  `str | None`; omits the clause on `None`.
+- `body-layer/tests/test_attack_run.py` — added
+  `test_no_look_cause_too_far_wins_over_a_fresh_obstructed_verdict`; rewrote
+  `test_decide_losing_sight_where_phrase_reports_the_clock_hour` →
+  `test_decide_losing_sight_where_suppressed_when_it_restates_the_clock_hour`; added
+  `test_decide_losing_sight_where_phrase_kept_in_the_qualitative_register`; corrected
+  `test_no_look_cause_too_far_beyond_naked_eye_presence_range`'s docstring.
