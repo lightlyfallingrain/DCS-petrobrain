@@ -209,6 +209,49 @@ qualifier could fire for "no answer yet" rather than for real terrain.
 
 ---
 
+## §9 — The attack target has first claim on DCS line of sight
+
+> *"during an attack run the current target is *the* thing to LOS and must take priority over any
+> other DCS LOS checks."*
+
+**This is the answer to §8's open interaction, and it comes from the other end than expected.** §8
+noted that the live LOS gate is fail-closed since `BL-11` Stage 4 — a *missing* verdict reads as
+masked and would speak `", obstructed"` for *"no answer yet"*. The 16:44 sortie put that rate near
+8% across all gate-4 evaluations.
+
+The fix is not to soften the fail-closed rule, which exists for good reason. It is to **guarantee
+the one contact that matters always has a fresh verdict**: during an attack run the target is not
+one candidate among many competing for a budgeted LOS batch — it is the thing the batch exists for.
+
+**Where this lands is a cross-subproject question the plan must answer**, because the raycast is not
+ours: `X-B29` moved it into the DCS-side Lua Hook, and body-layer consumes
+`GET /line_of_sight/latest` joined by `unit_name` under `LOS_MAX_AGE_S = 3.0`. So priority can be
+expressed in at least two places —
+
+- **aircraft-layer**, ordering or reserving a slot in the Hook's own batch so the target is always
+  raycast; or
+- **body-layer**, requesting the target explicitly rather than taking whatever the latest snapshot
+  happens to contain.
+
+— and they have different costs and different failure modes. The first needs the export side to know
+which contact is the attack target, which is a new coupling between Petrovich's intent and the Hook.
+The second cannot conjure a verdict that was never computed.
+
+**Three things worth settling with it:**
+
+1. **What "priority" means when the verdict is simply stale** rather than absent — `LOS_MAX_AGE_S`
+   is 3.0 s, three poll cycles at the LOS feed's own 1 Hz. During a closing attack run a 3-second-old
+   terrain verdict may already be wrong.
+2. **Whether the target should also be raycast more often**, not merely first. This is the same
+   freshness argument `BL-B63`'s selective fast lane makes for telemetry and the current target —
+   and if so, the two belong together rather than being solved twice.
+3. **What Petrovich says if the verdict is genuinely unavailable** even with priority. Silence and
+   `", obstructed"` are both wrong: one hides a real obstruction, the other invents one. This is the
+   residue of the fail-closed rule and it needs an answer, even if the answer is "cannot happen once
+   priority is in place" — in which case say what enforces that.
+
+---
+
 ## What this leaves open for `/explore`
 
 - **§2:** does flying past *end* the run, or only silence it? And is "behind the cockpit mask" the
