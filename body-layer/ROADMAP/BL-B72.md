@@ -80,6 +80,27 @@
     bracketed to a life fraction of (0.69, 0.84]. Its one remaining follow-up — the exact threshold
     inside that band, and whether it is global or per-type — is not this entry's.
 
+  ## A burning unit is the third emitter, and the cheapest
+
+  **Added by the same direction**: *"oh, burning and smoking targets -> those are similarly visible
+  from far away"*.
+
+  **It is a polled state rather than an event**, which exempts it from every hard problem the other
+  two halves carry — no latching, no burst missed between 1 Hz polls, no start-without-end when a
+  unit dies mid-burst, no external lifetime to model. `getLife()`/`getLife0()` are read per unit
+  over the bridge already in production.
+
+  **The threshold is already measured, not open**: the closed probe records that the visible state
+  is **fire, not smoke**, meaning doomed-with-a-delay, bracketed to a life fraction of
+  **(0.69, 0.84]**. Its one follow-up — the exact value inside that band and whether it is global or
+  per-type — is a tuning question and belongs in the tuning file, not a feasibility question.
+
+  **What it tells the pilot is categorically different from the other two.** Gun fire says
+  *something there is dangerous now*; a burning unit says *something there is already dead or
+  dying*. That is not a threat report, and it is plausibly the answer to *"did we get it?"* that
+  `plans/brain-layer/explore-notes.md` recorded as an open question long before this entry existed.
+  Detection-only still holds.
+
   Related: `[[BL-B64]]` (the optic model this bypasses a gate of), `[[BL-B70]]`/`[[BL-B71]]` (the
   attack-run work whose `", obstructed"` semantics question 1 interacts with), `[[BL-2]]`
   (contact decay, which owns what happens after the firing stops).

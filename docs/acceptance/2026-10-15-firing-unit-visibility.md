@@ -138,6 +138,44 @@ most of what I filed as unknown:
 
 ---
 
+### A burning unit is the third emitter, and its data channel already exists
+
+> *"oh, burning and smoking targets -> those are similarly visible from far away"*
+
+Same rule, third source. But it differs from the other two in a way that makes it **the cheapest of
+the three**, and the difference is worth stating because it changes where the work lands:
+
+| source | nature | channel | lifetime |
+|---|---|---|---|
+| gun fire | **event**, start/end bounded | `S_EVENT_SHOOTING_START`/`END` | while firing |
+| SAM launch | **event**, plus a tail | `S_EVENT_SHOT` + dissipation constant | smoke hangs after the event |
+| **burning unit** | **state**, continuously readable | `getLife()`/`getLife0()` per unit | while it burns |
+
+**Burning is a polled state, not an event.** That removes this source from every hard problem the
+other two have: no latching, no missed burst between 1 Hz polls, no start-without-end when the unit
+is destroyed mid-burst, no external lifetime to model. It is a per-unit predicate read the same way
+everything else in the perception chain is read.
+
+**And the threshold is already measured.** The closed probe
+(`docs/acceptance/2026-09-24-damage-and-firing-probes.md`, flown 2026-09-25) establishes:
+
+- `getLife()` / `getLife0()` work per unit over the same mission-scripting bridge.
+- **The visible state is *fire*, not smoke** — the user's *"burning and smoking"* resolves to one
+  observable, and the project already knows which.
+- Fire means **doomed-with-a-delay**, bracketed to a life fraction of **(0.69, 0.84]**.
+- Its one open follow-up, named in that document: **the exact threshold inside that band, and
+  whether it is global or per-type.** That is a tuning question, not a feasibility one, and it is
+  exactly the shape that belongs in the tuning file.
+
+**What it tells the pilot is different from the other two, and that is the interesting part.** Gun
+fire says *something there is dangerous now*. A burning unit says *something there is already
+dead or dying* — which is not a threat report at all. It may be the answer to *"did we get it?"*,
+which `plans/brain-layer/explore-notes.md` recorded as a question long before this feature existed.
+**Detection-only still holds**: a fire at 9 km says *something is burning there*, not *that is the
+BMP-2 we shot*.
+
+---
+
 ## Open questions for `/explore`
 
 1. **Does terrain LOS still block a firing unit?** The user named *tree cover* explicitly and said
