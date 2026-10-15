@@ -61,3 +61,12 @@
   Related: `[[BL-14]]` (the milestone this fixes), `[[BL-B64]]` (made the sight a selectable optic;
   the bug class above), `[[BL-B71]]` (the optic ladder, which consumes this entry's cause taxonomy),
   `[[BL-B66]]`/`[[BL-B67]]` (will need that taxonomy to say anything honest about an ATGM run).
+
+  **The attack-target LOS priority (§9) is scheduled here and not earlier — user decision,
+  2026-10-15.** Asked whether the ~8% live-LOS no-verdict rate warranted pulling that fix forward,
+  the answer was to observe rather than tune, because the cost is density-dependent: *"If it's very
+  dense then there's a lot of units to LOS and that is a real cost. If just a few units inside the
+  player bubble then it's nearly free. A very dense scene is on the rare side."* So this entry
+  carries the priority fix on its own schedule, and nothing about the LOS feed is a prerequisite
+  for starting it. See `[[AC-8]]`/`[[WM-W2]]` for the measurement that would reopen the wider
+  question.
