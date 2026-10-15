@@ -97,9 +97,14 @@
 
   **What it tells the pilot is categorically different from the other two.** Gun fire says
   *something there is dangerous now*; a burning unit says *something there is already dead or
-  dying*. That is not a threat report, and it is plausibly the answer to *"did we get it?"* that
-  `plans/brain-layer/explore-notes.md` recorded as an open question long before this entry existed.
-  Detection-only still holds.
+  dying*. That is not a threat report. Detection-only still holds.
+
+  **It does NOT answer *"did we get it?"*** (user direction, 2026-10-15): *"It might be 'we got it'
+  but it might be another unit that somebody else got."* That question needs **attribution** — that
+  this burning unit is the one we engaged — and a life-fraction reading carries nothing of the kind.
+  Asserting the link from fire alone would be an omniscience leak of exactly the sort this
+  project's central invariant forbids. `plans/brain-layer/explore-notes.md`'s question **stays
+  open**; this entry supplies one input a future attribution model could use, not the answer.
 
   Related: `[[BL-B64]]` (the optic model this bypasses a gate of), `[[BL-B70]]`/`[[BL-B71]]` (the
   attack-run work whose `", obstructed"` semantics question 1 interacts with), `[[BL-2]]`

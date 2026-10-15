@@ -169,10 +169,26 @@ everything else in the perception chain is read.
 
 **What it tells the pilot is different from the other two, and that is the interesting part.** Gun
 fire says *something there is dangerous now*. A burning unit says *something there is already
-dead or dying* — which is not a threat report at all. It may be the answer to *"did we get it?"*,
-which `plans/brain-layer/explore-notes.md` recorded as a question long before this feature existed.
-**Detection-only still holds**: a fire at 9 km says *something is burning there*, not *that is the
-BMP-2 we shot*.
+dead or dying* — which is not a threat report at all. **Detection-only still holds**: a fire at
+9 km says *something is burning there*, not *that is the BMP-2 we shot*.
+
+**It is NOT the answer to *"did we get it?"*, and conflating them would be an omniscience leak.**
+User direction, immediately after:
+
+> *"did we get it is a separate thing, don't close it here. It might be 'we got it' but it might be
+> another unit that somebody else got."*
+
+**Seeing a fire is not knowing who caused it.** *"Did we get it?"* needs **attribution** — that
+*this* burning unit is the one *we* engaged — and nothing in a life-fraction reading carries that.
+A burning vehicle a few hundred metres from the one the pilot shot at, killed by a wingman or by
+artillery, reads identically. Answering the question from fire alone would have Petrovich assert a
+causal link he has no way to perceive, which is the exact failure `CLAUDE.md`'s central invariant
+exists to prevent.
+
+So the brain-layer note's question stays open and **must not be marked closed or partly closed by
+this entry**. What this entry supplies is one *input* that a future attribution model could use,
+alongside things it would also need and does not have — what we fired at, when, and whether a hit
+followed.
 
 ---
 
