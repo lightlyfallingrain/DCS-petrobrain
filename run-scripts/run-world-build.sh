@@ -24,13 +24,18 @@ then
 else
     # on Windows (WSL)
     DCS="$DCS_INSTALL_PATH/Mods/terrains/$TERRAIN"
+    if [[ ! -d $DCS ]]
+    then
+        echo Error "$DCS" is not valid path. Check terrain exits!
+        exit 1
+    fi
     pushd ../world-model/ && \
     .venv/bin/python tools/build_world_model.py $TERRAIN-full \
         --towns   "$DCS/map/towns.lua" \
         --beacons "$DCS/beacons.lua" \
         --routes  "$DCS/roads/$TERRAIN.routes" \
         --srtm-dir data/raw/dem/$TERRAIN-full/ \
-        --osm-pbf  data/raw/osm/$TERRAIN-full/afghanistan-theatre.osm.pbf \
+        --osm-pbf  data/raw/osm/$TERRAIN-full/$TERRAIN-theatre.osm.pbf \
         2>&1 | tee $TERRAIN-full-build.log
     popd
 fi
