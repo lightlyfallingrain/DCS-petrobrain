@@ -227,6 +227,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
+import tuning
 from belief.association_over_time import contacts_plausibly_same
 from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
@@ -454,15 +455,22 @@ CALLOUT_MAX_AGE_S: Final[float] = 10.0
 
 #: A breath between lines, and slack absorbing a small under-estimate in
 #: `estimate_speech_duration_s` -- see that function's own docstring.
-INTER_UTTERANCE_GAP_S: Final[float] = 0.75
+INTER_UTTERANCE_GAP_S: Final[float] = tuning.real(
+    "belief.callouts.INTER_UTTERANCE_GAP_S", 0.75, lo=0.1, hi=5.0, status="judgement"
+)
 
 #: **Uncalibrated -- needs a live sortie.** ~150 words per minute, the plan's
 #: one real guess (`plans/callout-scheduling/plan.md`, "Risks & Unknowns":
 #: "Duration estimation drift is the only load-bearing guess"). Isolated
 #: here, same "mechanism and calibration never share a commit" posture as
 #: `perception/optics.py`'s own provenance comments, so retuning it later
-#: never touches `estimate_speech_duration_s`'s mechanism.
-SPEECH_RATE_WPS: Final[float] = 2.5
+#: never touches `estimate_speech_duration_s`'s mechanism. **Retires** once
+#: `AC-B6`'s real playback-stopped signal lands (`plans/configurable-
+#: constants/plan.md`'s "AA-B5 ordering") -- a declared end, not an
+#: indefinite placeholder.
+SPEECH_RATE_WPS: Final[float] = tuning.real(
+    "belief.callouts.SPEECH_RATE_WPS", 2.5, lo=0.5, hi=8.0, status="uncalibrated"
+)
 
 #: **Uncalibrated -- needs a live sortie.** Per-line synthesis/transport
 #: overhead, roughly the measured `say` latency from `plans/

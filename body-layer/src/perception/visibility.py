@@ -200,6 +200,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Final
 
+import tuning
 from perception import object_model
 from perception.association import WorldObjectCandidate
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
@@ -293,9 +294,34 @@ class LiveLosCoverage:
 #:   inside the range where the ladder shows a clear row of contacts.
 #:   **The real presence limit is further out than anything tested** -- a
 #:   longer ladder would push this down again.
-LOWRES_ANGULAR_RADIUS_RAD: Final[float] = 0.003
-MEDRES_ANGULAR_RADIUS_RAD: Final[float] = 0.014
-HIRES_ANGULAR_RADIUS_RAD: Final[float] = 0.028
+#:
+#: Presence tier ("something is there") -- see the block above for the
+#: calibration this is the `lowres` row of.
+LOWRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
+    "perception.visibility.LOWRES_ANGULAR_RADIUS_RAD",
+    0.003,
+    lo=0.0005,
+    hi=0.01,
+    status="measured",
+)
+#: Classification tier ("something is a BMP") -- see the block above for
+#: the calibration this is the `medres` row of.
+MEDRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
+    "perception.visibility.MEDRES_ANGULAR_RADIUS_RAD",
+    0.014,
+    lo=0.001,
+    hi=0.05,
+    status="measured",
+)
+#: Type tier ("that specific BMP variant") -- see the block above for the
+#: calibration this is the `hires` row of.
+HIRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
+    "perception.visibility.HIRES_ANGULAR_RADIUS_RAD",
+    0.028,
+    lo=0.002,
+    hi=0.08,
+    status="measured",
+)
 #: Not used by this module -- friend/foe discrimination is out of scope
 #: (plan Risks, "no coalition/IFF filtering"). Named anyway so the full
 #: `min_angular_radius` table is visible in one place.

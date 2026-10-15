@@ -60,6 +60,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Final, Literal
 
+import tuning
 from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
 
 if TYPE_CHECKING:
@@ -72,7 +73,9 @@ if TYPE_CHECKING:
 #: classification.confidence` (never `.level`, which stays sticky by
 #: design -- see `belief.classification`'s module docstring) since this
 #: claim's `established_sim`.
-IDENTITY_HALF_LIFE_S: Final[float] = 600.0
+IDENTITY_HALF_LIFE_S: Final[float] = tuning.real(
+    "belief.decay.IDENTITY_HALF_LIFE_S", 600.0, lo=60.0, hi=1800.0, status="judgement"
+)
 
 #: Fastest-decaying attribute: the exact perceived position. Originally
 #: chosen as the order-of-magnitude time a ground vehicle needs to move
@@ -97,7 +100,9 @@ IDENTITY_HALF_LIFE_S: Final[float] = 600.0
 #:
 #: This is the one half-life `certainty_of` below actually uses to
 #: separate "tracked" from "estimated".
-POSITION_HALF_LIFE_S: Final[float] = 30.0
+POSITION_HALF_LIFE_S: Final[float] = tuning.real(
+    "belief.decay.POSITION_HALF_LIFE_S", 30.0, lo=20.0, hi=120.0, status="judgement"
+)
 
 #: Medium decay: which way it was moving. Slower than exact position (a
 #: heading estimate stays plausible longer than a point position does) but
@@ -218,7 +223,9 @@ assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S, (
 #: -- long enough that "estimated" (stale-but-plausible) has had room to mean
 #: something distinct from "tracked", short enough that a contact does not
 #: linger indefinitely as "estimated" once the crew has plainly lost it.
-LOST_THRESHOLD_S: Final[float] = 120.0
+LOST_THRESHOLD_S: Final[float] = tuning.real(
+    "belief.decay.LOST_THRESHOLD_S", 120.0, lo=30.0, hi=600.0, status="judgement"
+)
 
 #: `plans/contact-duplication-ambiguity-runaway/plan.md`'s object-permanence
 #: expiry window: how long a resolved `Observation.continues_observation_id`

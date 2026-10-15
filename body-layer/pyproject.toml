@@ -51,4 +51,5 @@ known-first-party = [
     "query",
     "store",
     "probe_store",
+    "tuning",
 ]

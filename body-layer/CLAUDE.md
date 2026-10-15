@@ -194,6 +194,54 @@ doesn't). The join itself (`src/detection_trace_writer.py`) is the one module in
 deliberately allowed to hold both ground truth and belief at once, and is read-only against
 `ContactStore` — see that module's own docstring for the boundary this preserves.
 
+## Tuning
+
+**`plans/configurable-constants/plan.md`, Stages 1-2.** A curated ~15 behaviour-affecting
+constants (the four `attack_run` gates, the three visibility tier radii, `SPEECH_RATE_WPS`,
+`INTER_UTTERANCE_GAP_S`, `FOCUS_DWELL_S`, `SCAN_PLAN`, `IDENTITY_HALF_LIFE_S`,
+`POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S`, `BEARING_SIGMA_DEG`) resolve through `src/tuning.py`
+at **import time**, not at runtime — see that module's own docstring for why (constants bind by
+value at import; a later `setattr` on the defining module never reaches an importer that already
+ran).
+
+**To override one:**
+
+1. Copy the key you want from `config/defaults.toml` (generated, committed, documents every
+   tunable constant's default/status/bounds/source) into your own `config/tuning.toml`
+   (gitignored, hand-written, sparse — only the keys you change).
+2. Set `PETROBRAIN_TUNING=config/tuning.toml` in the run command (an environment variable, never
+   a CLI flag — a flag would be parsed after every constant has already resolved, and would fail
+   silently).
+3. Restart `logger.py`. **Startup only, no mid-sortie reload** — a reload without re-importing
+   would change `--print-tuning`'s answer and not the cockpit's actual behaviour, and several of
+   these constants (the decay half-lives) integrate belief state over time, so a value changed
+   mid-flight would make the observed behaviour belong to neither setting.
+
+**A bad value warns and continues on the code default — it never refuses to start** (Decision 4
+REVISED, then Decision 4a: a *missing or unreadable* named file is not fatal either, just louder,
+since 100% of the file's overrides are absent rather than one key's). Every rejection — unknown
+key, wrong type, out of range, an unrecognised table entry — is printed once at startup and is
+always available via `--print-tuning`, which also works standalone (without
+`--aircraft-layer-url`) so it can be checked without launching anything:
+
+```sh
+PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --print-tuning
+```
+
+**Regenerating `config/defaults.toml`:** never hand-edit it — `tools/generate_defaults.py --write`
+regenerates it from the `tuning.*` declarations in `src/`, and
+`tests/test_tuning_defaults_toml.py` fails CI if a calibration commit forgot to regenerate it.
+
+**A known residual coupling, not fully closed by the loader's own per-key bounds:**
+`belief.decay.py` asserts `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` at import time
+(`OBSERVED_WINDOW_S` being `perception.gaze.SCAN_CYCLE_PERIOD_S`, itself
+`len(SCAN_PLAN) * FOCUS_DWELL_S`). `POSITION_HALF_LIFE_S`'s own declared bounds (`lo=20.0`) sit
+safely above the *default* `SCAN_CYCLE_PERIOD_S` (16.0), but tuning `POSITION_HALF_LIFE_S` down
+*and* `FOCUS_DWELL_S`/`SCAN_PLAN` up at the same time can still violate that assertion and crash
+at import — the loader validates each key against its own declared bounds, not against the other
+keys it is coupled to. Single-key tuning (the motivating case) is safe by a wide margin; tuning
+more than one of these three together is not protected.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running

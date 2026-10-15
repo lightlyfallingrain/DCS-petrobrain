@@ -43,6 +43,8 @@ import hashlib
 import math
 from typing import Final
 
+import tuning
+
 #: Down-range (along line-of-sight) 1-sigma error as a fraction of true
 #: range. Derived, not invented, from ED's own `OP_D*` range-bucket ladder
 #: (`perception.naked_eye_source`'s former `_RANGE_BUCKETS_M`, now
@@ -66,7 +68,9 @@ RANGE_FRACTIONAL_SIGMA: Final[float] = 0.17
 #: the number to move. The load-bearing claim is the *ratio* to `RANGE_
 #: FRACTIONAL_SIGMA`-derived down-range error (cross-range is several times
 #: smaller), not the exact value.
-BEARING_SIGMA_DEG: Final[float] = 3.0
+BEARING_SIGMA_DEG: Final[float] = tuning.real(
+    "perception.estimation.BEARING_SIGMA_DEG", 3.0, lo=0.1, hi=14.0, status="judgement"
+)
 
 #: Fraction of a look's own single-look sigma the never-redrawn per-object
 #: systematic bias is scaled to. This is what keeps a heavily-observed

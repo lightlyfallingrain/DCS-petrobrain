@@ -117,6 +117,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal
 
+import tuning
 from perception.geometry import angular_delta_deg
 from perception.optics import Optic
 
@@ -232,7 +233,9 @@ FOCUS_CONE_HALF_WIDTH_DEG: Final[float] = 15.0
 
 #: How long the focus cone dwells on one o'clock position before stepping
 #: to the next (user decision, 2026-09-21).
-FOCUS_DWELL_S: Final[float] = 2.0
+FOCUS_DWELL_S: Final[float] = tuning.real(
+    "perception.gaze.FOCUS_DWELL_S", 2.0, lo=0.5, hi=5.0, status="judgement"
+)
 
 #: Free scan's ordered o'clock-cone table (hard part 8, "Adopt A") -- 12 is
 #: deliberately visited twice per cycle (the forward arc gets double the
@@ -240,7 +243,9 @@ FOCUS_DWELL_S: Final[float] = 2.0
 #: derived constant below read this tuple directly, so revisiting hard part
 #: 8's plan-C alternative (`11, 12, 1` / `10, 9` / `2, 3`, 20 s) is a
 #: one-table edit plus `belief.decay.OBSERVED_WINDOW_S`, nothing else.
-SCAN_PLAN: Final[tuple[int, ...]] = (12, 11, 10, 9, 12, 1, 2, 3)
+SCAN_PLAN: Final[tuple[int, ...]] = tuning.sequence(
+    "perception.gaze.SCAN_PLAN", (12, 11, 10, 9, 12, 1, 2, 3), status="judgement"
+)
 
 #: A commanded sector's own o'clock legs (module docstring's "Commanded
 #: scan" case) -- `left`/`right` are exactly two-thirds of the three-way

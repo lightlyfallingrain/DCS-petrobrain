@@ -547,6 +547,19 @@ startup block's reason text distinguishes them for exactly that reason — "unkn
 warn-and-run-on-all-defaults, the mechanism supports it with no structural change, only a different
 answer at one `if`.
 
+**Decision 4a RESOLVED (orchestrator direction, 2026-10-15, during Implementer dispatch): not
+fatal.** The architect's recommendation above is declined, the same way Decision 4 itself was —
+not because its reasoning was wrong, but because the user's stated priority (a tuning loop that
+never refuses to start) applies to this case with *equal* force, not less: "the user chose
+warn-and-continue precisely so a bad tuning file can never block a sortie, and a missing file is
+the same class of event with a wider blast radius — so it gets the loudest message, not a
+different policy." A named-but-unreadable file warns and continues on 100% code defaults, exactly
+like every other rejection case, but louder: the startup block states plainly that the named file
+was not readable, gives the path, and says no overrides are in force, rather than rendering it as
+an ordinary single-key rejection. Implemented in `body-layer/src/tuning.py`
+(`render_startup_block`'s `"missing"`/`"unreadable"` branch) — see that module's docstring and
+`body-layer/CLAUDE.md`'s "Tuning" section.
+
 ---
 
 ### How the count was taken

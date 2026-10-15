@@ -2034,6 +2034,36 @@ def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
         main()
 
 
+def test_main_print_tuning_works_without_aircraft_layer_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--print-tuning` is the one flag that must work standalone --
+    plans/configurable-constants/plan.md's 'Verifying a changed value
+    took effect'. `main()` must not reject it for lacking
+    `--aircraft-layer-url`, and must exit cleanly (no `SystemExit`) after
+    printing."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PETROBRAIN_TUNING", raising=False)
+    monkeypatch.setattr(sys, "argv", ["logger", "--print-tuning"])
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "no override file (PETROBRAIN_TUNING unset)" in out
+    assert "at default" in out
+
+
+def test_main_rejects_missing_aircraft_layer_url_without_print_tuning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PETROBRAIN_TUNING", raising=False)
+    monkeypatch.setattr(sys, "argv", ["logger"])
+
+    with pytest.raises(SystemExit):
+        main()
+
+
 def test_main_rejects_neither_theatre_pair_nor_mission_understanding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
