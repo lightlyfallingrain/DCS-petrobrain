@@ -59,11 +59,26 @@
     **`S_EVENT_SHOOTING_START`** instead; both have paired end events. **The gun half and the SAM
     half of this feature therefore need different events** — and that split happens to line up
     exactly with the two halves.
-  - **The one open point**, which that note itself calls *"the single most important unresolved
-    point"*: whether **ground AAA** (ZU-23, Shilka, 2S6) raises `S_EVENT_SHOOTING_START` at all, or
-    only aircraft cannon do. The documented wording is unit-generic; every worked example is an
-    aircraft gun. **That is the probe** — one mission, one AAA unit, one log line — and it is much
-    smaller than the "can we get firing events" question this entry was first filed with.
+  - ~~**The one open point**: whether ground AAA raises `S_EVENT_SHOOTING_START` at all.~~
+    **ANSWERED — and it was already flown.** `docs/acceptance/2026-09-24-damage-and-firing-probes.md`
+    is marked **FLOWN AND CLOSED, 2026-09-25**, with its own instruction *"do not re-fly it"*:
+    *"a ground gun unit's `SHOOTING_START` names the player as its target, so 'we are being shot at'
+    needs no inference"*. Confirmed live, not inferred. **There is no probe outstanding for this
+    entry.**
+
+  **Three findings from that same closed probe bear on the design**, two of which would otherwise
+  have been got wrong:
+
+  - **The event carries its target.** A ground gun firing *at the player* is distinguishable from
+    one firing at something else, for free. That is a product-level difference — *"we are being shot
+    at"* versus *"something is firing over there"* — and it sharpens the open question about what
+    Petrovich actually says.
+  - **Gun rounds are not objects in `LoGetWorldObjects`; rockets are.** So the tracer channel *has*
+    to be the event — exactly as the user recalled it (*"unit firing is exportable event while
+    tracers are not"*). There is no world-object path to fall back on.
+  - Unrelated but adjacent, and in the same note: the visible damage state is **fire, not smoke**,
+    bracketed to a life fraction of (0.69, 0.84]. Its one remaining follow-up — the exact threshold
+    inside that band, and whether it is global or per-type — is not this entry's.
 
   Related: `[[BL-B64]]` (the optic model this bypasses a gate of), `[[BL-B70]]`/`[[BL-B71]]` (the
   attack-run work whose `", obstructed"` semantics question 1 interacts with), `[[BL-2]]`

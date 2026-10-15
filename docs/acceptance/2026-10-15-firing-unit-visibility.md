@@ -122,11 +122,19 @@ most of what I filed as unknown:
 - **`S_EVENT_SHOT` fires for any unit firing a weapon but explicitly excludes machine-gun and
   autocannon fire**, which is routed to `S_EVENT_SHOOTING_START` instead. Both have paired end
   events. So **the gun case and the missile case need different events** — the feature needs both.
-- **The one genuinely open point**, flagged in that note as *"the single most important unresolved
-  point"*: whether **ground AAA** (ZU-23, Shilka, 2S6) actually raises `S_EVENT_SHOOTING_START`, or
-  whether only aircraft cannon do. The wiki's wording is unit-generic but every worked example is an
-  aircraft gun. **That is the probe**, and it is much narrower than "can we get firing events at
-  all" — it is one mission, one AAA unit, one log line.
+- ~~**The one genuinely open point**: whether ground AAA actually raises
+  `S_EVENT_SHOOTING_START`.~~ **ANSWERED, and the flight already happened.** The user asked whether a
+  debrief log had been pasted during the tracer investigation; what exists is better —
+  `docs/acceptance/2026-09-24-damage-and-firing-probes.md`, **FLOWN AND CLOSED on 2026-09-25**,
+  carrying its own *"do not re-fly it"*. It records that **a ground gun unit's `SHOOTING_START`
+  names the player as its target**, so the event fires for ground AAA *and* identifies who is being
+  shot at, with no inference needed. It also confirms **gun rounds are not objects in
+  `LoGetWorldObjects`** (rockets are), which is why the event is the only possible channel — the
+  user's own recollection, confirmed.
+
+  **Nothing about this feature is blocked on a probe.** The lesson for this entry is the project's
+  own recurring one: the answer was on disk, in an acceptance document rather than a research note,
+  and was found only because the user remembered flying it.
 
 ---
 
