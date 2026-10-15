@@ -233,6 +233,7 @@ from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
 from belief.events import (
+    CONTACT_BURNING_SEEN,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_ENGAGEMENT_CHANGED,
@@ -269,6 +270,13 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
         CONTACT_MOTION_CHANGED,
         CONTACT_RANGE_CROSSED,
         CONTACT_ENGAGEMENT_CHANGED,
+        #: `plans/emitter-visibility/plan.md`, `BL-B72` Stage A. Not in
+        #: `_OBSERVABILITY_EXEMPT_KINDS` (it respects the gate like every
+        #: kind but `CONTACT_ENGAGEMENT_CHANGED`'s entering transition) and
+        #: not in `_WATCHED_ONLY_KINDS` (it fires for any burning contact,
+        #: watched or not -- it is informational, not a threat cue tied to
+        #: an engagement envelope).
+        CONTACT_BURNING_SEEN,
     }
 )
 

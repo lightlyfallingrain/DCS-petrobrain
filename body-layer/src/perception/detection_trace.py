@@ -199,6 +199,18 @@ class DetectionTrace:
     #: `DetectionTraceCollector.annotate_admission`'s own docstring.
     relative_direction_set: bool = False
 
+    #: The `perception.emitters.EmitterKind` value whose bypass actually
+    #: admitted this candidate (`plans/emitter-visibility/plan.md`,
+    #: `BL-B72` Stage A), mirroring `visibility.VisibilityResult.
+    #: emitter_kind` -- `None` on every row where no emitter bypass fired,
+    #: which is every row until Stage A ships and every row afterwards
+    #: where the candidate was admitted (or rejected) by the ordinary gate
+    #: chain. `threshold_bound` is `"emitter_bypass"` on the `ADMITTED` row
+    #: whenever this is set, so a live sortie's detection trace can show
+    #: *why* a candidate past the ordinary range/forest threshold was
+    #: still seen.
+    emitter_kind: str | None = None
+
 
 @dataclass
 class DetectionTraceCollector:

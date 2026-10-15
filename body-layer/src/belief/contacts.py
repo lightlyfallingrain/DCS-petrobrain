@@ -83,6 +83,7 @@ from belief.decay import (
 )
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
+    CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_ENGAGEMENT_CHANGED,
@@ -92,6 +93,7 @@ from belief.events import (
     Event,
     EventKind,
     attention_event_kind,
+    burning_event_kind,
     cardinality_event,
     classification_event,
     lifecycle_event_kind,
@@ -109,6 +111,7 @@ from belief.position_belief import (
 from belief.threat import envelope_for
 from perception.association import RANGE_CAP_M as _HYBRID_RANGE_CAP_M
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
+from perception.emitters import EmitterKind
 from perception.geometry import (
     GeoPosition,
     body_relative_direction,
@@ -360,6 +363,22 @@ class Contact:
     events.motion_event_kind`'s comparison -- written only by `ContactStore.
     tick`, never by `record`.
 
+    `is_burning` is `plans/emitter-visibility/plan.md`'s addition (`BL-B72`
+    Stage A): whether the most recent percept folded into this contact
+    carried `EmitterKind.BURNING` -- written directly by `record` from
+    `percept.emitter_kind` (the closed signal the plan's review narrowed
+    this to -- `belief.percept.Percept.emitter_kind`'s own docstring), the
+    same "most recent look's own claim, overwritten, not fused" posture
+    `last_class_raw` already has (not a
+    fold: there is no partial-evidence combination to perform for a flat
+    boolean). Stays at its last-written value between percepts, same as
+    `last_class_raw`/`motion` -- a burning contact not currently re-
+    observed is still believed to be burning until a fresh percept says
+    otherwise, decaying only by `belief.decay`'s ordinary rules.
+    `last_emitted_burning` is `last_emitted_motion`'s twin, for `belief.
+    events.burning_event_kind`'s comparison -- written only by
+    `ContactStore.tick`, never by `record`.
+
     `last_event_emitted_sim` is BL-4's per-contact-per-kind emission
     cooldown state (`belief.events.EVENT_COOLDOWN_S`): the `t_sim` at which
     an event of each `EventKind` was last actually appended to the log for
@@ -414,6 +433,10 @@ class Contact:
     motion: MotionBelief | None = None
     motion_pending_stop_since_sim: float | None = None
     last_emitted_motion: MotionState | None = None
+    #: `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- see the
+    #: class docstring's paragraph on `is_burning`/`last_emitted_burning`.
+    is_burning: bool = False
+    last_emitted_burning: bool | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
     #: `plans/watch-reporting/plan.md` Decision 5's kilometre-crossing
     #: bookkeeping -- the whole-kilometre band this contact was last
@@ -651,6 +674,11 @@ class Contact:
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
         self.live_los_clear = percept.live_los_clear
+        # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- the most
+        # recent look's own claim, overwritten like `last_class_raw`, not
+        # folded (class docstring's own paragraph on why there is nothing
+        # to fold for a flat boolean).
+        self.is_burning = percept.emitter_kind == EmitterKind.BURNING.value
         self.last_percept = percept
         self._extend_or_open_span(percept)
 
@@ -721,6 +749,12 @@ class Contact:
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
             live_los_clear=percept.live_los_clear,
+            # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- a
+            # contact founded already burning is real information (see
+            # `burning_event_kind`'s own docstring, mirroring `motion_
+            # event_kind`'s "contact, and it's moving" reasoning), not
+            # suppressed as a same-tick redundant pair.
+            is_burning=percept.emitter_kind == EmitterKind.BURNING.value,
             last_percept=percept,
         )
         contact.contributing_observation_ids.append(percept.observation_id)
@@ -1482,6 +1516,35 @@ class ContactStore:
                 )
                 contact.last_event_emitted_sim[CONTACT_MOTION_CHANGED] = now_sim
             contact.last_emitted_motion = current_motion
+
+            # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A.
+            # Deliberately no `observable_or_grace` check here, unlike the
+            # `CONTACT_MOTION_CHANGED` block immediately above -- that
+            # check is a historical, pre-`plans/callout-observability-
+            # gate/debug.md` emission-time gate, kept there only because it
+            # predates the comprehensive fix; the comprehensive fix
+            # (`belief.callouts.CalloutScheduler.tick`'s own gate) already
+            # covers every member of `_TEMPLATED_KINDS` uniformly at
+            # speak-time, `CONTACT_BURNING_SEEN` included once it joins
+            # that set, so a second gate here would be the redundancy that
+            # module's docstring warns against inventing per-kind.
+            burning_kind = burning_event_kind(
+                contact.last_emitted_burning, contact.is_burning
+            )
+            if burning_kind is not None and self._cooldown_elapsed(
+                contact, CONTACT_BURNING_SEEN, now_sim
+            ):
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_BURNING_SEEN,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                    )
+                )
+                contact.last_event_emitted_sim[CONTACT_BURNING_SEEN] = now_sim
+            contact.last_emitted_burning = contact.is_burning
 
             current_attention, _area_id = effective_attention(
                 contact.attention, contact.last_position, self.areas

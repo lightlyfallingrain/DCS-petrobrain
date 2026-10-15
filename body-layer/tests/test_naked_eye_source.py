@@ -30,6 +30,7 @@ from perception.association import SightCone
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
+    PROVENANCE_EMITTER_BURNING,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
@@ -218,9 +219,12 @@ def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
 def _source(
     world_objects: dict[str, Any] | None,
     *,
+    unit_velocity: dict[str, Any] | None = None,
     blocked_unit_names: frozenset[str] = frozenset(),
 ) -> tuple[NakedEyePerceptionSource, FakeAircraftClient]:
-    client = FakeAircraftClient(world_objects, blocked_unit_names=blocked_unit_names)
+    client = FakeAircraftClient(
+        world_objects, unit_velocity, blocked_unit_names=blocked_unit_names
+    )
     source = NakedEyePerceptionSource(
         aircraft_client=client,  # type: ignore[arg-type]
         theatre=_THEATRE,
@@ -1502,3 +1506,148 @@ def test_merging_previously_separate_contacts_abandons_the_minority_identities()
     # later poll re-splits the scatter, possibly a freshly founded one for
     # whichever object does not reunite with it).
     assert merged_observation.continues_observation_id not in minority_ids
+
+
+# -- Emitter visibility (plans/emitter-visibility/plan.md, BL-B72 Stage A) --
+
+
+def test_a_burning_unit_beyond_naked_eye_range_becomes_visible() -> None:
+    """End-to-end demonstration: a T-72B at 9 km is far beyond its own
+    2333.33 m `lowres` presence threshold (`test_armored_vehicle_just_
+    inside_lowres_tier_range_is_visible` in `test_visibility.py` has the
+    derivation) -- only the emitter bypass can admit it."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(world_objects, unit_velocity=unit_velocity)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].classification_raw == object_model.DEFAULT_OP_CLASS
+    assert observations[0].provenance == PROVENANCE_EMITTER_BURNING
+
+
+def test_the_same_unit_not_burning_is_not_visible() -> None:
+    """The other half of the regression gate: the identical T-72B at
+    9 km, healthy, is not seen at all."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 1.0, "life0": 1.0},
+        }
+    }
+    source, _client = _source(world_objects, unit_velocity=unit_velocity)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert observations == []
+
+
+def test_a_burning_unit_behind_terrain_stays_invisible() -> None:
+    """*"Terrain does block, of course... Terrain just blocks LOS."* --
+    the emitter bypass does not reach gate 4."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, client = _source(
+        world_objects,
+        unit_velocity=unit_velocity,
+        blocked_unit_names=frozenset({"unit_1"}),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert observations == []
+    assert client.world_objects_calls == 1
+
+
+def test_emitter_does_not_widen_group_salience_for_a_non_emitting_neighbour() -> None:
+    """The plan's own pin (Implementation Plan step 11, Risks &
+    Unknowns): `group_salient_ids` runs on the whole candidate pool
+    *before* visibility is resolved and has no `emitter` parameter at
+    all, so an emitter bypass structurally cannot widen it for a
+    neighbour.
+
+    **Range chosen to make that claim falsifiable** (review of this plan,
+    `BL-B72` Stage A, 2026-10-15): the original fixture placed both T-72Bs
+    at 9 km, beyond even `group_salience.py`'s relaxed `RESOLUTION_
+    ANGULAR_RADIUS_RAD` threshold (5468.75 m for a 7 m vehicle under
+    `UNAIDED_OPTIC`), so group-salience membership could not have changed
+    either candidate's outcome whether or not the leak this test exists to
+    catch were present -- mutation testing confirmed the old fixture
+    passed unchanged under both shapes of that leak. The healthy
+    neighbour here instead sits at 4 km: beyond `LOWRES_ANGULAR_RADIUS_
+    RAD`'s own lone-presence threshold (2333.33 m, so a correctly-
+    unflagged candidate is rejected) but inside the relaxed `RESOLUTION_
+    ANGULAR_RADIUS_RAD` one (5468.75 m, so a candidate *wrongly* marked
+    `group_salient` -- the plan's own "one AAA gun makes a whole convoy
+    visible" risk -- would be admitted instead). The burning unit stays
+    at 9 km, still beyond the relaxed threshold either way, so its own
+    visibility still comes entirely from the emitter bypass, unaffected
+    by this change; only 2 candidates total, still well under `GROUP_
+    MIN_MEMBERS` (3), so there is no legitimate group-salience mechanism
+    for the neighbour to ride on regardless."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=4000.0, lon_deg=200.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+            "unit_2": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 1.0, "life0": 1.0},
+        }
+    }
+    source, _client = _source(world_objects, unit_velocity=unit_velocity)
+
+    observations = source.poll(0.0, _ownship())
+
+    # Only the burning unit (9 km, emitter-bypass-admitted) is reported --
+    # the healthy neighbour at 4 km is beyond its own lone-presence
+    # threshold and must stay rejected, not ride along on a borrowed
+    # group-salience flag.
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_BURNING
+
+
+def test_emitter_present_but_cleared_unaided_keeps_ordinary_provenance() -> None:
+    """*"an emitter must never lower what Petrovich can see"* -- a
+    burning unit well inside its own ordinary presence range keeps the
+    ordinary provenance, not `PROVENANCE_EMITTER_BURNING` (the tier was
+    never clamped, since no bypass fired)."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=100.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(world_objects, unit_velocity=unit_velocity)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY

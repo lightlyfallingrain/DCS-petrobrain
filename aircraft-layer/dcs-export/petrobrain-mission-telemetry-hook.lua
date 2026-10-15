@@ -45,12 +45,25 @@ runs *inside* that state via `dostring_in`, not in the Hook.
 **Wire format (this script -> collector), UDP, one JSON object per
 poll** (matches `aircraft-layer/src/schema/unit_velocity.py`):
     {"payload": "<unit_count>|<dcs_model_time_s>|<entries>", "bridge_call_ms": <float>}
-`entries` is `"<unit_name>:<vx>:<vy>:<vz>;..."`, semicolon-separated --
-`dostring_in` can only return one simple scalar across the Hook/
-mission-scripting boundary (the same constraint
+`entries` is `"<unit_name>:<vx>:<vy>:<vz>:<life>:<life0>;..."`,
+semicolon-separated -- `dostring_in` can only return one simple scalar
+across the Hook/mission-scripting boundary (the same constraint
 `petrobrain-f10-commands-hook.lua`'s `POLL_CODE` works around), so
 `VELOCITY_CODE` packs the whole poll into one string and this Hook wraps it
 in JSON rather than parsing it itself.
+
+**`life`/`life0` (`AC-B7`, the transport half of `[[BL-B72]]`'s burning
+emitter) are the two trailing fields, added to this same loop rather than a
+new feed** (user decision 1, `plans/emitter-visibility/plan.md`): the
+existing `getVelocity()` loop already runs in-state over every live unit and
+static once a second, joined body-side by `unit_name` -- `getLife()`/
+`getLife0()` are one more `pcall` per object on the same object reference,
+not a second loop or a second bridge round-trip. Either field is the literal
+string `"nil"` when the underlying call fails or returns a non-number (same
+tri-state discipline `WorldObjectCandidate.heading_true_deg`/`velocity`
+already use on the body-layer side) -- `schema.unit_velocity.
+UnitVelocitySample.life`/`life0` are `None` in that case, never a guessed
+`0.0`.
 
 `bridge_call_ms` is this Hook's own `os.clock()`-measured wall-time cost of
 the `dostring_in` call -- Stage 0 part 2's self-measurement design: the
@@ -104,7 +117,29 @@ local POLL_INTERVAL_S = 1.0
 --: same string `Export.lua`'s new `unit_name` field carries
 --: (`LoGetWorldObjects`'s own `UnitName`) -- `plans/movement-detection/
 --: plan.md` Decision 1.
+--:
+--: `lifeFields` (`AC-B7`) reads `getLife()`/`getLife0()` off the same
+--: `unit`/`obj` reference the velocity read already has in hand -- one more
+--: guarded `pcall` per object, not a second enumeration. Both live units and
+--: static objects expose `getLife()`/`getLife0()` (both are DCS `Object`s),
+--: confirmed per-unit over this same bridge by the closed probe
+--: (`docs/acceptance/2026-09-24-damage-and-firing-probes.md`, flown
+--: 2026-09-25). Returns the literal string `"nil"` for either field on any
+--: failure (no such call, non-number result) -- never a guessed `0`, so the
+--: body-layer parser's `None` means exactly "this poll could not read it".
+--: **Defined inside `VELOCITY_CODE` itself, not as a Hook-local function**
+--: -- `VELOCITY_CODE` is a string executed via `net.dostring_in("scripting",
+--: ...)` in the separate mission-scripting Lua state, which cannot see any
+--: function defined in this Hook's own state (the same reason
+--: `petrobrain-f10-commands-hook.lua`'s snippets are self-contained strings).
 local VELOCITY_CODE = [[
+local function lifeFields(obj)
+    local lifeOk, life = pcall(function() return obj:getLife() end)
+    local life0Ok, life0 = pcall(function() return obj:getLife0() end)
+    local lifeStr = (lifeOk and type(life) == "number") and tostring(life) or "nil"
+    local life0Str = (life0Ok and type(life0) == "number") and tostring(life0) or "nil"
+    return lifeStr .. ":" .. life0Str
+end
 local parts = {}
 local count = 0
 for _, coa in pairs({coalition.side.NEUTRAL, coalition.side.RED, coalition.side.BLUE}) do
@@ -116,6 +151,7 @@ for _, coa in pairs({coalition.side.NEUTRAL, coalition.side.RED, coalition.side.
                     count = count + 1
                     parts[#parts + 1] = unit:getName() .. ":" .. tostring(v.x)
                         .. ":" .. tostring(v.y) .. ":" .. tostring(v.z)
+                        .. ":" .. lifeFields(unit)
                 end
             end
         end
@@ -123,7 +159,7 @@ for _, coa in pairs({coalition.side.NEUTRAL, coalition.side.RED, coalition.side.
     for _, obj in ipairs(coalition.getStaticObjects(coa) or {}) do
         if obj and obj:isExist() then
             count = count + 1
-            parts[#parts + 1] = obj:getName() .. ":0:0:0"
+            parts[#parts + 1] = obj:getName() .. ":0:0:0:" .. lifeFields(obj)
         end
     end
 end

@@ -44,6 +44,11 @@ refined/contradicted direction to distinguish, unlike classification --
 attention is a flat rank, not a specificity lattice); `previous is None`
 produces no event, the same first-tick convention as the other two kinds.
 
+`burning_event_kind` is `plans/emitter-visibility/plan.md`'s twin
+(`BL-B72` Stage A), over `belief.contacts.Contact.is_burning` -- see that
+function's own docstring for why it fires only on the entering transition,
+unlike every other comparison in this module.
+
 `motion_event_kind` is `plans/movement-detection/plan.md` Stage 3's twin,
 over `belief.motion.MotionBelief.state` (`"moving"`/`"stopped"`) instead of
 `Certainty`/`ClassificationBelief`/`Attention` -- the project's first
@@ -113,6 +118,7 @@ EventKind = Literal[
     "CONTACT_MOTION_CHANGED",
     "CONTACT_RANGE_CROSSED",
     "CONTACT_ENGAGEMENT_CHANGED",
+    "CONTACT_BURNING_SEEN",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -139,6 +145,18 @@ CONTACT_RANGE_CROSSED: Final[EventKind] = "CONTACT_RANGE_CROSSED"
 #: CROSSED` (`ContactStore.tick`'s seventh block), for the identical
 #: reason: the bookkeeping only means anything for a watched contact.
 CONTACT_ENGAGEMENT_CHANGED: Final[EventKind] = "CONTACT_ENGAGEMENT_CHANGED"
+#: `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- a contact's
+#: `Observation.provenance` became `PROVENANCE_EMITTER_BURNING` (`belief.
+#: contacts.Contact.is_burning` went from not-burning to burning).
+#: **Deliberately not routed through `belief.threat.envelope_for`** -- a
+#: `PRESENCE`-only contact (which this always is, Stage A's detection-only
+#: invariant) matches no envelope and would otherwise be scheduled at
+#: `belief.callouts`' lowest priority, the plan's own finding 2. A burning
+#: unit is **not a threat line** at all (*"something there is already
+#: dead or dying"*, not a danger call), so it needs no elevated priority
+#: either -- it rides `callout_priority`'s ordinary attention-based
+#: ordering unchanged.
+CONTACT_BURNING_SEEN: Final[EventKind] = "CONTACT_BURNING_SEEN"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 
@@ -313,6 +331,32 @@ def attention_event_kind(
     if previous == current:
         return None
     return CONTACT_ATTENTION_CHANGED
+
+
+def burning_event_kind(previous: bool | None, current: bool) -> EventKind | None:
+    """`plans/emitter-visibility/plan.md`, `BL-B72` Stage A's twin, over
+    `belief.contacts.Contact.is_burning` (a plain `bool`, not a tri-state --
+    unlike `motion_event_kind`'s `current is None`, "burning" always has an
+    answer: `is_burning` is derived from the contact's `last_percept`, which
+    is never `None` once a contact is founded).
+
+    **Fires only on the entering transition (not-burning -> burning), never
+    the reverse.** Unlike every flat-comparison kind above, this is
+    deliberately one-directional: there is no accepted *"stopped burning"*
+    callout (the plan names only *"something burning, two o'clock"*), and
+    a contact simply ceasing to report burning says nothing confident --
+    the unit could be out of view, dead, or genuinely extinguished, and
+    guessing which would assert more than was perceived. `previous is None`
+    (a contact's first tick) is treated as not-burning, the same
+    first-tick convention every comparison in this module but `motion_
+    event_kind` follows -- a contact founded already burning still gets
+    one `CONTACT_BURNING_SEEN`, exactly as `motion_event_kind`'s own
+    "contact, and it's moving" case is real information worth reporting
+    on the founding tick."""
+    was_burning = previous is True
+    if current and not was_burning:
+        return CONTACT_BURNING_SEEN
+    return None
 
 
 def motion_event_kind(

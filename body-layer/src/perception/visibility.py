@@ -175,6 +175,30 @@ detection here to be ambiguous *about*):
    that already cleared every cheaper gate. `forest` defaults to `None`,
    a true no-op (gate 5 below).
 
+**Emitter bypass (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A).**
+An optional, per-candidate `emitter: perception.emitters.Emitter | None`
+(resolved by the caller, exactly the `gaze`/`group_salient`/
+`live_los_clear` pattern) bypasses gates 3 (range/size) and 5 (forest)
+**only when they would otherwise have rejected the candidate** -- gaze,
+cockpit mask, optic FOV and gate 4 (terrain LOS) are never affected,
+matching the user's own words: *"Terrain does block, of course... Terrain
+just blocks LOS."* Whenever either bypass actually fires, the achieved
+tier is clamped to `NAKED_EYE_GATING_TIER_NAME` (`"lowres"`) at
+`NAKED_EYE_PRESENCE_CONFIDENCE` -- `_achieved_tier` is not called -- so an
+emitter can only ever grant detection, never classification or
+identification: `_classification_for_tier("lowres", ...)` already yields
+`object_model.DEFAULT_OP_CLASS` at level 1 (presence), no new
+classification path needed. **An emitter must never lower what Petrovich
+can see**: if the candidate would have cleared both gates unaided, the
+ordinary (unclamped) tier stands -- the bypass is a floor, not a ceiling.
+`VisibilityResult.emitter_kind` carries which kind actually bypassed a
+gate (`None` when no bypass fired, including when `emitter` was given but
+unneeded), for `naked_eye_source.py` to pick the right
+`PROVENANCE_EMITTER_*` value and for `DetectionTrace.emitter_kind`/
+`threshold_bound="emitter_bypass"` to make a live sortie's "why was that
+seen" debrief legible. `emitter` defaults to `None`, a true no-op -- every
+caller that predates this parameter is behaviour-identical.
+
 **Resolution vs. salience (`plans/group-detectability/plan.md`).** Gate 3's
 `profile.size_m`-based presence threshold above conflated two different
 questions with one constant: *can the eye register a mark at all*
@@ -209,6 +233,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
+from perception.emitters import Emitter
 from perception.forest import ForestOcclusion
 from perception.gaze import Gaze, within_gaze
 
@@ -532,12 +557,22 @@ class VisibilityResult:
     candidate that clears the gate can still resolve closer-in to `hires`
     (and its higher confidence) if it is near enough, independent of what
     tier the gate itself is set to. `naked_eye_source.py` maps `tier` onto a
-    lattice level/value; this module only computes the geometry."""
+    lattice level/value; this module only computes the geometry.
+
+    `emitter_kind` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A) is
+    the `perception.emitters.EmitterKind` value whose bypass actually
+    admitted this candidate past gate 3 or gate 5, or `None` when no bypass
+    fired -- including the case where an `Emitter` was passed in but the
+    candidate cleared both gates unaided (module docstring's "must never
+    lower what Petrovich can see" rule), and the default case where no
+    `Emitter` was passed in at all. `None` here is also what keeps `tier`
+    at its ordinary, unclamped value."""
 
     bearing_deg: float
     range_m: float
     tier: str
     confidence: float
+    emitter_kind: str | None = None
 
 
 def _aspect_deg(
@@ -730,6 +765,7 @@ def check_visibility(
     group_salient: bool = False,
     live_los_coverage: LiveLosCoverage | None = None,
     forest: ForestOcclusion | None = None,
+    emitter: Emitter | None = None,
 ) -> VisibilityResult | None:
     """Run `candidate` through all six gates: gaze, cockpit mask, per-optic
     field of view (`plans/detection-cones-slice1/plan.md`), angular-radius
@@ -819,6 +855,13 @@ def check_visibility(
     always populated regardless of which gate fired. No change to this
     function's existing return value or gate order.
 
+    `emitter` (`perception.emitters.Emitter`, `plans/emitter-visibility/
+    plan.md`, `BL-B72` Stage A) defaults to `None` -- a true no-op, same
+    additive pattern as `trace`/`forest` above. See module docstring's
+    "Emitter bypass" section for exactly which two gates it can bypass
+    (3 and 5, only when they would otherwise reject) and the tier clamp
+    that keeps the bypass detection-only.
+
     **Gate 4 (terrain LOS), fail-closed as of `plans/
     bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4 steps 3-4), superseding
     the fallback `plans/dcs-driven-los/plan.md` (X-B29) originally shipped:**
@@ -894,7 +937,11 @@ def check_visibility(
     else:
         threshold_bound = "size_curve"
 
-    def _record(outcome: GateOutcome, achieved_tier: str | None = None) -> None:
+    def _record(
+        outcome: GateOutcome,
+        achieved_tier: str | None = None,
+        emitter_kind: str | None = None,
+    ) -> None:
         if trace is None:
             return
         trace.record(
@@ -909,6 +956,7 @@ def check_visibility(
                 outcome=outcome,
                 achieved_tier=achieved_tier,
                 optic=optic.name,
+                emitter_kind=emitter_kind,
             )
         )
 
@@ -943,9 +991,19 @@ def check_visibility(
         _record(GateOutcome.OPTIC_FOV)
         return None
 
+    # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A: the range/size
+    # gate is bypassed when an `emitter` was resolved for this candidate
+    # AND it would otherwise have failed -- the player bubble
+    # (`association.filter_player_bubble`, applied upstream) remains the
+    # only range bound in that case. When no `emitter` is given, or the
+    # candidate clears this threshold unaided, behaviour is identical to
+    # before this parameter existed.
+    range_bypassed = False
     if candidate_range_m > range_threshold_m:
-        _record(GateOutcome.RANGE_OR_SIZE)
-        return None
+        if emitter is None:
+            _record(GateOutcome.RANGE_OR_SIZE)
+            return None
+        range_bypassed = True
 
     # `plans/dcs-driven-los/plan.md` (X-B29), fail-closed per
     # `plans/bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4 steps 3-4):
@@ -972,22 +1030,49 @@ def check_visibility(
     # and `forest.py`'s own docstring for why `None` is deliberately not
     # treated as forest. `forest is None` is a true no-op, so every
     # existing caller's behaviour is unchanged until Stage 2 wires one in.
+    #
+    # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A: bypassed on the
+    # same "only if it would otherwise have rejected" rule as gate 3 above
+    # -- *"bright flashes through trees and tracer fire raising from the
+    # forest"*. A unit firing from inside a mapped forest is seen as
+    # *something* emitting there, never resolved through the canopy (the
+    # tier clamp below is what enforces that, not this gate).
+    forest_bypassed = False
     if forest is not None and forest.occluded(candidate.x, candidate.z):
-        _record(GateOutcome.FOREST)
-        return None
+        if emitter is None:
+            _record(GateOutcome.FOREST)
+            return None
+        forest_bypassed = True
 
-    achieved_tier, achieved_confidence = _achieved_tier(
-        candidate_range_m,
-        profile.size_m,
-        recognition_extent_m,
-        optic,
-        object_model.distinctiveness_of(profile),
-        group_salient,
+    # The tier clamp -- the invariant that makes this detection-only
+    # (module docstring's "Emitter bypass" section). Whenever either
+    # bypass above actually fired, the achieved tier is forced to the
+    # lowest ("presence") tier regardless of range or size, and
+    # `_achieved_tier` is never called; otherwise this is byte-identical
+    # to every caller that predates `emitter`.
+    emitter_kind: str | None = None
+    if range_bypassed or forest_bypassed:
+        assert emitter is not None  # only set True when `emitter` is not None
+        achieved_tier = NAKED_EYE_GATING_TIER_NAME
+        achieved_confidence = NAKED_EYE_PRESENCE_CONFIDENCE
+        emitter_kind = emitter.kind.value
+        threshold_bound = "emitter_bypass"
+    else:
+        achieved_tier, achieved_confidence = _achieved_tier(
+            candidate_range_m,
+            profile.size_m,
+            recognition_extent_m,
+            optic,
+            object_model.distinctiveness_of(profile),
+            group_salient,
+        )
+    _record(
+        GateOutcome.ADMITTED, achieved_tier=achieved_tier, emitter_kind=emitter_kind
     )
-    _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(
         bearing_deg=candidate_bearing_deg,
         range_m=candidate_range_m,
         tier=achieved_tier,
         confidence=achieved_confidence,
+        emitter_kind=emitter_kind,
     )

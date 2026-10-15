@@ -19,18 +19,58 @@ for provenance/history -- `plans/body-layer/plan.md` §3.4's per-contact
 observation history), not a truth field: it is not derived from any DCS
 object id, only from the per-source counter `perception.source`'s id-prefix
 constants keep collision-free across channels.
+
+**How to add a new signal from the perception side, and why not the
+obvious way.** When `BL-B72` needed `Contact.is_burning`, the first
+implementation let `Observation.provenance` -- a free-form `str` -- cross
+into `Percept` wholesale, and removed `"provenance"` from
+`test_percept.py`'s forbidden set to match. Reviewer rejected it: every
+value that field holds *today* is channel self-description, but its
+**type** is unconstrained, `perception.hybrid_source` already puts internal
+pipeline detail in it, and once a field is known to cross freely nothing
+stops a future producer putting something truth-derived there. The
+discipline would have become a comment in a test file rather than a guard.
+
+**So: add a closed, purpose-named field, populated through an explicit
+mapping** -- `emitter_kind` and `_EMITTER_KIND_BY_PROVENANCE` below are the
+pattern. An unregistered producer maps to `None` rather than crossing, so
+widening the boundary takes a deliberate edit here instead of happening by
+default somewhere else. `BL-B73` and `BL-B74` will each want a signal of
+exactly this shape; follow the mapping rather than widening a free-form
+field, and keep `test_percept.py`'s forbidden set intact.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from perception.emitters import EmitterKind
+from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
 from perception.source import (
     Observation,
     OwnshipState,
     PositionUncertainty,
     RelativeDirection,
 )
+
+#: `plans/emitter-visibility/plan.md` review (Stage A, 2026-10-15) --
+#: `percept_of` must not let `Observation.provenance` (a free-form `str`,
+#: see that field's own docstring) cross into `Percept` wholesale: nothing
+#: would then stop a future producer folding something truth-derived into
+#: it, with `test_percept.py::test_percept_has_no_truth_carrying_field`'s
+#: forbidden-set check never seeing it happen. Instead `Percept` exposes
+#: only a *closed*, purpose-built signal -- `emitter_kind`, one of
+#: `perception.emitters.EmitterKind`'s values or `None` -- derived from
+#: `observation.provenance` through this mapping. A `provenance` value not
+#: listed here (including every non-emitter value) maps to `None` via
+#: `dict.get`, so adding a new `PROVENANCE_*` constant elsewhere can never
+#: silently start producing a new `Percept.emitter_kind` value; it has to
+#: be added here first. Only `BURNING` exists today (`BL-B73`/`BL-B74` add
+#: `FIRING`/`LAUNCH_SMOKE`, per `perception.emitters.EmitterKind`'s own
+#: docstring).
+_EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
+    PROVENANCE_EMITTER_BURNING: EmitterKind.BURNING.value,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +135,22 @@ class Percept:
     perceived metadata with no path back to a world position; this one
     carries true relative geometry that, combined with ownship's own
     exact telemetry, is convertible to one -- see Decision 16 item 4 for
-    the full argument."""
+    the full argument.
+
+    `emitter_kind` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A,
+    narrowed per that plan's review) is which `perception.emitters.
+    EmitterKind` value (if any) made `Observation.provenance` an emitter
+    provenance this look -- `percept_of` derives it through
+    `_EMITTER_KIND_BY_PROVENANCE` rather than letting the free-form
+    `provenance` string itself cross this boundary, so it is a *closed*
+    signal, not a passthrough: `"provenance"` stays in `test_percept.py`'s
+    forbidden-field set, and this field is the one and only sanctioned
+    channel for the kind of thing `provenance` carries to reach `belief/`.
+    `belief.contacts.Contact.record` reads this to decide `is_burning`
+    (`belief.events.burning_event_kind`'s input); nothing else in
+    `belief/` needs it yet. `None` is the default -- every pre-existing
+    construction site (test fixtures included) keeps compiling, and it is
+    also what every non-emitter `provenance` value maps to."""
 
     t_sim: float
     source: str
@@ -111,6 +166,7 @@ class Percept:
     position_uncertainty: PositionUncertainty | None = None
     live_los_clear: bool | None = None
     relative_direction: RelativeDirection | None = None
+    emitter_kind: str | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -134,4 +190,5 @@ def percept_of(observation: Observation) -> Percept:
         position_uncertainty=observation.position_uncertainty,
         live_los_clear=observation.live_los_clear,
         relative_direction=observation.relative_direction,
+        emitter_kind=_EMITTER_KIND_BY_PROVENANCE.get(observation.provenance),
     )

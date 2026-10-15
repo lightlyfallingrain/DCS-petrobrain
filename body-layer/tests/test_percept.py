@@ -7,16 +7,29 @@ from __future__ import annotations
 import dataclasses
 
 from belief.percept import Percept, percept_of
+from perception.emitters import EmitterKind
+from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
 _TRUTH_FIELD_NAMES = frozenset(
     {
         "derived_world_position",
         "contact_id",
-        "provenance",
         "t_wall",
+        "provenance",
     }
 )
+#: `provenance` stays in this set per `plans/emitter-visibility/plan.md`'s
+#: review (`BL-B72` Stage A, 2026-10-15): `Observation.provenance` is a
+#: free-form `str`, not a closed enum, and letting it cross into `Percept`
+#: wholesale would mean nothing stops a future producer folding something
+#: truth-derived into it -- this test's own introspection would then never
+#: see it happen. `belief.contacts.Contact.is_burning` learns "this report
+#: came from the emitter bypass" through a narrower, closed signal instead
+#: -- `Percept.emitter_kind`, one of `perception.emitters.EmitterKind`'s
+#: values or `None`, derived by `belief.percept.percept_of` through an
+#: explicit mapping (that module's own `_EMITTER_KIND_BY_PROVENANCE`) --
+#: so `Observation.provenance` itself never has to cross this boundary.
 
 
 def _ownship() -> OwnshipState:
@@ -86,6 +99,29 @@ def test_percept_of_drops_derived_world_position() -> None:
     # the projected object.
     percept_values = {getattr(percept, f.name) for f in dataclasses.fields(percept)}
     assert 99999.0 not in percept_values
+
+
+def test_percept_of_maps_emitter_provenance_to_emitter_kind() -> None:
+    """`plans/emitter-visibility/plan.md` review (`BL-B72` Stage A) -- the
+    closed mapping `percept_of` uses instead of letting `Observation.
+    provenance` cross the boundary."""
+    observation = _observation(provenance=PROVENANCE_EMITTER_BURNING)
+
+    percept = percept_of(observation)
+
+    assert percept.emitter_kind == EmitterKind.BURNING.value
+    assert not hasattr(percept, "provenance")
+
+
+def test_percept_of_maps_non_emitter_provenance_to_none() -> None:
+    """Every `provenance` value not in the mapping -- including the
+    ordinary non-emitter case this fixture already uses -- resolves to
+    `None`, never to a guess."""
+    observation = _observation()
+
+    percept = percept_of(observation)
+
+    assert percept.emitter_kind is None
 
 
 def test_percept_of_carries_live_los_clear_through_unchanged() -> None:

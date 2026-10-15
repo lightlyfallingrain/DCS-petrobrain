@@ -6,6 +6,19 @@ A ground unit standing inside a mapped forest polygon is not detected by the nak
 one additional gate in `perception.check_visibility`, flat and binary, no directionality, no
 altitude term.
 
+> **Decision REVISED 2026-10-15 (`BL-B72`, emitter visibility).** *"Flat and binary, no
+> directionality"* now has exactly one exception: a candidate carrying an **emitter** (today, a
+> burning unit; later gun fire and a SAM launch's smoke trail) **skips this gate entirely**, because
+> a fire or a muzzle flash is visible through a treeline when the vehicle's own silhouette is not.
+> The user's own words: *"I could see bright flashes through trees and tracer fire raising from the
+> forest, that makes it visible."*
+>
+> **The gate itself is unweakened** — an emitter bypasses it, nothing changes what it does for every
+> other candidate, and terrain LOS (a separate gate) still blocks regardless. Recorded here as a
+> numbered revision rather than an edit to the sentence above, per `docs/PROCESS.md`'s supersession
+> convention, because that sentence is cited elsewhere as a property of this design.
+
+
 Specification: `docs/acceptance/2026-10-13-tree-cover-direction.md` (user direction, verbatim).
 The treeline case is **explicitly deferred** to a later `/explore` and is not designed here.
 
