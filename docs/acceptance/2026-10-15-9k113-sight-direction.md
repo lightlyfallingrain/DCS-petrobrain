@@ -283,10 +283,44 @@ Four things follow, and they are design constraints rather than observations:
    stage**, not the optional optimisation it reads as today. Worth noting that `BL-B63` was already
    filed with missile guidance as its second justification; this is the same mechanism arriving a
    stage earlier than expected.
-3. **Maximum angular velocity is a constant**, and belongs in `X-T26`'s tunable set — it is exactly
-   the kind of number a sortie would want adjusted.
+3. ~~**Maximum angular velocity is a constant**, and belongs in `X-T26`'s tunable set.~~
+   **SUPERSEDED immediately — see §12a.** This was my inference, not the user's statement, and it is
+   wrong.
 4. **Overshoot, deadband and settling are now real concerns.** A loop that chatters around its
    target would be visible in the cockpit and, during an ATGM run, would be a guidance failure.
+
+### §12a — We do not know the maximum rate, and do not need to
+
+> *"Max angular velocity is a constant -> we do not need to know it, actually. DCS limits it and we
+> just command the "joystick" deflection. At max deflection the sight moves as fast as it can."*
+
+**What we command is deflection, not a rate in degrees per second.** DCS owns the rate limit and
+enforces it; full deflection simply means "as fast as it goes". So there is no maximum-rate constant
+to discover, to calibrate, or to expose for tuning — point 3 above invented a number that does not
+exist on our side of the boundary.
+
+**This makes the loop simpler in one way and harder in another, and the second is the part to
+design for.**
+
+*Simpler*: the command side needs **no calibration at all**. Nothing has to establish what one unit
+of axis deflection means in degrees per second, which is one fewer thing for the deferred probe to
+measure and one fewer number that could drift between DCS versions.
+
+*Harder*: **the plant is unknown.** The loop cannot predict where the sight will be after commanding
+a deflection — it can only observe where it ended up. That rules out any feed-forward or
+time-to-target estimate and makes this **purely reactive** feedback control. Two things follow:
+
+- **Proportional deflection, not bang-bang.** Commanding full deflection until the error flips sign
+  is the obvious implementation and the one that chatters. Reducing deflection as the error shrinks
+  is what makes it settle, and it can be done without knowing the rate — the error itself is the
+  signal.
+- **Its constants are empirical and belong in `X-T26`'s tunable set** — the deflection-versus-error
+  response and the deadband that stops it hunting. Those *are* numbers a sortie would want adjusted,
+  which is what point 3 was reaching for and attached to the wrong quantity.
+
+**The feedback half of the probe is untouched by this.** Reading the sight's *current angle* every
+iteration (point 1) is still load-bearing — without it there is no error term and nothing to be
+proportional to. What drops away is only the need to calibrate the *command* into physical units.
 
 > *"We don't need this modeled before the effectors, but we must be ready for how it will work with
 > the effectors so we don't have to redo much of the mechanism."*
