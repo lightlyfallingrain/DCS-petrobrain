@@ -15,8 +15,11 @@ poll-shaped snapshot (`GET /firing/latest`, `api.server`).
 
 - `S_EVENT_SHOOTING_START` opens an entry: `since_sim` = the event's own
   time, `expires_at_sim = now + FIRING_WATCHDOG_S` -- a start whose end
-  never arrives (the unit dies mid-burst and no `S_EVENT_SHOOTING_END`
-  follows) is still bounded, so no entry outlives its watchdog whatever
+  never arrives for a unit that is destroyed mid-burst is *not* what this
+  bounds (that case is removed immediately by the `S_EVENT_DEAD`/`_CRASH`
+  path below, independent of the watchdog); it bounds a start whose end
+  never arrives because the event itself is dropped while the unit is
+  still alive and still firing, so no entry outlives its watchdog whatever
   the event stream does or fails to do.
 - `S_EVENT_SHOOTING_END` tightens the same entry's expiry to
   `max(now, since_sim + FIRING_MIN_VISIBLE_S)` -- **one formula covers
@@ -98,16 +101,32 @@ EMITTER_KIND_FIRING: Final[str] = "firing"
 FIRING_MIN_VISIBLE_S: Final[float] = 1.5
 
 #: **Behaviour-affecting -- the longest a `FIRING` entry survives with no
-#: `S_EVENT_SHOOTING_END` ever arriving** (the unit is destroyed mid-burst,
-#: or the `END` event is lost). A *smaller* value risks closing an entry
-#: while the unit is still genuinely firing (a long burst with no gap); a
-#: *larger* value risks showing a unit as firing well after it stopped, if
-#: its `END` event is ever dropped by the bridge. Set generously above any
-#: plausible single burst duration (`FIRING_MIN_VISIBLE_S` already covers
-#: the short-burst case; this is the backstop for the no-`END`-at-all case,
-#: not the ordinary path). Same no-tuning-mechanism-yet note as
+#: further event naming the same unit at all.** This is NOT the backstop
+#: for "the unit was destroyed mid-burst" -- that case is handled
+#: immediately and unconditionally by the `S_EVENT_DEAD`/`_CRASH` removal
+#: path below (`_DEATH_KINDS`), independent of this timer. This watchdog's
+#: only remaining real case is "`S_EVENT_SHOOTING_END` never arrives for a
+#: unit that is still alive and still firing" -- the bridge drops the
+#: `END` event, or (per `aircraft-layer/research/2026-09-24-damage-and-
+#: firing-events-over-mission-bridge.md`, lines ~178-179) `S_EVENT_
+#: SHOOTING_START` turns out not to retrigger mid-burst, in which case a
+#: sustained engagement (continuous AAA holding the player, exactly this
+#: feature's own target scenario) produces no further events at all until
+#: the eventual `END`. **A *smaller* value here risks ending a sighting
+#: while the unit is still genuinely shooting at the player, mid-attack --
+#: the one failure mode this feature exists to prevent.** A *larger* value
+#: only risks showing a unit as firing for longer after a dropped `END`
+#: that was never going to be followed by a `DEAD`/`CRASH` either, which is
+#: doubly rare (lost event + unit survives). Set generously above any
+#: plausible single continuous engagement, since the downside of
+#: overshooting is small and the downside of undershooting is a false "not
+#: firing anymore" read on a unit still shooting at the aircraft. Whether
+#: `S_EVENT_SHOOTING_START` retriggers mid-burst is still unconfirmed and
+#: needs a live answer (plan's Risks & Unknowns) before this value's true
+#: safe floor is known; until then this stays a conservative guess rather
+#: than a measured bound. Same no-tuning-mechanism-yet note as
 #: `FIRING_MIN_VISIBLE_S` above.
-FIRING_WATCHDOG_S: Final[float] = 10.0
+FIRING_WATCHDOG_S: Final[float] = 180.0
 
 #: Absorbs harmless non-monotonicity between two polls of the *same*
 #: running mission (see module docstring's "Mission-restart reset" note) --

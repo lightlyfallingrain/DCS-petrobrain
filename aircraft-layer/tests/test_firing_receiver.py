@@ -151,6 +151,39 @@ def test_dead_removes_the_entry_immediately_regardless_of_watchdog() -> None:
     assert "Unit_1" not in active
 
 
+def test_a_unit_still_firing_past_the_former_ten_second_floor_stays_visible() -> None:
+    """Pins the fix for the review's required finding (`AC-B8`/`BL-B73` Stage
+    B review): the watchdog must not end a sighting while the unit is still
+    genuinely firing. `10.0` was the old `FIRING_WATCHDOG_S` -- a sustained
+    burst with no further event at all (no `END`, no `DEAD`/`CRASH`) must
+    still be visible well past that old floor, because "no further event"
+    does not mean "nothing is happening"; it can mean the unit is mid-burst
+    and `S_EVENT_SHOOTING_START` never retriggers."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _start("Unit_1", 100.0)))
+
+    tracker.ingest(_batch(100.0 + 10.0 + 0.1))  # past the old watchdog floor
+    active = tracker.snapshot()["active"]
+    assert isinstance(active, dict)
+    assert "Unit_1" in active
+
+
+def test_dead_during_a_sustained_burst_removes_the_entry_immediately() -> None:
+    """The other half of the distinction the review's finding draws: a unit
+    destroyed mid-burst is removed by the death path, not by the watchdog,
+    at any point in the burst -- including well past the old 10s floor,
+    where the watchdog alone would have left it visible for a while yet."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _start("Unit_1", 100.0)))
+    tracker.ingest(_batch(100.0 + 10.0 + 0.1))  # still firing, past old floor
+    assert "Unit_1" in tracker.snapshot()["active"]  # type: ignore[operator]
+
+    tracker.ingest(_batch(100.0 + 10.0 + 0.2, _dead("Unit_1", 100.0 + 10.0 + 0.2)))
+    active = tracker.snapshot()["active"]
+    assert isinstance(active, dict)
+    assert "Unit_1" not in active
+
+
 def test_dead_for_an_untracked_unit_is_a_no_op() -> None:
     tracker = EmitterTracker()
     tracker.ingest(_batch(100.0, _dead("Unit_never_fired", 100.0)))

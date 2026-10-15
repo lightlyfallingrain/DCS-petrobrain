@@ -416,3 +416,62 @@ per the role's own instructions on claims that cannot be falsified without a liv
    in the `"scripting"` state. The same persistence lets a *second* Hook script's own `dostring_in`
    call read a global the *first* Hook script's handler wrote, with no collector round trip and no
    new wire format.
+
+### Review Round 3 — Stage B's one required fix
+
+The Stage B review (`review.md`, commit `031abd3`) raised one required finding:
+`FIRING_WATCHDOG_S`'s docstring described it as bounding "a `START` whose `END` never arrives,"
+which conflates two causes — a unit destroyed mid-burst (already handled immediately by the
+`S_EVENT_DEAD`/`_CRASH` path, independent of the watchdog) and a unit still alive and firing whose
+burst simply outlasts the timer (the watchdog's only remaining real case, and exactly this
+feature's own sustained-AAA-fire scenario). Whether `S_EVENT_SHOOTING_START` retriggers mid-burst
+is genuinely unconfirmed, per the project's own 2026-09-24 research note.
+
+**Fix, scoped exactly as recommended, nothing else touched:**
+
+- **`FIRING_WATCHDOG_S` raised from `10.0` to `180.0`** (`aircraft-layer/src/collector/
+  firing_receiver.py`). Justified against the scenario it still protects — a continuous-fire
+  engagement with no further event at all until the eventual `END` — not against the one it no
+  longer owns (unit destruction, which the death path removes immediately regardless of this
+  value). 180 s is a conservative guess well above any plausible single continuous engagement;
+  it is explicitly not a measured bound, and the comment says so. The downside of overshooting is
+  small (a stale-looking entry only in the rare case where both `END` and `DEAD`/`CRASH` are lost);
+  the downside of undershooting was the review's actual finding, a false "stopped firing" read
+  mid-attack.
+- **The constant's own comment and the module docstring's "Co-moving Fields" paragraph rewritten**
+  to separate the two causes explicitly at the watchdog's own site, naming the death path as the
+  owner of unit-destroyed-mid-burst so the next reader does not re-derive the same conflation.
+  `FIRING_MIN_VISIBLE_S` and the `_DEATH_KINDS` removal path are untouched — the review said neither
+  needed to change, and neither did.
+- **The open DCS question added to `plan.md`'s Risks & Unknowns** (a new bullet naming the research
+  note, the one-shot Lua write, and the live-sortie question this needs), and to Stage D's item 12
+  (one sortie per stage) naming the specific Stage B check: hold a unit firing continuously past
+  180 s and read the detection trace for a silent drop or for repeated `START` events in the log.
+  No separate Stage-B-specific acceptance-checklist document exists yet (Stage A's is in
+  `dod-check.md`, written before this stage landed) — the plan's own Risks & Unknowns and item 12
+  are the right place until DoD writes Stage B's acceptance plan.
+- **Two tests added** to `aircraft-layer/tests/test_firing_receiver.py`, pinning the distinction the
+  review asked for directly rather than only via the raised constant:
+  - `test_a_unit_still_firing_past_the_former_ten_second_floor_stays_visible` — a unit with no
+    further event at all stays visible well past the *old* 10 s floor, demonstrating the fix.
+  - `test_dead_during_a_sustained_burst_removes_the_entry_immediately` — the same sustained-burst
+    unit is still removed immediately the instant `DEAD` arrives, at any point in the burst,
+    confirming the death path (not the watchdog) owns that case regardless of the new value.
+
+**Left alone, per the finding's explicit scope:** the `implementation.md` Stage B test-count prose
+(the earlier "17 new" claim for this file is now exactly correct — 15 + 2 = 17, confirmed by
+`grep -c '^def test_' aircraft-layer/tests/test_firing_receiver.py` — so nothing needed fixing
+there, and this is not an instance of the "if your change makes the first one more wrong, fix that
+one line" caveat since it made it more right instead); the generator backtick quirk; the two
+module-level ordering asserts named as optional refinements.
+
+### Checks, Review Round 3
+
+- `aircraft-layer`: `ruff format --check src tests` — pass. `ruff check src tests` — pass.
+  `mypy src` — pass (`tests` has 2 pre-existing `unused-ignore` findings in files this change does
+  not touch, confirmed via `git diff --stat` against both). `pytest -q` — **293 passed** (291
+  baseline + 2 new, both confirmed by name in `-v` output).
+- `body-layer`: no files touched by this fix (`grep -rl FIRING_WATCHDOG_S body-layer` — no matches).
+  Run anyway for the regression check: `ruff format --check src tests` — pass. `ruff check src
+  tests` — pass. `mypy src` — pass. `pytest -q` — **2041 passed, 4 xfailed**, matching baseline
+  exactly.
