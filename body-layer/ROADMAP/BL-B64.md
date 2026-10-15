@@ -1,8 +1,14 @@
 # BL-B64 — The 9K113 sight, entry 1 of 3: perception
 
-- [ ] **BL-B64 — Simulate what the 9K113 lets Petrovich *see*: the wide and narrow optics, the
+- [x] **BL-B64 — Simulate what the 9K113 lets Petrovich *see*: the wide and narrow optics, the
   directional 20 km player-bubble exemption, a non-instant slew, a long-dwell timing shape, and a
-  range model that is approximate rather than exact.** #status/open
+  range model that is approximate rather than exact.** #status/done #needs-flight
+  **Merged to `main` 2026-10-15 as `ec39c0e`**, DoD PASS (`plans/9k113-sight/dod-check.md`).
+  **The acceptance sortie is outstanding** — card at
+  `docs/acceptance/2026-10-15-9k113-sight-acceptance-card.md`, and it must be flown with the
+  body-layer service restarted between missions until `[[BL-B68]]` lands. Shipped with OBSERV on a
+  voice command (`"observ on"`/`"observe on"`); the F10 radio-menu item was explicitly skipped by
+  user direction and belongs to `[[BL-B66]]`.
   **Specification: `docs/concept/9K113.md`** (the user's own words, 2026-10-14) **plus
   `docs/acceptance/2026-10-15-9k113-sight-direction.md` §1–§11** (his direction of 2026-10-15,
   which outranks the plan wherever they differ).
