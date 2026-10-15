@@ -474,6 +474,29 @@ measured win behind the risky one — and the user flies between stages.
 
 ## Decisions Requiring User Input
 
+### All six RESOLVED, 2026-10-15 — taken by the coordinator under "proceed independently"
+
+**The user authorised the work without answering these individually** (*"go ahead with BL-B70/BL-B71
+... Proceed independently"*), so **each is the architect's recommendation, accepted by me, not a
+user ruling.** Recorded that way deliberately: if one turns out wrong in the air, it is a decision
+to revisit, not a direction that was misread.
+
+| # | resolution |
+|---|---|
+| 1 | **Any entry into the 12 o'clock sector**, not literally 1→12 / 11→12. Measured azimuth deltas reach 11.7°/tick, so a hard turn can skip the adjacent sector — the literal rule would fail exactly when he is turning hardest, which is when the call matters. |
+| 2 | **Prefix on the same utterance** — *"Twelve o'clock, come left."* Guarantees the user's stated ordering without a second speech slot competing with the one-voice rule, and it changes the rendered text, so §1's veto emits it with no special case. |
+| 3 | **Reuse `_spoken_age_phrase`** — the user named the `describe` form explicitly. **Flagged for the sortie, not silently accepted** (see below). |
+| 4 | **`GUIDANCE_OPTIC_HYSTERESIS_FRACTION = 0.25`, `GUIDANCE_OPTIC_MIN_INTERVAL_S = 10.0`**, both derived from the measured −60 m/s median closing rate and +130 m/s worst reversal. Tunable, and expected to be retuned after flying. |
+| 5 | **Body-layer only, no aircraft-layer change.** The Hook already queries the look-direction wedge, and during a run `_active_gaze` returns a fixed look at the target — intent already pushes outward, so there is no new coupling to introduce. |
+| 6 | **No marker for an unqualified `UNKNOWN` tier-2 callout.** It is the fail-open default, and a word meaning *"I am not sure why"* is exactly the collapse §5 just undid. |
+
+**Decision 3 carries a known risk and the sortie should judge it.** Mid-run, `_spoken_age_phrase`
+renders almost always as *"under a minute old"* — so the guidance line becomes
+*"Come left, under a minute old."* every time the target is beyond resolving range. That is honest
+and it is the form the user asked for, but it may read as clutter in the one register that is meant
+to be terse. **If it grates in the air, the alternative is a fixed phrase** — which §8 otherwise
+says not to mint, so it would be a deliberate exception rather than a drift.
+
 1. **§4's trigger: literally 1→12 and 11→12, or any entry into the 12 o'clock sector from the o'clock
    register?** *Recommend: any entry.* The pilot's stated reason — not overshooting the turn — applies
    identically however he arrived, and the measured azimuth deltas (up to 11.7° per tick) mean a hard
