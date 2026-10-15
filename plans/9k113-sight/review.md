@@ -467,3 +467,127 @@ chain was traced through `_apply_active_gaze`'s actual branches rather than take
 implementation note; the dispatch table was independently re-derived against the cited
 tests' bodies, not just their names; and the required fix was confirmed removable by
 mutation. Nothing in this pass was spot-checked or time-boxed.
+
+---
+
+## Pass 6 — review of the two field-of-regard security fixes (`aac1828`, `ccda29d`)
+
+Reviewed `feature/9k113-sight` at `ccda29d2bb41b2b4ff62612e93cff87753e23c81` (branch tip matched
+the dispatch brief's named sha exactly; worktree checked out directly from the branch, no
+fast-forward needed). Scope: the two commits only — `aac1828` (enforce the field of regard at
+look selection, the security deep analysis's required fix) and `ccda29d` (close the residual
+leak in `look_sweep` the implementer found while fixing it) — not a re-review of the whole
+feature, which Pass 1-3 above and `security.md` already cover.
+
+### What was verified, and how (not read-only)
+
+- **Reproduced both leaks from source, not from the reports.** `git show <parent-sha>:<path>`
+  into scratch files, swapped into the worktree in place, ran the real functions, restored to
+  HEAD, diffed to confirm exact restoration:
+  - At `f3668e8` (pre-`aac1828`): a target at 85° azimuth is selected and committed —
+    `decision.optic=sight_narrow`, `look_azimuth_deg=85.0` — 25° past `SIGHT_WIDE_OPTIC`'s 60°
+    limit. Matches the security report's own reproduction exactly.
+  - At `aac1828` (pre-`ccda29d`, i.e. fix 1 only): a target at 55° (5° inside the 60° limit),
+    default 15° bearing uncertainty, driven through the real `decide()` for 30 simulated polls —
+    `look_azimuth_deg` reaches 67.0°, matching the implementer's own reported reproduction number
+    exactly.
+  - At `ccda29d` (HEAD, both fixes): same two scenarios re-run — the 85° target is now rejected
+    outright (`look_azimuth_deg: None`, optic rests on `sight_wide` idle); the 55°-target sweep
+    over the same 30 polls now tops out at exactly 55.0°, never exceeding 60°. Both leaks closed.
+- **Mutation-tested both fixes independently**, each by editing the real source (not a stub) and
+  re-running the relevant tests, then restoring to a verified-clean `HEAD` diff:
+  - Removing the `within_field_of_regard(...)` clause from `_decide_sighting`'s `worth_looking`
+    filter (fix 1's guard) makes 4 of the 9 `TestFieldOfRegardEnforcement` tests fail — not with
+    a wrong-value assertion but with `IndexError: list index out of range` at `sweep[0]`, because
+    the now-unrejected 85° target is chosen and every step the sweep generates around it is
+    filtered out by fix 2's own `look_sweep` guard, which is still active. This is itself informal
+    confirmation that the two fixes are not redundant: each is independently load-bearing, and
+    losing either changes the failure mode, not just the pass/fail count.
+  - Removing `regard_optic=SIGHT_WIDE_OPTIC` from the one `look_sweep` call site in
+    `_decide_sighting` (fix 2's wiring) reproduces the exact reported defect: 1 test fails with
+    `assert 67.0 <= 60.0`, byte-for-byte the number both the security report's "Notable
+    Discoveries" and the implementation note cite.
+- **Grepped independently for every reader of the aim fields outside `optic_policy.py`/
+  `logger.py`** (`look_azimuth_deg`, `look_elevation_deg`, `search_pattern_steps`,
+  `look_envelope_azimuth_deg`, `look_envelope_half_width_deg`), across all of `src/` — empty
+  result, confirming the widened audit's load-bearing claim rather than taking it on the
+  implementer's word.
+- **Confirmed the "continuing look" path is covered too, not just asserted.** `state.
+  search_pattern_steps[index]` (the mid-look read path, line ~1199) reads from `tuple(sweep)`,
+  which is the same already-filtered list the "new look" path's `sweep[0]` reads from — one
+  filter, two consumers, as claimed. Read directly, not inferred from the commit message.
+- **Checked the "elevation held constant" claim against the actual loop body**, not just the
+  docstring: `look_sweep`'s step-construction line is
+  `(centre_azimuth_deg + offset, centre_elevation_deg)` for every offset — `centre_elevation_deg`
+  is never varied. The claim holds, and the filter does still call `within_field_of_regard` with
+  each step's (unvarying) elevation, so a future change that *did* vary it would be caught rather
+  than silently exempted, exactly as stated.
+- **Stress-tested the "centre step always survives" claim and found it imprecisely stated** (see
+  Minor Finding below) but the safety property it is used to support — the sweep is never
+  returned empty for a validated centre — holds under direct test across a battery of
+  near-boundary centres (59.0°/59.9°/59.99°/60.0°) and uncertainty widths (5°-50°): every case
+  retained at least one step, never fewer, confirming truncation never degenerates into "selected
+  but never looked at."
+- **Checked truncation's behavioural cost directly** (the question the dispatch brief raised): a
+  target only fractions of a degree inside the boundary, across widths up to 50°, always keeps at
+  least half its originally-generated steps (worst case observed: 1 of 2), and the surviving steps
+  are always clustered near the target's own believed position, not scattered. A target can end up
+  searched more narrowly than an in-the-clear target would be, but never ends up "selected but
+  effectively unsearched" — there is always at least one step near its own position in every case
+  tried.
+- **Confirmed `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`'s `regard_*` fields are in fact identical**
+  (60.0 / 20.0 / −15.0 on both), by reading both dataclass literals directly rather than trusting
+  the docstring's claim that they are.
+- **Confirmed the GLASSING/SEARCHING `look_sweep` call site (line ~1538) never passes
+  `regard_optic`** — read directly; it is the pre-existing binocular sweep, untouched by either
+  commit, and the no-op claim is backed by a real `decide()`-level test
+  (`test_binocular_cycle_is_unaffected_by_field_of_regard`) that drives an 85° target through the
+  actual `SCANNING`→`GLASSING` path, not a unit test on `look_sweep` alone.
+- **Confirmed no new `tuning.*` constant was introduced by either commit** (`config/defaults.toml`
+  untouched in the diff) — `within_field_of_regard` and `regard_optic` are a predicate and a
+  parameter, not numeric constants, so the X-T26 tuning-mechanism check does not apply here; the
+  pre-existing four sight-timing constants this feature already declared are unaffected.
+- **Confirmed zero removed/modified tests and zero removed/modified `assert`/`def test` lines**
+  across both commits' test-file diffs — the only removed line in either diff is one superseded
+  docstring sentence in `test_optics.py` noting the sight optics are "not tested here," which this
+  change makes false and correctly deletes.
+- **Ran the verification commands myself** rather than taking the implementer's reported numbers:
+  `ruff format --check .` fails only on the pre-existing out-of-scope
+  `research/2026-10-05-security-audit.md`; `ruff check .` and `mypy --strict src` both clean;
+  `pytest -q` — **1953 passed, 4 xfailed**, matching the claim exactly.
+
+### Minor Finding (optional)
+
+- **`look_sweep`'s "the centre step always survives" docstring claim is not literally true when
+  the generated step count is even.** `_step_centres_deg` only places an exact `0.0` offset when
+  `steps_across` (`ceil(2·half_width/fov_full_width)`) is odd; for an even count (e.g.
+  `bearing_uncertainty_deg=12.0` with the sight's 6° FOV gives `steps_across=4`, offsets
+  `[-9, -3, 3, 9]` — no zero), the sweep never generates a step at the chosen target's own exact
+  azimuth at all, with or without the field-of-regard filter. This is pre-existing `look_sweep`
+  geometry, not introduced by either commit, and it does not weaken the actual safety property:
+  by construction the offsets are symmetric about zero, so whichever of any symmetric pair moves
+  *toward* zero from a validated centre always stays within whatever bound the centre already
+  satisfies — confirmed directly by stress-testing a battery of near-boundary/even-step-count
+  cases (see above), all non-empty. **Optional**: tighten the docstring's claim from "the step at
+  offset zero" to "a step at or arbitrarily close to the validated centre," since the current
+  wording asserts something about `look_sweep`'s output that is not always true, even though the
+  conclusion drawn from it (never empty) is.
+
+### Verdict
+**APPROVED.** Both required findings from `plans/9k113-sight/security.md` are closed, the residual
+leak the implementer found while fixing the first is independently reproduced and confirmed closed
+from source (not from the report), both fixes are confirmed load-bearing by mutation, the widened
+audit's "nothing else reads these fields" claim is independently confirmed by grep, reject-not-clamp
+and truncate-not-narrow are both honoured with no clamping anywhere including error paths, the
+naked-eye/binocular no-op is confirmed by a real `decide()`-level test rather than by construction
+alone, and the one imprecision found (the "centre step" docstring claim) does not affect correctness
+and is optional. Proceeds to DoD — performance and security have both already passed, and security's
+one required finding is what these two commits answer.
+
+### Review Confidence
+Full read, including the implementer's own two implementation-note passes and the preceding
+security report. Both pre-fix leaks were reproduced directly from source (not read off the
+reports), both fixes were independently mutation-tested, the "nothing else reads these fields"
+audit was independently re-run via grep rather than trusted, and the truncation behavioural-cost
+question was stress-tested across a battery of synthetic cases rather than argued analytically
+alone. Nothing in this pass was spot-checked or time-boxed.
