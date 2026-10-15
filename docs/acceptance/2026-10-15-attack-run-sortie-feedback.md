@@ -181,6 +181,34 @@ A ladder that thrashes at the boundary would be worse than one that never de-esc
 
 ---
 
+## §8 — `", obstructed"` means DCS line of sight, and nothing else
+
+> *"'...obstructed' for DCS LOS, be it terrain or buildings."*
+
+**This answers the open question §5 raised** — whether the qualifier has any caller left once the
+other two causes are routed elsewhere. It does, and exactly one:
+
+| cause | what Petrovich does |
+|---|---|
+| **DCS line of sight** — terrain or buildings | **say `", obstructed"`** — this is the word's only remaining caller |
+| cockpit mask — behind the airframe | **silence** (§2) |
+| range/size — too far to resolve | **change optic** (§6, §7); if even that is not enough, the remembered-sighting phrasing `describe` already uses |
+
+So the word recovers the meaning it was given in the 2026-10-14 direction (§19) — *something is in
+the way* — rather than standing in for every reason Petrovich is not currently looking at the
+target. All three causes are now distinguishable to the pilot, and each says something he can act
+on: nothing to do about terrain, turn to fix the mask, wait or close for range.
+
+**Note which LOS this is.** The live DCS verdict (`candidate.live_los_clear`, joined from the
+aircraft-layer Hook per `X-B29`), **not** world-model's offline primitive, which is testing-only by
+standing user direction of 2026-10-05. `BL-11` Stage 4 made that gate fail-closed, so **a missing
+live verdict currently reads as masked** — and would therefore speak `", obstructed"` under this
+rule. That interaction deserves checking: the 2026-10-15T16:44 sortie reported
+`420/5106 gate-4 evaluations had no live verdict`, roughly 8%, which is the rate at which this
+qualifier could fire for "no answer yet" rather than for real terrain.
+
+---
+
 ## What this leaves open for `/explore`
 
 - **§2:** does flying past *end* the run, or only silence it? And is "behind the cockpit mask" the
