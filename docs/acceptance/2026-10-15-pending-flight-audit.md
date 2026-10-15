@@ -48,6 +48,13 @@ you already have, not a flying task.
    that's good enough now, especially for whatever you're currently aiming at, or whether it needs
    the "always check the thing I'm aiming at first" fix before it matters.
 
+9. **A unit sitting inside forest should not be seen at all, and this has never been tested in the
+   air.** Needs a deliberate setup: fly the `--forest-occlusion` flag over the coastal woods
+   north-east of Latakia (the densest treed area in the theatre — an ordinary sortie elsewhere
+   almost never triggers this gate) with units placed in and at the edge of the treeline. This is
+   the same underlying check as item 3's cousin on the backlog side (`BL-B59`/`X-B31`); it rides
+   its own dedicated flight, not the ordinary sortie items 1–5 ride on.
+
 **Low priority / skip unless convenient:** the audio-adapter's halved polling rate has no cockpit
 effect at all — only worth a look if you happen to run with `--debug` open already.
 
@@ -75,6 +82,7 @@ effect at all — only worth a look if you happen to run with `--debug` open alr
 | **BL-B59** (bounded fold displacement) | A real scene dense/ambiguous enough to exercise the fold-displacement bound. | **STILL OPEN.** Merged (`a8551d9`, confirmed in `git log`). No sortie since has reported a group-fold incident one way or the other — the three 2026-10-15 sorties' main group interaction was a single-vehicle attack run, not the dense-cluster case this bound targets. | `body-layer/ROADMAP/BL-B59.md`; checked `git log --oneline` |
 | **BL-B64** (9K113 sight, perception) | A real acceptance flight with OBSERV actually turned on. | **STILL OPEN, confirmed by absence.** Searched all three 2026-10-15 speech logs for any "observ" token/transcript — none. The sight has shipped (merged `ec39c0e`) but has never been switched on in a real flight. | `body-layer/logs/dcs-speech-20261015-*.jsonl` (no "observ" occurrence); `docs/acceptance/2026-10-15-9k113-sight-acceptance-card.md` |
 | **BL-B47** | — see BL-13 table above. | PARTLY ANSWERED | — |
+| **X-B31** (occluder layer — not in the original candidate list, found by this audit) | The trees-only slice's own A/B flight over dense forest. | **STILL OPEN, same check as `BL-B59`'s neighbour, not `BL-B59` itself.** `feature/forest-occlusion` is DoD-passed, merge pending user approval, flag off by default. Its own entry says plainly "no sortie has exercised this path," and blast radius is ~0% at Latakia itself / 1–3% theatre-wide, so no ordinary sortie flown so far (including all three on 2026-10-15) would have exercised it without deliberate placement in the coastal woods NE of Latakia. The buildings half of this item is separately blocked on a LAN-topology decision, not a flight. | `todo/backlog/X-B31.md` |
 
 ### Body-layer work items (`BL-W`)
 
@@ -143,3 +151,19 @@ marker on inspection — flagging that discrepancy rather than silently dropping
 - **AC-8 and WM-W2** are two roadmap entries (different subprojects) describing the *same* piece of
   work and the same residual open question (feed availability) — don't track them as two separate
   things to check.
+- **`BL-B59` and `X-B31`** are not the same item (different mechanisms: bounded fold-displacement
+  vs. a forest-occlusion gate on the target's own position) but their flight checks are both
+  "dense/forested scene nobody has deliberately flown yet," and a sortie built to exercise one
+  (close grouped contacts in or near treed terrain) is a reasonable place to also exercise the
+  other. Listed as separate items (3 and 9) in section A because the triggering scenario differs
+  in a way that is easy to miss — B59 needs a tight *cluster*, X-B31 needs *tree cover* — but worth
+  planning as one flight if convenient.
+
+## Addendum — one item outside the original candidate list
+
+`todo/backlog/X-B31` (the occluder layer, buildings-from-DCS/trees-from-OSM) was not in the task's
+given list, but `grep -rl` for `#needs-flight`-equivalent phrasing surfaced it independently: its
+own entry states in plain prose that the merged trees-only slice (`feature/forest-occlusion`) is
+"fixture-only — no sortie has exercised this path." It earns inclusion by the same `grep`/"verify
+rather than trust the list" instruction the task gave for everything else. See item 9 in section A
+and its row in the "Other subprojects" table above.
