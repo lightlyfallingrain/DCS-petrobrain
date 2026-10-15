@@ -240,6 +240,27 @@ graph honest".
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list — every subproject has one, each equally canonical, ruff format/check + mypy --strict + pytest in each case, and the set of subprojects comes from root `ROADMAP.md`'s status table rather than from a list here. A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
 
+### Behaviour-affecting constants are tunable — standard practice
+
+**User direction, 2026-10-15**, once `X-T26` shipped the mechanism: *"X-T26 pattern must become
+standard practice from now on."* A new constant that changes **what Petrovich does** — what he sees,
+says, remembers, or how long he waits — is declared through `body-layer/src/tuning.py` with `lo`/`hi`
+bounds and a `#:` comment, and appears in the generated `body-layer/config/defaults.toml`. One that
+does not affect behaviour (buffer size, format width, protocol constant, internal epsilon) stays an
+ordinary literal.
+
+The procedure, the three measured traps (constants bind by value at import; `lo`/`hi` must be AST
+literals; per-key bounds cannot catch cross-key couplings) and the inclusion test live in
+`.claude/agents/implementer.md`; the Reviewer's verification half is in `.claude/agents/reviewer.md`,
+and `body-layer/CLAUDE.md`'s "Tuning" section is the user-facing reference. **Outside body-layer the
+loader does not exist** — declare the constant normally and note that it would want the mechanism,
+rather than improvising a second one.
+
+**The one habit worth repeating here, because it is where every `X-T26` defect hid:** check the
+**rendered** `defaults.toml`, not the `#:` comment it was generated from. The generator emits only
+the first sentence, so a warning written second reaches nobody — and that survived three review
+passes by readers reading the diff.
+
 ## Direction before speed
 
 **Moving in the correct direction beats moving fast.** User direction, 2026-10-05, and it is the

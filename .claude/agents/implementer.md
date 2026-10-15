@@ -53,6 +53,52 @@ definition, including this one.
 - Any feature derived from mixing DCS + external GIS data must carry explicit provenance and confidence fields, never a bare collapsed value.
 - Raw extracted data (`world-model/data/raw/`) is immutable input — never mutate it in place; derive into `processed/`.
 - Never write to the DCS installation directory.
+- **A new constant that affects behaviour goes through the tuning mechanism, not in as a bare module
+  literal.** Standard practice as of 2026-10-15 (user direction); see immediately below.
+
+### Behaviour-affecting constants are tunable — standard practice, not a special case
+
+**User direction, 2026-10-15**, once `X-T26` had shipped the mechanism: *"X-T26 pattern must become
+standard practice from now on."* The purpose, in his own earlier words, is *"so that I can change
+them easily to fiddle with the parameters that affect behaviour"* — a number he cannot adjust
+between sorties without a rebuild is a number that never gets tuned.
+
+**The test for whether a constant qualifies:** would a different value change what Petrovich *does*
+— what he sees, says, remembers, or how long he waits? Then it is behaviour-affecting. A buffer
+size, a format width, a protocol constant or an internal epsilon is not. The full inclusion test is
+in `plans/configurable-constants/plan.md`.
+
+**How, in body-layer** — `body-layer/CLAUDE.md`'s "Tuning" section is the reference:
+
+1. Declare it with `tuning.real(...)` / `tuning.whole(...)` / `tuning.sequence(...)` /
+   `tuning.table(...)` at **module level**, with `lo`/`hi` bounds and a `#:` comment above it.
+2. **The comment's FIRST sentence is what the pilot reads** — the generator renders only that one.
+   Say what the constant does, which direction is the dangerous one, and roughly what the default
+   corresponds to in the world. Provenance and reasoning follow in later sentences and stay in the
+   code, where they belong.
+3. Regenerate with `.venv/bin/python tools/generate_defaults.py --write`; a staleness test keeps
+   `config/defaults.toml` honest against the source.
+4. **Read the rendered `config/defaults.toml`, not your source comment.** Three separate defects in
+   `X-T26` lived in the gap between the two, and every one of them survived a reader who read the
+   diff.
+
+**Three traps, all measured rather than theorised:**
+
+- **Constants bind by value at import** (145 instances in `body-layer/src`). A later `setattr` on
+  the defining module never reaches an importer that already ran, so resolution must happen at the
+  declaration itself.
+- **`lo`/`hi` must be AST literals.** The generator reads them from the source tree and understands
+  no name references; a reference also risks `NameError` when the source constant is defined later
+  in the same file. If you must duplicate a value, name its source in a comment and flag it in your
+  report.
+- **Per-key bounds do not catch cross-key couplings.** Two values each inside its own bound can be
+  jointly invalid — `X-T26` found two such pairs, one of which crashed the process at import. If
+  your constant has a relationship with another (an ordering, a ratio, an invariant asserted
+  anywhere), say so in your report even if you do not guard it.
+
+**Outside body-layer the loader does not exist yet.** Do not invent a second one: declare the
+constant normally and say in your report that it is behaviour-affecting and would want the
+mechanism if that subproject grows one.
 
 ---
 
