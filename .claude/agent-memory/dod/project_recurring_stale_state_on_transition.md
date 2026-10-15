@@ -1,6 +1,6 @@
 ---
 name: recurring_stale_state_on_transition
-description: BL-14 alone produced four separate "state that should reset on a transition/identity change silently didn't" findings across its review cycle -- a category, not a one-off
+description: this defect shape -- state that should reset/carry on a transition and doesn't -- has now recurred across two separate features (BL-14's four instances, BL-B64's at least two more); raise it at Architect time for any "mode/phase with more than one field that should move together" feature, not only at Reviewer/Security
 metadata:
   type: project
 ---
@@ -35,3 +35,31 @@ changes?" -- would plausibly have caught #2-#4 as one audit rather than three se
 Worth raising at Architect for any future feature with a "selected/active X" concept (next
 candidate: `BL-B62`/`BL-B63`, the group-view/fast-lane work, both of which will have their own
 notion of "the current target").
+
+**Recurred again, `BL-B64` (the 9K113 sight), 2026-10-15 -- now a two-feature pattern, not a
+one-feature cluster.** At least two more instances of the same shape, in the same project area
+(`belief/optic_policy.py`'s phase/mode state machine), caught by two different later roles:
+
+5. `OpticState` is documented as "frozen and replaced rather than mutated," which reads as if
+   every transition carries every field forward -- but two phase-entry branches construct
+   `OpticState(...)` fresh rather than via `replace()`, so a newly added persistent field
+   (`actual_aim_*`) silently reset to its default on exactly those transitions (caught by the
+   Implementer's own test, per its own agent-memory note
+   `feedback_decide_fresh_dataclass_construction_drops_fields.md`).
+6. A pilot's "Observ off" command set `OpticState.home_phase` to `SCANNING`, but `decide()`'s
+   `phase is SIGHTING` dispatch never read `home_phase` -- the two fields were assumed to move
+   together once `phase` had already entered `SIGHTING`, and nothing enforced that. Found by
+   Reviewer Pass 2 via direct reproduction (building the diverged state by hand), not by reading --
+   every existing test happened to keep `phase`/`home_phase` in agreement, so the gap was invisible
+   at the unit level.
+
+**The category is now confirmed rather than merely suspected**: two unrelated features, both
+built around a phase/mode state machine with more than one field that is supposed to move
+together, each produced multiple instances of exactly this shape, and in both cases at least one
+instance was caught only by a later role (Security or a Reviewer pass doing direct reproduction)
+rather than by the Implementer or an earlier Reviewer pass. **Standing recommendation, now with two
+data points behind it**: any Architect plan introducing or extending a phase/mode state machine
+with more than one piece of state that must move together should name, as an explicit plan
+section, every field that must track every other field's transition, and which construction/
+dispatch sites are responsible for keeping them in agreement -- rather than leaving it to be
+discovered per-field by whichever role happens to build the diverged state first.
