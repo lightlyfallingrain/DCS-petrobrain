@@ -435,6 +435,16 @@ class NakedEyePerceptionSource:
     #: regression gate 2B used and it is worth repeating here: the
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
+    #: Set to `now_sim + HANDS_BUSY_DURATION_S` by `logger._apply_active_
+    #: gaze` whenever `OpticState.hands_busy_until_sim` is active this poll
+    #: (`BL-B64` Stage 2, direction §6's "1 s hand movement") -- `poll()`
+    #: below returns `[]` immediately while `now_sim` is still under this,
+    #: without touching `_previously_seen_at`/`_acquired_at` (this is a
+    #: deliberate pause, not a data gap -- the world has not become
+    #: unknown, Petrovich's eyes are just on the switch). `None` (the
+    #: default, and the value on every poll before this entry) is a true
+    #: no-op.
+    suppressed_until_sim: float | None = None
     #: The peripheral channel's output (hard parts 2a/4 of the plan) --
     #: always empty until the attention-capture channel exists (out of
     #: scope this slice); resolved per candidate through `perception.gaze.
@@ -473,6 +483,16 @@ class NakedEyePerceptionSource:
     _observation_count: int = field(default=0, init=False, repr=False)
 
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
+        if (
+            self.suppressed_until_sim is not None
+            and now_sim < self.suppressed_until_sim
+        ):
+            # The 1 s hand movement (`BL-B64` Stage 2, direction §6) --
+            # Petrovich's eyes are on the switch, not through any optic.
+            # Deliberately does not touch `_previously_seen_at`/
+            # `_acquired_at`: a brief, deliberate pause is not a data gap,
+            # unlike the `world_objects is None` branch below.
+            return []
         world_objects = self.aircraft_client.get_world_objects_latest()
         if world_objects is None:
             # No snapshot -- reset visible-set state so the next real

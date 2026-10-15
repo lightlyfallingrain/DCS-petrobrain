@@ -1524,6 +1524,32 @@ def test_apply_active_gaze_returns_none_when_optic_state_was_never_given() -> No
     assert updated_state is None
 
 
+# -- `_apply_active_gaze`'s `suppressed_until_sim` build (`BL-B64` Stage 2,
+# direction §6) --------------------------------------------------------------
+
+
+def test_apply_active_gaze_sets_suppressed_until_sim_from_optic_state() -> None:
+    from belief.optic_policy import OpticState
+
+    naked_eye = _naked_eye_source()
+
+    _apply_active_gaze(
+        [naked_eye],
+        TaskStore(),
+        optic_state=OpticState(hands_busy_until_sim=42.0),
+    )
+
+    assert naked_eye.suppressed_until_sim == 42.0
+
+
+def test_apply_active_gaze_suppressed_until_sim_is_none_by_default() -> None:
+    naked_eye = _naked_eye_source()
+
+    _apply_active_gaze([naked_eye], TaskStore())
+
+    assert naked_eye.suppressed_until_sim is None
+
+
 def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
     # End-to-end: a pending scan-left task registered on the store the
     # runner ticks must be visible to a real NakedEyePerceptionSource by

@@ -805,6 +805,12 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "step",
         "engage",
         "disengage",
+        # `BL-B64` Stage 2, direction §6 -- "Observ on"/"Observ off".
+        # `_handle_observ_on`/`_handle_observ_off` always return a
+        # one-line readback unconditionally, so neither needs the
+        # no-return-value exemption.
+        "observ_on",
+        "observ_off",
         "cancel_task",
         "cancel_scan",
         "cancel_watch",
@@ -949,6 +955,18 @@ class CrewConsole:
     #: loop the moment it is applied, so a command that is never repeated
     #: does not re-fire every poll thereafter.
     attack_run_transition: Literal["engage", "disengage"] | None = None
+    #: "Observ on"/"Observ off"'s one-shot signal to `logger.py`'s poll
+    #: loop -- `BL-B64` Stage 2, direction §6 (`docs/concept/9K113.md`'s
+    #: "Observ" glossary: *"Turn on OBSERV in guidance unit, tell pilot
+    #: 'Observ on'"*). The same division `attack_run_transition` already
+    #: states just above: `OpticState.home_phase` lives on `logger.
+    #: ConsolePerceptionRunner`, not here, so this class leaves a narrow
+    #: instruction instead of mutating state it cannot reach. Reset to
+    #: `None` at the top of every `handle_command` dispatch, same
+    #: convention as `last_command_target_contact_id`/`attack_run_
+    #: transition`, and consumed-and-cleared by the poll loop the moment
+    #: it is applied.
+    observ_transition: Literal["on", "off"] | None = None
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `overlay_client`/`speech_client`: `None` is a true no-op.
@@ -1351,6 +1369,9 @@ class CrewConsole:
         # dispatch this poll loop has not yet consumed cannot leak into an
         # unrelated later command's evaluation this same poll.
         self.attack_run_transition = None
+        # Same reset, same reason, for OBSERV (`observ_transition`'s own
+        # docstring).
+        self.observ_transition = None
         if token == "silence":
             # Checked *before* the general `self.silenced = False` reset
             # below, and dispatched before it -- `_handle_silence` is the
@@ -1411,6 +1432,10 @@ class CrewConsole:
             lines = self._handle_engage(now_sim, slots)
         elif token == "disengage":
             lines = self._handle_disengage()
+        elif token == "observ_on":
+            lines = self._handle_observ_on()
+        elif token == "observ_off":
+            lines = self._handle_observ_off()
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         elif token == "cancel_scan":
@@ -2179,6 +2204,31 @@ class CrewConsole:
         caller, not here)."""
         self.attack_run_transition = "disengage"
         return [render_attack_run_off().text]
+
+    def _handle_observ_on(self) -> list[str]:
+        """ "Observ on" -- `BL-B64` Stage 2, direction §6: *"OBSERV ON only
+        on pilot command."* Leaves `observ_transition` for the poll loop
+        (`logger.py`, which owns `OpticState.home_phase`) rather than
+        mutating state this class cannot reach -- see that field's own
+        docstring. Entering OBSERV does not itself point the sight or
+        change what Petrovich is looking through this instant: the phase
+        cycle (`belief.optic_policy.decide`) only moves into `SIGHTING` at
+        its own next phase boundary, the structural rule that makes
+        abandoning a scan mid-sweep to glass up (or sight up) an
+        inexpressible state. Speaks unconditionally, same posture as
+        `_handle_disengage`."""
+        self.observ_transition = "on"
+        return ["Observ on."]
+
+    def _handle_observ_off(self) -> list[str]:
+        """ "Observ off" -- the pilot's own command to end OBSERV (direction
+        §6), and also what a violent manoeuvre does automatically
+        (`belief.optic_policy._force_observ_off`, direction §8) -- this
+        handler is the pilot-commanded path only; the manoeuvre path never
+        calls it. Speaks unconditionally, same posture as `_handle_
+        disengage`."""
+        self.observ_transition = "off"
+        return ["Observ off."]
 
     def drain_attack_run(
         self,

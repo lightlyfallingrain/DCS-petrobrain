@@ -8,11 +8,17 @@ identical and the reason the policy takes `LookTarget`s rather than
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from belief.optic_policy import (
+    HANDS_BUSY_DURATION_S,
     MAX_LOOK_S,
     RETRY_RANGE_FRACTION,
+    SIGHT_GLANCE_AWAY_S,
+    SIGHT_MAX_DWELL_S,
+    SIGHT_STEADY_RATE_LIMIT_DEG_S,
     STEADY_RATE_LIMIT_DEG_S,
     LookTarget,
     OpticPhase,
@@ -25,7 +31,12 @@ from belief.optic_policy import (
     is_worth_a_look,
     lower_binoculars,
 )
-from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+from perception.optics import (
+    BINOCULAR_OPTIC,
+    SIGHT_NARROW_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    UNAIDED_OPTIC,
+)
 
 _CYCLE_S = 16.0
 
@@ -1349,3 +1360,438 @@ class TestOpticStateActualAimCarriesForward:
         assert decision.optic is BINOCULAR_OPTIC
         assert state.actual_aim_azimuth_deg == 12.0
         assert state.actual_aim_elevation_deg == -3.0
+
+
+class TestObservOffIsBitIdentical:
+    """`BL-B64` Stage 2, plan §13's own claim: `home_phase`'s default is
+    `SCANNING`, so every caller that never sets it (every pre-existing
+    caller) must exercise exactly the code this project already had.
+    `TestPhaseCycle`/`TestSteadinessGate`/`TestOpticStateActualAimCarries
+    Forward` above already pin that path byte-for-byte unchanged (they
+    pass with no edits); this class pins the two *new* parameters'
+    no-op contract specifically, which nothing above exercises."""
+
+    def test_sight_steady_is_ignored_while_observ_is_off(self) -> None:
+        """`sight_steady` is only ever read inside the `SIGHTING` branch
+        (`_decide_sighting`) -- a `False` value must not perturb the
+        ordinary scanning-at-home cycle at all."""
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+            sight_steady=False,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.home_phase is OpticPhase.SCANNING
+
+    def test_hands_busy_until_sim_default_never_suppresses(self) -> None:
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S / 2,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert decision.suppressed is False
+        assert state.hands_busy_until_sim is None
+
+    def test_first_poll_optic_is_still_unaided_when_home_phase_defaults(
+        self,
+    ) -> None:
+        state, decision = decide(
+            OpticState(),
+            now_sim=0.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+        )
+        assert decision.optic is UNAIDED_OPTIC
+        assert state.phase is OpticPhase.SCANNING
+
+
+class TestObservOn:
+    """`BL-B64` Stage 2, direction §6 -- entering OBSERV never jumps the
+    *current* phase straight into `SIGHTING`; it only changes `home_phase`,
+    and the phase itself moves there at its own next boundary
+    (`_back_to_home`) -- the structural rule that makes "abandon a scan
+    mid-sweep to sight up" inexpressible, exactly as it already does for
+    binoculars."""
+
+    def test_setting_home_phase_mid_glassing_does_not_interrupt_the_look(
+        self,
+    ) -> None:
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+        # OBSERV commanded on mid-look (the poll loop would do this via
+        # `replace(runner.optic_state, home_phase=OpticPhase.SIGHTING)`).
+        state = replace(state, home_phase=OpticPhase.SIGHTING)
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        # Still glassing -- the look is not abandoned mid-sweep.
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.optic is BINOCULAR_OPTIC
+
+    def test_the_look_ending_hands_back_to_sighting_not_scanning(self) -> None:
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        state = replace(state, home_phase=OpticPhase.SIGHTING)
+        resolved = _target(current_level="type")
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[resolved],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_WIDE_OPTIC
+
+
+class TestSightingDwellCycle:
+    """`SIGHTING`'s own body (`_decide_sighting`), direction §9's inverted
+    dwell: always ready to pick a target (no scan boundary to wait for),
+    narrow sight while actively looking, wide while idle, and a scheduled
+    break (`SIGHT_MAX_DWELL_S`) regardless of whether anything is still
+    worth looking at."""
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    def test_idle_sighting_rests_wide_with_nothing_worth_looking_at(self) -> None:
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert decision.look_azimuth_deg is None
+
+    def test_a_worthwhile_target_is_picked_immediately_no_scan_boundary(
+        self,
+    ) -> None:
+        """Unlike `GLASSING`, which waits for `scan_cycle_period_s` to
+        elapse, `SIGHTING` has no boundary to wait for -- it is already
+        home."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_NARROW_OPTIC
+        assert decision.look_azimuth_deg is not None
+        assert state.look_contact_id == "CONTACT_1"
+        assert state.look_started_sim == 0.5
+
+    def test_the_look_continues_on_the_next_poll(self) -> None:
+        state, _ = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_NARROW_OPTIC
+        assert state.look_contact_id == "CONTACT_1"
+
+    def test_a_resolved_look_commits_and_immediately_picks_the_next_target(
+        self,
+    ) -> None:
+        state, _ = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target("CONTACT_1")],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+
+        resolved = _target("CONTACT_1", current_level="type")
+        other = _target("CONTACT_2", azimuth_deg=20.0)
+        state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[resolved, other],
+            steady=True,
+        )
+        # CONTACT_1 resolved and left the window; the dwell does not end --
+        # it picks CONTACT_2 immediately, without a forced break.
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_NARROW_OPTIC
+        assert state.look_contact_id == "CONTACT_2"
+        assert "CONTACT_1" in state.attempted_at_range_m
+
+    def test_the_scheduled_break_fires_regardless_of_whether_something_is_worth_looking_at(
+        self,
+    ) -> None:
+        """Direction §9: *"Maybe take eyes off it for a quick glance
+        around"* -- a scheduled break, not only a last-resort timeout."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=SIGHT_MAX_DWELL_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert state.home_phase is OpticPhase.SIGHTING
+        assert decision.optic is UNAIDED_OPTIC
+
+    def test_the_glance_away_returns_to_sighting_after_its_own_duration(
+        self,
+    ) -> None:
+        state, _ = decide(
+            self._sighting_state(),
+            now_sim=SIGHT_MAX_DWELL_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+
+        state, decision = decide(
+            state,
+            now_sim=SIGHT_MAX_DWELL_S + SIGHT_GLANCE_AWAY_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        # `_back_to_home` itself rests idle-wide for the poll that resolves
+        # the glance -- there is no scan-complete gate (unlike `SCANNING`-
+        # at-home) to wait out before the *next* poll picks a target.
+        assert state.phase is OpticPhase.SIGHTING
+        assert state.home_phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_WIDE_OPTIC
+
+        state, decision = decide(
+            state,
+            now_sim=SIGHT_MAX_DWELL_S + SIGHT_GLANCE_AWAY_S + 0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+    def test_the_glance_away_holds_naked_eye_before_its_duration_elapses(
+        self,
+    ) -> None:
+        state, _ = decide(
+            self._sighting_state(),
+            now_sim=SIGHT_MAX_DWELL_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        state, decision = decide(
+            state,
+            now_sim=SIGHT_MAX_DWELL_S + SIGHT_GLANCE_AWAY_S / 2,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+
+
+class TestManoeuvreForcesObservOff:
+    """Direction §8: *"Gyros are sensitive to violent manouvres and OBSERV
+    must be swithced OFF is pilot manouvres violently."* Unlike a normal
+    binocular interruption (which only ends the current dwell),
+    `sight_steady=False` drops `home_phase` back to `SCANNING` -- OBSERV
+    itself ends, not just the current look."""
+
+    def test_an_unsteady_poll_while_sighting_turns_observ_off_entirely(
+        self,
+    ) -> None:
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+            look_contact_id="CONTACT_1",
+            look_started_sim=0.0,
+        )
+        state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+            sight_steady=False,
+        )
+        assert state.home_phase is OpticPhase.SCANNING
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+        # The interrupted look's pending marks are dropped, not committed.
+        assert state.pending_attempted_at_range_m == {}
+
+    def test_binoculars_steadiness_is_unaffected_by_sight_steady(self) -> None:
+        """`steady`/`sight_steady` answer different questions -- a violent
+        manoeuvre on the sight's own gate must not interrupt an ordinary
+        binocular look that is otherwise steady."""
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+            sight_steady=False,
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+
+class TestHandsBusy:
+    """`BL-B64` Stage 2, direction §6's 1 s hand movement -- `decide`
+    suppresses every optic's observations while `hands_busy_until_sim` is
+    active, rather than advancing any phase logic."""
+
+    def test_suppressed_while_hands_are_busy(self) -> None:
+        state = OpticState(phase_started_sim=0.0, hands_busy_until_sim=1.0)
+        new_state, decision = decide(
+            state,
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert decision.suppressed is True
+        assert new_state.phase is OpticPhase.SCANNING
+        assert new_state is state
+
+    def test_no_longer_suppressed_once_the_duration_elapses(self) -> None:
+        state = OpticState(phase_started_sim=0.0, hands_busy_until_sim=1.0)
+        _, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert decision.suppressed is False
+
+    def test_hands_busy_duration_constant_is_positive(self) -> None:
+        assert HANDS_BUSY_DURATION_S > 0.0
+
+
+class TestLowerBinocularsPreservesObserv:
+    """§13a's first named trap: `lower_binoculars` runs on every player
+    command and must not drop OBSERV -- it is a pilot-commanded standing
+    mode (direction §6), distinct from the current dwell this function
+    ends."""
+
+    def test_lowering_while_sighting_is_home_and_idle_is_a_no_op(self) -> None:
+        """Mirrors today's "lowering while already naked-eye scanning is a
+        no-op" exactly, with the roles swapped -- idle, no look chosen."""
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        result = lower_binoculars(state, now_sim=5.0)
+        assert result is state
+        assert result.home_phase is OpticPhase.SIGHTING
+
+    def test_lowering_while_sighting_is_home_drops_an_active_look(self) -> None:
+        """Unlike `SCANNING`-at-home (which never has a look in progress
+        while it is the current phase), `SIGHTING`-at-home is its own
+        "closer look" -- so a command can still drop an *active* look back
+        to idle without leaving `home_phase`, the same distinction §13a
+        draws for the standing mode versus the current dwell."""
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+            look_contact_id="CONTACT_1",
+            look_started_sim=0.0,
+        )
+        result = lower_binoculars(state, now_sim=5.0)
+        assert result.phase is OpticPhase.SIGHTING
+        assert result.home_phase is OpticPhase.SIGHTING
+        assert result.look_contact_id is None
+
+    def test_lowering_mid_glance_away_returns_to_sighting_not_scanning_home(
+        self,
+    ) -> None:
+        """The brief glance-away is `phase is SCANNING` with `home_phase is
+        SIGHTING` -- lowering it must hand back to the sight, not drop
+        OBSERV by accident."""
+        state = OpticState(
+            phase=OpticPhase.SCANNING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        result = lower_binoculars(state, now_sim=1.0)
+        assert result.phase is OpticPhase.SIGHTING
+        assert result.home_phase is OpticPhase.SIGHTING
+
+    def test_lowering_a_sight_look_drops_pending_but_keeps_observ_on(
+        self,
+    ) -> None:
+        state, _ = decide(
+            OpticState(
+                phase=OpticPhase.SIGHTING,
+                phase_started_sim=0.0,
+                home_phase=OpticPhase.SIGHTING,
+            ),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert state.look_contact_id == "CONTACT_1"
+
+        result = lower_binoculars(state, now_sim=1.0)
+        assert result.phase is OpticPhase.SIGHTING
+        assert result.home_phase is OpticPhase.SIGHTING
+        assert result.look_contact_id is None
+        assert result.pending_attempted_at_range_m == {}
+
+
+class TestSightSteadyRateLimitIsHigherThanBinoculars:
+    """Cross-key coupling (not enforced at import, like `SIGHT_WIDE_RANGE_
+    SIGMA_SCALE`/`SIGHT_NARROW_RANGE_SIGMA_SCALE`'s own ordering) -- a
+    stabilised sight must tolerate at least as much attitude-rate as a
+    pair of hands holding binoculars, per direction §8's own framing."""
+
+    def test_sight_rate_limit_is_at_least_binocular_rate_limit(self) -> None:
+        assert SIGHT_STEADY_RATE_LIMIT_DEG_S >= STEADY_RATE_LIMIT_DEG_S

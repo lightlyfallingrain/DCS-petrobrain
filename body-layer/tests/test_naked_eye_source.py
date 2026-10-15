@@ -374,6 +374,46 @@ def test_naked_eye_source_only_sees_a_flank_contact_when_its_cone_is_gazed() -> 
     assert len(nine_leg) == 1
 
 
+def test_suppressed_until_sim_yields_no_observations() -> None:
+    """`BL-B64` Stage 2, direction §6's 1 s hand movement -- `poll()`
+    returns `[]` immediately while `now_sim` is still under `suppressed_
+    until_sim`, for a candidate that would otherwise be admitted."""
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+    source.suppressed_until_sim = 1.0
+
+    assert source.poll(0.5, _ownship()) == []
+
+
+def test_no_longer_suppressed_once_the_duration_elapses() -> None:
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+    source.suppressed_until_sim = 1.0
+
+    assert len(source.poll(1.0, _ownship())) == 1
+
+
+def test_suppression_does_not_touch_dedup_state() -> None:
+    """A deliberate pause is not a data gap -- unlike `world_objects is
+    None`, `_previously_seen_at`/`_acquired_at` must be left exactly as
+    they were."""
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+    source.poll(0.0, _ownship())
+    seen_before = dict(source._previously_seen_at)
+
+    source.suppressed_until_sim = 10.0
+    source.poll(0.5, _ownship())
+
+    assert source._previously_seen_at == seen_before
+
+
 def test_replaying_the_same_stream_twice_yields_identical_observations() -> None:
     # Determinism (plan item 15, hard part 9): `gaze_at` is a pure function
     # of sim time, so replaying the identical frame sequence through two

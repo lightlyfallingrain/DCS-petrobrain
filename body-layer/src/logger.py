@@ -220,6 +220,8 @@ from belief.mission_phase import (
     load_mission_understanding,
 )
 from belief.optic_policy import (
+    HANDS_BUSY_DURATION_S,
+    SIGHT_STEADY_RATE_LIMIT_DEG_S,
     LookTarget,
     OpticDecision,
     OpticPhase,
@@ -562,6 +564,16 @@ class ConsolePerceptionRunner:
             targets=_look_targets(self.store, ownship),
             steady=is_steady(list(self.attitude_history)),
             search=_search_sweep(self.scan_plan, ownship),
+            # `BL-B64` Stage 2, direction §8 -- the sight's own, higher
+            # manoeuvre-tolerance threshold, read from the same attitude
+            # history the binocular gate above already samples. A second
+            # call, not a shared one: `is_steady` is a pure function of
+            # its own `rate_limit_deg_s`, and the two thresholds answer
+            # different questions (hands vs. gyros) over the same data.
+            sight_steady=is_steady(
+                list(self.attitude_history),
+                rate_limit_deg_s=SIGHT_STEADY_RATE_LIMIT_DEG_S,
+            ),
         )
         self.optic = optic_decision.optic
         # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the
@@ -955,10 +967,18 @@ def _apply_active_gaze(
             actual_aim_azimuth_deg=None,
             actual_aim_elevation_deg=None,
         )
+    # `BL-B64` Stage 2, direction §6 -- the 1 s hand movement. `None`
+    # (the default) on every pre-existing `OpticState`, so this is a
+    # true no-op until the pilot's "Observ on"/"Observ off" command sets
+    # it (`logger.py`'s poll loop).
+    suppressed_until_sim = (
+        optic_state.hands_busy_until_sim if optic_state is not None else None
+    )
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = resolved_plan
             source.optic = optic
+            source.suppressed_until_sim = suppressed_until_sim
     return updated_state
 
 
@@ -1879,6 +1899,39 @@ def _run_crew_text_poll_loop(
                         elif crew_console.attack_run_transition == "disengage":
                             runner.attack_run_state = None
                             crew_console.attack_run_transition = None
+                        # `BL-B64` Stage 2, direction §6 -- the same
+                        # one-shot-signal shape `attack_run_transition`
+                        # just used: `_handle_observ_on`/`_handle_observ_
+                        # off` leave this for the poll loop rather than
+                        # mutating `runner.optic_state` directly (`belief`
+                        # has no reference to it -- the same division
+                        # `drain_attack_run`'s own docstring states for
+                        # `attack_run_state`). Entering OBSERV also starts
+                        # the 1 s hand-movement suppression (direction §6);
+                        # leaving it does too -- the pilot's hand is on the
+                        # switch either way. Only `home_phase` changes --
+                        # `decide`'s own dispatch (`_back_to_home`) is what
+                        # actually moves `phase` at the next boundary, so
+                        # this never expresses the illegal "jump straight
+                        # into SIGHTING" state the structural rule forbids.
+                        if crew_console.observ_transition == "on":
+                            runner.optic_state = replace(
+                                runner.optic_state,
+                                home_phase=OpticPhase.SIGHTING,
+                                hands_busy_until_sim=(
+                                    runner.last_t_sim + HANDS_BUSY_DURATION_S
+                                ),
+                            )
+                            crew_console.observ_transition = None
+                        elif crew_console.observ_transition == "off":
+                            runner.optic_state = replace(
+                                runner.optic_state,
+                                home_phase=OpticPhase.SCANNING,
+                                hands_busy_until_sim=(
+                                    runner.last_t_sim + HANDS_BUSY_DURATION_S
+                                ),
+                            )
+                            crew_console.observ_transition = None
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
                             runner.last_t_sim,
