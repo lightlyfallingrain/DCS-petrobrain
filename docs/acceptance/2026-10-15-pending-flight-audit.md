@@ -36,6 +36,54 @@ and found sound.
 
 ---
 
+## Consolidated status, 2026-10-15 evening — read this first
+
+This document was written by one agent, then corrected by three more running in parallel, which
+produced two retracted accusations and one genuine contradiction. **The adjudications below were
+made against the primitive sources — the real `.jsonl` logs and the roadmap entries — not by
+another dispatched agent**, and they supersede anything later in the file that disagrees.
+
+**Two claims made against this document were checked and are false:**
+
+- **"The merged file accuses a correct figure of being fabricated."** No such text exists in it;
+  `grep` finds nothing of the kind.
+- **"`BL-11`'s `median=1.018s` is fabricated, because the belief-truth log has no timing field."**
+  The log indeed has no duration field — but the figure is not read from one. It is the **median
+  gap between consecutive `t_sim` values**, which is what a log reduction of a poll loop means.
+  Recomputed directly:
+
+  | sortie | distinct ticks | median gap | p90 |
+  |---|---|---|---|
+  | 2026-10-15 15:07 | 462 | **1.018 s** | 1.81 s |
+  | 2026-10-15 16:44 | 450 | 1.020 s | 4.89 s |
+  | 2026-10-15 17:55 | 65 | 1.017 s | 3.05 s |
+
+  **One caveat the original row understated:** this is tick *interval*, not tick *cost*. A 1.018 s
+  median against a 1 Hz target says the loop is not stalling, which is the right observable. The
+  **p90 of 1.8–4.9 s says long gaps still occur** — a real residual, not a closed question.
+
+**User verdicts given directly, 2026-10-15 evening** — these are acceptance decisions, not
+inferences:
+
+| item | verdict |
+|---|---|
+| Rear-hemisphere silence (`BL-11` Stage 0) | **PASS** on the silence itself — *"seems to work"*. **The Danger-exception half is still unchecked**: a threatening unit going astern should still speak. |
+| `describe` pull summary (`BL-13`) | **PASS** — *"initial impression from today is it's good. Refine later if needed."* |
+
+**Corrections that verified and are folded in** (from the second audit pass):
+
+- **`BL-W1`** (contact-report flood suppression) and **`BL-W5`** (`cancel` → `confirm`) are
+  **ANSWERED** — both graded *pass* in `docs/acceptance/2026-10-05-sortie-feedback.md`'s own
+  pass/fail table from a real flight. The earlier "no log evidence" reasoning was invalid:
+  **speech logging only began 2026-10-08**, after that sortie, so its absence from the logs proves
+  nothing.
+- **`docs/acceptance/2026-10-06-callout-observability-sortie.md` carries a wrong instruction** — it
+  tells the pilot to check out `fix/callout-observability-gate`, which merged as `24746f5`.
+  Following it today would take him *backwards* off `main` and drop every later fix. The check is
+  still owed; it must be flown from `main`.
+
+---
+
 ## A. Still-open list (what needs checking, in plain language)
 
 Ordered cheapest/most-valuable first. Items 1–5 and 10–12 all ride on **one ordinary ground-attack
@@ -213,3 +261,140 @@ own entry states in plain prose that the merged trees-only slice (`feature/fores
 "fixture-only — no sortie has exercised this path." It earns inclusion by the same `grep`/"verify
 rather than trust the list" instruction the task gave for everything else. See item 9 in section A
 and its row in the "Other subprojects" table above.
+
+---
+
+## Addendum 2 — second pass, and a correction to this file's own provenance note
+
+A second audit pass covered the same candidate list. It agreed with section B on almost everything.
+Below: one correction to this file's provenance note, one factually-wrong card found by neither
+pass, two items that can come off section A, and the measurements behind them — each with the
+command that reproduces it, so nothing here has to be taken on trust.
+
+### The provenance note's fabrication finding is mistaken, and the reason is worth keeping
+
+This file's own header states that a subagent's log-based claims cited
+`body-layer/logs/dcs-speech-20261015-*.jsonl`, "files that do not exist anywhere in this worktree
+(confirmed: `body-layer/logs/` is gitignored and absent here)", and concludes the measurements were
+fabricated.
+
+**The first half is right and the conclusion does not follow.** The files are gitignored, so they
+are absent from *every* worktree — and present in the user's root checkout, which is where they were
+read:
+
+```sh
+$ git check-ignore -v body-layer/logs/dcs-speech-20261015-150739.jsonl
+body-layer/.gitignore:8:logs/	body-layer/logs/dcs-speech-20261015-150739.jsonl
+$ ls -l body-layer/logs/dcs-speech-20261015-*.jsonl     # from /Users/sg/Code/DCS-petrobrain
+-rw-r--r--  5146  body-layer/logs/dcs-speech-20261015-150739.jsonl
+-rw-r--r--  5171  body-layer/logs/dcs-speech-20261015-164451.jsonl
+-rw-r--r--   498  body-layer/logs/dcs-speech-20261015-175509.jsonl
+```
+
+The headline figure reproduces exactly:
+
+```sh
+$ python3 -c "
+import json,statistics
+f='body-layer/logs/dcs-belief-truth-20261015-150739.jsonl'
+t=sorted({json.loads(l)['t_sim'] for l in open(f) if l.strip()})
+g=[b-a for a,b in zip(t,t[1:]) if 0<b-a<30]
+print(round(statistics.median(g),3))"
+1.018
+```
+
+**Why this is worth writing down rather than quietly fixing.** The check that produced the finding —
+"do the cited files exist where I am standing?" — is the right check, and this repo's own rules are
+what make it misfire: `AGENTS.md` requires every agent to work in a worktree, and a worktree cannot
+by construction see a gitignored path. So *any* log-derived measurement, from any agent, will look
+fabricated to a verifier standing in a worktree. **A file-absence check is only as good as the
+checker's own vantage point**, and "absent from my worktree" and "does not exist" are different
+claims for anything gitignored. The section-B verdicts resting on real-log reads are sound; so were
+the discarded ones.
+
+### A card that would send the pilot off `main` — found by neither pass
+
+**`docs/acceptance/2026-10-06-callout-observability-sortie.md` is wrong in an instruction, not just
+in a status.** It reads:
+
+> **Branch: `fix/callout-observability-gate`** — … Reviewer approved over two rounds, **not merged**.
+> … `git checkout fix/callout-observability-gate`
+> (Verified: the branch exists and its tip is `304a367`. It is not on `main`, so `main` still has
+> the defect.)
+
+That branch merged as **`24746f5`** ("Merge fix/callout-observability-gate: no unprompted callout
+names a masked hour"), and `git merge-base --is-ancestor 304a367 main` returns true today. Following
+this card now would take the user **off** current `main` to test something already on it, dropping
+every fix merged since. The parenthesis written to make the card trustworthy is the part that went
+stale.
+
+The check itself — no unprompted callout names an hour behind you — is still owed, and belongs on
+the ordinary sortie in section A item 1. It just has to be flown on `main`.
+
+### Two items can come off section A: the pilot already graded them
+
+`docs/acceptance/2026-10-05-sortie-feedback.md` carries an explicit verdict table from a flown
+sortie: `silence` **pass**, contact-report flood suppression **pass**, confirm band **pass**, plus
+*"very good improvements on contact detection and reporting."*
+
+- **`BL-W1`** (contact-report-flood suppression) → **ANSWERED.** Graded *pass* on that flight.
+- **`BL-W5`** / the `cancel` → `confirm` round trip → **ANSWERED.** Graded *pass* on that flight.
+  The argument against it was that no `cancel` token appears in any speech log. The inference is
+  sound and the conclusion is wrong: **speech logging starts 2026-10-08** (and the two 10-08 files
+  hold one line each), so the 10-05 flight could not have logged it. Same shape as the provenance
+  note above — a log-absence argument is only as good as the log's coverage window, and `ls` settles
+  it.
+
+### `WM-W2`'s own clearing condition is met, measured
+
+`WM-W2` clears *"when the feed is continuous and the fallback is the exception rather than the
+rule."* Counting only candidates that reached the line-of-sight stage — past the gaze and
+player-bubble gates, which reject before LOS is consulted:
+
+| sortie | rows past the gaze gate | carrying a live verdict |
+|---|---|---|
+| `dcs-detection-trace-20261015-164451.jsonl` | 15,033 | 14,877 — **99.0 %** |
+| `dcs-detection-trace-20261015-175509.jsonl` | 559 | 521 — **93.2 %** |
+
+```sh
+python3 -c "
+import json
+for f in ['body-layer/logs/dcs-detection-trace-20261015-164451.jsonl',
+          'body-layer/logs/dcs-detection-trace-20261015-175509.jsonl']:
+    tot=pres=0
+    for l in open(f):
+        d=json.loads(l)
+        if d.get('outcome') in ('gaze','player_bubble'): continue
+        tot+=1; pres += d.get('live_los_clear') is not None
+    print(f.split('/')[-1], tot, pres, f'{100*pres/tot:.1f}%')"
+```
+
+Terrain-LOS rejections across both: 12 and 3. Against 77 % fallback on 2026-10-05 and 19 % of polls
+returning nothing a week ago, **the fallback is now the exception.** Section A item 7 stands but is
+narrower than stated: the open question is only what explains the residual 1–7 %, which is a
+`dcs.log` counter capture, not a judgement call.
+
+This also bears on the ~8 % figure quoted in `2026-10-15-attack-run-sortie-feedback.md` §8/§9 as the
+rate at which `", obstructed"` might fire for *"no answer yet"*: it is the right order of magnitude.
+The ~61 % reconstruction sitting beside it in `plans/position-belief-runaway/debug-2026-10-15.md` is
+explicitly distrusted by its own author (*"I do not trust my 61 % figure"*), and the count above
+supports the 8 % end.
+
+### Confirmations
+
+- **Tick cost.** Median realised tick period over the `t_sim` gaps of four real sortie logs:
+  **1.018 s** (10-15 15:07), **1.020 s** (10-15 16:44), **1.030 s** (10-11), **1.029 s** (10-08) —
+  against `BL-11`'s 1.000 s bench figure and a 1.33 s pre-branch baseline. The bench number holds in
+  the air, so that card's headline measurement no longer needs a flight.
+- **`BL-B47`'s scene did occur.** The 2026-10-15 sorties carried real air defence at class level —
+  `OP_MRSAM`, `OP_LRSAM`, `OP_SRSAM`, `OP_ZU23`, `OP_SPAAG`, with an `S-300PS 64H6E sr` tracked 75
+  times — so the code path ran. Whether he *spoke*, and whether he repeated, is unlogged. STILL OPEN
+  is right, and it is purely an ear check.
+- **`BR-B1` already has three real misses**, from the 2026-10-15 speech log rather than from the
+  `BR-1.2` flight its entry waits on: *"Watch, ground ahead"*, *"attack ground"*, *"attack, run"* —
+  all `say_again`.
+- **`BL-13`'s mechanism flew.** `describe right`, `describe ten o'clock`, `describe at eleven
+  o'clock`, `describe ahead` and bare `describe` all acted across two 2026-10-15 sorties. What is
+  unrecorded is the pilot's judgement, which is what section A item 1 asks for.
+- **The 533 km position errors** in `dcs-belief-truth-20261015-150739.jsonl` are not a new defect:
+  that file holds three concatenated flights, diagnosed and filed as `BL-B68`.

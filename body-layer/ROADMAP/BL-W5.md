@@ -1,7 +1,12 @@
 # BL-W5 — Confirm-band affirmatives
 
 - [x] **`fix/confirm-band-affirmatives` — the confirm band was unanswerable in the air; fixed and
-  merged 2026-09-28 (`583d786`), unflown.** #status/done #needs-flight **Merged before its acceptance flight at user
+  merged 2026-09-28 (`583d786`). **FLOWN AND PASSED 2026-10-05**.** #status/done
+  **Graded *pass* in `docs/acceptance/2026-10-05-sortie-feedback.md`'s own table** ("Confirm band |
+  **pass**"), a week after the merge. Carried as unflown until a 2026-10-15 sweep found the flight
+  had already happened — the "no `cancel` in the speech logs" reasoning was invalid, because
+  **speech logging only began 2026-10-08**. Note `todo/todo/X-T8.md` describes the same defect and
+  the same fix; close it as a duplicate of this rather than scheduling a second flight. **Merged before its acceptance flight at user
   direction** — *"so many things at this stage are intertwined that it's better to test to current
   HEAD"* — so the card
   (`docs/acceptance/2026-09-28-confirm-band-sortie.md`) is now flown from `main` alongside
