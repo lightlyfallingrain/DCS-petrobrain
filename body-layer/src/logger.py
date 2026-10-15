@@ -1222,7 +1222,16 @@ def _speech_log_sink(
     third argument, threaded straight through to `write_speech`'s own
     four attack-run keyword arguments -- `None` for every line but
     `drain_attack_run`'s own, which is the only caller that ever supplies
-    it."""
+    it.
+
+    Also carries `runner.last_ownship_state`'s pitch/bank/heading/altitude
+    through to `write_speech`'s own ownship fields (added for the
+    2026-10-15 attack-run sortie's open question -- see `write_speech`'s
+    own docstring). `None` for all four when no poll has completed yet
+    (`last_ownship_state` still unset), the same "nothing to report yet"
+    case `_render_eyesight_frame` already guards against -- never a
+    fabricated `0.0`, which would read as "level, unbanked" rather than
+    "unknown"."""
 
     def sink(
         line: str, urgent: bool, attack_run_fields: dict[str, object] | None
@@ -1231,6 +1240,7 @@ def _speech_log_sink(
         if now_sim is None:
             return
         gaze = gaze_at(now_sim, runner.scan_plan)
+        ownship = runner.last_ownship_state
         extra = attack_run_fields or {}
         target_contact_id = extra.get("attack_run_target_contact_id")
         tier = extra.get("attack_run_tier")
@@ -1243,6 +1253,12 @@ def _speech_log_sink(
             gaze_label=gaze.label,
             gaze_center_deg=gaze.center_azimuth_deg,
             optic_name=runner.optic.name,
+            ownship_pitch_deg=ownship.pitch_deg if ownship is not None else None,
+            ownship_bank_deg=ownship.bank_deg if ownship is not None else None,
+            ownship_heading_true_deg=(
+                ownship.heading_true_deg if ownship is not None else None
+            ),
+            ownship_alt_m=ownship.alt_m if ownship is not None else None,
             attack_run_target_contact_id=(
                 target_contact_id if isinstance(target_contact_id, str) else None
             ),
