@@ -20,7 +20,7 @@ never-reuse rule. A new one takes the next unused number; numbers are never reus
 mechanical check is now a directory listing:
 
 ```sh
-ls body-layer/ROADMAP/ | grep -oE '^BL-B[0-9]+' | sort -t B -k3 -n | tail -1
+ls body-layer/ROADMAP/ | grep -oE '^BL-B[0-9]+' | sort -V | tail -1
 ```
 
 Entry files live in `body-layer/ROADMAP/` alongside this subproject's milestone and work-item
@@ -102,8 +102,10 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B61]] — `group_matches` test 4 cannot tell kinds apart at class level (5th `BL-B47`-family occurrence)
 - [[BL-B62]] — The ownship-relative observation channel is general, and only `BL-14` uses it
 - [[BL-B63]] — A selective fast lane for ownship telemetry and the currently-selected target
-- [[BL-B64]] — the 9K113 sight: the whole capability, spec at `docs/concept/9K113.md`
+- [[BL-B64]] — the 9K113 sight, entry 1 of 3: perception (spec at `docs/concept/9K113.md`)
 - [[BL-B65]] — weapons safety circuit switch, before any ATGM attack run
+- [[BL-B66]] — the 9K113 sight, entry 2 of 3: effectors (the real cockpit switches moving)
+- [[BL-B67]] — the 9K113 sight, entry 3 of 3: the ATGM attack run
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root

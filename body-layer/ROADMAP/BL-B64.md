@@ -1,100 +1,104 @@
-# BL-B64 — The 9K113 sight: the whole capability, and its own specification
+# BL-B64 — The 9K113 sight, entry 1 of 3: perception
 
-- [ ] **BL-B64 — Simulate the 9K113 Raduga-Sh sight: warm-up, OBSERV, slewing, the wide/narrow
-  fields, and what it makes possible that the naked eye and binoculars cannot.** #status/open
-  **Specification: `docs/concept/9K113.md`** (the user's own words, written 2026-10-14 — it is the
-  specification, not a summary of one). Filed 2026-10-14 at his request, *"so that it does not get
-  forgotten"*.
+- [ ] **BL-B64 — Simulate what the 9K113 lets Petrovich *see*: the wide and narrow optics, the
+  directional 20 km player-bubble exemption, a non-instant slew, a long-dwell timing shape, and a
+  range model that is approximate rather than exact.** #status/open
+  **Specification: `docs/concept/9K113.md`** (the user's own words, 2026-10-14) **plus
+  `docs/acceptance/2026-10-15-9k113-sight-direction.md` §1–§11** (his direction of 2026-10-15,
+  which outranks the plan wherever they differ).
+  **Plan: `plans/9k113-sight/plan.md`** — sections 10–18 are this entry; 0–6 are the first pass,
+  preserved with its superseded reasoning marked in place.
 
-  **Why this entry had to be minted rather than appended to.** He asked for the reference to go on
-  "the 9K113 roadmap item". There was none. `[[BL-B55]]` names *"the 9K113 slice"* in its own title
-  and depends on it, and `[[BL-14]]`, `[[BL-B62]]` and the deferred ATGM attack run all point at it —
-  so four entries referenced a slice that was never filed. That is exactly how a prerequisite goes
-  missing: every document assumes someone else is tracking it.
+  **Split 2026-10-15.** This item was *"the whole capability"*; the user's §5 direction made it three
+  entries in a fixed order — *"Lets start with that, that let's us test the behaviour. We'll then add
+  actually manipulating the systems in cockpit. Only then can we add the ATGM attack run."*
 
-  ## The hard prerequisite, established 2026-10-14
+  | | entry | what it delivers |
+  |---|---|---|
+  | 1 | **`BL-B64`** (this) | perception — what the sight lets him see |
+  | 2 | `[[BL-B66]]` | effectors — the real cockpit switches moving |
+  | 3 | `[[BL-B67]]` | the ATGM attack run |
 
-  **The 9K113 sight does not exist in code.** `perception/optics.py` declares exactly two optics,
-  `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`, and four other files say so about themselves
-  (`belief/groups.py:385`, `perception/association.py:91`, `perception/visibility.py:49`,
-  `perception/clustering.py:79`). So **every** 9K113-dependent capability — ATGM guidance above all —
-  is gated on this entry, not on tuning or on the attack run. From the `BL-14` explore
-  (`docs/acceptance/2026-10-13-group-model-and-attention-tiers.md`): *"ATGM guidance is with 9K113
-  only, there is no naked eye channel for ATGM guidance."*
+  **`BL-B64` keeps its number and became the *first* entry rather than an umbrella.** An umbrella
+  would never close, sitting `[ ]` open indefinitely and making the backlog's status unreadable; the
+  three entries are held together by the shared specification document and by cross-links instead.
+  Numbers are never reused or renumbered, so the two new entries took `BL-B66`/`BL-B67` (`BL-B65`,
+  the weapons safety switch, already existed). **Note for anyone following an old pointer:** four
+  entries refer to *"the 9K113 slice"*, and where they mean the attack run they now mean
+  `[[BL-B67]]`.
 
-  ## What the specification contains, in outline — read the document, not this list
+  ## Why perception goes first
 
-  - **A ~3 minute warm-up** with a cockpit switch sequence, a *"Guidance unit ready"* callout when
-    the panel light illuminates, and a 1 s hand-movement delay simulated between switch actions.
-  - **OBSERV as a mode**, with *"Observ on"* / *"Observ off"* callouts, gyro alignment before
-    slewing, and the operational constraint that it is **not** left on for prolonged periods.
-  - **Looking through it is exclusive**: flipping other switches takes his eyes off the sight, so he
-    *does not see* what it shows — eyes away, hand to switch, back, each 1 s.
-  - **Slewing** as an inspect-and-adapt loop, because the sight does not move instantly, and
-    `9K113` slew controls are to be used *only while looking through it*. Ownship telemetry must
-    carry 9K113 state.
-  - **The capability it adds**: detection, classification and type identification at greater range
-    (the existing calibration tables already hold the figures), good azimuth understanding,
-    **poor vertical** understanding, a visual range aid useful inside ~5 km, gyro stabilisation
-    against ownship movement, and the sight holding its last position while he uses the naked eye or
-    binoculars.
-  - **Strong manoeuvres force OBSERV off** to protect the gyros, with a 1–2 s reaction time
-    acceptable.
-  - **The ATGM attack run**: arm the weapons circuit, select a pylon with a missile, azimuth-only
-    guidance, *"out of range"* / *"in range"* spoken once each, a launch callout naming the missile
-    and estimated flight time, *"impact"* (with hit/miss if detectable), and resetting the guidance
-    transmitter 1 s after impact.
-  - **Rockets too**: the sight is not meant to guide them, but holding the crosshair on the target
-    lets the pilot read the target's position off the ASP-17 — a second, non-ATGM use.
+  The reason is the user's own and it is **testability**, not cost: this is the stage that lets the
+  behaviour be flown. It also depends on nothing outside body-layer, while every cockpit-visible use
+  sits behind a write channel on devices 6/7 that is **unverified**.
 
-  ## What must happen before any of it is planned
+  Three assets make it cheap, all already on disk:
 
-  1. **An Investigator pass on the Russian QuickStart PDF.** The document's switch tables are
-     deliberately `TBD` and it names the sections to read —
-     `docs/concept/mi-24_info/DCS Mi-24P QuickStart RU.pdf` pages 21–39, 42, 44, chapter 4.6
-     (pp. 60–70) and chapter 5.3.8 (pp. 105–116). It also asks which ATGM types are supported, and
-     the gyro alignment duration. **Do not guess these from the screenshots** — that is the role
-     `investigator` exists for.
-  2. **An `/explore` where it contradicts earlier decisions.** The document says so itself:
-     *"Where this document contradicts something written earlier, explore with user."* At least one
-     contradiction is already known — `BL-14` records the vertical axis as a *discrimination* aid,
-     while this document says the 9K113 gives **poor** vertical understanding, which is a different
-     claim about a different instrument.
-  3. **`[[BL-B55]]` first or alongside**: `naked_eye_sigma_m` takes range only, so every look gets
-     naked-eye-grade position error regardless of optic. A sight whose whole point is better
-     resolution cannot be modelled through an optic-blind uncertainty function.
+  1. **The multipliers are measured** — `perception/optics.py`'s own docstring records wide
+     **3.55/7.00/6.50** and narrow **5.81/13.75/15.00** from detection-cones slice 2A, deliberately
+     not instantiated. FOV (11.5°/6.0° full angle) and field of regard (±60° az, +20/−15° el) are in
+     `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`. **No calibration sortie is
+     needed.**
+  2. **`BINOCULAR_OPTIC` has no cockpit representation and never has.** A purely-simulated optic is
+     the established pattern here, not a shortcut.
+  3. **`[[BL-B55]]` is one parameter** (`self.optic` is already in scope at
+     `naked_eye_source.py:949`).
 
-  Related: `[[BL-B55]]` (optic-blind uncertainty, names this slice in its title),
-  `[[BL-B65]]` (the weapons safety circuit switch, which the specification says must be its own item
-  before the ATGM run), `[[BL-14]]` (the naked-eye/binocular attack run, which ships without any of
-  this), `[[BL-B62]]` (relative-versus-map perception channels; the ATGM run is one of its named
-  candidate consumers).
+  ## `[[BL-B55]]` closes as this entry's own stage — the two must not be separated
 
-  ---
+  A sight seeing to 13–19 km while every look still carries naked-eye range error
+  (`σ_down ≈ 0.17·R`) would report a precise-sounding range wrong by **~2.3–3.3 km at those
+  ranges** — worse than having no sight at all, and the exact pathology `BL-B55` was filed against.
+  So it is a stage here, not a prerequisite to schedule ahead.
 
-  **Planned 2026-10-15 (architect, planning only — not implemented by user direction):**
-  `plans/9k113-sight/plan.md`. Investigator findings it builds on:
-  `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md` (plus its 2026-10-15 addendum,
-  which closes the missile speed/range gap from sources the user supplied).
+  ## What the 2026-10-15 direction added, and the one finding it could not have
 
-  **The plan splits this item along a seam the brief did not anticipate: perception versus
-  effectors.** Axis A — sight-grade detection/recognition range and position precision — depends on
-  nothing outside body-layer, and the optic multipliers it needs were already measured (they sit in
-  a `perception/optics.py` docstring, deliberately not instantiated), so **it needs no calibration
-  sortie**. Axis B — real cockpit switches, the ASP-17 mark, the ATGM run — depends on an unverified
-  write channel on devices 6/7, a sub-1 s loop ([[BL-B63]]/`AC-B3`, filed not built), and a
-  readiness lamp with no read path. The plan recommends Axis A as its own entry, merged, before Axis
-  B is decided.
+  - **Both fields of view from the start** (§8). Two `Optic` rows, not a mode flag; wide↔narrow uses
+    the same reach-versus-field mechanism as naked eye↔binoculars.
+  - **A 20 km directional cone** (§7), when OBSERV is on, in the direction the sight points, at the
+    sight's own FOV. **Body-layer only** — DCS exports every unit in the mission (user-confirmed), so
+    there is no culling to work around, the export side needs no change and aircraft-layer's `AC-B3`
+    is **not involved**. `PLAYER_BUBBLE_RADIUS_M = 10000.0` is a cost filter of our own choosing.
+    The design was already prescribed by that constant's own docstring: evaluate the exemption
+    *inside* `filter_player_bubble()`, narrowed to the sight's FOV, **never by raising the radius**.
+  - **Slew takes time** (§8) — *"we cannot expect instant alignment with anything."* The plan
+    recommends the perception entry own a slew **rate limit** and the effector entry own the closed
+    loop (plan §15, open decision 6).
+  - **An inverted dwell shape** (§9): long dwell at the sight, brief glances away and back — the
+    opposite of binoculars. Shared mechanism, different constants, but it inverts `optic_policy`'s
+    *resting phase*, which is a shape change rather than a retune (plan §13).
+  - **Ranging is approximate and a group is ranged once at its middle unit** (§11). First phase may
+    be instant but **must never be exact**. The shared per-group draw is a correctness argument, not
+    an optimisation — independent per-unit draws would scatter a group's believed positions, which is
+    what `[[BL-12]]`'s cohesion cap cannot absorb.
+  - **No elevation angle is ever spoken** (§2, §10) — there is **no elevation scale on the
+    instrument at all**, only an azimuth arc (10/30/60° off boresight;
+    `docs/concept/mi-24_info/9k113-reticle-narrow-x10.png`). World reference (*"on the ridge"*) is
+    cross-reference and is fine. Azimuth feeds `[[BL-14]]`'s existing o'clock-then-left/right
+    register; **no new guidance vocabulary**.
 
-  **[[BL-B55]] is not a separate prerequisite to schedule ahead of this — it is Axis A's own stage,
-  and the two must not be separated.** A sight seeing to 8 km while still carrying naked-eye range
-  error (`σ_down ≈ 0.17·R`) would report a precise-sounding range wrong by ~1.4 km, which is worse
-  than having no sight. So `BL-B55` closes as part of this work.
+  **The finding the direction could not have: the cone alone buys nothing.** `visibility.py:854`
+  computes `range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)` with the cap at
+  `10000.0`, so a narrow-sight candidate at 13.6 km is admitted by the cone and then **clamped back
+  to 10 km and rejected**. This entry needs **two** changes — the cone in `association.py` *and* an
+  optic-aware range cap in `visibility.py` — and neither is sufficient alone.
 
-  **Five decisions remain the user's**, listed in the plan: whether a perception-only 9K113 is an
-  acceptable interim; what *"poor vertical understanding"* actually means mechanically (the sourced
-  FOVs are symmetric, so nothing in the optics supports it — and if it means the sight cannot
-  separate two vertically-stacked units, ATGM target selection cannot work the way `BL-14`'s does);
-  whether autonomous OBSERV is in scope at all (`/explore` owed); the missile word; and the launch
-  callout's interim now that the flight-time numbers exist.
+  ## Effort/value, honestly
 
+  **No longer "nearly free", but still the cheap slice and still first.** Five things closed at zero
+  cost (the ASP-17 crosshair use case removed entirely by §1, the *"poor vertical"* mechanism
+  answered without touching the optics, autonomous OBSERV's `/explore` cancelled by §6, a sight-
+  specific guidance vocabulary, and per-unit ranging). The growth is concentrated in two places: the
+  `optic_policy` resting-phase refactor, and the cone-plus-cap pair whose downstream LOS cost needs a
+  **bench measurement** (plan §12b — estimated +20–40% on a 12.6 ms tick, bounded by area at 5–10%
+  more candidates). Cheap lever if it measures high: **the cone is only load-bearing for narrow
+  mode** — wide reaches ~8.3 km for a 7 m vehicle, *inside* the existing bubble — so dropping wide
+  from phase 1 halves the added cost for almost no product loss.
+
+  Related: `[[BL-B55]]` (closes here), `[[BL-B66]]`, `[[BL-B67]]`, `[[BL-B62]]` (the
+  relative-versus-map channel — its named consumer is the ATGM run, so `BL-B67`, not this entry),
+  `[[BL-B63]]` (the selective fast lane, a hard dependency of `BL-B67` and not of this entry),
+  `[[BL-12]]` (the cohesion cap this entry's range model is what makes behave at range),
+  `[[BL-14]]`, `[[BL-B23]]` (never-pruned `ContactStore` — this entry gives it a genuinely new
+  growth source by admitting contacts past 10 km for the first time).

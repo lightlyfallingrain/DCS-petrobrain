@@ -1,7 +1,21 @@
 # BL-B64 — The 9K113 Raduga-Sh sight
 
 > **Planning only.** User direction, 2026-10-14: *"start architect on it. Do not implement yet."*
-> Nothing in this plan is to be built until the decisions in the last two sections come back.
+> Reaffirmed 2026-10-15 for this amendment pass. Nothing in this plan is to be built yet.
+
+> **AMENDED 2026-10-15 (second pass).** User direction arrived in response to this plan's five open
+> decisions and is captured verbatim in **`docs/acceptance/2026-10-15-9k113-sight-direction.md`**,
+> §1–§11. **That document is the specification and outranks this plan wherever they differ.**
+>
+> It settles Decisions 1, 2 and 3 (marked in place below — the original reasoning is kept, because
+> *why the optics were the wrong place to look* is the transferable part), removes one use case
+> entirely, and adds four requirements this plan did not have: both fields of view from the start,
+> a non-instant slew, a directional player-bubble exemption to 20 km, and a ranging act with a cost.
+>
+> **It also splits this item into three roadmap entries** (§5 of the direction), which is the other
+> half of this pass: `[[BL-B64]]` (perception — this plan's Axis A), `[[BL-B66]]` (effectors),
+> `[[BL-B67]]` (the ATGM run). **Sections 10–16 below are the amendment**, and are where the
+> perception entry's design actually lives; sections 0–6 are the first pass, preserved.
 
 ### Goal
 
@@ -53,6 +67,16 @@ an ordinary flight, and it is what the pilot actually notices — reports at ran
 earlier and believed to the precision they deserve. Axis B is a multi-entry workstream with an
 acceptance loop that costs ~3 minutes of warm-up per attempt and two unresolved external
 dependencies.
+
+> **PARTLY SUPERSEDED 2026-10-15 — §1 of the direction removes one row from the table above.**
+> *"ASP-17 must not be manipulated directly. It shows the pilot where the 9K113 is pointing, but
+> that's automatic, not manual."* So "the pilot reading the sight off the ASP-17" is **not** an Axis
+> B deliverable and must not be built as an action at all: the mark follows the sight's pointing by
+> itself, and whatever makes the sight point somewhere makes the mark move. It stays in this plan
+> only as a *consequence* of Axis B, with no effector, no `AUTO/MAN` switch step, and no entry of
+> its own. §4.6 below (step 6 of the Axis B list) is superseded by the same sentence.
+>
+> The rest of the table stands, and the direction confirms its recommendation (§5).
 
 **What Axis A does not do, stated plainly so it is not discovered in the air:** Petrovich would be
 getting sight-grade perception without the warm-up having happened, without OBSERV, and without the
@@ -154,6 +178,16 @@ which is the whole content of inspect-and-adapt. Axis A therefore models the sig
 instantly within its field of regard, and Stage 4 replaces that with the real loop. Say so in the
 docstring; an instant-slew model left unlabelled is the kind of placeholder that gets believed.
 
+> **SUPERSEDED 2026-10-15 (direction §8).** *"the 9K113 via cockpit manipulation takes time to move
+> so we cannot expect instant alignment with anything."* **Instant pointing is not an acceptable
+> placeholder in the perception stage, labelled or not**, and the reasoning above is wrong in one
+> specific way worth keeping visible: it argued the fiction was harmless because nothing could check
+> it. That was true when the plan had no cone. **Direction §7's 20 km exemption is pointed *in the
+> direction the sight is looking*, so the pointing direction now has a consumer** — an instantly
+> teleporting cone would let Petrovich perceive at 19 km in a direction he could not have been
+> looking at a second earlier, which is an omniscience leak, not a placeholder. §15 below settles
+> which stage owns slew and recommends this one.
+
 ### Stage 3 — acceptance flight for Axis A
 
 An ordinary sortie, no warm-up cost. What it decides: whether sight-grade detection ranges feel
@@ -190,6 +224,12 @@ would be planning around assumptions. What it contains, in dependency order:
    (1)–(3) exist, and worth noting they also need the ASP-17 `AUTO/MAN` switch at arg 553 and the
    PUVL selector at arg 523 (research note, steps 2.2 and 3) for the pilot's HUD mark to follow the
    sight at all. That is a real precondition the spec does not mention.
+
+   > **SUPERSEDED 2026-10-15 (direction §1).** The crosshair-hold half of this item does not exist
+   > as work. The ASP-17 mark follows the sight automatically, so there is no "hold the crosshair"
+   > action to build and no `AUTO/MAN`/PUVL precondition to satisfy for it — this paragraph's
+   > "real precondition the spec does not mention" was reasoning from an action that is not real.
+   > Pinpoint-on-request survives, as part of `[[BL-B66]]`.
 
 ---
 
@@ -263,6 +303,12 @@ unverified-community-claim-as-fact the project forbids. So:
 ---
 
 ## 6. Autonomous OBSERV — not designed here
+> **SUPERSEDED IN FULL 2026-10-15 (direction §6).** No `/explore` is owed. OBSERV is entered on
+> pilot command and the sight is autonomous within it, *"like he uses binoculars"* — so the trigger,
+> the cost, the release and the is-it-autonomous question below are all answered by the existing
+> optic policy rather than by a conversation. Kept for the record; §13 replaces it. The one thing
+> this section got right and §13 carries forward: `peripheral=False` means OBSERV really does cost
+> the peripheral channel.
 
 The spec leaves *"When to Observ → Autonomously given conditions → TBD"* open, and I am not
 inventing it. **It needs an `/explore`**, and what that conversation has to decide:
@@ -296,8 +342,10 @@ inventing it. **It needs an `/explore`**, and what that conversation has to deci
   excessive-rate manoeuvre needs `GUID.UNIT POWER` cycled and **another 3–4 minutes**. A single
   mistake mid-test costs a full reset. Budget acceptance in sorties, not in attempts, and build the
   flag-gated debug logging up front.
-- **Axis A's instant-slew fiction** will be believed if it is not labelled. Label it in the
-  docstring where the fiction lives, not only in this plan.
+- ~~**Axis A's instant-slew fiction** will be believed if it is not labelled.~~ **Retired
+  2026-10-15 (direction §8): there is no instant-slew fiction, because slew time is modelled in the
+  perception stage (§15).** The risk it is replaced by is that the slew *rate* is a stated modelling
+  choice rather than a measurement — carried in §16.
 - **Four files assert there are only two optics.** Two of them (`clustering.py`,
   `visibility.py`) have derivations that already reference the sight's numbers, so each needs
   reading rather than find-and-replace.
@@ -328,6 +376,13 @@ weapons-safety switch, the ASP-17 mode switch and anything else cockpit-side wou
    unverified write channel and missing missile data. **Recommendation: yes, build Axis A first**,
    with the fiction labelled where it lives.
 
+   > **DECISION 1 ANSWERED 2026-10-15 (direction §5): yes.** *"Lets start with that, that let's us
+   > test the behaviour. We'll then add actually manipulating the systems in cockpit. Only then can
+   > we add the ATGM attack run."* The reason given is **testability** — it is the stage that lets
+   > the behaviour be flown — which is a stronger reason than the cheapness this plan argued from.
+   > Three entries in that order, not one feature. One clause of the recommendation is now wrong:
+   > the instant-slew fiction is **not** to be labelled and kept (see §15).
+
 2. **"Poor vertical understanding" — what is the mechanism?** The spec says the 9K113 gives poor
    vertical understanding; `BL-14` uses the vertical axis as a *discrimination* aid for picking the
    right unit. `BL-14`'s own entry already reads these as two different instruments (its tiers are
@@ -348,10 +403,50 @@ weapons-safety switch, the ASP-17 mode switch and anything else cockpit-side wou
    way `BL-14` does, and selection has to come from somewhere else.** I am not picking an answer —
    the spec itself asks for an `/explore` here.
 
+   > **DECISION 2 ANSWERED 2026-10-15 (direction §2), and none of the three candidates was right.**
+   > *"The 9K113 itself is very precise on where it is pointing. However, the copilot only has
+   > azimuth reading for it, and not a precise one. […] Nothing at all tells the vertical offset."*
+   >
+   > **The answer is upstream of the optics entirely: the sight is precise, the *instrumentation* is
+   > asymmetric.** The reticle carries an azimuth scale (a bottom arc marked `1`/`3`/`6` = 10°/30°/60°
+   > off boresight — `docs/concept/mi-24_info/9k113-reticle-narrow-x10.png`) and **no elevation scale
+   > at all**. The crewman judges the vertical from the view itself, with no instrument to read.
+   >
+   > **The original reasoning is kept deliberately, because its negative finding was correct and is
+   > the reusable part:** this pass checked the optics, found the sourced FOVs symmetric (wide 11.5°,
+   > narrow 6.0°, circular eyepiece), and concluded nothing in the optics supports an az/el
+   > asymmetry. That was right. The mistake was assuming the asymmetry therefore had to be *in* the
+   > optics, so all three candidate mechanisms were drawn from the wrong layer. **When a spec claims
+   > an asymmetry the physics does not have, look at what the operator can read, not at what the
+   > instrument can see.**
+   >
+   > Consequences, smaller than this decision feared: **no elevation angle is ever spoken** (§10);
+   > world reference is fine and is cross-reference rather than instrument readout (*"on the ridge"*
+   > — the existing semantic-position machinery); and the approximate azimuth offset feeds `BL-14`'s
+   > existing o'clock-then-left/right register with **no new guidance vocabulary**. The feared ATGM
+   > target-selection problem belongs to `[[BL-B67]]`, not to this entry.
+
 3. **Where does autonomous OBSERV go?** `/explore` now, or defer it and ship OBSERV as
    pilot-commanded only (§6). **Recommendation: defer.** Pilot-commanded is the spec's own first
    bullet, it is cheaper, and the autonomous policy is better decided after flying the commanded
    one.
+
+   > **DECISION 3 ANSWERED 2026-10-15 (direction §6), by splitting the question this plan could not
+   > answer.** *"OBSERV ON only on pilot command / if OBSERV is ON, then Petrovich can use the 9K113
+   > autonomously, like he uses binoculars."*
+   >
+   > **Entering** the mode is always the pilot's call — so the recommendation to defer was right
+   > about the mode switch. **Within** the mode the sight is autonomous, which the recommendation
+   > got wrong, and the four questions §6 of this plan said an `/explore` had to settle (trigger,
+   > cost, release, whether it is autonomous at all) **do not need answering**: the second clause
+   > hands them all to a mechanism that already exists.
+   >
+   > *"Like he uses binoculars"* is the load-bearing phrase. It makes the 9K113 **a new entry in
+   > `optic_policy`'s existing dwell/scan machinery, not a new attention model** — which is a far
+   > smaller build than §6 assumed. §13 below is what that actually costs, and it is not zero: the
+   > mechanism is shared but §9 inverts its *shape*.
+   >
+   > So **no `/explore` is owed on OBSERV**, and §6 of this plan is superseded in full.
 
 4. **The missile word.** Investigator established that only 9M114 **Shturm** exists in DCS; the
    spec's example says *"Ataka"*. Options: `"Shturm"` (correct, and he will hear it if he ever flies
@@ -362,3 +457,368 @@ weapons-safety switch, the ASP-17 mode switch and anything else cockpit-side wou
    time and suppress the range callouts until speed and range are measured rather than guessed.
    Confirm — the alternative is a number from community consensus, which this project does not
    encode as fact.
+
+   > **Deferred, not answered (direction, "What this leaves open").** Decisions 4 and 5 both belong
+   > to `[[BL-B67]]`, which §5 places last, and both are partly superseded by the 2026-10-15 missile
+   > addendum. Not urgent; they are not this entry's to settle and are not re-asked below.
+
+---
+---
+
+# AMENDMENT, 2026-10-15 — the perception entry's design
+
+Everything from here down is the second pass. It designs **`[[BL-B64]]` only** — the perception
+entry, this plan's Axis A, now carrying §§7–11 of the direction. `[[BL-B66]]` (effectors) and
+`[[BL-B67]]` (the ATGM run) are deliberately *not* designed here; their entries say what they are
+waiting for.
+
+## 10. What the direction added, removed, and left alone
+
+| direction | effect on this entry |
+|---|---|
+| §1 ASP-17 is automatic | **removes** the crosshair-hold use case entirely. Not an action, not an entry. |
+| §2 instrumentation asymmetry | **answers** Decision 2 with no optics work. No elevation readout exists. |
+| §5 three entries, in order | **splits** this item. Perception → effectors → ATGM. |
+| §6 OBSERV commanded, autonomous within | **answers** Decision 3. New `optic_policy` entry, not a new attention model. |
+| §7 20 km directional cone | **adds** work, body-layer only. `AC-B3` not involved. |
+| §8 both FOVs, slew takes time | **adds** work: two optics from the start, and a slew rate limit. |
+| §9 inverted dwell shape | **adds** work: shared mechanism, inverted *shape* (§13). |
+| §10 no elevation spoken | **removes** work. No new vocabulary; `BL-14`'s register is enough. |
+| §11 ranging costs 2 s, group ranged once | **adds** a range-error model; **removes** per-unit ranging cost. |
+
+Five things the first pass carried as open or as work are now closed at zero cost: the ASP-17 use
+case, Decision 2's three-way mechanism question, autonomous OBSERV's `/explore`, a sight-specific
+guidance vocabulary, and per-unit ranging. That is the context for the effort/value re-read in §17.
+
+## 11. Wide and narrow are two optics, and the mechanism is the one binoculars already use
+
+**Two new `Optic` table rows, not a mode flag.** The reach-versus-field axis `BINOCULAR_OPTIC`
+already sits on is the same axis; the sight simply sits further along it, which is the direction's
+own reading (§8: *"quite analogous… the 9K113 just has a longer reach, can see further, though also
+a much more limited FOV"*).
+
+| field | `UNAIDED` | `BINOCULAR` | `SIGHT_WIDE` | `SIGHT_NARROW` |
+|---|---|---|---|---|
+| `presence_range_mult` | 1.00 | 2.42 | **3.55** | **5.81** |
+| `class_range_mult` | 1.00 | 3.50 | **7.00** | **13.75** |
+| `type_range_mult` | 1.00 | 3.00 | **6.50** | **15.00** |
+| `fov_half_angle_deg` | (wide) | 4.25 | **5.75** | **3.00** |
+| `peripheral` | `True` | `False` | **`False`** | **`False`** |
+
+The multipliers are **already measured** (detection-cones slice 2A) and sit in `optics.py`'s own
+docstring, deliberately not instantiated. The FOVs are the sourced 11.5°/6.0° full angles halved.
+So the table rows cost nothing to fill — this is the first pass's finding and it survives.
+
+**Selection needs no new logic.** `improvement_window_m()` / `tier_ranges()` already answer *"what
+would a different optic gain on this contact"* per optic, which is exactly the wide-versus-narrow
+question. A third and fourth row make that machinery answer it for the sight too.
+
+**What genuinely differs, and it is one new field, not a new value.** Field of regard — how far the
+sight can be *pointed* — has no analogue in the eye or binoculars, which are pointed by the head and
+are unrestricted. `Optic` gains `regard_azimuth_half_deg` (±60), `regard_elevation_up_deg` (+20),
+`regard_elevation_down_deg` (−15); `None` on the two existing optics, which is the state its own
+docstring already anticipates (*"a future 9K113 slice adds them back"*). Three fields because the
+elevation envelope is asymmetric.
+
+**One figure to fix while in the file.** `visibility.NAKED_EYE_RANGE_CAP_M`'s docstring says *"a 7 m
+vehicle reaches 9333 m from the formula, just inside this cap"*. With the current
+`LOWRES_ANGULAR_RADIUS_RAD = 0.003` it reaches **2333 m**; 9333 m was a 0.00075 threshold that no
+longer exists. Stale, and it matters here because that docstring is what the next reader will use to
+sanity-check the sight's reach.
+
+## 12. The 20 km cone goes inside the bubble filter — the constant's own docstring says so
+
+**Direction §7's requirement was anticipated on disk.** `association.PLAYER_BUBBLE_RADIUS_M`'s
+docstring already prescribes this exact design, down to the reason:
+
+> *"They will diverge the moment the 9K113 sight lands… its cone reaches 20 km while the naked eye's
+> own cap stays at 10 km, and when that exception exists it will be evaluated **within** the bubble
+> filter below (narrowed to the sight's own FOV), **not by raising this radius** — raising it would
+> reinstate the whole-sphere cost the bubble exists to remove, at four times the area."*
+
+So: `filter_player_bubble()` gains an optional frozen `sight_cone: SightCone | None` (azimuth,
+half-angle, depth), handed down per poll by the same seam `gaze` and `optic` already use — belief
+decides, `logger` passes a frozen value, perception owns the act. Admission becomes: inside the
+radius, **or** inside the cone and within its depth. `PLAYER_BUBBLE_RADIUS_M` is not raised, not
+aliased, and `tests/test_association.py`'s `test_player_bubble_radius_is_not_…` pair (which asserts
+neither module's source names the other's constant) must keep passing.
+
+### 12a. The cone alone buys nothing — this is the finding the direction could not have
+
+`visibility.py:854`:
+
+```python
+range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
+```
+
+`NAKED_EYE_RANGE_CAP_M = 10000.0`. A narrow-sight candidate at 13.6 km computes
+`size_curve_threshold_m ≈ 13 556` and is then **clamped back to 10 000 and rejected**, with trace
+outcome `range_cap`. The cone would admit it into the pipeline and the cap would throw it away.
+
+**So the entry needs two changes, and neither is sufficient alone:** the cone in `association.py`,
+*and* an optic-aware range cap in `visibility.py`. The honest shape for the second is a per-optic
+cap (`optic.range_cap_m`, defaulting to today's 10 000 for eye and binoculars) rather than scaling
+the existing constant — scaling it by `presence_range_mult` would make the sanity bound stop being a
+sanity bound, which is the one job that constant has. It must not be aliased to
+`PLAYER_BUBBLE_RADIUS_M` in either direction.
+
+### 12b. What the cone costs per tick, and what has to be measured
+
+**The numbers below are on disk already** (`plans/player-bubble/performance.md`, and the
+performance-reviewer's own measurement): 423 median candidates/tick on the real 2026-10-01
+engagement trace, the bubble dropping **~76.6%** of them (so ~98 survive), the bubble filter costing
+**~0.53 µs/candidate**, terrain LOS costing **~540 µs/candidate** — a **~1000×** gap — and the
+realised whole-tick work median at **12.6 ms** after `BL-11`.
+
+**Area bound on the admission count.** Bubble area = π·10² = 314 km². The cone's area *outside* the
+bubble = (fov/360)·π·(20² − 10²): **15.7 km² narrow** (6.0°), **30.1 km² wide** (11.5°) — i.e. **5%
+and 10% of the bubble's own area**. At uniform density that is ~5–10 extra candidates per tick on
+the 423/98 figures. The exemption is small because a 6° wedge is small, not because 20 km is close.
+
+**Filter-side cost: negligible and bounded.** `range_m` already runs on all 423 candidates. The cone
+adds a `bearing_deg` only for candidates that *fail* the radius test (~325 of them), at the same
+order as `range_m`: **~0.16 ms/tick against a 12.6 ms tick, ~1.3%.** Guard the whole branch on
+`sight_cone is not None` so an OBSERV-off tick pays nothing at all.
+
+**Downstream cost: this is the real one, and it is the number that decides the design.** ~5–10 extra
+candidates entering `check_visibility`'s gate chain cost ~nothing at the cheap gates but **~540 µs
+each if they reach terrain LOS** — **~2.7–5.4 ms/tick, i.e. +20–40% on a 12.6 ms tick.** That is not
+negligible. The upper end is also pessimistic: a candidate past 10 km survives only while the sight
+is active *and pointed at it*, which is at most one 6° wedge, so the realistic count is a handful
+rather than ten, and the cheap gates (the new per-optic cap, the FOV cone, the cockpit mask) run
+first by construction — `check_visibility`'s gate order is cheap-before-LOS.
+
+**What must be measured, and it is a re-run rather than new instrumentation.**
+`plans/player-bubble/performance.md` already has the harness, the trace and the per-candidate costs:
+
+1. **candidates admitted by the cone but not the radius**, per tick, median *and max*;
+2. **how many of those reach the LOS step** — not how many are admitted. `detection_trace` already
+   records the gate-outcome histogram, including `PLAYER_BUBBLE` and `range_cap`, so this is a
+   query, not a new counter;
+3. **realised tick time with the cone on and off**, on the same trace.
+
+**(2) is the measurement that matters, and the reason is a recorded lesson rather than a guess.** The
+performance reviewer's own finding on this filter was that *"an exclusion-rate percentage is not
+itself the saving — check what gate would have rejected those candidates anyway, and at what
+cost"*: the bubble's headline 76.6% exclusion was worth **~1.4%** end-to-end, because
+`NAKED_EYE_RANGE_CAP_M` was already rejecting the same candidates cheaply. The mirror-image error is
+available here — reading an admission count as a cost.
+
+**And this is the change that finally makes the bubble earn its keep**, which the same measurement
+predicted: *"the bubble's real payoff is structural/future… will diverge once a wider-range optic
+(9K113, 20 km cone) lands — that is when this filter starts actually saving LOS cost rather than
+duplicating an existing cheap gate."* Worth stating, because it retires a justification that has
+been soft since 2026-10-02.
+
+## 13. §9's inverted dwell is a policy *shape* change — but one parameter, not a second policy
+
+**It is not just constants, and that is the honest answer to the question.** `optic_policy`'s
+machine hardcodes `SCANNING` as the resting phase in three places (`_back_to_scanning`, the
+first-poll branch, `lower_binoculars`), and its central structural invariant — the module docstring
+calls it out as *"the illegal state cannot be expressed"* — is that **`GLASSING` is reachable only
+from a scan boundary**. That exists to enforce the user's binocular rule, *"at least one naked eye
+scan before next binocular usage"*.
+
+§9 inverts exactly that: *"When using 9K113 we typically use it for a longer period of time. Maybe
+take eyes off it for a quick glance around and then continue with the sight."* **With the sight, the
+sight is the baseline and the naked eye is the interruption.** A fourth phase bolted on with its own
+entry rules would duplicate the whole machine.
+
+**Design: parameterise the home phase.** `OpticState` gains `home_phase: OpticPhase =
+OpticPhase.SCANNING`; `_back_to_scanning` becomes `_back_to_home`. OBSERV ON sets `home_phase` to a
+new `SIGHTING`; OBSERV OFF sets it back.
+
+- **OBSERV off: behaviour is identical to today**, by construction — same default, same transitions.
+  That is pinnable as a property test, and it is what makes the refactor safe to do at all.
+- **OBSERV on: the symmetry is exact.** `SIGHTING` rests; the existing `SCANNING` phase becomes the
+  bounded interruption, reached at a dwell boundary precisely as `GLASSING` is reached at a scan
+  boundary today. One parameter earns its place because it removes a duplicate machine — the test
+  this project's own rule sets for a new abstraction.
+
+**Constants that differ (these really are only constants):** `MAX_LOOK_S = 6.0` → a much longer
+`SIGHT_MAX_DWELL_S`; a new `SIGHT_GLANCE_AWAY_S` bounding the interruption (the inverse of
+`SCAN_CYCLE_PERIOD_S`'s role today); and `STEADY_RATE_LIMIT_DEG_S = 12.0` → a separate
+`SIGHT_STEADY_RATE_LIMIT_DEG_S`, because gyros tolerate far more than hands do. All start as stated
+modelling choices tuned from flying, like every perception constant before its first sortie, and
+all belong in `X-T26`'s configurable set rather than inline.
+
+### 13a. Two traps in this refactor, both already recorded
+
+- **`lower_binoculars` must not drop OBSERV.** It is called on **every** player command (*"the pilot
+  asking for something is itself evidence that what Petrovich is doing matters less"*). But §6 makes
+  OBSERV a **pilot-commanded mode**: any command silently cancelling it would be wrong, and would be
+  the kind of wrong that is very hard to see in the air. It may end the current *dwell*; it must
+  leave `home_phase` alone.
+- **The interrupted-look attempt-burn gets worse with a long dwell.** There is a live defect on
+  record: `decide` marks a look-target attempted the moment a look *starts*, and `lower_binoculars`
+  can end it early with no distinction from a completed look, which can permanently lock a
+  stalled-range contact out. The pending/committed split (Stage 2, Fix B1) is what handles the
+  interrupted case for `GLASSING` — **confirm it covers `SIGHTING` before lengthening the dwell**,
+  because a 30 s dwell interrupted at 1 s burns the attempt on a far larger window than a 6 s look
+  does.
+
+## 14. The range model: fractional like the eye's, with a smaller coefficient, drawn once per group
+
+**Phase 1 is instant but imprecise** (§11: *"instant, though not perfect… it does not give exact
+answers"*). What must be right from the start is that the answer is **approximate**; the 2 s cost
+can come later.
+
+**Shape, with the number left to `[[BL-B55]]`'s own calibration:**
+
+- **Down-range: keep the existing shape, change only the coefficient.**
+  `σ_down = SIGHT_RANGE_FRACTIONAL_SIGMA × R`, mirroring `RANGE_FRACTIONAL_SIGMA = 0.17`. Keeping it
+  fractional is what makes this *one parameter* on `naked_eye_sigma_m` (`BL-B55`'s own finding:
+  `self.optic` is already in scope at the call site) rather than a new estimator.
+- **One caution on that shape.** A purely fractional error understates how a stadiametric aid
+  actually degrades: it is useful inside ~5 km and falls off faster once the target subtends less
+  than the smallest reticle division. If flying shows that, the honest upgrade is **a fraction that
+  grows past ~5 km**, not a different estimator. Noted; not built.
+- **Cross-range: scale `BEARING_SIGMA_DEG` by the optic** — a narrower field is a tighter bearing
+  read. **But** that constant's docstring says it models *stating* a bearing, floored by optical
+  resolution, so scaling it is coherent for the **observation** channel only. It must not be
+  confused with `[[BL-B62]]`'s relative-direction channel, whose `RELATIVE_DIRECTION_SIGMA_DEG` is
+  `0.0` and is fenced to two files by test.
+- **A group is ranged once, at its middle unit** (§11), and **this is a correctness argument, not an
+  optimisation.** Draw the ranging error **once per group per look** and share it across members.
+  Independent per-unit draws would scatter members' believed positions; a shared draw keeps the
+  group *cohesive*, which is exactly what `BL-12` Stage 0's cohesion cap needs — the cap is
+  calibrated on true spacing and applied to believed spacing. So honour §11 from the start rather
+  than deferring it. Per-unit ranging stays an explicit, occasional act with one named use case
+  (ATGM range checks), and it belongs to `[[BL-B67]]`.
+- **Phase 2, named but deferred:** the ~2 s cost as an eyes-busy interval, reusing the same
+  `hands_busy_until_sim` field the 1 s switch movement uses. Not in this entry.
+
+`[[BL-B55]]` closes as this entry's own stage and must not be separated from it — the first pass's
+reasoning stands unchanged: a sight seeing to 13–19 km while every look carries `σ_down ≈ 0.17·R`
+reports a precise-sounding range wrong by **~2.3–3.3 km at those ranges** (worse than the 1.4 km the
+8 km case gave), which is worse than having no sight.
+
+## 15. Slew time belongs in the perception stage — recommendation, with the argument
+
+**Recommendation: the perception entry owns a slew *rate limit*; the effector entry owns the *closed
+loop*.** Two different things, and only the second needs anything unmeasured.
+
+1. **The direction's own reason for building both FOVs now applies verbatim** (§8): the perception
+   simulation is being built regardless, and a model that snaps instantly produces behaviour
+   `[[BL-B66]]` could never reproduce — *"the difference would surface as a regression rather than as
+   a known gap."*
+2. **It is cheap here and expensive later.** In perception, slew is a bounded pointing state: a
+   commanded azimuth/elevation, a rate, and observations yielded only from where the sight points
+   *now*. `OpticState` already carries that shape — `look_azimuth_deg`, `look_elevation_deg`,
+   `phase_started_sim` — so this is **a rate limit on how fast the commanded direction may change**,
+   not a new subsystem.
+3. **The decisive point: slew changes what the cone admits.** §7's exemption is pointed *where the
+   sight is looking*. Instant pointing means the cone teleports — a different 6° wedge out to 20 km
+   every tick — which both inflates §12b's cost and lets Petrovich perceive at 19 km in a direction
+   he could not have been looking a second earlier. **That is an omniscience leak, not a
+   placeholder**, and it is why the first pass's "label the fiction" was safe then and is not now:
+   the cone gives the pointing direction a consumer it did not have.
+4. **The honest objection, and why it does not bite.** The slew *rate* is not measured — arg 876's
+   degrees-per-unit is unmeasured (research note). But a rate constant needs **seconds per degree**,
+   which is a stated project modelling choice tuned from flying, exactly like the 1 s hand movement.
+   The unmeasured conversion blocks *reading back* where the sight actually went, which is
+   `[[BL-B66]]`'s inspect-and-adapt loop — not modelling a plausible rate here.
+
+**This is a view, not a decision** — it is open question 4 in the direction's own list, and it is
+Decision 6 below.
+
+## 16. Risks this amendment adds
+
+- **The cone's downstream LOS cost is estimated, not measured** — §12b's +20–40% upper bound is the
+  one number in this plan that could change the design. It gates the stage, and the cheap lever if
+  it comes back high is in §17.
+- **Lifting the range cap for the sight creates contacts beyond 10 km for the first time.**
+  `ContactStore` never prunes (an accepted, documented bound), and `BL-B23`'s analysis says the
+  bubble does not reduce accumulation *today* only because `NAKED_EYE_RANGE_CAP_M` bounded it
+  anyway. An optic-aware cap removes that bound, so the never-pruned growth axis gets a genuinely
+  new source. Not a vulnerability; a quantity to watch in the sortie logs.
+- **`BL-12`'s cohesion cap will behave at ranges nothing has flown.** §14's shared per-group draw is
+  the design that keeps it sane, and it has not been exercised past 10 km. `BL-B55` still forbids
+  retuning the cap to compensate.
+- **The `home_phase` refactor touches the most behaviour-critical function in the belief layer**, and
+  near a live defect (§13a). Pinned-behaviour tests for the OBSERV-off path are the mitigation, and
+  they are cheap because the default is unchanged.
+- **The slew rate is a modelling choice, not a measurement** — replacing the retired instant-slew
+  risk. One constant, in `X-T26`'s configurable set, tuned from flying.
+- **`NAKED_EYE_RANGE_CAP_M`'s docstring is stale** (§11) and is the figure a reader would check the
+  sight's reach against.
+
+## 17. Effort/value, re-read against the direction
+
+**It is no longer "nearly free". It is still the cheap slice, and it should still go first — but it
+is a three-stage entry with one measurement gate, not a drop-in.** Stated plainly because the first
+pass called it *"a few hundred lines with no new failure surface"* and that sentence is now wrong.
+
+**The first pass's three reasons all survive**: the multipliers are measured and on disk, a
+purely-simulated optic is the established pattern (`BINOCULAR_OPTIC` has never had a cockpit
+representation), and `BL-B55` is one parameter. **And the direction removed five things** (§10),
+including the entire ASP-17 use case and the OBSERV `/explore`.
+
+**The growth is concentrated in two places, not spread:**
+
+1. **The `home_phase` inversion** (§13) — a refactor of `optic_policy`'s central structural
+   invariant, next to a known live bug whose blast radius the long dwell *increases*. Not a
+   constant; a careful pass with pinned-behaviour tests.
+2. **The cone plus the optic-aware cap** (§12) — a two-sided change where neither side works alone,
+   with a cost question that needs a bench measurement, and the first change that lets contacts be
+   created beyond 10 km.
+
+Everything else the direction added is genuinely small: two table rows (§11), a rate limit (§15), a
+coefficient and a per-group draw (§14).
+
+**One cheap lever, identified before the measurement rather than after it.** If §12b's LOS cost
+comes back at the top of the range, **narrow the cone rather than optimise LOS** — and the right cut
+is already visible in the arithmetic: **§7's cone is only load-bearing for narrow mode.** Wide
+presence reaches `2333 × 3.55 ≈ 8.3 km` for a 7 m vehicle — *inside* the existing 10 km bubble — and
+only ~11.8 km for a 10 m one. **Narrow reaches 13.6 km and 19.4 km.** So the wide cone buys almost
+nothing for ordinary ground vehicles while costing twice the narrow cone's area (30.1 vs 15.7 km²).
+Dropping wide from the cone in phase 1 halves the added cost at near-zero product cost, and it is a
+one-line gate.
+
+**Verified, not accepted:** the direction's parenthetical that *"the measured multipliers put narrow
+presence at ~13.6 km for a 7 m vehicle and ~19.4 km for a 10 m one, so 20 km is close to where the
+sight genuinely runs out, not a round number"* is **exactly right** —
+`7/0.003 × 5.81 = 13 556 m` and `10/0.003 × 5.81 = 19 367 m` from
+`LOWRES_ANGULAR_RADIUS_RAD = 0.003` and the measured narrow presence multiplier. Checked rather than
+taken, because a sizing figure in a brief is the one most likely to be wrong by 2×. This one is not.
+
+**Nothing here argues for deferring the entry.** The alternative — holding perception behind the
+effectors — is *strictly worse* than it was before, because the direction removed the effector
+axis's cheapest use case.
+
+## 18. Second-order effect
+
+Unchanged from the first pass in substance, with two additions. **The cone is the first consumer of
+the sight's pointing direction**, which is what makes slew time load-bearing now rather than later
+(§15) — so this entry hands `[[BL-B66]]` a pointing model to make real rather than a fiction to
+replace. And **the per-optic range cap is a seam, not a one-off**: it is the first time
+`NAKED_EYE_RANGE_CAP_M` stops being global, which is the shape any future sensor with its own reach
+would need. Against that, `[[BL-B67]]` is now *more* constrained than before: §2's no-elevation-
+readout finding means ATGM target selection cannot discriminate vertically the way `BL-14` does, and
+that has to be solved in that entry rather than assumed away.
+
+---
+
+### Decisions Requiring User Input (second pass)
+
+The five from the first pass are settled or deferred above. These are new.
+
+6. **Does slew time belong in the perception entry, or with the effectors?** §15 recommends
+   **perception**, on the ground that the cone consumes the pointing direction, so an instantly
+   teleporting sight is an omniscience leak rather than a labelled placeholder. Cost is one rate
+   limit on state `OpticState` already carries. The counter-argument is that it adds a constant with
+   no measurement behind it.
+7. **Should the wide cone be in phase 1 at all?** §17: wide reaches ~8.3 km for a 7 m vehicle, which
+   is *inside* the existing bubble, while costing twice narrow's cone area. **Recommendation:
+   narrow-only cone in phase 1**, wide added if a sortie shows something missed. This is cheap to
+   reverse and halves the one cost that needs measuring.
+8. **Does `BL-B64` keeping its number as the *perception* entry read correctly to you?** The
+   alternative was an umbrella entry holding all three. **Recommendation: as done** — an umbrella
+   never closes, so it would sit `[ ]` open indefinitely and make the backlog's status unreadable,
+   whereas the three entries share the specification document and cross-link. Flagged because four
+   other entries point at *"the 9K113 slice"* and some of them mean the ATGM run, which is now
+   `[[BL-B67]]`.
+9. **Is the ~2 s ranging cost deferred to a later entry, or in phase 1?** §14 defers it, on the
+   direction's own *"acceptable first phase implementation is that distance measurement is
+   instant"*. **Recommendation: defer** — the approximation is what matters and it is in phase 1;
+   the cost is a second eyes-busy interval on a field that does not exist yet.
