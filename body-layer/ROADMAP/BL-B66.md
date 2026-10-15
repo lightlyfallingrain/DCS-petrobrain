@@ -133,6 +133,36 @@
   sorties, not in attempts, and build the flag-gated debug logging up front** rather than bolting it
   on after the first failed sortie.
 
+  ## Amended 2026-10-15 — architect pass: `plans/9k113-effectors/plan.md`
+
+  **Planned. Two changes to what is written above, both by evidence rather than opinion.**
+
+  **1. Zero warm-up, by user direction this session:** *"ignore until effectors built. Prepare code
+  for it, but use no warmup time."* So the 3–4 min and 10–15 s timers above are **not built**, and
+  the ЩО `READY` lamp is not modelled. The 11-switch table's **ordering and device/arg numbers stay
+  structural** (they are what Stage 2 throws); only the *elapsed-time* gates are dropped. Readiness
+  takes `advance_sight_aim`'s own seam shape — a named predicate answering "ready" immediately with
+  one obvious place for a duration or a lamp read to land later. **The "acceptance is unusually
+  expensive" section above no longer applies** — that was this entry's biggest cost driver.
+
+  **2. The channel choice above assumes the rate loop; the repo already refutes its premises.**
+  `aircraft-layer/research/mi24p-command-surface.md` §4.1.2 + its CORRECTION (2026-09-21) measured
+  the **AI axis (3060/3061) live at five points** as an exactly linear *position* target, ratio
+  `0.440000`, settling inside 0.25 s — *"pointing is a **single write** — no closed loop"* — while
+  saying of the player rate axis *"**do not use it as an effector**"* and recording that generalising
+  between the two channels **cost two probe flights**. The maximum rate is also not unknown:
+  `Devices_specs/9K113.lua` publishes `h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`.
+
+  **§12 is not contradicted** — it describes how the *crewman* slews, and that stays the modelled
+  behaviour; §8's slew time is delivered by rate-limiting `actual` toward `desired` inside
+  `advance_sight_aim`, in body-layer, with no cockpit write involved. What is open is only which DCS
+  command id we write, which this entry already called *"an open question for this stage's plan."*
+  **It is now Decision 1 of the plan, recommending the position axis.**
+
+  **Consequence for `[[BL-B63]]`: its hard-dependency status is *conditional on that decision*** and
+  disappears under the position-axis answer, along with the controller, the deflection/deadband
+  tuning pair, the limit-cycle risk and the feedback half of the probe.
+
   ## Second-order effect
 
   If built, this makes the cockpit-write channel a **general facility**: the SPU-8 and AI-wheel

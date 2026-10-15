@@ -871,6 +871,38 @@ entry's only obligation remains §15a's field split):
    only that it is readable.** That is a question to settle in `[[BL-B66]]`'s own plan, and it is the
    one place §12a makes the probe's job slightly larger rather than smaller.
 
+### 15d. Decision REVISED, 2026-10-15 — all four of §15c's constraints are *conditional*, not settled
+
+**What forced the change:** the `[[BL-B66]]` architect pass (`plans/9k113-effectors/plan.md` §0)
+checked §15c's premises against the repo and found two of them already refuted by a **live,
+five-point measurement** this document did not consult —
+`aircraft-layer/research/mi24p-command-surface.md` §4.1.2 and its **CORRECTION of 2026-09-21**:
+
+- **The AI axis (3060/3061) is an exactly linear *position* target**, ratio `0.440000` at five
+  commanded points, settling inside 0.25 s. *"So pointing is a **single write** — no closed loop."*
+  The same note says of the player rate axis: *"**Do not use it as an effector**"*, and records that
+  generalising between the two channels **already cost two probe flights**.
+- **The maximum rate is not unknown.** `Devices_specs/9K113.lua` publishes it —
+  `h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`. §12a's conclusion (*we do not need
+  to know it*) is correct for the player channel, but point 3's stronger claim that **no
+  maximum-rate constant exists anywhere in the design** does not follow: a faithful slew time can be
+  modelled on our side from DCS's own figures.
+
+**§15c is not deleted and §12/§12a are not contradicted** — §12 describes how the *crewman* slews,
+which is accurately a rate command, and that remains the behaviour being modelled. What §15c did was
+assume that fact selects our *command channel* too. It does not, and `[[BL-B66]]`'s own roadmap entry
+already flagged the channel as *"an open question for this stage's plan rather than a settled
+choice."*
+
+**So each of §15c's four points now reads "if the rate channel is chosen":** points 1 and 2 (the
+load-bearing feedback probe, and `[[BL-B63]]` as a hard dependency) and point 4's deadband and
+limit-cycle analysis all apply **only** to the rate-loop answer. Under the position-axis answer they
+do not arise at all, and §8's slew time is delivered by rate-limiting `actual` toward `desired`
+inside `advance_sight_aim` — body-layer only, no probe, no fast lane.
+
+**Open for the user** as Decision 1 of `plans/9k113-effectors/plan.md`, which recommends the position
+axis. Until it is answered, nothing in §15c should be cited as a settled constraint on `[[BL-B66]]`.
+
 ## 16. Risks this amendment adds
 
 - **The cone's downstream LOS cost is estimated, not measured** — §12b's +20–40% upper bound is the

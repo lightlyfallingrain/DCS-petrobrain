@@ -62,6 +62,19 @@
   the fast lane is a second loop or a sub-tick inside the existing one is the same open design
   question, left to whoever builds this.
 
+  **Amended again, later on 2026-10-15 — the hard-dependency claim immediately below is
+  *conditional*, and on current evidence probably does not hold.** The `[[BL-B66]]` architect pass
+  (`plans/9k113-effectors/plan.md` §0) found that the DCS channel the amendment assumes is not the
+  one the repo's own live measurement recommends: `aircraft-layer/research/mi24p-command-surface.md`
+  §4.1.2 + CORRECTION (2026-09-21) measured the **AI axis (3060/3061) as an exactly linear
+  *position* target** at five points, settling inside 0.25 s — *"pointing is a **single write** — no
+  closed loop"* — and says of the player rate axis *"do not use it as an effector"*. Direction §12
+  describes how the **crewman** slews (truly a rate command) and is not contradicted; it simply does
+  not select our command channel, which `[[BL-B66]]` itself had already flagged as open. **Under the
+  position-axis answer there is no rate loop, so this entry reverts to the optimisation it was filed
+  as.** Open as Decision 1 of that plan, which recommends the position axis. Read the paragraph below
+  as "if the rate channel is chosen".
+
   **Amended 2026-10-15 — this became a hard dependency of a named stage, one stage earlier than this
   entry expects, and on correctness grounds rather than performance ones.**
   `docs/acceptance/2026-10-15-9k113-sight-direction.md` §12 establishes that the 9K113 is slewed by a
