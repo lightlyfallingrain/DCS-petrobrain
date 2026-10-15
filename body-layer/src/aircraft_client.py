@@ -66,6 +66,18 @@ empty state is `[]`, not `None` (the response is always a JSON list, never
 `null`). It still raises `AircraftLayerError` on transport/parse failure,
 the same posture as every other `get_*` -- only the *empty* state differs
 from the `/latest`-style endpoints.
+
+`get_firing_latest` (`plans/emitter-visibility/plan.md` Stage B, `AC-B8`)
+is this seam's `GET /firing/latest` counterpart to `get_line_of_sight_
+latest` above, with one difference: the aircraft layer's own response is
+never JSON `null` (`EmitterTracker.snapshot()`'s own docstring: there is
+no "cache empty" state distinct from "nothing is firing right now"), so
+this method's return type carries no `None` case for that reason -- it
+still raises `AircraftLayerError` on a genuine transport/parse failure
+(an aircraft-layer instance predating `AC-B8` has no such route at all,
+same as every other `get_*` on an unreachable endpoint). `naked_eye_
+source.py` resolves the per-`unit_name` join itself, same split of
+responsibility as the velocity and LOS feeds.
 """
 
 from __future__ import annotations
@@ -166,6 +178,18 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /line_of_sight/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_firing_latest(self) -> dict[str, Any]:
+        """`GET /firing/latest` -> the most recent `EmitterTracker.
+        snapshot()` as a dict (`{"dcs_model_time_s", "received_wall_
+        clock_s", "active"}`, see `aircraft-layer/src/collector/
+        firing_receiver.py`). Never `None` -- see the module docstring."""
+        result = self._get_json("/firing/latest")
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object from /firing/latest, got {type(result).__name__}"
             )
         return result
 

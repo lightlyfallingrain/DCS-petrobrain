@@ -14,6 +14,7 @@ from belief.events import (
     CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_FIRING_SEEN,
     CONTACT_LOST,
     CONTACT_MOTION_CHANGED,
     CONTACT_REACQUIRED,
@@ -21,6 +22,7 @@ from belief.events import (
     burning_event_kind,
     cardinality_event,
     classification_event,
+    firing_event_kind,
     lifecycle_event_kind,
     motion_event_kind,
 )
@@ -195,3 +197,28 @@ def test_burning_leaving_transition_emits_nothing() -> None:
     above, there is no accepted "stopped burning" callout (see
     `burning_event_kind`'s own docstring)."""
     assert burning_event_kind(True, False) is None
+
+
+def test_firing_founded_already_firing_emits_contact_firing_seen() -> None:
+    """`firing_event_kind`'s direct sibling of `burning_event_kind`'s own
+    founding-tick test above."""
+    assert firing_event_kind(None, True) == CONTACT_FIRING_SEEN
+
+
+def test_firing_founded_not_firing_emits_nothing() -> None:
+    assert firing_event_kind(None, False) is None
+
+
+def test_firing_entering_transition_emits_contact_firing_seen() -> None:
+    assert firing_event_kind(False, True) == CONTACT_FIRING_SEEN
+
+
+def test_firing_unchanged_emits_nothing() -> None:
+    assert firing_event_kind(True, True) is None
+    assert firing_event_kind(False, False) is None
+
+
+def test_firing_leaving_transition_emits_nothing() -> None:
+    """Deliberately one-directional -- there is no accepted "stopped
+    firing" callout (see `firing_event_kind`'s own docstring)."""
+    assert firing_event_kind(True, False) is None

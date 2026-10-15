@@ -112,6 +112,16 @@ class FakeAircraftClient:
             "verdicts": verdicts,
         }
 
+    def get_firing_latest(self) -> dict[str, Any]:
+        # `plans/emitter-visibility/plan.md` Stage B -- nobody-firing
+        # default, same reasoning as `test_naked_eye_source.py`'s
+        # `FakeAircraftClient.get_firing_latest`.
+        return {
+            "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
+            "received_wall_clock_s": 0.0,
+            "active": {},
+        }
+
 
 @pytest.fixture(autouse=True)
 def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:

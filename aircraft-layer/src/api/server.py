@@ -128,6 +128,17 @@ the body/brain process, on either Windows or Mac (compute topology note in
   endpoint from `/world_objects/latest`/`/unit_velocity/latest`, same
   "separate feed, separate clock, joined client-side by `unit_name`"
   reasoning as `/unit_velocity/latest`'s own docstring.
+- `GET /firing/latest` -> `collector.firing_receiver.EmitterTracker.
+  snapshot()` as JSON (`plans/emitter-visibility/plan.md` Stage B,
+  `AC-B8`) -- `{"dcs_model_time_s", "received_wall_clock_s", "active":
+  {unit_name: {"kind", "since_sim", "targets_ownship"}}}`. Unlike every
+  `/latest` endpoint above, this is never JSON `null`: an `EmitterTracker`
+  with nothing currently firing answers `{"dcs_model_time_s": null,
+  "received_wall_clock_s": <float>, "active": {}}` -- there is no
+  "cache empty" state distinct from "nothing is firing right now", so the
+  response is always a well-formed object. Joined client-side by
+  `unit_name`, same convention as `/unit_velocity/latest`/
+  `/line_of_sight/latest`.
 - `POST /command/look_direction` -> the aircraft layer's fifth
   inbound/write path (`plans/dcs-driven-los/plan.md` SS9). Body
   `{"hour": <int 0..11>, "fov_half_deg": <int 5..180>}`; forwards to
@@ -187,6 +198,7 @@ from collector.command_sender import (
     LookDirectionSender,
     SearchMode,
 )
+from collector.firing_receiver import EmitterTracker
 from collector.text_sender import TextOverlaySender
 
 logger = logging.getLogger(__name__)
@@ -199,6 +211,7 @@ _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
 _LINE_OF_SIGHT_LATEST_PATH = "/line_of_sight/latest"
+_FIRING_LATEST_PATH = "/firing/latest"
 _PTT_STATE_PATH = "/ptt/state"
 _SPU8_STATE_PATH = "/spu8/state"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
@@ -251,6 +264,13 @@ def _handle_line_of_sight_latest(
 ) -> dict[str, Any] | None:
     snapshot = cache.latest()
     return None if snapshot is None else snapshot.to_dict()
+
+
+def _handle_firing_latest(tracker: EmitterTracker) -> dict[str, Any]:
+    """Never `null` -- see this endpoint's own docstring in the module
+    docstring for why there is no "cache empty" state to distinguish from
+    "nothing is firing"."""
+    return tracker.snapshot()
 
 
 def _handle_ptt_state(cache: PttCache, spu8_cache: Spu8Cache) -> dict[str, Any] | None:
@@ -317,6 +337,7 @@ def _make_handler(
     spu8_cache: Spu8Cache,
     line_of_sight_cache: LineOfSightCache,
     look_direction_sender: LookDirectionSender | None,
+    emitter_tracker: EmitterTracker,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -338,6 +359,9 @@ def _make_handler(
                 self._respond_json(
                     200, _handle_line_of_sight_latest(line_of_sight_cache)
                 )
+                return
+            if path == _FIRING_LATEST_PATH:
+                self._respond_json(200, _handle_firing_latest(emitter_tracker))
                 return
             if path == _PTT_STATE_PATH:
                 self._respond_json(200, _handle_ptt_state(ptt_cache, spu8_cache))
@@ -592,6 +616,7 @@ class TelemetryAPIServer:
         spu8_cache: Spu8Cache | None = None,
         line_of_sight_cache: LineOfSightCache | None = None,
         look_direction_sender: LookDirectionSender | None = None,
+        emitter_tracker: EmitterTracker | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
@@ -638,6 +663,14 @@ class TelemetryAPIServer:
             if line_of_sight_cache is not None
             else LineOfSightCache()
         )
+        # `EmitterTracker` defaults to a fresh, never-fed instance -- same
+        # "unconfigured answers the empty/default state, never crashes"
+        # posture as every other optional cache above, just with no
+        # "configured at all" distinction for this one (see `/firing/
+        # latest`'s own docstring).
+        self._emitter_tracker = (
+            emitter_tracker if emitter_tracker is not None else EmitterTracker()
+        )
         self._text_sender = text_sender
         self._command_sender = command_sender
         self._audio_sender = audio_sender
@@ -683,6 +716,7 @@ class TelemetryAPIServer:
                 self._spu8_cache,
                 self._line_of_sight_cache,
                 self._look_direction_sender,
+                self._emitter_tracker,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

@@ -31,6 +31,8 @@ from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_EMITTER_BURNING,
+    PROVENANCE_EMITTER_FIRING,
+    PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
@@ -170,10 +172,12 @@ class FakeAircraftClient:
         unit_velocity: dict[str, Any] | None = None,
         *,
         blocked_unit_names: frozenset[str] = frozenset(),
+        firing: dict[str, Any] | None = None,
     ) -> None:
         self._world_objects = world_objects
         self._unit_velocity = unit_velocity
         self._blocked_unit_names = blocked_unit_names
+        self._firing = firing
         self.world_objects_calls = 0
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
@@ -208,6 +212,23 @@ class FakeAircraftClient:
             "verdicts": verdicts,
         }
 
+    def get_firing_latest(self) -> dict[str, Any]:
+        """`plans/emitter-visibility/plan.md` Stage B -- defaults to a
+        well-formed, empty-but-fresh snapshot (same `dcs_model_time_s` as
+        `get_world_objects_latest`'s own, so `_resolve_firing_active`'s
+        skew check always passes), same "synthesize a working default
+        rather than always degrading" reasoning `get_line_of_sight_latest`
+        already follows. `firing=` at construction overrides it wholesale
+        for tests that need a specific `"active"` map."""
+        if self._firing is not None:
+            return self._firing
+        t_sim = (
+            self._world_objects.get("dcs_model_time_s", 0.0)
+            if self._world_objects is not None
+            else 0.0
+        )
+        return {"dcs_model_time_s": t_sim, "received_wall_clock_s": 0.0, "active": {}}
+
 
 @pytest.fixture(autouse=True)
 def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,9 +242,13 @@ def _source(
     *,
     unit_velocity: dict[str, Any] | None = None,
     blocked_unit_names: frozenset[str] = frozenset(),
+    firing: dict[str, Any] | None = None,
 ) -> tuple[NakedEyePerceptionSource, FakeAircraftClient]:
     client = FakeAircraftClient(
-        world_objects, unit_velocity, blocked_unit_names=blocked_unit_names
+        world_objects,
+        unit_velocity,
+        blocked_unit_names=blocked_unit_names,
+        firing=firing,
     )
     source = NakedEyePerceptionSource(
         aircraft_client=client,  # type: ignore[arg-type]
@@ -1651,3 +1676,139 @@ def test_emitter_present_but_cleared_unaided_keeps_ordinary_provenance() -> None
 
     assert len(observations) == 1
     assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
+
+
+# -- Emitter visibility, Stage B (plans/emitter-visibility/plan.md, BL-B73) --
+
+
+def _firing_active_map(
+    unit_name: str, *, targets_ownship: bool = False
+) -> dict[str, Any]:
+    return {
+        "dcs_model_time_s": 0.0,
+        "received_wall_clock_s": 0.0,
+        "active": {
+            unit_name: {
+                "kind": "firing",
+                "since_sim": 0.0,
+                "targets_ownship": targets_ownship,
+            }
+        },
+    }
+
+
+def test_a_unit_firing_beyond_naked_eye_range_becomes_visible() -> None:
+    """End-to-end demonstration, `BL-B73`'s own version of the Stage A
+    regression gate above: a T-72B at 9 km, not burning, firing -- only
+    the emitter bypass can admit it."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects, firing=_firing_active_map("unit_1"))
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].classification_raw == object_model.DEFAULT_OP_CLASS
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
+
+
+def test_the_same_unit_not_firing_is_not_visible() -> None:
+    """The other half of the regression gate: the identical T-72B at
+    9 km, not firing, not burning, is not seen at all."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert observations == []
+
+
+def test_a_unit_firing_behind_terrain_stays_invisible() -> None:
+    """Gate 4 is unreached by either bypass -- firing included."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1"),
+        blocked_unit_names=frozenset({"unit_1"}),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert observations == []
+
+
+def test_a_unit_firing_at_ownship_sets_the_targets_ownship_provenance() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1", targets_ownship=True),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
+
+
+def test_firing_wins_over_burning_for_the_same_unit() -> None:
+    """The plan's "Co-moving Fields" precedence, exercised end to end:
+    a unit both burning and firing resolves to the `FIRING` provenance."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(
+        world_objects,
+        unit_velocity=unit_velocity,
+        firing=_firing_active_map("unit_1"),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
+
+
+def test_a_stale_firing_snapshot_is_discarded() -> None:
+    """`FIRING_MAX_AGE_S` -- a firing snapshot whose own `dcs_model_time_s`
+    is far older than this poll's world-objects snapshot is treated the
+    same as no firing at all, mirroring the LOS feed's own skew discipline."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ],
+        "dcs_model_time_s": 100.0,
+    }
+    stale_firing = {
+        "dcs_model_time_s": 0.0,  # 100 s stale, far past FIRING_MAX_AGE_S
+        "received_wall_clock_s": 0.0,
+        "active": {
+            "unit_1": {"kind": "firing", "since_sim": 0.0, "targets_ownship": False}
+        },
+    }
+    source, _client = _source(world_objects, firing=stale_firing)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert observations == []

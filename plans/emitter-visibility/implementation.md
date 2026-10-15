@@ -221,3 +221,198 @@ gun makes a whole convoy visible"):
 5. **`FIRE_LIFE_FRACTION_MAX`'s cross-key relationship worth naming**: none found. It is a standalone
    fraction with its own `lo`/`hi` bound equal to the measured bracket; it is not compared against or
    ordered relative to any other tuning constant in this codebase.
+
+---
+
+## Stage B — `AC-B8`/`BL-B73` (gun fire, the event channel)
+
+Implements `AC-B8` (the production firing-event Hook + collector-side `EmitterTracker`) and `BL-B73`
+(gun fire makes its firer visible), per `plans/emitter-visibility/plan.md` Stage B. `BL-B74` (the
+SAM smoke trail) is not built — only its wire/schema seam (`FiringRawEvent.x`/`z`, `S_EVENT_SHOT`
+accepted on the wire but not acted on by `EmitterTracker`).
+
+### Files Changed
+
+**aircraft-layer**
+
+- `dcs-export/petrobrain-firing-events-hook.lua` **(new)** — productionises
+  `petrobrain-damage-events-probe-hook.lua`'s event-handler pattern: registers `world.
+  addEventHandler` once, filters to five kinds (`S_EVENT_SHOOTING_START`/`_END`, `S_EVENT_SHOT`,
+  `S_EVENT_DEAD`, `S_EVENT_CRASH`), resolves `targets_ownship` (vs. `world.getPlayer()`) and
+  `S_EVENT_SHOT`'s frozen position Hook-side, drains the queue at 1 Hz. Also maintains
+  `PB_ACTIVE_FIRING_UNITS`, a real-time name set updated directly inside the event handler (not
+  waiting for the collector) — this is the 128-sightline-cap mitigation's data source, read by
+  `petrobrain-line-of-sight-hook.lua` via the shared `"scripting"`-state global, the same mechanism
+  `PB_F10_QUEUE` already proves persists across `dostring_in` calls.
+- `dcs-export/petrobrain-line-of-sight-hook.lua` — the `MAX_SIGHTLINES_PER_CALL` mitigation named in
+  the plan's Risks section: `candidates` is sorted by `(not firing, rangeM)` instead of `rangeM`
+  alone, so a currently-firing unit is never truncated by the nearest-first cap regardless of range.
+  `PB_ACTIVE_FIRING_UNITS or {}` is a true no-op when the firing-events Hook is not loaded.
+- `src/schema/firing.py` **(new)** — `FiringRawEvent`/`FiringEventBatch`, wire parsing. `x`/`z` are
+  parsed and carried (the `BL-B74` seam) but nothing in this stage's collector logic reads them for
+  anything but passthrough.
+- `src/collector/firing_receiver.py` **(new)** — `EmitterTracker` (the latch/watchdog state machine:
+  `FIRING_MIN_VISIBLE_S=1.5`, `FIRING_WATCHDOG_S=10.0`, both plain module constants — **this
+  subproject has no `tuning.*` loader**, flagged per role instructions as behaviour-affecting and a
+  candidate for that mechanism if aircraft-layer grows one) and `FiringEventsReceiver` (the UDP
+  receiver, mirroring `LineOfSightReceiver`'s shape). Mission-restart detection: `dcs_model_time_s`
+  regressing by more than `_RESTART_TOLERANCE_S=0.5` clears all tracked state.
+- `src/api/server.py` — `GET /firing/latest` → `EmitterTracker.snapshot()`. Never JSON `null` — see
+  that endpoint's own docstring for why there is no "cache empty" state distinct from "nothing is
+  firing right now".
+- `src/collector/__main__.py` — wires `EmitterTracker`/`FiringEventsReceiver` the same way as every
+  other Hook-to-collector feed; `--firing-host`/`--firing-port` CLI flags, port 7798 (the next
+  sequential loopback port after `command_sender.LOOK_DIRECTION_DEFAULT_PORT`'s 7797).
+- Tests: `tests/test_firing_schema.py` (13 new), `tests/test_firing_receiver.py` (17 new — latch,
+  watchdog, death semantics, mission restart, targets_ownship, plus three real-loopback-socket
+  receiver tests), `tests/test_line_of_sight_hook_lua.py` (+2, static guards on the sort-key splice).
+
+**body-layer**
+
+- `src/perception/emitters.py` — `EmitterKind.FIRING`/`.LAUNCH_SMOKE` added (the latter never
+  produced this stage); `Emitter.targets_ownship: bool = False` added. New `firing_emitters(
+  raw_objects, firing_active)` (same join/collision shape as `burning_emitters`) and
+  `resolve_emitters(raw_objects, unit_velocity_samples, firing_active)` — the plan's single merge
+  point: `FIRING` wins over `BURNING` for the same unit (implemented as `burning.update(firing)`).
+- `src/perception/naked_eye_source.py` — `get_firing_latest()` call (independently-degradable,
+  `AircraftLayerError` → `None`, same posture as velocity/LOS), `_resolve_firing_active` (skew check
+  against `FIRING_MAX_AGE_S`, a new `tuning.real` constant, default 3.0s matching `LOS_MAX_AGE_S`),
+  `naked_eye_source.poll()` now calls `resolve_emitters` instead of `burning_emitters` directly.
+  `PROVENANCE_EMITTER_FIRING`/`PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP` (two values, not one — see
+  "the targets_ownship fold is a second level deeper" below). `_build_observation` threads a new
+  `targets_ownship_by_object_id` dict alongside `emitter_kind_by_object_id` and resolves the
+  cluster's provenance one level deeper for `FIRING`: `PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP`
+  only when every member agrees `targets_ownship=True`, else the plain `PROVENANCE_EMITTER_FIRING`.
+- `src/aircraft_client.py` — `get_firing_latest()`, following `get_line_of_sight_latest`'s exact
+  shape except it never returns `None` on a populated cache (mirrors `/firing/latest`'s own
+  contract).
+- `src/belief/percept.py` — `_EMITTER_KIND_BY_PROVENANCE` gains both `FIRING` provenance values (both
+  map to the same `EmitterKind.FIRING.value` — which one it was crosses separately).
+  `Percept.targets_ownship: bool = False`, derived via a new closed set,
+  `_TARGETS_OWNSHIP_PROVENANCE = frozenset({PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP})` — the same
+  "closed mapping, not a passthrough" pattern Stage A's review established, applied one bit deeper.
+  `test_percept.py`'s forbidden-set test needed no change.
+- `src/belief/contacts.py` — `Contact.is_firing`/`firing_targets_ownship`/`last_emitted_firing`, the
+  direct siblings of `is_burning`/`last_emitted_burning` (same overwrite-not-fold posture).
+  `ContactStore.tick` gained a `CONTACT_FIRING_SEEN` block mirroring the burning one, no
+  `observable_or_grace` check for the same reason.
+- `src/belief/events.py` — `CONTACT_FIRING_SEEN`, `firing_event_kind` (one-directional, mirrors
+  `burning_event_kind`), `Event.targets_ownship: bool = False`.
+- `src/belief/callouts.py` — `CONTACT_FIRING_SEEN` added to `_TEMPLATED_KINDS` only. `callout_
+  priority` gains the one kind-specific branch in this function: `CONTACT_FIRING_SEEN` resolves to
+  `_FIRING_TARGETS_OWNSHIP_THREAT_BAND` (-2) or `_FIRING_THREAT_BAND` (-1) instead of
+  `_DEFAULT_THREAT_BAND` (0) — both strictly more urgent (lower sorts first), independent of
+  classification, per the plan's finding 2.
+- `src/belief/speech.py` — `_render_lifecycle_text`'s `CONTACT_FIRING_SEEN` branch: `"Taking fire,
+  {clock} o'clock."` when `event.targets_ownship`, else `"Something firing, {clock} o'clock, far."` —
+  the accepted wording verbatim, including the literal trailing "far". No range clause either form;
+  silent when there is no current bearing (same rule `CONTACT_BURNING_SEEN` already follows).
+- `config/defaults.toml` — regenerated via `tools/generate_defaults.py --write` for `FIRING_MAX_AGE_S`.
+- Fixture update (regression, not a feature change): every `FakeAircraftClient`/
+  `FakeConsoleAircraftClient` across `test_naked_eye_source.py`, `test_detection_trace.py`,
+  `test_emission_pipeline.py`, `test_player_bubble.py`, `test_logger.py` gained a `get_firing_latest`
+  method (the new unconditional call site in `naked_eye_source.poll()` broke all five without it —
+  caught by running the full suite, not just the new tests, per role instructions).
+- Tests (each `+n` counted via `git diff --cached <file> | grep -cE '^\+def test_'`, not estimated):
+  `tests/test_emitters.py` (+9: `firing_emitters`, `resolve_emitters` precedence/merge),
+  `tests/test_percept.py` (+4: both `FIRING` provenance values → `FIRING` kind, `targets_ownship`
+  mapping), `tests/test_events.py` (+5: `firing_event_kind`'s one-directional transition),
+  `tests/test_contacts_firing.py` **(new, 10)**: `record`/`from_percept` assignment, `ContactStore.
+  tick` emission including founded-already-firing, `targets_ownship` carried onto the `Event`, the
+  one-directional leaving-transition silence, the event cooldown — direct mirror of
+  `test_contacts_burning.py`. `tests/test_callouts.py` (+3: priority ordering — firing outranks even
+  `priority`-attention ordinary events, targeting-ownship outranks not-targeting, both outrank
+  default). `tests/test_speech.py` (+4: both wordings, no-range-clause silence, auto-acknowledge).
+  `tests/test_naked_eye_source.py` (+6, end to end): 9 km firing-admitted, same-unit-not-firing
+  invisible, firing-behind-terrain invisible, targets_ownship provenance, firing-wins-over-burning
+  precedence, stale-firing-snapshot discarded. Total: 9+4+5+10+3+4+6 = 41, matching the suite delta
+  (2041 − 2000) exactly.
+
+### Checks
+
+**aircraft-layer**
+- `ruff format --check .`: pass (pre-existing unrelated finding in
+  `research/2026-10-06-unit-id-join-reduce.py`, the exact file the dispatch said to expect)
+- `ruff check .`: pass
+- `mypy src`: pass (23 source files)
+- `pytest -q`: 291 passed (baseline 262 + 29 new: `test_firing_schema.py` 12 + `test_firing_receiver.
+  py` 15 + `test_line_of_sight_hook_lua.py` +2 = 29; each counted via `--collect-only` on its own
+  file, not inferred, and the unfiltered `pytest -q` total confirmed against 262+29=291)
+
+**body-layer**
+- `ruff format --check .`: pass (pre-existing unrelated finding in
+  `research/2026-10-05-security-audit.md`, the exact file the dispatch said to expect)
+- `ruff check .`: pass
+- `mypy src`: pass (60 source files)
+- `pytest -q`: 2041 passed, 4 xfailed (baseline 2000 passed/4 xfailed + 41 new)
+
+### Demonstration (pasted from a live run, not predicted)
+
+```
+tests/test_naked_eye_source.py::test_a_unit_firing_beyond_naked_eye_range_becomes_visible PASSED
+tests/test_naked_eye_source.py::test_the_same_unit_not_firing_is_not_visible PASSED
+tests/test_naked_eye_source.py::test_a_unit_firing_behind_terrain_stays_invisible PASSED
+tests/test_naked_eye_source.py::test_a_unit_firing_at_ownship_sets_the_targets_ownship_provenance PASSED
+tests/test_naked_eye_source.py::test_firing_wins_over_burning_for_the_same_unit PASSED
+tests/test_naked_eye_source.py::test_a_stale_firing_snapshot_is_discarded PASSED
+tests/test_contacts_firing.py (10 tests) PASSED
+tests/test_speech.py::test_route_event_contact_firing_seen_not_targeting_says_something_firing_far PASSED
+tests/test_speech.py::test_route_event_contact_firing_seen_targeting_ownship_says_taking_fire PASSED
+```
+
+A burst shorter than one poll (`START`+`END` in the same drained batch) is demonstrated at the layer
+that actually owns the latch — `collector.firing_receiver`'s
+`test_a_sub_poll_burst_start_and_end_in_the_same_batch_survives_one_poll` — not at body-layer, which
+only ever consumes whatever `EmitterTracker.snapshot()` already decided.
+
+### The 128-sightline-cap mitigation — how verified
+
+No DCS process is available to this agent, so this is **not** a live-sortie measurement — the same
+limitation `test_line_of_sight_hook_lua.py`'s own module docstring already states for every test in
+that file. Verified three ways:
+
+1. **Lua syntax**: the whole file, the body below its header comment (the header's own `[[ID]]` link
+   markup trips `luac5.1`'s "nesting of `[[...]]` is deprecated" on *every* Hook script in this
+   codebase that uses that markup, including pre-existing production files — confirmed by running
+   `luac5.1 -p` against `petrobrain-mission-telemetry-hook.lua` unmodified and seeing the identical
+   error, so this is a harmless pre-existing artifact, not a regression), and each embedded
+   `dostring_in` snippet extracted and compiled separately (`EVENT_REGISTER_CODE`, `EVENT_POLL_CODE`,
+   and the reconstructed `LOS_CODE` chunk with its spliced prefix) — all compile clean.
+2. **Self-containment**: `EVENT_REGISTER_CODE`'s helpers (`safeName`, `targetsOwnship`,
+   `initiatorPosition`, the `onEvent` handler itself) are defined *inside* the snippet string, not as
+   Hook-local functions — confirmed by reading the file, the exact class of defect this project's own
+   agent-memory note (`feedback_lua_dostring_in_snippet_must_be_self_contained.md`) warns about.
+3. **Static guard, committed**: `test_candidate_sort_reads_the_active_firing_units_global` /
+   `test_los_code_prefix_still_sorts_nearest_first_within_each_group` assert the comparator actually
+   consults `firingUnits[a.name]`/`firingUnits[b.name]` for both sides before falling back to
+   `a.rangeM < b.rangeM` — a guard against the mechanism silently regressing to range-only sorting,
+   not a behavioural proof (no Lua test harness exists in this repo for that).
+
+**This is not independently re-verifiable on a live sortie by this agent** — flagged for DoD/the user
+per the role's own instructions on claims that cannot be falsified without a live DCS process.
+
+### Notable Discoveries, Stage B
+
+6. **`callout_priority`'s existing "threat_band is a disposable placeholder" design made the
+   required fix a one-branch addition, not a redesign.** Because `_DEFAULT_THREAT_BAND` was already
+   a flat constant with no real assessment behind it, adding a kind-specific override for exactly one
+   `EventKind` (`CONTACT_FIRING_SEEN`) composes cleanly with the plan's own placeholder note — the
+   two new bands (`_FIRING_THREAT_BAND=-1`, `_FIRING_TARGETS_OWNSHIP_THREAT_BAND=-2`) are plain module
+   constants, not `tuning.real`, because they are an ordinal relationship to `_DEFAULT_THREAT_BAND`
+   (must stay strictly below it) rather than an independently tunable lever — same judgement
+   `_DEFAULT_THREAT_BAND` itself already received (it too is a bare constant, not tuned). Flagging
+   this judgement call explicitly per role instructions rather than silently deciding it.
+7. **The `targets_ownship` boundary crossing needed its own closed set, not a widened `EmitterKind`
+   mapping.** `_EMITTER_KIND_BY_PROVENANCE` answers "which kind"; `targets_ownship` is a second,
+   independent bit that only `FIRING` ever uses. Folding it into the kind mapping (e.g. a fourth
+   `EmitterKind` value for "firing at us") would have been a fabricated taxonomy — the *kind* of
+   emitter is the same, only the target differs — so a parallel `_TARGETS_OWNSHIP_PROVENANCE`
+   frozenset, read independently by `percept_of`, was the design that stayed faithful to "which kind"
+   meaning only that.
+8. **The event-handler-side name set (`PB_ACTIVE_FIRING_UNITS`) needed no new transport because two
+   Hook scripts already share one Lua state.** This was not obvious from the plan text alone (which
+   named the mitigation but not its mechanism) — found by rereading `petrobrain-f10-commands-hook.
+   lua`'s own header, which already documents that `PB_F10_QUEUE` persists across `dostring_in` calls
+   in the `"scripting"` state. The same persistence lets a *second* Hook script's own `dostring_in`
+   call read a global the *first* Hook script's handler wrote, with no collector round trip and no
+   new wire format.

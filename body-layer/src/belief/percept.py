@@ -35,8 +35,11 @@ discipline would have become a comment in a test file rather than a guard.
 mapping** -- `emitter_kind` and `_EMITTER_KIND_BY_PROVENANCE` below are the
 pattern. An unregistered producer maps to `None` rather than crossing, so
 widening the boundary takes a deliberate edit here instead of happening by
-default somewhere else. `BL-B73` and `BL-B74` will each want a signal of
-exactly this shape; follow the mapping rather than widening a free-form
+default somewhere else. `BL-B73` followed the same pattern for
+`targets_ownship`/`_TARGETS_OWNSHIP_PROVENANCE` below, rather than
+widening `emitter_kind` itself into something richer than "which kind";
+`BL-B74` is expected to do the same for whatever signal its frozen-
+position seam needs. Follow the mapping rather than widening a free-form
 field, and keep `test_percept.py`'s forbidden set intact.
 """
 
@@ -45,7 +48,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from perception.emitters import EmitterKind
-from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
+from perception.naked_eye_source import (
+    PROVENANCE_EMITTER_BURNING,
+    PROVENANCE_EMITTER_FIRING,
+    PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+)
 from perception.source import (
     Observation,
     OwnshipState,
@@ -70,7 +77,27 @@ from perception.source import (
 #: docstring).
 _EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
     PROVENANCE_EMITTER_BURNING: EmitterKind.BURNING.value,
+    # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- both of
+    # `naked_eye_source.py`'s `FIRING` provenance values map to the same
+    # `EmitterKind`, since `Percept.emitter_kind` only ever needs to answer
+    # "which kind", not "and was it aimed at us" -- that second bit crosses
+    # through its own closed mapping, `_TARGETS_OWNSHIP_PROVENANCE` below,
+    # for the same reason this one exists: a free-form string must not
+    # cross this boundary on its own say-so.
+    PROVENANCE_EMITTER_FIRING: EmitterKind.FIRING.value,
+    PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: EmitterKind.FIRING.value,
 }
+
+#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the one
+#: `PROVENANCE_*` value whose presence means "and the event named ownship
+#: as its target", closed the same way `_EMITTER_KIND_BY_PROVENANCE` is:
+#: `Percept.targets_ownship` is `observation.provenance in` this set, never
+#: a passthrough of `Observation.provenance` itself. A `frozenset`, not a
+#: `dict`, because there is only one bit to carry (unlike `EmitterKind`'s
+#: several values) -- membership is the whole answer.
+_TARGETS_OWNSHIP_PROVENANCE: frozenset[str] = frozenset(
+    {PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,11 +173,20 @@ class Percept:
     signal, not a passthrough: `"provenance"` stays in `test_percept.py`'s
     forbidden-field set, and this field is the one and only sanctioned
     channel for the kind of thing `provenance` carries to reach `belief/`.
-    `belief.contacts.Contact.record` reads this to decide `is_burning`
-    (`belief.events.burning_event_kind`'s input); nothing else in
-    `belief/` needs it yet. `None` is the default -- every pre-existing
-    construction site (test fixtures included) keeps compiling, and it is
-    also what every non-emitter `provenance` value maps to."""
+    `belief.contacts.Contact.record` reads this to decide `is_burning`/
+    `is_firing` (`belief.events.burning_event_kind`/`firing_event_kind`'s
+    input); nothing else in `belief/` needs it yet. `None` is the default
+    -- every pre-existing construction site (test fixtures included)
+    keeps compiling, and it is also what every non-emitter `provenance`
+    value maps to.
+
+    `targets_ownship` (`plans/emitter-visibility/plan.md` Stage B,
+    `BL-B73`) is the same closed-mapping treatment one level deeper --
+    `_TARGETS_OWNSHIP_PROVENANCE`'s own docstring -- and is only ever
+    meaningful alongside `emitter_kind == EmitterKind.FIRING.value`;
+    `False` is the default and is also what every other `emitter_kind`
+    (including `BURNING`, which carries no notion of a target at all)
+    resolves to."""
 
     t_sim: float
     source: str
@@ -167,6 +203,7 @@ class Percept:
     live_los_clear: bool | None = None
     relative_direction: RelativeDirection | None = None
     emitter_kind: str | None = None
+    targets_ownship: bool = False
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -191,4 +228,5 @@ def percept_of(observation: Observation) -> Percept:
         live_los_clear=observation.live_los_clear,
         relative_direction=observation.relative_direction,
         emitter_kind=_EMITTER_KIND_BY_PROVENANCE.get(observation.provenance),
+        targets_ownship=observation.provenance in _TARGETS_OWNSHIP_PROVENANCE,
     )

@@ -42,6 +42,16 @@ look_direction`, this pipeline's fifth inbound/write path -- unlike
 targets the LOS Hook script's own inbound listener (`land.*`/`world.*` are
 only reachable from the mission-scripting state, not Export's).
 
+A `FiringEventsReceiver`/`EmitterTracker` pair (`plans/emitter-visibility/
+plan.md` Stage B, `AC-B8`) is opened and run on its own background thread
+the same way as `line_of_sight_receiver` -- the fourth channel running the
+Hook-to-collector direction. Unlike every other feed above, the thing fed
+by the receiver is not a `*Cache` but a small stateful machine
+(`collector.firing_receiver.EmitterTracker`) that latches/watchdogs raw
+`S_EVENT_SHOOTING_START`/`_END` events into "who is currently firing" --
+see that module's own docstring. `GET /firing/latest` reads its
+`snapshot()`.
+
 A `Spu8Cache` (`plans/spu8-intercom/plan.md`) is constructed the same way
 as `ptt_cache` -- fed by `CollectorServer` from Export.lua's "net1" lines,
 served by `GET /spu8/state`, and consumed by `_handle_ptt_state` to gate
@@ -90,6 +100,9 @@ from collector.command_sender import (
 from collector.f10_command_receiver import DEFAULT_HOST as F10_DEFAULT_HOST
 from collector.f10_command_receiver import DEFAULT_PORT as F10_DEFAULT_PORT
 from collector.f10_command_receiver import F10CommandReceiver
+from collector.firing_receiver import DEFAULT_HOST as FIRING_DEFAULT_HOST
+from collector.firing_receiver import DEFAULT_PORT as FIRING_DEFAULT_PORT
+from collector.firing_receiver import EmitterTracker, FiringEventsReceiver
 from collector.line_of_sight_receiver import DEFAULT_HOST as LOS_DEFAULT_HOST
 from collector.line_of_sight_receiver import DEFAULT_PORT as LOS_DEFAULT_PORT
 from collector.line_of_sight_receiver import LineOfSightReceiver
@@ -183,6 +196,17 @@ def main() -> None:
         help="line-of-sight Hook script's inbound command listener port",
     )
     parser.add_argument(
+        "--firing-host",
+        default=FIRING_DEFAULT_HOST,
+        help="firing-events Hook script's UDP sender host (loopback)",
+    )
+    parser.add_argument(
+        "--firing-port",
+        type=int,
+        default=FIRING_DEFAULT_PORT,
+        help="firing-events Hook script's UDP sender port",
+    )
+    parser.add_argument(
         "--dump-interval",
         type=float,
         default=1.0,
@@ -244,6 +268,15 @@ def main() -> None:
         host=args.look_direction_host, port=args.look_direction_port
     )
     look_direction_sender.open()
+    emitter_tracker = EmitterTracker()
+    firing_events_receiver = FiringEventsReceiver(
+        emitter_tracker, host=args.firing_host, port=args.firing_port
+    )
+    firing_events_receiver.open()
+    firing_events_receiver_thread = threading.Thread(
+        target=firing_events_receiver.serve_forever, daemon=True
+    )
+    firing_events_receiver_thread.start()
 
     # One cache, handed to both halves: the collector fills it from
     # Export.lua's ptt lines and the API serves it to the capture process.
@@ -289,6 +322,7 @@ def main() -> None:
         spu8_cache=spu8_cache,
         line_of_sight_cache=line_of_sight_cache,
         look_direction_sender=look_direction_sender,
+        emitter_tracker=emitter_tracker,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -311,6 +345,7 @@ def main() -> None:
         unit_velocity_receiver.close()
         line_of_sight_receiver.close()
         look_direction_sender.close()
+        firing_events_receiver.close()
 
 
 if __name__ == "__main__":

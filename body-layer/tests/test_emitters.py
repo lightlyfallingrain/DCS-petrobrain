@@ -1,5 +1,6 @@
-"""Tests for `perception.emitters.burning_emitters` --
-`plans/emitter-visibility/plan.md`, `BL-B72` Stage A."""
+"""Tests for `perception.emitters` -- `burning_emitters` (`plans/
+emitter-visibility/plan.md`, `BL-B72` Stage A) and `firing_emitters`/
+`resolve_emitters` (Stage B, `BL-B73`)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,8 @@ from perception.emitters import (
     Emitter,
     EmitterKind,
     burning_emitters,
+    firing_emitters,
+    resolve_emitters,
 )
 
 
@@ -120,4 +123,96 @@ def test_malformed_object_entries_are_skipped_not_raised() -> None:
 
     assert burning_emitters(raw_objects, samples) == {
         3: Emitter(kind=EmitterKind.BURNING)
+    }
+
+
+def _firing_active(name: str, *, targets_ownship: bool = False) -> dict[str, object]:
+    return {"kind": "firing", "since_sim": 50.0, "targets_ownship": targets_ownship}
+
+
+def test_firing_unit_resolves_to_an_emitter() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+    active = {"Unit_1": _firing_active("Unit_1")}
+
+    result = firing_emitters(raw_objects, active)
+
+    assert result == {1: Emitter(kind=EmitterKind.FIRING, targets_ownship=False)}
+
+
+def test_firing_unit_targeting_ownship() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+    active = {"Unit_1": _firing_active("Unit_1", targets_ownship=True)}
+
+    result = firing_emitters(raw_objects, active)
+
+    assert result == {1: Emitter(kind=EmitterKind.FIRING, targets_ownship=True)}
+
+
+def test_no_active_firing_this_poll_returns_empty() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+
+    assert firing_emitters(raw_objects, None) == {}
+    assert firing_emitters(raw_objects, {}) == {}
+
+
+def test_unit_with_no_matching_active_entry_is_not_firing() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+    active = {"Unit_2": _firing_active("Unit_2")}
+
+    assert firing_emitters(raw_objects, active) == {}
+
+
+def test_a_non_firing_kind_in_the_active_map_is_ignored() -> None:
+    """`EmitterTracker` is the only producer of this map and never emits
+    anything but `"firing"` today, but `firing_emitters` checks the kind
+    explicitly rather than trusting every entry -- defensive against a
+    future `LAUNCH_SMOKE` entry (`[[BL-B74]]`) landing in the same map and
+    being misread as gun fire."""
+    raw_objects = [_object(1, "Unit_1")]
+    active = {
+        "Unit_1": {"kind": "launch_smoke", "since_sim": 1.0, "targets_ownship": False}
+    }
+
+    assert firing_emitters(raw_objects, active) == {}
+
+
+def test_firing_non_unique_unit_name_drops_to_unresolved() -> None:
+    raw_objects = [_object(1, "Unit_1"), _object(2, "Unit_1")]
+    active = {"Unit_1": _firing_active("Unit_1")}
+
+    assert firing_emitters(raw_objects, active) == {}
+
+
+def test_resolve_emitters_firing_wins_over_burning_for_the_same_unit() -> None:
+    """The plan's "Co-moving Fields" table, last row: a unit both burning
+    and firing resolves to `FIRING` for wording priority -- resolved once,
+    in `resolve_emitters`, never in two places."""
+    raw_objects = [_object(1, "Unit_1")]
+    samples = {"Unit_1": _sample(life=0.5, life0=1.0)}  # burning
+    active = {"Unit_1": _firing_active("Unit_1")}  # also firing
+
+    result = resolve_emitters(raw_objects, samples, active)
+
+    assert result == {1: Emitter(kind=EmitterKind.FIRING, targets_ownship=False)}
+
+
+def test_resolve_emitters_keeps_burning_when_not_firing() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+    samples = {"Unit_1": _sample(life=0.5, life0=1.0)}
+
+    result = resolve_emitters(raw_objects, samples, None)
+
+    assert result == {1: Emitter(kind=EmitterKind.BURNING)}
+
+
+def test_resolve_emitters_merges_independent_units() -> None:
+    raw_objects = [_object(1, "Unit_1"), _object(2, "Unit_2")]
+    samples = {"Unit_1": _sample(life=0.5, life0=1.0)}
+    active = {"Unit_2": _firing_active("Unit_2")}
+
+    result = resolve_emitters(raw_objects, samples, active)
+
+    assert result == {
+        1: Emitter(kind=EmitterKind.BURNING),
+        2: Emitter(kind=EmitterKind.FIRING, targets_ownship=False),
     }

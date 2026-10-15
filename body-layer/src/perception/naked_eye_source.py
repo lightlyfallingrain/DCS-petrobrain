@@ -238,6 +238,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
+import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from perception import object_model
 from perception.association import (
@@ -253,7 +254,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
-from perception.emitters import EmitterKind, burning_emitters
+from perception.emitters import EmitterKind, resolve_emitters
 from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
@@ -350,6 +351,26 @@ _ACQUISITION_RETENTION_WINDOW_S: Final[float] = SCAN_CYCLE_PERIOD_S
 #: listen for if a stale verdict ever produces a visibly wrong call.
 LOS_MAX_AGE_S: Final[float] = 3.0
 
+#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the maximum
+#: age, in sim seconds, a `GET /firing/latest` snapshot's own
+#: `dcs_model_time_s` may be before its join onto this poll's world-objects
+#: snapshot is discarded (same shape/reasoning as `LOS_MAX_AGE_S` above).
+#: **Behaviour-affecting**: too small and a momentary gap in the collector's
+#: own 1 Hz poll (not this feature's fault) would make Petrovich blind to
+#: an active firing contact he would otherwise still see; too large and a
+#: genuinely stale (collector crashed, Hook unregistered) firing snapshot
+#: keeps admitting candidates well after the information went dark. Same
+#: default as `LOS_MAX_AGE_S` -- both feeds share the 1 Hz `dostring_in`
+#: cadence this value is reasoned from, and there is no evidence yet that
+#: they need to diverge.
+FIRING_MAX_AGE_S: Final[float] = tuning.real(
+    "perception.naked_eye_source.FIRING_MAX_AGE_S",
+    3.0,
+    lo=1.0,
+    hi=15.0,
+    status="judgement",
+)
+
 #: Reads differently from Hybrid's `"petrovich_indication+world_objects"` --
 #: a filter pass here is structurally weaker evidence than a real HelperAI
 #: detection (plan Invariant Check: "every naked-eye `Observation`'s
@@ -370,11 +391,31 @@ PROVENANCE_VISIBILITY_FILTER_ONLY: Final[str] = "world_objects/visibility_filter
 #: this stage.
 PROVENANCE_EMITTER_BURNING: Final[str] = "world_objects/emitter_burning"
 
+#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- two values, not
+#: one, because the accepted wording (user decision 3) distinguishes a
+#: unit firing at ownship from one firing at something else, and that
+#: distinction has to survive the `belief/` boundary the same closed-
+#: mapping way `PROVENANCE_EMITTER_BURNING` does (`belief.percept.Percept.
+#: targets_ownship`'s own docstring). A mixed-`targets_ownship` cluster
+#: (vanishingly unlikely -- `targets_ownship` is resolved per unit, not per
+#: cluster, so this only happens if two different firing units with
+#: different targets land in the same angular cluster) keeps the ordinary
+#: `PROVENANCE_EMITTER_FIRING` value, same "identical keeps, disagreement
+#: degrades" rule `_build_observation` already applies to emitter kind
+#: itself.
+PROVENANCE_EMITTER_FIRING: Final[str] = "world_objects/emitter_firing"
+PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: Final[str] = (
+    "world_objects/emitter_firing_targets_ownship"
+)
+
 #: `visibility.VisibilityResult.emitter_kind` (an `EmitterKind.value`
 #: string) -> the `PROVENANCE_EMITTER_*` constant it should produce, for
 #: `_build_observation`'s cluster-level fold below. A `dict`, not a
-#: branch chain, so `BL-B73`/`BL-B74` add one entry each rather than a new
-#: `if`.
+#: branch chain, so `BL-B74` adds one entry rather than a new `if`.
+#: `FIRING` is **not** listed here -- its provenance depends on
+#: `targets_ownship` too, so `_build_observation` resolves it with its own
+#: small branch rather than a single kind->provenance lookup (see that
+#: method's own docstring).
 _PROVENANCE_BY_EMITTER_KIND: Final[dict[str, str]] = {
     EmitterKind.BURNING.value: PROVENANCE_EMITTER_BURNING,
 }
@@ -566,9 +607,28 @@ class NakedEyePerceptionSource:
         # docstring. `unit_velocity is None` (the feed degraded) resolves
         # to "nobody is burning this poll", the same shape every other
         # independently-degradable join in this method already takes.
-        emitter_by_object_id = burning_emitters(
+        #
+        # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- same
+        # independently-degradable-feed posture for `/firing/latest`: an
+        # aircraft-layer instance predating `AC-B8` (or whose firing-events
+        # Hook hasn't registered) has no route at all, a transport-level
+        # `AircraftLayerError`. `_resolve_firing_active` additionally
+        # discards a stale snapshot (`FIRING_MAX_AGE_S`) the same way
+        # `_resolve_los_by_unit_name` discards a stale LOS one. Both
+        # degrade to "nobody is firing this poll", resolved once together
+        # with the burning map by `resolve_emitters` -- the plan's single
+        # merge point (`emitters.py`'s own module docstring).
+        try:
+            firing = self.aircraft_client.get_firing_latest()
+        except AircraftLayerError:
+            firing = None
+        firing_active = _resolve_firing_active(
+            world_objects.get("dcs_model_time_s"), firing
+        )
+        emitter_by_object_id = resolve_emitters(
             raw_objects,
             unit_velocity.get("samples") if unit_velocity is not None else None,
+            firing_active,
         )
         # `plans/dcs-driven-los/plan.md` (X-B29) -- same independently-
         # degradable-feed posture as the velocity join immediately above:
@@ -767,6 +827,23 @@ class NakedEyePerceptionSource:
             candidate.object_id: result.emitter_kind for candidate, result in visible
         }
 
+        # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the
+        # resolved `Emitter.targets_ownship` bit, same shape/timing as
+        # `emitter_kind_by_object_id` immediately above, gated the same
+        # way: only meaningful (and only ever `True`) when `result.
+        # emitter_kind is not None` -- an `Emitter` the bypass did not
+        # actually need (candidate cleared both gates unaided) must not
+        # contribute a stray `targets_ownship=True` to the cluster fold
+        # below.
+        targets_ownship_by_object_id: dict[int, bool] = {}
+        for candidate, result in visible:
+            emitter = emitter_by_object_id.get(candidate.object_id)
+            targets_ownship_by_object_id[candidate.object_id] = (
+                result.emitter_kind is not None
+                and emitter is not None
+                and emitter.targets_ownship
+            )
+
         observations = self._build_observations(
             now_sim,
             ownship_state,
@@ -775,6 +852,7 @@ class NakedEyePerceptionSource:
             motion_by_object_id,
             live_los_clear_by_object_id,
             emitter_kind_by_object_id,
+            targets_ownship_by_object_id,
         )
         if self.trace_sink is not None:
             for cluster, observation in zip(to_emit, observations):
@@ -798,6 +876,7 @@ class NakedEyePerceptionSource:
         motion_by_object_id: dict[int, bool | None],
         live_los_clear_by_object_id: dict[int, bool | None],
         emitter_kind_by_object_id: dict[int, str | None],
+        targets_ownship_by_object_id: dict[int, bool],
     ) -> list[Observation]:
         """One `Observation` per `clusters` entry, resolving majority-overlap
         continuity (module docstring point 6) across the *whole* batch before
@@ -854,6 +933,7 @@ class NakedEyePerceptionSource:
                     motion_by_object_id,
                     live_los_clear_by_object_id,
                     emitter_kind_by_object_id,
+                    targets_ownship_by_object_id,
                     continues_observation_id,
                 )
             )
@@ -1006,6 +1086,7 @@ class NakedEyePerceptionSource:
         motion_by_object_id: dict[int, bool | None],
         live_los_clear_by_object_id: dict[int, bool | None],
         emitter_kind_by_object_id: dict[int, str | None],
+        targets_ownship_by_object_id: dict[int, bool],
         continues_observation_id: str | None,
     ) -> Observation:
         """One `Observation` for `cluster` -- `plans/group-contact-model/
@@ -1040,13 +1121,17 @@ class NakedEyePerceptionSource:
         a cluster is one crew-facing report, so its LOS verdict is "clear"
         only when every member's own DCS-driven verdict agrees it is.
 
-        `provenance` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A)
-        takes a `PROVENANCE_EMITTER_*` value only when every member's
-        `VisibilityResult.emitter_kind` agrees on the same non-`None`
-        kind -- a mixed cluster keeps the ordinary `PROVENANCE_VISIBILITY_
-        FILTER_ONLY`, following `Cluster.classification_raw`'s own
-        "identical keeps, disagreement degrades" rule rather than a second
-        one."""
+        `provenance` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A,
+        extended Stage B) takes a `PROVENANCE_EMITTER_*` value only when
+        every member's `VisibilityResult.emitter_kind` agrees on the same
+        non-`None` kind -- a mixed cluster keeps the ordinary
+        `PROVENANCE_VISIBILITY_FILTER_ONLY`, following `Cluster.
+        classification_raw`'s own "identical keeps, disagreement degrades"
+        rule rather than a second one. When that kind is `FIRING`, the
+        **same rule applies one level deeper**: `PROVENANCE_EMITTER_
+        FIRING_TARGETS_OWNSHIP` only when every member's `targets_ownship`
+        also agrees (and is `True`); any disagreement, or a unanimous
+        `False`, falls back to the plain `PROVENANCE_EMITTER_FIRING`."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -1107,7 +1192,19 @@ class NakedEyePerceptionSource:
         provenance = PROVENANCE_VISIBILITY_FILTER_ONLY
         if len(member_emitter_kinds) == 1:
             (only_emitter_kind,) = member_emitter_kinds
-            if only_emitter_kind is not None:
+            if only_emitter_kind == EmitterKind.FIRING.value:
+                # One level deeper than the plain kind-agreement rule
+                # above (method docstring): `targets_ownship` must also
+                # agree, and be `True`, for the stronger provenance.
+                member_targets_ownship = {
+                    targets_ownship_by_object_id.get(member.object_id, False)
+                    for member in cluster.members
+                }
+                if member_targets_ownship == {True}:
+                    provenance = PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
+                else:
+                    provenance = PROVENANCE_EMITTER_FIRING
+            elif only_emitter_kind is not None:
                 provenance = _PROVENANCE_BY_EMITTER_KIND.get(
                     only_emitter_kind, PROVENANCE_VISIBILITY_FILTER_ONLY
                 )
@@ -1236,6 +1333,38 @@ def _resolve_velocity_by_object_id(
         if isinstance(sample, dict):
             resolved[object_id] = sample
     return resolved, skew_s
+
+
+def _resolve_firing_active(
+    world_objects_t_sim: Any,
+    firing: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Discard this poll's `GET /firing/latest` snapshot if it is missing,
+    has never been populated (`dcs_model_time_s` still `None` -- the
+    tracker's own "nothing ingested yet" state, `collector.firing_receiver.
+    EmitterTracker.snapshot`'s own docstring), or has gone stale
+    (`FIRING_MAX_AGE_S`), mirroring `_resolve_los_by_unit_name`'s skew
+    check. Returns the raw `"active"` dict (still keyed by `unit_name`,
+    still needing `firing_emitters`'s own join onto `object_id`) or `None`
+    on any of those three paths -- `perception.emitters.firing_emitters`
+    treats `None` the same as an empty dict (its own `if not
+    firing_active` guard), so the caller does not need to distinguish
+    them."""
+    if firing is None:
+        return None
+    firing_t_sim = firing.get("dcs_model_time_s")
+    if firing_t_sim is None:
+        return None
+    try:
+        skew_s = abs(float(world_objects_t_sim) - float(firing_t_sim))
+    except (TypeError, ValueError):
+        return None
+    if skew_s > FIRING_MAX_AGE_S:
+        return None
+    active = firing.get("active")
+    if not isinstance(active, dict):
+        return None
+    return active
 
 
 @dataclass(frozen=True, slots=True)
