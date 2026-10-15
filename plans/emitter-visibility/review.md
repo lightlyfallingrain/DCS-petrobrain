@@ -271,3 +271,221 @@ re-reading the pasted red/green), including a mutation the implementer did not t
 (re-adding `provenance` to `Percept` directly, rather than only the two unit tests they added).
 Independently recomputed the angular-separation arithmetic for the cross-offset claim rather than
 taking "the two do not cluster" on faith.
+
+---
+
+## Stage B Review — `AC-B8`/`BL-B73`, commit `f02ec43`
+
+Reviewed `feature/emitter-events` @ `f02ec435fe17d964f289095913c9d14d1afbc011` (Stage B: the
+production firing-event Hook, the collector-side `EmitterTracker` latch/watchdog, `CONTACT_FIRING_SEEN`
+and its priority/wording). Checked out the branch directly into a fresh worktree (HEAD landed exactly
+on the named tip; no ff-from-stale-base was attempted since the dispatch already flagged the base as
+diverged). Rebuilt both subprojects' venvs from the pinned versions and ran every check myself. Read
+the plan (Stage B), the acceptance document, `AC-B8`/`BL-B73`/`BL-B74`'s roadmap entries, the
+2026-09-24 closed probe, the implementer's own account, and the full diff (31 files, 3014/58).
+Independently verified the concurrent-branch additivity claim for `events.py`/`speech.py` by reading
+their diffs directly rather than trusting the implementer's note.
+
+The gate chain, closed-mapping pattern, priority bands, wording, and the 128-sightline mitigation are
+all implemented as planned and well tested. One correctness gap in the latch/watchdog state machine
+needs to be addressed before this merges.
+
+### Required Fixes
+
+**1. `FIRING_WATCHDOG_S=10.0` can silently end a sighting while the unit is still genuinely firing,
+and this rests on an unverified assumption about DCS event semantics the project's own research
+already flagged as unknown.**
+
+`EmitterTracker._apply` only refreshes `expires_at_sim` on `S_EVENT_SHOOTING_START` (once, at the
+start of a burst) and on `S_EVENT_SHOOTING_END` (which tightens it). Nothing refreshes it while a
+burst is merely continuing. `test_a_start_with_no_end_is_bounded_by_the_watchdog`
+(`aircraft-layer/tests/test_firing_receiver.py:127`) demonstrates — and asserts as correct — that a
+unit with an open `START` and no further events disappears from the snapshot at exactly
+`FIRING_WATCHDOG_S` later, "no END, no DEAD, nothing but time."
+
+The watchdog's stated purpose (plan's Co-moving Fields table, and this file's own module docstring)
+is to bound "a `START` whose `END` never arrives." That phrase conflates two different causes with
+one mechanism:
+
+- **the unit was destroyed mid-burst** — already handled, immediately and independently, by the
+  `S_EVENT_DEAD`/`S_EVENT_CRASH` removal path (`_DEATH_KINDS`). The watchdog is not needed for this
+  case at all.
+- **the unit is alive and still firing, and the burst has simply run longer than
+  `FIRING_WATCHDOG_S`** — a continuous-fire weapon (autocannon/AAA holding fire on a target) engaging
+  for more than 10 seconds is an entirely ordinary thing for this feature's own target scenario (a
+  unit shooting at the aircraft). If `S_EVENT_SHOOTING_START` fires once per continuous trigger-pull
+  rather than retriggering periodically — which is exactly what the Lua handler's one-time
+  `PB_ACTIVE_FIRING_UNITS[initName] = true` on `SHOOTING_START` implements, with no mid-burst
+  refresh — the entry is removed at t=10s even though the unit is still actively firing and a real
+  `SHOOTING_END` will eventually arrive.
+
+This is not a hypothetical I'm inventing: `aircraft-layer/research/2026-09-24-damage-and-firing-events
+-over-mission-bridge.md:178-179` says explicitly, of this exact question, *"Whether
+`S_EVENT_SHOOTING_START` fires once per burst or is retriggered mid-burst is **not documented**"* —
+the project's own prior research already identified this as an open unknown, and neither the Stage B
+plan nor the implementation re-raised it, resolved it, or flagged it in Risks & Unknowns. If DCS does
+retrigger `START` periodically during a sustained burst, this gap doesn't exist in practice; if it
+doesn't (which the Lua handler's own implementation assumes, by only writing the entry once), a
+sustained engagement — the scenario the user's own direction was written around (*"taking fire"*) —
+goes silently invisible mid-attack, with no error, no log line indicating why, and no test that would
+catch it (every watchdog test in this file assumes "no further events" means "nothing is happening,"
+never "the unit is still firing and no further event has fired yet").
+
+**This is a correctness risk against the feature's own acceptance criterion** (*"the firing unit can
+be seen at max player bubble range during the time it is firing"* — not for the first 10 seconds of
+it), not a style nit, and it was not flagged anywhere in `plan.md` or `implementation.md`.
+
+Recommended fix, scoped to be small: (a) raise `FIRING_WATCHDOG_S` to a conservative value well above
+any plausible sustained engagement (its downside is minimal — it only matters in the genuine
+"`END` dropped by the bridge and the unit died with no `DEAD`/`CRASH` either" case, which is already
+rare), and (b) add this open question explicitly to the plan's Risks & Unknowns and to the live-sortie
+acceptance checklist — specifically, whether `S_EVENT_SHOOTING_START` retriggers mid-burst needs a
+live answer before `FIRING_WATCHDOG_S`'s true safe floor is known. This does not require touching the
+latch (`FIRING_MIN_VISIBLE_S`) or the death-removal path, both of which are correct as built.
+
+### On the 128-sightline mitigation — confidence assessment (per dispatch)
+
+**Moderate-to-high confidence, not proof, and that is the right level for this stage.** Beyond the
+three verification methods the implementer's report already names (Lua syntax check, self-containment
+reading, static sort-key guards), I found the cross-Hook-global-sharing claim rests on a *stronger*
+precedent than the one cited: `petrobrain-line-of-sight-hook.lua` already reads `PB_LOOK_HOUR`/
+`PB_LOOK_FOV_DEG` — globals written by a *different* Hook script's own `dostring_in` call — in
+*production*, not merely as an analogy to `PB_F10_QUEUE` (which is one Hook script's own queue,
+written and drained by itself). That is the literal mechanism this mitigation needs (Hook A writes a
+global in the `"scripting"` state, Hook B reads it on its own `dostring_in` call), already shipping.
+So the mechanism itself is proven; what is not proven is that `PB_ACTIVE_FIRING_UNITS`'s specific
+read/write pattern (written inside a persistent `world.addEventHandler` closure that runs
+continuously, rather than written by a periodic `dostring_in` snippet like `PB_LOOK_HOUR` is) behaves
+identically. **What would actually confirm it**: a live sortie with ≥128 units in one 180° look wedge
+and one of them firing beyond the nearest 128 by range — the exact scenario the mitigation exists for
+— confirming the far firing unit still gets a sightline. Short of that, the static guards correctly
+pin the mechanism against silent regression, which is the right thing to have before a live sortie
+exists to run.
+
+### Optional Refinements
+
+- **`implementation.md`'s "Files Changed" prose miscounts two new-file test totals** — it says
+  `test_firing_schema.py` "(13 new)" and `test_firing_receiver.py` "(17 new)", but both files are
+  new, and `grep -c '^def test_'` gives 12 and 15 respectively — matching the "Checks" section's own
+  (correct) 12+15+2=29 arithmetic, which is also what the actual `pytest` run confirms (291 =
+  262+29). The final numbers reported and verified are right; only the earlier prose narrative is off
+  by one and two. Cosmetic, but worth a one-line fix in the plan file so a future reader doesn't
+  recompute it and get confused by the mismatch between the two sections of the same document.
+- **The rendered `config/defaults.toml` entry for `FIRING_MAX_AGE_S` drops its leading backtick**
+  (`# plans/emitter-visibility/plan.md\` Stage B...` instead of `` # `plans/emitter-visibility
+  /plan.md`...``). I checked whether this is a defect this PR introduced — it is not: the same
+  generator drops the leading backtick on every pre-existing `#:`-comment that begins directly with
+  a backtick-wrapped term (confirmed on `ATTACK_RUN_CHANGE_THRESHOLD_DEG`/
+  `ATTACK_RUN_ELEVATION_GATE_DEG`'s own rendered entries, both pre-existing and both exhibiting the
+  identical dropped-backtick pattern). A systemic, pre-existing generator quirk, not something to fix
+  in this feature's scope — flagging only because the role instructions ask to read the rendered file
+  and this is exactly the class of defect that check exists to catch, even when (as here) it turns
+  out to be out of scope.
+- **No module-level assert pins the ordering invariants this stage introduces** — `FIRING_MIN_VISIBLE_S
+  (1.5) < FIRING_WATCHDOG_S (10.0)` in `firing_receiver.py`, and
+  `_FIRING_TARGETS_OWNSHIP_THREAT_BAND (-2) < _FIRING_THREAT_BAND (-1) < _DEFAULT_THREAT_BAND (0)` in
+  `callouts.py`. Both are bare module constants (no tuning loader for the first pair; a stated
+  judgement call for the second), so neither can be broken by a config file — only by a future code
+  edit. A one-line `assert` at each site costs nothing and converts "a future edit silently breaks
+  the ordering" into an import-time failure. Not required: the relationships are correctly
+  documented in each constant's own comment and the risk surface is a direct code edit, not
+  configuration drift.
+
+### Confirmed, no issues
+
+- **`events.py`/`speech.py` are genuinely additive** relative to `main` — read both diffs directly:
+  every change is a new import, a new `EventKind` literal appended to the `Literal[...]` tuple, a new
+  `Final` constant, a new dataclass field with a `False` default, and one new `if` branch in
+  `_render_lifecycle_text`. Nothing existing is modified or reordered. Safe for the concurrent
+  `feature/attack-run-fixes` branch (which touches the same two files) to merge independently; any
+  conflict will be textual, not semantic.
+- **`visibility.py` is untouched in Stage B**, confirmed by `git diff` — the gate chain, tier clamp,
+  and bypass logic are exactly Stage A's, as the plan said they would be.
+- **`BL-B74`'s seam is genuinely inert.** `S_EVENT_SHOT` is accepted on the wire
+  (`schema/firing.py`), parsed, and its `x`/`z` carried through to `FiringRawEvent`, but
+  `EmitterTracker._apply` has no branch for it at all — it falls through the `if`/`elif` chain as a
+  deliberate no-op (commented as such). No dissipation constant, no `LAUNCH_SMOKE` entry, nothing
+  acted on.
+- **The priority bands displace nothing else.** `_FIRING_THREAT_BAND`/
+  `_FIRING_TARGETS_OWNSHIP_THREAT_BAND` are `-1`/`-2`; every other `EventKind` still resolves to
+  `_DEFAULT_THREAT_BAND = 0` unchanged (grepped for every other reference to that constant; none
+  exist outside `callouts.py`). Strictly more urgent, nothing bumped down.
+- **The second closed mapping (`_TARGETS_OWNSHIP_PROVENANCE`) is the right pattern repeated, not a
+  sign the pattern needs generalising** — `targets_ownship` is a genuinely independent bit from
+  "which kind", exactly the reasoning the implementer gave (Notable Discovery 7) for not folding it
+  into a fourth `EmitterKind` value. `test_percept.py`'s forbidden-set test is untouched (diffed
+  directly); unregistered provenance values still map to `None`/`False`, never pass through. If
+  `BL-B74` needs a third independent bit (e.g., the frozen position), it would be worth asking then
+  whether `Percept` should carry one small per-emitter metadata object instead of a third parallel
+  frozenset — not before.
+- **The `FakeAircraftClient` method addition is the minimum change** — exactly the 5 files the
+  dispatch named, each adding only `get_firing_latest`, caused by the new unconditional call site in
+  `naked_eye_source.poll()`. No other coupling masked.
+- **Mission-restart reset is correct and does not inherit `BL-B68`'s known gap** — `EmitterTracker`
+  clears on `dcs_model_time_s` regression independently of body-layer's belief layer (which `BL-B68`
+  correctly still does not reset); after a restart, the firing snapshot going empty simply lets
+  `firing_event_kind`'s one-directional design quietly stop reporting `is_firing`, with no stale
+  `CONTACT_FIRING_SEEN` re-fired and no crash.
+- **Detection-only held**: no path from `FIRING`/`targets_ownship` to `CLASS`/`TYPE` — the tier clamp
+  this inherits from Stage A is untouched, and `callout_priority`'s special-case is purely an
+  ordering change, never a classification one.
+- **Aircraft-layer's two bare constants** (`FIRING_MIN_VISIBLE_S`, `FIRING_WATCHDOG_S`) are
+  acceptable as plain module constants per the project's own stated rule (no `tuning.*` loader exists
+  outside body-layer) — correctly flagged in the implementer's own report as a candidate for that
+  mechanism if/when aircraft-layer grows one, which is the right amount of ceremony for this stage.
+
+### Verification
+
+Rebuilt both subprojects' venvs from the pinned versions (`ruff==0.16.6`, `mypy==2.3.1`,
+`pytest==9.1.1`, `numpy==2.4.6`, `pyproj==3.8.0`):
+
+**aircraft-layer**
+- `ruff format --check .` → 1 file would be reformatted (`research/2026-10-06-unit-id-join-reduce.py`
+  — the exact pre-existing out-of-scope file the dispatch said to expect), 117 already formatted.
+- `ruff check .` → 1 pre-existing `EXE001` in the same research file; no other findings.
+- `mypy src` (run from inside `aircraft-layer/`) → `Success: no issues found in 23 source files`.
+- `pytest -q` → **291 passed** (claimed: 291, baseline 262). Matches exactly.
+
+**body-layer**
+- `ruff format --check src tests` → `133 files already formatted` (clean — the canonical command per
+  this subproject's own `CLAUDE.md` scopes to `src`/`tests`, not `research/`, so the out-of-scope
+  finding the dispatch named for the full-tree form correctly does not appear here).
+- `ruff check src tests` → `All checks passed!`
+- `mypy src` (run from inside `body-layer/`) → `Success: no issues found in 60 source files`.
+- `pytest -q` → **2041 passed, 4 xfailed** (claimed: 2041/4, baseline 2000/4). Matches exactly.
+
+Test-count accounting independently recomputed per file (`git diff ... | grep -cE '^\+def test_'`),
+not taken from the implementer's prose: body-layer's 9+4+5+10+3+4+6=41 matches the suite delta
+exactly; aircraft-layer's actual 12+15+2=29 matches the suite delta exactly but differs from the
+"Files Changed" section's own prose (13/17) — see Optional Refinements.
+
+Re-ran the specific demonstration tests named in the dispatch directly (not just as part of the full
+suite): far-range firing visible, same-unit-not-firing invisible, firing-behind-terrain invisible,
+sub-poll-burst-survives-one-poll (at the collector layer, where the latch actually lives),
+`targets_ownship` wording selection, and firing-wins-over-burning precedence — all pass.
+
+### Verdict
+
+**NEEDS REVISION** — one required fix, scoped and small to apply (raise `FIRING_WATCHDOG_S` to a
+safer default, document the open DCS-retrigger question in Risks & Unknowns and the live-sortie
+checklist), though the underlying DCS-behaviour question it rests on can only be closed by a live
+sortie or an Investigator pass, not by code alone. Everything else — the gate chain, the closed
+mappings, the priority bands, the wording, the 128-sightline mitigation, the seam discipline for
+`BL-B74`, and the concurrent-branch additivity of `events.py`/`speech.py` — checked out clean on
+direct reading and independent test execution.
+
+Per the project's re-entry rule, this goes back to Implementer for the fix, then Reviewer again on
+the fix, before DoD.
+
+### Review Confidence
+
+Full read of the plan (Stage B), the acceptance document, all three new/updated roadmap entries
+(`AC-B8`, `BL-B73`, `BL-B74`), the 2026-09-24 closed probe and its underlying research note, the
+implementer's own account, and the full diff (31 files). Independently rebuilt both subprojects'
+venvs and ran every check myself; all counts matched the implementer's claims exactly except the
+`implementation.md` prose-vs-Checks test-count mismatch noted above (the Checks numbers, and the
+actual test run, are correct). Did not independently fly a live sortie to confirm the 128-sightline
+mitigation or resolve the `FIRING_WATCHDOG_S` question — both correctly require a live DCS process,
+which is DoD's/the user's to run, not Reviewer's; this review's job was to establish what is and is
+not yet verified, and the watchdog gap specifically because it was not flagged as an open question
+anywhere on this branch.
