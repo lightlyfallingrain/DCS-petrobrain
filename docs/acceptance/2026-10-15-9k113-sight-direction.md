@@ -151,11 +151,107 @@ Shape of the requirement, in the user's terms:
 | depth | **up to 20 km** |
 | effect | those units pass into detection logic |
 
-**Open, and for the `/explore` rather than for an agent to decide:** whether this cone is applied on
-the export side (aircraft-layer, which would make it a real `AC-` entry and a new coupling between
-Petrovich's gaze and what DCS exports) or whether the bubble is already wide enough and the work is
-purely body-layer. Also unestablished: what the player bubble's actual radius is today, and whether
-a 20 km directional cone at 5 Hz has an FPS cost worth measuring before it is specified.
+**Answered in the same conversation — the cone is body-layer only, and no probe is needed:**
+
+> *"whether DCS hands us units at 20 km at all -> it does, that's been verified earlier. DCS can
+> export *every* unit in the whole mission. That is why we built the bubble, to not calculate each
+> and every unit and distances where they do not matter at all."*
+
+So the export side needs no change and `AC-B3` is not involved. `PLAYER_BUBBLE_RADIUS_M = 10000.0`
+(`body-layer/src/perception/association.py:116`) is purely a **cost filter of our own choosing**, and
+its own comment already said so — *"a decision about what is worth computing, taken on the pilot's
+own judgement… it is a number to revisit, not a law"*, with DCS's own culling radius explicitly left
+unestablished. This direction establishes it: there is no culling to work around.
+
+**What that makes the work:** a directional exemption to a filter we own, in one function, in
+body-layer. The cost question is the only real one left — the cone admits more candidates into the
+per-tick distance work the bubble exists to avoid, and narrow mode's reach is what makes the
+exemption worth having (the measured multipliers put narrow presence at ~13.6 km for a 7 m vehicle
+and ~19.4 km for a 10 m one, so 20 km is close to where the sight genuinely runs out, not a round
+number).
+
+---
+
+## §8 — Both FOVs are simulated from the start, and the sight is slow to move
+
+> *"both. We simulate the percetion in any case, so we can first build the simulation and then add
+> the cockpit instrument manipulation. Do not that the 9K113 via cokcpit manipulation *takes time to
+> move* so we cannot expect instant alignment with anything."*
+
+(«Do not that» read as «Do note that».)
+
+**This resolves the FOV question without a fiction.** The perception simulation is being built
+*regardless* of whether the cockpit switches move, so both modes exist in the model from the start
+and Axis B later makes the real switches follow. Petrovich is not pretending to use a mode he
+cannot select; the model is simply ahead of the effectors, which is the same relationship
+`BINOCULAR_OPTIC` already has with a cockpit that has no binoculars in it.
+
+**The slew-time constraint is new and is not in the plan.** The sight takes real time to move, so
+**nothing may assume instant alignment** — not the perception stage and not, later, the ATGM run.
+Worth building into the simulation *now* rather than when the effectors land, because a perception
+model that snaps instantly would produce behaviour Axis B could never reproduce, and the difference
+would surface as a regression rather than as a known gap.
+
+> *"Swithing between wide and narrow should use similar logic to naked eye and binocular usage. That
+> is quite analogous example, the 9K113 just has a longer "reach", can see further, though also a
+> much more limited FOV."*
+
+So wide↔narrow is the **same mechanism** as naked eye↔binoculars, not a new one. The axis is
+reach-versus-field, exactly as it already is for binoculars; the 9K113 simply sits further along it.
+
+## §9 — The 9K113 has its own timing, unlike the other optics
+
+> *"This also leads to 9K113 usage following different timing schedule than the naked eye and
+> binoculars. When using 9K113 we typically use if for a longer period of time. Maybe take eyes of
+> if for a quick glance around and then continue with the sight."*
+
+**The mechanism is shared, the constants are not.** `optic_policy`'s existing dwell/scan machinery
+applies, but the 9K113's dwell is *long* and its interruptions are brief glances away that return to
+the sight — the opposite shape from binoculars, which are a short raised-to-the-eyes act between
+periods of naked-eye scanning. With the sight, the sight is the baseline and the naked eye is the
+interruption.
+
+## §10 — Vertical: nothing about the sight's own angle, everything about the world
+
+> *"No, not about the 9K113 elevation angle. Distance yes, target world reference yes - like your on
+> the ridge example. So, things that can be perceived about where the target is in world, not about
+> 9K113 angle."*
+
+The dividing line is **what the crewman could know versus what the instrument would have to tell
+him**. He has no elevation readout (§2), so no elevation angle is ever spoken. He *can* see that the
+target is on a ridge, in a valley, behind a treeline — that is world knowledge, reached by
+cross-reference, and it is already this project's existing semantic-position machinery.
+
+> *"We do know the approximate azimuth offset so that can be used in callouts as well as attack run
+> guidance. But then the already existing system there is perfectly fine: o'clock's until 12 o'clock
+> sector and then left/right guidance."*
+
+**No new guidance register.** `BL-14`'s existing scheme — o'clock positions until the target is in
+the 12 o'clock sector, then qualitative left/right — covers the sight too. The approximate azimuth
+offset feeds it; nothing about the sight needs its own vocabulary.
+
+## §11 — The stadiametric measurement is an act with a cost, and a group is measured once
+
+> *"Yes, but let's just use a time constant for that. Let's say it takes 2s to measure distance."*
+
+> *"Note that if I'm looking at a group, I don't need to measure the distance to each unit, I'll just
+> get the middle one and then use that for group position. Then if I need to know an individual units
+> distance, I can use the stadiametric on that one. Use case for that would usually be attack run, to
+> know when we are in ATGM range."*
+
+**Two things fall out, and the second is the one that saves work.** Ranging costs ~2 s of the
+crewman's attention, like the existing eyes-away costs. And **a group is ranged once, at its middle
+unit, with that range standing for the whole group** — so the per-unit ranging cost the obvious
+implementation would incur does not arise. Per-unit ranging is a deliberate, occasional act with a
+named use case: knowing whether a specific unit is inside ATGM range during an attack run.
+
+> *"An acceptable first phase implementation is that distance measurement is instant, though not
+> perfect. The stadiametric scale is still just a visual aid, id does not give excat answers."*
+
+**First phase: instant but imprecise.** The 2 s cost can come later; what must be right from the
+start is that the answer is **approximate**. This is a `BL-B55` matter — the sight's range error is
+better than the naked eye's but is not a laser's, and modelling it as exact would be a worse error
+than modelling it as free.
 
 ---
 
@@ -165,7 +261,9 @@ a 20 km directional cone at 5 Hz has an FPS cost worth measuring before it is sp
   superseded in part by the 2026-10-15 missile-data addendum
   (`body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`) and belong to the ATGM stage,
   which §5 places last. Not urgent.
-- **How the azimuth-only instrumentation becomes a model.** §2 says what the crewman can read; it
-  does not say what Petrovich's resulting uncertainty should look like, and §4 says the position
-  comes from cross-reference rather than from the readout. This is the substance of the `/explore`.
-- **The player-bubble cone's owning layer and its cost** (§7).
+- **What the sight's range error actually is** (§11). "Approximate, better than the naked eye, not a
+  laser" is the shape; the number is not set, and it is `BL-B55`'s to establish.
+- **The cone's per-tick cost** (§7) — the only remaining question on the player-bubble exemption,
+  now that the export side is known not to be involved.
+- **Whether slew time is modelled in the perception stage or deferred with the effectors** (§8). The
+  direction says alignment is never instant; it does not say which stage owns that.
