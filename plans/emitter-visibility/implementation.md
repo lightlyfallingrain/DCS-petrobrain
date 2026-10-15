@@ -108,6 +108,79 @@ Note: `mypy tests` (not part of the mandated command) reports ~150 pre-existing 
 `test_brain_client.py`, `test_aircraft_client.py`, `test_callouts.py`, `test_speech.py` — none in
 lines this feature touched; not investigated further since the documented command is `mypy src`.
 
+### Review Round 2 -- Both Required Fixes
+
+`plans/emitter-visibility/review.md` found two required fixes against the Stage A code above.
+Both addressed; nothing else changed.
+
+**Fix 1 -- closed `Percept.emitter_kind` instead of a `Percept.provenance` passthrough.**
+
+- `src/belief/percept.py` -- replaced `Percept.provenance: str | None = None` with
+  `Percept.emitter_kind: str | None = None` (one of `perception.emitters.EmitterKind`'s values,
+  or `None`). `percept_of` no longer passes `observation.provenance` through; it derives
+  `emitter_kind` via a new module-level `_EMITTER_KIND_BY_PROVENANCE: dict[str, str]` mapping
+  (`PROVENANCE_EMITTER_BURNING -> EmitterKind.BURNING.value` today), looked up with `dict.get`
+  so any `provenance` value not in the mapping -- every non-emitter value, and any future
+  `PROVENANCE_*` constant nobody has registered here yet -- resolves to `None`. This is the
+  reviewer's own recommended design (review.md fix 1's fourth bullet), chosen over the
+  alternative it also offered (adding `Observation.emitter_kind` and having `naked_eye_source.py`
+  populate it directly): the mapping approach needed no change to `Observation`'s shape or to any
+  of the many existing tests that construct an `Observation` with `provenance=PROVENANCE_EMITTER_
+  BURNING` (`test_contacts_burning.py`, `test_speech.py`) -- those tests continue to exercise the
+  real production path (`Observation.provenance` -> `percept_of` -> `Contact.is_burning`)
+  unchanged, rather than needing to be rewritten to set a new field the old fixtures never knew
+  about.
+- `src/belief/contacts.py` -- `Contact.record`/`Contact.from_percept` now derive `is_burning` as
+  `percept.emitter_kind == EmitterKind.BURNING.value`, not `percept.provenance ==
+  PROVENANCE_EMITTER_BURNING`. Import changed from `perception.naked_eye_source.
+  PROVENANCE_EMITTER_BURNING` to `perception.emitters.EmitterKind` (the latter is the lower-level,
+  canonical home for the enum -- `naked_eye_source.py`'s own provenance constants are a specific
+  channel's wiring of it, and `belief/percept.py` is the only place that still needs to know about
+  `PROVENANCE_EMITTER_BURNING` directly, for the mapping above).
+- `tests/test_percept.py` -- `"provenance"` restored to `_TRUTH_FIELD_NAMES`; the comment block
+  explaining the prior removal replaced with one explaining why it stays and what carries the
+  signal instead. Added two small unit tests: `test_percept_of_maps_emitter_provenance_to_
+  emitter_kind` and `test_percept_of_maps_non_emitter_provenance_to_none`, covering the new
+  mapping directly (the existing end-to-end tests in `test_naked_eye_source.py`/
+  `test_contacts_burning.py`/`test_speech.py` already covered the integration path, but nothing
+  exercised `percept_of`'s mapping as a unit).
+- No change was needed to `Observation`, `test_naked_eye_source.py`'s provenance-constant tests,
+  `test_speech.py`, or `test_contacts_burning.py` -- all of them already construct/assert
+  `Observation.provenance`, which is unchanged; only the belief-side consumer moved.
+
+**Fix 2 -- the group-salience non-interaction test made falsifiable.**
+
+`tests/test_naked_eye_source.py::test_emitter_does_not_widen_group_salience_for_a_non_emitting_
+neighbour` placed both the burning unit and the healthy neighbour at 9 km, beyond even `group_
+salience.py`'s relaxed `RESOLUTION_ANGULAR_RADIUS_RAD` admission threshold (5468.75 m for a 7 m
+vehicle under `UNAIDED_OPTIC`, computed directly: `7.0 / 0.00128 * 1.0`). Moved the healthy
+neighbour to 4 km with a 200 m cross-range offset (bearing ~2.86 deg off the burning unit's, far
+enough that the two do not cluster into one report): beyond `LOWRES_ANGULAR_RADIUS_RAD`'s own
+lone-presence threshold (2333.33 m) but inside the relaxed one, so a candidate wrongly marked
+`group_salient` is admitted where a correctly-unflagged one is rejected -- the window the leak
+this test guards against would actually open.
+
+Note the review's own prose cited this window as "~5.4-9.3 km"; measuring it directly from the
+running code (`LOWRES_ANGULAR_RADIUS_RAD`/`RESOLUTION_ANGULAR_RADIUS_RAD`, `UNAIDED_OPTIC.
+presence_range_mult`, size_m=7.0) gives 2333.33-5468.75 m instead -- the "5.4" half matches, the
+other bound does not. Flagging this rather than reproducing the stated numbers uncritically,
+per this role's falsifiability discipline; the window used above is the one verified by running
+the real admission formula and by the red/green proof below, not the one quoted in review.md.
+
+**Red/green proof**, run against `src/perception/naked_eye_source.py`'s `salient_ids =
+group_salient_ids(...)` call site (the exact shape of the plan's own Risks-section leak, "one AAA
+gun makes a whole convoy visible"):
+
+- Checksum before mutating: `5b2b4286225d0f738ea4a6df585157a418b4da2b`.
+- Mutation: `if emitter_by_object_id: salient_ids = frozenset(c.object_id for c in candidates)`
+  inserted immediately after the real `group_salient_ids` call.
+- `pytest -q tests/test_naked_eye_source.py -k test_emitter_does_not_widen_group_salience -v` ->
+  **FAILED**: `assert len(observations) == 1` with `AssertionError: assert 2 == 1` -- the healthy
+  neighbour was wrongly admitted as its own second observation.
+- Mutation reverted; checksum after: `5b2b4286225d0f738ea4a6df585157a418b4da2b` (identical to
+  before -- confirmed by checksum, not by eye).
+- Same command re-run -> **PASSED**.
+
 ### Notable Discoveries
 
 1. **A real pre-existing test conflicted with the plan's own design, and had to be changed.**

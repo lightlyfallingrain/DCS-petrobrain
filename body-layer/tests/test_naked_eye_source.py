@@ -1585,19 +1585,31 @@ def test_emitter_does_not_widen_group_salience_for_a_non_emitting_neighbour() ->
     Unknowns): `group_salient_ids` runs on the whole candidate pool
     *before* visibility is resolved and has no `emitter` parameter at
     all, so an emitter bypass structurally cannot widen it for a
-    neighbour. Both T-72Bs sit at 9 km -- well beyond even `group_
-    salience.py`'s own relaxed `RESOLUTION_ANGULAR_RADIUS_RAD` threshold
-    (~5469 m for a 7 m vehicle), so neither one is even "resolvable" to
-    that function, and it returns `frozenset()` regardless of which one
-    is burning. The burning unit's visibility comes entirely from the
-    emitter bypass; the healthy neighbour, close enough to form a
-    cohesive pair, still does not ride along -- there is no group-
-    salience mechanism here for it to ride on, with only 2 candidates
-    well under `GROUP_MIN_MEMBERS` (3) in any case."""
+    neighbour.
+
+    **Range chosen to make that claim falsifiable** (review of this plan,
+    `BL-B72` Stage A, 2026-10-15): the original fixture placed both T-72Bs
+    at 9 km, beyond even `group_salience.py`'s relaxed `RESOLUTION_
+    ANGULAR_RADIUS_RAD` threshold (5468.75 m for a 7 m vehicle under
+    `UNAIDED_OPTIC`), so group-salience membership could not have changed
+    either candidate's outcome whether or not the leak this test exists to
+    catch were present -- mutation testing confirmed the old fixture
+    passed unchanged under both shapes of that leak. The healthy
+    neighbour here instead sits at 4 km: beyond `LOWRES_ANGULAR_RADIUS_
+    RAD`'s own lone-presence threshold (2333.33 m, so a correctly-
+    unflagged candidate is rejected) but inside the relaxed `RESOLUTION_
+    ANGULAR_RADIUS_RAD` one (5468.75 m, so a candidate *wrongly* marked
+    `group_salient` -- the plan's own "one AAA gun makes a whole convoy
+    visible" risk -- would be admitted instead). The burning unit stays
+    at 9 km, still beyond the relaxed threshold either way, so its own
+    visibility still comes entirely from the emitter bypass, unaffected
+    by this change; only 2 candidates total, still well under `GROUP_
+    MIN_MEMBERS` (3), so there is no legitimate group-salience mechanism
+    for the neighbour to ride on regardless."""
     world_objects = {
         "objects": [
             _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
-            _world_object(2, "T-72B", lat_deg=9000.0, lon_deg=50.0),
+            _world_object(2, "T-72B", lat_deg=4000.0, lon_deg=200.0),
         ]
     }
     unit_velocity = {
@@ -1610,6 +1622,10 @@ def test_emitter_does_not_widen_group_salience_for_a_non_emitting_neighbour() ->
 
     observations = source.poll(0.0, _ownship())
 
+    # Only the burning unit (9 km, emitter-bypass-admitted) is reported --
+    # the healthy neighbour at 4 km is beyond its own lone-presence
+    # threshold and must stay rejected, not ride along on a borrowed
+    # group-salience flag.
     assert len(observations) == 1
     assert observations[0].provenance == PROVENANCE_EMITTER_BURNING
 

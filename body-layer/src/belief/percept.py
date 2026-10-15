@@ -25,12 +25,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from perception.emitters import EmitterKind
+from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
 from perception.source import (
     Observation,
     OwnshipState,
     PositionUncertainty,
     RelativeDirection,
 )
+
+#: `plans/emitter-visibility/plan.md` review (Stage A, 2026-10-15) --
+#: `percept_of` must not let `Observation.provenance` (a free-form `str`,
+#: see that field's own docstring) cross into `Percept` wholesale: nothing
+#: would then stop a future producer folding something truth-derived into
+#: it, with `test_percept.py::test_percept_has_no_truth_carrying_field`'s
+#: forbidden-set check never seeing it happen. Instead `Percept` exposes
+#: only a *closed*, purpose-built signal -- `emitter_kind`, one of
+#: `perception.emitters.EmitterKind`'s values or `None` -- derived from
+#: `observation.provenance` through this mapping. A `provenance` value not
+#: listed here (including every non-emitter value) maps to `None` via
+#: `dict.get`, so adding a new `PROVENANCE_*` constant elsewhere can never
+#: silently start producing a new `Percept.emitter_kind` value; it has to
+#: be added here first. Only `BURNING` exists today (`BL-B73`/`BL-B74` add
+#: `FIRING`/`LAUNCH_SMOKE`, per `perception.emitters.EmitterKind`'s own
+#: docstring).
+_EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
+    PROVENANCE_EMITTER_BURNING: EmitterKind.BURNING.value,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,16 +118,20 @@ class Percept:
     exact telemetry, is convertible to one -- see Decision 16 item 4 for
     the full argument.
 
-    `provenance` carries `Observation.provenance` through unchanged
-    (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A) -- which
-    filtering produced this report (today `PROVENANCE_VISIBILITY_FILTER_
-    ONLY` or, for a burning unit, `PROVENANCE_EMITTER_BURNING`), not a
-    truth field: same footing as `classification_level`/`count_bucket`
-    above, a channel's own honest statement about itself. `belief.
-    contacts.Contact.record` reads this to decide `is_burning` (`belief.
-    events.burning_event_kind`'s input); nothing else in `belief/` needs
-    it yet. `None` is the default so every pre-existing construction site
-    (test fixtures included) keeps compiling."""
+    `emitter_kind` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A,
+    narrowed per that plan's review) is which `perception.emitters.
+    EmitterKind` value (if any) made `Observation.provenance` an emitter
+    provenance this look -- `percept_of` derives it through
+    `_EMITTER_KIND_BY_PROVENANCE` rather than letting the free-form
+    `provenance` string itself cross this boundary, so it is a *closed*
+    signal, not a passthrough: `"provenance"` stays in `test_percept.py`'s
+    forbidden-field set, and this field is the one and only sanctioned
+    channel for the kind of thing `provenance` carries to reach `belief/`.
+    `belief.contacts.Contact.record` reads this to decide `is_burning`
+    (`belief.events.burning_event_kind`'s input); nothing else in
+    `belief/` needs it yet. `None` is the default -- every pre-existing
+    construction site (test fixtures included) keeps compiling, and it is
+    also what every non-emitter `provenance` value maps to."""
 
     t_sim: float
     source: str
@@ -122,7 +147,7 @@ class Percept:
     position_uncertainty: PositionUncertainty | None = None
     live_los_clear: bool | None = None
     relative_direction: RelativeDirection | None = None
-    provenance: str | None = None
+    emitter_kind: str | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -146,5 +171,5 @@ def percept_of(observation: Observation) -> Percept:
         position_uncertainty=observation.position_uncertainty,
         live_los_clear=observation.live_los_clear,
         relative_direction=observation.relative_direction,
-        provenance=observation.provenance,
+        emitter_kind=_EMITTER_KIND_BY_PROVENANCE.get(observation.provenance),
     )

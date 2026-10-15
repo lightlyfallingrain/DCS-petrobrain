@@ -111,13 +111,13 @@ from belief.position_belief import (
 from belief.threat import envelope_for
 from perception.association import RANGE_CAP_M as _HYBRID_RANGE_CAP_M
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
+from perception.emitters import EmitterKind
 from perception.geometry import (
     GeoPosition,
     body_relative_direction,
     range_m,
 )
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
-from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     Observation,
@@ -365,9 +365,11 @@ class Contact:
 
     `is_burning` is `plans/emitter-visibility/plan.md`'s addition (`BL-B72`
     Stage A): whether the most recent percept folded into this contact
-    carried `PROVENANCE_EMITTER_BURNING` -- written directly by `record`
-    from `percept.provenance`, the same "most recent look's own claim,
-    overwritten, not fused" posture `last_class_raw` already has (not a
+    carried `EmitterKind.BURNING` -- written directly by `record` from
+    `percept.emitter_kind` (the closed signal the plan's review narrowed
+    this to -- `belief.percept.Percept.emitter_kind`'s own docstring), the
+    same "most recent look's own claim, overwritten, not fused" posture
+    `last_class_raw` already has (not a
     fold: there is no partial-evidence combination to perform for a flat
     boolean). Stays at its last-written value between percepts, same as
     `last_class_raw`/`motion` -- a burning contact not currently re-
@@ -676,7 +678,7 @@ class Contact:
         # recent look's own claim, overwritten like `last_class_raw`, not
         # folded (class docstring's own paragraph on why there is nothing
         # to fold for a flat boolean).
-        self.is_burning = percept.provenance == PROVENANCE_EMITTER_BURNING
+        self.is_burning = percept.emitter_kind == EmitterKind.BURNING.value
         self.last_percept = percept
         self._extend_or_open_span(percept)
 
@@ -752,7 +754,7 @@ class Contact:
             # `burning_event_kind`'s own docstring, mirroring `motion_
             # event_kind`'s "contact, and it's moving" reasoning), not
             # suppressed as a same-tick redundant pair.
-            is_burning=percept.provenance == PROVENANCE_EMITTER_BURNING,
+            is_burning=percept.emitter_kind == EmitterKind.BURNING.value,
             last_percept=percept,
         )
         contact.contributing_observation_ids.append(percept.observation_id)
