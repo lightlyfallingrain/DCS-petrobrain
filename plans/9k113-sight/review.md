@@ -137,3 +137,215 @@ no-change, group-ranged-once) verified by mutation or structural inspection rath
 by trusting the implementer's account; all claimed numbers (sourced figures, test counts,
 docstring arithmetic) independently recomputed or grepped against source, not accepted on
 the author's word.
+
+---
+
+## Pass 2 — Stage 2, the §7 directional cone, the optic-aware range cap
+
+### Review Summary
+
+Reviewed `BL-B64` Stage 2 (`SIGHTING` phase, the 1 s hands-busy suppression, the sight's
+own manoeuvre rate limit) and the §7/§12a cone-plus-cap pair, on `feature/9k113-sight` at
+`67addd732015acfdcb0f268897c7ad0235ba61bf` (two commits, `5e5f823` then `67addd7`).
+
+**Address verification.** Created the worktree directly from the branch
+(`git worktree add /tmp/review-9k113-sight feature/9k113-sight`) rather than from
+`origin/HEAD`, so `git rev-parse HEAD` already equalled the named tip sha exactly — no
+merge needed, tree clean. All five input documents read in full (plan §10–18, the
+direction document in full, `performance-cone-gate.md`, `implementation.md`, this file's
+first pass, `BL-B64.md`). `body-layer/.venv` rebuilt with the pinned versions inside
+`body-layer/`; world-model present as a sibling checkout at the same relative path the
+`pyproject.toml` seam expects.
+
+**Verification — matches every claimed number exactly.**
+- `ruff format --check .`: fails only on the pre-existing out-of-scope
+  `research/2026-10-05-security-audit.md` (same two lines the first pass predicted).
+- `ruff check .`: all checks passed.
+- `mypy src`: success, 0 errors, 59 source files.
+- `pytest -q`: **1929 passed, 4 xfailed** (baseline 1883/4, net +46), matching the
+  implementer's own count exactly.
+- Test-diff claim ("zero removed, zero modified"): `git diff 118d4dc..67addd7 -- '*/tests/*'`
+  shows 797 insertions / **2** deletions across six files — both deletions are import-line
+  reformatting (splitting a two-name import across lines to add the new optic names), not a
+  removed or altered assertion. The zero-modified-tests claim holds.
+
+**Mutation-tested both highest-risk claims, not just read.**
+1. *"The cone and cap are a pair; either alone is a no-op."* Patched
+   `filter_player_bubble`'s cone branch to always `continue` (cone effectively removed) —
+   `test_sight_cone_admits_a_candidate_beyond_the_player_bubble` failed immediately
+   (`assert 0 == 1`). Restored. Separately patched `check_visibility`'s `optic_range_cap_m`
+   to always resolve to `NAKED_EYE_RANGE_CAP_M` (cap effectively removed) — the same test
+   failed the same way, through the full `poll()` pipeline. Restored; tree clean both
+   times. Both halves of "neither works alone" are real and mutation-caught by the
+   existing suite, not merely asserted.
+2. *"The cone is pointed at ACTUAL aim, never desired, and an OBSERV-off tick pays
+   nothing."* Read `association.SightCone`'s construction site in
+   `logger._apply_active_gaze` directly: `sight_cone` is built only when
+   `optic.regard_azimuth_half_deg is not None` (true only for the two sight optics) *and*
+   `updated_state.actual_aim_azimuth_deg is not None` (true only once a look is actually
+   committed), and its `azimuth_deg` is read from `updated_state.actual_aim_azimuth_deg` —
+   the same field `advance_sight_aim`'s result was just written into, never from
+   `decision.look_azimuth_deg` (belief's desired aim). `filter_player_bubble`'s own first
+   line inside the branch is `if sight_cone is None or candidate_range_m > sight_cone.depth_m:
+   continue` — an OBSERV-off tick (where `sight_cone` is always `None`, by construction, per
+   the first check) pays exactly one extra `is None` test per candidate that already failed
+   the radius check, confirmed by reading the branch rather than taking the docstring's word
+   for it.
+
+**Gate order in `check_visibility` is unchanged.** Read the function in full: the six-gate
+sequence (gaze, cockpit mask, optic FOV, angular-radius range/size, terrain LOS, forest) is
+untouched; the only edit is `tier_ranges`/`check_visibility`'s shared range-cap resolution
+line (`optic.range_cap_m if optic.range_cap_m is not None else NAKED_EYE_RANGE_CAP_M`),
+in the same position the old bare constant occupied. Gate 4 (terrain LOS)'s fail-closed
+contract from `BL-11` Stage 4 is untouched.
+
+**The `_decide_sighting`/`lower_binoculars` restructuring was read end-to-end, not
+sampled.** Both of implementation.md's "Notable Discoveries" (the naive
+`phase is home_phase` no-op check silently failing to drop an in-progress sight look; the
+first draft of `_decide_sighting` re-running `is_worth_a_look` every poll and ending every
+look after one poll) are real, well-described, and each now carries a test
+(`test_lowering_while_sighting_is_home_drops_an_active_look`,
+`test_the_look_continues_on_the_next_poll`) that fails if the fix is reverted — spot-checked
+by reverting each fix in turn and confirming the named test catches it.
+
+**OBSERV-off bit-identical claim: the zero-modified/zero-removed pre-existing-test result
+is real evidence, and it is also not sufficient — see the Required Fix below, which is
+exactly the kind of path a byte-identical-on-existing-tests claim cannot see.** Every new
+branch in `decide()` (hands-busy check, `SIGHTING` dispatch, the `SCANNING`-at-home
+split on `home_phase`) is reached only when `state.home_phase is OpticPhase.SIGHTING` or
+`state.hands_busy_until_sim` is set, neither of which any pre-existing caller produces —
+that part of the claim is correct and verified by the full pre-existing suite passing with
+zero edits. But "OBSERV-off is bit-identical" is a claim about the *old* paths being
+unchanged; it says nothing about whether the *new* path (`SIGHTING`) correctly returns to
+the old one when `home_phase` changes back. It does not, in one case — found by direct
+`decide()` mutation testing below, not by reading.
+
+### Required Fixes
+
+- **Commanding "Observ off" while Petrovich is actively in the `SIGHTING` phase does not
+  make him stop using the sight — it can take up to `SIGHT_MAX_DWELL_S` (default 30 s,
+  tunable 5–120 s) for the phase to actually leave `SIGHTING`, during which the sight
+  optic, the look-in-progress (if one was active and not otherwise dropped), and the §7
+  cone all keep operating exactly as before the command. The pilot hears "Observ off"
+  immediately (`crew_console`'s readback is unconditional) while the system silently keeps
+  the sight live underneath that statement.
+
+  **Mechanism.** `logger.py`'s poll loop drains a pilot's "Observ off" into
+  `OpticState.home_phase` directly (`replace(runner.optic_state, home_phase=OpticPhase.SCANNING, ...)`),
+  the same one-poll-lagged signal shape `attack_run_transition` uses. But `decide()`'s
+  dispatch for `state.phase is OpticPhase.SIGHTING` is unconditional:
+
+  ```python
+  if state.phase is OpticPhase.SIGHTING:
+      return _decide_sighting(state, now_sim, targets, sight_steady)
+  ```
+
+  Nothing here, or inside `_decide_sighting`, ever reads `state.home_phase`. The *only*
+  ways `_decide_sighting` hands back to home are its own two internal stop conditions —
+  the scheduled dwell boundary (`SIGHT_MAX_DWELL_S`, via `_start_glance_away`) and a
+  violated `sight_steady` (via `_force_observ_off`). A pilot command that changes
+  `home_phase` out from under a phase that is still `SIGHTING` is invisible to both.
+  This directly falsifies `_decide_sighting`'s own docstring claim — *"only ever called
+  from `decide` while `state.phase is OpticPhase.SIGHTING`, which is only reachable while
+  `state.home_phase is OpticPhase.SIGHTING` too"* — the two fields are assumed to move
+  together but nothing enforces that once `phase` has already entered `SIGHTING`.
+
+  **Reproduced directly** (not from reading alone): built an `OpticState` with
+  `phase=SIGHTING`, `home_phase=SIGHTING`, an active look, then set
+  `home_phase=OpticPhase.SCANNING` the way the poll loop does, and called `decide()` in a
+  loop for eight simulated seconds. `state.phase` stayed `OpticPhase.SIGHTING` throughout
+  (the active look was cleared, `is_worth_a_look`/`choose_look` kept returning `None`
+  against an empty target list, so it settled on `SIGHT_WIDE_OPTIC` idle — but the phase
+  itself never left `SIGHTING`). It only leaves at the next `SIGHT_MAX_DWELL_S` boundary
+  or an unsteady poll — neither of which the pilot's command causes.
+
+  **Contrast with the one path that does work today.** `sight_steady=False` *is* checked
+  inside `_decide_sighting` every poll (it is passed as one of `decide()`'s own
+  parameters, recomputed fresh from attitude history each call) and correctly forces an
+  immediate `_force_observ_off`, tested directly
+  (`TestManoeuvreForcesObservOff::test_an_unsteady_poll_while_sighting_turns_observ_off_entirely`).
+  The asymmetry is the wiring, not the concept: manoeuvre-triggered exit is a `decide()`
+  input re-evaluated every poll; command-triggered exit is a mutation to a field `decide()`
+  never reads while `phase is SIGHTING`.
+
+  **Not covered by any existing test.** `TestObservOn`'s two tests
+  (`test_setting_home_phase_mid_glassing_does_not_interrupt_the_look`,
+  `test_the_look_ending_hands_back_to_sighting_not_scanning`) only exercise `home_phase`
+  moving **into** `SIGHTING` while `phase` is `GLASSING`/`SCANNING` — the direction this
+  entry's own design intends to tolerate (don't abandon a bounded look mid-sweep).
+  `TestLowerBinocularsPreservesObserv`'s four cases all construct `state` with `phase`
+  and `home_phase` already *agreeing* (both `SIGHTING`, or `SCANNING`-with-`home_phase`-
+  `SIGHTING` for the glance-away case) — none of them starts from the diverged state
+  (`phase is SIGHTING`, `home_phase is SCANNING`) that the real "Observ off" command
+  actually produces one poll after it lands. Grepped `test_logger.py` for `observ` and
+  `SIGHTING` — no hit; the full poll-loop path for turning OBSERV off mid-sight is
+  untested end to end.
+
+  **Fix shape** (not prescribing the exact code, since this is the Implementer's call,
+  but the gap is precisely located): `decide()`'s `state.phase is OpticPhase.SIGHTING`
+  branch needs the same kind of check the `SCANNING`-at-home branch already has in the
+  other direction (`if state.home_phase is OpticPhase.SIGHTING:` for the glance-away) —
+  something like `if state.home_phase is not OpticPhase.SIGHTING: return _back_to_home(state, now_sim)`
+  before dispatching to `_decide_sighting`, so a command-driven `home_phase` change takes
+  effect at the very next poll (after `hands_busy_until_sim` elapses) rather than waiting
+  for `_decide_sighting`'s own internal stop conditions. Whatever shape is chosen, it
+  needs a test built from the diverged state directly (`phase=SIGHTING`,
+  `home_phase=SCANNING`), both idle and mid-look, plus one through the full `logger.py`
+  poll loop exercising the actual command→drain→decide sequence — the gap this pass
+  found was invisible at the unit level precisely because every existing test starts from
+  an *agreeing* `phase`/`home_phase` pair.
+
+### Optional Refinements
+
+- **The `SIGHT_STEADY_RATE_LIMIT_DEG_S` lo-bound coupling (`lo=12.0`, pinning it to
+  `STEADY_RATE_LIMIT_DEG_S`) is enforced only one-way.** `STEADY_RATE_LIMIT_DEG_S` itself
+  is a bare `Final[float] = 12.0`, not a tunable — so the `lo` bound protects against a
+  retune of the *sight's* constant going too low, but nothing protects the reverse: if
+  `STEADY_RATE_LIMIT_DEG_S` were ever raised above 12.0 in a future code change, the
+  `lo=12.0` bound on the sight's tunable would silently stop being the right floor. Low
+  priority — any such change is a source edit to a `Final` constant, which a future
+  reviewer would see in the same diff; the live-value test
+  (`TestSightSteadyRateLimitIsHigherThanBinoculars`) already catches the case that
+  actually matters (the two values disagreeing at runtime), same pattern Stage 1's
+  down-range-sigma ordering uses (optional).
+- **No autonomous wide/narrow switching within one look (design choice 2 in the task
+  brief).** Judged against the user's own worked example (*"I use narrow to see more
+  detail and wide to see more surrounding"*): this is a real simplification against that
+  description, but it is the *same* simplification `GLASSING`/binoculars already made —
+  committing to a magnified look already means losing the wide view until that look ends,
+  and nobody has flagged that as a problem for binoculars. Narrow-while-looking,
+  wide-while-idle is consistent with the established pattern rather than a new gap. Worth
+  revisiting after the Stage 3 acceptance sortie if the pilot notices losing situational
+  awareness mid-look, as the implementer already flagged, but not a defect against this
+  entry's own scope (optional, matches the implementer's own characterisation).
+- **The one-poll latency in `_back_to_home` before `SIGHTING` can pick a target (design
+  choice 3)** is small (~1 s at today's 1 Hz), explicitly documented, and consistent with
+  other scan-boundary latencies already in this module. Not a defect; worth knowing before
+  the sortie, as the implementer already flagged (optional).
+- **Group-ranged-once and the narrow-≤-wide down-range ordering**, both carried over as
+  optional from the first pass, stand unchanged — nothing in this pass touches either
+  mechanism.
+
+### Verdict
+NEEDS REVISION
+
+One required fix: the `SIGHTING`-phase dispatch in `decide()` must notice when
+`state.home_phase` no longer agrees with `state.phase`, so a pilot's "Observ off" takes
+effect at the next poll rather than waiting for the sight's own internal dwell/manoeuvre
+stop conditions. This is a correctness defect with a pilot-visible consequence (a
+readback that says "Observ off" while the sight keeps running), located precisely, and
+small to fix — re-enters the Implementer → Reviewer loop per `AGENTS.md`'s change-request
+procedure, not a full re-plan.
+
+### Review Confidence
+Full read — plan §10–18, the direction document, `performance-cone-gate.md`,
+`implementation.md`, and every file in the diff read in full. The two highest-risk claims
+named in the task brief (cone+cap pairing, cone pointed at actual aim with zero
+OBSERV-off cost) were mutation-tested or verified against the exact construction/branch
+code, not accepted on the implementer's account. The required fix was found by direct
+`decide()` reproduction (building the diverged state and stepping it), not by reading the
+diff — the diff and every existing test agree with each other precisely because every one
+of them keeps `phase`/`home_phase` in agreement; the gap only shows up once they are
+pushed out of agreement the way the real command path does. No part of this review was
+spot-checked due to time-boxing; the only thing not exercised live is the real DCS poll
+loop end to end, which is the acceptance sortie's job, not this review's.
