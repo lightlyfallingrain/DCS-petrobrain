@@ -19,6 +19,25 @@ for provenance/history -- `plans/body-layer/plan.md` §3.4's per-contact
 observation history), not a truth field: it is not derived from any DCS
 object id, only from the per-source counter `perception.source`'s id-prefix
 constants keep collision-free across channels.
+
+**How to add a new signal from the perception side, and why not the
+obvious way.** When `BL-B72` needed `Contact.is_burning`, the first
+implementation let `Observation.provenance` -- a free-form `str` -- cross
+into `Percept` wholesale, and removed `"provenance"` from
+`test_percept.py`'s forbidden set to match. Reviewer rejected it: every
+value that field holds *today* is channel self-description, but its
+**type** is unconstrained, `perception.hybrid_source` already puts internal
+pipeline detail in it, and once a field is known to cross freely nothing
+stops a future producer putting something truth-derived there. The
+discipline would have become a comment in a test file rather than a guard.
+
+**So: add a closed, purpose-named field, populated through an explicit
+mapping** -- `emitter_kind` and `_EMITTER_KIND_BY_PROVENANCE` below are the
+pattern. An unregistered producer maps to `None` rather than crossing, so
+widening the boundary takes a deliberate edit here instead of happening by
+default somewhere else. `BL-B73` and `BL-B74` will each want a signal of
+exactly this shape; follow the mapping rather than widening a free-form
+field, and keep `test_percept.py`'s forbidden set intact.
 """
 
 from __future__ import annotations
