@@ -252,6 +252,48 @@ The second cannot conjure a verdict that was never computed.
 
 ---
 
+## §10 — The too-far phrasing is announced once, not appended every line
+
+**Supersedes the plan's Decision 3** (reuse `_spoken_age_phrase` on every qualifying line), which
+I accepted on the user's behalf under *"proceed independently"* and flagged as risky in the same
+breath — *"Come left, under a minute old."* every tick reads as clutter in the one register meant
+to be terse. The user's own replacement:
+
+> *"let's modify like this:*
+> - *initial: `"<attack_run_text> <what> <where> last seen <time> ago"` where `<time>` is rounded to
+>   something sensible like "moment" "minute" "couple of minutes"*
+> - *guidance after initial -> guidance only, no appended text*
+> - *reacquired -> `"eyes on, <normal guidance text>"`*
+> - *after that `"<normal guidance text>"`*"
+
+**It is a four-state register, and the announcements are on the transitions:**
+
+| state | spoken |
+|---|---|
+| **losing sight** (entering unresolved) | `"<guidance> <what> <where> last seen <time> ago"` — the full claim, once |
+| **while unresolved** | guidance only, nothing appended |
+| **regaining sight** (reacquired) | `"eyes on, <guidance>"` — once |
+| **while seen** | guidance only |
+
+**This is the same shape §4 already establishes**, and the consistency is the point: the sector
+crossing is announced on the transition and then the register continues plainly. Losing and
+regaining sight are transitions of the same kind. A pilot needs to be *told something changed*; he
+does not need it restated every three seconds, which is exactly what §1 was about.
+
+**The time words are coarse by intent** — *"moment"*, *"minute"*, *"couple of minutes"*. Petrovich
+is not reading a clock; he is saying how stale his last look was. Whatever `_spoken_age_phrase`
+currently renders, the buckets must land on words like these rather than on a precise-sounding
+phrase, which is the same instinct that made the guidance register qualitative rather than numeric
+(2026-10-14 direction §9).
+
+**One thing to get right, because it is the fourth instance of this class in two features:** the
+"have I already announced the loss?" and "have I already said eyes on?" flags are **co-moving state
+on `AttackRunState`**, written on transitions and reset on a re-point. They belong in the plan's
+Co-moving Fields table — a new target's first callout must never open with *"eyes on"* or with a
+last-seen clause inherited from the previous target.
+
+---
+
 ## What this leaves open for `/explore`
 
 - **§2:** does flying past *end* the run, or only silence it? And is "behind the cockpit mask" the
