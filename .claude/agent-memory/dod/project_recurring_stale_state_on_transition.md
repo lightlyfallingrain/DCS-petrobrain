@@ -35,3 +35,25 @@ changes?" -- would plausibly have caught #2-#4 as one audit rather than three se
 Worth raising at Architect for any future feature with a "selected/active X" concept (next
 candidate: `BL-B62`/`BL-B63`, the group-view/fast-lane work, both of which will have their own
 notion of "the current target").
+
+**Recurred a third time, in a different shape, on `BL-B64` (the 9K113 sight)**: three more
+instances in one feature -- a `decide()` branch constructing `OpticState` fresh instead of via
+`replace()` and silently dropping new fields on every phase transition (caught by the
+implementer's own test); the `phase`/`home_phase` divergence, where the `SIGHTING` dispatch
+branch never read `home_phase`, so a pilot's "Observ off" didn't stop the sight for up to 30 s
+while the readback said it had (caught only because a reviewer constructed the diverged pair by
+hand -- no existing test built it, since every test set both fields consistently from the start);
+and a field-of-regard bound declared in Stage 1 with a docstring deferring enforcement to Stage 2,
+which then shipped without it (caught by Security executing the scenario). Seven instances across
+two features now.
+
+**Recommendation approved by the user (2026-10-15) and now in the Architect role file.** The
+user's own words: *"any plan introducing a phase/mode state machine with more than one co-moving
+field should name, in the plan, which fields must track which transitions -> good catch, approved,
+fix please."* `.claude/agents/architect.md` step 6a (and its Output Format's Co-moving Fields
+table) now requires this whenever a plan introduces a phase/mode state machine with two or more
+co-moving fields, at least one externally written and at least one internally written; it is also
+reflected in `docs/AGENT_ROLES.md`'s Architect section. **If this shape recurs after that step
+exists, the gap is the step not firing (Architect skipped it, or the trigger didn't match a real
+case), not that the rule is missing** -- check that before writing a fourth memory entry for the
+same category.

@@ -78,6 +78,28 @@ When asked to plan a feature or resolve a design question:
     `body-layer/src/belief/decay.py`) before finalizing the plan, not after the user raises it.
 5. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
 6. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
+6a. **If the plan introduces a phase/mode state machine with more than one co-moving field, name
+    every transition's effect on every field, in the plan.** Trigger: two or more fields that are
+    each supposed to track "the current phase/mode," where at least one is written externally (a
+    pilot command, an F10 item, a voice token) and at least one is written by internal
+    decide()-style logic. Add a **Co-moving Fields** table to the plan (see Output Format) listing
+    every such field, every transition, and what must be true of each field immediately after that
+    transition fires.
+
+    **This cannot be left to Reviewer or Security to find one field at a time.** `BL-B64`'s
+    `phase`/`home_phase` divergence is the worked example: the `SIGHTING` dispatch branch never
+    read `home_phase`, so a pilot's "Observ off" didn't stop the sight for up to 30 s while the
+    readback already said it had. Every existing test set both fields consistently from the start,
+    so none of them could construct the diverged pair that exposed the gap — it took a reviewer
+    building that state by hand. Naming the transition/field matrix at design time makes the
+    diverged case visible before a single test is written, rather than depending on someone
+    constructing it by accident during review. (The same feature produced two more instances of
+    the same root cause — a fresh-construction branch silently dropping fields instead of using
+    `replace()`, and a field-of-regard bound declared in one stage and never enforced in the next —
+    state that was supposed to move together, with nothing written down to say it must.)
+
+    **Immediate application: `BL-B66`** (the 9K113's effector entry, not yet planned) is this shape
+    again — warm-up state, OBSERV state, and slew state are all co-moving. Its plan needs this table.
 7. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
 8. **State a second-order effect** — one sentence on how this feature affects later milestones (unblocks/narrows/complicates a future one), or "none identified" if genuinely isolated. First-order correctness isn't enough; value chains further than the immediate change.
 9. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
@@ -129,7 +151,20 @@ Use this structure in the file:
 - ...
 ```
 
-If there are no open decisions, omit that section. Keep the plan concise — it is a guide for the Implementer, not a design document.
+Add a **Co-moving Fields** section whenever step 6a's trigger fires (a phase/mode state machine
+with more than one co-moving field, at least one externally written):
+
+```
+### Co-moving Fields
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `phase` | internal (decide()) | OBSERV off | `phase is SCANNING` |
+| `home_phase` | external (pilot command) | OBSERV off | `home_phase is SCANNING`, and every phase-dispatch branch has re-checked it |
+```
+
+If there are no open decisions, omit that section. If step 6a's trigger does not fire, omit the
+Co-moving Fields section too. Keep the plan concise — it is a guide for the Implementer, not a
+design document.
 
 ---
 
