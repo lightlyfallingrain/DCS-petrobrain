@@ -255,6 +255,55 @@ than modelling it as free.
 
 ---
 
+## §12 — Slewing is a *rate* command, so pointing the sight is a control loop
+
+> *"The way the copilot slews the sight is by a joystick like device. It has vertical and horizontal
+> axis that slew the sight, as a joystick would. The axis input is the slew *speed*. Not desired
+> angle, but angular speed of slew. To get it to where we want to point it, be it for detection or
+> guiding a missile, we need a constant inspect and adapt loop to happen so that we check whether the
+> sight is where we want it and if not we command angular velocity in desired direction. There's a
+> maximum to angular velocity of course, and that is why it takes time to move the 9K113 from one
+> point to another."*
+
+**This is the single most consequential sentence for the effector stage, and it is not what the plan
+assumed.** "Point the sight at X" is not an action with an argument — there is no angle to write.
+It is a **closed loop**: read where the sight is, compare against where it should be, command an
+angular *velocity*, repeat until converged. Slew time is not a delay to wait out; it is the
+consequence of a rate limit inside a loop.
+
+Four things follow, and they are design constraints rather than observations:
+
+1. **The sight's current angle must be readable every iteration.** Without it there is no feedback
+   term and the loop cannot close. This elevates the investigator's deferred probe from *useful* to
+   *load-bearing* for the effector stage — in particular whether arg 876's degrees-per-unit is
+   measurable and whether the OBSERV readout (arg 886) can be sampled at loop rate.
+2. **Loop rate is a correctness property, not a performance preference.** A rate-commanded loop
+   closed at body-layer's current 1 Hz would overshoot every time. That makes `BL-B63`'s selective
+   fast lane (ownship telemetry and the current target at ~5 Hz) a **hard dependency of the effector
+   stage**, not the optional optimisation it reads as today. Worth noting that `BL-B63` was already
+   filed with missile guidance as its second justification; this is the same mechanism arriving a
+   stage earlier than expected.
+3. **Maximum angular velocity is a constant**, and belongs in `X-T26`'s tunable set — it is exactly
+   the kind of number a sortie would want adjusted.
+4. **Overshoot, deadband and settling are now real concerns.** A loop that chatters around its
+   target would be visible in the cockpit and, during an ATGM run, would be a guidance failure.
+
+> *"We don't need this modeled before the effectors, but we must be ready for how it will work with
+> the effectors so we don't have to redo much of the mechanism."*
+
+**This answers §8's open question** — slew time is **not** modelled in the perception stage. But the
+requirement is stronger than "defer it": the perception stage must be *shaped* so the loop can be
+dropped in later without rework.
+
+**The concrete form that takes**, which costs almost nothing now: keep **desired aim direction** and
+**actual sight direction** as two distinct things in the model from the start, even while the
+perception stage sets actual := desired instantly. Then the effector stage is a controller inserted
+between two fields that already exist, rather than a refactor of everything that assumed one field.
+If the perception stage collapses them into one "where Petrovich is looking", that collapse is the
+rework the user is asking to avoid.
+
+---
+
 ## What this leaves open
 
 - **The two remaining plan decisions** — the missile word, and the launch-callout interim — are both
@@ -265,5 +314,8 @@ than modelling it as free.
   laser" is the shape; the number is not set, and it is `BL-B55`'s to establish.
 - **The cone's per-tick cost** (§7) — the only remaining question on the player-bubble exemption,
   now that the export side is known not to be involved.
-- **Whether slew time is modelled in the perception stage or deferred with the effectors** (§8). The
-  direction says alignment is never instant; it does not say which stage owns that.
+- **~~Whether slew time is modelled in the perception stage or deferred with the effectors~~** (§8)
+  — **answered by §12**: deferred to the effector stage, but the perception stage must keep desired
+  and actual sight direction distinct so the control loop slots in without rework.
+- **Whether the sight's current angle is readable at loop rate** (§12). The effector stage cannot
+  close its loop without it, and nothing has probed it. Belongs ahead of that stage's own plan.
