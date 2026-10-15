@@ -10,6 +10,30 @@ and later roadmap entries that supersede or absorb an earlier question.
 — e.g. a fresh tick-cost measurement against the 2026-10-15 belief-truth log, and a token-presence
 check against the 2026-10-15 speech logs to see whether a given voice path was ever actually used.
 
+**Correction pass.** Three verdicts below were revised after re-reading the cited evidence rather
+than trusting the first summary of it — the exact trap the task brief named:
+
+- **`BL-B47`** was first called "ANSWERED"/"PARTLY ANSWERED" on the strength of
+  `docs/acceptance/2026-10-10-crew-query-path-sortie.md`. That doc runs an offline Python check
+  confirming the *code* resolves class-level SAMs, then says explicitly, in its own words, **"In
+  the air — UNVERIFIED."** `body-layer/ROADMAP/BL-B47.md:5` itself still says **"UNFLOWN"** and
+  carries `#needs-flight` today. Corrected to **STILL OPEN** throughout this file and moved into
+  section A.
+- **`BL-W12`** was first called "ANSWERED (flown, with downstream findings)" on the claim that
+  `BL-B58`/`BL-B59`/`BL-B60` were found by flying this mechanism. They were not:
+  `body-layer/ROADMAP/BL-B59.md` says outright **"Fixture-only — no sortie has exercised this
+  path"**, and `BL-B58`'s fix is a DoD-passed plan, not a flight log. Corrected to **STILL OPEN**.
+- **`BL-13`** was first called "ANSWERED (mechanism exercised)." Direct replay of
+  `dcs-speech-20261015-{150739,164451}.jsonl` confirms the pull-summary path (`"describe left"`,
+  `"describe right"`, `"describe at eleven o'clock"`, bare `"describe"`) really was used
+  repeatedly and successfully across two real sorties — but no document records the pilot's own
+  judgement on whether the summary beats enumeration or runs too long in a hover, which is the
+  thing the item is actually waiting on. Softened to **PARTLY ANSWERED**.
+
+Everything else in this file was independently cross-checked (including against the real,
+gitignored logs at `/Users/sg/Code/DCS-petrobrain/body-layer/logs/`, not just this worktree's view)
+and found sound.
+
 ---
 
 ## A. Still-open list (what needs checking, in plain language)
@@ -29,6 +53,8 @@ you already have, not a flying task.
 3. **A dense or tight cluster of contacts (e.g. three+ close together, one air-defence) should not
    silently lose a member when a new contact folds in nearby.** Watch for a group's composition
    suddenly dropping someone it had, especially if that someone was the one flagged as air defence.
+   This also covers the group-cohesion rules themselves (`BL-W12`) — a large group shouldn't repeat
+   the same roster line every ~11 seconds with only the range changing.
 4. **An unprompted callout should never name a clock-hour behind you (5, 6, 7 o'clock)** — except
    that a threatening unit going astern should still get a "Danger" call. Listen specifically for
    silence to your rear, and for the one exception still speaking up.
@@ -55,6 +81,20 @@ you already have, not a flying task.
    the same underlying check as item 3's cousin on the backlog side (`BL-B59`/`X-B31`); it rides
    its own dedicated flight, not the ordinary sortie items 1–5 ride on.
 
+10. **Does the pull-summary for `report`/`describe` actually feel right, not just work?** It's
+    clearly being used already (confirmed from logs), but nobody has said whether it's shorter/
+    better than a plain list, or too long to take in while manoeuvring. Thirty seconds of
+    deliberate attention to this the next time you say "describe" would close it.
+11. **An old, still-unflown bundle from three weeks back** (callouts stopping correctly when a
+    contact is behind the airframe, binoculars getting a retry on a held contact, an unrecognised
+    command not lowering the binoculars) and **a second one riding the same unflown card**
+    (repeated-contact suppression, and "next valley"/"beyond the ridge" terrain phrasing) — both
+    are ordinary flying, no special setup, just overdue. Worth doing on the same flight as items
+    1–5.
+12. **`"cancel"` then `"confirm"` should actually stop the task** — this exact round trip has not
+    been spoken in any flight since the fix (confirmed by checking the logs directly: no "cancel"
+    command appears in any of them). One word each way, on any ordinary flight.
+
 **Low priority / skip unless convenient:** the audio-adapter's halved polling rate has no cockpit
 effect at all — only worth a look if you happen to run with `--debug` open already.
 
@@ -68,8 +108,8 @@ effect at all — only worth a look if you happen to run with `--debug` open alr
 |---|---|---|---|
 | **BL-11** (tick cost / observability) | Stages 1,2,3b,5: tick median back to ~1.0s, invisible from cockpit, log-reduction only. Stage 4 (live-LOS fail-closed): gate behaves live. Stage 0 (rear-hemisphere callout silence + air-defence exemption): never flown. | **Stages 1/2/3b/5: ANSWERED** — re-ran the same log-reduction against the 2026-10-15 15:07 sortie's own belief-truth log: `median=1.018s` (was 1.424s pre-fix), confirms the fix holds in real flying, not just the 2026-10-06 bench run. **Stage 4 step 2: ANSWERED**, flown 2026-10-08 (roadmap's own "Resolved" note); steps 3-4 needed no separate flight by design. **Stage 0: STILL OPEN** — no sortie feedback mentions rear-hemisphere silence one way or the other. | Measured directly this audit; `body-layer/ROADMAP/BL-11.md` |
 | **BL-12** (group contact identity across repositioning) | The specific "column pops behind a ridge, reappears as the same group" scenario. | **STILL OPEN.** Merged 2026-10-12, mechanism has run in every sortie since (10-13, 10-15 ×3) as part of ordinary group handling with no complaint, but no document specifically reports the reposition-and-reappear case being watched for. | `body-layer/ROADMAP/BL-12.md`; no matching mention in any later acceptance/feedback doc |
-| **BL-13** (crew query path, `report`/`describe`) | Whether a pull summary beats enumeration, in the cockpit. | **ANSWERED (mechanism exercised).** "describe"/"report" tokens both appear repeatedly in the 2026-10-15 15:07 and 16:44 speech logs (`"Describe."`, `"describe left."`, `"What do you see?"` → `report_all`), used successfully across two real sorties with no complaint recorded. | `body-layer/logs/dcs-speech-20261015-{150739,164451}.jsonl` |
-| **BL-B47** (air-defence recognised at class level, rides BL-13's card) | Repetition, not silence, for a class-level SAM belief. | **PARTLY ANSWERED.** The query path it depends on was used live (above), but no feedback doc confirms the specific class-level-SAM repetition behaviour was observed. Carried as item 5 in section A. | `body-layer/ROADMAP/BL-B47.md` |
+| **BL-13** (crew query path, `report`/`describe`) | Whether a pull summary beats enumeration, in the cockpit. | **PARTLY ANSWERED** (corrected from ANSWERED — see Correction pass above). The command path itself is clearly working: "describe"/"report" tokens appear repeatedly in the 2026-10-15 15:07 and 16:44 speech logs (`"Describe."`, `"describe left."`, `"describe at eleven o'clock"`, `"What do you see?"` → `report_all`/`report`), used successfully across two real sorties. What remains unconfirmed is the actual thing the item is waiting on: whether the pilot judges the summary as beating enumeration and not too long in a hover — no document records that judgement. | `body-layer/logs/dcs-speech-20261015-{150739,164451}.jsonl` |
+| **BL-B47** (air-defence recognised at class level, rides BL-13's card) | Repetition, not silence, for a class-level SAM belief, confirmed in a live callout. | **STILL OPEN** (corrected from PARTLY ANSWERED — see Correction pass above). The cited ground check only verifies the fix offline; its own doc says "In the air — UNVERIFIED," and the roadmap entry itself says "UNFLOWN" with `#needs-flight`. Carried as item 5 in section A. | `body-layer/ROADMAP/BL-B47.md:5`; `docs/acceptance/2026-10-10-crew-query-path-sortie.md` ("In the air — UNVERIFIED") |
 | **BL-14** (attack-run guidance) | A combined acceptance sortie covering the guidance register. | **ANSWERED (flown) but found real defects, now its own workstream.** Flown twice 2026-10-15 (16:44 and 17:55). §1 repeat-callout, §2 doesn't stop on flyby, §3→§5 "obstructed" fires for range not obstruction (root-caused to the naked-eye presence threshold, not cockpit mask), §6-§7 optic-ladder direction, §9 LOS-priority-for-target all came out of this flight. The roadmap's own text ("not yet flown") is **stale** — it should say flown-with-findings, not unflown. | `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md`; `body-layer/ROADMAP/BL-14.md` (stale) |
 | **BR-1.1 / BR-1.2** (brain layer wire + real Ollama model) | Whether the cockpit stays responsive while the brain "thinks," and whether hearing the model's own language (not a canned line) feels right. | **STILL OPEN.** Checked every transcript across all three 2026-10-15 sorties: every utterance matched a known command token (`report_all`, `engage`, `scan_*`, etc.) — nothing ever fell through to the brain-layer escalation path. The free-text/model path has still never been heard live. | `body-layer/logs/dcs-speech-20261015-*.jsonl` (no unmatched/escalated utterance found) |
 | **BR-B1** (wider classify vocabulary) | Whether the narrow 7-token set under-serves real sorties. | **STILL OPEN, blocked on BR-1.2's own flight** — can't judge vocabulary coverage for an escalation path that has never fired. | `body-layer/ROADMAP/BR-B1.md` |
@@ -97,7 +137,7 @@ marker on inspection — flagging that discrepancy rather than silently dropping
 | **BL-W5** (confirm-band affirmatives) | Whether 15s/20s timing is right and cancel→confirm actually stops the task. | **STILL OPEN** — no later doc confirms this specifically; superseded in importance by the `silence` command (BL-W13) which the user later said covers most of the same need. | `body-layer/ROADMAP/BL-W5.md` |
 | **BL-W6** (sortie 09-26 fixes A/B1/B2/C) | Three in-cockpit observables (mask/occlusion grace, binoculars on a held contact, no interrupt on in-progress look). | **STILL OPEN** — no later doc confirms or denies. | `body-layer/ROADMAP/BL-W6.md` |
 | **BL-W7** (binocular optic / voice completeness / precise position belief) | — | **ANSWERED.** Already marked `[x]` **FLOWN AND CLOSED 2026-09-25** in its own file. The source list's inclusion of this item was a false positive (grep matched leftover "unflown" text from the superseded sub-entry, not current status). | `body-layer/ROADMAP/BL-W7.md` |
-| **BL-W12** (group cohesion redesign: size-relative cohesion, infantry EAGER, delta taxonomy) | Real-scene behaviour of the 500m installation cap, air-defence class guess, and the six-branch delta taxonomy "by ear." | **ANSWERED (flown, with downstream findings).** This mechanism has been exercised continuously since merge (2026-10-01) — the very bugs now tracked as BL-B58/BL-B59/BL-B60/BL-B41 were *found* by flying and tracing this exact mechanism on 2026-10-11/10-12. That is flight evidence, just not a clean pass. Treat as flown-and-still-being-hardened, not unflown. | `body-layer/ROADMAP/BL-W12.md`, `BL-B58.md`, `BL-B59.md` |
+| **BL-W12** (group cohesion redesign: size-relative cohesion, infantry EAGER, delta taxonomy) | Real-scene behaviour of the 500m installation cap, air-defence class guess, and the six-branch delta taxonomy "by ear." | **STILL OPEN** (corrected from ANSWERED — see Correction pass above). `BL-B59.md` states plainly "Fixture-only — no sortie has exercised this path," which contradicts the claim that its sibling bugs were found by flying. No document records a real flight exercising this mechanism's cohesion rules and judging the result. | `body-layer/ROADMAP/BL-W12.md`; `body-layer/ROADMAP/BL-B59.md` ("Fixture-only — no sortie has exercised this path") |
 | **BL-W13** (`silence` command) | Whether one word of silence is the right amount; the third sub-question (silence vs. a threat appearing while muted) is explicitly separate. | **ANSWERED, with one residual.** User ACCEPTED 2026-10-09 ("silence command / one word, absolute quiet -> accepted"). Residual: whether absolute silence should break for a new threat — explicitly noted as "may simply not have occurred yet," i.e. untested, not forgotten. | `body-layer/ROADMAP/BL-W13.md` |
 | **BL-W35** (watch reporting, Stages 1-5) | Movement/range-crossing/follow/engagement-envelope triggers in real flying. | **ANSWERED (flown, superseded card).** Exercised continuously since 2026-09-25 across every later sortie; follow/engage/danger-callout mechanisms are the ones exercised in the 2026-10-15 attack-run flights. | `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` shows `follow`/`engage` working end to end |
 | **BL-W36** (group reporting disclosure ladder) | "Group lines stop restating known members," among others. | **ANSWERED.** User ACCEPTED 2026-10-09 ("Group lines stop restating known members -> accepted"). | `docs/acceptance/2026-10-09-four-acceptances-and-the-kola-correction.md` |
