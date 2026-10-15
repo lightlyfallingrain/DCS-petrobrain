@@ -337,6 +337,11 @@ inventing it. **It needs an `/explore`**, and what that conversation has to deci
 - **Missile speed and maximum range are missing**, as above. Carried as a risk, not an assumption.
 - **Elevation slew's degrees-per-unit is unmeasured**, so any elevation-aware slew logic is
   unplannable to a degree today.
+
+  > **Largely dissolved 2026-10-15 (direction §12a).** We command *deflection*, not a rate, and DCS
+  > enforces its own limit — so no conversion into physical units is needed on the command side at
+  > all. What remains is weaker and different: the *readout* must be readable and comparable at loop
+  > rate, and its **resolution** floors the controller's deadband. See §15c.
 - **Acceptance is unusually expensive for Axis B** — ~3 minutes of warm-up before anything is
   testable, and the research note adds a failure mode the spec does not model: a gyro toppled by an
   excessive-rate manoeuvre needs `GUID.UNIT POWER` cycled and **another 3–4 minutes**. A single
@@ -798,22 +803,44 @@ Decision 6 below.~~ **Settled by §12; see §15 and §15a above.**
 ### 15c. What §12 does to the effector entry — three constraints, recorded here and in `[[BL-B66]]`
 
 Not this entry's work, but it changes `[[BL-B66]]`'s shape enough to be worth stating where the
-reasoning lives:
+reasoning lives (§12a revises points 3–4, and **none of this touches `[[BL-B64]]`** — the perception
+entry's only obligation remains §15a's field split):
 
 1. **The sight's current angle must be readable every iteration**, or the loop has no feedback term.
    **This promotes the deferred cockpit probe from useful to load-bearing** for that stage —
-   specifically whether arg **876**'s degrees-per-unit is measurable and whether the OBSERV readout
-   (arg **886**) can be sampled at loop rate. Still not dispatched from here; it gates that stage's
-   own plan.
+   specifically whether args **874/876** can be read at loop rate **and at what resolution**, and
+   whether the OBSERV readout (arg **886**) can be sampled at loop rate. Per §12a this is *not* a
+   question about degrees-per-unit: the command needs no physical calibration, so the error term only
+   has to be readable and comparable. Still not dispatched from here; it gates that stage's own plan.
 2. **Loop rate becomes a correctness property, not a performance preference.** A rate-commanded loop
    closed at body-layer's current **1 Hz would overshoot every time**. So `[[BL-B63]]`'s selective
    fast lane is a **hard dependency of the effector stage**, not the optional optimisation its entry
    reads as today — the same mechanism it was already filed for (missile guidance), arriving one
    stage earlier than it expects.
-3. **Maximum angular velocity is a constant** and belongs in `X-T26`'s tunable set
-   (`body-layer/config/defaults.toml` + `src/tuning.py`, merged to `main` 2026-10-15). Overshoot,
-   deadband and settling become real concerns there too — a loop that chatters would be visible in
-   the cockpit and, during an ATGM run, a guidance failure.
+3. **What we command is *deflection*, not a rate — so there is no maximum-rate constant anywhere in
+   this design** (direction §12a: *"we do not need to know it, actually. DCS limits it and we just
+   command the 'joystick' deflection. At max deflection the sight moves as fast as it can."*). The
+   command side therefore needs **no calibration at all**: nothing has to establish what a unit of
+   deflection means physically, which removes one measurement from the probe and one number that
+   could drift between DCS versions.
+4. **The plant is unknown, so the loop is purely reactive** — it cannot predict where the sight will
+   be after a command, only observe where it ended up. No feed-forward, no time-to-target estimate.
+   **Proportional deflection, not bang-bang**: full deflection until the error flips sign is the
+   obvious implementation and the one that chatters, while reducing deflection as the error shrinks
+   is what makes it settle — and it needs no knowledge of the rate, because the error *is* the
+   signal. **The empirical constants are the deflection-versus-error response and a deadband**, and
+   those belong in `X-T26`'s tunable set (`body-layer/config/defaults.toml` + `src/tuning.py`,
+   merged to `main` 2026-10-15).
+
+   **Evaluated, not adopted — and it holds, with one caveat worth carrying into that stage's plan.**
+   Proportional control is right here for the reason given: it is the only one of the two that can
+   settle without a plant model. The caveat is that **pure proportional control against an unknown
+   plant with a one-poll feedback delay can still limit-cycle** — the deadband is what actually stops
+   the hunting, so it is load-bearing rather than a refinement, and it interacts with the feedback
+   *resolution*: the deadband cannot usefully be finer than arg 876's read granularity, which is
+   unmeasured. **So the probe's feedback half now also has to report the readout's resolution, not
+   only that it is readable.** That is a question to settle in `[[BL-B66]]`'s own plan, and it is the
+   one place §12a makes the probe's job slightly larger rather than smaller.
 
 ## 16. Risks this amendment adds
 

@@ -35,11 +35,24 @@
      selective fast lane a **hard dependency of this entry**, not the optional optimisation its entry
      reads as — the same mechanism it was already filed for (missile guidance), arriving one stage
      earlier than it expects.
-  3. **Maximum angular velocity is a constant** and belongs in `X-T26`'s tunable set — follow
-     `body-layer/config/defaults.toml` and `src/tuning.py` (merged to `main` 2026-10-15). Exactly the
-     kind of number a sortie would want adjusted.
-  4. **Overshoot, deadband and settling are real concerns.** A loop that chatters around its target
-     would be visible in the cockpit and, during an ATGM run, a guidance failure.
+  3. **What we command is *deflection*, not a rate, and there is no maximum-rate constant to know**
+     (§12a: *"we do not need to know it, actually. DCS limits it and we just command the 'joystick'
+     deflection. At max deflection the sight moves as fast as it can."*). **The command side needs no
+     calibration at all** — nothing has to establish what a unit of deflection means physically,
+     which removes one measurement from the probe below and one number that could drift between DCS
+     versions. **The feedback half is untouched**: without the current angle there is no error term.
+  4. **The plant is unknown, so the loop is purely reactive.** It cannot predict where the sight will
+     be after a command, only observe where it ended up — no feed-forward, no time-to-target
+     estimate. **Proportional deflection, not bang-bang**: full deflection until the error flips sign
+     chatters, while reducing deflection as the error shrinks settles, and needs no knowledge of the
+     rate because the error *is* the signal. **The empirical constants are the
+     deflection-versus-error response and a deadband**, and those belong in `X-T26`'s tunable set
+     (`body-layer/config/defaults.toml`, `src/tuning.py`).
+
+     **One caveat for this stage's own plan:** proportional control against an unknown plant with a
+     one-poll feedback delay can still limit-cycle, so **the deadband is load-bearing rather than a
+     refinement** — and it cannot usefully be finer than the readout's resolution, which is why the
+     probe has to report arg 876's read *granularity*, not only that it is readable.
 
   **What `[[BL-B64]]` is doing to make this cheap.** Per the user — *"We don't need this modeled
   before the effectors, but we must be ready for how it will work with the effectors so we don't have
@@ -57,10 +70,14 @@
   - Can `performClickableAction` actually move args **673 / 955 / 885 / 886 / 963** on **`WEAP_SYS`
     (device 6)** and **`I9K113` (device 7)**, and does the lamp state follow?
   - Does `list_indication` on `ccGunnersCPanel` (**index 8, never tried**) read the `READY` lamp?
-  - **Is arg 876's degrees-per-unit measurable, and can the OBSERV readout (arg 886) be sampled at
-    loop rate?** Added 2026-10-15 from §12 — **these two are the loop's feedback term**, so a
-    negative answer does not merely degrade this stage, it means the loop cannot close as designed
-    and the stage needs a different plan.
+  - **Can the sight's current angle (args 874/876) be read at loop rate, and at what resolution?**
+    Added 2026-10-15 from §12/§12a — **this is the loop's feedback term**, so a negative answer does
+    not merely degrade this stage, it means the loop cannot close as designed and the stage needs a
+    different plan. The *resolution* matters because it floors the deadband (consequence 4 above).
+    **Note what this question is no longer:** it is not *"what is 876's degrees-per-unit"*, because
+    §12a removes the need to convert a command into physical units — only the error term needs to be
+    readable and comparable, not calibrated.
+  - Can the OBSERV readout (arg **886**) be sampled at loop rate?
 
   **Why it is not run yet.** The write channel is proven live only on **device 30** (the AI wheel)
   and **device 55** (SPU-8) — every argument number in the warm-up table is cross-referenced from a
@@ -83,12 +100,13 @@
      comes back negative, readiness is a timer Petrobrain owns**: honest, and the manual itself
      presents the timing as elapsed-time gates.
   3. **The slew closed loop** — reading args 874/876 back and writing the AI axis (3060/3061).
-     **876's degrees-per-unit is unmeasured**: the raw read is confirmed, the conversion is not, so
-     elevation slew is not plannable to a degree today. Note that the AI axis (3060/3061) is
-     *position* while the player axis (3025/3026) is *velocity* — do not generalise one from the
-     other, and note that **§12 says the crewman's own control is a velocity command**, so which of
-     those two axes this loop should drive is itself an open question for this stage's plan rather
-     than a settled choice. Needs `[[BL-B63]]` first (consequence 2 above).
+     876's degrees-per-unit is unmeasured — but per §12a **that no longer blocks anything**, since
+     the command is a deflection and needs no physical calibration; only the readout's availability
+     and resolution matter. Note that the AI axis (3060/3061) is *position* while the player axis
+     (3025/3026) is *velocity* — do not generalise one from the other, and note that **§12 says the
+     crewman's own control is a velocity command**, so which of those two axes this loop should drive
+     is itself an open question for this stage's plan rather than a settled choice. Needs
+     `[[BL-B63]]` first (consequence 2 above).
   4. **Pinpoint-on-request** — the surviving non-ATGM use.
 
   ## What this entry does *not* contain
