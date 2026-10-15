@@ -106,6 +106,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B65]] — weapons safety circuit switch, before any ATGM attack run
 - [[BL-B66]] — the 9K113 sight, entry 2 of 3: effectors (the real cockpit switches moving)
 - [[BL-B67]] — the 9K113 sight, entry 3 of 3: the ATGM attack run
+- [[BL-B68]] — belief survives a DCS mission restart, because nothing resets it `[>]` deferred
+- [[BL-B69]] — the object-permanence shortcut skips the spatial gate with no distance check
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
