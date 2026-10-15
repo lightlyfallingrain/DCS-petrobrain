@@ -82,6 +82,67 @@ replacing it.
 
 ---
 
+## §5 — §3 diagnosed: the target was out of *range*, not obstructed
+
+**Settled from the 2026-10-15T17:55 sortie's own logs**, the first flown with ownship attitude on
+every speech row. The attack target was rejected at the **`range_or_size`** gate, never at
+`cockpit_mask`:
+
+```
+ 98.7 … 113.8   range_or_size   2607 m -> 2357 m     "..., obstructed."
+114.8 onward    admitted        2322 m -> closing    "Lined up."
+```
+
+The crossover sits at ~2,330 m, which is exactly `7 m / 0.003` — the naked-eye **presence**
+threshold (`LOWRES_ANGULAR_RADIUS_RAD`) for a 7-metre vehicle. Attitude was nose-down throughout
+(pitch −6.8° to −11.2°), which *clears* the cockpit mask rather than tripping it, so the mask
+hypothesis is dead and the earlier bank and pitch theories with it.
+
+**The defect is the word, not the perception.** Guidance renders every non-observation as
+`", obstructed"` regardless of cause, collapsing three different situations into one:
+
+| cause | truthful meaning | observed in |
+|---|---|---|
+| cockpit mask | behind the airframe, cannot see | 45 rear calls, 16:44 sortie |
+| terrain LOS | something is in the way | by construction |
+| **range/size** | **too far to make out** | this block, and the user's *"plain sight"* complaint |
+
+The user could see it plainly on screen; Petrovich's naked-eye model genuinely cannot resolve a 7 m
+vehicle past ~2.3 km. Both are correct, and the sentence was wrong.
+
+## §6 — What to say, and which optic to reach for
+
+> *"first of all, use binoculars. If still too far, use the "...last I saw" or similar that's already
+> used in the describe."*
+
+So the answer is **not** a new phrase for "too far". It is an **escalation ladder**: reach for a
+better instrument first, and only fall back to remembered-sighting language when even that cannot
+resolve the target. Binoculars (×2.42 presence) take the same 7 m vehicle from ~2.3 km to ~5.6 km,
+which covers the whole of this sortie's problem block.
+
+**Reuse the existing remembered-sighting phrasing from `describe`** rather than minting a new form —
+the user named it explicitly, and it already carries the right epistemic claim: this is what I saw,
+not what I see.
+
+> *"Not automatically. If OBSERV is ON already, then yes. If OFF, then not. Also, distance dependent,
+> if target within naked eye range, then not."*
+
+**The 9K113 is never reached for autonomously by designating a target.** The rule is a cheapest-
+sufficient-optic ladder with a hard gate on the sight:
+
+1. **Naked eye** if the target is within naked-eye range — do not escalate at all.
+2. **Binoculars** when the naked eye cannot resolve it.
+3. **9K113** only if **OBSERV is already ON**. If OBSERV is OFF, designating a target must not turn
+   it on — that stays the pilot's command (§6 of the direction document).
+4. Otherwise, speak from belief using the `describe` remembered-sighting phrasing.
+
+Note how this interacts with what already shipped: `BL-B64` made the sight a selectable optic and
+OBSERV a voice command, so step 3 costs almost nothing — but the gate matters, because an attack run
+that silently switched Petrovich to a 3°-field sight would change what he can see of everything else
+without the pilot asking for it.
+
+---
+
 ## What this leaves open for `/explore`
 
 - **§2:** does flying past *end* the run, or only silence it? And is "behind the cockpit mask" the
