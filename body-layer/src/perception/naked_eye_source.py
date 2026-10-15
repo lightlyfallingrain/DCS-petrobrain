@@ -242,6 +242,7 @@ from aircraft_client import AircraftLayerClient, AircraftLayerError
 from perception import object_model
 from perception.association import (
     PLAYER_BUBBLE_RADIUS_M,
+    SightCone,
     WorldObjectCandidate,
     filter_ownship,
     filter_player_bubble,
@@ -253,7 +254,7 @@ from perception.detection_trace import (
     GateOutcome,
 )
 from perception.estimation import (
-    naked_eye_sigma_m,
+    look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
 )
@@ -435,6 +436,26 @@ class NakedEyePerceptionSource:
     #: regression gate 2B used and it is worth repeating here: the
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
+    #: The player-bubble directional exemption (`BL-B64` Stage 2, direction
+    #: §7) -- assigned per poll by `logger._apply_active_gaze` alongside
+    #: `optic`, from the same resolution: the sight's own *actual* pointing
+    #: direction, built from `OpticState.actual_aim_azimuth_deg` (never
+    #: belief's desired aim -- an instantly-teleporting cone would be an
+    #: omniscience leak, `plans/9k113-sight/plan.md` §15a/§15b). `None`
+    #: whenever no sight optic is active this poll (every OBSERV-off poll,
+    #: by construction) -- `association.filter_player_bubble`'s own
+    #: docstring on why that guards the whole added branch at zero cost.
+    sight_cone: SightCone | None = None
+    #: Set to `now_sim + HANDS_BUSY_DURATION_S` by `logger._apply_active_
+    #: gaze` whenever `OpticState.hands_busy_until_sim` is active this poll
+    #: (`BL-B64` Stage 2, direction §6's "1 s hand movement") -- `poll()`
+    #: below returns `[]` immediately while `now_sim` is still under this,
+    #: without touching `_previously_seen_at`/`_acquired_at` (this is a
+    #: deliberate pause, not a data gap -- the world has not become
+    #: unknown, Petrovich's eyes are just on the switch). `None` (the
+    #: default, and the value on every poll before this entry) is a true
+    #: no-op.
+    suppressed_until_sim: float | None = None
     #: The peripheral channel's output (hard parts 2a/4 of the plan) --
     #: always empty until the attention-capture channel exists (out of
     #: scope this slice); resolved per candidate through `perception.gaze.
@@ -473,6 +494,16 @@ class NakedEyePerceptionSource:
     _observation_count: int = field(default=0, init=False, repr=False)
 
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
+        if (
+            self.suppressed_until_sim is not None
+            and now_sim < self.suppressed_until_sim
+        ):
+            # The 1 s hand movement (`BL-B64` Stage 2, direction §6) --
+            # Petrovich's eyes are on the switch, not through any optic.
+            # Deliberately does not touch `_previously_seen_at`/
+            # `_acquired_at`: a brief, deliberate pause is not a data gap,
+            # unlike the `world_objects is None` branch below.
+            return []
         world_objects = self.aircraft_client.get_world_objects_latest()
         if world_objects is None:
             # No snapshot -- reset visible-set state so the next real
@@ -545,7 +576,9 @@ class NakedEyePerceptionSource:
         # candidate gets exactly one trace row (PLAYER_BUBBLE) when tracing
         # is on, instead of the per-gate row `check_visibility` would have
         # produced -- it was never handed to `check_visibility` at all.
-        candidates = filter_player_bubble(all_candidates, ownship_state)
+        candidates = filter_player_bubble(
+            all_candidates, ownship_state, sight_cone=self.sight_cone
+        )
         if self.trace_sink is not None:
             in_bubble_ids = frozenset(c.object_id for c in candidates)
             for candidate in all_candidates:
@@ -965,7 +998,13 @@ class NakedEyePerceptionSource:
         self._observation_count += 1
         observation_id = f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}"
         bias_object_id = min(member.object_id for member in cluster.members)
-        sigma_cross_m, sigma_down_m = naked_eye_sigma_m(true_range_m)
+        # `BL-B64` Stage 1b (`BL-B55`, folded in): `self.optic` is the
+        # active optic for this whole poll (module docstring on that
+        # attribute), so this one call is both "per-optic position sigma"
+        # and "a group ranged once with a shared draw" -- `_build_
+        # observation` already runs once per cluster, so there is no
+        # per-member ranging to avoid.
+        sigma_cross_m, sigma_down_m = look_sigma_m(true_range_m, self.optic)
         estimated_bearing_deg, estimated_range_m = perturbed_bearing_range(
             observation_id=observation_id,
             object_id=bias_object_id,

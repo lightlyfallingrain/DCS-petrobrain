@@ -39,6 +39,24 @@ correspondingly large saving, because the obvious next step for a surviving cand
 LOS check" cost the code and prior agent-memory
 ([[project_terrain_watershed_scaling]]-adjacent) already flagged as expensive.
 
+> **THIS FIGURE IS NO LONGER TRUE OF THE CODE — do not cite it forward.** Added 2026-10-15,
+> `plans/9k113-sight/performance-cone-gate.md`. The 540 us was measured when `check_visibility`
+> called world-model's sqlite `sample_grid` raycast **directly**, and **`BL-11` Stage 4's
+> fail-closed rewrite deleted that path.** Terrain LOS is now a boolean read off
+> `candidate.live_los_clear`, joined upstream by a dict lookup; the raycast moved into the DCS-side
+> Lua Hook (`X-B29`), a separate subsystem with its own budget.
+>
+> **Re-measured on the current code: 4.3 us/candidate** for the whole gate chain through
+> `ADMITTED` — **~125x cheaper.** It was carried forward uncorrected into
+> `plans/9k113-sight/plan.md` §12b, where it produced a "+20-40% of the tick" estimate for the
+> 9K113 cone that is wrong by three orders of magnitude and nearly bought a bounding mechanism
+> nothing needed.
+>
+> The transferable part: **a measurement names the code path it measured, and that path can be
+> deleted by work that never reads the measurement.** `BL-11` Stage 4 had no reason to come here.
+> What makes a stale figure dangerous is that it stays plausible and keeps getting cited — this one
+> survived a plan, an amendment and a review pass.
+
 But that LOS cost was **never reachable by an out-of-bubble candidate in the first place**:
 `check_visibility` gates cheap-before-expensive (gaze → cockpit mask → optic FOV → range/size →
 LOS), and its own range/size gate is capped at `visibility.NAKED_EYE_RANGE_CAP_M = 10000.0` —

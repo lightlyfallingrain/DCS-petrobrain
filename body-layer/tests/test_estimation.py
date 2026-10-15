@@ -1,5 +1,7 @@
 """Tests for `perception.estimation` -- the error model and perturbation
-`plans/precise-position-belief/plan.md` Stages 1-2 introduced.
+`plans/precise-position-belief/plan.md` Stages 1-2 introduced, extended by
+`BL-B64` Stage 1b (`plans/9k113-sight/plan.md` §14, `naked_eye_sigma_m`
+renamed to `look_sigma_m` and given an `optic` parameter).
 
 **Gap found while verifying this plan's own test-impact list** (Stage 3's
 task brief): the plan's Stage 2 "Verify" section calls for a
@@ -20,17 +22,25 @@ from perception.estimation import (
     BEARING_SIGMA_DEG,
     RANGE_FRACTIONAL_SIGMA,
     RELATIVE_DIRECTION_SIGMA_DEG,
+    SIGHT_NARROW_RANGE_SIGMA_SCALE,
+    SIGHT_WIDE_RANGE_SIGMA_SCALE,
     SYSTEMATIC_BIAS_FRACTION,
-    naked_eye_sigma_m,
+    look_sigma_m,
     perturbed_bearing_range,
     perturbed_relative_direction,
     systematic_bias_m,
 )
+from perception.optics import (
+    BINOCULAR_OPTIC,
+    SIGHT_NARROW_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    UNAIDED_OPTIC,
+)
 
 
 def test_naked_eye_sigma_scales_with_range() -> None:
-    sigma_cross_1k, sigma_down_1k = naked_eye_sigma_m(1000.0)
-    sigma_cross_3k, sigma_down_3k = naked_eye_sigma_m(3000.0)
+    sigma_cross_1k, sigma_down_1k = look_sigma_m(1000.0, UNAIDED_OPTIC)
+    sigma_cross_3k, sigma_down_3k = look_sigma_m(3000.0, UNAIDED_OPTIC)
 
     assert math.isclose(sigma_cross_1k, math.radians(BEARING_SIGMA_DEG) * 1000.0)
     assert math.isclose(sigma_down_1k, RANGE_FRACTIONAL_SIGMA * 1000.0)
@@ -44,14 +54,57 @@ def test_down_range_sigma_dominates_cross_range_sigma() -> None:
     he judges its distance -- cross-range error must be several times
     *smaller* than down-range error, the reverse of the old (deleted)
     quantisation-derived model."""
-    sigma_cross_m, sigma_down_m = naked_eye_sigma_m(3000.0)
+    sigma_cross_m, sigma_down_m = look_sigma_m(3000.0, UNAIDED_OPTIC)
 
     assert sigma_cross_m < sigma_down_m
     assert sigma_down_m / sigma_cross_m > 3.0
 
 
+def test_binocular_optic_gets_the_same_sigma_as_the_naked_eye() -> None:
+    """`BL-B64` Stage 1b fixes the 9K113's own two optics only --
+    `BINOCULAR_OPTIC` is deliberately untouched (module docstring), so a
+    binocular look must produce *exactly* the naked-eye-grade sigma, not a
+    new value, until a sourced figure exists for it."""
+    naked_eye = look_sigma_m(3000.0, UNAIDED_OPTIC)
+    binocular = look_sigma_m(3000.0, BINOCULAR_OPTIC)
+
+    assert binocular == naked_eye
+
+
+def test_sight_optics_get_a_smaller_down_range_sigma_than_the_naked_eye() -> None:
+    """Direction §11/§14: the stadiametric aid makes the sight's range
+    estimate better than the naked eye's, though still not exact -- the
+    down-range sigma must shrink for both sight optics, and narrow (finer
+    stadiametric resolution) must shrink it further than wide."""
+    _cross_eye, down_eye = look_sigma_m(3000.0, UNAIDED_OPTIC)
+    _cross_wide, down_wide = look_sigma_m(3000.0, SIGHT_WIDE_OPTIC)
+    _cross_narrow, down_narrow = look_sigma_m(3000.0, SIGHT_NARROW_OPTIC)
+
+    assert down_wide == RANGE_FRACTIONAL_SIGMA * SIGHT_WIDE_RANGE_SIGMA_SCALE * 3000.0
+    assert (
+        down_narrow == RANGE_FRACTIONAL_SIGMA * SIGHT_NARROW_RANGE_SIGMA_SCALE * 3000.0
+    )
+    assert down_narrow < down_wide < down_eye
+
+
+def test_sight_cross_range_sigma_is_derived_from_the_fov_ratio() -> None:
+    """Direction §11: "a narrower field is a tighter bearing read" -- the
+    cross-range scale is the active optic's own `fov_half_angle_deg`
+    divided by `BINOCULAR_OPTIC`'s (the regime `BEARING_SIGMA_DEG` is
+    already calibrated against), not an independent judgement constant.
+    Narrow's field (3.0 deg) is tighter than binoculars' (4.25 deg), so
+    narrow's cross-range sigma must be smaller than a binocular look's;
+    wide's field (5.75 deg) is wider than binoculars', so wide's must be
+    larger."""
+    cross_binocular, _down_binocular = look_sigma_m(3000.0, BINOCULAR_OPTIC)
+    cross_wide, _down_wide = look_sigma_m(3000.0, SIGHT_WIDE_OPTIC)
+    cross_narrow, _down_narrow = look_sigma_m(3000.0, SIGHT_NARROW_OPTIC)
+
+    assert cross_narrow < cross_binocular < cross_wide
+
+
 def test_perturbed_bearing_range_is_deterministic_per_observation_id() -> None:
-    sigma_cross_m, sigma_down_m = naked_eye_sigma_m(1000.0)
+    sigma_cross_m, sigma_down_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
     kwargs = {
         "object_id": 1,
         "true_bearing_deg": 45.0,
@@ -78,7 +131,7 @@ def test_perturbed_bearing_range_mean_offset_is_unbiased() -> None:
     (see `test_systematic_bias_never_redrawn_for_the_same_object_id`) --
     unbiasedness is a population-level property of the per-look draw plus
     the per-object draw together, not a promise about any one object."""
-    sigma_cross_m, sigma_down_m = naked_eye_sigma_m(1000.0)
+    sigma_cross_m, sigma_down_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
     true_bearing_deg = 30.0
     true_range_m = 1000.0
 
@@ -130,7 +183,7 @@ def test_perturbed_range_is_floored_at_zero() -> None:
 
 
 def test_systematic_bias_never_redrawn_for_the_same_object_id() -> None:
-    sigma_cross_m, sigma_down_m = naked_eye_sigma_m(1000.0)
+    sigma_cross_m, sigma_down_m = look_sigma_m(1000.0, UNAIDED_OPTIC)
 
     first = systematic_bias_m(42, sigma_cross_m, sigma_down_m)
     second = systematic_bias_m(42, sigma_cross_m, sigma_down_m)

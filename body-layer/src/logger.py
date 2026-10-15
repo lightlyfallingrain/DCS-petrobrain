@@ -195,7 +195,7 @@ import time
 import urllib.error
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, TextIO
 
@@ -220,10 +220,13 @@ from belief.mission_phase import (
     load_mission_understanding,
 )
 from belief.optic_policy import (
+    HANDS_BUSY_DURATION_S,
+    SIGHT_STEADY_RATE_LIMIT_DEG_S,
     LookTarget,
     OpticDecision,
     OpticPhase,
     OpticState,
+    advance_sight_aim,
     is_steady,
     look_target_for,
     lower_binoculars,
@@ -242,6 +245,7 @@ from eyesight_view import (
 )
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
+from perception.association import PLAYER_BUBBLE_RADIUS_M, SightCone
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
 from perception.forest import ForestOcclusion
@@ -561,11 +565,36 @@ class ConsolePerceptionRunner:
             targets=_look_targets(self.store, ownship),
             steady=is_steady(list(self.attitude_history)),
             search=_search_sweep(self.scan_plan, ownship),
+            # `BL-B64` Stage 2, direction §8 -- the sight's own, higher
+            # manoeuvre-tolerance threshold, read from the same attitude
+            # history the binocular gate above already samples. A second
+            # call, not a shared one: `is_steady` is a pure function of
+            # its own `rate_limit_deg_s`, and the two thresholds answer
+            # different questions (hands vs. gyros) over the same data.
+            sight_steady=is_steady(
+                list(self.attitude_history),
+                rate_limit_deg_s=SIGHT_STEADY_RATE_LIMIT_DEG_S,
+            ),
         )
         self.optic = optic_decision.optic
-        _apply_active_gaze(
-            self.sources, self.tasks, scan_plan=self.scan_plan, decision=optic_decision
+        # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the
+        # *previous* poll's own `t_sim` here (it is updated later in this
+        # method), so this is an ordinary poll-to-poll delta, 0.0 on the
+        # first poll -- unused by `advance_sight_aim`'s current body, kept
+        # threaded through for the effector stage's controller.
+        dt_s = ownship.t_sim - (
+            self.last_t_sim if self.last_t_sim is not None else ownship.t_sim
         )
+        updated_optic_state = _apply_active_gaze(
+            self.sources,
+            self.tasks,
+            scan_plan=self.scan_plan,
+            decision=optic_decision,
+            optic_state=self.optic_state,
+            dt_s=dt_s,
+        )
+        if updated_optic_state is not None:
+            self.optic_state = updated_optic_state
         observations = [
             observation
             for source in self.sources
@@ -851,7 +880,9 @@ def _apply_active_gaze(
     *,
     scan_plan: ScanPlan | None = None,
     decision: OpticDecision | None = None,
-) -> None:
+    optic_state: OpticState | None = None,
+    dt_s: float = 0.0,
+) -> OpticState | None:
     """Assigns the resolved scan plan and optic onto whichever `sources`
     entry is a `NakedEyePerceptionSource` -- a true no-op for every other
     source, and for a `sources` list (e.g. in tests) that holds no
@@ -873,22 +904,109 @@ def _apply_active_gaze(
     holding one direction rather than a special case in the source: the
     source already resolves `gaze_at(now_sim, scan_plan)` every poll, so a
     plan whose every leg is the same direction *is* a fixed stare, and no
-    branch is needed anywhere downstream."""
+    branch is needed anywhere downstream.
+
+    **This is the conversion point `plans/9k113-sight/plan.md` §15a
+    names**: `decision.look_azimuth_deg`/`look_elevation_deg` are belief's
+    *desired* aim; `advance_sight_aim` converts that into the sight's
+    *actual* pointing direction, and the `ScanPlan`/`Gaze` built below
+    reads *actual*, never desired. `optic_state` is optional (`None` for
+    every pre-existing caller, including the several tests that call this
+    directly with no decision) -- when given, the returned `OpticState`
+    (or `None` if nothing changed) is what the caller must persist back
+    onto its own `optic_state` field, the same way `run_once` already
+    persists `decide_optic`'s return value. `dt_s` is threaded through to
+    `advance_sight_aim` unused today -- see that function's own docstring."""
     resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
     optic = decision.optic if decision is not None else UNAIDED_OPTIC
+    updated_state = optic_state
     if (
         decision is not None
         and decision.look_azimuth_deg is not None
         and decision.look_elevation_deg is not None
     ):
-        resolved_plan = ScanPlan.fixed_look_at(
-            azimuth_deg=decision.look_azimuth_deg,
-            elevation_deg=decision.look_elevation_deg,
+        prior_azimuth = (
+            optic_state.actual_aim_azimuth_deg if optic_state is not None else None
         )
+        prior_elevation = (
+            optic_state.actual_aim_elevation_deg if optic_state is not None else None
+        )
+        actual_azimuth_deg, actual_elevation_deg = advance_sight_aim(
+            prior_azimuth,
+            prior_elevation,
+            decision.look_azimuth_deg,
+            decision.look_elevation_deg,
+            dt_s=dt_s,
+        )
+        # `advance_sight_aim`'s perception-stage body is `return desired`,
+        # and both desired values are non-`None` on this branch (checked
+        # above) -- so `actual` cannot be `None` here. A future controller
+        # must preserve that: it never has a desired aim to converge
+        # toward without one to converge *from*.
+        assert actual_azimuth_deg is not None
+        assert actual_elevation_deg is not None
+        if optic_state is not None:
+            updated_state = replace(
+                optic_state,
+                actual_aim_azimuth_deg=actual_azimuth_deg,
+                actual_aim_elevation_deg=actual_elevation_deg,
+            )
+        resolved_plan = ScanPlan.fixed_look_at(
+            azimuth_deg=actual_azimuth_deg,
+            elevation_deg=actual_elevation_deg,
+        )
+    elif optic_state is not None and (
+        optic_state.actual_aim_azimuth_deg is not None
+        or optic_state.actual_aim_elevation_deg is not None
+    ):
+        # No fixed look is commanded this poll -- actual aim goes back to
+        # `None` too, mirroring `OpticState.look_azimuth_deg`'s own
+        # None-while-not-glassing contract, rather than holding a stale
+        # direction from the last glass phase.
+        updated_state = replace(
+            optic_state,
+            actual_aim_azimuth_deg=None,
+            actual_aim_elevation_deg=None,
+        )
+    # `BL-B64` Stage 2, direction §7 -- the directional player-bubble
+    # exemption, pointed at the sight's own *actual* aim (never desired,
+    # same reasoning as the `ScanPlan` above). `optic.regard_azimuth_half_
+    # deg is not None` is the general test for "this optic can be
+    # pointed/slewed" rather than naming the two sight optics -- only they
+    # set it (`optics.py`'s own docstring) -- so a future optic with a
+    # field of regard picks this up automatically. `None` whenever no
+    # actual aim is committed this poll (idle-wide sighting, or any other
+    # optic), which is the whole of `association.filter_player_bubble`'s
+    # own "guard the whole branch" contract.
+    sight_cone: SightCone | None = None
+    if (
+        optic.regard_azimuth_half_deg is not None
+        and updated_state is not None
+        and updated_state.actual_aim_azimuth_deg is not None
+    ):
+        sight_cone = SightCone(
+            azimuth_deg=updated_state.actual_aim_azimuth_deg,
+            half_angle_deg=optic.fov_half_angle_deg or 0.0,
+            depth_m=(
+                optic.range_cap_m
+                if optic.range_cap_m is not None
+                else PLAYER_BUBBLE_RADIUS_M
+            ),
+        )
+    # `BL-B64` Stage 2, direction §6 -- the 1 s hand movement. `None`
+    # (the default) on every pre-existing `OpticState`, so this is a
+    # true no-op until the pilot's "Observ on"/"Observ off" command sets
+    # it (`logger.py`'s poll loop).
+    suppressed_until_sim = (
+        optic_state.hands_busy_until_sim if optic_state is not None else None
+    )
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = resolved_plan
             source.optic = optic
+            source.sight_cone = sight_cone
+            source.suppressed_until_sim = suppressed_until_sim
+    return updated_state
 
 
 def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
@@ -1808,6 +1926,39 @@ def _run_crew_text_poll_loop(
                         elif crew_console.attack_run_transition == "disengage":
                             runner.attack_run_state = None
                             crew_console.attack_run_transition = None
+                        # `BL-B64` Stage 2, direction §6 -- the same
+                        # one-shot-signal shape `attack_run_transition`
+                        # just used: `_handle_observ_on`/`_handle_observ_
+                        # off` leave this for the poll loop rather than
+                        # mutating `runner.optic_state` directly (`belief`
+                        # has no reference to it -- the same division
+                        # `drain_attack_run`'s own docstring states for
+                        # `attack_run_state`). Entering OBSERV also starts
+                        # the 1 s hand-movement suppression (direction §6);
+                        # leaving it does too -- the pilot's hand is on the
+                        # switch either way. Only `home_phase` changes --
+                        # `decide`'s own dispatch (`_back_to_home`) is what
+                        # actually moves `phase` at the next boundary, so
+                        # this never expresses the illegal "jump straight
+                        # into SIGHTING" state the structural rule forbids.
+                        if crew_console.observ_transition == "on":
+                            runner.optic_state = replace(
+                                runner.optic_state,
+                                home_phase=OpticPhase.SIGHTING,
+                                hands_busy_until_sim=(
+                                    runner.last_t_sim + HANDS_BUSY_DURATION_S
+                                ),
+                            )
+                            crew_console.observ_transition = None
+                        elif crew_console.observ_transition == "off":
+                            runner.optic_state = replace(
+                                runner.optic_state,
+                                home_phase=OpticPhase.SCANNING,
+                                hands_busy_until_sim=(
+                                    runner.last_t_sim + HANDS_BUSY_DURATION_S
+                                ),
+                            )
+                            crew_console.observ_transition = None
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
                             runner.last_t_sim,

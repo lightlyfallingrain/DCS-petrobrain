@@ -57,11 +57,42 @@ LOST_THRESHOLD_S = 120.0
 # source: belief/decay.py:POSITION_HALF_LIFE_S
 POSITION_HALF_LIFE_S = 30.0
 
+[belief.optic_policy]
+# How long the 1 s hand movement of switching the sight on/off, or between its settings, suppresses observation entirely -- direction §6 (`docs/acceptance/2026-10-15-9k113-sight-direction.md`), `plans/9k113-sight/plan.md` Stage 2. Any cockpit action that touches the sight sets `OpticState.hands_busy_until_sim` to `now_sim + this`; while it is set, no optic yields observations at all -- Petrovich's eyes are on the switch, not through any instrument.
+# status: judgement | range: 0.1 .. 5.0
+# source: belief/optic_policy.py:HANDS_BUSY_DURATION_S
+HANDS_BUSY_DURATION_S = 1.0
+
+# How long the brief naked-eye glance away from the sight lasts, mirroring `SCAN_CYCLE_PERIOD_S`'s role as the home phase's own dwell boundary -- but here the *interruption's* duration, not the home phase's: direction §9's "inverted dwell shape" (plan §13) swaps which phase is home and which is the bounded break, so the breaks' own timescale inverts with it -- brief here, where `MAX_LOOK_S` (the old break, now unused while OBSERV is on) was the long one.
+# status: judgement | range: 1.0 .. 15.0
+# source: belief/optic_policy.py:SIGHT_GLANCE_AWAY_S
+SIGHT_GLANCE_AWAY_S = 3.0
+
+# The sight's own dwell ceiling, mirroring `MAX_LOOK_S`'s role but much longer -- direction §9 (*"When using 9K113 we typically use it for a longer period of time"*), plan §13. Unlike `MAX_LOOK_S` (which only fires when recognition genuinely is not happening), this is also the *scheduled* break trigger: dwelling at the sight this long, regardless of whether something is still worth looking at, forces a brief naked-eye glance away (`SIGHT_GLANCE_AWAY_S`) before resuming -- direction §9's *"Maybe take eyes off it for a quick glance around and then continue with the sight."* A project modelling choice, tuned from flying like every dwell/scan constant before it.
+# status: judgement | range: 5.0 .. 120.0
+# source: belief/optic_policy.py:SIGHT_MAX_DWELL_S
+SIGHT_MAX_DWELL_S = 30.0
+
+# The 9K113's own manoeuvre-tolerance threshold, mirroring `STEADY_RATE_LIMIT_DEG_S`'s role but for a gyro-stabilised sight rather than a pair of hands holding binoculars steady -- direction §8 (*"Gyros are sensitive to violent manouvres and OBSERV must be swithced OFF is pilot manouvres violently"*), plan §13. **Deliberately a separate constant, not a reuse** -- a stabilised sight tolerates far more attitude-rate than an arm does, so the same number here would force OBSERV off during perfectly flyable manoeuvring.
+# status: judgement | range: 12.0 .. 90.0
+# source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S
+SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
+
 [perception.estimation]
 # Cross-range (perpendicular to line-of-sight) 1-sigma bearing error, degrees.
 # status: judgement | range: 0.1 .. 14.0
 # source: perception/estimation.py:BEARING_SIGMA_DEG
 BEARING_SIGMA_DEG = 3.0
+
+# Same role as `SIGHT_WIDE_RANGE_SIGMA_SCALE` above, for the narrow (x10) setting -- smaller, because the x10 magnification reads the same stadiametric marks at finer resolution.
+# status: judgement | range: 0.05 .. 1.0
+# source: perception/estimation.py:SIGHT_NARROW_RANGE_SIGMA_SCALE
+SIGHT_NARROW_RANGE_SIGMA_SCALE = 0.3
+
+# Down-range fractional-sigma coefficient for a 9K113 wide look -- `BL-B64` Stage 1b (`plans/9k113-sight/plan.md` §14).
+# status: judgement | range: 0.05 .. 1.0
+# source: perception/estimation.py:SIGHT_WIDE_RANGE_SIGMA_SCALE
+SIGHT_WIDE_RANGE_SIGMA_SCALE = 0.5
 
 [perception.gaze]
 # How long the focus cone dwells on one o'clock position before stepping to the next (user decision, 2026-09-21).

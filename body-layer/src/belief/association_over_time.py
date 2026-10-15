@@ -189,7 +189,7 @@ horizontal position it was derived alongside.
 `plans/precise-position-belief/plan.md` Stage 1.** Every percept carries its
 own `position_uncertainty` (`perception.source.PositionUncertainty`), an
 honest (cross-range, down-range) sigma pair each concrete source computes
-from its own error model -- `perception.estimation.naked_eye_sigma_m` for
+from its own error model -- `perception.estimation.look_sigma_m` for
 the naked-eye channel (range-fractional down-range error, a declared
 bearing-sigma constant for cross-range), a fixed isotropic pair declared in
 `hybrid_source.py` for the scope/hybrid channel. This module used to hold a

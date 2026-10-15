@@ -446,10 +446,17 @@ NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 #:
 #: Still not a measured limit: nothing was photographed beyond 8.89 km, so
 #: whether real DCS visibility ends at 10 km, 15 km, or further is unknown.
-#: With the calibrated `lowres` threshold a 7 m vehicle reaches 9333 m from
-#: the formula, just inside this cap -- so for ordinary ground vehicles the
-#: size curve still does the discriminating and the cap binds only ships
-#: and other outsized objects.
+#:
+#: **Stale figure corrected, 2026-10-15 (`plans/9k113-sight/plan.md` §11,
+#: found while checking this cap's reach for the 9K113 work).** This
+#: comment used to claim a 7 m vehicle reaches 9333 m from the formula,
+#: "just inside this cap" -- that was from a `LOWRES_ANGULAR_RADIUS_RAD`
+#: threshold (0.00075) that no longer exists. With the current value
+#: (0.003), a 7 m vehicle's naked-eye `lowres` presence threshold is
+#: `7 / 0.003 = 2333 m`, far short of this cap -- so for an ordinary
+#: ground vehicle the size curve does the discriminating at a much shorter
+#: range than this paragraph used to say, and the cap binds only ships and
+#: other outsized objects, as the next sentence already said.
 #:
 #: Note this no longer matches `association.RANGE_CAP_M` (5000). The two
 #: were aligned when both were guesses; this one now has data behind it and
@@ -576,9 +583,19 @@ def tier_ranges(
     would present as Petrovich raising binoculars for contacts he then
     cannot resolve -- a behaviour nobody would trace back to a duplicated
     formula.
+
+    **The sanity bound is `optic.range_cap_m`, defaulting to
+    `NAKED_EYE_RANGE_CAP_M`** (`BL-B64` Stage 2, `plans/9k113-sight/
+    plan.md` §12a) -- `optic.range_cap_m`'s own docstring. Resolved here
+    rather than read as a bare module constant so the two sight optics'
+    20 km figure flows through this one formula rather than needing a
+    second copy of the clamp.
     """
+    range_cap_m = (
+        optic.range_cap_m if optic.range_cap_m is not None else NAKED_EYE_RANGE_CAP_M
+    )
     presence_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
+        range_cap_m,
         (
             presence_size_m
             / _presence_angular_radius_rad(LOWRES_ANGULAR_RADIUS_RAD, group_salient)
@@ -782,12 +799,16 @@ def check_visibility(
 
     The FOV gate is a new cone on top of the cockpit mask, not a
     replacement for it -- an optic can only narrow what the mask already
-    admits. For `UNAIDED_OPTIC` (`fov_half_angle_deg is None`)
-    `within_optic_fov` always passes, so the gate is a no-op for the
-    default path. `BINOCULAR_OPTIC` now carries a real field-of-view value
-    (`optics.py`'s own docstring), but is not wired into any concrete
-    `PerceptionSource` yet -- passing it is possible today only by an
-    explicit caller, none of which exist.
+    admits. **Until `BL-B64` (direction §14), `UNAIDED_OPTIC` had
+    `fov_half_angle_deg is None` and this gate was a documented no-op for
+    the default path** -- the one optic in this table whose FOV gate never
+    fired. It now carries a real 90-degree half-angle, so the gate is live
+    for the default path too (see `optics.py`'s own docstring for the one
+    behavioural difference: it is a true 90-degree *separation* bound, not
+    a restatement of the gaze gate's azimuth-only +/-90). `BINOCULAR_OPTIC`
+    carries a real field-of-view value too (`optics.py`'s own docstring),
+    but is not wired into any concrete `PerceptionSource` yet -- passing it
+    is possible today only by an explicit caller, none of which exist.
 
     `trace` (`perception.detection_trace`, BL-9) is additive and defaults
     to `None` -- a true no-op, same pattern `overlay_client`/`speech_client`
@@ -851,8 +872,17 @@ def check_visibility(
     size_curve_threshold_m = (
         profile.size_m / effective_gating_angular_radius_rad
     ) * optic.presence_range_mult
-    range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
-    if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m:
+    # `optic.range_cap_m`, defaulting to `NAKED_EYE_RANGE_CAP_M` -- the
+    # same resolution `tier_ranges` performs, kept in sync by construction
+    # (`BL-B64` Stage 2, plan §12a): a 9K113-narrow candidate past 10 km
+    # must not be admitted by the player-bubble cone (`association.
+    # filter_player_bubble`'s `sight_cone`) only to be clamped back and
+    # rejected here by a cap that never learned about the sight.
+    optic_range_cap_m = (
+        optic.range_cap_m if optic.range_cap_m is not None else NAKED_EYE_RANGE_CAP_M
+    )
+    range_threshold_m = min(optic_range_cap_m, size_curve_threshold_m)
+    if optic_range_cap_m <= size_curve_threshold_m:
         threshold_bound = "range_cap"
     elif group_salient:
         # The relaxed (RESOLUTION, not LOWRES) threshold was the binding

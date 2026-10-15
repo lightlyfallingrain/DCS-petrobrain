@@ -5014,6 +5014,36 @@ def test_disengage_speaks_unconditionally_even_with_no_run_active() -> None:
     assert lines == ["Attack run off."]
 
 
+def test_observ_on_signals_the_poll_loop_and_speaks() -> None:
+    """`BL-B64` Stage 2, direction §6 -- the same one-shot-signal shape
+    `attack_run_transition` uses, since `OpticState.home_phase` lives on
+    `logger.ConsolePerceptionRunner`, not here."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("observ_on", now_sim=0.0)
+    assert lines == ["Observ on."]
+    assert console.observ_transition == "on"
+
+
+def test_observ_off_signals_the_poll_loop_and_speaks() -> None:
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    lines = console.handle_command("observ_off", now_sim=0.0)
+    assert lines == ["Observ off."]
+    assert console.observ_transition == "off"
+
+
+def test_observ_transition_is_reset_at_the_top_of_every_dispatch() -> None:
+    """Same convention as `last_command_target_contact_id`/`attack_run_
+    transition` -- a stale signal from an earlier dispatch this poll loop
+    has not yet consumed must not leak into an unrelated later command's
+    evaluation."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.handle_command("observ_on", now_sim=0.0)
+    assert console.observ_transition == "on"
+
+    console.handle_command("disengage", now_sim=1.0)
+    assert console.observ_transition is None
+
+
 def test_drain_attack_run_is_noop_while_not_engaged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -306,6 +306,79 @@ def test_naked_eye_range_cap_is_not_imported_from_association() -> None:
     assert "PLAYER_BUBBLE_RADIUS_M" not in dir(visibility)
 
 
+# --- `SightCone` -- `BL-B64` Stage 2, direction §7's directional
+# exemption. Candidates are built at a known *true* bearing (ownship's own
+# heading is 0 in every test below, so true == body-relative) rather than
+# by azimuth directly, matching how `association.py`'s own geometry works.
+
+
+def test_sight_cone_is_a_true_no_op_when_none() -> None:
+    """The whole added branch must cost nothing on an OBSERV-off poll --
+    `sight_cone=None` is every caller's default."""
+    beyond_bubble = _candidate(1, "T-72", x=PLAYER_BUBBLE_RADIUS_M + 1.0, z=0.0)
+
+    assert filter_player_bubble([beyond_bubble], _ownship()) == []
+    assert filter_player_bubble([beyond_bubble], _ownship(), sight_cone=None) == []
+
+
+def test_sight_cone_admits_a_candidate_beyond_the_bubble_in_its_wedge() -> None:
+    far_but_pointed_at = _candidate(
+        1, "T-72", x=PLAYER_BUBBLE_RADIUS_M + 3_000.0, z=0.0
+    )
+    cone = association.SightCone(azimuth_deg=0.0, half_angle_deg=3.0, depth_m=20_000.0)
+
+    assert filter_player_bubble([far_but_pointed_at], _ownship(), sight_cone=cone) == [
+        far_but_pointed_at
+    ]
+
+
+def test_sight_cone_rejects_a_candidate_outside_its_wedge() -> None:
+    off_to_the_side = _candidate(1, "T-72", x=0.0, z=PLAYER_BUBBLE_RADIUS_M + 3_000.0)
+    cone = association.SightCone(azimuth_deg=0.0, half_angle_deg=3.0, depth_m=20_000.0)
+
+    assert filter_player_bubble([off_to_the_side], _ownship(), sight_cone=cone) == []
+
+
+def test_sight_cone_rejects_a_candidate_beyond_its_own_depth() -> None:
+    far_pointed_but_too_far = _candidate(1, "T-72", x=20_000.0 + 1.0, z=0.0)
+    cone = association.SightCone(azimuth_deg=0.0, half_angle_deg=3.0, depth_m=20_000.0)
+
+    assert (
+        filter_player_bubble([far_pointed_but_too_far], _ownship(), sight_cone=cone)
+        == []
+    )
+
+
+def test_sight_cone_does_not_re_admit_a_candidate_already_inside_the_bubble() -> None:
+    """A candidate already inside the radius survives via the ordinary
+    radius test -- the cone's azimuth test must not accidentally exclude
+    it, and the radius path short-circuits before the cone is even
+    consulted."""
+    inside = _candidate(1, "T-72", x=1_000.0, z=5_000.0)
+    cone = association.SightCone(azimuth_deg=0.0, half_angle_deg=3.0, depth_m=20_000.0)
+
+    assert filter_player_bubble([inside], _ownship(), sight_cone=cone) == [inside]
+
+
+def test_sight_cone_azimuth_is_body_relative_to_ownship_heading() -> None:
+    """A cone pointed at 90 deg (body-relative) admits a candidate due
+    east only once ownship's own heading is accounted for -- built at a
+    true bearing of 90 deg with ownship heading 0, so body-relative
+    azimuth is 90 deg too."""
+    due_east_far = _candidate(1, "T-72", x=0.0, z=PLAYER_BUBBLE_RADIUS_M + 3_000.0)
+    cone_ahead = association.SightCone(
+        azimuth_deg=0.0, half_angle_deg=3.0, depth_m=20_000.0
+    )
+    cone_east = association.SightCone(
+        azimuth_deg=90.0, half_angle_deg=3.0, depth_m=20_000.0
+    )
+
+    assert filter_player_bubble([due_east_far], _ownship(), sight_cone=cone_ahead) == []
+    assert filter_player_bubble([due_east_far], _ownship(), sight_cone=cone_east) == [
+        due_east_far
+    ]
+
+
 # --- PB-2 Stage 0a: `_type_match_score` against real DCS type/reporting-name
 # tuples (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
 # ambient-detection.md` Finding 6). Before the reporting-name resolution fix,

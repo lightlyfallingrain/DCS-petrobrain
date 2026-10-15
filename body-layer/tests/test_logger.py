@@ -1448,6 +1448,165 @@ def test_apply_active_gaze_resets_to_free_scan_when_nothing_is_pending() -> None
     assert naked_eye.scan_plan == FREE_SCAN_PLAN
 
 
+# -- _apply_active_gaze's desired/actual aim split (plans/9k113-sight/
+# plan.md section 15a) -----------------------------------------------------
+
+
+def test_apply_active_gaze_builds_the_scan_plan_from_actual_aim() -> None:
+    """With no prior `optic_state`, `advance_sight_aim`'s pass-through
+    body makes actual equal desired instantly -- the `ScanPlan` the naked
+    eye source receives must still come from the decision's own azimuth/
+    elevation, same as before this field split existed."""
+    from belief.optic_policy import OpticDecision
+    from perception.optics import BINOCULAR_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=BINOCULAR_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze([naked_eye], TaskStore(), decision=decision)
+
+    assert naked_eye.scan_plan == ScanPlan.fixed_look_at(
+        azimuth_deg=12.0, elevation_deg=-3.0
+    )
+
+
+def test_apply_active_gaze_returns_the_updated_optic_state_with_actual_aim_set() -> (
+    None
+):
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=BINOCULAR_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    updated_state = _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
+    )
+
+    assert updated_state is not None
+    assert updated_state.actual_aim_azimuth_deg == 12.0
+    assert updated_state.actual_aim_elevation_deg == -3.0
+
+
+def test_apply_active_gaze_clears_actual_aim_when_no_look_is_commanded() -> None:
+    """A stale actual aim from the last glass phase must not linger once
+    `decide` has gone back to `SCANNING` (no fixed look, `OpticDecision`'s
+    azimuth/elevation both `None`) -- mirrors `OpticState.look_azimuth_
+    deg`'s own None-while-scanning contract."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import UNAIDED_OPTIC
+
+    naked_eye = _naked_eye_source()
+    prior_state = OpticState(actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-3.0)
+    decision = OpticDecision(optic=UNAIDED_OPTIC)
+
+    updated_state = _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=prior_state
+    )
+
+    assert updated_state is not None
+    assert updated_state.actual_aim_azimuth_deg is None
+    assert updated_state.actual_aim_elevation_deg is None
+
+
+def test_apply_active_gaze_returns_none_when_optic_state_was_never_given() -> None:
+    """Every pre-existing caller (including the two tests above this
+    section) passes no `optic_state` at all -- the return value must stay
+    `None` for them, not manufacture a state nobody asked for."""
+    naked_eye = _naked_eye_source()
+
+    updated_state = _apply_active_gaze([naked_eye], TaskStore())
+
+    assert updated_state is None
+
+
+# -- `_apply_active_gaze`'s `sight_cone`/`suppressed_until_sim` build
+# (`plans/9k113-sight/plan.md` §12/§12a, direction §6/§7) -------------------
+
+
+def test_apply_active_gaze_builds_a_sight_cone_from_actual_aim() -> None:
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import SIGHT_NARROW_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=SIGHT_NARROW_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
+    )
+
+    assert naked_eye.sight_cone is not None
+    assert naked_eye.sight_cone.azimuth_deg == 12.0
+    assert naked_eye.sight_cone.half_angle_deg == SIGHT_NARROW_OPTIC.fov_half_angle_deg
+    assert naked_eye.sight_cone.depth_m == SIGHT_NARROW_OPTIC.range_cap_m
+
+
+def test_apply_active_gaze_builds_no_cone_for_a_non_sight_optic() -> None:
+    """`Optic.regard_azimuth_half_deg is None` for `UNAIDED_OPTIC`/
+    `BINOCULAR_OPTIC` -- neither is pointed/slewed, so neither gets a
+    cone, even with a fixed look commanded (e.g. a binocular glass)."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=BINOCULAR_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
+    )
+
+    assert naked_eye.sight_cone is None
+
+
+def test_apply_active_gaze_builds_no_cone_while_sighting_is_idle() -> None:
+    """No fixed look commanded (idle-wide sighting, `decision.look_azimuth_
+    deg is None`) -- actual aim is cleared, so there is no committed
+    direction to point a cone at. The cone only follows a *committed* aim,
+    never a teleporting one (plan §15a/§15b point 3)."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    naked_eye = _naked_eye_source()
+    prior_state = OpticState(actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-3.0)
+    decision = OpticDecision(optic=SIGHT_WIDE_OPTIC)
+
+    _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=prior_state
+    )
+
+    assert naked_eye.sight_cone is None
+
+
+def test_apply_active_gaze_sets_suppressed_until_sim_from_optic_state() -> None:
+    from belief.optic_policy import OpticState
+
+    naked_eye = _naked_eye_source()
+
+    _apply_active_gaze(
+        [naked_eye],
+        TaskStore(),
+        optic_state=OpticState(hands_busy_until_sim=42.0),
+    )
+
+    assert naked_eye.suppressed_until_sim == 42.0
+
+
+def test_apply_active_gaze_suppressed_until_sim_is_none_by_default() -> None:
+    naked_eye = _naked_eye_source()
+
+    _apply_active_gaze([naked_eye], TaskStore())
+
+    assert naked_eye.suppressed_until_sim is None
+
+
 def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
     # End-to-end: a pending scan-left task registered on the store the
     # runner ticks must be visible to a real NakedEyePerceptionSource by
@@ -1911,6 +2070,75 @@ def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
 
     known_lower, known_upper = improvement_window_m("T-72", current_level="presence")
     assert (unknown_lower, unknown_upper) != (known_lower, known_upper)
+
+
+def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None:
+    """`BL-B64` Stage 2 review, Pass 2 required fix, exercised through the
+    actual command -> drain -> decide sequence, not just `optic_policy`'s
+    own unit tests. Reproduces the exact `observ_transition == "off"` drain
+    block `logger.py`'s poll loop runs (same pattern
+    `test_a_player_command_lowers_the_binoculars` already uses for the
+    binocular case) -- the gap the review found was invisible precisely
+    because no existing test drove this path end to end."""
+    from dataclasses import replace as _replace
+
+    from belief.crew_console import CrewConsole
+    from belief.optic_policy import (
+        HANDS_BUSY_DURATION_S,
+        OpticPhase,
+        OpticState,
+        decide,
+    )
+
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    optic_state = OpticState(
+        phase=OpticPhase.SIGHTING,
+        phase_started_sim=0.0,
+        home_phase=OpticPhase.SIGHTING,
+        look_contact_id="CONTACT_1",
+        look_started_sim=0.0,
+    )
+
+    # The real command surface: "Observ off" speaks immediately...
+    lines = console.handle_command("observ_off", now_sim=1.0)
+    assert lines == ["Observ off."]
+    assert console.observ_transition == "off"
+
+    # ...and the poll loop's own drain block (logger.py) is what actually
+    # touches `optic_state` -- reproduced verbatim rather than invoking the
+    # whole runner.
+    if console.observ_transition == "off":
+        optic_state = _replace(
+            optic_state,
+            home_phase=OpticPhase.SCANNING,
+            hands_busy_until_sim=1.0 + HANDS_BUSY_DURATION_S,
+        )
+        console.observ_transition = None
+
+    # While the 1 s hand movement is still running, decide() suppresses
+    # every optic -- the sight already stops speaking for Petrovich, even
+    # though `phase` has not yet formally left SIGHTING.
+    optic_state, decision = decide(
+        optic_state,
+        now_sim=1.0,
+        scan_cycle_period_s=10.0,
+        targets=[],
+        steady=True,
+    )
+    assert decision.suppressed is True
+
+    # The very next poll after the hand movement elapses: phase leaves
+    # SIGHTING immediately, not after SIGHT_MAX_DWELL_S.
+    optic_state, decision = decide(
+        optic_state,
+        now_sim=1.0 + HANDS_BUSY_DURATION_S,
+        scan_cycle_period_s=10.0,
+        targets=[],
+        steady=True,
+    )
+    assert optic_state.phase is OpticPhase.SCANNING
+    assert optic_state.home_phase is OpticPhase.SCANNING
+    assert optic_state.look_contact_id is None
 
 
 # -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side

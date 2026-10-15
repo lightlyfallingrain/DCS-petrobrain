@@ -769,6 +769,63 @@ def test_disengage_matches_its_phrasings() -> None:
         assert result.slots is None
 
 
+# --- BL-B64 Stage 2, direction §6: "OBSERV ON only on pilot command" ----
+
+
+class TestObservOnOff:
+    """`observ_on`/`observ_off` -- plain, slot-free phrases, both spoken
+    forms admitted (`vocabulary.PHRASES`'s own comment: "OBSERV" is not an
+    English word, so a recognizer may decode the sound as the real word
+    "observe" instead of the cockpit abbreviation, and nothing here bets
+    on one over the other)."""
+
+    def test_both_phrasings_resolve_each_token(self) -> None:
+        for phrase in ("observ on", "observe on"):
+            result = match_transcript(phrase)
+            assert result.token == "observ_on", phrase
+            assert result.match_ratio == 1.0, phrase
+            assert result.verb_anchored is True, phrase
+            assert result.ambiguous is False, phrase
+            assert result.slots is None, phrase
+        for phrase in ("observ off", "observe off"):
+            result = match_transcript(phrase)
+            assert result.token == "observ_off", phrase
+            assert result.match_ratio == 1.0, phrase
+            assert result.verb_anchored is True, phrase
+            assert result.ambiguous is False, phrase
+            assert result.slots is None, phrase
+
+    def test_survives_trailing_punctuation_and_casing(self) -> None:
+        """Realistic STT output -- trailing punctuation, a leading filler
+        word, and mixed case all survive to the same token (the shapes
+        observed in today's speech log: `"scan north,"`, `"Describe at
+        eleven o'clock."`)."""
+        for transcript, token in (
+            ("Observe on.", "observ_on"),
+            ("observ off,", "observ_off"),
+            ("OBSERVE OFF", "observ_off"),
+            ("please observe off", "observ_off"),
+            ("um observe on", "observ_on"),
+        ):
+            result = match_transcript(transcript)
+            assert result.token == token, transcript
+
+    def test_does_not_collide_with_any_existing_phrase(self) -> None:
+        """Neither phrasing fuzzy-matches an unrelated token -- there is
+        exactly one candidate above `MATCH_FLOOR` for each, and it is the
+        intended one. Guards against "observ"/"observe" stealing a match
+        that belongs to `watch`/`report`/`select_target`/etc."""
+        for phrase, expected in (
+            ("observ on", "observ_on"),
+            ("observe on", "observ_on"),
+            ("observ off", "observ_off"),
+            ("observe off", "observ_off"),
+        ):
+            result = match_transcript(phrase)
+            assert result.ambiguous is False, phrase
+            assert result.token == expected, phrase
+
+
 # --- describe: report's synonym (sortie 2026-10-05 debrief,
 # plans/sortie-2026-10-05-refinements/plan.md Item 2) ---
 
