@@ -14,14 +14,21 @@ guidance continues from world-anchored belief (projected forward if the
 target's own `motion` says it was moving, Decision 10/Stage 7) for the
 horizontal, and the **remembered** relative height (Decision 4 REVISED)
 for the vertical -- never `Contact.last_alt_m`, which is the ownship's own
-altitude at the last look, not the target's. Tier 2's utterance carries an
-`", obstructed"` qualifier appended to whatever tier 1 would have said in
-coarse form (the user's own words, 2026-10-14 second direction pass:
-`"lined up, obstructed"` composes exactly like `"right, obstructed"` --
-one rule, not a per-utterance table), including the `"lined up"` case,
-spoken once on entering it and then silent, mirroring tier 1's own
-`"Lined up."`-then-silence (§4) -- see `render_alignment`'s own docstring
-for why no special-case code is needed to make that true.
+altitude at the last look, not the target's.
+
+**The cause taxonomy (`plans/attack-run-sortie-fixes/plan.md`, BL-B70
+§1/§2/§8/§9) replaces the old "tier 2 always says obstructed" rule.**
+`_no_look_cause` answers *why* Petrovich has no fresh look right now, in
+`check_visibility`'s own gate order: `"masked"` (behind the cockpit mask --
+silence, the run stays engaged, §2), `"obstructed"` (a fresh DCS live LOS
+verdict says blocked by terrain or buildings -- `", obstructed"`, the
+word's only remaining caller, §8), `"too_far"` (naked-eye presence range
+exceeded -- the remembered-sighting age phrase, §5's fallback), or
+`"unknown"` (no fresh verdict either way -- fail-open, no qualifier at
+all, same posture `ContactStore.tick`'s own engagement term already
+takes). The qualifier is appended only on a tier-2 tick -- tier 1 is a
+live look and speaks bare, regardless of what `_no_look_cause` would say
+about last tick's geometry.
 
 **Pure functions plus one frozen dataclass; no I/O.** `AttackRunState` is
 modelled on `belief.optic_policy.OpticState`/`decide()`: replaced wholesale
@@ -48,13 +55,27 @@ from belief.association_over_time import contact_growth_rate_mps
 from belief.contacts import Contact
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.groups import Group
-from belief.speech import OutgoingSpeech, render_alignment
+from belief.speech import (
+    OutgoingSpeech,
+    _unit_type_display,
+    alignment_clock_hour,
+    alignment_phrase,
+    render_alignment,
+    render_attack_run_lost_sight,
+    render_attack_run_regained_sight,
+)
+from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
 from perception.geometry import (
     GeoPosition,
     alignment_direction,
-    signed_angular_delta_deg,
+    body_relative_direction,
+    range_m,
 )
+from perception.naked_eye_source import ATTACK_TARGET_LOS_MAX_AGE_S
+from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
+from perception.optics import UNAIDED_OPTIC
 from perception.source import OwnshipState
+from perception.visibility import tier_ranges
 
 #: The 12 o'clock sector's own half-width (Decision 6: one clock hour is
 #: 30 degrees, so the sector is the +/-15 degree wedge about the nose) --
@@ -62,7 +83,7 @@ from perception.source import OwnshipState
 #: already uses, not a second constant for the identical geometric fact.
 _SECTOR_HALF_DEG: Final[float] = CLOCK_BUCKET_DEG / 2.0
 
-#: Three constants, one place each, stated as assumptions (Decision 11,
+#: Two constants, one place each, stated as assumptions (Decision 11,
 #: kept unchanged by Decision 11 REVISED/§17's amendment) -- a stated
 #: guess with its bounds named, not a measurement, tuned from flying. **Do
 #: not tune these as part of implementing this plan** -- see the plan's
@@ -96,20 +117,6 @@ ATTACK_RUN_ELEVATION_GATE_DEG: Final[float] = tuning.real(
     hi=45.0,
     status="agreed-guess",
 )
-#: `ATTACK_RUN_CHANGE_THRESHOLD_DEG` (3.0): `BEARING_SIGMA_DEG` again --
-#: do not re-speak until the error has moved by more than belief's own
-#: noise would. Tier 1 has zero noise, so this constant's real job under
-#: design A is channel economy (how often to re-speak an unchanged-enough
-#: error), not noise rejection -- kept at 3.0 anyway rather than lowered,
-#: since a sortie, not this implementation, decides the cadence.
-ATTACK_RUN_CHANGE_THRESHOLD_DEG: Final[float] = tuning.real(
-    "belief.attack_run.ATTACK_RUN_CHANGE_THRESHOLD_DEG",
-    3.0,
-    lo=0.5,
-    hi=14.0,
-    status="agreed-guess",
-)
-
 #: How stale a relative observation may be and still be trusted for tier 1
 #: (Decision 16) -- two polls at the crew loop's `_DEFAULT_POLL_INTERVAL_S`
 #: (1.0 s), so a single missed poll does not immediately drop to silence.
@@ -177,21 +184,50 @@ class AttackRunState:
     `optic_state` once Stage 5 wires the loop (not done by this stage).
     Replaced wholesale by `decide`, never mutated.
 
-    `last_spoken_*` is the change-driven emit rule's own baseline
-    (Decision 7): the *last spoken* azimuth/elevation/text, never the
-    previous sample -- §10's own named guard against slow drift
-    accumulating silently under a per-sample threshold. All three start
-    `None` (nothing spoken yet), which `decide`'s own emit check treats as
-    "always emit the first utterance."
+    `last_spoken_text` is the change-driven emit rule's own baseline
+    (Decision 7, revised by `plans/attack-run-sortie-fixes/plan.md` BL-B70
+    §1): the *last spoken* rendered text, never the previous sample's
+    angles -- the angular change-driven clause is deleted entirely (F1:
+    no threshold can fix a comparison finer-grained than the vocabulary it
+    guards), so this is now the **whole** of `_should_emit`'s own
+    baseline. `None` (nothing spoken yet) means "always emit the first
+    utterance." **Never written on a `MASKED` tick** (§2) -- a suppressed-
+    for-masking tick must not move the baseline, or coming back round the
+    turn with the words unchanged would wrongly stay silent.
 
     `last_spoken_tier` is `decide`'s own record of which tier produced
     `last_spoken_text` (`1`/`2`, `None` before anything has been spoken) --
     read back by `belief.crew_console.drain_attack_run` for the speech
     log's `attack_run_tier` field, and by tests that pin which tier
     produced a given utterance. It plays no part in the emit decision
-    itself: a tier change always changes the *text* too (tier 2 appends
-    `", obstructed"`), so `_should_emit`'s existing text-comparison already
-    re-fires on a tier change with no tier-aware branch needed.
+    itself.
+
+    `last_spoken_clock_hour` (§4, BL-B70) is the hour `decide` last spoke
+    in the o'clock register, or `None` if the last spoken utterance was in
+    the qualitative register -- the baseline `decide` compares against to
+    decide whether *this* tick is a fresh entry into the 12 o'clock sector
+    (any entry, not literally 1->12/11->12 -- a hard turn can skip the
+    adjacent sector). Reset to `None` on a re-point (below): a new
+    target's first callout must never read as a sector crossing.
+
+    `last_spoken_unresolved` (§10, BL-B70) is whether `last_spoken_text`
+    was produced while the target's cause was `"too_far"` -- the baseline
+    for the "losing sight"/"regaining sight" transition sentences
+    (`belief.speech.render_attack_run_lost_sight`/`render_attack_run_
+    regained_sight`): `decide` speaks the full remembered-sighting claim
+    only on the `False` -> `True` edge, and `"Eyes on, ..."` only on the
+    `True` -> `False` edge (tier 1 resolving again). A `MASKED` tick
+    leaves this untouched, same reasoning as `last_spoken_text` -- going
+    behind the cockpit mask mid-episode must not end or restart the
+    episode, since §2 is silent on both edges by design.
+
+    `current_azimuth_deg`/`current_elevation_deg` are **not** a cadence
+    baseline -- updated unconditionally on *every* call, spoken or not,
+    exactly like `last_known_target_alt_m` below. They exist so `belief.
+    crew_console.drain_attack_run`'s speech-log fields always read "this
+    tick's" angles rather than a stale spoken baseline (the removed
+    `last_spoken_azimuth_deg`/`last_spoken_elevation_deg`'s only other
+    reader, besides the deleted cadence clause).
 
     `last_known_target_alt_m` is Decision 4 REVISED's "remember the
     relative height from the last look instead [of reading `Contact.
@@ -218,10 +254,12 @@ class AttackRunState:
     docstring for why that reset lives there and not at the call site.
     `None` only for a state that has never been passed through `decide`."""
 
-    last_spoken_azimuth_deg: float | None = None
-    last_spoken_elevation_deg: float | None = None
     last_spoken_text: str | None = None
     last_spoken_tier: Literal[1, 2] | None = None
+    last_spoken_clock_hour: int | None = None
+    last_spoken_unresolved: bool = False
+    current_azimuth_deg: float | None = None
+    current_elevation_deg: float | None = None
     last_known_target_alt_m: float | None = None
     last_contact_id: str | None = None
 
@@ -358,38 +396,98 @@ def _tier2_alignment(
     return direction.azimuth_deg, elevation_deg
 
 
-def _should_emit(
-    state: AttackRunState, azimuth_deg: float, elevation_deg: float, text: str
-) -> bool:
-    """Decision 7's change-driven cadence: emit when the rendered text
-    differs from the last *spoken* text, or either axis has moved by more
-    than `ATTACK_RUN_CHANGE_THRESHOLD_DEG` since the last spoken value --
-    not the previous sample, which is the slow-drift guard §10 itself
-    names.
+#: Why Petrovich has no fresh look at the attack target right now,
+#: computed in `check_visibility`'s own gate order so the two cannot
+#: disagree about precedence (`plans/attack-run-sortie-fixes/plan.md`
+#: BL-B70's cause taxonomy):
+#:
+#: - `"masked"` -- behind the cockpit mask. Silence (§2); the run stays
+#:   engaged.
+#: - `"obstructed"` -- a fresh DCS live LOS verdict says blocked by
+#:   terrain or buildings. `", obstructed"` -- the word's only remaining
+#:   caller (§8).
+#: - `"too_far"` -- naked-eye presence range exceeded. The remembered-
+#:   sighting transition register (§10).
+#: - `"unknown"` -- no fresh live LOS verdict either way. Fail-open, no
+#:   qualifier at all (F2) -- the same posture `ContactStore.tick`'s own
+#:   engagement term already takes for a missing/stale verdict.
+NoLookCause = Literal["masked", "obstructed", "too_far", "unknown"]
 
-    **No tier-aware branch needed** (Stage 6): a tier change always
-    changes `text` too -- tier 2 appends `", obstructed"` to whatever tier
-    1 would have rendered, including the `"lined up"` case, so the first
-    `text != state.last_spoken_text` check alone re-fires on every tier
-    transition in both directions. This is the mechanism, not a
-    coincidence worth re-deriving: the user's own direction (2026-10-14,
-    second pass) is that `"lined up, obstructed"` is spoken once on
-    entering it and `"lined up"` once on leaving it, exactly mirroring
-    tier 1's own `"Lined up."`-then-silence (§4) -- which is exactly what
-    falls out of comparing against the literal last-spoken text, with no
-    special case for the lined-up state."""
-    if text != state.last_spoken_text:
-        return True
-    if state.last_spoken_azimuth_deg is None or state.last_spoken_elevation_deg is None:
-        return True
-    azimuth_delta = abs(
-        signed_angular_delta_deg(state.last_spoken_azimuth_deg, azimuth_deg)
+
+def _no_look_cause(
+    ownship: OwnshipState, contact: Contact, now_sim: float
+) -> NoLookCause:
+    """`plans/attack-run-sortie-fixes/plan.md` BL-B70's cause taxonomy --
+    pure, computed from the same primitives `perception.visibility.
+    check_visibility`'s gates already use (`cockpit_mask.is_visible`,
+    `Contact.live_los_clear`, `visibility.tier_ranges`), never from
+    `perception.detection_trace.DetectionTrace` (a diagnostic channel;
+    using it as a control input would make the log load-bearing).
+
+    **The mask test uses the true, banked body-relative direction**
+    (`geometry.body_relative_direction` with `ownship.bank_deg`), *not*
+    `decide`'s own `alignment_direction`-derived azimuth/elevation --
+    those are deliberately bank-removed (a pilot control decomposition,
+    `alignment_direction`'s own docstring), which would silently misjudge
+    the mask during a banked turn. This mirrors `belief.contacts`'s own
+    `_callout_may_speak` mask check exactly (same call shape, same
+    `contact.last_position`).
+
+    **LOS freshness uses `ATTACK_TARGET_LOS_MAX_AGE_S`, not the general
+    `OBSERVED_WINDOW_S`/`LOS_MAX_AGE_S`** -- §9: the attack target gets a
+    tighter bound than an ordinary watched contact, because at the
+    measured ~60 m/s closing rate a 3 s-old verdict already describes a
+    position 180 m behind the target.
+
+    **Range uses the naked eye's own presence threshold** (`UNAIDED_
+    OPTIC`) -- `BL-B71`'s optic ladder (a different optic lowering this
+    bound) is out of scope for this entry."""
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    body_direction = body_relative_direction(
+        observer,
+        contact.last_position,
+        heading_true_deg=ownship.heading_true_deg,
+        pitch_deg=ownship.pitch_deg,
+        bank_deg=ownship.bank_deg,
     )
-    elevation_delta = abs(elevation_deg - state.last_spoken_elevation_deg)
-    return (
-        azimuth_delta > ATTACK_RUN_CHANGE_THRESHOLD_DEG
-        or elevation_delta > ATTACK_RUN_CHANGE_THRESHOLD_DEG
+    co_pilot_mask = COCKPIT_MASKS[STATION_CO_PILOT]
+    if not is_visible(
+        co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
+    ):
+        return "masked"
+    if (
+        contact.live_los_clear is False
+        and (now_sim - contact.last_seen_sim) <= ATTACK_TARGET_LOS_MAX_AGE_S
+    ):
+        return "obstructed"
+    profile = profile_for(contact.last_class_raw)
+    # Aspect is unknown for a belief the same way `improvement_window_m`
+    # treats it -- the profile's own extent, not a guess from a stale
+    # heading.
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+    presence_threshold_m, _class_threshold_m, _type_threshold_m = tier_ranges(
+        presence_size_m=profile.size_m,
+        recognition_extent_m=extent,
+        optic=UNAIDED_OPTIC,
+        distinctiveness=distinctiveness,
     )
+    if range_m(observer, contact.last_position) > presence_threshold_m:
+        return "too_far"
+    return "unknown"
+
+
+def _should_emit(state: AttackRunState, text: str) -> bool:
+    """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §1: emit if and only
+    if the rendered text differs from the last *spoken* text -- text
+    equality is a **veto**, not one of two triggers. The angular
+    change-driven clause this function used to also check is deleted
+    entirely (F1): the emit threshold was finer-grained than the
+    vocabulary's own quantisation (10/30/7.5/5.0 degrees), so it could
+    only ever re-speak unchanged text -- measured at 47 of 125 attack-run
+    utterances (38%) in the 2026-10-15 16:44 sortie. Compare what would be
+    said, not what is believed (the user's own words, §1)."""
+    return text != state.last_spoken_text
 
 
 def decide(
@@ -400,13 +498,7 @@ def decide(
     contact: Contact,
     group: Group | None = None,
 ) -> tuple[AttackRunState, OutgoingSpeech | None]:
-    """One tick of attack-run guidance: `(new_state, speech)`, `speech`
-    `None` when the change-driven rule says the rendered text has not
-    moved enough to repeat itself (Decision 7) -- the one remaining
-    silence, now that tier 2 (Stage 6/7) means there is always *something*
-    to guide on once a target is selected: `Contact.position` always
-    exists, so this function is silent only by the cadence rule, never
-    because no tier had anything to say.
+    """One tick of attack-run guidance: `(new_state, speech)`.
 
     Tries tier 1 first (`_tier1_alignment`); falls through to tier 2
     (`_tier2_alignment`) whenever tier 1 has no fresh relative observation.
@@ -415,11 +507,49 @@ def decide(
     resolves it from `self.store.group_for_contact(contact.id)`; tier 1
     never reads it, since a live look needs no projection.
 
-    `AttackRunState.last_known_target_alt_m` is updated on every call
-    where tier 1 succeeds, regardless of whether this call also speaks
-    (`AttackRunState`'s own docstring) -- so the memory a later tier-2 tick
-    reads is always as fresh as the most recent look, not merely the most
-    recent *spoken* one.
+    **`plans/attack-run-sortie-fixes/plan.md` BL-B70's cause taxonomy
+    (`_no_look_cause`) decides three things on top of the tier, in this
+    order:**
+
+    1. **`"masked"` -> silence** (§2): `speech` is `None` and neither
+       `last_spoken_text`, `last_spoken_clock_hour` nor `last_spoken_
+       unresolved` move -- the run stays engaged, but a suppressed-for-
+       masking tick must not look like a spoken one to the next tick's
+       comparison. Memory (`last_known_target_alt_m`,
+       `current_azimuth_deg`/`current_elevation_deg`) still updates, same
+       as any other tick.
+    2. **Tier 2's qualifier is cause-keyed, not tier-keyed** (§8, revising
+       Stage 6's "tier 2 always says obstructed"): `"obstructed"` ->
+       `", obstructed"`; `"too_far"` -> the §10 transition register
+       below; `"unknown"` -> no qualifier at all (fail-open, F2). Tier 1
+       never carries a qualifier regardless of what `_no_look_cause`
+       says about the *previous* tick's geometry.
+    3. **§10's "losing sight"/"regaining sight" announcements key on
+       resolvability, not on having been masked** (direction §11, user's
+       own words: *"losing sight is expected in a break after a gun/
+       rocket run... the important question is whether Petrovich sees
+       the target when we turn to see what is happening"*).
+       `AttackRunState.last_spoken_unresolved` tracks whether the cause
+       behind `last_spoken_text` was `"too_far"`; a `"masked"` tick never
+       touches it, so a break that masks the target mid-episode neither
+       starts nor ends one, and pulling off target (which masks on every
+       pass) does not announce a loss once per pass -- only the
+       resolvable/unresolvable edge does, which is `"too_far"`'s edge
+       alone.
+
+       - `False -> True` (newly too far): `render_attack_run_lost_sight`
+         -- the full remembered-sighting claim, once.
+       - steady `True`: ordinary bare guidance, no appended clause.
+       - `True -> False` (back inside acquisition range, i.e. tier 1
+         resolves again): `render_attack_run_regained_sight` -- `"Eyes
+         on, ..."`, once.
+       - steady `False`: ordinary rendering (§8/§4 as usual).
+
+    `AttackRunState.last_known_target_alt_m`/`current_azimuth_deg`/
+    `current_elevation_deg` update on **every** call regardless of tier,
+    cause or emit (their own docstrings) -- `belief.crew_console.
+    drain_attack_run`'s speech-log fields read `current_azimuth_deg`/
+    `current_elevation_deg`, never a spoken baseline.
 
     **Resets `state` to fresh the moment `contact.id` differs from
     `state.last_contact_id`** (the security-fix review's finding 5): a
@@ -437,13 +567,17 @@ def decide(
     fires on an explicit `engage` transition, never on a bare
     reselection). The reset clears `last_known_target_alt_m` (closes the
     reported bug: the new target's elevation can no longer be computed
-    from the old target's remembered altitude) and the `last_spoken_*`
-    cadence baseline/tier (so the first utterance about the newly
-    selected target always speaks -- `_should_emit` sees `last_spoken_
-    text=None` and emits unconditionally -- and carries the tier that
-    utterance actually used, never the old target's)."""
+    from the old target's remembered altitude), the `last_spoken_*`
+    cadence baseline/tier/clock-hour (so the first utterance about the
+    newly selected target always speaks and is never read as a sector
+    crossing), and `last_spoken_unresolved` (a new target's first callout
+    must never open with `"Eyes on, ..."` or inherit a last-seen clause
+    from the previous target, per direction §10)."""
     if state.last_contact_id != contact.id:
         state = AttackRunState(last_contact_id=contact.id)
+
+    cause = _no_look_cause(ownship, contact, now_sim)
+
     tier: Literal[1, 2]
     alignment = _tier1_alignment(ownship, contact, now_sim)
     if alignment is not None:
@@ -462,26 +596,88 @@ def decide(
         azimuth_table = TIER2_AZIMUTH_WORD_TABLE
         elevation_table = ELEVATION_WORD_TABLE if elevation_deg_opt is not None else ()
 
-    speech = render_alignment(
-        azimuth_deg,
-        elevation_deg,
-        tier=tier,
-        azimuth_table=azimuth_table,
-        elevation_table=elevation_table,
-    )
-    # Memory (the remembered target altitude) updates every tick tier 1
-    # succeeds, independent of the emit decision below -- see
+    # Memory updates every tick regardless of tier/cause/emit -- see
     # `AttackRunState`'s own docstring on why this must not wait for a
     # spoken tick.
-    state = replace(state, last_known_target_alt_m=target_alt_m)
-    if not _should_emit(state, azimuth_deg, elevation_deg, speech.text):
+    state = replace(
+        state,
+        last_known_target_alt_m=target_alt_m,
+        current_azimuth_deg=azimuth_deg,
+        current_elevation_deg=elevation_deg,
+    )
+
+    if cause == "masked":
+        # §2: silence, run stays engaged, cadence/sector/unresolved
+        # baselines all untouched (direction §11 -- a break that masks
+        # the target must not itself count as losing or regaining sight).
         return state, None
-    new_state = AttackRunState(
-        last_spoken_azimuth_deg=azimuth_deg,
-        last_spoken_elevation_deg=elevation_deg,
+
+    announce_twelve = (
+        abs(azimuth_deg) <= _SECTOR_HALF_DEG
+        and state.last_spoken_clock_hour is not None
+    )
+
+    # §10/§11: keyed on whether the target is resolvable *now*
+    # (`cause == "too_far"`), never on tier directly and never on having
+    # been masked -- direction §11, the user's own words: "the important
+    # question is whether Petrovich sees the target when we turn to see
+    # what is happening," not whether a break masked him in the
+    # meantime. `tier == 1` with `cause == "too_far"` is not reachable in
+    # practice (a fresh relative percept implies naked_eye_source already
+    # admitted it within presence range), but the condition is written
+    # against `cause` rather than `tier` so a range closing while tier
+    # stays 2 (still no fresh percept, but no longer too far) correctly
+    # announces "eyes on" too, not only a tier flip.
+    now_unresolved = cause == "too_far"
+    regaining_sight = state.last_spoken_unresolved and not now_unresolved
+    losing_sight = now_unresolved and not state.last_spoken_unresolved
+    speech: OutgoingSpeech
+    if regaining_sight:
+        phrase = alignment_phrase(
+            azimuth_deg,
+            elevation_deg,
+            azimuth_table=azimuth_table,
+            elevation_table=elevation_table,
+        )
+        speech = render_attack_run_regained_sight(phrase)
+    elif losing_sight:
+        phrase = alignment_phrase(
+            azimuth_deg,
+            elevation_deg,
+            azimuth_table=azimuth_table,
+            elevation_table=elevation_table,
+        )
+        what = _unit_type_display(
+            contact.classification.value, contact.classification.level.name.lower()
+        )
+        where_hour = alignment_clock_hour(azimuth_deg)
+        where = f"{where_hour} o'clock" if where_hour is not None else "ahead"
+        speech = render_attack_run_lost_sight(
+            phrase, what, where, now_sim - contact.last_seen_sim
+        )
+    else:
+        qualifier: str | None = None
+        if tier == 2 and cause == "obstructed":
+            qualifier = ", obstructed"
+        speech = render_alignment(
+            azimuth_deg,
+            elevation_deg,
+            azimuth_table=azimuth_table,
+            elevation_table=elevation_table,
+            qualifier=qualifier,
+            announce_twelve=announce_twelve,
+        )
+
+    if not _should_emit(state, speech.text):
+        return state, None
+
+    new_clock_hour = alignment_clock_hour(azimuth_deg)
+    new_state = replace(
+        state,
         last_spoken_text=speech.text,
         last_spoken_tier=tier,
-        last_known_target_alt_m=target_alt_m,
+        last_spoken_clock_hour=new_clock_hour,
+        last_spoken_unresolved=now_unresolved,
         last_contact_id=contact.id,
     )
     return new_state, speech

@@ -2304,8 +2304,16 @@ class CrewConsole:
                 attack_run_fields={
                     "attack_run_target_contact_id": contact.id,
                     "attack_run_tier": new_state.last_spoken_tier,
-                    "attack_run_azimuth_deg": new_state.last_spoken_azimuth_deg,
-                    "attack_run_elevation_deg": new_state.last_spoken_elevation_deg,
+                    # `plans/attack-run-sortie-fixes/plan.md` BL-B70 §1:
+                    # `AttackRunState.last_spoken_azimuth_deg`/
+                    # `last_spoken_elevation_deg` (the old cadence
+                    # baseline) are removed -- `current_azimuth_deg`/
+                    # `current_elevation_deg` are updated every tick
+                    # regardless of emit, so they always read "this
+                    # tick's" angles, which is exactly the tick that
+                    # produced `speech.text` here.
+                    "attack_run_azimuth_deg": new_state.current_azimuth_deg,
+                    "attack_run_elevation_deg": new_state.current_elevation_deg,
                 },
             )
             return new_state

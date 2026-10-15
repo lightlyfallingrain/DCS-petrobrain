@@ -1588,7 +1588,14 @@ def _run_console_poll_loop(
                         and runner.last_ownship_state is not None
                     ):
                         belief_truth_writer.write_poll(
-                            trace_collector, runner.store, runner.last_ownship_state
+                            trace_collector,
+                            runner.store,
+                            runner.last_ownship_state,
+                            attack_run_target_contact_id=(
+                                runner.attack_run_state.last_contact_id
+                                if runner.attack_run_state is not None
+                                else None
+                            ),
                         )
                     if trace_writer is not None:
                         trace_writer.write_poll(trace_collector, runner.store)
@@ -1905,7 +1912,14 @@ def _run_crew_text_poll_loop(
                         and runner.last_ownship_state is not None
                     ):
                         belief_truth_writer.write_poll(
-                            trace_collector, runner.store, runner.last_ownship_state
+                            trace_collector,
+                            runner.store,
+                            runner.last_ownship_state,
+                            attack_run_target_contact_id=(
+                                runner.attack_run_state.last_contact_id
+                                if runner.attack_run_state is not None
+                                else None
+                            ),
                         )
                     if trace_writer is not None:
                         trace_writer.write_poll(trace_collector, runner.store)

@@ -238,6 +238,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
+import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from perception import object_model
 from perception.association import (
@@ -349,6 +350,27 @@ _ACQUISITION_RETENTION_WINDOW_S: Final[float] = SCAN_CYCLE_PERIOD_S
 #: rate: at 83 m/s the aircraft covers ~250 m in 3 s, the shape of error to
 #: listen for if a stale verdict ever produces a visibly wrong call.
 LOS_MAX_AGE_S: Final[float] = 3.0
+
+#: `plans/attack-run-sortie-fixes/plan.md` (BL-B70 §9) -- how stale the
+#: attack-run target's own live LOS verdict may be before `belief.
+#: attack_run._no_look_cause` treats it as no verdict at all (`"unknown"`,
+#: fail-open) rather than a real `"obstructed"` call; a *smaller* value
+#: here is the dangerous direction, since it starts discarding genuinely
+#: fresh verdicts and reporting `"unknown"` instead. Tighter than the
+#: general `LOS_MAX_AGE_S` above, deliberately: at the 2026-10-15 sortie's
+#: measured ~60 m/s closing rate a verdict this old already describes a
+#: position 90 m behind the target, which is already most of a vehicle's
+#: own length of error. Does not change the join itself (`LOS_MAX_AGE_S`
+#: still gates whether a verdict is attached to `Contact.live_los_clear`
+#: at all) -- this is a second, tighter freshness test applied only to
+#: the one contact an active attack run is guiding on.
+ATTACK_TARGET_LOS_MAX_AGE_S: Final[float] = tuning.real(
+    "perception.naked_eye_source.ATTACK_TARGET_LOS_MAX_AGE_S",
+    1.5,
+    lo=0.5,
+    hi=3.0,
+    status="agreed-guess",
+)
 
 #: Reads differently from Hybrid's `"petrovich_indication+world_objects"` --
 #: a filter pass here is structurally weaker evidence than a real HelperAI
