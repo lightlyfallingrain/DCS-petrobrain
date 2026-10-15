@@ -35,17 +35,35 @@
   currently the hardest for Petrovich to see.** Measured on the 2026-10-15T17:55 sortie, where the
   attack target sat unresolvable between 2.6 km and 2.36 km for fifteen seconds.
 
-  ## Blocked on a probe, not on a plan
+  ## SAM launch is the same rule with a decaying tail
 
-  **DCS firing events are not exported today** — `grep` over `aircraft-layer/dcs-export/Export.lua`
-  and `aircraft-layer/src` finds no shooting event of any kind. So this needs new aircraft-layer
-  work, and its feasibility is unverified in the specific way that decides the entry's cost:
+  **Added by the same direction.** A SAM launch is comparable, *"but SAM missiles leave smoke trail,
+  so that especially gives away the launcher position. Pick a constant to simulate smoke trail
+  dissipation -> SAM launch shows where the launcher was for quite a while."*
 
-  `S_EVENT_SHOOTING_START`/`S_EVENT_SHOOTING_END` are **mission-scripting** events
-  (`world.addEventHandler`). This project's export lives in a **GameGUI Hook**, and whether a Hook
-  can observe those events at all is an open question. **Investigator before Architect** — if the
-  answer is no, the fallbacks (a polled per-unit firing flag, if one exists; or nothing) are
-  materially worse and change whether this is worth building as specified.
+  This is **the first perception source with a decaying external lifetime**: gun fire is visible
+  only between start and stop, while a launch stays visible *after* the event ends because the smoke
+  hangs. It reveals **where the launcher was** — a sighting with an age, which belief already
+  models — and must not read as "a launcher is there now". The dissipation constant is
+  behaviour-affecting and goes in the tuning file; it is exactly what a sortie retunes.
+
+  ## The export mechanism exists; the open question is narrower than it looked
+
+  **Corrected 2026-10-15** against
+  `aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md`, which the
+  user remembered and which settles most of this:
+
+  - Reachable over the **mission-scripting bridge** (`net.dostring_in("scripting", ...)`, polled at
+    1 Hz from a Hook) — **already shipping** for F10 commands and unit velocity. No new mechanism.
+  - **`S_EVENT_SHOT` covers missiles and excludes machine-gun/autocannon fire**, which routes to
+    **`S_EVENT_SHOOTING_START`** instead; both have paired end events. **The gun half and the SAM
+    half of this feature therefore need different events** — and that split happens to line up
+    exactly with the two halves.
+  - **The one open point**, which that note itself calls *"the single most important unresolved
+    point"*: whether **ground AAA** (ZU-23, Shilka, 2S6) raises `S_EVENT_SHOOTING_START` at all, or
+    only aircraft cannon do. The documented wording is unit-generic; every worked example is an
+    aircraft gun. **That is the probe** — one mission, one AAA unit, one log line — and it is much
+    smaller than the "can we get firing events" question this entry was first filed with.
 
   Related: `[[BL-B64]]` (the optic model this bypasses a gate of), `[[BL-B70]]`/`[[BL-B71]]` (the
   attack-run work whose `", obstructed"` semantics question 1 interacts with), `[[BL-2]]`
