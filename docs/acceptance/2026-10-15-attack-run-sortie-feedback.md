@@ -294,6 +294,40 @@ last-seen clause inherited from the previous target.
 
 ---
 
+## §11 — The announcement keys on whether he can see it, not on what interrupted
+
+Answering the one question §10 left open — whether going silent behind the airframe (§2) and then
+coming back counts as losing sight:
+
+> *"If beyond visual acquisition range when turning back in, then yes. If turning back in within
+> detection range of target then no, just normal guidance. Losing sight is expected in a break
+> after a gun/rocket run. The important question is whether Petrovich sees the target when we turn
+> to see what is happening and if we should attack again."*
+
+**So the two mechanisms are independent, and that makes both simpler:**
+
+| mechanism | keyed on | effect |
+|---|---|---|
+| §2 silence | the **cockpit mask** — target behind the airframe | say nothing while blocked |
+| §10 announcement | **whether the target is currently resolvable** on return | announce the loss, or don't |
+
+**Do not track "was I masked".** Track whether he can resolve the target *now*. Coming back inside
+acquisition range is ordinary guidance with no preamble; coming back outside it announces the loss
+with its last-seen clause. The mask is irrelevant to that choice — it only decides whether he was
+speaking in the meantime.
+
+**The reasoning behind it is the part worth keeping**, because it says what the feature is *for*:
+losing sight during a break after a gun or rocket run is **expected and unremarkable** — narrating
+it would be noise about something the pilot just did deliberately. What the pilot actually wants to
+know on turning back is *"do you see it, and should we go again?"*. The announcement exists to
+answer that question, not to report the break.
+
+This also removes a hazard §10 introduced: a mask-keyed implementation would announce a loss every
+time the pilot pulled off target, which is precisely the per-tick noise §1 and §10 exist to remove,
+arriving once per pass instead of once per tick.
+
+---
+
 ## What this leaves open for `/explore`
 
 - **§2:** does flying past *end* the run, or only silence it? And is "behind the cockpit mask" the
