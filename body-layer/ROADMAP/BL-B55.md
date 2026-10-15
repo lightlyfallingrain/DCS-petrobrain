@@ -1,7 +1,12 @@
 # BL-B55 — Position uncertainty is optic-blind, and the 9K113 slice depends on it
 
-- [ ] **BL-B55 — `naked_eye_sigma_m` takes range only, so every look gets naked-eye-grade position
-  error regardless of which optic made it.** #status/open Identified by the user, 2026-10-11, from
+- [x] **BL-B55 — `naked_eye_sigma_m` takes range only, so every look gets naked-eye-grade position
+  error regardless of which optic made it.** #status/done #needs-flight
+  **Closed as `[[BL-B64]]`'s own Stage 1b, merged 2026-10-15 in `ec39c0e`** — the two could not be
+  separated, because a sight seeing to 8 km while every look carried naked-eye range error would
+  report a confident range wrong by ~1.4 km, which is worse than having no sight. `naked_eye_sigma_m`
+  is now `look_sigma_m` with a mandatory optic parameter. The per-optic scales are **stated
+  assumptions, not measurements**, so the acceptance sortie is what confirms them. Identified by the user, 2026-10-11, from
   the pilot's side rather than the code's — see
   `docs/acceptance/2026-10-11-infantry-detectability-feedback.md` for his words and the arithmetic.
 
