@@ -351,6 +351,17 @@ and does not turn hears nothing further, because nothing has changed. That is co
 A and is the opposite of the 23-callouts-in-45-s problem, but whether prolonged silence while badly
 misaligned reads as "aligned" is a sortie question (see §"What a sortie must decide").
 
+**7a. Decision 7 REVISED (2026-10-15 sortie, §1) — the `either` becomes a veto, and the angular
+clause is deleted.** The decision above stands as the record of what was built; **do not implement
+from it.** The sortie measured **47 of 125** attack-run utterances byte-identical to the one before
+(38%), and the cause is the second bullet firing while the first is unchanged: the threshold is 3.0°
+while the vocabulary's own quantisation is 10° (elevation gate, direction §11's *"wide on purpose"*),
+30° (o'clock sector) and 7.5°/5.0° (azimuth rows), so **a 3° threshold on a 10° word gate cannot do
+anything except re-speak unchanged text.** Emit **iff** the rendered string differs;
+`last_spoken_azimuth_deg`/`last_spoken_elevation_deg` lose their only reader and go with it. This is
+§10's drift risk being *answered* by a sortie rather than reversed — the guard fired 47 times and
+never once carried information. Replacement: `plans/attack-run-sortie-fixes/plan.md`, `[[BL-B70]]`.
+
 **8. `silence` mid-run mutes guidance — no exemption.** `self.silenced` gates exactly one thing,
 `_print`'s `speech_client.push_speech`, and does so for `bypass_gate=True` urgent lines too, by the
 user's own explicit choice. Guidance should not be the first exception, and the overlap window is
@@ -819,6 +830,17 @@ tier 1's table leaks through — no o'clock, no *"come left"*, no *"lined up"*. 
 takes the tier as an argument; what changed from the struck recommendation is that tier 2 is no
 longer a *subset* of tier 1's table reached by withholding one row, but a separate, narrower
 rendering path selected by the same argument.
+
+**17b. Decision 17 REVISED, amended (2026-10-15 sortie, §5/§8) — `", obstructed"` is no longer the
+qualifier for *every* tier-2 cause.** Tier 2's two-vocabulary structure above is unchanged and
+stands; what changes is the qualifier it appends. The sortie found the attack target rejected at the
+**`range_or_size`** gate, never at `cockpit_mask`, crossing at ~2,330 m — exactly
+`7 m / LOWRES_ANGULAR_RADIUS_RAD` — so *"obstructed"* was spoken for a target in plain sight that
+Petrovich's naked eye genuinely could not resolve. Per user direction (§8, *"'...obstructed' for DCS
+LOS, be it terrain or buildings"*), the word's **only** remaining caller is a fresh
+`live_los_clear is False`; the cockpit mask goes **silent** (§2) and range/size changes optic (§6/§7)
+or falls back to `speech._spoken_age_phrase`. Replacement:
+`plans/attack-run-sortie-fixes/plan.md`, `[[BL-B70]]`/`[[BL-B71]]`.
 
 > ~~**One vocabulary, two tiers (Decision 17).** Every row above is spoken in either tier except
 > *"a bit left"* / *"a bit right"*, which **tier 2 withholds** — its ~3.9° residual cannot support a
