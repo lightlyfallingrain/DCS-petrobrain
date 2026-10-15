@@ -31,3 +31,9 @@ recurring false positives are not re-litigated every merge.
   `tools/inspect_terrain.py`, which automates the multi-scale hillshade snapshot pipeline.
 - 2026-10-04 `harvest an agent's worktree commit` — **created** as `.claude/skills/harvest-agent-commit/` (user approved 2026-10-05).
 - 2026-10-04 `sortie-log triage` — **created** as `.claude/skills/sortie-log-triage/` (user approved 2026-10-05).
+- 2026-10-15 `duplicate-audit-subagent-fanout` — **rejected** (user approved 2026-10-15). Real
+  coordination gap: one audit task was re-spawned 8+ times by different agents at increasing depths,
+  and the duplicates produced contradictory reports that cost a session to untangle. But it is a
+  *dispatch rule* ("do not spawn an equivalent audit while one is running"), not a reusable
+  procedure, so it belongs in the `PreToolUse:Agent` hook beside the worktree and sha gates — the
+  same redirection `agent-dispatch-preamble` got on 2026-10-04.
