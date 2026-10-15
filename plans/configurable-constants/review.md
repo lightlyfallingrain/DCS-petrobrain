@@ -518,3 +518,88 @@ confirm the defaults.toml-propagation gap is structural, not a bug introduced by
 independently re-derived: the pre-existing calibration note's own screenshot-ladder measurements
 (503 m–8.89 km) — taken as given, since they predate this commit and are out of this review's
 scope.
+
+## Fix-pass-3 review
+
+Reviewing commit `58c0114` alone, against the two Fix-pass-2 required findings. Not a re-review of
+the whole feature -- everything else is already approved by Reviewer (twice), Performance, and
+Security.
+
+**Base check.** `.claude/worktrees/review-xt26-fp3` created against the exact named tip; `git
+rev-parse HEAD` == `58c0114cf3a964900b590e8390028298e3b5f783`, tree clean, no merge needed.
+
+**Required fix 1 (the 4x-high figures).** Re-derived independently rather than checked against the
+implementer's arithmetic: `LOWRES=0.003`, `MEDRES=0.014`, `HIRES=0.028` (read directly from the
+`tuning.real(...)` calls in `perception/visibility.py`); `UNAIDED_OPTIC.presence_range_mult` /
+`class_range_mult` / `type_range_mult` are all `1.0` (`perception/optics.py` lines 141-143, which
+`check_visibility`'s default `optic` parameter resolves to). `7 / 0.003 ~= 2.33 km`,
+`7 / 0.014 = 0.5 km`, `7 / 0.028 = 0.25 km` -- exactly the ~2.3/0.5/0.25 km now in the source and in
+`defaults.toml`. Each sentence now names `UNAIDED_OPTIC` explicitly, closing the ambiguity that let
+the first (binocular-ladder) figure through unchallenged. **Correct.**
+
+**Required fix 2 (rendering into `defaults.toml`).** Read the rendered file itself, not the source
+comments -- the distinction the prior pass's failure turned on. All three sentences now render as
+each block's comment line in `config/defaults.toml` (lines 83, 88, 91 as checked out for
+LOWRES/MEDRES/HIRES), carrying the inverse-relationship statement, the named optic, the corrected
+figure, and the `lo`-is-dangerous direction, all in one first sentence. `git show 58c0114 --
+visibility.py` confirms every added line is a `#:` comment -- no code, no `default`/`lo`/`hi`
+touched; `generate_defaults.py` and `optics.py` are untouched by this commit (`git diff` against
+both is empty). `_first_sentence()`'s one-sentence contract was correctly left alone, matching the
+scope limit set in the dispatch. **Correct, and verified against the artifact the fix was supposed
+to produce, not its source.**
+
+**The backtick-span rendering bug found along the way.** Confirmed real by reading
+`_join_comment_lines()`: it tracks backtick parity across lines and joins with no space when a span
+is "open" at a line boundary -- correct for a hand-wrapped dotted identifier, wrong for an ordinary
+word-wrapped formula that happens to start with a backtick. The fix taken (keep each
+backtick-quoted formula on one physical `#:` line) is a workaround to the prose, not a fix to the
+generator, and the implementer says so themselves. **Judgment: `X-B37` (`todo/backlog/`, filed
+2026-10-15 from this same review cycle) is the right home, but not a perfect fit as currently
+worded** -- `X-B37` frames the open question as `_first_sentence()`'s truncation/markup-leakage
+contract; this is a distinct mechanism, `_join_comment_lines()`'s cross-line join, and it can
+corrupt *any* multi-line `#:` block with a wrapped backtick span, not just ones affected by
+first-sentence truncation. Both live in `generate_defaults.py` and both are "the generator's
+rendering contract isn't trustworthy yet," so I'd fold a line into `X-B37` noting the join-level
+defect explicitly (so whoever picks it up tests for it) rather than filing a fourth item -- but that
+fold is a one-line edit for whoever next touches `X-B37`, not something blocking this verdict.
+
+**Sentence clarity.** The three rendered sentences are long (~45 words, one sentence each) but each
+clause is load-bearing: direction of the inverse relationship, the formula, the named optic, the
+default's boundary in km, which bound is dangerous. Trying to drop "naked-eye" before "presence
+range" (redundant with the explicit `UNAIDED_OPTIC` a few words later) reads slightly cleaner
+without losing anything -- a trim worth making, but optional; the sentence is accurate and parses
+correctly as written, which is what the brief actually requires.
+
+**Nothing else moved.** `git show 58c0114 --stat` touches exactly `visibility.py` (comments only),
+`defaults.toml` (three description lines only, confirmed no `status`/`range`/value line changed),
+`implementation.md`, and two `.claude/agent-memory/implementer/` feedback files -- both well-formed,
+correctly scoped (not under `research/`), and substantively useful for Stage 3's ~80 remaining
+keys.
+
+**Verification, run myself** (worktree `.venv` rebuilt pinned to `ruff==0.16.6`/`mypy==2.3.1`/
+`pytest==9.1.1`/`numpy==2.4.6`/`pyproj==3.8.0`):
+- `ruff format --check .` -- fails only on the pre-existing, out-of-scope
+  `research/2026-10-05-security-audit.md`. Matches claim.
+- `ruff check .` -- all checks passed.
+- `mypy src` -- success, 59 source files.
+- `pytest -q` -- **1870 passed, 4 xfailed.** Matches claim exactly.
+- `PETROBRAIN_TUNING` sanity check, re-run independently: `LOWRES_ANGULAR_RADIUS_RAD = 0.0005`
+  override -- process starts, `--print-tuning` reports it rejected with `out of range (0.0005 out of
+  range [0.00128, 0.01])`, code default `0.003` stays in force. Matches claim.
+
+### Fix-pass-3 Verdict
+
+**APPROVED.** Both required findings from Fix-pass-2 are correctly and completely addressed, the
+figures check out against the actual code (not against the implementer's own arithmetic), the
+sentences render into the artifact the user's brief names directly, and nothing out of scope moved.
+This has been round the loop three times on description text and this pass gets it right --
+proceeds to DoD.
+
+### Fix-pass-3 Review Confidence
+
+Full read of the one commit. Verified by independent recomputation (the range figures, from the
+actual constants and `UNAIDED_OPTIC`'s multipliers -- not cross-checked against the implementer's
+numbers), by reading the rendered `config/defaults.toml` directly rather than the source `#:`
+comments, by diffing `optics.py`/`generate_defaults.py` against the prior commit to confirm neither
+moved, and by re-running every verification command and the standing `PETROBRAIN_TUNING` sanity
+check myself rather than accepting the reported counts.
