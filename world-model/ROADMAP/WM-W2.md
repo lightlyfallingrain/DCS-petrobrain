@@ -37,3 +37,26 @@
   `docs/acceptance/2026-10-05-dcs-driven-los-sortie.md`. Full record: `plans/dcs-driven-los/{plan.md,
   security-plan-review.md, implementation.md, review.md, security-deep-analysis.md, performance.md,
   dod-check.md}`; backlog entries `todo/backlog.md`'s [[X-B29]]/[[X-B30]].
+
+## Decision, 2026-10-15 (user): observe, do not tune
+
+**The residual no-verdict rate is accepted as-is for now**, and the attack-target LOS priority is
+scheduled with `[[BL-B70]]` rather than pulled forward. The user's reasoning, which is the part
+worth keeping because it decides when this becomes urgent again:
+
+> *"This is highly dependent on density of targets in a given mission. If it's very dense then
+> there's a lot of units to LOS and that is a real cost. If just a few units inside the player
+> bubble then it's nearly free. A very dense scene is on the rare side, it may happen over large
+> cities, but otherwise the scenarios typically are much sparser."*
+
+So the cost is **a property of the mission, not of the code**, and tuning against the sparse case
+would be tuning against the common case rather than the one that hurts. Coverage measured 77% on
+2026-10-05 and 93–99% across the three 2026-10-15 sorties; the gate fails closed, so a miss costs
+one tick of a contact treated as masked.
+
+**What would reopen it**, concretely rather than as a feeling: the hook already puts
+`units_in_wedge` and `sightlines_computed` on the wire side by side, and its own docstring states
+the test — *"If `sightlines_computed < units_in_wedge` ever shows up in the log, the wedge is
+wrong, not the budget."* A dense-city sortie is the scenario that would show it. **Read those two
+numbers before changing `MAX_SIGHTLINES_PER_CALL` (128), the 90° wedge, or `LOS_MAX_AGE_S` (3.0)**
+— all three were left deliberately unchanged pending exactly that measurement.
