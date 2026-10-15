@@ -106,6 +106,25 @@
   project's central invariant forbids. `plans/brain-layer/explore-notes.md`'s question **stays
   open**; this entry supplies one input a future attribution model could use, not the answer.
 
+  ## Planned, and split three ways
+
+  **Architect pass 2026-10-15: `plans/emitter-visibility/plan.md`.** The gate change is one
+  mechanism for all three emitters — a per-candidate `emitter` parameter on `check_visibility` that
+  bypasses the range/size and forest gates only, and clamps the achieved tier to `lowres` whenever
+  either bypass was used. `_classification_for_tier("lowres", …)` already yields the presence class,
+  so detection-only needs no new classification path. Provenance rides on `Observation.provenance`,
+  which is already a free-form string, so no schema changes anywhere.
+
+  **This entry keeps the shared bypass plus the burning emitter** (`[[AC-B7]]`), which needs no new
+  transport and ships first. The two event-driven halves split out: **`[[BL-B73]]`** gun fire and
+  **`[[BL-B74]]`** the SAM smoke tail, both blocked on **`[[AC-B8]]`**.
+
+  **Two findings from that pass worth having here**: the existing threat path keys on classification
+  and so would schedule a `PRESENCE`-only firing contact at the *lowest* priority there is — new
+  event kinds are required, not a reuse; and `petrobrain-line-of-sight-hook.lua`'s
+  `MAX_SIGHTLINES_PER_CALL = 128` nearest-first cap drops the *far* candidates, which with a
+  fail-closed LOS gate can silently neuter the whole feature in a dense scene.
+
   Related: `[[BL-B64]]` (the optic model this bypasses a gate of), `[[BL-B70]]`/`[[BL-B71]]` (the
   attack-run work whose `", obstructed"` semantics question 1 interacts with), `[[BL-2]]`
   (contact decay, which owns what happens after the firing stops).

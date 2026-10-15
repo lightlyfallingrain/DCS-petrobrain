@@ -40,6 +40,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B4]] — Measure `LoGetWorldObjects` FPS cost live
 - [[AC-B5]] — A probe Hook left deployed taxes every sortie
 - [[AC-B6]] — report when audio playback has actually stopped
+- [[AC-B7]] — per-unit life on the existing mission-scripting bridge
+- [[AC-B8]] — a production firing-event channel over the mission-scripting bridge
 
 ## Keeping this current
 

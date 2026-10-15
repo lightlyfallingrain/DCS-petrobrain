@@ -111,6 +111,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B70]] — attack-run guidance: what to say and when (2026-10-15 sortie §1/§2/§4/§8/§9)
 - [[BL-B71]] — the least-capable-optic guidance ladder (2026-10-15 sortie §6/§7)
 - [[BL-B72]] — a firing unit gives itself away, out to the player bubble (detection only)
+- [[BL-B73]] — gun fire makes its firer visible out to the player bubble
+- [[BL-B74]] — a SAM launch's smoke trail shows where the launcher was
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
