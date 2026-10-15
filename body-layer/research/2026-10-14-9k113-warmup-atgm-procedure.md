@@ -339,3 +339,57 @@ and `find / -iname "mainpanel_init.lua"` both returned nothing).
   this session. They should hold (device/command tables are positional but stable across a single
   DCS version), but a DCS update between 2026-09-11 and whenever this is built could have shifted
   them — regenerate against the installed tree before relying on exact argument numbers in code.
+
+---
+
+## Addendum, 2026-10-15 — missile speed and range, from the user's own sources
+
+**Finding 4's data gap is closed, and not by a flight.** The user supplied the sources directly:
+Wikipedia's [9K114 Shturm](https://en.wikipedia.org/wiki/9K114_Shturm) and
+[9M120 Ataka](https://en.wikipedia.org/wiki/9M120_Ataka) articles, with his own framing: *"Hind can
+carry either ... ATGM missiles."*
+
+That framing matters as much as the numbers: **the Hind's loadout is a choice between two missile
+families, not one missile.** Finding 4 above treated "Shturm" versus "Ataka" as a naming correction
+(DCS implements 9M114, the Ataka family is marked in development). It is really a **loadout
+question** — which changes the design, because the speed and the maximum range differ by enough
+that one set of constants cannot serve both.
+
+| | **9M114 Shturm** (9M114V on the Mi-24) | **9M120 Ataka** (9M127-1 Ataka-VM is the helicopter air-to-surface variant) |
+|---|---|---|
+| range | **400–5,000 m** (base 9M114) | **400–6,000 m** (base 9M120) |
+| | 6 km (9M114M1 / AT-6B), 7 km (9M114M2 / AT-6C) | 8 km (9M120M), 10 km (9M120D) |
+| speed | **345 m/s** (≈Mach 1.0) | **400 m/s average, 550 m/s max** (≈Mach 1.6) |
+| guidance | radio-command **SACLOS**, VHF, five frequency bands | radio-command **SACLOS** |
+| warhead | 5.3 kg HEAT, 560–600 mm RHA | tandem HEAT, 800 mm after ERA (950 mm on 9M120M) |
+| length / dia / weight | 1,625 mm / 130 mm / 31.4 kg | 1,830 mm / 130 mm / 49.5 kg |
+
+**Neither source states a time of flight**, so the flight-time callout still has to be computed
+rather than looked up. But it is now computable: at 345 m/s a Shturm covers 5 km in **~14.5 s**, and
+at 400 m/s average an Ataka covers 6 km in **~15 s**. Those are the figures the
+`"<missile>, <flight time>"` callout needs, and they are the right order of magnitude for a spoken
+countdown.
+
+**Three consequences for `plans/9k113-sight/plan.md`:**
+
+1. **The missile word is a loadout read, not a constant.** Speaking `"Shturm"` unconditionally is
+   correct *today* only because DCS has not shipped the Ataka family. The moment it does, a
+   hardcoded word is wrong for half the loadouts. The cheap design is to derive the word from the
+   loaded store and fall back to the generic `"missile"` when it cannot be read — which is also the
+   plan's own Decision 4, now with a reason beyond caution.
+2. **Speed and max range are per-family constants**, so they belong in the
+   `X-T26` configurable set rather than inline — two profiles, not two magic numbers. The ~40%
+   speed difference (345 vs 400 m/s average) is large enough to be audible in a spoken flight time.
+3. **The in-range / out-of-range gate is now implementable** — 400 m minimum and a per-family
+   maximum. The plan's recommendation to suppress those callouts entirely was made because the
+   numbers were unknown; that premise is gone. **It should still be weighed against source
+   confidence:** these are Wikipedia figures, not DCS's own weapons tables, and DCS's shipped tables
+   remain the authoritative read (a file read, not a flight — see the plan's own note). Treat the
+   table above as good enough to design against and worth confirming against
+   `Scripts/Database/db_weapons*.lua` before the numbers reach a callout the pilot trusts.
+
+**Minimum range is a real constraint, not a footnote.** Both families need **400 m**, and the
+attack-run guidance from `BL-14` currently has no concept of being too close. A run that closes
+inside 400 m has no launch solution at all, which is exactly the case `BL-14`'s own direction
+anticipated — *"when attack run starts from a fairly close distance ... the time to weapon release
+might be short."*
