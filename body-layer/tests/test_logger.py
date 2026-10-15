@@ -2072,6 +2072,75 @@ def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
     assert (unknown_lower, unknown_upper) != (known_lower, known_upper)
 
 
+def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None:
+    """`BL-B64` Stage 2 review, Pass 2 required fix, exercised through the
+    actual command -> drain -> decide sequence, not just `optic_policy`'s
+    own unit tests. Reproduces the exact `observ_transition == "off"` drain
+    block `logger.py`'s poll loop runs (same pattern
+    `test_a_player_command_lowers_the_binoculars` already uses for the
+    binocular case) -- the gap the review found was invisible precisely
+    because no existing test drove this path end to end."""
+    from dataclasses import replace as _replace
+
+    from belief.crew_console import CrewConsole
+    from belief.optic_policy import (
+        HANDS_BUSY_DURATION_S,
+        OpticPhase,
+        OpticState,
+        decide,
+    )
+
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    optic_state = OpticState(
+        phase=OpticPhase.SIGHTING,
+        phase_started_sim=0.0,
+        home_phase=OpticPhase.SIGHTING,
+        look_contact_id="CONTACT_1",
+        look_started_sim=0.0,
+    )
+
+    # The real command surface: "Observ off" speaks immediately...
+    lines = console.handle_command("observ_off", now_sim=1.0)
+    assert lines == ["Observ off."]
+    assert console.observ_transition == "off"
+
+    # ...and the poll loop's own drain block (logger.py) is what actually
+    # touches `optic_state` -- reproduced verbatim rather than invoking the
+    # whole runner.
+    if console.observ_transition == "off":
+        optic_state = _replace(
+            optic_state,
+            home_phase=OpticPhase.SCANNING,
+            hands_busy_until_sim=1.0 + HANDS_BUSY_DURATION_S,
+        )
+        console.observ_transition = None
+
+    # While the 1 s hand movement is still running, decide() suppresses
+    # every optic -- the sight already stops speaking for Petrovich, even
+    # though `phase` has not yet formally left SIGHTING.
+    optic_state, decision = decide(
+        optic_state,
+        now_sim=1.0,
+        scan_cycle_period_s=10.0,
+        targets=[],
+        steady=True,
+    )
+    assert decision.suppressed is True
+
+    # The very next poll after the hand movement elapses: phase leaves
+    # SIGHTING immediately, not after SIGHT_MAX_DWELL_S.
+    optic_state, decision = decide(
+        optic_state,
+        now_sim=1.0 + HANDS_BUSY_DURATION_S,
+        scan_cycle_period_s=10.0,
+        targets=[],
+        steady=True,
+    )
+    assert optic_state.phase is OpticPhase.SCANNING
+    assert optic_state.home_phase is OpticPhase.SCANNING
+    assert optic_state.look_contact_id is None
+
+
 # -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side
 # feature: "every not recognised command is appended to a log file, with
 # timestamp" should not require the pilot to remember a flag) ------------

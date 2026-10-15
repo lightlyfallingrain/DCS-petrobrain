@@ -1053,9 +1053,13 @@ def _decide_sighting(
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
-    SIGHTING`, which is only reachable while `state.home_phase is
-    OpticPhase.SIGHTING` too (`_back_to_home` is the only way into this
-    phase, and it always goes to `state.home_phase`).
+    SIGHTING` **and** `state.home_phase is OpticPhase.SIGHTING` -- `decide`'s
+    own dispatch checks both explicitly immediately before calling this
+    (`BL-B64` Stage 2 review, Pass 2 required fix), rather than assuming the
+    two fields stay in agreement once `phase` has entered `SIGHTING`. Before
+    that fix, a pilot's "Observ off" changed `home_phase` alone and this
+    function had no way to notice, so the two could diverge and this
+    docstring's claim did not hold; it is enforced now, not merely assumed.
 
     **Plays the role `GLASSING` plays today** -- pick a target via
     `choose_look`, sweep its believed-bearing envelope via `look_sweep`,
@@ -1352,6 +1356,23 @@ def decide(
         )
 
     if state.phase is OpticPhase.SIGHTING:
+        if state.home_phase is not OpticPhase.SIGHTING:
+            # A pilot's "Observ off" (`logger.py`'s poll loop) drains into
+            # `home_phase` alone, one poll lagged, the same shape `_force_
+            # observ_off` already uses in the other direction (a violated
+            # `sight_steady`). Nothing inside `_decide_sighting` ever reads
+            # `home_phase`, so without this check a command-driven change
+            # would be invisible until the sight's own internal stop
+            # conditions fired (`SIGHT_MAX_DWELL_S`, or an unsteady poll) --
+            # up to `SIGHT_MAX_DWELL_S` of the sight, the cone, and any
+            # look in progress continuing to run under a readback that
+            # already said "Observ off" (`BL-B64` Stage 2 review, Pass 2
+            # required fix). `_back_to_home` both ends the dwell at the
+            # very next poll and drops any pending look the same way every
+            # other interruption on this phase already does (`not steady`,
+            # `lower_binoculars`) -- this is not a new mechanism, it is the
+            # existing interruption path reached from a third trigger.
+            return _back_to_home(state, now_sim)
         return _decide_sighting(state, now_sim, targets, sight_steady)
 
     # state.phase must be SCANNING here (the only phase not already

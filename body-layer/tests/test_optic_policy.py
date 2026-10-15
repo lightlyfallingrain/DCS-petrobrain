@@ -1679,6 +1679,104 @@ class TestManoeuvreForcesObservOff:
         assert state.phase is OpticPhase.GLASSING
 
 
+class TestObservOffStopsTheSightImmediately:
+    """`BL-B64` Stage 2 review, Pass 2 required fix. The pilot's "Observ
+    off" command (`logger.py`'s poll loop) drains into `state.home_phase`
+    alone, one poll lagged -- the same shape `_force_observ_off` already
+    uses for a violated `sight_steady`, just arriving from a pilot command
+    instead of a manoeuvre. Every test here builds the *diverged* state
+    directly (`phase=SIGHTING`, `home_phase=SCANNING`) -- the state no
+    pre-existing test constructed, which is exactly why the gap survived
+    46 new tests on the first implementation."""
+
+    def test_observ_off_while_idle_sighting_exits_on_the_next_poll(self) -> None:
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SCANNING,  # already diverged
+        )
+        state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert state.home_phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+
+    def test_observ_off_mid_look_drops_the_look_on_the_next_poll(self) -> None:
+        """The reviewer's own reproduction: a look is active when the
+        command lands, and it must not be allowed to finish."""
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SCANNING,  # diverged: command already landed
+            look_contact_id="CONTACT_1",
+            look_started_sim=0.0,
+            pending_attempted_at_range_m={"CONTACT_1": 3000.0},
+        )
+        state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+        assert state.look_contact_id is None
+        # Dropped, same as any other interruption on this phase -- not
+        # committed, so the contact is immediately eligible for a fresh
+        # look if OBSERV comes back on.
+        assert state.pending_attempted_at_range_m == {}
+
+    def test_observ_off_never_reaches_sight_max_dwell_s(self) -> None:
+        """Stepped for several polls, well short of `SIGHT_MAX_DWELL_S` --
+        before the fix this stayed in `SIGHTING` throughout (the review's
+        own eight-second reproduction); it must now leave on the very
+        first poll after the command lands."""
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+            look_contact_id="CONTACT_1",
+            look_started_sim=0.0,
+        )
+        # The command lands: the poll loop sets home_phase alone.
+        state = replace(state, home_phase=OpticPhase.SCANNING)
+        for poll in range(1, 5):
+            state, decision = decide(
+                state,
+                now_sim=float(poll),
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[],
+                steady=True,
+            )
+            assert state.phase is OpticPhase.SCANNING
+            assert decision.optic is UNAIDED_OPTIC
+
+    def test_observ_still_on_through_sighting_is_unaffected(self) -> None:
+        """Counter-test: the ordinary agreeing-state cycle stays exactly
+        as before this fix -- `home_phase is SIGHTING` throughout, so the
+        new check is a no-op and `_decide_sighting` still runs."""
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        state, decision = decide(
+            state,
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SIGHTING
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+
 class TestHandsBusy:
     """`BL-B64` Stage 2, direction §6's 1 s hand movement -- `decide`
     suppresses every optic's observations while `hands_busy_until_sim` is

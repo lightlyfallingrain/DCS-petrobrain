@@ -1,3 +1,125 @@
+## Pass 3 — the required fix from the Pass 2 review (commanding "Observ off" did not stop the sight)
+
+### Implementation Summary
+
+Fixes the sole required finding from `plans/9k113-sight/review.md`'s Pass 2: `decide()`'s
+`state.phase is OpticPhase.SIGHTING` dispatch never read `state.home_phase`, so a pilot's
+"Observ off" (which drains into `home_phase` alone, one poll lagged) was invisible to the
+sight until its own internal stop conditions fired (`SIGHT_MAX_DWELL_S`, default 30 s, or
+an unsteady poll) — up to 30 s of the sight, the cone, and any look in progress continuing
+to run under a readback that had already said "Observ off". Built on `feature/9k113-sight`
+at `bd0fae576ee4058f2b9741d291a8fad64b197d53` (HEAD matched the named tip exactly, no merge
+needed).
+
+### Files Changed
+
+- `src/belief/optic_policy.py` — `decide()`'s `OpticPhase.SIGHTING` dispatch now checks
+  `state.home_phase is not OpticPhase.SIGHTING` *before* calling `_decide_sighting`, and
+  returns `_back_to_home(state, now_sim)` instead when the two have diverged. This is the
+  same interruption path every other `SIGHTING` exit already uses (`not sight_steady`,
+  `lower_binoculars`) reached from a third trigger, not a new mechanism: it ends the dwell
+  immediately, drops any `pending_attempted_at_range_m` for a look in progress rather than
+  letting it finish (the same "interrupted, not naturally ended" rule `_back_to_home`'s own
+  docstring states), and returns the home phase's idle optic (`UNAIDED_OPTIC` once
+  `home_phase` is `SCANNING`). `_decide_sighting`'s docstring updated to state the invariant
+  it now actually enforces (previously assumed, falsely, that `phase`/`home_phase` could not
+  diverge once `phase` had entered `SIGHTING`) — `decide`'s own dispatch is what enforces it,
+  checked immediately before every call.
+- `tests/test_optic_policy.py` — new `TestObservOffStopsTheSightImmediately` (4 tests, see
+  below), inserted between `TestManoeuvreForcesObservOff` and `TestHandsBusy`.
+- `tests/test_logger.py` — one new test exercising the real command → drain → decide
+  sequence end to end (see below).
+
+### Tests Added
+
+- `TestObservOffStopsTheSightImmediately::test_observ_off_while_idle_sighting_exits_on_the_next_poll`
+  — the diverged state (`phase=SIGHTING`, `home_phase=SCANNING`) built directly, idle (no
+  active look): `decide()` exits to `SCANNING`/`UNAIDED_OPTIC` on the very first call.
+- `...::test_observ_off_mid_look_drops_the_look_on_the_next_poll` — the reviewer's own
+  reproduction shape, with an active look and a non-empty `pending_attempted_at_range_m`:
+  the look is dropped (`look_contact_id` cleared, pending marks discarded, not committed),
+  not allowed to finish.
+- `...::test_observ_off_never_reaches_sight_max_dwell_s` — stepped for several polls, well
+  short of `SIGHT_MAX_DWELL_S`: stays `SCANNING` throughout once the command has landed,
+  the direct counter-case to the reviewer's eight-second reproduction that stayed stuck in
+  `SIGHTING`.
+- `...::test_observ_still_on_through_sighting_is_unaffected` — counter-test: with `phase`
+  and `home_phase` agreeing (`SIGHTING`/`SIGHTING`, the ordinary cycle), the new check is a
+  no-op and `_decide_sighting` still runs exactly as before.
+- `test_observ_off_command_stops_the_sight_through_the_real_poll_loop` (`test_logger.py`) —
+  drives the actual command surface (`CrewConsole.handle_command("observ_off", ...)`), then
+  reproduces `logger.py`'s own drain block verbatim (same pattern
+  `test_a_player_command_lowers_the_binoculars` already uses for the binocular case) before
+  calling `decide()`: confirms the 1 s hand-movement window suppresses the optic immediately
+  (`decision.suppressed is True`) even before `phase` formally leaves `SIGHTING`, and that
+  the very next poll after that window elapses leaves `SIGHTING` for good — not at
+  `SIGHT_MAX_DWELL_S`.
+
+**Before/after reproduction** (not just the test suite): built the diverged state directly
+(`phase=SIGHTING`, `home_phase=SCANNING`, an active look) and stepped `decide()` for 8
+simulated seconds. Before the fix (confirmed by temporarily stashing it via `git stash`,
+then restoring): `state.phase` stayed `SIGHTING` throughout, `decision.optic` stayed
+`sight_wide` every poll — exactly the reviewer's own reproduction. After the fix:
+`state.phase` is `SCANNING` and `decision.optic` is `unaided` from the very first call.
+
+### Dispatch-branch table (the systematic check the review asked for)
+
+Every branch in `decide()`'s own dispatch, and whether it reads `state.home_phase`:
+
+| branch | reads `home_phase`? | should it? |
+|---|---|---|
+| first poll (`phase_started_sim is None`) | yes (`_HOME_OPTIC[state.home_phase]`) | yes — correct, unchanged |
+| hands-busy suppression | no | no — the 1 s suppression applies regardless of which phase/home_phase combination is active; nothing here advances any phase |
+| `phase is SEARCHING` | no | no, by design — `SEARCHING` is only ever entered from `SCANNING`-at-home, and `TestObservOn` deliberately establishes that commanding OBSERV on mid-sweep must *not* abandon the sweep; the mirror case (a live defect for `SIGHTING`) does not apply here because nothing drains a command that would move `SEARCHING` elsewhere mid-sweep |
+| `phase is GLASSING` | no | no, by design — same reasoning, and the exact case `TestObservOn::test_setting_home_phase_mid_glassing_does_not_interrupt_the_look` pins: OBSERV commanded on mid-look does not abandon it |
+| `phase is SIGHTING` | **yes, as of this fix** | yes — this was the gap: a pilot command changes `home_phase` alone and nothing read it |
+| `SCANNING`, `home_phase is SIGHTING` (glance-away) | yes | yes — correct, unchanged; this is the existing symmetric check in the other direction |
+| `SCANNING`-at-home (`home_phase is SCANNING`, the fallthrough) | yes, implicitly (reached only when the two checks above are both false) | yes — correct, unchanged |
+
+The asymmetry between `SIGHTING` (now checked) and `SEARCHING`/`GLASSING` (deliberately not
+checked) is not a second instance of the same bug: entering OBSERV is specified to never
+interrupt an in-progress naked-eye/binocular activity (direction §9, `TestObservOn`'s own
+docstring), so those two branches not reading `home_phase` is the intended behaviour, pinned
+by existing tests. The `SIGHTING` branch is different because *leaving* OBSERV while actively
+using the sight has no equivalent "let it finish" carve-out stated anywhere in the direction
+document — §6 makes entering OBSERV the pilot's call, and leaving it is equally his.
+
+### Checks
+
+(body-layer/ only — the only subproject touched)
+
+- `ruff format --check .`: fails only on the pre-existing out-of-scope
+  `research/2026-10-05-security-audit.md`, as predicted.
+- `ruff check .`: pass.
+- `mypy src`: pass (0 errors, 59 source files).
+- `pytest -q`: **1934 passed, 4 xfailed** (baseline for this pass: 1929 passed, 4 xfailed —
+  net +5, matching the 5 new tests exactly: 4 in `TestObservOffStopsTheSightImmediately`
+  plus 1 in `test_logger.py`). All 5 confirmed by name in unfiltered `-v` output, not via
+  `-k`. Zero removed, zero modified tests — the ordinary OBSERV-off cycle (`home_phase`
+  never set, or agreeing with `phase` throughout) is bit-identical, confirmed by the full
+  pre-existing suite passing unchanged.
+- xfailed count unchanged (4 -> 4).
+
+### Notable Discoveries
+
+- **The cone stops in the same tick the sight stops, confirmed by reading
+  `logger._apply_active_gaze`, not assumed.** Once `decide()` returns `_back_to_home`'s
+  `OpticDecision(optic=UNAIDED_OPTIC)` (no `look_azimuth_deg`), `_apply_active_gaze` clears
+  `updated_state.actual_aim_azimuth_deg` to `None` on that same call (the `elif` branch that
+  mirrors `look_azimuth_deg`'s own None-while-idle contract), and `optic.regard_azimuth_
+  half_deg is not None` is false for `UNAIDED_OPTIC` regardless — so `sight_cone` is `None`
+  from the very poll the command takes effect, with no one-poll gap. This holds even during
+  the 1 s hand-movement window: `decide()`'s hands-busy branch itself returns
+  `OpticDecision(optic=UNAIDED_OPTIC, suppressed=True)` immediately, before `phase` has
+  formally left `SIGHTING`, so the cone and the sight both stop before the phase transition
+  completes, not after it.
+- **The fix is the interruption path, not a new one.** `_back_to_home` was already the single
+  function every other `SIGHTING` exit uses; this entry adds a third call site to it rather
+  than inventing a parallel "home_phase changed" branch, which keeps the drop-pending-marks
+  behaviour (and any future change to that behaviour) in one place.
+
+---
+
 ## Pass 2 — Stage 2, the §7 directional cone, and the optic-aware range cap
 
 ### Implementation Summary
