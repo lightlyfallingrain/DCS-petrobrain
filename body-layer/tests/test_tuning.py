@@ -312,6 +312,169 @@ def test_empty_rejected_section_when_file_loaded_with_no_bad_keys(
     assert "rejected (0)" in block
 
 
+def test_cross_key_coupling_rejects_both_overrides_and_falls_back_to_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The review's Required Fix 1 reproduction (`plans/
+    configurable-constants/review.md`), exercised directly against
+    `tuning.py`'s own accessors -- FOCUS_DWELL_S at its own `hi` (5.0) and
+    POSITION_HALF_LIFE_S at its own `lo` (20.0) used to raise an uncaught
+    `AssertionError` at import, a disguised refusal to start on two
+    individually-valid overrides. See
+    `test_reviewer_repro_scan_decay_coupling_does_not_crash_the_process`
+    below for the full-process pin."""
+    path = tmp_path / "tuning.toml"
+    path.write_text(
+        "[perception.gaze]\nFOCUS_DWELL_S = 5.0\n"
+        "[belief.decay]\nPOSITION_HALF_LIFE_S = 20.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PETROBRAIN_TUNING", str(path))
+
+    focus = tuning.real(
+        "perception.gaze.FOCUS_DWELL_S", 2.0, lo=0.5, hi=5.0, status="judgement"
+    )
+    half_life = tuning.real(
+        "belief.decay.POSITION_HALF_LIFE_S",
+        30.0,
+        lo=20.0,
+        hi=120.0,
+        status="judgement",
+    )
+    assert focus == 2.0
+    assert half_life == 30.0
+
+    resolution = tuning.validate_against_defaults()
+    focus_rej = resolution.rejected["perception.gaze.FOCUS_DWELL_S"]
+    half_life_rej = resolution.rejected["belief.decay.POSITION_HALF_LIFE_S"]
+    assert focus_rej.reason == "invariant violation"
+    assert half_life_rej.reason == "invariant violation"
+    assert "POSITION_HALF_LIFE_S" in focus_rej.detail
+    assert "FOCUS_DWELL_S" in half_life_rej.detail
+    block = tuning.render_startup_block(resolution)
+    assert "perception.gaze.FOCUS_DWELL_S" in block
+    assert "belief.decay.POSITION_HALF_LIFE_S" in block
+
+
+def test_cross_key_coupling_trips_from_a_single_overridden_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`FOCUS_DWELL_S` alone, against the code default `POSITION_HALF_LIFE_S`
+    (30.0) and the code default `SCAN_PLAN` (8 legs), already violates the
+    invariant (8 * 5.0 = 40.0 >= 30.0) -- only the one key actually in the
+    file is rejected; `POSITION_HALF_LIFE_S`, never overridden, was never
+    going to be anything but its own default anyway."""
+    path = tmp_path / "tuning.toml"
+    path.write_text("[perception.gaze]\nFOCUS_DWELL_S = 5.0\n", encoding="utf-8")
+    monkeypatch.setenv("PETROBRAIN_TUNING", str(path))
+
+    focus = tuning.real(
+        "perception.gaze.FOCUS_DWELL_S", 2.0, lo=0.5, hi=5.0, status="judgement"
+    )
+    assert focus == 2.0
+
+    resolution = tuning.validate_against_defaults()
+    assert (
+        resolution.rejected["perception.gaze.FOCUS_DWELL_S"].reason
+        == "invariant violation"
+    )
+    assert "belief.decay.POSITION_HALF_LIFE_S" not in resolution.rejected
+
+
+def test_cross_key_coupling_does_not_fire_for_a_safe_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "tuning.toml"
+    path.write_text("[belief.decay]\nPOSITION_HALF_LIFE_S = 100.0\n", encoding="utf-8")
+    monkeypatch.setenv("PETROBRAIN_TUNING", str(path))
+
+    half_life = tuning.real(
+        "belief.decay.POSITION_HALF_LIFE_S",
+        30.0,
+        lo=20.0,
+        hi=120.0,
+        status="judgement",
+    )
+    assert half_life == 100.0
+
+    resolution = tuning.validate_against_defaults()
+    assert resolution.applied["belief.decay.POSITION_HALF_LIFE_S"].value == 100.0
+    assert "belief.decay.POSITION_HALF_LIFE_S" not in resolution.rejected
+
+
+def test_cross_key_coupling_does_not_override_a_more_specific_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key that is independently wrong-typed keeps that more specific
+    classification -- the coupling check only has an opinion about a value
+    that would otherwise have been accepted."""
+    path = tmp_path / "tuning.toml"
+    path.write_text(
+        '[perception.gaze]\nFOCUS_DWELL_S = "nope"\n'
+        "[belief.decay]\nPOSITION_HALF_LIFE_S = 20.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PETROBRAIN_TUNING", str(path))
+
+    focus = tuning.real(
+        "perception.gaze.FOCUS_DWELL_S", 2.0, lo=0.5, hi=5.0, status="judgement"
+    )
+    assert focus == 2.0
+
+    resolution = tuning.validate_against_defaults()
+    assert resolution.rejected["perception.gaze.FOCUS_DWELL_S"].reason == "wrong type"
+
+
+def test_reviewer_repro_scan_decay_coupling_does_not_crash_the_process(
+    tmp_path: Path,
+) -> None:
+    """Pins the reviewer's exact reproduction end to end, in a fresh
+    process, importing the real production modules
+    (`perception.gaze`/`belief.decay`) rather than synthetic keys: must
+    start, leave both constants at their code defaults, and surface the
+    rejection in the startup output."""
+    tuning_file = tmp_path / "tuning.toml"
+    tuning_file.write_text(
+        "[perception.gaze]\nFOCUS_DWELL_S = 5.0\n"
+        "[belief.decay]\nPOSITION_HALF_LIFE_S = 20.0\n",
+        encoding="utf-8",
+    )
+
+    body_layer_src = Path(__file__).resolve().parent.parent / "src"
+    world_model_src = (
+        Path(__file__).resolve().parent.parent.parent / "world-model" / "src"
+    )
+    env = {
+        "PETROBRAIN_TUNING": str(tuning_file),
+        "PYTHONPATH": f"{body_layer_src}:{world_model_src}",
+        "PATH": "/usr/bin:/bin",
+    }
+    script = (
+        "import tuning\n"
+        "from perception.gaze import FOCUS_DWELL_S\n"
+        "from belief.decay import OBSERVED_WINDOW_S, POSITION_HALF_LIFE_S\n"
+        "assert FOCUS_DWELL_S == 2.0, FOCUS_DWELL_S\n"
+        "assert POSITION_HALF_LIFE_S == 30.0, POSITION_HALF_LIFE_S\n"
+        "assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S\n"
+        "resolution = tuning.validate_against_defaults()\n"
+        "print(tuning.render_startup_block(resolution))\n"
+    )
+    # `check=True` is the point: this call must not raise -- a regression
+    # of the bug being fixed here is an uncaught AssertionError at import,
+    # which `subprocess.run` surfaces as a non-zero exit and this would
+    # turn into a CalledProcessError.
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "invariant" in result.stdout
+    assert "perception.gaze.FOCUS_DWELL_S" in result.stdout
+    assert "belief.decay.POSITION_HALF_LIFE_S" in result.stdout
+
+
 def test_a_real_constant_resolves_an_override_in_a_fresh_process(
     tmp_path: Path,
 ) -> None:

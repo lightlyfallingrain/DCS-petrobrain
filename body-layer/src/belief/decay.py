@@ -213,6 +213,17 @@ assert SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S, (
 # stops a later widening of `OBSERVED_WINDOW_S` (e.g. hard part 8's plan-C
 # fallback, 16 -> 20) from silently collapsing that middle certainty band
 # instead of raising `POSITION_HALF_LIFE_S` alongside it.
+#
+# **A pilot override cannot trip this any more** (`plans/
+# configurable-constants/review.md`'s Required Fix 1): `tuning.
+# _check_scan_decay_coupling` enforces this exact relationship across
+# `perception.gaze.FOCUS_DWELL_S`, `perception.gaze.SCAN_PLAN`, and
+# `POSITION_HALF_LIFE_S` *before* any of the three is finally bound,
+# rejecting whichever of them the override file set and falling back to
+# their code defaults -- so by the time this line runs, the only way left
+# to trip it is a change to the code defaults themselves, which is exactly
+# what this assert still exists to catch loudly. See `tuning.py`'s module
+# docstring for the full mechanism.
 assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S, (
     "OBSERVED_WINDOW_S must stay below POSITION_HALF_LIFE_S or the "
     "'tracked' certainty band collapses to nothing"

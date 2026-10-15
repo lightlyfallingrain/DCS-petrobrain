@@ -35,7 +35,9 @@ from pathlib import Path
 from typing import Any
 
 _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
-_DEFAULTS_TOML_PATH = Path(__file__).resolve().parent.parent / "config" / "defaults.toml"
+_DEFAULTS_TOML_PATH = (
+    Path(__file__).resolve().parent.parent / "config" / "defaults.toml"
+)
 
 #: `tuning.*` accessor names this generator understands. `whole` is not
 #: used by any constant converted so far but is included for forward
@@ -153,7 +155,9 @@ def _scan_file(path: Path) -> list[Declaration]:
         assert isinstance(call, ast.Call)
 
         positional = [_literal(a) for a in call.args]
-        keywords = {kw.arg: _literal(kw.value) for kw in call.keywords if kw.arg is not None}
+        keywords = {
+            kw.arg: _literal(kw.value) for kw in call.keywords if kw.arg is not None
+        }
 
         key = positional[0]
         default = positional[1]
@@ -210,7 +214,7 @@ def render_toml(declarations: list[Declaration]) -> str:
         "# This file documents the code default for every tunable constant --",
         "# it is a rendering of the `tuning.*` declarations in src/, never the",
         "# authority. The authority is the code comment at the constant itself",
-        "# (plans/configurable-constants/plan.md, \"Where provenance lives\").",
+        '# (plans/configurable-constants/plan.md, "Where provenance lives").',
         "#",
         "# To override a value, copy the key you want into config/tuning.toml",
         "# (gitignored, created by you, sparse -- only the keys you change) and",
@@ -250,9 +254,16 @@ def main() -> int:
         print(f"wrote {_DEFAULTS_TOML_PATH}")
         return 0
 
-    current = _DEFAULTS_TOML_PATH.read_text(encoding="utf-8") if _DEFAULTS_TOML_PATH.exists() else ""
+    current = (
+        _DEFAULTS_TOML_PATH.read_text(encoding="utf-8")
+        if _DEFAULTS_TOML_PATH.exists()
+        else ""
+    )
     if current != rendered:
-        print(f"{_DEFAULTS_TOML_PATH} is stale -- run with --write to regenerate", file=sys.stderr)
+        print(
+            f"{_DEFAULTS_TOML_PATH} is stale -- run with --write to regenerate",
+            file=sys.stderr,
+        )
         return 1
     print(f"{_DEFAULTS_TOML_PATH} is up to date")
     return 0

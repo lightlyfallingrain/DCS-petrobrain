@@ -23,6 +23,37 @@ the file is missing or unreadable is *also* not fatal -- it warns loudly
 as every other case. There is no case in this module that raises past
 accessor/`validate_against_defaults()` call time.
 
+**The one cross-key coupling this loader knows about (review's Required
+Fix 1, `plans/configurable-constants/review.md`): `belief.decay`'s
+`OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` invariant.** `OBSERVED_WINDOW_S`
+is `len(perception.gaze.SCAN_PLAN) * perception.gaze.FOCUS_DWELL_S`, not a
+key of its own, so no per-key `lo`/`hi` bound can see the coupling between
+`perception.gaze.FOCUS_DWELL_S`, `perception.gaze.SCAN_PLAN`, and
+`belief.decay.POSITION_HALF_LIFE_S` -- two overrides that are each inside
+their own declared bounds can still violate it, and `belief.decay` used to
+enforce it with a bare `assert`, i.e. a disguised refusal to start, exactly
+the thing Decision 4 REVISED exists to prevent. `_check_scan_decay_coupling`
+below is the fix: a single targeted check for this one known relationship
+(not a general cross-key framework, out of scope per the review), run from
+inside `real`/`sequence` for exactly these three keys, before either of
+`perception.gaze`'s two accessor calls returns -- it has to run there,
+not in `belief.decay` where the invariant conceptually lives, because
+`perception.gaze` resolves first (`belief.decay` imports from it) and
+`belief.decay` cannot react to a problem after `perception.gaze` has
+already bound its `Final` constants. It peeks at
+`belief.decay.POSITION_HALF_LIFE_S`'s raw override value directly, by key,
+with no import of `belief.decay` needed -- the same technique
+`validate_against_defaults` already uses against `config/defaults.toml`'s
+full registry. When the combination would violate the invariant, every one
+of the three keys that the override file actually set is rejected and
+falls back to its code default -- never a clamped or invented middle
+value -- which necessarily restores the invariant, because any of the
+three keys *not* in the override file was already at its own code default,
+and the code defaults are asserted safe in `belief.decay` itself (that
+assert stays, and still fails loudly, because a *default* combination
+that violates the invariant is a genuine programming error, not a bad
+tuning file).
+
 **Two registries, for two different questions:**
 
 - The *live registry* (`_State.claimed`, `.resolution`) is built
@@ -91,11 +122,19 @@ class RejectedEntry:
     classification the startup block and `--print-tuning` both render,
     per the plan's "Failure behaviour" distinction between a typo (the
     edit was never read) and an out-of-range value (the edit was read and
-    rejected)."""
+    rejected). "invariant violation" is the one addition past the plan
+    (review's Required Fix 1): the key's own value was fine on its own
+    terms, but combined with another key's override it would break the
+    one cross-key coupling `_check_scan_decay_coupling` knows about --
+    `detail` names the invariant and every key rejected alongside it."""
 
     key: str
     reason: Literal[
-        "unknown key", "wrong type", "out of range", "unrecognised table entry"
+        "unknown key",
+        "wrong type",
+        "out of range",
+        "unrecognised table entry",
+        "invariant violation",
     ]
     detail: str
     default_in_force: Any
@@ -132,9 +171,23 @@ class _State:
     flat: dict[str, Any]
     claimed: set[str]
     resolution: Resolution
+    #: Set by `_check_scan_decay_coupling` the first time it runs (idempotent
+    #: past that, since the check only needs to run once per process).
+    cross_key_checked: bool = False
+    #: Keys the coupling check has rejected -- consulted by `real`/
+    #: `sequence` for exactly the three keys `_COUPLED_KEYS` names.
+    cross_key_rejected: set[str] = field(default_factory=set)
+    #: The shared rejection detail text for every key in `cross_key_rejected`
+    #: -- one message, not one per key, since they are rejected together for
+    #: the same reason.
+    cross_key_detail: str = ""
 
 
 _state: _State | None = None
+
+#: Cache for `_defaults_registry()` -- the flattened `config/defaults.toml`,
+#: read at most once per process, same lazy-singleton shape as `_state`.
+_defaults_registry_cache: dict[str, Any] | None = None
 
 
 def _flatten(raw: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -241,11 +294,118 @@ def _coerce_number(raw_value: Any) -> float | None:
     return None
 
 
+#: The one cross-key coupling this loader knows about -- see the module
+#: docstring and `_check_scan_decay_coupling` below. Not a general
+#: mechanism: these three dotted keys are named literally, nowhere else in
+#: this module, and nothing generalises this to a second coupling without
+#: writing a second named check.
+_FOCUS_DWELL_S_KEY = "perception.gaze.FOCUS_DWELL_S"
+_SCAN_PLAN_KEY = "perception.gaze.SCAN_PLAN"
+_POSITION_HALF_LIFE_S_KEY = "belief.decay.POSITION_HALF_LIFE_S"
+_COUPLED_KEYS = (_FOCUS_DWELL_S_KEY, _SCAN_PLAN_KEY, _POSITION_HALF_LIFE_S_KEY)
+
+
+def _defaults_registry() -> dict[str, Any]:
+    """The flattened, committed `config/defaults.toml` -- the same file
+    `validate_against_defaults` reads, cached once per process. Used by
+    `_check_scan_decay_coupling` to get each coupled key's code default
+    without importing `perception.gaze`/`belief.decay` (which would defeat
+    the point: `perception.gaze` is what is still resolving when this is
+    called)."""
+    global _defaults_registry_cache
+    if _defaults_registry_cache is None:
+        try:
+            raw = tomllib.loads(_DEFAULT_DEFAULTS_TOML_PATH.read_text(encoding="utf-8"))
+        except OSError:
+            raw = {}
+        _defaults_registry_cache = _flatten(raw)
+    return _defaults_registry_cache
+
+
+def _coupling_effective_value(state: _State, key: str) -> Any:
+    """`key`'s raw override if the file supplies one, else its committed
+    default from `config/defaults.toml`. Deliberately does not re-validate
+    the override's own type/bounds here -- that is each key's own
+    accessor's job, which runs its full check *before* consulting
+    `cross_key_rejected` (see `real`/`sequence` below), so a value that is
+    independently wrong-typed or out-of-range is still classified under
+    that more specific reason, not this one."""
+    if state.file_status == "loaded" and key in state.flat:
+        return state.flat[key]
+    return _defaults_registry().get(key)
+
+
+def _check_scan_decay_coupling(state: _State) -> None:
+    """The targeted fix for review's Required Fix 1: before either of
+    `perception.gaze.FOCUS_DWELL_S`'s or `perception.gaze.SCAN_PLAN`'s own
+    accessor call returns, check whether the combination they and
+    `belief.decay.POSITION_HALF_LIFE_S` would resolve to violates
+    `belief.decay`'s `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` invariant
+    -- `OBSERVED_WINDOW_S` being `len(SCAN_PLAN) * FOCUS_DWELL_S`. Runs at
+    most once per process (`state.cross_key_checked` guards it), triggered
+    by whichever of the three keys' accessor call happens to run first.
+
+    If the invariant would be violated, every one of the three keys that
+    the override file actually sets is marked `cross_key_rejected` --
+    never a subset chosen to be "the cause," and never a clamped or
+    invented middle value -- so that the keys actually at fault
+    (whichever they are) all fall back to their code defaults and the
+    invariant is restored, per the reasoning in the module docstring.
+    A key the file never mentions was already going to resolve to its own
+    code default through the ordinary path, so marking only the
+    file-mentioned keys here still produces "every one of the three keys
+    is at its code default" as the end state -- exactly what the review's
+    reproduction requires."""
+    if state.cross_key_checked:
+        return
+    state.cross_key_checked = True
+    if state.file_status != "loaded":
+        return
+
+    focus = _coupling_effective_value(state, _FOCUS_DWELL_S_KEY)
+    scan_plan = _coupling_effective_value(state, _SCAN_PLAN_KEY)
+    half_life = _coupling_effective_value(state, _POSITION_HALF_LIFE_S_KEY)
+    if isinstance(focus, bool) or not isinstance(focus, (int, float)):
+        return
+    if not isinstance(scan_plan, list) or not all(
+        isinstance(v, int) and not isinstance(v, bool) for v in scan_plan
+    ):
+        return
+    if isinstance(half_life, bool) or not isinstance(half_life, (int, float)):
+        return
+
+    observed_window_s = len(scan_plan) * float(focus)
+    if observed_window_s < float(half_life):
+        return
+
+    involved = sorted(
+        key
+        for key in _COUPLED_KEYS
+        if state.file_status == "loaded" and key in state.flat
+    )
+    if not involved:
+        # The violation comes entirely from code defaults, not from any
+        # override -- a genuine programming error, not a bad tuning file.
+        # Leave it alone; belief.decay's own hard assert (kept exactly for
+        # this case) will fail loudly once it resolves.
+        return
+    state.cross_key_rejected.update(involved)
+    state.cross_key_detail = (
+        "belief.decay's OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S invariant "
+        f"would be violated (OBSERVED_WINDOW_S = len(SCAN_PLAN) * "
+        f"FOCUS_DWELL_S = {observed_window_s!r} >= POSITION_HALF_LIFE_S = "
+        f"{half_life!r}); rejected together with: {involved} -- code "
+        "defaults in force for all of them"
+    )
+
+
 def real(key: str, default: float, *, lo: float, hi: float, status: Status) -> float:
     """A scalar float tunable. Composition: the override replaces the
     default if present and valid; otherwise the default stays in force,
     reported per the plan's "Failure behaviour" table."""
     state = _get_state()
+    if key in _COUPLED_KEYS:
+        _check_scan_decay_coupling(state)
     state.claimed.add(key)
     if state.file_status != "loaded" or key not in state.flat:
         state.resolution.defaulted[key] = DefaultedEntry(key, default, status)
@@ -264,6 +424,11 @@ def real(key: str, default: float, *, lo: float, hi: float, status: Status) -> f
     if not (lo <= value <= hi):
         state.resolution.rejected[key] = RejectedEntry(
             key, "out of range", f"{value!r} out of range [{lo}, {hi}]", default
+        )
+        return default
+    if key in state.cross_key_rejected:
+        state.resolution.rejected[key] = RejectedEntry(
+            key, "invariant violation", state.cross_key_detail, default
         )
         return default
 
@@ -311,6 +476,8 @@ def sequence(key: str, default: tuple[int, ...], *, status: Status) -> tuple[int
     """An array-valued tunable. Composition: replace wholesale -- there is
     no per-element merge, unlike `table`."""
     state = _get_state()
+    if key in _COUPLED_KEYS:
+        _check_scan_decay_coupling(state)
     state.claimed.add(key)
     if state.file_status != "loaded" or key not in state.flat:
         state.resolution.defaulted[key] = DefaultedEntry(key, default, status)
@@ -325,6 +492,11 @@ def sequence(key: str, default: tuple[int, ...], *, status: Status) -> tuple[int
             "wrong type",
             f"expected an array of whole numbers, got {raw_value!r}",
             default,
+        )
+        return default
+    if key in state.cross_key_rejected:
+        state.resolution.rejected[key] = RejectedEntry(
+            key, "invariant violation", state.cross_key_detail, default
         )
         return default
 
