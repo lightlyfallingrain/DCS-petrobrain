@@ -132,3 +132,25 @@
   `[[BL-12]]` (the cohesion cap this entry's range model is what makes behave at range),
   `[[BL-14]]`, `[[BL-B23]]` (never-pruned `ContactStore` — this entry gives it a genuinely new
   growth source by admitting contacts past 10 km for the first time).
+
+  ---
+
+  **Added by direction, 2026-10-15: set `UNAIDED_OPTIC.fov_half_angle_deg` from `None` to `90`**
+  while the optic table is being revised (§14 of the direction document). *"a fairly sane 180 degree
+  naked eye max FOV (that's a peripherial vision FOV, but we can refine later for focus FOV)"*.
+
+  **Nearly a no-op, verified rather than assumed**: `FULL_GAZE` is already `half_width_deg = 90.0`
+  (`perception/gaze.py:194`) and the gaze gate runs before the optic gate, so the bound already
+  exists — this moves it into the place that should own it. **The one real difference**:
+  `within_gaze` compares azimuth only, `within_optic_fov` computes a great-circle separation
+  including elevation, so a candidate near 90° azimuth *and* well off the horizon now falls outside.
+  A test pinned exactly at the 90° boundary can flip; that is a behaviour change, not a refactor.
+
+  **Why it belongs in this entry**: it closes the asymmetry recorded above — the naked eye is
+  currently the one optic whose FOV gate is a documented no-op, which makes "LOS is bounded by the
+  optic's FOV" true of every optic *except* the default. Afterwards it holds universally.
+
+  Leaves `within_optic_fov`'s `fov_half_angle_deg is None` branch unreachable; keep it with a
+  comment (a future peripheral-awareness pseudo-optic may want it) rather than deleting it.
+  Reconciling 180° peripheral against `FOCUS_CONE_HALF_WIDTH_DEG = 15.0` is explicitly **later**.
+
