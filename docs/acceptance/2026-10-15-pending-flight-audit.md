@@ -1,0 +1,145 @@
+# Pending-flight audit, 2026-10-15
+
+Audit of every roadmap item and acceptance card carrying a flight-waiting marker (`#needs-flight`,
+"unflown", "live acceptance outstanding"), cross-checked against everything flown or decided since
+each item's own date: `body-layer/logs/dcs-{speech,belief-truth,detection-trace}-*.jsonl` (sorties
+2026-10-08, 10-11, 10-15 ×3), the dated sortie-feedback/direction documents in `docs/acceptance/`,
+and later roadmap entries that supersede or absorb an earlier question.
+
+**Method note.** Reading the logs directly settled several items no document had closed explicitly
+— e.g. a fresh tick-cost measurement against the 2026-10-15 belief-truth log, and a token-presence
+check against the 2026-10-15 speech logs to see whether a given voice path was ever actually used.
+
+---
+
+## A. Still-open list (what needs checking, in plain language)
+
+Ordered cheapest/most-valuable first. Items 1–5 all ride on **one ordinary ground-attack sortie**
+with a mix of grouped contacts, some scanning/reporting, and one odd phrase thrown in — nothing
+about them needs a special setup. Items 6–7 need a deliberate scenario. Item 8 is a read of logs
+you already have, not a flying task.
+
+1. **Petrovich's free-text answers have never actually been heard.** Every "report"/"describe" so
+   far matched a known voice command. Say something that isn't in the command vocabulary (e.g. ask
+   a real question) and confirm he answers in his own words rather than "say again" — this is the
+   first real test of the brain layer talking to a live model in the air.
+2. **A group that pops behind a ridge and reappears should stay the same group**, not become a new
+   one. Watch a column or formation go out of sight and come back, and check Petrovich still talks
+   about it as the one he already knew.
+3. **A dense or tight cluster of contacts (e.g. three+ close together, one air-defence) should not
+   silently lose a member when a new contact folds in nearby.** Watch for a group's composition
+   suddenly dropping someone it had, especially if that someone was the one flagged as air defence.
+4. **An unprompted callout should never name a clock-hour behind you (5, 6, 7 o'clock)** — except
+   that a threatening unit going astern should still get a "Danger" call. Listen specifically for
+   silence to your rear, and for the one exception still speaking up.
+5. **When a contact is believed to be a SAM only at the general-class level (not yet identified to
+   exact type), does Petrovich still treat it as air defence** — same callout behaviour as a
+   type-identified one, not silence?
+6. **The 9K113 sight has never been turned on in flight at all.** Say "observ on," then check
+   whether detection range, position precision, and the handover between naked eye / binoculars /
+   sight feel right and natural rather than thrashing.
+7. **The attack-run guidance (`engage`/`follow`) has real known bugs from the last two flights**
+   and needs the fixes built before it's worth re-flying: the guidance line repeats itself when
+   nothing audibly changed, it keeps talking after you fly past or turn away, and "obstructed" gets
+   said for a target that's simply too far away rather than actually blocked. Re-fly once those are
+   fixed, not before.
+8. **(No flying needed — just a look at the Hook's own log next time)**: the live line-of-sight feed
+   still misses verdicts on roughly 8% of checks (down from 19% a week ago). Worth deciding whether
+   that's good enough now, especially for whatever you're currently aiming at, or whether it needs
+   the "always check the thing I'm aiming at first" fix before it matters.
+
+**Low priority / skip unless convenient:** the audio-adapter's halved polling rate has no cockpit
+effect at all — only worth a look if you happen to run with `--debug` open already.
+
+---
+
+## B. Per-item audit
+
+### Body-layer core milestones
+
+| item | waiting for | verdict | evidence |
+|---|---|---|---|
+| **BL-11** (tick cost / observability) | Stages 1,2,3b,5: tick median back to ~1.0s, invisible from cockpit, log-reduction only. Stage 4 (live-LOS fail-closed): gate behaves live. Stage 0 (rear-hemisphere callout silence + air-defence exemption): never flown. | **Stages 1/2/3b/5: ANSWERED** — re-ran the same log-reduction against the 2026-10-15 15:07 sortie's own belief-truth log: `median=1.018s` (was 1.424s pre-fix), confirms the fix holds in real flying, not just the 2026-10-06 bench run. **Stage 4 step 2: ANSWERED**, flown 2026-10-08 (roadmap's own "Resolved" note); steps 3-4 needed no separate flight by design. **Stage 0: STILL OPEN** — no sortie feedback mentions rear-hemisphere silence one way or the other. | Measured directly this audit; `body-layer/ROADMAP/BL-11.md` |
+| **BL-12** (group contact identity across repositioning) | The specific "column pops behind a ridge, reappears as the same group" scenario. | **STILL OPEN.** Merged 2026-10-12, mechanism has run in every sortie since (10-13, 10-15 ×3) as part of ordinary group handling with no complaint, but no document specifically reports the reposition-and-reappear case being watched for. | `body-layer/ROADMAP/BL-12.md`; no matching mention in any later acceptance/feedback doc |
+| **BL-13** (crew query path, `report`/`describe`) | Whether a pull summary beats enumeration, in the cockpit. | **ANSWERED (mechanism exercised).** "describe"/"report" tokens both appear repeatedly in the 2026-10-15 15:07 and 16:44 speech logs (`"Describe."`, `"describe left."`, `"What do you see?"` → `report_all`), used successfully across two real sorties with no complaint recorded. | `body-layer/logs/dcs-speech-20261015-{150739,164451}.jsonl` |
+| **BL-B47** (air-defence recognised at class level, rides BL-13's card) | Repetition, not silence, for a class-level SAM belief. | **PARTLY ANSWERED.** The query path it depends on was used live (above), but no feedback doc confirms the specific class-level-SAM repetition behaviour was observed. Carried as item 5 in section A. | `body-layer/ROADMAP/BL-B47.md` |
+| **BL-14** (attack-run guidance) | A combined acceptance sortie covering the guidance register. | **ANSWERED (flown) but found real defects, now its own workstream.** Flown twice 2026-10-15 (16:44 and 17:55). §1 repeat-callout, §2 doesn't stop on flyby, §3→§5 "obstructed" fires for range not obstruction (root-caused to the naked-eye presence threshold, not cockpit mask), §6-§7 optic-ladder direction, §9 LOS-priority-for-target all came out of this flight. The roadmap's own text ("not yet flown") is **stale** — it should say flown-with-findings, not unflown. | `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md`; `body-layer/ROADMAP/BL-14.md` (stale) |
+| **BR-1.1 / BR-1.2** (brain layer wire + real Ollama model) | Whether the cockpit stays responsive while the brain "thinks," and whether hearing the model's own language (not a canned line) feels right. | **STILL OPEN.** Checked every transcript across all three 2026-10-15 sorties: every utterance matched a known command token (`report_all`, `engage`, `scan_*`, etc.) — nothing ever fell through to the brain-layer escalation path. The free-text/model path has still never been heard live. | `body-layer/logs/dcs-speech-20261015-*.jsonl` (no unmatched/escalated utterance found) |
+| **BR-B1** (wider classify vocabulary) | Whether the narrow 7-token set under-serves real sorties. | **STILL OPEN, blocked on BR-1.2's own flight** — can't judge vocabulary coverage for an escalation path that has never fired. | `body-layer/ROADMAP/BR-B1.md` |
+
+### Body-layer backlog (`BL-B`)
+
+| item | waiting for | verdict | evidence |
+|---|---|---|---|
+| **BL-B55** (per-optic position error) | Confirming the stated per-optic sigma assumptions. | **STILL OPEN**, closed-as-BL-B64's-own-stage — same flight as BL-B64 clears both. | `body-layer/ROADMAP/BL-B55.md` |
+| **BL-B59** (bounded fold displacement) | A real scene dense/ambiguous enough to exercise the fold-displacement bound. | **STILL OPEN.** Merged (`a8551d9`, confirmed in `git log`). No sortie since has reported a group-fold incident one way or the other — the three 2026-10-15 sorties' main group interaction was a single-vehicle attack run, not the dense-cluster case this bound targets. | `body-layer/ROADMAP/BL-B59.md`; checked `git log --oneline` |
+| **BL-B64** (9K113 sight, perception) | A real acceptance flight with OBSERV actually turned on. | **STILL OPEN, confirmed by absence.** Searched all three 2026-10-15 speech logs for any "observ" token/transcript — none. The sight has shipped (merged `ec39c0e`) but has never been switched on in a real flight. | `body-layer/logs/dcs-speech-20261015-*.jsonl` (no "observ" occurrence); `docs/acceptance/2026-10-15-9k113-sight-acceptance-card.md` |
+| **BL-B47** | — see BL-13 table above. | PARTLY ANSWERED | — |
+
+### Body-layer work items (`BL-W`)
+
+The given list included BL-W3, W4, W7, W13 which do **not** actually carry a `#needs-flight`
+marker on inspection — flagging that discrepancy rather than silently dropping them.
+
+| item | waiting for | verdict | evidence |
+|---|---|---|---|
+| **BL-W1** (contact-report-flood suppression) | Whether the cockpit is quieter without losing a genuine split. | **PARTLY ANSWERED** by continuous use since 2026-10-05 across every later sortie with no complaint resurfacing, but no document explicitly confirms it. | `body-layer/ROADMAP/BL-W1.md` |
+| **BL-W3** (describe synonym, watch-group tagging, 11-12-1 scan sweep) | Each of three pilot-reported refinements. | **(2) `describe` synonym: ANSWERED** — used and recognised repeatedly in the 2026-10-15 logs. **(3)/(4): PARTLY ANSWERED** by routine subsequent flying, no explicit confirmation. Correctly does **not** carry `#needs-flight` in the file itself. | `body-layer/logs/dcs-speech-20261015-*.jsonl`; `body-layer/ROADMAP/BL-W3.md` |
+| **BL-W4** (terrain qualifier "next valley"/"beyond the ridge") | Whether the qualifier fires where a pilot would say it, and the four shipped constants. | **STILL OPEN** — no sortie feedback doc mentions a terrain/divide qualifier being heard or judged; the only adjacent check (BL-11's tick-cost card) asks the pilot to listen for a *wrong* terrain qualifier but no result was recorded. Does not carry `#needs-flight` in the file. | `body-layer/ROADMAP/BL-W4.md`; `docs/acceptance/2026-10-06-bl11-tick-cost-sortie.md` |
+| **BL-W5** (confirm-band affirmatives) | Whether 15s/20s timing is right and cancel→confirm actually stops the task. | **STILL OPEN** — no later doc confirms this specifically; superseded in importance by the `silence` command (BL-W13) which the user later said covers most of the same need. | `body-layer/ROADMAP/BL-W5.md` |
+| **BL-W6** (sortie 09-26 fixes A/B1/B2/C) | Three in-cockpit observables (mask/occlusion grace, binoculars on a held contact, no interrupt on in-progress look). | **STILL OPEN** — no later doc confirms or denies. | `body-layer/ROADMAP/BL-W6.md` |
+| **BL-W7** (binocular optic / voice completeness / precise position belief) | — | **ANSWERED.** Already marked `[x]` **FLOWN AND CLOSED 2026-09-25** in its own file. The source list's inclusion of this item was a false positive (grep matched leftover "unflown" text from the superseded sub-entry, not current status). | `body-layer/ROADMAP/BL-W7.md` |
+| **BL-W12** (group cohesion redesign: size-relative cohesion, infantry EAGER, delta taxonomy) | Real-scene behaviour of the 500m installation cap, air-defence class guess, and the six-branch delta taxonomy "by ear." | **ANSWERED (flown, with downstream findings).** This mechanism has been exercised continuously since merge (2026-10-01) — the very bugs now tracked as BL-B58/BL-B59/BL-B60/BL-B41 were *found* by flying and tracing this exact mechanism on 2026-10-11/10-12. That is flight evidence, just not a clean pass. Treat as flown-and-still-being-hardened, not unflown. | `body-layer/ROADMAP/BL-W12.md`, `BL-B58.md`, `BL-B59.md` |
+| **BL-W13** (`silence` command) | Whether one word of silence is the right amount; the third sub-question (silence vs. a threat appearing while muted) is explicitly separate. | **ANSWERED, with one residual.** User ACCEPTED 2026-10-09 ("silence command / one word, absolute quiet -> accepted"). Residual: whether absolute silence should break for a new threat — explicitly noted as "may simply not have occurred yet," i.e. untested, not forgotten. | `body-layer/ROADMAP/BL-W13.md` |
+| **BL-W35** (watch reporting, Stages 1-5) | Movement/range-crossing/follow/engagement-envelope triggers in real flying. | **ANSWERED (flown, superseded card).** Exercised continuously since 2026-09-25 across every later sortie; follow/engage/danger-callout mechanisms are the ones exercised in the 2026-10-15 attack-run flights. | `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` shows `follow`/`engage` working end to end |
+| **BL-W36** (group reporting disclosure ladder) | "Group lines stop restating known members," among others. | **ANSWERED.** User ACCEPTED 2026-10-09 ("Group lines stop restating known members -> accepted"). | `docs/acceptance/2026-10-09-four-acceptances-and-the-kola-correction.md` |
+
+### Other subprojects / cross-cutting
+
+| item | waiting for | verdict | evidence |
+|---|---|---|---|
+| **AC-8** (DCS-driven LOS, aircraft-layer) | A live DCS flight for the Hook's heading convention, building occlusion, socket-poll cost. | **ANSWERED for the core question, doc is self-contradictory and stale.** The file's own `[ ]` entry says "not yet merged, not yet flown" while flagging in its own header that this disagrees with WM-W2's record of the same work as "FLOWN 2026-10-05, 101,091 live verdicts... buildings have never occluded anything before." Merge is mechanically confirmed (`main` history carries the DoD commit). Building occlusion: **confirmed working**. Heading convention / socket-poll stutter: not explicitly re-confirmed, but no bug has ever surfaced for either since. Residual open point is the same as WM-W2 below (feed availability). | `aircraft-layer/ROADMAP/AC-8.md` (self-flagged contradiction); `world-model/ROADMAP/WM-W2.md` |
+| **AA-2** (audio-adapter poll-hz default + Content-Length guard) | Optional cockpit confirmation of ~30Hz vs ~60Hz polling; no cockpit observable exists. | **STILL OPEN but trivial** — pure performance change with no in-cockpit effect; the entry itself calls the confirmation optional. Low priority, listed separately in section A. | `audio-adapter/ROADMAP/AA-2.md` |
+| **AA-5** (`silence` phrase wiring, audio-adapter half) | Shares one sortie's worth of verification with body-layer's `silence` command. | **ANSWERED** — same acceptance as BL-W13 (2026-10-09, user accepted). | `audio-adapter/ROADMAP/AA-5.md`; `docs/acceptance/2026-10-09-four-acceptances-and-the-kola-correction.md` |
+| **WM-W1** (LOS elevation-tolerance fix) | Whether the 12m tolerance behaves correctly live. | **ANSWERED.** User ACCEPTED 2026-10-09 ("LOS tolerance / grid error buried a unit -> accepted"), and separately the tolerance is now offline/fixture-only by construction since BL-11 Stage 4 moved live LOS off this primitive — so there is nothing left for a flight to further confirm. | `world-model/ROADMAP/WM-W1.md` |
+| **WM-W2** (`feature/dcs-driven-los`, live feed availability) | Whether the live LOS feed is continuous enough, not just correct when present. | **PARTLY ANSWERED.** Mechanism flown and proven correct (2026-10-05). Availability measured at 19% missing verdicts on that flight; the 2026-10-15 attack-run sortie measured a materially better but still nonzero ~8% miss rate on gate-4 specifically. Improving, not closed — carried forward as a live, currently-being-designed fix (give the attack target LOS priority), not a fresh unknown. | `world-model/ROADMAP/WM-W2.md`; `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` §8-§9 |
+| **X-B26** (can DCS elevation be read from files) | — | **Not actually a flight-pending item — list inclusion was wrong.** This is a closed investigation: answered 2026-09-29, then **superseded by a 2026-10-05 user decision rejecting live elevation polling entirely** ("Reject elevation probing from live missions..."). Fully closed, no flight involved at any point. | `todo/backlog/X-B26.md` |
+
+### Acceptance cards
+
+| card | status |
+|---|---|
+| **2026-10-14-bl14-attack-run-acceptance-card.md** | Flown (see BL-14 above). Superseded in practice by `2026-10-15-attack-run-sortie-feedback.md`'s findings; the three constants it asked the sortie to set (lined-up band, elevation gate, change threshold) were not reported on directly — folded into the "repeats when nothing changed" defect instead. |
+| **2026-10-15-9k113-sight-acceptance-card.md** | Confirmed **still open** — see BL-B64 above. Also stale in one respect: it instructs a typed `!voice observ_on` console workaround, but the roadmap says OBSERV shipped as a real voice command ("observ on") — the card predates that and should be re-read, not flown as written. |
+| Older cards (2026-09-18 through 2026-09-25) | Several explicitly marked `FLOWN AND CLOSED` or superseded by a later consolidated card in their own text — consistent, no further action. |
+| 2026-09-29 / 10-01 / 10-02 / 10-04 / 10-05 / 10-06 / 10-08 cards | Each either explicitly closed by the 2026-10-09 "four acceptances" document, superseded by a later card named in its own text, or folded into the live-acceptance-debt entries audited above under their matching roadmap item — no separate open item found beyond what's already listed. |
+
+---
+
+## Doc defects found (not flight status, but wrong on the page)
+
+- **`body-layer/ROADMAP/BL-14.md`** says "not yet flown" — it has been, twice, on 2026-10-15, and
+  produced a feedback document with nine numbered findings. Should be corrected to reflect
+  flown-with-findings rather than unflown.
+- **`aircraft-layer/ROADMAP/AC-8.md`** already flags its own contradiction with `WM-W2.md` in its
+  header (one says unflown, the other says flown 2026-10-05) — confirmed WM-W2's version is correct
+  and AC-8's is stale.
+- **`docs/acceptance/2026-10-15-9k113-sight-acceptance-card.md`** instructs a typed-console OBSERV
+  workaround that the roadmap says has already been superseded by a real voice command.
+- The original task's candidate list named **BL-W3, BL-W4, BL-W7, BL-W13** as carrying
+  `#needs-flight` — on inspection none of the four currently do (BL-W7 is closed, BL-W13 is
+  accepted, BL-W3/W4 never carried the tag to begin with). Likely picked up by the earlier grep
+  matching leftover "unflown" wording inside superseded sub-entries.
+- **`todo/backlog/X-B26.md`** was named in the task's candidate list but is not a flight-pending
+  item at all — it's a closed investigation whose answer was later reversed by a user decision that
+  removed the need for any live elevation polling, flight or otherwise.
+
+## Duplicate/overlapping checks
+
+- **BL-B55 and BL-B64** clear on the same flight (BL-B55 is explicitly folded into BL-B64's own
+  Stage 1b).
+- **BL-W13, BL-W36, WM-W1, AA-5** were all already closed together in the single 2026-10-09 "four
+  acceptances" conversation — a genuine batch, already done.
+- **AC-8 and WM-W2** are two roadmap entries (different subprojects) describing the *same* piece of
+  work and the same residual open question (feed availability) — don't track them as two separate
+  things to check.
