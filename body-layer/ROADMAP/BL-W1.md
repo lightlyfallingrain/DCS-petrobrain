@@ -1,7 +1,12 @@
 # BL-W1 — Contact-report flood (merge-echo callout suppression)
 
-- [x] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`), not yet flown
-  (2026-10-05).** #status/done #needs-flight Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
+- [x] **`fix/contact-report-flood` — DoD PASSED on fixtures, merged 2026-10-05 (`3fe93fd`); **FLOWN
+  AND PASSED** the same day.** #status/done
+  **Graded *pass* in `docs/acceptance/2026-10-05-sortie-feedback.md`'s own table** ("Contact-report
+  flood suppression | **pass**"). Marked unflown until 2026-10-15, when a sweep of everything
+  waiting on a sortie found the flight had already happened. The reasoning that kept it open —
+  "no log evidence" — was invalid: **speech logging only began 2026-10-08**, so its absence from
+  the logs says nothing about a 2026-10-05 flight. Suppresses the spoken `CONTACT_DETECTED` callout for a freshly-founded contact
   when an existing, not-yet-`lost` contact is spatially/class-plausibly the same real thing — the
   speech-layer fix for the naked-eye gaze sweep's merge-direction continuity loss (the user's own
   complaint, mid-flight 2026-10-04: *"it feels like many of those reports were about the same
