@@ -46,7 +46,13 @@ from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.forest import ForestOcclusion
 from perception.gaze import Gaze
 from perception.object_model import ObjectTypeProfile
-from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
+from perception.optics import (
+    BINOCULAR_OPTIC,
+    SIGHT_NARROW_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    UNAIDED_OPTIC,
+    Optic,
+)
 from perception.source import OwnshipState
 from perception.visibility import (
     NAKED_EYE_PRESENCE_CONFIDENCE,
@@ -54,6 +60,7 @@ from perception.visibility import (
     NAKED_EYE_TYPE_CONFIDENCE,
     NAKED_EYE_VISIBILITY_CONFIDENCE,
     check_visibility,
+    tier_ranges,
 )
 
 _FAKE_CONN = sqlite3.connect(":memory:")
@@ -451,6 +458,84 @@ def test_range_cap_binds_for_every_object_the_size_curve_would_let_run_away() ->
 
     assert check_visibility(ownship, at_cap, _FAKE_CONN, _THEATRE) is not None
     assert check_visibility(ownship, beyond_cap, _FAKE_CONN, _THEATRE) is None
+
+
+# --- Optic-aware range cap (`BL-B64` Stage 2, `plans/9k113-sight/plan.md`
+# §12a) -- the finding that nearly made the cone a no-op: a narrow-sight
+# candidate admitted past `NAKED_EYE_RANGE_CAP_M` by `association.
+# filter_player_bubble`'s cone must not be clamped straight back to 10 km
+# and rejected here. `Optic.range_cap_m` generalises the cap per optic;
+# `UNAIDED_OPTIC`/`BINOCULAR_OPTIC` default to `None`, resolved to
+# `NAKED_EYE_RANGE_CAP_M` -- the test above already pins that default path
+# unchanged.
+
+
+def test_sight_narrow_range_cap_admits_past_the_naked_eye_cap() -> None:
+    # T-72B (size 7 m), SIGHT_NARROW_OPTIC (presence_range_mult=5.81):
+    # size_curve_threshold_m = 7 / 0.003 * 5.81 = 13556.67 m -- beyond
+    # NAKED_EYE_RANGE_CAP_M (10000) but inside SIGHT_NARROW_OPTIC.
+    # range_cap_m (20000). Exactly the scenario plan §12a found: without
+    # the optic-aware cap this candidate would be admitted by the cone and
+    # then clamped straight back out here.
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=13_556.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, optic=SIGHT_NARROW_OPTIC
+    )
+
+    assert result is not None
+    assert result.tier == "lowres"
+
+
+def test_sight_narrow_range_cap_still_rejects_beyond_its_own_20km_cap() -> None:
+    ownship = _ownship(heading_true_deg=0.0)
+    beyond = _candidate("T-72B", x=20_001.0, z=0.0)
+
+    assert (
+        check_visibility(
+            ownship, beyond, _FAKE_CONN, _THEATRE, optic=SIGHT_NARROW_OPTIC
+        )
+        is None
+    )
+
+
+def test_unaided_optic_range_cap_is_unaffected_by_the_sight_cap() -> None:
+    """`Optic.range_cap_m` is `None` on `UNAIDED_OPTIC`/`BINOCULAR_OPTIC`
+    -- behaviour-identical to before this field existed, pinned here
+    against the same candidate the sight test above admits."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=13_556.0, z=0.0)
+
+    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
+
+
+def test_sight_wide_range_cap_is_also_20km() -> None:
+    assert SIGHT_WIDE_OPTIC.range_cap_m == 20_000.0
+    assert SIGHT_NARROW_OPTIC.range_cap_m == 20_000.0
+
+
+def test_tier_ranges_presence_threshold_uses_the_optic_s_own_cap() -> None:
+    """`tier_ranges` and `check_visibility`'s own inline computation must
+    resolve the same cap -- the contract `tier_ranges`'s own docstring
+    states ("must be the exact same value check_visibility's own
+    range-admission gate uses"). A large object (size 100 m, a ship-like
+    figure) is what actually makes the cap bind -- an ordinary 7 m vehicle
+    never reaches either optic's cap (the test above)."""
+    presence_naked, _, _ = tier_ranges(
+        presence_size_m=100.0, recognition_extent_m=100.0, optic=UNAIDED_OPTIC
+    )
+    presence_narrow, _, _ = tier_ranges(
+        presence_size_m=100.0, recognition_extent_m=100.0, optic=SIGHT_NARROW_OPTIC
+    )
+
+    # Size curve alone (100 / 0.003 * 1.0 = 33333) is well past
+    # NAKED_EYE_RANGE_CAP_M -- the naked eye's own cap (10000.0) binds.
+    assert presence_naked == pytest.approx(NAKED_EYE_RANGE_CAP_M)
+    # Size curve alone (100 / 0.003 * 5.81 = 193667) is well past the
+    # sight's own cap too -- SIGHT_NARROW_OPTIC.range_cap_m (20000.0)
+    # binds instead, not the naked eye's.
+    assert presence_narrow == pytest.approx(20_000.0)
 
 
 def test_forward_and_below_candidate_at_a_mild_depression_is_visible() -> None:

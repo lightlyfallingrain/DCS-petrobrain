@@ -149,7 +149,27 @@ class Optic:
     `regard_elevation_down_deg` (`BL-B64` Stage 1) are the field of
     regard -- how far this optic can be *pointed* -- `None` for an optic
     pointed by the head (unrestricted). Three fields because the
-    elevation envelope need not be symmetric (the 9K113's is: +20/-15)."""
+    elevation envelope need not be symmetric (the 9K113's is: +20/-15).
+
+    `range_cap_m` (`BL-B64` Stage 2, `plans/9k113-sight/plan.md` §12a) is
+    the sanity bound `visibility.check_visibility`'s range-admission gate
+    clamps against -- generalises the old global `visibility.
+    NAKED_EYE_RANGE_CAP_M` into a per-optic figure, the honest shape
+    §12a's own finding calls for: the cone that admits a narrow-sight
+    candidate past 10 km (direction §7) buys nothing if the range gate
+    immediately clamps it back and rejects it, so the two must change
+    together. `None` (every optic before this entry) means "use
+    `visibility.NAKED_EYE_RANGE_CAP_M`" -- `check_visibility`/`tier_ranges`
+    resolve that default themselves, so this module never has to import a
+    literal from `visibility.py` (which would reinstate the circular
+    import slice 2A deliberately dissolved, module docstring). The two
+    sight optics below set `20_000.0` explicitly (direction §7's cone
+    depth) -- deliberately the same figure as `[[BL-B64]]`'s 20 km cone,
+    but **not aliased to it**: this field answers "how far can this optic
+    claim to have resolved something," the cone answers "is a candidate
+    even worth computing at all" (`association.PLAYER_BUBBLE_RADIUS_M`'s
+    own docstring draws the identical distinction for the un-capped
+    case), and a future optic could reasonably need the two to differ."""
 
     name: str
     presence_range_mult: float
@@ -165,6 +185,10 @@ class Optic:
     regard_azimuth_half_deg: float | None = None
     regard_elevation_up_deg: float | None = None
     regard_elevation_down_deg: float | None = None
+    #: `None` (every optic before `BL-B64` Stage 2) defers to
+    #: `visibility.NAKED_EYE_RANGE_CAP_M` -- see this field's own
+    #: docstring above.
+    range_cap_m: float | None = None
 
 
 #: 1.0 on every tier -- the cockpit mask is the naked eye's only range
@@ -251,6 +275,7 @@ SIGHT_WIDE_OPTIC: Final[Optic] = Optic(
     regard_azimuth_half_deg=60.0,
     regard_elevation_up_deg=20.0,
     regard_elevation_down_deg=-15.0,
+    range_cap_m=20_000.0,
 )
 
 #: The 9K113 Raduga-Sh sight, narrow (x10) setting -- same source and
@@ -283,6 +308,7 @@ SIGHT_NARROW_OPTIC: Final[Optic] = Optic(
     regard_azimuth_half_deg=60.0,
     regard_elevation_up_deg=20.0,
     regard_elevation_down_deg=-15.0,
+    range_cap_m=20_000.0,
 )
 
 

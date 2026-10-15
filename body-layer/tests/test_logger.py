@@ -1524,8 +1524,65 @@ def test_apply_active_gaze_returns_none_when_optic_state_was_never_given() -> No
     assert updated_state is None
 
 
-# -- `_apply_active_gaze`'s `suppressed_until_sim` build (`BL-B64` Stage 2,
-# direction §6) --------------------------------------------------------------
+# -- `_apply_active_gaze`'s `sight_cone`/`suppressed_until_sim` build
+# (`plans/9k113-sight/plan.md` §12/§12a, direction §6/§7) -------------------
+
+
+def test_apply_active_gaze_builds_a_sight_cone_from_actual_aim() -> None:
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import SIGHT_NARROW_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=SIGHT_NARROW_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
+    )
+
+    assert naked_eye.sight_cone is not None
+    assert naked_eye.sight_cone.azimuth_deg == 12.0
+    assert naked_eye.sight_cone.half_angle_deg == SIGHT_NARROW_OPTIC.fov_half_angle_deg
+    assert naked_eye.sight_cone.depth_m == SIGHT_NARROW_OPTIC.range_cap_m
+
+
+def test_apply_active_gaze_builds_no_cone_for_a_non_sight_optic() -> None:
+    """`Optic.regard_azimuth_half_deg is None` for `UNAIDED_OPTIC`/
+    `BINOCULAR_OPTIC` -- neither is pointed/slewed, so neither gets a
+    cone, even with a fixed look commanded (e.g. a binocular glass)."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    naked_eye = _naked_eye_source()
+    decision = OpticDecision(
+        optic=BINOCULAR_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+    )
+
+    _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=OpticState()
+    )
+
+    assert naked_eye.sight_cone is None
+
+
+def test_apply_active_gaze_builds_no_cone_while_sighting_is_idle() -> None:
+    """No fixed look commanded (idle-wide sighting, `decision.look_azimuth_
+    deg is None`) -- actual aim is cleared, so there is no committed
+    direction to point a cone at. The cone only follows a *committed* aim,
+    never a teleporting one (plan §15a/§15b point 3)."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from perception.optics import SIGHT_WIDE_OPTIC
+
+    naked_eye = _naked_eye_source()
+    prior_state = OpticState(actual_aim_azimuth_deg=12.0, actual_aim_elevation_deg=-3.0)
+    decision = OpticDecision(optic=SIGHT_WIDE_OPTIC)
+
+    _apply_active_gaze(
+        [naked_eye], TaskStore(), decision=decision, optic_state=prior_state
+    )
+
+    assert naked_eye.sight_cone is None
 
 
 def test_apply_active_gaze_sets_suppressed_until_sim_from_optic_state() -> None:

@@ -88,12 +88,13 @@ RANGE_CAP_M: Final[float] = 5000.0
 #: an admitted guess, scaled by whichever optic is active. This constant
 #: answers a different question: what is even worth computing in the first
 #: place, regardless of which optic or channel might eventually look at it.
-#: They will diverge the moment the 9K113 sight lands (per the todo item):
-#: its cone reaches 20 km while the naked eye's own cap stays at 10 km, and
-#: when that exception exists it will be evaluated *within* the bubble
-#: filter below (narrowed to the sight's own FOV), not by raising this
-#: radius -- raising it would reinstate the whole-sphere cost the bubble
-#: exists to remove, at four times the area. Do not import this from
+#: They diverged the moment the 9K113 sight landed (`BL-B64` Stage 2,
+#: `SightCone` above): its cone reaches 20 km while the naked eye's own
+#: cap stays at 10 km, and that exception is evaluated *within* the
+#: bubble filter below (narrowed to the sight's own FOV via `sight_cone`),
+#: not by raising this radius -- raising it would reinstate the
+#: whole-sphere cost the bubble exists to remove, at four times the area.
+#: Do not import this from
 #: `visibility.py`, alias it to `NAKED_EYE_RANGE_CAP_M`, or vice versa --
 #: `tests/test_association.py`'s `test_player_bubble_radius_is_not_...`
 #: pair asserts neither module's source references the other's constant
@@ -286,9 +287,46 @@ def filter_ownship(
     return [candidate for candidate in candidates if candidate.is_ownship is not True]
 
 
+@dataclass(frozen=True, slots=True)
+class SightCone:
+    """A directional exemption to `PLAYER_BUBBLE_RADIUS_M` -- direction §7
+    (`docs/acceptance/2026-10-15-9k113-sight-direction.md`), `plans/
+    9k113-sight/plan.md` §12/§12a/§12b. The 9K113, especially in narrow
+    FOV mode, resolves targets well past the bubble's own 10 km cost
+    radius; this is the shape the bubble's own docstring already
+    prescribed for that case -- evaluated *inside* `filter_player_bubble`
+    below, narrowed to the sight's own field of view, never by raising
+    `PLAYER_BUBBLE_RADIUS_M` itself (which would reinstate the
+    whole-sphere cost the bubble exists to remove, at four times the
+    area).
+
+    `azimuth_deg`/`half_angle_deg` are body-relative, the same convention
+    `optics.within_optic_fov` tests in -- `azimuth_deg` is the sight's
+    *actual* pointing direction (`belief.optic_policy.OpticState.
+    actual_aim_azimuth_deg`), never belief's desired aim: an instantly-
+    teleporting cone pointed at a direction the sight has not actually
+    reached yet would let Petrovich perceive at range in a direction he
+    could not have been looking a moment earlier -- an omniscience leak,
+    not a placeholder (plan §15a/§15b point 3). `depth_m` is the cone's
+    own reach past the bubble radius, **not** validated against it here
+    (a `depth_m` shorter than `PLAYER_BUBBLE_RADIUS_M` would simply admit
+    nothing new, harmlessly) -- the caller (`optic.range_cap_m`, today
+    20 km for both sight settings) decides how far.
+
+    Measured cost: negligible at every percentile on a real engagement
+    trace, `plans/9k113-sight/performance-cone-gate.md` -- built with no
+    candidate cap or pre-filter, per that review's verdict."""
+
+    azimuth_deg: float
+    half_angle_deg: float
+    depth_m: float
+
+
 def filter_player_bubble(
     candidates: Sequence[WorldObjectCandidate],
     ownship: OwnshipState,
+    *,
+    sight_cone: SightCone | None = None,
 ) -> list[WorldObjectCandidate]:
     """Drop any candidate further than `PLAYER_BUBBLE_RADIUS_M` from
     ownship -- see that constant's own docstring for why this exists and
@@ -298,12 +336,34 @@ def filter_player_bubble(
     visibility/clustering/association work runs on the survivors -- a
     candidate beyond the bubble is never considered at all, not gated
     late. Equal-to-radius is kept (`<=`), matching `associate()`'s own
-    `> RANGE_CAP_M` rejection convention elsewhere in this module."""
+    `> RANGE_CAP_M` rejection convention elsewhere in this module.
+
+    `sight_cone` (`BL-B64` Stage 2, `SightCone`'s own docstring above)
+    admits a candidate beyond the radius too, when it falls inside the
+    cone's azimuth wedge and within its depth -- `None` (every caller
+    before this entry, and every OBSERV-off poll today) is a true no-op:
+    the whole branch below only runs for a candidate that has *already*
+    failed the radius test, so an OBSERV-off tick pays nothing beyond the
+    one extra `is None` check (plan §12b's measured cost, negligible even
+    when active)."""
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     survivors: list[WorldObjectCandidate] = []
     for candidate in candidates:
         target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
-        if range_m(observer, target) <= PLAYER_BUBBLE_RADIUS_M:
+        candidate_range_m = range_m(observer, target)
+        if candidate_range_m <= PLAYER_BUBBLE_RADIUS_M:
+            survivors.append(candidate)
+            continue
+        if sight_cone is None or candidate_range_m > sight_cone.depth_m:
+            continue
+        candidate_true_bearing_deg = bearing_deg(observer, target)
+        body_relative_deg = (
+            candidate_true_bearing_deg - ownship.heading_true_deg + 540.0
+        ) % 360.0 - 180.0
+        azimuth_delta_deg = abs(
+            (body_relative_deg - sight_cone.azimuth_deg + 540.0) % 360.0 - 180.0
+        )
+        if azimuth_delta_deg <= sight_cone.half_angle_deg:
             survivors.append(candidate)
     return survivors
 

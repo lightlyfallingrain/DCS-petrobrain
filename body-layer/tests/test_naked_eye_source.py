@@ -26,12 +26,14 @@ from typing import Any, Final
 import pytest
 
 from perception import association, object_model
+from perception.association import SightCone
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
+from perception.optics import SIGHT_NARROW_OPTIC
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 from replay import replay
 
@@ -412,6 +414,42 @@ def test_suppression_does_not_touch_dedup_state() -> None:
     source.poll(0.5, _ownship())
 
     assert source._previously_seen_at == seen_before
+
+
+def test_sight_cone_admits_a_candidate_beyond_the_player_bubble() -> None:
+    """`BL-B64` Stage 2, direction §7 -- threaded through from `self.
+    sight_cone` into `association.filter_player_bubble`, with the
+    optic-aware range cap (`Optic.range_cap_m`) letting it survive
+    `visibility.check_visibility`'s own gate too (plan §12a: neither
+    change is sufficient alone)."""
+    # T-72B, size 7 m: SIGHT_NARROW_OPTIC's own size-curve threshold is
+    # 7 / 0.003 * 5.81 = 13556.67 m -- 13000 m sits inside it and inside
+    # the optic's own 20 km range_cap_m, but beyond PLAYER_BUBBLE_RADIUS_M
+    # (10000 m), so only the cone (not the ordinary radius test) admits
+    # it. Dead ahead (lon_deg=0) so the +/-15 deg default gaze cone and
+    # the narrow sight's own 3 deg FOV both clear it too.
+    world_objects = {
+        "objects": [_world_object(1, "T-72B", lat_deg=13_000.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+    source.optic = SIGHT_NARROW_OPTIC
+    source.sight_cone = SightCone(
+        azimuth_deg=0.0, half_angle_deg=10.0, depth_m=20_000.0
+    )
+
+    assert len(source.poll(0.5, _ownship())) == 1
+
+
+def test_sight_cone_none_is_unaffected_by_a_beyond_bubble_candidate() -> None:
+    """The same candidate, same optic, no cone -- rejected by the ordinary
+    `PLAYER_BUBBLE_RADIUS_M` test, exactly as before this entry."""
+    world_objects = {
+        "objects": [_world_object(1, "T-72B", lat_deg=13_000.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+    source.optic = SIGHT_NARROW_OPTIC
+
+    assert source.poll(0.5, _ownship()) == []
 
 
 def test_replaying_the_same_stream_twice_yields_identical_observations() -> None:

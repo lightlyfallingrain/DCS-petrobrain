@@ -242,6 +242,7 @@ from aircraft_client import AircraftLayerClient, AircraftLayerError
 from perception import object_model
 from perception.association import (
     PLAYER_BUBBLE_RADIUS_M,
+    SightCone,
     WorldObjectCandidate,
     filter_ownship,
     filter_player_bubble,
@@ -435,6 +436,16 @@ class NakedEyePerceptionSource:
     #: regression gate 2B used and it is worth repeating here: the
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
+    #: The player-bubble directional exemption (`BL-B64` Stage 2, direction
+    #: §7) -- assigned per poll by `logger._apply_active_gaze` alongside
+    #: `optic`, from the same resolution: the sight's own *actual* pointing
+    #: direction, built from `OpticState.actual_aim_azimuth_deg` (never
+    #: belief's desired aim -- an instantly-teleporting cone would be an
+    #: omniscience leak, `plans/9k113-sight/plan.md` §15a/§15b). `None`
+    #: whenever no sight optic is active this poll (every OBSERV-off poll,
+    #: by construction) -- `association.filter_player_bubble`'s own
+    #: docstring on why that guards the whole added branch at zero cost.
+    sight_cone: SightCone | None = None
     #: Set to `now_sim + HANDS_BUSY_DURATION_S` by `logger._apply_active_
     #: gaze` whenever `OpticState.hands_busy_until_sim` is active this poll
     #: (`BL-B64` Stage 2, direction §6's "1 s hand movement") -- `poll()`
@@ -565,7 +576,9 @@ class NakedEyePerceptionSource:
         # candidate gets exactly one trace row (PLAYER_BUBBLE) when tracing
         # is on, instead of the per-gate row `check_visibility` would have
         # produced -- it was never handed to `check_visibility` at all.
-        candidates = filter_player_bubble(all_candidates, ownship_state)
+        candidates = filter_player_bubble(
+            all_candidates, ownship_state, sight_cone=self.sight_cone
+        )
         if self.trace_sink is not None:
             in_bubble_ids = frozenset(c.object_id for c in candidates)
             for candidate in all_candidates:

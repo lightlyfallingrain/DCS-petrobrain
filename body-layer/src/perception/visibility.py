@@ -583,9 +583,19 @@ def tier_ranges(
     would present as Petrovich raising binoculars for contacts he then
     cannot resolve -- a behaviour nobody would trace back to a duplicated
     formula.
+
+    **The sanity bound is `optic.range_cap_m`, defaulting to
+    `NAKED_EYE_RANGE_CAP_M`** (`BL-B64` Stage 2, `plans/9k113-sight/
+    plan.md` §12a) -- `optic.range_cap_m`'s own docstring. Resolved here
+    rather than read as a bare module constant so the two sight optics'
+    20 km figure flows through this one formula rather than needing a
+    second copy of the clamp.
     """
+    range_cap_m = (
+        optic.range_cap_m if optic.range_cap_m is not None else NAKED_EYE_RANGE_CAP_M
+    )
     presence_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
+        range_cap_m,
         (
             presence_size_m
             / _presence_angular_radius_rad(LOWRES_ANGULAR_RADIUS_RAD, group_salient)
@@ -862,8 +872,17 @@ def check_visibility(
     size_curve_threshold_m = (
         profile.size_m / effective_gating_angular_radius_rad
     ) * optic.presence_range_mult
-    range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
-    if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m:
+    # `optic.range_cap_m`, defaulting to `NAKED_EYE_RANGE_CAP_M` -- the
+    # same resolution `tier_ranges` performs, kept in sync by construction
+    # (`BL-B64` Stage 2, plan §12a): a 9K113-narrow candidate past 10 km
+    # must not be admitted by the player-bubble cone (`association.
+    # filter_player_bubble`'s `sight_cone`) only to be clamped back and
+    # rejected here by a cap that never learned about the sight.
+    optic_range_cap_m = (
+        optic.range_cap_m if optic.range_cap_m is not None else NAKED_EYE_RANGE_CAP_M
+    )
+    range_threshold_m = min(optic_range_cap_m, size_curve_threshold_m)
+    if optic_range_cap_m <= size_curve_threshold_m:
         threshold_bound = "range_cap"
     elif group_salient:
         # The relaxed (RESOLUTION, not LOWRES) threshold was the binding

@@ -245,6 +245,7 @@ from eyesight_view import (
 )
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
+from perception.association import PLAYER_BUBBLE_RADIUS_M, SightCone
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
 from perception.forest import ForestOcclusion
@@ -967,6 +968,31 @@ def _apply_active_gaze(
             actual_aim_azimuth_deg=None,
             actual_aim_elevation_deg=None,
         )
+    # `BL-B64` Stage 2, direction §7 -- the directional player-bubble
+    # exemption, pointed at the sight's own *actual* aim (never desired,
+    # same reasoning as the `ScanPlan` above). `optic.regard_azimuth_half_
+    # deg is not None` is the general test for "this optic can be
+    # pointed/slewed" rather than naming the two sight optics -- only they
+    # set it (`optics.py`'s own docstring) -- so a future optic with a
+    # field of regard picks this up automatically. `None` whenever no
+    # actual aim is committed this poll (idle-wide sighting, or any other
+    # optic), which is the whole of `association.filter_player_bubble`'s
+    # own "guard the whole branch" contract.
+    sight_cone: SightCone | None = None
+    if (
+        optic.regard_azimuth_half_deg is not None
+        and updated_state is not None
+        and updated_state.actual_aim_azimuth_deg is not None
+    ):
+        sight_cone = SightCone(
+            azimuth_deg=updated_state.actual_aim_azimuth_deg,
+            half_angle_deg=optic.fov_half_angle_deg or 0.0,
+            depth_m=(
+                optic.range_cap_m
+                if optic.range_cap_m is not None
+                else PLAYER_BUBBLE_RADIUS_M
+            ),
+        )
     # `BL-B64` Stage 2, direction §6 -- the 1 s hand movement. `None`
     # (the default) on every pre-existing `OpticState`, so this is a
     # true no-op until the pilot's "Observ on"/"Observ off" command sets
@@ -978,6 +1004,7 @@ def _apply_active_gaze(
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = resolved_plan
             source.optic = optic
+            source.sight_cone = sight_cone
             source.suppressed_until_sim = suppressed_until_sim
     return updated_state
 
