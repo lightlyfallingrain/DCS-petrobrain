@@ -323,6 +323,32 @@ rather than a probe.
 
 ---
 
+### All four ANSWERED — user direction, 2026-10-15
+
+| # | question | answer |
+|---|---|---|
+| 1 | life/burning fields: existing feed or new endpoint? | **existing** — ride `/unit_velocity/latest` |
+| 2 | split `BL-B72` three ways? | **split** — `BL-B73`, `BL-B74`, `AC-B7`, `AC-B8` stand |
+| 3 | callout wording | **proposals accepted as drafted** |
+| 4 | does the smoke trail outlive the launcher's world object? | **yes**, built that way from the start |
+
+**On 3**, the accepted forms, each claiming presence only and none implying attribution:
+
+| emitter | callout |
+|---|---|
+| gun fire, not at us | *"something firing, two o'clock, far"* |
+| gun fire, event names us | *"taking fire, two o'clock"* |
+| SAM launch | *"launch, two o'clock"*, then *"smoke trail, two o'clock"* |
+| burning unit | *"something burning, two o'clock"* |
+
+**On 4**, the consequence to build for rather than discover: a launcher destroyed seconds after
+firing is the **normal** case under attack, so the smoke record must be able to mint its own
+candidate rather than annotating a live one. A version that works only while the launcher survives
+would fail in exactly the engagement that matters.
+
+**Implementation authorised** the same message: *"Go ahead and implement"*. Stage A (`BL-B72`,
+burning) plus `AC-B7`'s transport is the first slice; `BL-B73`/`BL-B74` wait on `AC-B8`.
+
 ### Decisions Requiring User Input
 
 1. **Does the burning/life data ride on the existing `/unit_velocity/latest` feed, or get its own
