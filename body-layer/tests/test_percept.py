@@ -13,10 +13,21 @@ _TRUTH_FIELD_NAMES = frozenset(
     {
         "derived_world_position",
         "contact_id",
-        "provenance",
         "t_wall",
     }
 )
+#: `provenance` was removed from the set above by `plans/
+#: emitter-visibility/plan.md` (`BL-B72` Stage A, 2026-10-15) --
+#: `Observation.provenance` is a free-form string stating *which filtering
+#: produced this observation* (e.g. `PROVENANCE_VISIBILITY_FILTER_ONLY`/
+#: `PROVENANCE_EMITTER_BURNING`), not a DCS-truth field: it is the
+#: channel's own honest statement about itself, same footing as
+#: `classification_level`/`count_bucket` (already on `Percept`), never a
+#: ground-truth position or DCS object id. The plan's own design requires
+#: it on this side of the boundary -- `belief.contacts.Contact.is_burning`
+#: (`belief.events.burning_event_kind`'s input) is derived from it, and
+#: there is no other sanctioned way for belief to learn "this report came
+#: from the emitter bypass" without it.
 
 
 def _ownship() -> OwnshipState:

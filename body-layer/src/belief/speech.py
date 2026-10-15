@@ -215,6 +215,7 @@ from belief.classification import (
 from belief.contacts import Contact, ContactStore
 from belief.enrichment import CLOCK_BUCKET_DEG, EnrichmentContext
 from belief.events import (
+    CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
@@ -3040,6 +3041,28 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         closing = event.range_km < event.previous_range_km
         lead = "Getting closer, " if closing else "Moving away, "
         return _contact_report_text(result["facts"], lead=lead)
+    if event.kind == CONTACT_BURNING_SEEN:
+        # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- the
+        # accepted wording (user decision 3), deliberately its own
+        # bespoke line rather than `_contact_report_text`: that helper's
+        # generic form would say "ground, two o'clock, 2.3 kilometres" for
+        # a `PRESENCE`-level contact (`_unit_type_display`'s `"presence"`
+        # branch), not "something burning" -- and would append a range
+        # the accepted wording does not carry. No `_identification_lead`/
+        # unit-type claim either: this is detection-only (module docstring
+        # on `check_visibility`'s emitter bypass), never attribution
+        # (`"we got it"`/`"target destroyed"` are forbidden -- user
+        # direction, 2026-10-15).
+        relative_now = result["facts"].get("relative_now")
+        if relative_now is None:
+            # No current bearing to report -- this line only makes sense
+            # pointed at a clock position; silently say nothing rather
+            # than a directionless "something burning" that invents a
+            # look that was not taken.
+            return None
+        assert isinstance(relative_now, dict)
+        clock = relative_now["clock_position"]
+        return f"Something burning, {clock} o'clock."
     if event.kind == CONTACT_ENGAGEMENT_CHANGED:
         # Decision 3's two wordings, taken from `docs/concept/
         # STATE_TRANSITIONS.md`'s own "danger <unit> <where>"/"safe from

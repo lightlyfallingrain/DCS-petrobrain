@@ -253,6 +253,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
+from perception.emitters import EmitterKind, burning_emitters
 from perception.estimation import (
     look_sigma_m,
     perturbed_bearing_range,
@@ -354,6 +355,29 @@ LOS_MAX_AGE_S: Final[float] = 3.0
 #: detection (plan Invariant Check: "every naked-eye `Observation`'s
 #: `provenance` string must read differently from Hybrid's").
 PROVENANCE_VISIBILITY_FILTER_ONLY: Final[str] = "world_objects/visibility_filter_only"
+
+#: `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- set instead of
+#: `PROVENANCE_VISIBILITY_FILTER_ONLY` when every member of an emitted
+#: cluster was admitted via the burning-unit bypass (`visibility.
+#: check_visibility`'s `emitter` parameter). The plan's Affected Modules
+#: section names `perception/source.py` as this constant's home, beside
+#: `PROVENANCE_VISIBILITY_FILTER_ONLY` -- but that constant's own actual
+#: home is this module, not `source.py` (confirmed by `grep`; `source.py`'s
+#: docstring only explains why `SOURCE_NAKED_EYE_VISUAL_FILTERED` lives
+#: there, a different constant), so this is declared beside its real
+#: sibling instead. `PROVENANCE_EMITTER_FIRING`/`_LAUNCH_SMOKE` (`BL-B73`/
+#: `BL-B74`) are not declared here yet -- their transport does not exist
+#: this stage.
+PROVENANCE_EMITTER_BURNING: Final[str] = "world_objects/emitter_burning"
+
+#: `visibility.VisibilityResult.emitter_kind` (an `EmitterKind.value`
+#: string) -> the `PROVENANCE_EMITTER_*` constant it should produce, for
+#: `_build_observation`'s cluster-level fold below. A `dict`, not a
+#: branch chain, so `BL-B73`/`BL-B74` add one entry each rather than a new
+#: `if`.
+_PROVENANCE_BY_EMITTER_KIND: Final[dict[str, str]] = {
+    EmitterKind.BURNING.value: PROVENANCE_EMITTER_BURNING,
+}
 
 #: `derived_world_position.method` for every emitted naked-eye `Observation`
 #: -- distinct from Hybrid's `association.CONFIDENT_ASSOCIATION_METHOD`/
@@ -532,6 +556,20 @@ class NakedEyePerceptionSource:
         velocity_by_object_id, motion_skew_s = _resolve_velocity_by_object_id(
             raw_objects, world_objects.get("dcs_model_time_s"), unit_velocity
         )
+        # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- resolved
+        # off the same already-fetched `unit_velocity` snapshot and the
+        # same `unit_name` join as the velocity resolution immediately
+        # above (`AC-B7`'s `life`/`life0` fields ride the same
+        # `/unit_velocity/latest` feed, user decision 1). A burning unit is
+        # a polled state, not an event, so this needs no new transport and
+        # no per-poll state of its own -- see `emitters.py`'s own module
+        # docstring. `unit_velocity is None` (the feed degraded) resolves
+        # to "nobody is burning this poll", the same shape every other
+        # independently-degradable join in this method already takes.
+        emitter_by_object_id = burning_emitters(
+            raw_objects,
+            unit_velocity.get("samples") if unit_velocity is not None else None,
+        )
         # `plans/dcs-driven-los/plan.md` (X-B29) -- same independently-
         # degradable-feed posture as the velocity join immediately above:
         # an aircraft-layer instance predating this endpoint (or whose LOS
@@ -638,6 +676,7 @@ class NakedEyePerceptionSource:
                 group_salient=candidate.object_id in salient_ids,
                 live_los_coverage=self.live_los_coverage,
                 forest=self.forest,
+                emitter=emitter_by_object_id.get(candidate.object_id),
             )
             if self.trace_sink is not None:
                 resolved_los = los_by_object_id.get(candidate.object_id)
@@ -718,6 +757,16 @@ class NakedEyePerceptionSource:
             for candidate, _result in visible
         }
 
+        # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- the
+        # `EmitterKind` value (or `None`) whose bypass actually admitted
+        # each candidate (`VisibilityResult.emitter_kind`, `None` for an
+        # ordinary admission), same shape/timing as `live_los_clear_by_
+        # object_id` immediately above, for `_build_observation`'s
+        # cluster-level fold.
+        emitter_kind_by_object_id: dict[int, str | None] = {
+            candidate.object_id: result.emitter_kind for candidate, result in visible
+        }
+
         observations = self._build_observations(
             now_sim,
             ownship_state,
@@ -725,6 +774,7 @@ class NakedEyePerceptionSource:
             confidence_by_object_id,
             motion_by_object_id,
             live_los_clear_by_object_id,
+            emitter_kind_by_object_id,
         )
         if self.trace_sink is not None:
             for cluster, observation in zip(to_emit, observations):
@@ -747,6 +797,7 @@ class NakedEyePerceptionSource:
         confidence_by_object_id: dict[int, float],
         motion_by_object_id: dict[int, bool | None],
         live_los_clear_by_object_id: dict[int, bool | None],
+        emitter_kind_by_object_id: dict[int, str | None],
     ) -> list[Observation]:
         """One `Observation` per `clusters` entry, resolving majority-overlap
         continuity (module docstring point 6) across the *whole* batch before
@@ -802,6 +853,7 @@ class NakedEyePerceptionSource:
                     confidence_by_object_id,
                     motion_by_object_id,
                     live_los_clear_by_object_id,
+                    emitter_kind_by_object_id,
                     continues_observation_id,
                 )
             )
@@ -953,6 +1005,7 @@ class NakedEyePerceptionSource:
         confidence_by_object_id: dict[int, float],
         motion_by_object_id: dict[int, bool | None],
         live_los_clear_by_object_id: dict[int, bool | None],
+        emitter_kind_by_object_id: dict[int, str | None],
         continues_observation_id: str | None,
     ) -> Observation:
         """One `Observation` for `cluster` -- `plans/group-contact-model/
@@ -985,7 +1038,15 @@ class NakedEyePerceptionSource:
         `live_los_clear` (`plans/dcs-driven-los/plan.md`, module docstring
         point 8) follows the exact same rule, for the exact same reason:
         a cluster is one crew-facing report, so its LOS verdict is "clear"
-        only when every member's own DCS-driven verdict agrees it is."""
+        only when every member's own DCS-driven verdict agrees it is.
+
+        `provenance` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A)
+        takes a `PROVENANCE_EMITTER_*` value only when every member's
+        `VisibilityResult.emitter_kind` agrees on the same non-`None`
+        kind -- a mixed cluster keeps the ordinary `PROVENANCE_VISIBILITY_
+        FILTER_ONLY`, following `Cluster.classification_raw`'s own
+        "identical keeps, disagreement degrades" rule rather than a second
+        one."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -1030,6 +1091,26 @@ class NakedEyePerceptionSource:
             for member in cluster.members
         }
         live_los_clear = next(iter(member_los)) if len(member_los) == 1 else None
+
+        # `plans/emitter-visibility/plan.md`, `BL-B72` Stage A: a cluster
+        # takes an emitter provenance only when **every** member was
+        # emitter-admitted of the *same* kind -- the plan's own rule,
+        # following `Cluster.classification_raw`'s "identical keeps,
+        # disagreement degrades" convention rather than a second one. A
+        # mixed cluster (some members emitter-admitted, some not, or two
+        # different kinds) keeps the ordinary `PROVENANCE_VISIBILITY_
+        # FILTER_ONLY` value.
+        member_emitter_kinds = {
+            emitter_kind_by_object_id.get(member.object_id)
+            for member in cluster.members
+        }
+        provenance = PROVENANCE_VISIBILITY_FILTER_ONLY
+        if len(member_emitter_kinds) == 1:
+            (only_emitter_kind,) = member_emitter_kinds
+            if only_emitter_kind is not None:
+                provenance = _PROVENANCE_BY_EMITTER_KIND.get(
+                    only_emitter_kind, PROVENANCE_VISIBILITY_FILTER_ONLY
+                )
 
         # `plans/attack-run/plan.md` Decision 16, Stage 2: the ownship-
         # relative observation, set only when the cluster was genuinely
@@ -1080,7 +1161,7 @@ class NakedEyePerceptionSource:
                 confidence=confidence,
                 method=_DERIVED_POSITION_METHOD,
             ),
-            provenance=PROVENANCE_VISIBILITY_FILTER_ONLY,
+            provenance=provenance,
             classification_level=cluster.classification_level,
             continues_observation_id=continues_observation_id,
             count_bucket=cluster.count_bucket,

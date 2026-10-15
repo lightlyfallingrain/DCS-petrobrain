@@ -27,6 +27,7 @@ from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
+    CONTACT_BURNING_SEEN,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_MOTION_CHANGED,
     Event,
@@ -67,6 +68,7 @@ from belief.speech import (
 from belief.tools import describe_contact
 from belief.utterance import ReferenceCandidate
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
+from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
 _FAKE_CONN = sqlite3.connect(":memory:")
@@ -2033,6 +2035,83 @@ def test_route_event_contact_motion_changed_auto_acknowledges() -> None:
     assert motion_event in store.unacknowledged_events
     route_event(store, motion_event, now_sim=0.0)
     assert motion_event not in store.unacknowledged_events
+
+
+# --- CONTACT_BURNING_SEEN speech (plans/emitter-visibility/plan.md,
+# BL-B72 Stage A) --
+
+
+def _burning_observation(*, obs_id: str, t_sim: float) -> Observation:
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw="BMP-2",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance=PROVENANCE_EMITTER_BURNING,
+    )
+
+
+def test_route_event_contact_burning_seen_says_something_burning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The accepted wording (user decision 3) -- claims presence only,
+    never attribution."""
+    store = ContactStore()
+    store.ingest([_burning_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    burning_event = next(e for e in store.events if e.kind == CONTACT_BURNING_SEEN)
+
+    speech = route_event(
+        store, burning_event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert "burning" in speech.text.lower()
+    assert "o'clock" in speech.text
+    # Never attribution -- the user's own forbidden words.
+    assert "we got it" not in speech.text.lower()
+    assert "target destroyed" not in speech.text.lower()
+    assert "got him" not in speech.text.lower()
+
+
+def test_route_event_contact_burning_seen_omits_range() -> None:
+    """The accepted wording has no range clause, unlike every other
+    positional callout in this module."""
+    store = ContactStore()
+    store.ingest([_burning_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    burning_event = next(e for e in store.events if e.kind == CONTACT_BURNING_SEEN)
+
+    speech = route_event(store, burning_event, now_sim=0.0)
+
+    # No EnrichmentContext -> no `relative_now` -> no clock position to
+    # report at all, so this renders nothing rather than a directionless
+    # "something burning".
+    assert speech is None
+
+
+def test_route_event_contact_burning_seen_auto_acknowledges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest([_burning_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    burning_event = next(e for e in store.events if e.kind == CONTACT_BURNING_SEEN)
+    assert burning_event in store.unacknowledged_events
+
+    route_event(
+        store, burning_event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert burning_event not in store.unacknowledged_events
 
 
 # --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --

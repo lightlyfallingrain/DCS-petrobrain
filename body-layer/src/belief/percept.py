@@ -95,7 +95,18 @@ class Percept:
     perceived metadata with no path back to a world position; this one
     carries true relative geometry that, combined with ownship's own
     exact telemetry, is convertible to one -- see Decision 16 item 4 for
-    the full argument."""
+    the full argument.
+
+    `provenance` carries `Observation.provenance` through unchanged
+    (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A) -- which
+    filtering produced this report (today `PROVENANCE_VISIBILITY_FILTER_
+    ONLY` or, for a burning unit, `PROVENANCE_EMITTER_BURNING`), not a
+    truth field: same footing as `classification_level`/`count_bucket`
+    above, a channel's own honest statement about itself. `belief.
+    contacts.Contact.record` reads this to decide `is_burning` (`belief.
+    events.burning_event_kind`'s input); nothing else in `belief/` needs
+    it yet. `None` is the default so every pre-existing construction site
+    (test fixtures included) keeps compiling."""
 
     t_sim: float
     source: str
@@ -111,6 +122,7 @@ class Percept:
     position_uncertainty: PositionUncertainty | None = None
     live_los_clear: bool | None = None
     relative_direction: RelativeDirection | None = None
+    provenance: str | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -134,4 +146,5 @@ def percept_of(observation: Observation) -> Percept:
         position_uncertainty=observation.position_uncertainty,
         live_los_clear=observation.live_los_clear,
         relative_direction=observation.relative_direction,
+        provenance=observation.provenance,
     )

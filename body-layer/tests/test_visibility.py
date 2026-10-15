@@ -43,6 +43,7 @@ import pytest
 from perception import object_model, visibility
 from perception.association import WorldObjectCandidate
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
+from perception.emitters import Emitter, EmitterKind
 from perception.forest import ForestOcclusion
 from perception.gaze import Gaze
 from perception.object_model import ObjectTypeProfile
@@ -1468,3 +1469,181 @@ def test_forest_gate_records_forest_outcome_in_trace() -> None:
     assert result is None
     assert len(trace.records) == 1
     assert trace.records[0].outcome is GateOutcome.FOREST
+
+
+# `plans/emitter-visibility/plan.md`, `BL-B72` Stage A -- the shared
+# emitter bypass. `_BURNING = Emitter(kind=EmitterKind.BURNING)` stands in
+# for any emitter: Stage A is the only kind that exists today, but the
+# bypass mechanism itself in `check_visibility` does not discriminate by
+# kind.
+_BURNING = Emitter(kind=EmitterKind.BURNING)
+
+
+def test_emitter_admits_a_candidate_beyond_the_range_gate() -> None:
+    """The regression gate for the whole feature (plan step 3): a T-72B at
+    9 km is far beyond its own 2333.33 m `lowres` threshold (see
+    `test_armored_vehicle_just_inside_lowres_tier_range_is_visible`'s own
+    derivation) and well inside `NAKED_EYE_RANGE_CAP_M`/the player bubble,
+    so an `emitter` is the only thing that can admit it."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=9000.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=_BURNING
+    )
+
+    assert result is not None
+    assert result.tier == "lowres"
+    assert result.confidence == NAKED_EYE_PRESENCE_CONFIDENCE
+    assert result.emitter_kind == EmitterKind.BURNING.value
+
+
+def test_same_far_candidate_without_an_emitter_is_rejected() -> None:
+    """The other half of the regression gate: the identical T-72B at 9 km,
+    not burning, is rejected exactly as before this parameter existed."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=9000.0, z=0.0)
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert result is None
+
+
+def test_emitter_admits_a_candidate_inside_a_mapped_forest() -> None:
+    """*"a unit firing from a forest gives it location away"* -- the
+    forest gate (5) is bypassed on the identical "only if it would
+    otherwise reject" rule as the range gate."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=100.0, z=0.0)
+
+    result = check_visibility(
+        ownship,
+        candidate,
+        _FAKE_CONN,
+        _THEATRE,
+        forest=_forest_stub(True),
+        emitter=_BURNING,
+    )
+
+    assert result is not None
+    assert result.tier == "lowres"
+    assert result.emitter_kind == EmitterKind.BURNING.value
+
+
+def test_emitter_does_not_bypass_terrain_los() -> None:
+    """*"Terrain does block, of course... Terrain just blocks LOS."* --
+    gate 4 is unaffected by `emitter`, fail-closed exactly as always."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=9000.0, z=0.0, live_los_clear=False)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=_BURNING
+    )
+
+    assert result is None
+
+
+def test_emitter_does_not_bypass_gaze() -> None:
+    """An emitter does not relax gaze -- *"If Petrovich is looking at the
+    unit's direction..."* is a precondition the bypass never removes."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=9000.0, z=0.0)
+    # A gaze wedge pointed well away from the candidate's bearing (0 deg).
+    narrow_gaze = Gaze(center_azimuth_deg=180.0, half_width_deg=10.0, label="rear")
+
+    result = check_visibility(
+        ownship,
+        candidate,
+        _FAKE_CONN,
+        _THEATRE,
+        gaze=narrow_gaze,
+        emitter=_BURNING,
+    )
+
+    assert result is None
+
+
+def test_emitter_does_not_bypass_cockpit_mask() -> None:
+    """An emitter does not let Petrovich see through the airframe."""
+    ownship = _ownship(heading_true_deg=0.0)
+    # Dead astern (azimuth 180 deg), well beyond `STATION_CO_PILOT`'s
+    # `rear_cutoff_deg=130.0` -- rejected by the cockpit mask regardless of
+    # range/size.
+    candidate = _candidate("T-72B", x=-9000.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=_BURNING
+    )
+
+    assert result is None
+
+
+def test_emitter_never_lowers_what_would_already_be_seen() -> None:
+    """*"an emitter must never lower what Petrovich can see"* -- a
+    candidate that clears both bypassable gates unaided keeps its
+    ordinary, unclamped tier and carries no `emitter_kind`."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=100.0, z=0.0)
+
+    with_emitter = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=_BURNING
+    )
+    without_emitter = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert with_emitter is not None
+    assert without_emitter is not None
+    assert with_emitter == without_emitter
+    assert with_emitter.tier == "hires"
+    assert with_emitter.emitter_kind is None
+
+
+def test_emitter_default_none_is_a_true_noop() -> None:
+    """Omitting `emitter` entirely must be byte-identical to a rejected
+    far candidate -- the additive no-op contract every other optional gate
+    parameter in this module already carries."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=9000.0, z=0.0)
+
+    default_result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+    explicit_none_result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=None
+    )
+
+    assert default_result is None
+    assert explicit_none_result is None
+
+
+def test_emitter_bypass_records_emitter_kind_and_threshold_bound_in_trace() -> None:
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=9000.0, z=0.0)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=_BURNING, trace=trace
+    )
+
+    assert result is not None
+    assert len(trace.records) == 1
+    entry = trace.records[0]
+    assert entry.outcome is GateOutcome.ADMITTED
+    assert entry.emitter_kind == EmitterKind.BURNING.value
+    assert entry.threshold_bound == "emitter_bypass"
+
+
+def test_emitter_present_but_unneeded_leaves_trace_threshold_bound_ordinary() -> None:
+    """A candidate that clears the range gate unaided is traced exactly as
+    any ordinary admission -- the bypass only changes `threshold_bound`
+    when it actually fires."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=100.0, z=0.0)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, emitter=_BURNING, trace=trace
+    )
+
+    assert result is not None
+    assert len(trace.records) == 1
+    entry = trace.records[0]
+    assert entry.emitter_kind is None
+    assert entry.threshold_bound == "size_curve"

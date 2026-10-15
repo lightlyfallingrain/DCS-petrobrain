@@ -11,12 +11,14 @@ from __future__ import annotations
 from belief.classification import ClassificationBelief, SpecificityLevel
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
+    CONTACT_BURNING_SEEN,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
     CONTACT_MOTION_CHANGED,
     CONTACT_REACQUIRED,
     attention_event_kind,
+    burning_event_kind,
     cardinality_event,
     classification_event,
     lifecycle_event_kind,
@@ -165,3 +167,31 @@ def test_motion_state_change_is_contact_motion_changed() -> None:
     assert motion_event_kind("stopped", "moving") == CONTACT_MOTION_CHANGED
     assert motion_event_kind("moving", "stopped") == CONTACT_MOTION_CHANGED
     assert cardinality_event((4, 5), (4, float("inf"))) == CONTACT_CARDINALITY_CHANGED
+
+
+def test_burning_founded_already_burning_emits_contact_burning_seen() -> None:
+    """`previous is None` does NOT suppress the event here, mirroring
+    `motion_event_kind`'s own "contact, and it's moving" reasoning: a
+    contact founded already burning is real information worth reporting
+    on the founding tick."""
+    assert burning_event_kind(None, True) == CONTACT_BURNING_SEEN
+
+
+def test_burning_founded_not_burning_emits_nothing() -> None:
+    assert burning_event_kind(None, False) is None
+
+
+def test_burning_entering_transition_emits_contact_burning_seen() -> None:
+    assert burning_event_kind(False, True) == CONTACT_BURNING_SEEN
+
+
+def test_burning_unchanged_emits_nothing() -> None:
+    assert burning_event_kind(True, True) is None
+    assert burning_event_kind(False, False) is None
+
+
+def test_burning_leaving_transition_emits_nothing() -> None:
+    """Deliberately one-directional -- unlike every flat-comparison kind
+    above, there is no accepted "stopped burning" callout (see
+    `burning_event_kind`'s own docstring)."""
+    assert burning_event_kind(True, False) is None
