@@ -1,3 +1,138 @@
+## Pass 6 — wiring OBSERV on/off into the voice vocabulary (`BL-B64` merge blocker)
+
+### Implementation Summary
+
+DoD's "acceptance boundary" finding was that `observ_on`/`observ_off` exist and work in
+`crew_console.handle_command`, but the only input surface that reaches them is the `!voice` test
+harness — no F10 menu entry and no spoken vocabulary. User direction made the voice half a merge
+blocker (F10 explicitly waived). This pass adds the spoken vocabulary only.
+
+Built in a worktree checked out directly from `feature/9k113-sight` at `2c851d5` (the branch's own
+tip; HEAD matched exactly, no merge needed — the branch had not advanced past the DoD commit).
+`body-layer/.venv` and `audio-adapter/.venv` both absent and rebuilt with the pinned versions
+(`ruff==0.16.6`, `mypy==2.3.1`, `pytest==9.1.1`, plus `numpy==2.4.6`/`pyproj==3.8.0` for body-layer).
+
+**The vocabulary lives in `audio-adapter`, not `body-layer`** — `audio-adapter/src/vocabulary.py`
+owns every spoken token's phrase table (module independence: body-layer never imports it). This is
+the only subproject this pass touches on the source side; body-layer's `crew_console.py` already
+had the `observ_on`/`observ_off` dispatch and readback wired from the original `BL-B64` work, and
+needed no change.
+
+### Files Changed
+- `audio-adapter/src/vocabulary.py` — added `observ_on`/`observ_off` to `VOICE_ONLY_TOKENS`, with
+  two phrasings each: `"observ on"`/`"observe on"` and `"observ off"`/`"observe off"`. Both
+  spellings are admitted deliberately: "OBSERV" (the panel's own name for the mode) is not an
+  English word, so a recognizer has no reason to prefer its spelling over "observe," the real word
+  it is homophonic with — the same reasoning `wake_petrovich` already applies to "petrovich"/"hey
+  petrovich". Plain, slot-free phrases, the same posture `drop_target`/`disengage` already have.
+  No F10 equivalent (user: "OK to skip F10 menu command"), so both are `VOICE_ONLY_TOKENS` by
+  construction.
+- `audio-adapter/tests/test_command_matcher.py` — `TestObservOnOff`, three tests covering both
+  phrasings resolving to each token, realistic noisy transcripts, and the collision check (below).
+
+### Collision check (ran before committing to these phrasings)
+
+Enumerated the full `VERB_ANCHOR_WORDS` set (27 words, derived from every phrasing's first word)
+and scored `"observ on"`/`"observe on"`/`"observ off"`/`"observe off"` as word-sequences against
+every existing `PHRASES` entry with `difflib.SequenceMatcher` on the normalised word lists (the
+same proxy `_phrase_match_ratio` uses). **Zero existing phrases scored above 0.4** against any of
+the four candidates — no fuzzy-match collision risk. Ran the real `match_transcript` against both
+phrasings plus five noisy variants (trailing punctuation, filler, mixed case, from the task's own
+list of observed STT shapes) and every one resolved to the intended token at `match_ratio=1.0`,
+`ambiguous=False`.
+
+One pre-existing, unrelated finding surfaced while probing adversarial sentences: `"the pilot will
+observe the target"` anchors (`verb_anchored=True`) on its first word `"the"`, which is close
+enough to an existing anchor word (not one of mine) to anchor regardless — confirmed by running the
+identical probe against the pre-change `vocabulary.py` (`git stash`), which showed the same
+`verb_anchored=True, token=None` result. Not a regression; `token=None` means it still resolves to
+"say again," never a false execution.
+
+### Why `observ_off` is NOT added to `belief.voice_commands.CANCEL_TOKENS`
+
+Weighed and rejected explicitly, because the direction this pass responds to argues the opposite
+way from what that set does. `CANCEL_TOKENS` raises the confidence floor a transcript must clear
+before `classify_response` dispatches it as `"act"` (`ACT_FLOOR_CANCEL` 0.80 vs `ACT_FLOOR` 0.60) —
+it exists to guard against a *false act* destroying state a misfire cannot cheaply undo
+(`cancel_task`, `silence`, `drop_target`, `disengage`). The attack-run sortie feedback this task
+cited (§2, Petrovich not stopping the sight when told to) is the opposite risk: a *missed* act
+because the floor was set too high. Raising `observ_off`'s floor would work against the very
+reliability this task was commissioned to improve. Both tokens stay at the ordinary `ACT_FLOOR`.
+Said here rather than guarded in code, per the task's instruction to flag an ordering/invariant
+relationship with an existing constant even when not enforcing it — this is an explicit rejection
+of a plausible-looking relationship, not an unexamined gap.
+
+### No new tuning constant
+
+No new behaviour-affecting numeric constant was introduced — only phrase-table entries (plain
+strings) and a `CANCEL_TOKENS`-membership decision, both already-shaped mechanisms. `config/
+defaults.toml` was not regenerated because nothing in `body-layer`'s `tuning.*` table changed.
+
+### Tests Added
+- `TestObservOnOff.test_both_phrasings_resolve_each_token` — both spellings of on/off resolve to
+  the right token at `match_ratio=1.0`, `verb_anchored=True`, `ambiguous=False`, `slots=None`.
+- `TestObservOnOff.test_survives_trailing_punctuation_and_casing` — five noisy-STT-shaped
+  transcripts (trailing comma/period, filler word, all-caps) all still resolve correctly.
+- `TestObservOnOff.test_does_not_collide_with_any_existing_phrase` — `ambiguous=False` and the
+  correct token for all four phrasings, i.e. no other phrase comes close enough to create a
+  near-tie.
+
+### End-to-end demonstration
+
+Drove `"Observe on,"` and `"observe off."` through the real `audio_adapter.command_matcher.
+match_transcript` and the result straight into a real `belief.crew_console.CrewConsole.
+handle_transcript` (confidence 0.85, an empty `ContactStore`, a fake `speech_client` standing in for
+the aircraft-layer TTS push):
+
+```
+transcript: 'Observe on,'
+  match: MatchResult(token='observ_on', match_ratio=1.0, verb_anchored=True, ambiguous=False, slots=None)
+  lines: ['Observ on.']
+  observ_transition: on
+transcript: 'observe off.'
+  match: MatchResult(token='observ_off', match_ratio=1.0, verb_anchored=True, ambiguous=False, slots=None)
+  lines: ['Observ off.']
+  observ_transition: off
+pushed_speech: [('Observ on.', False), ('Observ off.', False)]
+```
+
+Both readbacks reached the fake speech client — confirming `handle_command`'s existing
+`self._print(lines, now_sim)` call (already in place from the original `BL-B64` work, not touched
+by this pass) is what funnels the voice-matched readback to TTS, the same path every other voice
+command already uses. No body-layer change was needed to make this reach the speech path.
+
+### Checks
+
+**`audio-adapter/`** (the only subproject with a source change):
+- `ruff format --check src tests`: pass (29 files already formatted)
+- `ruff check src tests`: pass
+- `cd audio-adapter && .venv/bin/mypy src`: pass (no issues, 15 source files)
+- `pytest tests -q`: pass — **280 passed, 1 skipped** (was 277 passed, 1 skipped before this pass;
+  +3 new tests, zero pre-existing changed)
+
+**`body-layer/`** (read-only this pass, run anyway since it was in scope per the task's own
+instruction to run every touched subproject's checks — and to confirm the baseline the DoD report
+cited still holds):
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass (no issues, 59 source files)
+- `pytest tests -q`: pass — **1953 passed, 4 xfailed**, exact match to DoD's own baseline
+
+### Notable Discoveries
+- `audio-adapter/.venv` and `body-layer/.venv` were both absent in this worktree (gitignored, as
+  expected) and had to be rebuilt from the pinned versions before anything could run.
+- Confirmed by reading, not assuming: `handle_command`'s `self._print(lines, now_sim)` call at its
+  tail is the single funnel every dispatched token's readback already goes through to both the
+  overlay and TTS sinks (`_print`'s own docstring) — `observ_on`/`observ_off` needed no special
+  casing to reach speech, because they dispatch through the same `handle_command` every other
+  voice-matched token does.
+- `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md`, which the task's §2 citation refers
+  to, lives on `main` (commit `a6ca62d`) and is not present on this branch — correctly out of scope
+  per the task's own instruction not to touch attack-run guidance, and not fabricated as a path in
+  this pass's comments (referenced by content/date only, not by a path this worktree doesn't have).
+
+---
+
 ## Pass 5 — closing the residual field-of-regard leak in `look_sweep`
 
 ### Implementation Summary

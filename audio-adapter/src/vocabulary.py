@@ -195,6 +195,27 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # `disengage` / `stop attack` / `abort` (Decision 2) -- a plain,
         # slot-free phrase, like `drop_target`.
         "disengage",
+        # `observ on` / `observ off` (`BL-B64` Stage 2, direction §6:
+        # "OBSERV ON only on pilot command") -- plain, slot-free phrases,
+        # the same posture `drop_target`/`disengage` already have. There
+        # is no F10 equivalent (user direction: "OK to skip F10 menu
+        # command" on the merge blocking this pair in), so both are
+        # `VOICE_ONLY_TOKENS` rather than `LEGACY_F10_TOKENS` members by
+        # construction, not by omission.
+        #
+        # **Deliberately NOT added to `belief.voice_commands.CANCEL_TOKENS`**
+        # -- that set raises the floor a transcript's confidence must
+        # clear before it is *acted on*, which lowers the odds of exactly
+        # the thing the attack-run sortie feedback (§2, the reason this
+        # pair must ship before merge) calls out: Petrovich not stopping
+        # the sight when told to. `cancel_task`/`silence`/`drop_target`
+        # are in that set because a *false act* destroys standing state a
+        # misfire cannot cheaply undo; a false act on `observ_off` costs
+        # nothing worse than re-entering OBSERV, while a *missed* act
+        # (the floor set too high) is the failure that matters here. Both
+        # tokens stay at the ordinary `ACT_FLOOR`.
+        "observ_on",
+        "observ_off",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -514,6 +535,25 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `disengage` / `stop attack` / `abort` (Decision 2) -- a plain,
     # slot-free phrase, matching `drop_target`'s own posture.
     "disengage": ("disengage", "stop attack", "abort"),
+    # `observ on` -- the cockpit's own name for the mode (the panel reads
+    # "OBSERV"), said the way the readback itself says it back
+    # (`_handle_observ_on`: "Observ on."). Two phrasings, not one, because
+    # "OBSERV" is not an English word and a recognizer has no reason to
+    # prefer its spelling over the real word it is homophonic with --
+    # "observe" is the standard decoding of the same sound, so both are
+    # admitted rather than betting on one. **Unbenched**, like every
+    # token added here without a re-recorded corpus (the same cost this
+    # module's docstring notes for `cancel_scan`/`cancel_watch`/
+    # `silence`): no recordings of this speaker saying either phrasing
+    # exist yet.
+    "observ_on": ("observ on", "observe on"),
+    # `observ off` -- same two-spelling reasoning as `observ_on` above.
+    # **This is the direction the attack-run sortie feedback actually
+    # cares about** (§2: Petrovich not stopping the sight when told to),
+    # so this pair's reliability matters more than `observ_on`'s -- see
+    # `VOICE_ONLY_TOKENS`' own comment on why that argues for the
+    # *ordinary* `ACT_FLOOR`, not a stricter one.
+    "observ_off": ("observ off", "observe off"),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
