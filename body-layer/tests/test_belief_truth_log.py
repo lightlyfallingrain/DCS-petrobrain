@@ -365,6 +365,55 @@ def test_write_speech_rows_carry_gaze_at_the_moment_of_speech(
     }
 
 
+def test_write_speech_carries_ownship_attitude(tmp_path: Path) -> None:
+    """Added for the 2026-10-15 attack-run sortie's open question
+    (`docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` S3): an
+    ", obstructed" qualifier firing with the target in plain sight. The
+    speech rows previously carried gaze/optic but no ownship attitude, so
+    the cockpit-mask verdict at the moment of the utterance could not be
+    reconstructed after the fact — these four fields close that gap."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(
+        t_sim=58.6,
+        text="Lined up, obstructed.",
+        urgent=False,
+        ownship_pitch_deg=-3.5,
+        ownship_bank_deg=12.0,
+        ownship_heading_true_deg=270.0,
+        ownship_alt_m=450.0,
+    )
+
+    row = json.loads(path.read_text().strip())
+    assert row == {
+        "kind": "speech",
+        "t_sim": 58.6,
+        "text": "Lined up, obstructed.",
+        "urgent": False,
+        "ownship_pitch_deg": -3.5,
+        "ownship_bank_deg": 12.0,
+        "ownship_heading_true_deg": 270.0,
+        "ownship_alt_m": 450.0,
+    }
+
+
+def test_write_speech_omits_ownship_attitude_when_unknown(tmp_path: Path) -> None:
+    """Absent rather than null — a zero pitch/bank would read as "level,
+    unbanked" rather than "unknown", which would corrupt exactly the
+    analysis these fields exist to enable."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=True)
+
+    row = json.loads(path.read_text().strip())
+    assert "ownship_pitch_deg" not in row
+    assert "ownship_bank_deg" not in row
+    assert "ownship_heading_true_deg" not in row
+    assert "ownship_alt_m" not in row
+
+
 def test_write_speech_carries_attack_run_fields(tmp_path: Path) -> None:
     """`plans/attack-run/plan.md` Stage 5 -- the attack-run target, tier,
     and current azimuth/elevation error, so a sortie's guidance lines can

@@ -276,6 +276,10 @@ class BeliefTruthLogWriter:
         gaze_label: str | None = None,
         gaze_center_deg: float | None = None,
         optic_name: str | None = None,
+        ownship_pitch_deg: float | None = None,
+        ownship_bank_deg: float | None = None,
+        ownship_heading_true_deg: float | None = None,
+        ownship_alt_m: float | None = None,
         attack_run_target_contact_id: str | None = None,
         attack_run_tier: int | None = None,
         attack_run_azimuth_deg: float | None = None,
@@ -298,6 +302,22 @@ class BeliefTruthLogWriter:
         human has to correlate into one line that either shows the
         contradiction or does not.
 
+        `ownship_pitch_deg`/`ownship_bank_deg`/`ownship_heading_true_deg`/
+        `ownship_alt_m` (added for the 2026-10-15 attack-run sortie's open
+        question, `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md`
+        S3: an ", obstructed" qualifier firing with the target in plain
+        sight, on flat desert) capture ownship's own attitude/position **at
+        the moment of the utterance**, exactly mirroring `perception.source.
+        OwnshipState`'s own fields and sign convention -- positive
+        `ownship_pitch_deg` is nose up, positive `ownship_bank_deg` is right
+        bank (right wing down), `ownship_heading_true_deg` is true heading
+        in `[0, 360)`, `ownship_alt_m` is MSL. These are what `cockpit_mask.
+        is_visible`'s body-relative azimuth/elevation are rotated from
+        (`perception.visibility`'s own call site passes `ownship.bank_deg`
+        into that rotation) -- recording them is what makes a later
+        "was the mask verdict right" question reconstructible from the log
+        rather than merely asserted.
+
         Rows carry `kind` so a reader can tell them apart. Belief-truth rows
         written before this existed have no `kind` field, so **treat a
         missing `kind` as `"belief_truth"`** rather than skipping the row --
@@ -308,9 +328,22 @@ class BeliefTruthLogWriter:
         plan.md` Stage 5) carry one attack-run guidance utterance's own
         context -- the target, which tier produced it, and the current
         axis errors -- so a sortie can be triaged from this log instead of
-        recalled. `None` (the default, every row that is not attack-run
-        guidance) omits all four, the same absent-not-null convention
-        `gaze_label`/`gaze_center_deg`/`optic_name` already follow."""
+        recalled. **These are `belief.attack_run._tier1_alignment`'s own
+        azimuth/elevation, which is explicitly bank-removed** (that
+        function's own docstring: "re-rotating by current attitude via
+        geometry.alignment_direction (bank removed)") -- a different
+        rotation from the one `cockpit_mask.is_visible` is checked against,
+        so they must not be read as a stand-in for the mask's own verdict.
+        That is also why no mask-verdict field is recorded here: computing
+        one from these axis values would answer a question about a
+        different rotation than the one that actually ran during
+        perception, which risks looking like an answer while being wrong
+        in exactly the way this investigation is trying to rule out. `None`
+        (the default, every row that is not attack-run guidance, or where
+        ownship state was unavailable) omits the corresponding field, the
+        same absent-not-null convention `gaze_label`/`gaze_center_deg`/
+        `optic_name` already follow -- a missing field means "not known",
+        never "zero"."""
         row: dict[str, object] = {
             "kind": "speech",
             "t_sim": t_sim,
@@ -323,6 +356,14 @@ class BeliefTruthLogWriter:
             row["gaze_center_deg"] = gaze_center_deg
         if optic_name is not None:
             row["optic_name"] = optic_name
+        if ownship_pitch_deg is not None:
+            row["ownship_pitch_deg"] = ownship_pitch_deg
+        if ownship_bank_deg is not None:
+            row["ownship_bank_deg"] = ownship_bank_deg
+        if ownship_heading_true_deg is not None:
+            row["ownship_heading_true_deg"] = ownship_heading_true_deg
+        if ownship_alt_m is not None:
+            row["ownship_alt_m"] = ownship_alt_m
         if attack_run_target_contact_id is not None:
             row["attack_run_target_contact_id"] = attack_run_target_contact_id
         if attack_run_tier is not None:

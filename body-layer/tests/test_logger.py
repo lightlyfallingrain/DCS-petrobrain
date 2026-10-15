@@ -1420,6 +1420,56 @@ def test_speech_log_sink_omits_attack_run_fields_for_an_ordinary_line() -> None:
     assert call["attack_run_elevation_deg"] is None
 
 
+def test_speech_log_sink_forwards_ownship_attitude() -> None:
+    """Added for the 2026-10-15 attack-run sortie's open question -- see
+    `_speech_log_sink`'s own docstring. `runner.last_ownship_state` must
+    be read at the moment of the call, the same live-read reasoning the
+    gaze/optic fields already follow."""
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 5.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=5.0,
+        x=100.0,
+        z=200.0,
+        alt_m=450.0,
+        heading_true_deg=270.0,
+        pitch_deg=-3.5,
+        bank_deg=12.0,
+    )
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Lined up, obstructed.", False, None)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["ownship_pitch_deg"] == -3.5
+    assert call["ownship_bank_deg"] == 12.0
+    assert call["ownship_heading_true_deg"] == 270.0
+    assert call["ownship_alt_m"] == 450.0
+
+
+def test_speech_log_sink_omits_ownship_attitude_before_first_poll() -> None:
+    """`runner.last_ownship_state` is `None` until the first poll
+    completes -- the same "nothing to report yet" case
+    `_render_eyesight_frame` already guards against. Must come through
+    as `None`, never a fabricated `0.0` that would read as "level,
+    unbanked"."""
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 5.0
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Scanning right.", False, None)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["ownship_pitch_deg"] is None
+    assert call["ownship_bank_deg"] is None
+    assert call["ownship_heading_true_deg"] is None
+    assert call["ownship_alt_m"] is None
+
+
 def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
     tasks = TaskStore()
     tasks.create(
