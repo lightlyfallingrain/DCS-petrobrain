@@ -84,6 +84,9 @@ than normalised.
 - [[X-B33]] — `/invariant-check` cannot see `contextlib.suppress(...)`
 - [[X-B34]] — Two agent-memory indexes have outgrown their read cap
 - [[X-B35]] — Provenance path resolution is hardcoded to audio-adapter, and the gate it feeds is red
+- [[X-B36]] — `tools/` is outside every subproject's documented format/lint gate
+- [[X-B37]] — The tuning TOML generator renders only a first sentence, and renders markdown into it
+- [[X-B38]] — Two accepted-but-untested edge cases in `tuning.py`
 
 ## One entry carries two checkbox blocks
 
