@@ -228,3 +228,75 @@ a narrow fix pass, so I'm flagging it rather than editing `CLAUDE.md`'s Commands
   show as `rejected` with reason `invariant violation`, both resolve to their code defaults
   (confirmed in the `--print-tuning` dump and via direct import in the subprocess test above). No
   `AssertionError`.
+
+### Fix pass 2 — security.md's one Recommended finding (2026-10-15)
+
+Acted on `plans/configurable-constants/security.md`'s single Recommended finding (not Required):
+`LOWRES`/`MEDRES_ANGULAR_RADIUS_RAD`'s declared `lo` bounds permitted values below the fixed
+`RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128) optical-resolution floor that `perception/clustering.py`'s
+own docstring states and relies on (`RESOLUTION_ANGULAR_RADIUS_RAD <= LOWRES_ANGULAR_RADIUS_RAD`).
+Narrow pass, not a re-implementation; the general "narrow the lo headroom" suggestion in the same
+finding was explicitly out of scope (a product decision about how much rope the pilot wants, his
+call, not mine).
+
+**Files changed:**
+
+- `body-layer/src/perception/visibility.py` — `LOWRES_ANGULAR_RADIUS_RAD`'s and
+  `MEDRES_ANGULAR_RADIUS_RAD`'s `lo=` raised from `0.0005`/`0.001` to `0.00128`
+  (`RESOLUTION_ANGULAR_RADIUS_RAD`'s own value). **Written as the literal `0.00128`, not a name
+  reference to `RESOLUTION_ANGULAR_RADIUS_RAD`**, for two independent reasons, both load-bearing:
+  (1) `RESOLUTION_ANGULAR_RADIUS_RAD` is defined later in this same module (after the three tier
+  constants), so a forward name reference would raise `NameError` at import — the three
+  `tuning.real(...)` calls execute top-to-bottom at module load; (2) even if the ordering were
+  reversed, `generate_defaults.py`'s AST-based `_literal()` only understands `Constant`/`Tuple`/
+  `List`/`Dict`/`UnaryOp(USub)` nodes for `lo=`/`hi=` — a `Name` node raises
+  `ValueError: unsupported literal node`. This is the same genre of blocker the dispatch's "if
+  deriving it creates an import cycle" fallback names, so per that instruction I used a literal
+  with a comment naming the source constant in both directions: `LOWRES`/`MEDRES`'s own comments
+  name `RESOLUTION_ANGULAR_RADIUS_RAD` as the source, and `RESOLUTION_ANGULAR_RADIUS_RAD`'s own
+  comment now says both copies exist and must be kept in sync if this value ever changes. I
+  considered reordering the module (defining `RESOLUTION_ANGULAR_RADIUS_RAD` first) purely to make
+  reason (1) go away, but reason (2) is unconditional regardless of ordering, so reordering would
+  have bought nothing and cost a larger, cross-reference-heavy diff through the module's docstring
+  prose — reverted that attempt and kept the original ordering.
+  - Added one sentence to each of the three tier radii's `#:` comment (`LOWRES`/`MEDRES`/
+    `HIRES_ANGULAR_RADIUS_RAD`) stating the inverse relationship (smaller threshold = longer range)
+    and the approximate range the default implies, per instruction 3 — this is the part that
+    answers the user's own "short description of what each constant does" brief; a pilot should not
+    have to fly it to discover smaller-means-farther.
+  - **`HIRES_ANGULAR_RADIUS_RAD` judgement**: left its `lo=0.002` unchanged. `0.002` already sits
+    above the 0.00128 floor (unlike `LOWRES`'s `0.0005` and `MEDRES`'s `0.001`), so there is no
+    floor violation to fix there — the finding's floor-violation claim named only `LOWRES`/
+    `MEDRES`. It still permits ~14x past the measured default on the headroom axis, same as the
+    other two, but that is the general-headroom suggestion the dispatch explicitly said not to act
+    on. Documented the reasoning in the constant's own comment rather than only in this log, so a
+    future reader checking `HIRES` against the same question sees why it was left alone.
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`); only the
+  two `range:` lines for `LOWRES`/`MEDRES_ANGULAR_RADIUS_RAD` changed (`0.0005`/`0.001` → `0.00128`
+  for the `lo` side). Descriptions unchanged in the rendered file because the generator takes only
+  the comment's *first* sentence, and the new inverse-relationship sentences are the second.
+- `body-layer/tests/test_tuning.py` — added
+  `test_lowres_override_below_the_resolution_floor_is_rejected`, same shape as the existing
+  `test_a_rejected_value_in_a_fresh_process_leaves_the_code_default_in_force` (subprocess, fresh
+  interpreter, since the constant is already bound by the time this test file's own imports run):
+  an override of `0.0005` (the bound's own pre-fix value) is rejected as out of range and the
+  constant resolves to its code default `0.003`.
+
+**Sanity check (per dispatch instruction, not part of the automated suite):** ran `logger.py`'s
+underlying machinery directly with `PETROBRAIN_TUNING` pointed at a file setting
+`LOWRES_ANGULAR_RADIUS_RAD = 0.0005`. Process starts; `LOWRES_ANGULAR_RADIUS_RAD` resolves to its
+code default `0.003`; the startup block shows the key `rejected`, reason `out of range`, against the
+new bound `[0.00128, 0.01]`.
+
+### Checks (fix pass 2, body-layer/ only)
+
+`.venv` was absent in this worktree (gitignored) — rebuilt it from the subproject's own
+`pyproject.toml` dependency pins plus the root checkout's installed dev-tool versions
+(`mypy==2.3.1`, `ruff==0.16.6`, `pytest==9.1.1`).
+
+- `ruff format --check .`: fails only on the pre-existing, out-of-scope
+  `research/2026-10-05-security-audit.md` — unchanged from the baseline reported in the dispatch;
+  every file this pass touched is clean.
+- `ruff check .`: pass, all checks passed.
+- `mypy src`: pass, 59 source files, no issues.
+- `pytest -q`: **1870 passed, 4 xfailed** (1869 + 1 new test; xfail count unchanged from baseline).

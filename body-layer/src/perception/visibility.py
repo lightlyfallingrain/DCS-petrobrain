@@ -296,25 +296,51 @@ class LiveLosCoverage:
 #:   longer ladder would push this down again.
 #:
 #: Presence tier ("something is there") -- see the block above for the
-#: calibration this is the `lowres` row of.
+#: calibration this is the `lowres` row of. **Inverse relationship:** a
+#: *smaller* value here means a *longer* detection range (`range = size_m
+#: / threshold`), so `lo` below is the dangerous direction, not `hi` --
+#: the default puts the presence boundary at ~9.3 km for a 7 m vehicle.
+#: `lo` is floored at `RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128, defined
+#: below in this module) rather than left open, so no override can see a
+#: mark the eye cannot physically resolve -- written as the literal
+#: `0.00128` rather than a reference to that name because `RESOLUTION_
+#: ANGULAR_RADIUS_RAD` is defined later in this file (`tuning.real`'s
+#: keyword arguments must be literals the AST-based generator can read;
+#: see `generate_defaults.py`'s `_literal`) and because `tuning.real` is
+#: itself called before that later assignment executes, so a forward
+#: name reference would raise `NameError` at import.
 LOWRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     "perception.visibility.LOWRES_ANGULAR_RADIUS_RAD",
     0.003,
-    lo=0.0005,
+    lo=0.00128,
     hi=0.01,
     status="measured",
 )
 #: Classification tier ("something is a BMP") -- see the block above for
-#: the calibration this is the `medres` row of.
+#: the calibration this is the `medres` row of. **Inverse relationship:**
+#: a *smaller* value here means a *longer* classification range (`range
+#: = size_m / threshold`), so `lo` below is the dangerous direction, not
+#: `hi` -- the default puts the classification boundary at ~2.0 km for a
+#: 7 m vehicle. `lo` is floored at the same `RESOLUTION_ANGULAR_RADIUS_
+#: RAD` (0.00128) as `LOWRES_ANGULAR_RADIUS_RAD` above, for the same
+#: reason and the same literal-not-reference constraint.
 MEDRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     "perception.visibility.MEDRES_ANGULAR_RADIUS_RAD",
     0.014,
-    lo=0.001,
+    lo=0.00128,
     hi=0.05,
     status="measured",
 )
 #: Type tier ("that specific BMP variant") -- see the block above for the
-#: calibration this is the `hires` row of.
+#: calibration this is the `hires` row of. **Inverse relationship:** a
+#: *smaller* value here means a *longer* type-ID range (`range = size_m /
+#: threshold`), so `lo` below is the dangerous direction, not `hi` -- the
+#: default puts the type-ID boundary at ~1.0 km for a 7 m vehicle.
+#: Unlike the two tiers above, `0.002` already sits above the optical-
+#: resolution floor (0.00128), so no change was needed here for that
+#: reason; it still permits ~14x past the measured default, which is a
+#: product decision about headroom, not a correctness floor, and is left
+#: to the pilot.
 HIRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     "perception.visibility.HIRES_ANGULAR_RADIUS_RAD",
     0.028,
@@ -365,6 +391,17 @@ IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 #: derived from an observation must admit that observation, or the derivation
 #: is not reproducible from the data it cites. At 0.00128 the boundary is
 #: 5469 m and the rung clears.
+#:
+#: **This value is also copied as a literal into `LOWRES_ANGULAR_RADIUS_
+#: RAD`/`MEDRES_ANGULAR_RADIUS_RAD`'s `lo=` bound above** (`plans/
+#: configurable-constants/security.md`'s Recommended finding) -- a
+#: pilot-supplied override of either below this floor would violate
+#: `perception.clustering`'s own docstring, which states and relies on
+#: `RESOLUTION_ANGULAR_RADIUS_RAD <= LOWRES_ANGULAR_RADIUS_RAD`. Not a
+#: name reference because `tuning.real` executes those two assignments
+#: before this one, and the generator that renders `defaults.toml` reads
+#: `lo=`/`hi=` as AST literals, not names -- if this value ever changes,
+#: both copies above must change with it.
 RESOLUTION_ANGULAR_RADIUS_RAD: Final[float] = 0.00128
 
 #: The tier this filter gates on. `lowres` over `medres`

@@ -541,3 +541,44 @@ def test_a_rejected_value_in_a_fresh_process_leaves_the_code_default_in_force(
         check=True,
     )
     assert result.stdout.strip() == "3.0"
+
+
+def test_lowres_override_below_the_resolution_floor_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """`plans/configurable-constants/security.md`'s Recommended finding:
+    `LOWRES_ANGULAR_RADIUS_RAD`'s `lo` bound is floored at
+    `perception.visibility.RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128) so an
+    override can never put it below the optical-resolution floor
+    `perception.clustering`'s own docstring relies on never being
+    violated. `0.0005` was the bound's own value before this fix -- it
+    must now be rejected as out of range, falling back to the code
+    default (0.003), exactly as `test_a_rejected_value_in_a_fresh_process_
+    leaves_the_code_default_in_force` above pins for `BEARING_SIGMA_DEG`."""
+    tuning_file = tmp_path / "tuning.toml"
+    tuning_file.write_text(
+        "[perception.visibility]\nLOWRES_ANGULAR_RADIUS_RAD = 0.0005\n",
+        encoding="utf-8",
+    )
+
+    body_layer_src = Path(__file__).resolve().parent.parent / "src"
+    world_model_src = (
+        Path(__file__).resolve().parent.parent.parent / "world-model" / "src"
+    )
+    env = {
+        "PETROBRAIN_TUNING": str(tuning_file),
+        "PYTHONPATH": f"{body_layer_src}:{world_model_src}",
+        "PATH": "/usr/bin:/bin",
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from perception.visibility import LOWRES_ANGULAR_RADIUS_RAD; print(LOWRES_ANGULAR_RADIUS_RAD)",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "0.003"
