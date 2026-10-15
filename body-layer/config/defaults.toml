@@ -75,17 +75,17 @@ FOCUS_DWELL_S = 2.0
 SCAN_PLAN = [12, 11, 10, 9, 12, 1, 2, 3]
 
 [perception.visibility]
-# Type tier ("that specific BMP variant") -- see the block above for the calibration this is the `hires` row of.
+# Type tier ("that specific BMP variant"): a *smaller* value here means a *longer* naked-eye type-ID range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.25 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
 # status: measured | range: 0.002 .. 0.08
 # source: perception/visibility.py:HIRES_ANGULAR_RADIUS_RAD
 HIRES_ANGULAR_RADIUS_RAD = 0.028
 
-# Presence tier ("something is there") -- see the block above for the calibration this is the `lowres` row of.
+# Presence tier ("something is there"): a *smaller* value here means a *longer* naked-eye presence range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~2.3 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
 # status: measured | range: 0.00128 .. 0.01
 # source: perception/visibility.py:LOWRES_ANGULAR_RADIUS_RAD
 LOWRES_ANGULAR_RADIUS_RAD = 0.003
 
-# Classification tier ("something is a BMP") -- see the block above for the calibration this is the `medres` row of.
+# Classification tier ("something is a BMP"): a *smaller* value here means a *longer* naked-eye classification range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
 # status: measured | range: 0.00128 .. 0.05
 # source: perception/visibility.py:MEDRES_ANGULAR_RADIUS_RAD
 MEDRES_ANGULAR_RADIUS_RAD = 0.014

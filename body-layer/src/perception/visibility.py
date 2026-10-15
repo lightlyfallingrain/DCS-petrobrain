@@ -295,11 +295,11 @@ class LiveLosCoverage:
 #:   **The real presence limit is further out than anything tested** -- a
 #:   longer ladder would push this down again.
 #:
-#: Presence tier ("something is there") -- see the block above for the
-#: calibration this is the `lowres` row of. **Inverse relationship:** a
-#: *smaller* value here means a *longer* detection range (`range = size_m
-#: / threshold`), so `lo` below is the dangerous direction, not `hi` --
-#: the default puts the presence boundary at ~9.3 km for a 7 m vehicle.
+#: Presence tier ("something is there"): a *smaller* value here means a
+#: *longer* naked-eye presence range (`range = size_m / threshold` under
+#: `UNAIDED_OPTIC`), and the default puts the boundary at ~2.3 km for a
+#: 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction. See
+#: the block above for the calibration this is the `lowres` row of.
 #: `lo` is floored at `RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128, defined
 #: below in this module) rather than left open, so no override can see a
 #: mark the eye cannot physically resolve -- written as the literal
@@ -316,14 +316,14 @@ LOWRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     hi=0.01,
     status="measured",
 )
-#: Classification tier ("something is a BMP") -- see the block above for
-#: the calibration this is the `medres` row of. **Inverse relationship:**
-#: a *smaller* value here means a *longer* classification range (`range
-#: = size_m / threshold`), so `lo` below is the dangerous direction, not
-#: `hi` -- the default puts the classification boundary at ~2.0 km for a
-#: 7 m vehicle. `lo` is floored at the same `RESOLUTION_ANGULAR_RADIUS_
-#: RAD` (0.00128) as `LOWRES_ANGULAR_RADIUS_RAD` above, for the same
-#: reason and the same literal-not-reference constraint.
+#: Classification tier ("something is a BMP"): a *smaller* value here means
+#: a *longer* naked-eye classification range (`range = size_m / threshold`
+#: under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for
+#: a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction. See
+#: the block above for the calibration this is the `medres` row of.
+#: `lo` is floored at the same `RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128)
+#: as `LOWRES_ANGULAR_RADIUS_RAD` above, for the same reason and the
+#: same literal-not-reference constraint.
 MEDRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     "perception.visibility.MEDRES_ANGULAR_RADIUS_RAD",
     0.014,
@@ -331,16 +331,16 @@ MEDRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     hi=0.05,
     status="measured",
 )
-#: Type tier ("that specific BMP variant") -- see the block above for the
-#: calibration this is the `hires` row of. **Inverse relationship:** a
-#: *smaller* value here means a *longer* type-ID range (`range = size_m /
-#: threshold`), so `lo` below is the dangerous direction, not `hi` -- the
-#: default puts the type-ID boundary at ~1.0 km for a 7 m vehicle.
-#: Unlike the two tiers above, `0.002` already sits above the optical-
-#: resolution floor (0.00128), so no change was needed here for that
-#: reason; it still permits ~14x past the measured default, which is a
-#: product decision about headroom, not a correctness floor, and is left
-#: to the pilot.
+#: Type tier ("that specific BMP variant"): a *smaller* value here means
+#: a *longer* naked-eye type-ID range (`range = size_m / threshold`
+#: under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.25 km
+#: for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous
+#: direction. See the block above for the calibration this is the
+#: `hires` row of. Unlike the two tiers above, `0.002` already sits
+#: above the optical-resolution floor (0.00128), so no change was
+#: needed here for that reason; it still permits ~14x past the
+#: measured default, which is a product decision about headroom, not a
+#: correctness floor, and is left to the pilot.
 HIRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     "perception.visibility.HIRES_ANGULAR_RADIUS_RAD",
     0.028,

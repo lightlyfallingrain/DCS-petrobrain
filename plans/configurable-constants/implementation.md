@@ -300,3 +300,103 @@ new bound `[0.00128, 0.01]`.
 - `ruff check .`: pass, all checks passed.
 - `mypy src`: pass, 59 source files, no issues.
 - `pytest -q`: **1870 passed, 4 xfailed** (1869 + 1 new test; xfail count unchanged from baseline).
+
+## Fix pass 3 — review.md's Fix-pass-2 verdict: NEEDS REVISION (two required/upgraded findings)
+
+Reviewed input: `plans/configurable-constants/review.md`'s "Fix pass 2 review" section (the
+security.md Recommended finding re-review), dispatched as two fixes.
+
+### Required fix 1 — the three range figures were 4x too high
+
+Verified the arithmetic myself before touching anything, against the actual default constants
+(`LOWRES=0.003`, `MEDRES=0.014`, `HIRES=0.028`, confirmed by reading the `tuning.real(...)` calls)
+and `perception/optics.py`'s `UNAIDED_OPTIC` (confirmed `presence_range_mult`/`class_range_mult`/
+`type_range_mult` are all `1.0`, lines 141-143):
+
+- `LOWRES`: `7 / 0.003 ≈ 2333 m` → **~2.3 km** (was stated as ~9.3 km — 4x too high)
+- `MEDRES`: `7 / 0.014 = 500 m` → **~0.5 km** (was stated as ~2.0 km — 4x too high)
+- `HIRES`: `7 / 0.028 = 250 m` → **~0.25 km** (was stated as ~1.0 km — 4x too high)
+
+The review's own diagnosis of the 4x was correct — the figures had been lifted from the adjacent
+calibration note's `size / threshold * BINOCULAR_RANGE_MULTIPLIER` derivation two paragraphs above,
+which is the binocular-ladder case, while the function these constants actually feed
+(`_recognition_thresholds_m`) defaults its `optic` parameter to `UNAIDED_OPTIC`, where every range
+multiplier is `1.0`. Corrected all three figures in `perception/visibility.py` and, per the
+dispatch's suggestion, now name the optic explicitly in each sentence (`` under `UNAIDED_OPTIC` ``)
+rather than leaving "the default" to imply whichever optic the adjacent note happened to assume —
+the same ambiguity that produced the 4x error in the first place.
+
+### Required fix 2 (upgraded from Recommended) — fold the sentence into the renderable first sentence
+
+`generate_defaults.py`'s `_first_sentence()` renders only the first `#:`-block sentence
+(`plan.md` line 129's Stage 1 design), and the three inverse-relationship sentences had been written
+as the *second* sentence of each block, so none of them reached `config/defaults.toml` — the file
+the user's brief names directly ("in the default configuration files"). Rather than changing the
+generator's contract (explicitly out of scope — it would alter every other key's rendered
+description), reworded each block so the inverse-relationship statement, the optic, and the
+corrected range figure are all part of the comment's *first* sentence. The pre-existing
+"see the block above for the calibration" and `lo`-floor-rationale text now follow as later
+sentences, unchanged in substance, just demoted in order.
+
+**One rendering trap found and fixed along the way, not mentioned in either review:**
+`generate_defaults.py`'s `_join_comment_lines()` deliberately joins two `#:` lines with *no* space
+when a backtick-quoted span opens on one line and closes on the next (so a hand-wrapped dotted name
+like `` `perception.estimation. `` / `` BEARING_SIGMA_DEG` `` rejoins correctly). My first draft of
+the `MEDRES_ANGULAR_RADIUS_RAD` block happened to wrap the *inline-code formula*
+`` `range = size_m / threshold` `` across exactly such a line break — not a dotted name, just an
+ordinary word-wrapped formula that happened to begin with a backtick. The renderer applied the same
+no-space rule and produced `size_m /threshold` (missing space) in `defaults.toml`. Caught by
+re-running the generator and reading its actual output rather than only reading the source diff —
+fixed by keeping the whole backtick-quoted formula on one physical `#:` line in all three blocks
+(matching how `LOWRES`/`HIRES` were already wrapped), not by touching the join logic itself.
+
+### Files Changed (fix pass 3)
+
+- `body-layer/src/perception/visibility.py` — corrected the three range figures (~2.3 km / ~0.5 km
+  / ~0.25 km, was ~9.3 km / ~2.0 km / ~1.0 km), named `UNAIDED_OPTIC` explicitly in each sentence,
+  and reworded all three `#:` blocks so the inverse-relationship/range sentence is the comment's
+  first sentence (the one `_first_sentence()` renders), without changing any default/`lo`/`hi`
+  value.
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`); only the
+  three `LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD` description lines changed, now carrying the
+  corrected, optic-named inverse-relationship sentence. Rendered entries pasted below.
+
+### Rendered `defaults.toml` entries (fix pass 3)
+
+```
+# Presence tier ("something is there"): a *smaller* value here means a *longer* naked-eye presence range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~2.3 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
+# status: measured | range: 0.00128 .. 0.01
+# source: perception/visibility.py:LOWRES_ANGULAR_RADIUS_RAD
+LOWRES_ANGULAR_RADIUS_RAD = 0.003
+
+# Classification tier ("something is a BMP"): a *smaller* value here means a *longer* naked-eye classification range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
+# status: measured | range: 0.00128 .. 0.05
+# source: perception/visibility.py:MEDRES_ANGULAR_RADIUS_RAD
+MEDRES_ANGULAR_RADIUS_RAD = 0.014
+
+# Type tier ("that specific BMP variant"): a *smaller* value here means a *longer* naked-eye type-ID range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.25 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
+# status: measured | range: 0.002 .. 0.08
+# source: perception/visibility.py:HIRES_ANGULAR_RADIUS_RAD
+HIRES_ANGULAR_RADIUS_RAD = 0.028
+```
+
+### Checks (fix pass 3, body-layer/ only)
+
+Worktree's `.venv` was absent (gitignored, as every worktree's is) — rebuilt from scratch, pinned
+to the exact versions the root checkout has installed and the dispatch named:
+`ruff==0.16.6`, `mypy==2.3.1`, `pytest==9.1.1`, plus the project's own pins `numpy==2.4.6`,
+`pyproj==3.8.0` (read off the root checkout's `.venv/bin/pip list`, not guessed).
+
+- `ruff format --check .`: fails only on the pre-existing, out-of-scope
+  `research/2026-10-05-security-audit.md` — matches the stated baseline exactly.
+- `ruff check .`: all checks passed.
+- `mypy src`: success, 59 source files, no issues.
+- `pytest -q`: **1870 passed, 4 xfailed** — matches the stated baseline exactly (no test was added
+  or removed this pass; only comment text and a generated file changed).
+- Re-ran the standing `PETROBRAIN_TUNING` sanity check (`LOWRES_ANGULAR_RADIUS_RAD = 0.0005` in the
+  override file): process starts (needed `PYTHONPATH=src:../world-model/src` for the body-layer
+  ↔ world-model in-process import to resolve from a `python -m logger` invocation outside the
+  package), `LOWRES_ANGULAR_RADIUS_RAD` resolves to its code default `0.003` (confirmed by direct
+  import, not just reading the startup block), and `--print-tuning`'s rejected-list entry reads
+  `perception.visibility.LOWRES_ANGULAR_RADIUS_RAD: out of range (0.0005 out of range [0.00128,
+  0.01])` — the new bound, unchanged by this pass.
