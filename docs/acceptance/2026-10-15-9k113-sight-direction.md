@@ -366,6 +366,47 @@ naked eye as the baseline — not candidates admitted by the bubble.
 
 ---
 
+## §14 — Give the naked eye a real FOV: `fov_half_angle_deg = 90`
+
+> *"While doing the optics, put UNAIDED_OPTIC fov_half_angle_deg at 90. It's a minor change to do at
+> the same time and gives a fairly sane 180 degree naked eye max FOV (that's a peripherial vision
+> FOV, but we can refine later for focus FOV, ingore that for now)."*
+
+**Checked against the code before recording, because "minor" is a claim worth testing: it is
+very nearly a no-op today, and that is what makes it worth doing now.**
+
+`FULL_GAZE` is already `half_width_deg = 90.0` (`perception/gaze.py:194`), so the gaze gate —
+which runs *before* the optic gate — already bounds the naked eye to ±90° of the look direction.
+Setting the optic's own half-angle to 90° therefore mostly **restates an existing bound in the
+place that should have owned it all along**.
+
+**The one real behavioural difference, stated so a surprised test is not a mystery.** The two gates
+measure differently: `within_gaze` compares **azimuth only** (`angular_delta_deg`), while
+`within_optic_fov` computes a **great-circle separation that includes elevation**. So a candidate
+at an azimuth very close to 90° *and* appreciably above or below the horizon lands just past 90° of
+true separation and is now rejected where the gaze gate alone admitted it. That is a thin sliver at
+the boundary, and it is the correct behaviour — but **a test pinned exactly at the 90° azimuth
+boundary can flip**, and that is a real change rather than a refactor.
+
+**Why do it with the optics work rather than separately:**
+
+- It **closes §13's asymmetry.** Today the naked eye is the one optic for which the FOV gate is a
+  documented no-op, which made "LOS is bounded by the optic's FOV" true of every optic *except* the
+  default one. After this, the statement holds universally.
+- The 9K113 work is already adding two `Optic` rows and the field-of-regard fields, so the optic
+  table is being read and revised anyway.
+- It gives the eventual **focus-FOV** refinement somewhere to live. The user is explicit that 180°
+  is peripheral vision and a narrower focus cone is a later refinement — `FOCUS_CONE_HALF_WIDTH_DEG
+  = 15.0` already exists in `gaze.py`, so the two concepts will need reconciling, but **not now**.
+
+**One thing for the implementer to decide rather than assume:** `within_optic_fov`'s
+`if optic.fov_half_angle_deg is None: return True` branch becomes unreachable if no optic carries
+`None` any more. Recommend **keeping it** — it is the documented contract of a `None` half-angle,
+and a future pseudo-optic for peripheral awareness may want it — but say so in a comment, because
+an unreachable branch with no explanation is exactly what a reviewer will ask about.
+
+---
+
 ## What this leaves open
 
 - **The two remaining plan decisions** — the missile word, and the launch-callout interim — are both
