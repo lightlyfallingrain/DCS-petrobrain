@@ -36,6 +36,54 @@ and found sound.
 
 ---
 
+## Consolidated status, 2026-10-15 evening — read this first
+
+This document was written by one agent, then corrected by three more running in parallel, which
+produced two retracted accusations and one genuine contradiction. **The adjudications below were
+made against the primitive sources — the real `.jsonl` logs and the roadmap entries — not by
+another dispatched agent**, and they supersede anything later in the file that disagrees.
+
+**Two claims made against this document were checked and are false:**
+
+- **"The merged file accuses a correct figure of being fabricated."** No such text exists in it;
+  `grep` finds nothing of the kind.
+- **"`BL-11`'s `median=1.018s` is fabricated, because the belief-truth log has no timing field."**
+  The log indeed has no duration field — but the figure is not read from one. It is the **median
+  gap between consecutive `t_sim` values**, which is what a log reduction of a poll loop means.
+  Recomputed directly:
+
+  | sortie | distinct ticks | median gap | p90 |
+  |---|---|---|---|
+  | 2026-10-15 15:07 | 462 | **1.018 s** | 1.81 s |
+  | 2026-10-15 16:44 | 450 | 1.020 s | 4.89 s |
+  | 2026-10-15 17:55 | 65 | 1.017 s | 3.05 s |
+
+  **One caveat the original row understated:** this is tick *interval*, not tick *cost*. A 1.018 s
+  median against a 1 Hz target says the loop is not stalling, which is the right observable. The
+  **p90 of 1.8–4.9 s says long gaps still occur** — a real residual, not a closed question.
+
+**User verdicts given directly, 2026-10-15 evening** — these are acceptance decisions, not
+inferences:
+
+| item | verdict |
+|---|---|
+| Rear-hemisphere silence (`BL-11` Stage 0) | **PASS** on the silence itself — *"seems to work"*. **The Danger-exception half is still unchecked**: a threatening unit going astern should still speak. |
+| `describe` pull summary (`BL-13`) | **PASS** — *"initial impression from today is it's good. Refine later if needed."* |
+
+**Corrections that verified and are folded in** (from the second audit pass):
+
+- **`BL-W1`** (contact-report flood suppression) and **`BL-W5`** (`cancel` → `confirm`) are
+  **ANSWERED** — both graded *pass* in `docs/acceptance/2026-10-05-sortie-feedback.md`'s own
+  pass/fail table from a real flight. The earlier "no log evidence" reasoning was invalid:
+  **speech logging only began 2026-10-08**, after that sortie, so its absence from the logs proves
+  nothing.
+- **`docs/acceptance/2026-10-06-callout-observability-sortie.md` carries a wrong instruction** — it
+  tells the pilot to check out `fix/callout-observability-gate`, which merged as `24746f5`.
+  Following it today would take him *backwards* off `main` and drop every later fix. The check is
+  still owed; it must be flown from `main`.
+
+---
+
 ## A. Still-open list (what needs checking, in plain language)
 
 Ordered cheapest/most-valuable first. Items 1–5 and 10–12 all ride on **one ordinary ground-attack
