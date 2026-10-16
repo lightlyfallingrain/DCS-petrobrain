@@ -430,6 +430,26 @@ bounded.
 
 ---
 
+### Decisions Requiring User Input — BOTH ANSWERED 2026-10-16
+
+> **A: the brevity register.** *"Couple contacts, trucks, 2 o'clock, 6 kilometres."* Chosen with the
+> three mock lines in front of him, consistent with the 2026-09-23 articles direction.
+>
+> **B: yes, a hedge-band crossing speaks.** Decision 9's third trigger stands as planned — sixteen
+> vehicles filling one hour cost at most four lines.
+>
+> **And a third direction arrived with them, which this plan did not ask for:** *"group line has a
+> hardcoded 'A couple of contacts.' -> unify, use hedge logic and words there too. Fix this first."*
+>
+> So the two-registers inconsistency is **not** filed as a backlog item to align later, as the
+> recommendation below suggested. It is a prerequisite: `render_group_disclosure`'s hardcoded
+> literal is replaced by the shared `_cardinality_phrase` register, in its own change, **before any
+> stage of this plan is implemented**. Filed as `[[BL-B77]]`. That also removes the risk this plan
+> would otherwise carry — shipping a *third* phrasing of one hedge while two already disagree.
+
+The original write-up of both decisions follows, kept because it records what the shipped code
+actually does and why the mock was built from the wrong half of it.
+
 ### Decisions Requiring User Input
 
 **A. Articles: *"Couple contacts"* or *"A couple of contacts"*?**
