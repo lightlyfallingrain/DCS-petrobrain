@@ -1,10 +1,29 @@
 # AC-B8 — A production firing-event channel over the mission-scripting bridge
 
-- [ ] **AC-B8 — Productionise the firing-event probe: a Hook that registers `world.addEventHandler`
+- [x] **AC-B8 — Productionise the firing-event probe: a Hook that registers `world.addEventHandler`
   in the `"scripting"` state, accumulates `S_EVENT_SHOOTING_START`/`_END` and `S_EVENT_SHOT`
-  in-state, drains them per 1 Hz poll, and publishes a pollable emitter snapshot.** #status/open
-  Filed at Architect stage, 2026-10-15, as the transport half of `[[BL-B73]]` and `[[BL-B74]]` —
-  `plans/emitter-visibility/plan.md` Stage B.
+  in-state, drains them per 1 Hz poll, and publishes a pollable emitter snapshot.** #status/done
+  #needs-flight Filed at Architect stage, 2026-10-15, as the transport half of `[[BL-B73]]` and
+  `[[BL-B74]]` — `plans/emitter-visibility/plan.md` Stage B.
+
+  **Delivered 2026-10-16** (`feature/emitter-events`, DoD @ `aafb20a`): a production Hook
+  (`aircraft-layer/dcs-export/petrobrain-firing-events-hook.lua`, not the probe), the latch
+  (`FIRING_MIN_VISIBLE_S`) and watchdog (`FIRING_WATCHDOG_S`, raised `10.0` → `180.0` mid-review,
+  see the correction below) in `collector/firing_receiver.py`'s `EmitterTracker`, per-kind death
+  semantics (a dead unit's `FIRING` entry is removed; a future `LAUNCH_SMOKE` entry would not be —
+  `[[BL-B74]]`'s seam, not reachable yet), a clean slate on `onSimulationStart`/bridge reconnect
+  (mission-time regression clears all tracked state), and the schema/receiver/endpoint triple
+  (`schema/firing.py`, `firing_receiver.py`, `GET /firing/latest`). All mechanical checks pass at
+  this tip (aircraft-layer: ruff/mypy 23 files/pytest 293; body-layer: ruff/mypy 60 files/pytest
+  2041+4xfail). Security APPROVED, Performance APPROVED-MONITOR
+  (`plans/emitter-visibility/security-stage-b.md`, `performance-stage-b.md`).
+
+  **`#needs-flight`, not fully closed**: the one thing no fixture can settle is whether
+  `S_EVENT_SHOOTING_START` retriggers mid-burst (plan Risks & Unknowns; the live check is named in
+  Stage D item 12 — hold a unit firing past 180 s and read the detection trace). User direction
+  2026-10-16 settled the *design* question this watchdog protects against (bursts are paired and
+  short, so `180.0` is a pure backstop, not a value to tune down) but did not fly the sortie that
+  confirms the retrigger behaviour itself. Clear this tag once that sortie is flown, naming it here.
 
   **Feasibility is closed, not open.** The 2026-09-25 probe
   (`docs/acceptance/2026-09-24-damage-and-firing-probes.md`, *"do not re-fly it"*) logged

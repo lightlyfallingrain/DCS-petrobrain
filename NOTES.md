@@ -1221,3 +1221,14 @@ two functions that must agree (2026-09-19).
   of any one implementation, and worth a structural check (e.g. "do all fields that should move
   together actually get updated by every transition path") rather than relying on each instance
   being caught individually.
+- **Two Hook scripts can share state with no new transport, because their separate
+  `dostring_in("scripting", ...)` calls execute in the same persistent mission-scripting Lua
+  state.** A global a first Hook script's drained snippet writes (`PB_ACTIVE_FIRING_UNITS`,
+  `petrobrain-firing-events-hook.lua`) is directly readable by a second, unrelated Hook script's
+  own snippet (`petrobrain-line-of-sight-hook.lua`'s sort-key splice) with no collector round trip,
+  no wire message, and no coupling between the two scripts' own code beyond agreeing on a global's
+  name. This was not obvious from reading either script's header alone — found only by noticing
+  that `petrobrain-f10-commands-hook.lua`'s own header already documents the same persistence for
+  its own queue global. Worth checking for before reaching for a new transport whenever one Hook
+  script's state needs to influence another's `dostring_in` snippet (`plans/emitter-visibility/
+  implementation.md`, Notable Discoveries Stage B).
