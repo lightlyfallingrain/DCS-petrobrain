@@ -171,6 +171,7 @@ from belief.voice_commands import (
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.gaze import RELATIVE_SECTORS, SECTOR_WEDGE_DEG
 from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_delta_deg
+from perception.optics import Optic
 from perception.source import OwnshipState
 
 #: On-ground altitude threshold (metres AGL) for `maybe_apply_on_ground_
@@ -2235,6 +2236,8 @@ class CrewConsole:
         state: AttackRunState | None,
         now_sim: float,
         ownship: OwnshipState,
+        *,
+        granted_optic: Optic | None = None,
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
@@ -2244,6 +2247,15 @@ class CrewConsole:
         5's wiring) rather than on this class: this method is called with
         the current state and returns its replacement, the same contract
         `decide` itself has.
+
+        `granted_optic` (`BL-B71`'s review, required fix) is the optic
+        that actually admitted this poll's percepts -- the caller's
+        `OpticState.guidance_optic`, read *after* this same poll's
+        `decide_optic` call (`logger.py`'s own ordering comment on
+        `requested_optic`/`drain_attack_run`) -- passed straight through
+        to `belief.attack_run.decide`'s own `granted_optic`. `None` (its
+        default) for a caller with no optic ladder, read by `decide` as
+        `UNAIDED_OPTIC`.
 
         **Resolves the target's `belief.groups.Group` and passes it to
         `decide` as of Stage 7** -- tier 2's own projection input (Decision
@@ -2293,7 +2305,12 @@ class CrewConsole:
             return None
         group = self.store.group_for_contact(contact.id)
         new_state, speech = decide_attack_run(
-            state, now_sim=now_sim, ownship=ownship, contact=contact, group=group
+            state,
+            now_sim=now_sim,
+            ownship=ownship,
+            contact=contact,
+            group=group,
+            granted_optic=granted_optic,
         )
         if speech is None:
             return new_state

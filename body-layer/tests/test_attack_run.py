@@ -1363,3 +1363,81 @@ class TestRequestedOptic:
         )
         assert new_state.last_contact_id == "CONTACT_2"
         assert new_state.requested_optic is UNAIDED_OPTIC
+
+
+# -- `BL-B71` review's required fix: `_no_look_cause` must test range   -
+# -- against the optic that actually resolved the look, not a fixed    -
+# -- `UNAIDED_OPTIC` --------------------------------------------------- -
+
+
+def test_no_look_cause_optic_param_lowers_the_too_far_threshold() -> None:
+    """Direct unit proof that `optic` moves the range gate: a contact
+    just beyond the naked eye's own presence threshold is `"too_far"`
+    against the default (`UNAIDED_OPTIC`), but `"unknown"` (resolvable,
+    no live LOS verdict either way) against a granted `BINOCULAR_OPTIC`
+    -- the two thresholds `_ARMORED_UNAIDED_M`/`_ARMORED_BINOCULAR_M`
+    above, exercised through the parameter itself rather than through
+    `decide`."""
+    contact = _contact_at(bearing_deg=0.0, range_m=_ARMORED_UNAIDED_M + 1.0)
+    assert _no_look_cause(_ownship(), contact, now_sim=0.0) == "too_far"
+    assert (
+        _no_look_cause(_ownship(), contact, now_sim=0.0, optic=BINOCULAR_OPTIC)
+        == "unknown"
+    )
+
+
+def test_decide_with_granted_binoculars_resolves_tier_1_instead_of_losing_sight() -> (
+    None
+):
+    """The review's required fix, exercised through the full `decide()`
+    path with a contact `_contact_at` cannot build (it is deliberately
+    tier-2-only): a **fresh tier-1 percept** -- `relative_direction` set,
+    so `_tier1_alignment` resolves -- at a range beyond the naked eye's
+    own presence threshold but within the granted binoculars'. This is
+    the steady-state case `BL-B71`'s optic ladder exists to cover: once
+    the ladder grants binoculars, a live look through them must speak
+    the ordinary alignment, not misattribute `"too_far"` (tested against
+    the wrong, narrower optic) and announce "last I saw ..." about a
+    target Petrovich is actively tracking.
+
+    Confirmed to fail for the stated reason before the fix (manual
+    counterfactual, not asserted here): reverting `_no_look_cause`'s
+    `optic` parameter to a hardcoded `UNAIDED_OPTIC` makes this test fail
+    with `speech.text` carrying the `render_attack_run_lost_sight`
+    "last I saw ..." phrasing instead of "Lined up.", because `cause`
+    reads `"too_far"` against the naked eye's own (narrower) threshold
+    even though tier 1 has a fresh, live look."""
+    range_m_value = _ARMORED_UNAIDED_M + 1.0  # beyond naked eye, inside binoculars
+    assert range_m_value < _ARMORED_BINOCULAR_M
+    contact = Contact.from_percept(
+        "CONTACT_1",
+        Percept(
+            t_sim=0.0,
+            source="naked_eye_visual_filtered",
+            classification_raw="OP_ARMORED",
+            bearing_deg=0.0,
+            range_m=range_m_value,
+            ownship_at_observation=_ownship(),
+            observation_id="OBS_1",
+            relative_direction=RelativeDirection(
+                forward_m=range_m_value, right_m=0.0, up_m=0.0
+            ),
+        ),
+    )
+    state = AttackRunState()
+
+    new_state, speech = decide(
+        state,
+        now_sim=0.1,
+        ownship=_ownship(),
+        contact=contact,
+        granted_optic=BINOCULAR_OPTIC,
+    )
+
+    assert speech is not None
+    assert speech.text == "Lined up."
+    assert new_state.last_spoken_tier == 1
+    # The edge this fix exists for: a resolvable tier-1 look must not be
+    # recorded as "unresolved," which would wrongly prime the next tick
+    # for a "regained sight" announcement that never lost anything.
+    assert new_state.last_spoken_unresolved is False

@@ -228,18 +228,21 @@ GUIDANCE_OPTIC_HYSTERESIS_FRACTION: Final[float] = tuning.real(
 )
 
 #: BL-B71 guard 3: the shortest time between two guidance-optic grants,
-#: clocked by `OpticState.guidance_optic_since_sim` -- bounds how often
-#: the 1 s hands-busy cost (`HANDS_BUSY_DURATION_S`) can be charged, and
-#: must exceed the ~4.5 s a fly-past needs to re-cross `GUIDANCE_OPTIC_
+#: clocked by `OpticState.guidance_optic_since_sim` -- must stay above
+#: `HANDS_BUSY_DURATION_S` (tuning it below that makes a grant
+#: re-chargeable before the previous charge even finishes) and must
+#: also exceed the ~4.5 s a fly-past needs to re-cross `GUIDANCE_OPTIC_
 #: HYSTERESIS_FRACTION`'s own band at the worst observed reversal rate
 #: (+130 m/s) -- 10.0 s bounds the worst case to one 1 s blind interval
 #: per 10 s (10% duty). Not derived from `HANDS_BUSY_DURATION_S` directly
 #: (that bound must stay an AST-literal for `tools/generate_defaults.py`
-#: to read it, and the two are independently tunable regardless) --
-#: lowering this far enough to sit below `HANDS_BUSY_DURATION_S` would
-#: make a grant re-chargeable before the previous charge even finishes,
-#: which is the coupling to keep in mind when tuning either. An
-#: `agreed-guess` like `GUIDANCE_OPTIC_HYSTERESIS_FRACTION` above.
+#: to read it, and the two are independently tunable regardless), so the
+#: coupling above is a tuning caution, not an enforced invariant -- the
+#: declared bounds (this constant's `lo=1.0`, `HANDS_BUSY_DURATION_S`'s
+#: `hi=5.0`) do permit violating it at the extremes; no cross-key check
+#: guards it, same posture as `belief.decay.py`'s own residual coupling
+#: note in `body-layer/CLAUDE.md`'s "Tuning" section. An `agreed-guess`
+#: like `GUIDANCE_OPTIC_HYSTERESIS_FRACTION` above.
 GUIDANCE_OPTIC_MIN_INTERVAL_S: Final[float] = tuning.real(
     "belief.optic_policy.GUIDANCE_OPTIC_MIN_INTERVAL_S",
     10.0,
@@ -1870,6 +1873,16 @@ def _apply_guidance(
     # changing -- compared against the standing grant if there is one,
     # or against the phase's own home optic otherwise (the first grant
     # of a run, where nothing has been granted yet to compare against).
+    # Known narrow gap, left as-is (review's optional refinement, `plans/
+    # attack-run-sortie-fixes/review-bl-b71.md`): this first-grant
+    # comparison uses `_HOME_OPTIC[state.home_phase]` rather than
+    # `decision.optic`, so a first grant can overcharge hands-busy when
+    # the ordinary phase dispatch already happened to be using the same
+    # optic the request resolves to (e.g. a GLASSING phase already up on
+    # binoculars for an unrelated contact). Not safety-relevant -- it
+    # only ever charges a cost that was not strictly owed, never skips a
+    # real one -- so left uncorrected rather than widened beyond the
+    # required fix this task was scoped to.
     previous_optic = (
         state.guidance_optic
         if state.guidance_optic is not None

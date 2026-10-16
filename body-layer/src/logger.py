@@ -2007,6 +2007,16 @@ def _run_crew_text_poll_loop(
                             runner.attack_run_state,
                             runner.last_t_sim,
                             runner.last_ownship_state,
+                            # Review's required fix (`BL-B71`): the optic
+                            # that actually admitted *this* poll's
+                            # percepts -- `decide_optic` (called inside
+                            # `run_once`, earlier this same poll) has
+                            # already updated this field for this tick,
+                            # so it is not one poll stale the way `self.
+                            # attack_run_state.requested_optic` (read the
+                            # other direction, into `decide_optic` above)
+                            # deliberately is.
+                            granted_optic=runner.optic_state.guidance_optic,
                         )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever

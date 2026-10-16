@@ -447,7 +447,10 @@ NoLookCause = Literal["masked", "obstructed", "too_far", "unknown"]
 
 
 def _no_look_cause(
-    ownship: OwnshipState, contact: Contact, now_sim: float
+    ownship: OwnshipState,
+    contact: Contact,
+    now_sim: float,
+    optic: Optic = UNAIDED_OPTIC,
 ) -> NoLookCause:
     """`plans/attack-run-sortie-fixes/plan.md` BL-B70's cause taxonomy --
     pure, computed from the same primitives `perception.visibility.
@@ -455,6 +458,18 @@ def _no_look_cause(
     `Contact.live_los_clear`, `visibility.tier_ranges`), never from
     `perception.detection_trace.DetectionTrace` (a diagnostic channel;
     using it as a control input would make the log load-bearing).
+
+    `optic` is the optic that actually resolved this tick's look (`BL-
+    B71`'s granted `OpticState.guidance_optic`, threaded in by `decide`
+    below), defaulting to `UNAIDED_OPTIC` when the caller passes nothing
+    (no standing grant, or a caller -- e.g. a direct test -- that has no
+    optic ladder at all). **User direction, 2026-10-16, asked directly
+    whether the naked-eye-only range test was a test artefact or real
+    behaviour: "actual behavior must measure by used optic."** Range (gate
+    3 below) must therefore test against the instrument actually admitting
+    percepts this tick, not a fixed `UNAIDED_OPTIC` -- see that gate's own
+    comment for why using the wrong one is a live misattribution, not a
+    cosmetic gap.
 
     **Checks range (gate 3) before terrain LOS (gate 4), matching
     `check_visibility`'s real order** (`visibility.py:997-1023`): mask,
@@ -482,9 +497,12 @@ def _no_look_cause(
     measured ~60 m/s closing rate a 3 s-old verdict already describes a
     position 180 m behind the target.
 
-    **Range uses the naked eye's own presence threshold** (`UNAIDED_
-    OPTIC`) -- `BL-B71`'s optic ladder (a different optic lowering this
-    bound) is out of scope for this entry."""
+    **Range uses the optic actually resolving the look, not a fixed
+    naked-eye threshold** -- `BL-B71`'s optic ladder lowers this bound
+    once binoculars (or a sight rung) are granted, and the range test
+    below must track that grant or it misattributes a live, resolvable
+    tier-1 look as `"too_far"` (see `decide`'s own docstring on why this
+    combination is reachable, not inert, once the ladder is live)."""
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     body_direction = body_relative_direction(
         observer,
@@ -507,7 +525,7 @@ def _no_look_cause(
     presence_threshold_m, _class_threshold_m, _type_threshold_m = tier_ranges(
         presence_size_m=profile.size_m,
         recognition_extent_m=extent,
-        optic=UNAIDED_OPTIC,
+        optic=optic,
         distinctiveness=distinctiveness,
     )
     if range_m(observer, contact.last_position) > presence_threshold_m:
@@ -540,6 +558,7 @@ def decide(
     ownship: OwnshipState,
     contact: Contact,
     group: Group | None = None,
+    granted_optic: Optic | None = None,
 ) -> tuple[AttackRunState, OutgoingSpeech | None]:
     """One tick of attack-run guidance: `(new_state, speech)`.
 
@@ -549,6 +568,17 @@ def decide(
     heading_deg`) -- the caller (`belief.crew_console.drain_attack_run`)
     resolves it from `self.store.group_for_contact(contact.id)`; tier 1
     never reads it, since a live look needs no projection.
+
+    `granted_optic` is the optic that actually admitted this tick's
+    percepts -- `OpticState.guidance_optic` at the point `logger.
+    ConsolePerceptionRunner` calls `decide_optic` for this same poll,
+    threaded through `drain_attack_run` -- defaulting to `None` (read as
+    `UNAIDED_OPTIC` by `_no_look_cause`) for callers with no optic ladder
+    at all. Passed straight through to `_no_look_cause`'s range gate,
+    never read anywhere else in this function; `requested_optic`'s own
+    ladder evaluation below is independent of it (one is what this run
+    is asking for, the other is what was actually granted for this
+    look).
 
     **`plans/attack-run-sortie-fixes/plan.md` BL-B70's cause taxonomy
     (`_no_look_cause`) decides three things on top of the tier, in this
@@ -623,7 +653,12 @@ def decide(
     if state.last_contact_id != contact.id:
         state = AttackRunState(last_contact_id=contact.id)
 
-    cause = _no_look_cause(ownship, contact, now_sim)
+    cause = _no_look_cause(
+        ownship,
+        contact,
+        now_sim,
+        optic=granted_optic if granted_optic is not None else UNAIDED_OPTIC,
+    )
 
     tier: Literal[1, 2]
     alignment = _tier1_alignment(ownship, contact, now_sim)
@@ -691,12 +726,19 @@ def decide(
     # been masked -- direction §11, the user's own words: "the important
     # question is whether Petrovich sees the target when we turn to see
     # what is happening," not whether a break masked him in the
-    # meantime. `tier == 1` with `cause == "too_far"` is not reachable in
-    # practice (a fresh relative percept implies naked_eye_source already
-    # admitted it within presence range), but the condition is written
-    # against `cause` rather than `tier` so a range closing while tier
-    # stays 2 (still no fresh percept, but no longer too far) correctly
-    # announces "eyes on" too, not only a tier flip.
+    # meantime. `tier == 1` with `cause == "too_far"` IS reachable once
+    # `BL-B71`'s optic ladder is live and `_no_look_cause` above is fed
+    # the wrong (narrower) optic: a fresh relative percept only implies
+    # admission within *some* optic's presence range, not necessarily
+    # the one `_no_look_cause` tests against. `granted_optic` closes that
+    # gap by testing the same optic that actually admitted the percept
+    # (review's required fix, `plans/attack-run-sortie-fixes/
+    # review-bl-b71.md`) -- a prior cut of this docstring called the
+    # combination "not reachable in practice," which was true only while
+    # the admitting optic was fixed at `UNAIDED_OPTIC`. The condition is
+    # written against `cause` rather than `tier` regardless, so a range
+    # closing while tier stays 2 (still no fresh percept, but no longer
+    # too far) correctly announces "eyes on" too, not only a tier flip.
     now_unresolved = cause == "too_far"
     regaining_sight = state.last_spoken_unresolved and not now_unresolved
     losing_sight = now_unresolved and not state.last_spoken_unresolved

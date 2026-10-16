@@ -584,3 +584,89 @@ test for the wrong reason:**
   `None` in that branch, so the attack-run-narrowed gaze is untouched. Confirmed by reading
   `_apply_active_gaze`, not by a new test — `BL-B71.md` itself names the consolidation
   (`OpticPhase.GUIDING`) that would resolve this, assigned to `BL-B66`.
+
+## BL-B71 review fix round (2026-10-16)
+
+Reviewer's required fix: `_no_look_cause`'s range test measured against `UNAIDED_OPTIC`
+unconditionally, so once the ladder granted binoculars a live, resolvable tier-1 look could still
+be reported `"too_far"` (tested against the wrong, narrower threshold) and trigger the
+`losing_sight` branch — "last I saw..." about a target currently in view. User direction asked
+directly whether this was a test artefact or real behaviour: **"actual behavior must measure by
+used optic."**
+
+### Files Changed (this round)
+
+- `body-layer/src/belief/attack_run.py` — `_no_look_cause` takes a new `optic: Optic =
+  UNAIDED_OPTIC` keyword parameter, used for the range gate (`tier_ranges(..., optic=optic, ...)`)
+  instead of the hardcoded constant. `decide` takes a new `granted_optic: Optic | None = None`
+  parameter, threaded straight through to `_no_look_cause` (falling back to `UNAIDED_OPTIC` when
+  `None`) and read nowhere else in the function — kept the function pure and did not widen its
+  signature beyond this one need, per the task's own direction. Corrected the docstring's "`tier ==
+  1` with `cause == "too_far"` is not reachable in practice" claim: it is reachable once the ladder
+  is live and the admitting optic is not threaded through, which is exactly the bug this round
+  fixes — left a trail to the review rather than silently deleting the old claim.
+- `body-layer/src/belief/crew_console.py` — `drain_attack_run` takes a new keyword-only
+  `granted_optic: Optic | None = None`, passed straight through to `decide_attack_run`. Added the
+  `Optic` import.
+- `body-layer/src/logger.py` — the `drain_attack_run` call site now passes `granted_optic=runner.
+  optic_state.guidance_optic`. This is **not** one-poll stale the way `AttackRunState.
+  requested_optic` (read the other direction, into `decide_optic`) deliberately is: `decide_optic`
+  runs earlier in the same poll (inside `run_once`) and has already updated `optic_state.
+  guidance_optic` for *this* tick before `drain_attack_run` is called, so it reflects the optic
+  that actually admitted this tick's percepts.
+- `body-layer/src/belief/optic_policy.py` — two unrequired-but-folded-in fixes from the review's
+  optional findings:
+  - `GUIDANCE_OPTIC_MIN_INTERVAL_S`'s `#:` comment: moved the cross-key coupling warning
+    (`must stay above HANDS_BUSY_DURATION_S`) into the comment's **first** sentence, since the
+    generator renders only that one — verified against the rendered `config/defaults.toml`, not
+    the comment (root `CLAUDE.md`'s named trap, third recurrence per the review). Stated plainly in
+    the comment that the declared `lo`/`hi` bounds (1.0..60.0 and the paired constant's 0.1..5.0)
+    do permit violating the coupling at the extremes and that nothing enforces it — no cross-key
+    assert added, since the task said to flag rather than invent unrequested machinery when one
+    isn't cheaply expressible, and this one is a tuning caution rather than an invariant that must
+    hold.
+  - The first-grant hands-busy baseline (`_apply_guidance`'s `previous_optic` comparison against
+    `_HOME_OPTIC[state.home_phase]` rather than `decision.optic`): left uncorrected, with a comment
+    explaining the narrow gap and why — it only ever overcharges a cost that was not strictly
+    owed, never skips a real one, so it is not safety-relevant and fixing it would have gone beyond
+    this task's scope (the review itself called it optional).
+
+### Tests Added (this round)
+
+- `test_no_look_cause_optic_param_lowers_the_too_far_threshold` — direct unit proof that `optic`
+  moves `_no_look_cause`'s range gate: the same contact is `"too_far"` against the default
+  (`UNAIDED_OPTIC`) and `"unknown"` against a granted `BINOCULAR_OPTIC`.
+- `test_decide_with_granted_binoculars_resolves_tier_1_instead_of_losing_sight` — the combination
+  the review found untestable through `_contact_at` (deliberately tier-2-only): a fresh tier-1
+  percept at a range beyond the naked eye's own presence threshold but within the granted
+  binoculars'. Asserts `decide()` with `granted_optic=BINOCULAR_OPTIC` speaks the ordinary "Lined
+  up." rather than the `render_attack_run_lost_sight` "last I saw..." phrasing, and that
+  `last_spoken_unresolved` is `False`.
+
+  **Counterfactual confirmed, not merely asserted**: reverted `_no_look_cause`'s call site inside
+  `decide` to a hardcoded `optic=UNAIDED_OPTIC`, re-ran the new `decide()`-level test — failed,
+  `speech.text` read `'Lined up armor ahead, last seen a moment ago.'` instead of `'Lined up.'`,
+  exactly the stated failure mode. Restored the fix; `shasum` of `attack_run.py` before and after
+  the mutation matched exactly (`1f0cfff8fda03dddc037746d4e5c4acdd4d81af7`).
+
+### Checks (this round)
+
+- `ruff format --check src tests`: pass, 133 files already formatted.
+- `ruff check src tests`: pass, all checks passed.
+- `mypy src` (from inside `body-layer/`): pass, no issues in 60 source files.
+- `pytest tests -q`: **2089 passed, 4 xfailed** (baseline 2087 passed / 4 xfailed; +2 for the two
+  new tests, confirmed by name in `-v` output).
+
+### Notable Discoveries (this round)
+
+- Confirmed by reading `_apply_guidance` that every branch setting `decision.optic` away from the
+  ordinary phase dispatch's own choice keeps it in lockstep with `state.guidance_optic` *after*
+  that call returns, **except** the "refused due to guard 3, no standing grant yet" branch, where
+  `decision.optic` is whatever the ordinary dispatch picked (which need not be `UNAIDED_OPTIC`) while
+  `state.guidance_optic` stays `None`. In that one edge case, reading `OpticState.guidance_optic`
+  (as this fix does, per the review's own explicit recommendation) is slightly more conservative
+  than reading the admitting `decision.optic`/`runner.optic` directly would be — it could in
+  principle test range against `UNAIDED_OPTIC` on a tick where the ordinary dispatch had already
+  put binoculars in use for an unrelated reason. Not fixed here (the review named `guidance_optic`
+  specifically and the user's direction was about measuring against the *granted* optic, not every
+  possible admitting optic); worth noting for anyone revisiting this area.
