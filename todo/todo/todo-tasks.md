@@ -43,8 +43,8 @@ on the index without opening anything.
 - [[X-T2]] — `/explore` the location-fragment rewrite — **USER**
 
 Next open items, not blocked on the user: [[X-T4]] (grouping is the priority), [[X-T5]] (free text
-comes back "Unable"), [[X-T23]] (no identification on a very close pass), [[X-T24]] (16 s flank
-revisit), and the three in-progress crew-behaviour findings [[X-T6]], [[X-T7]], [[X-T8]].
+comes back "Unable"), [[X-T23]] (no identification on a very close pass), and the crew-behaviour
+findings [[X-T6]] and [[X-T8]]. ([[X-T24]] was dropped and [[X-T7]] closed on 2026-10-16.)
 
 **Nothing is mid-sequence as of 2026-10-16.** Both branches that were in flight earlier that day
 merged the same evening, and what they owe now is **your flying, not more agent passes** — they are
@@ -177,7 +177,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 - [[X-T21]] — Callouts must not be backlogged
 - [[X-T22]] — Aggregate repetitive callouts
 - [[X-T23]] — No identification on a very close pass
-- [[X-T24]] — 16 s flank revisit
+- [[X-T24]] — 16 s flank revisit — **DROPPED 2026-10-16** by user direction, not completed: provisionally accepted in the air, no measurement owed, no observed failure
 
 ## Cross-cutting / unscoped backlog
 
