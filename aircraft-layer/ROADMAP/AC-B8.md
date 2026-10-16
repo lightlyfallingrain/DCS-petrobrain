@@ -20,8 +20,14 @@
 
   - a **latch**, because `START` and `END` can arrive in the same drained batch and a sub-poll burst
     must survive at least one body-layer poll (`FIRING_MIN_VISIBLE_S`);
-  - a **watchdog**, because a `START` whose `END` never arrives (a unit destroyed mid-burst) must
-    not leave a unit firing forever (`FIRING_WATCHDOG_S`);
+  - a **watchdog**, because a `START` whose `END` never arrives must not leave a unit firing forever
+    (`FIRING_WATCHDOG_S`). **Corrected 2026-10-16, Stage B review**: this used to name "a unit
+    destroyed mid-burst" as the case, which conflates two different ones. Destruction is already
+    owned, immediately, by the `S_EVENT_DEAD`/`_CRASH` removal path; the watchdog's only remaining
+    case is a dropped `END` for a unit that is still alive. Since firing events are paired and units
+    fire bursts rather than for tens of seconds (user direction, 2026-10-16), that case does not
+    occur in practice, so `FIRING_WATCHDOG_S = 180.0` is a pure backstop — **do not tune it down for
+    looking long**, a short value there was the Stage B review's actual finding;
   - **per-kind death semantics**: a dead unit's gun-fire entry is removed, a launch-smoke entry is
     kept, because smoke outlives the launcher;
   - **a clean slate on `onSimulationStart`** and on bridge reconnect.
