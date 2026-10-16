@@ -53,6 +53,16 @@ LOST_THRESHOLD_S = 120.0
 POSITION_HALF_LIFE_S = 30.0
 
 [belief.optic_policy]
+# BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that thrashes at the boundary would be worse than one that never de-escalates at all") -- a *fraction* of the lower rung's own presence threshold, not a fixed metre band, because the ladder's rungs are 2.42x apart (`presence_range_mult`), so a fixed band would be enormous at the naked-eye rung and negligible at the sight's.
+# status: agreed-guess | range: 0.05 .. 0.9
+# source: belief/optic_policy.py:GUIDANCE_OPTIC_HYSTERESIS_FRACTION
+GUIDANCE_OPTIC_HYSTERESIS_FRACTION = 0.25
+
+# BL-B71 guard 3: the shortest time between two guidance-optic grants, clocked by `OpticState.guidance_optic_since_sim` -- bounds how often the 1 s hands-busy cost (`HANDS_BUSY_DURATION_S`) can be charged, and must exceed the ~4.5 s a fly-past needs to re-cross `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`'s own band at the worst observed reversal rate (+130 m/s) -- 10.0 s bounds the worst case to one 1 s blind interval per 10 s (10% duty).
+# status: agreed-guess | range: 1.0 .. 60.0
+# source: belief/optic_policy.py:GUIDANCE_OPTIC_MIN_INTERVAL_S
+GUIDANCE_OPTIC_MIN_INTERVAL_S = 10.0
+
 # How long the 1 s hand movement of switching the sight on/off, or between its settings, suppresses observation entirely -- direction §6 (`docs/acceptance/2026-10-15-9k113-sight-direction.md`), `plans/9k113-sight/plan.md` Stage 2. Any cockpit action that touches the sight sets `OpticState.hands_busy_until_sim` to `now_sim + this`; while it is set, no optic yields observations at all -- Petrovich's eyes are on the switch, not through any instrument.
 # status: judgement | range: 0.1 .. 5.0
 # source: belief/optic_policy.py:HANDS_BUSY_DURATION_S

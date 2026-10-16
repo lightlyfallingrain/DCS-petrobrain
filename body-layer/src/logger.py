@@ -575,6 +575,20 @@ class ConsolePerceptionRunner:
                 list(self.attitude_history),
                 rate_limit_deg_s=SIGHT_STEADY_RATE_LIMIT_DEG_S,
             ),
+            # `BL-B71`: the attack run's own standing ladder request, from
+            # the *previous* poll -- `drain_attack_run` (which recomputes
+            # `AttackRunState.requested_optic` for *this* poll) runs later
+            # in `_run_crew_text_poll_loop`, after `run_once` (and this
+            # call) has already returned, the same one-poll lag `attack_
+            # run_transition`/`observ_transition` already accept elsewhere
+            # in this file. `None` whenever no run is engaged -- a true
+            # no-op, same posture as every other optional `decide_optic`
+            # keyword.
+            guidance_request=(
+                self.attack_run_state.requested_optic
+                if self.attack_run_state is not None
+                else None
+            ),
         )
         self.optic = optic_decision.optic
         # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the

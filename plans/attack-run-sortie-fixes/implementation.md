@@ -383,3 +383,204 @@ neither fix touches `_should_emit`'s text-veto or the cockpit-mask gate.
   `test_decide_losing_sight_where_suppressed_when_it_restates_the_clock_hour`; added
   `test_decide_losing_sight_where_phrase_kept_in_the_qualitative_register`; corrected
   `test_no_look_cause_too_far_beyond_naked_eye_presence_range`'s docstring.
+
+---
+
+## `BL-B71` — the least-capable-optic guidance ladder (§6, §7)
+
+Staged behind `BL-B70` as planned; built once `BL-B70` was merged (tip `98ee1f7a`).
+
+### What shipped
+
+**Stage 1, `optic_policy.least_capable_sufficient_optic(range_m, object_type, *, floor, ceiling)`.**
+A naive per-tick ladder lookup over a new `_LADDER = (UNAIDED_OPTIC, BINOCULAR_OPTIC, SIGHT_WIDE_OPTIC,
+SIGHT_NARROW_OPTIC)` (presence-ascending, matching `BL-B71.md`'s own derivation that this ordering
+already exists in the shipped table) — the least capable optic between `floor`/`ceiling` whose own
+`tier_ranges(...)[0]` still reaches `range_m`, falling back to `ceiling` if even that cannot resolve
+the target.
+
+**Stage 3, `optic_policy.guidance_request_for(range_m, object_type, previous, *, floor, ceiling)`.**
+The hysteresis wrapper: escalation is immediate (re-derives via `least_capable_sufficient_optic`
+whenever the current rung's own threshold is exceeded); de-escalation steps down exactly one rung at
+a time and only once range is past the lower rung's threshold by `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`
+(new `tuning.real`, `0.25`, `lo=0.05, hi=0.9`). `previous` is the *caller's own* last request
+(`AttackRunState.requested_optic`), never `optic_policy`'s own granted `guidance_optic` — the two can
+legitimately diverge (see "Design decisions" below).
+
+**Stage 2, `OpticState.guidance_optic`/`guidance_optic_since_sim`, and `decide`'s new
+`guidance_request: Optic | None = None` keyword.** `decide`'s existing body is renamed
+`_decide_without_guidance` (unchanged) and wrapped by a new public `decide` that applies a
+post-dispatch step, `_apply_guidance`, unless `decision.suppressed` (the hands-busy window). This is
+the literal implementation of the plan's "leaves the phase machine otherwise untouched": the ordinary
+SCANNING/GLASSING/SEARCHING/SIGHTING dispatch runs exactly as before, and `_apply_guidance` only ever
+rewrites `decision.optic` plus the two `guidance_*` state fields.
+
+`_apply_guidance`:
+
+1. `guidance_request is None` → revoke any standing grant (`guidance_optic`/`guidance_optic_since_sim`
+   both to `None` together).
+2. **Sight ceiling clamp, re-derived every call from `state.home_phase`, never cached**: a
+   sight-ranked request is capped to `BINOCULAR_OPTIC` whenever `home_phase is not SIGHTING`. This is
+   what makes the hard gate ("the 9K113 is never reached for autonomously") structural — a pilot's
+   "Observ off" or a violated `sight_steady` (`_force_observ_off`) both only ever change `home_phase`,
+   read fresh here, so a standing sight grant demotes to binoculars on the very next poll with no
+   separate transition-handling code needed.
+3. Guard 3 (`GUIDANCE_OPTIC_MIN_INTERVAL_S`, new `tuning.real`, `10.0`, `lo=1.0, hi=60.0`): a change
+   is refused if less than the interval has passed since the last grant; the standing grant (if any)
+   is held, and a refusal never advances `hands_busy_until_sim`.
+4. A real change charges `HANDS_BUSY_DURATION_S` **iff the optic actually in use is changing** —
+   compared against the standing grant if one exists, or against `_HOME_OPTIC[state.home_phase]`
+   otherwise (the first grant of a run, nothing yet to compare against; see "Design decisions").
+
+**Wiring.** `attack_run.decide` computes `AttackRunState.requested_optic` every non-`MASKED` tick
+(guard 1 — the field is simply never touched after the `cause == "masked"` early return, so "falls
+out of §2" needed no separate check) via `guidance_request_for(range_m(observer,
+contact.last_position), contact.last_class_raw, state.requested_optic, floor=UNAIDED_OPTIC,
+ceiling=SIGHT_NARROW_OPTIC)`. `logger.py`'s `run_once` threads
+`self.attack_run_state.requested_optic` into `decide_optic`'s new `guidance_request` keyword — one
+poll lagged relative to `drain_attack_run` (which recomputes it), the same lag
+`attack_run_transition`/`observ_transition` already accept elsewhere in that file.
+
+### Design decisions settled during implementation (not individually in the plan)
+
+- **`guidance_request_for`'s hysteresis lives in `optic_policy`, keyed by the caller's own `previous`
+  argument, not by `OpticState.guidance_optic`.** The plan names Stage 1's predicate signature
+  explicitly (no "current" parameter) and leaves Stage 3's home unstated. Putting the margin math
+  beside `tier_ranges`/`_LADDER` (which it needs) and having `attack_run` supply its own memory
+  (`AttackRunState.requested_optic`) keeps the two modules' roles exactly as drawn ("attack_run owns
+  the request, optic_policy owns the decision") — `attack_run`'s ladder tracks what the target's
+  geometry alone would ask for, independent of whether a sight request was ever actually granted
+  (home_phase may clamp it). One consequence, noted rather than guarded against: if OBSERV turns on
+  mid-run, the ladder's already-correct standing request becomes grantable immediately, rather than
+  needing several more ticks to re-climb from `BINOCULAR_OPTIC` — judged a feature (no needless
+  guidance lag), not a defect.
+- **First-grant hands-busy comparison baseline.** The plan does not say what "the optic actually
+  changing" compares against on the very first grant of a run (nothing has been granted yet).
+  Compared against `_HOME_OPTIC[state.home_phase]` (`UNAIDED_OPTIC` for `SCANNING`, `SIGHT_WIDE_OPTIC`
+  for `SIGHTING`) — the optic Petrovich would otherwise be using — so a run that only ever confirms
+  "naked eye is already enough" never charges a spurious first-grant cost.
+- **`_no_look_cause`'s `TOO_FAR` range test still uses `UNAIDED_OPTIC` unconditionally**, not the
+  currently-granted guidance optic. `BL-B70.md`'s own entry flags this coupling as out of scope for
+  that entry ("`BL-B71`'s optic ladder... is out of scope for this entry"); this task's Stages (1-5,
+  `plan.md`) likewise never ask `_no_look_cause` to change. Left as-is — the cause taxonomy and the
+  optic ladder answer related but distinct questions (why no fresh look right now, vs. which
+  instrument would help), and widening `_no_look_cause`'s scope was not requested. Flagged for whoever
+  next touches that function.
+
+### Co-moving Fields — exit transitions enumerated (grepped, not read off the plan's list)
+
+Every place `OpticState.phase`/`home_phase` changes or an attack run ends, checked against whether
+`guidance_optic` needs a write path there:
+
+| transition | where | effect on `guidance_optic` |
+|---|---|---|
+| `disengage`/`drop_target`/vanished-contact (any `drain_attack_run` path that returns `None`) | `crew_console.drain_attack_run` → `runner.attack_run_state = None` | next poll's `guidance_request` is `None` → `_apply_guidance` revokes |
+| pilot "Observ off" | `logger.py`'s command dispatch sets `home_phase=SCANNING` directly | **not written here at all** — the ceiling clamp re-reads `home_phase` fresh on the *next* `decide` call and demotes any sight-ranked grant to `BINOCULAR_OPTIC` there |
+| `_force_observ_off` (violated `sight_steady`) | inside `_decide_without_guidance`'s `_decide_sighting` dispatch | same as above — `home_phase` changes, `_apply_guidance` re-clamps on this *same* call since it runs on `_decide_without_guidance`'s own output state |
+| pilot "Observ on" | `logger.py`'s command dispatch sets `home_phase=SIGHTING` | raises the ceiling, not a revocation; no special handling needed |
+| ordinary `lower_binoculars` (ambient manoeuvre/command lowering an unrelated glass/sight look) | `optic_policy.lower_binoculars` | **does not touch `guidance_optic`** — confirmed deliberately out of scope: that function governs the phase's own *look* state (`look_contact_id` etc.), which is now orthogonal to the guidance override (the override replaces `decision.optic` regardless of what the phase machine is doing with its look target) |
+| fresh `OpticState(...)` construction entering `SEARCHING` or `GLASSING` from `SCANNING`-at-home | `_decide_without_guidance`'s own two fresh-construction sites | **had to be fixed** — neither site originally carried `guidance_optic`/`guidance_optic_since_sim` forward, which would have silently reset a standing grant's bookkeeping and triggered a spurious second hands-busy charge on an unrelated ordinary scan/glass event. Added explicit carry-forward at both sites, confirmed by mutation (see "Checks" below). |
+
+The plan's own list named only the first three rows (disengage/drop_target/run-ends,
+Observ-off-demotes, `_force_observ_off`-demotes). The fresh-construction trap was found by the same
+audit `BL-B64`/`BL-B70` each flag as their own recurring class, not named in `BL-B71.md`'s Co-moving
+Fields table.
+
+### Files Changed
+
+- `body-layer/src/belief/optic_policy.py` — `_LADDER`, `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`,
+  `GUIDANCE_OPTIC_MIN_INTERVAL_S` (new tuning constants); `least_capable_sufficient_optic`,
+  `guidance_request_for` (new pure functions); `OpticState` gains `guidance_optic`/
+  `guidance_optic_since_sim`, carried forward explicitly at both fresh-`OpticState(...)` construction
+  sites; `decide` renamed to `_decide_without_guidance` and wrapped by a new public `decide` with a
+  `guidance_request` keyword and the new `_apply_guidance` post-processing step.
+- `body-layer/src/belief/attack_run.py` — `AttackRunState` gains `requested_optic`, reset to `None`
+  on a contact re-point; `decide` computes it every non-masked tick via `optic_policy.
+  guidance_request_for`.
+- `body-layer/src/logger.py` — `run_once`'s `decide_optic` call threads
+  `self.attack_run_state.requested_optic` into the new `guidance_request` keyword.
+- `body-layer/config/defaults.toml` — regenerated; adds `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`,
+  `GUIDANCE_OPTIC_MIN_INTERVAL_S`.
+- `body-layer/tests/test_optic_policy.py` — `TestLeastCapableSufficientOptic`,
+  `TestGuidanceRequestFor`, `TestGuidanceOverride` (new).
+- `body-layer/tests/test_attack_run.py` — `TestRequestedOptic` (new).
+
+### Tests Added
+
+- `TestLeastCapableSufficientOptic` (5 tests) — naive ladder lookup: within/beyond each rung,
+  falls back to ceiling, and a `ceiling=BINOCULAR_OPTIC` caller never gets a sight optic back.
+- `TestGuidanceRequestFor` (5 tests) — no-previous starts at floor; escalation is immediate; the
+  de-escalation band is withheld then crossed; de-escalation steps one rung at a time; a `previous`
+  below a raised `floor` is clamped up.
+- `TestGuidanceOverride` (11 tests) — `guidance_request=None` true no-op; a grant overrides the optic
+  and charges hands-busy; the hard sight gate (and its lift once `home_phase is SIGHTING`); the
+  hand-built diverged state (`guidance_optic is SIGHT_WIDE_OPTIC` while `home_phase is SCANNING`,
+  per the plan's own explicit instruction to construct this by hand) demoting on one poll; guard 3
+  refusing then allowing a change; revocation on disengage; suppression during hands-busy; a fresh
+  `SEARCHING` entry not resetting a standing grant.
+- `TestRequestedOptic` (6 tests, `test_attack_run.py`) — starts `None`; naked-eye/binocular requests
+  by range; guard 1's masked freeze (range changed underneath a masked tick, request does not move);
+  the de-escalation band through the full `decide()` path; a re-point resets the request.
+
+### Checks
+
+- `ruff format --check src tests`: pass (2 files needed reformatting after being written, fixed with
+  `ruff format`, then re-verified clean).
+- `ruff check src tests`: pass (one `F401` unused-import caught and fixed before this run).
+- `mypy src` (CWD-only, run from inside `body-layer`): `Success: no issues found in 60 source files`.
+- `pytest tests -q`: **2087 passed, 4 xfailed** (baseline before this task: 2061 passed, 4 xfailed —
+  net +26, all new).
+
+**Counterfactuals run, by `shasum` before/after, for the three structural claims that could pass a
+test for the wrong reason:**
+
+1. **The sight ceiling clamp** (`_apply_guidance`'s `if` block) — replaced with `if False:`, re-ran
+   `test_the_hard_gate_the_9k113_is_never_reached_for_autonomously` and
+   `test_the_diverged_state_sight_granted_while_scanning_is_home_demotes_at_once`: both failed, each
+   asserting the request was granted as `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC` rather than clamped to
+   `BINOCULAR_OPTIC` — exactly the stated reason. Restored; `shasum` of `optic_policy.py` matched the
+   pre-mutation value exactly.
+2. **The fresh-`SEARCHING`-construction carry-forward** — dropped the two `guidance_optic*` kwargs
+   from that one construction site, re-ran
+   `test_a_fresh_search_phase_entry_does_not_reset_a_standing_grant`: failed,
+   `assert new_state.guidance_optic_since_sim == 0.0` got `16.0` (the clock had been silently reset
+   and re-stamped, exactly the spurious-recharge the test guards against). Restored; `shasum`
+   matched.
+3. **Guard 1's placement** (the masked early-return in `attack_run.decide`) — moved the
+   `requested_optic` update above the `if cause == "masked": return` line (the mutation the task
+   explicitly flagged as the dangerous one), re-ran
+   `test_a_masked_tick_freezes_the_request_guard_1`: failed, the request jumped from `UNAIDED_OPTIC`
+   to `BINOCULAR_OPTIC` on the masked tick. Restored; `shasum` matched.
+
+### Notable Discoveries
+
+- **The generator's `_first_sentence` strips only a single leading/trailing backtick, not whole
+  inline-code spans.** Both new tuning constants' `#:` comments originally opened with a
+  backtick-wrapped term (`` `BL-B71`'s... ``); the rendered `config/defaults.toml` line read
+  `` BL-B71`'s de-escalation... `` — the opening backtick silently eaten, the closing one left
+  dangling, because `str.strip("*`")` only trims characters from the very ends of the matched
+  sentence, not every inline span inside it. Fixed by not opening either comment's first sentence
+  with a backtick-wrapped term; not a general fix to the generator (out of scope here), but worth a
+  future pass given the generator's own docstring already documents two other failure modes of the
+  same shape (`tools/generate_defaults.py`'s module docstring; see also
+  `.claude/agent-memory/implementer/project_tuning_generator_comment_extraction.md`).
+- **The two new constants have no live run-loop coupling to assert, but one worth naming**: `GUIDANCE_
+  OPTIC_MIN_INTERVAL_S` (10.0) is sized to exceed `HANDS_BUSY_DURATION_S` (1.0) comfortably — if a
+  future retune pushed the interval below the hands-busy duration, a grant could in principle be
+  rechargeable before its own hands-busy window even finishes. Not enforced in code (the margin is
+  10x today), stated in the constant's own `#:` comment's second sentence (which the generator does
+  not render — see the first discovery above) rather than guarded in `tuning.py`, per the role's
+  guidance to flag rather than silently add cross-key machinery beyond what the plan asked for.
+- **The gaze/optic structural seam the plan names as deliberately unfixed (`BL-B71.md`: "the run
+  claims the gaze in `logger._active_gaze`... the optic comes from `optic_policy.decide`'s own scan
+  cycle") is confirmed still open after this change, in the specific direction that matters**: when
+  `home_phase is SIGHTING` and a guidance grant actually reaches a sight optic, `_apply_active_gaze`
+  still lets `_decide_sighting`'s own internally-chosen look target (via `choose_look`, which may be
+  glassing a *different* contact than the attack target) override the attack-run-narrowed
+  `scan_plan` whenever `decision.look_azimuth_deg is not None` — this change only ever overrides
+  `decision.optic`, never `look_azimuth_deg`/`look_elevation_deg`. For the realistic common case
+  (`home_phase is SCANNING`, the vast majority of runs since OBSERV needs an explicit pilot command)
+  this does not arise: `BINOCULAR_OPTIC` has no field of regard and `decision.look_azimuth_deg` stays
+  `None` in that branch, so the attack-run-narrowed gaze is untouched. Confirmed by reading
+  `_apply_active_gaze`, not by a new test — `BL-B71.md` itself names the consolidation
+  (`OpticPhase.GUIDING`) that would resolve this, assigned to `BL-B66`.

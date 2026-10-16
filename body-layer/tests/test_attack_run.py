@@ -36,6 +36,7 @@ from belief.percept import Percept
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import render_alignment
 from perception.naked_eye_source import ATTACK_TARGET_LOS_MAX_AGE_S
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
 from perception.source import OwnshipState, RelativeDirection
 
 _RELATIVE_DIRECTION_PATTERN = re.compile(
@@ -1254,3 +1255,111 @@ def test_the_two_constants_are_unchanged_assumptions() -> None:
     vocabulary it guards) -- the other two assumptions stand."""
     assert ATTACK_RUN_LINED_UP_AZIMUTH_DEG == 5.0
     assert ATTACK_RUN_ELEVATION_GATE_DEG == 10.0
+
+
+# -- `BL-B71`: `AttackRunState.requested_optic` --------------------------
+
+# Presence thresholds for "OP_ARMORED" (`_contact_at`'s own default
+# classification), from the same `tier_ranges` formula the module itself
+# uses: UNAIDED ~1667 m, BINOCULAR ~4033 m.
+_ARMORED_UNAIDED_M = 1666.6666666666667
+_ARMORED_BINOCULAR_M = 4033.3333333333335
+
+
+class TestRequestedOptic:
+    def test_starts_none_before_the_first_tick(self) -> None:
+        assert AttackRunState().requested_optic is None
+
+    def test_within_naked_eye_range_requests_the_naked_eye(self) -> None:
+        contact = _contact_at(bearing_deg=0.0, range_m=1000.0)
+        state, _speech = decide(
+            AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=contact
+        )
+        assert state.requested_optic is UNAIDED_OPTIC
+
+    def test_beyond_naked_eye_requests_binoculars(self) -> None:
+        contact = _contact_at(bearing_deg=0.0, range_m=_ARMORED_UNAIDED_M + 1.0)
+        state, _speech = decide(
+            AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=contact
+        )
+        assert state.requested_optic is BINOCULAR_OPTIC
+
+    def test_a_masked_tick_freezes_the_request_guard_1(self) -> None:
+        """§7 guard 1: `requested_optic` must not re-evaluate while
+        `cause == "masked"`, even though the range changed underneath it
+        -- this is what "falls out of §2" means (`AttackRunState.
+        requested_optic`'s own docstring): the field is only ever updated
+        after the `cause == "masked"` early return, so a masked tick
+        leaves it exactly as it was."""
+        near = _contact_at(bearing_deg=0.0, range_m=1000.0)
+        state, _speech = decide(
+            AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=near
+        )
+        assert state.requested_optic is UNAIDED_OPTIC
+
+        # Move the same contact astern (masked) *and* far beyond the
+        # naked eye's own range -- if the field re-evaluated here it
+        # would jump to `BINOCULAR_OPTIC`.
+        far_and_astern = _contact_at(
+            bearing_deg=180.0, range_m=_ARMORED_UNAIDED_M + 1.0
+        )
+        masked_state, speech = decide(
+            state, now_sim=1.0, ownship=_ownship(), contact=far_and_astern
+        )
+        assert speech is None  # confirms this tick really was masked
+        assert masked_state.requested_optic is UNAIDED_OPTIC
+
+    def test_de_escalation_is_withheld_until_the_margin_is_crossed(self) -> None:
+        """Guard 2, exercised through the full `decide()` path rather
+        than `guidance_request_for` directly -- a target still just
+        inside `BINOCULAR_OPTIC`'s own threshold does not yet give up the
+        request; one comfortably inside it does."""
+        far = _contact_at(bearing_deg=0.0, range_m=_ARMORED_UNAIDED_M + 1.0)
+        state, _speech = decide(
+            AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=far
+        )
+        assert state.requested_optic is BINOCULAR_OPTIC
+
+        just_inside = _contact_at(bearing_deg=0.0, range_m=_ARMORED_UNAIDED_M - 1.0)
+        held_state, _speech = decide(
+            state, now_sim=1.0, ownship=_ownship(), contact=just_inside
+        )
+        assert held_state.requested_optic is BINOCULAR_OPTIC
+
+        comfortably_inside = _contact_at(
+            bearing_deg=0.0, range_m=_ARMORED_UNAIDED_M * 0.5
+        )
+        de_escalated_state, _speech = decide(
+            held_state, now_sim=2.0, ownship=_ownship(), contact=comfortably_inside
+        )
+        assert de_escalated_state.requested_optic is UNAIDED_OPTIC
+
+    def test_a_re_point_resets_the_request(self) -> None:
+        """The reset-on-re-point path (`decide`'s own docstring) must
+        clear `requested_optic` too -- a new target starts its own ladder
+        evaluation from the floor, never inheriting the old target's
+        standing request."""
+        far = _contact_at(bearing_deg=0.0, range_m=_ARMORED_UNAIDED_M + 1.0)
+        state, _speech = decide(
+            AttackRunState(), now_sim=0.0, ownship=_ownship(), contact=far
+        )
+        assert state.requested_optic is BINOCULAR_OPTIC
+
+        other_contact = Contact.from_percept(
+            "CONTACT_2",
+            Percept(
+                t_sim=1.0,
+                source="naked_eye_visual_filtered",
+                classification_raw="OP_ARMORED",
+                bearing_deg=0.0,
+                range_m=1000.0,
+                ownship_at_observation=_ownship(),
+                observation_id="OBS_2",
+                relative_direction=None,
+            ),
+        )
+        new_state, _speech = decide(
+            state, now_sim=1.0, ownship=_ownship(), contact=other_contact
+        )
+        assert new_state.last_contact_id == "CONTACT_2"
+        assert new_state.requested_optic is UNAIDED_OPTIC
