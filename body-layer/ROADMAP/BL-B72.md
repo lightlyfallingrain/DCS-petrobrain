@@ -119,6 +119,14 @@
   transport and ships first. The two event-driven halves split out: **`[[BL-B73]]`** gun fire and
   **`[[BL-B74]]`** the SAM smoke tail, both blocked on **`[[AC-B8]]`**.
 
+  **Stage A merged 2026-10-15** (`f06802e`, `feature/emitter-visibility`, DoD PASS at
+  `plans/emitter-visibility/dod-check.md`): the shared `emitter` bypass on `check_visibility`, the
+  `lowres` tier clamp, and `EmitterKind.BURNING` in `body-layer/src/perception/emitters.py`.
+  **Stage B merged 2026-10-16** as `[[BL-B73]]`/`[[AC-B8]]`. **This entry stays open on Stage C
+  only** — `[[BL-B74]]`'s decaying launch-smoke lifetime is the one emitter kind
+  `resolve_emitters` does not yet fold in; neither Stage A nor Stage B has been flown
+  (`#needs-flight` sits on `[[BL-B73]]`/`[[AC-B8]]`/`[[AC-B7]]`).
+
   **Two findings from that pass worth having here**: the existing threat path keys on classification
   and so would schedule a `PRESENCE`-only firing contact at the *lowest* priority there is — new
   event kinds are required, not a reuse; and `petrobrain-line-of-sight-hook.lua`'s

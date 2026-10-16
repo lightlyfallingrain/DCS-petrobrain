@@ -1,9 +1,15 @@
 # AC-B7 — Per-unit life on the existing mission-scripting bridge
 
-- [ ] **AC-B7 — Add `getLife()`/`getLife0()` to the mission-telemetry hook's existing in-state
+- [x] **AC-B7 — Add `getLife()`/`getLife0()` to the mission-telemetry hook's existing in-state
   per-unit loop and carry them on the same feed, so body-layer can tell a burning unit from a
-  healthy one.** #status/open Filed at Architect stage, 2026-10-15, as the transport half of
-  `[[BL-B72]]`'s burning emitter — `plans/emitter-visibility/plan.md` Stage A.
+  healthy one.** #status/done #needs-flight Filed at Architect stage, 2026-10-15, as the transport
+  half of `[[BL-B72]]`'s burning emitter — `plans/emitter-visibility/plan.md` Stage A.
+
+  **Delivered with Stage A, merged 2026-10-15 (`f06802e`, `feature/emitter-visibility`)** — DoD
+  PASS at `plans/emitter-visibility/dod-check.md`; the life fields ride the existing
+  `petrobrain-mission-telemetry-hook.lua` per-unit loop and body-layer resolves them in
+  `perception/emitters.py`'s `burning_emitters`. **The per-unit cost measurement below is still
+  owed from a real sortie** — that is what the `#needs-flight` tag is for here, not the mechanism.
 
   **This is a field addition, not a mechanism.** `petrobrain-mission-telemetry-hook.lua` already
   runs an `O(N)` per-unit loop inside the `"scripting"` state calling `getVelocity()`, bridged at

@@ -513,74 +513,79 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 14 Oct 2026</span>
+      <span>Derived from ROADMAP.md · 16 Oct 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems, two hundred and seventy-eight tracked items &mdash; and the
-      question the attack run was about to be planned around has been <strong>dissolved rather than
-      answered</strong>. The open question was whether <code>BL-14</code> needs a contact record per
-      unit or merely better positions for the records Petrovich holds. Your own answer was neither:
-      <strong>resolution is a function of attention</strong>. At range, the fold's undercount is not
-      tolerable but <em>correct</em> &mdash; <em>few/several/many</em> and a rough class is all a low
-      or medium tier owes. At high tier &mdash; watched, selected as a target, or asked about &mdash;
-      Petrovich is looking near-constantly, so the evidence to resolve individuals actually exists.
-      What that exposes is a <strong>prerequisite nobody had filed</strong>: bounding the fold fixes
-      accuracy and <em>cannot fix existence</em>. Two of six real units had no record at all before
-      the bound and still have none after it, because a collapsed view only ever projects members
-      that were founded. So <code>BL-14</code> is not a consumer of today's group model; it needs a
-      resolution mechanism that does not exist. Two of your other directions this cycle cut the same
-      way: position uncertainty must key on <strong>observed movement, not class</strong> &mdash; a
-      T-72 sitting still is a 0&nbsp;m/s problem &mdash; and <em>&ldquo;anything in forest is not
-      seen&rdquo;</em> is now merged and will fire on almost no ordinary sortie. Still unheard in the
-      air: eight merged cards, behind one flight.</p>
+    <p class="lede">Six subsystems, three hundred and ten tracked items &mdash; and the attack run
+      <strong>flew</strong>. Twice, on 2026-10-15: the first thing Petrovich does that helps you
+      <em>attack</em> rather than understand. It worked structurally and sounded wrong in four
+      measurable ways &mdash; <strong>38&nbsp;% of guidance utterances were dead repeats</strong> and
+      <strong>68&nbsp;% of <code>&ldquo;obstructed&rdquo;</code> calls were rear-aspect</strong>,
+      Petrovich talking at a target behind the airframe. All four are fixed and merged. The sharpest
+      finding is the one that could not be heard: <strong>the register that word belongs to has no
+      live caller at all.</strong> A contact can only reach belief if its line of sight was
+      <em>clear</em>, so the flag the attack run reads is never <code>False</code> in real play
+      &mdash; the vocabulary spoke a condition the admission gate discards. Your answer did not widen
+      the gate: <em>&ldquo;no LOS means no observation, but a LOS a moment ago means it&rsquo;s near
+      where it was&rdquo;</em> &mdash; so the lookup moves, memory carries the rest, and the
+      <em>next</em> step is a measurement rather than a design. Two more capabilities landed beside
+      it: the <strong>9K113 sight&rsquo;s perception half</strong>, and <strong>emitters</strong>
+      &mdash; a burning or firing unit now gives itself away out to the 10&nbsp;km bubble, the first
+      perception path where the <em>target&rsquo;s</em> behaviour decides whether it is seen. The
+      board&rsquo;s own prediction last cycle was wrong and worth naming: <code>BL-14</code> was
+      drawn as blocked on a resolution mechanism nobody had built. It shipped without one, because
+      you removed the requirement &mdash; <em>&ldquo;I can myself approximate attacking a group by
+      picking an individual unit there.&rdquo;</em> Still unheard in the air: <strong>24 entries</strong>
+      carry <code>#needs-flight</code>, and one of them now asks for mountains.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>149</b><span>Done</span></div>
-    <div class="count is-active"><b>16</b><span>In progress</span></div>
-    <div class="count is-open"><b>101</b><span>Open</span></div>
-    <div class="count is-hold"><b>12</b><span>Deferred</span></div>
+    <div class="count is-done"><b>160</b><span>Done</span></div>
+    <div class="count is-active"><b>17</b><span>In progress</span></div>
+    <div class="count is-open"><b>118</b><span>Open</span></div>
+    <div class="count is-hold"><b>15</b><span>Deferred</span></div>
     <div class="count is-block"><b>5</b><span>Await you</span></div>
   </div>
 
   <section>
     <h2>Subsystems</h2>
-    <p class="section-note">Six components now &mdash; the brain layer stopped being a concept on 2026-09-25. Each stands alone with its own dependencies and test suite. Select one to see what it owns, what is finished, and what is genuinely left.</p>
+    <p class="section-note">Six components, each standing alone with its own dependencies and test
+      suite. Select one to see what it owns, what is finished, and what is genuinely left.</p>
     <div class="systems">
 
       <article class="sys" role="button" tabindex="0" data-detail="wm">
         <h3>World Model</h3>
         <span class="path">world-model/</span>
         <div class="bar"><i style="width:98%"></i></div>
-        <span class="chip done">M0–M10 complete &mdash; landforms rebuilt and accepted</span>
-        <p class="next">All query surfaces serving the Mission Interpreter over HTTP. The third
-          ridge/valley detector &mdash; geomorphons, with a relief gate and DEM-scale decimation
-          added after the first theatre build exposed both gaps &mdash; <b>cleared acceptance on
-          your 2026-10-04 rebuild</b>: no stored line under 50&nbsp;m of relief, 234,799 lines, a
-          720&nbsp;MB store. Latin-script place names cleared on the same run. <b>Next:</b> still
-          nothing urgent here. Callout stages 3&ndash;5 are unbuilt and gated on a consumer that
-          actually wants landform references; multi-theatre is the other open milestone and is
-          further along than it looks &mdash; Caucasus and Kola are implemented and reviewer-approved
-          on an unmerged branch, waiting on a user-run build each. The 12&nbsp;m LOS tolerance was
-          accepted 2026-10-09.</p>
+        <span class="chip done">M0&ndash;M10 complete &mdash; landforms rebuilt and accepted</span>
+        <p class="next">All query surfaces serving the Mission Interpreter over HTTP, and the
+          in-process seam to the body layer now carries terrain semantics only. The geomorphon
+          ridge/valley detector cleared acceptance on your 2026-10-04 rebuild &mdash; no stored line
+          under 50&nbsp;m of relief, 234,799 lines, a 720&nbsp;MB store &mdash; and Latin-script
+          place names cleared on the same run. <b>Next:</b> nothing urgent, and nothing moved here
+          this cycle. Callout stages 3&ndash;5 stay unbuilt and gated on a consumer that wants
+          landform references; multi-theatre is the other open milestone and is further along than
+          it looks &mdash; Caucasus and Kola are implemented and reviewer-approved on an unmerged
+          branch, each waiting on a build only your machine can run.</p>
         <span class="more">Details</span>
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="al">
         <h3>Aircraft Layer</h3>
         <span class="path">aircraft-layer/</span>
-        <div class="bar"><i style="width:95%"></i></div>
-        <span class="chip done">Core complete &mdash; the LOS Hook now sees statics too</span>
-        <p class="next">Live DCS I/O stable since Sept 7, and the idea the bridge measurement
-          unlocked is now flying: <b>DCS answers line of sight itself</b>. The Hook enumerates
-          static objects alongside AI units as of 2026-10-08 &mdash; the one missing call behind a
-          76&nbsp;% no-verdict population &mdash; at <b>~5&nbsp;ms a poll over a dense city,
-          27&nbsp;ms at worst</b>. Both halves of each sightline are published unANDed, and the
-          flight proved they genuinely disagree in both directions, so building occlusion
-          discriminates on its own. <b>Next:</b> the 128-sightline cap binds over a city, and the
-          cost says amortise it rather than raise it; a damage and firing channel is still
-          unbuilt.</p>
+        <div class="bar"><i style="width:97%"></i></div>
+        <span class="chip done">A third Hook: DCS now reports who is shooting</span>
+        <p class="next">Live DCS I/O stable since Sept 7, line of sight answered by DCS itself since
+          Oct 8, and this cycle the bridge grew the channel that had been &ldquo;unblocked, unbuilt&rdquo;
+          for three weeks: a production <b>firing-event Hook</b> accumulating
+          <code>SHOOTING_START</code>/<code>_END</code> and <code>SHOT</code> in the scripting state
+          and draining them per poll, plus <code>getLife()</code>/<code>getLife0()</code> riding the
+          existing per-unit telemetry loop so a burning hull is distinguishable from a healthy one.
+          <b>Next:</b> a &ldquo;playback has stopped&rdquo; signal so the layers above stop predicting
+          when Petrovich has finished speaking, and the 128-sightline cap, which binds over a city
+          and wants amortising rather than raising. The per-unit cost of the widened loop is owed from
+          a real sortie &mdash; this is the one place where cost means cockpit stutter.</p>
         <span class="more">Details</span>
       </article>
 
@@ -588,10 +593,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Mission Interpreter</h3>
         <span class="path">mission-interpreter/</span>
         <div class="bar"><i style="width:94%"></i></div>
-        <span class="chip done">MI-0–MI-6 complete, tested with notes</span>
+        <span class="chip done">MI-0&ndash;MI-6 complete, tested with notes</span>
         <p class="next">First run against missions the pilot actually built, 2026-09-24: passed, with
           a narrower player-question set than the stage claimed. <b>Next:</b> nothing of MI's own
-          &mdash; both open notes are deferred to the brain layer.</p>
+          &mdash; both open notes are deferred to the brain layer, and its output still has no runtime
+          consumer wired up.</p>
         <span class="more">Details</span>
       </article>
 
@@ -599,17 +605,18 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
         <div class="bar"><i style="width:96%"></i></div>
-        <span class="chip done">BL-B59 closed &mdash; the fold now has a displacement budget</span>
-        <p class="next"><code>BL-12</code>'s knowingly-shipped defect is fixed, and you chose the
-          cheaper of the two options: bound how far one ambiguity fold may move a fused position at
-          <code>plausible_speed &times; elapsed</code>, with <b>no new constant</b>. It closes both
-          halves &mdash; eviction (12 membership transitions to <b>0</b> over 60 ticks) and
-          absorption, which means <code>BL-12</code>'s own Stage&nbsp;3.5 admission gate is now a
-          no-op in the incident that motivated it and is kept only as a safety net. Forest occlusion
-          merged the same day: a unit inside mapped forest is simply not detected.
-          <b>Next:</b> one flight settles eight cards &mdash; and the two directions you gave on
-          2026-10-13 reshape what comes after it, because neither the attention tiers nor
-          movement-keyed uncertainty is a tuning change to this code.</p>
+        <span class="chip active">The attack run flew, and the sortie wrote the next three items</span>
+        <p class="next">Three capabilities merged in eight days: <code>BL-14</code>'s attack run
+          (selection, <code>step</code>, alignment guidance, end conditions), the <b>9K113 sight's
+          perception half</b> (wide and narrow optics, a 20&nbsp;km directional exemption, a
+          non-instant slew, per-optic position error), and <b>emitters</b> &mdash; burning and firing
+          units detectable out to the player bubble and through canopy, presence only. The crew query
+          path was <b>flown and passed</b> on 2026-10-15 (<em>&ldquo;describe summary &hellip; it's
+          good. Pass.&rdquo;</em>), and tick cost was finally answered from real sortie logs rather
+          than the bench: median realised period 1.017&ndash;1.020&nbsp;s against 1&nbsp;Hz, with p90
+          still 1.8&ndash;4.9&nbsp;s. <b>Next:</b> the three items the attack-run sortie itself wrote
+          &mdash; the <code>&ldquo;obstructed&rdquo;</code> lookup, the optic ladder, and the 9K113's
+          cockpit effectors &mdash; and the sortie that judges them must be <b>mountainous</b>.</p>
         <span class="more">Details</span>
       </article>
 
@@ -620,12 +627,13 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <span class="chip active">Stage 2 merged &mdash; a real model, never yet run against one</span>
         <p class="next">Stage 1 proved the async wire with a stub; Stage 2 put
           <code>qwen3:4b-instruct-2507-q4_K_M</code> behind it, with a body-side validator standing
-          between the model and anything Petrovich acts on. <b>Next:</b> the pilot's own first
-          real-model run &mdash; then structured candidates, so <code>follow that tank</code> can
-          resolve at all. A direction was settled 2026-09-28 from a flight where free speech came
-          back <em>&ldquo;unable, no such command&rdquo;</em>: the brain should <b>answer questions
-          about what Petrovich believes</b> rather than the command vocabulary growing to meet free
-          speech. The tool surface that needs is already frozen and built.</p>
+          between the model and anything Petrovich acts on. Unmoved for three weeks while the body
+          layer grew an attack run &mdash; and that is a scheduling choice, not neglect.
+          <b>Next:</b> your own first real-model run &mdash; then structured candidates, so
+          <code>follow that tank</code> can resolve at all. The direction settled 2026-09-28 still
+          stands: the brain should <b>answer questions about what Petrovich believes</b> rather than
+          the command vocabulary growing to meet free speech. The tool surface that needs is already
+          frozen and built.</p>
         <span class="more">Details</span>
       </article>
 
@@ -634,11 +642,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <span class="path">audio-adapter/</span>
         <div class="bar"><i style="width:88%"></i></div>
         <span class="chip done">Voice out accepted · speech in flown &amp; accepted</span>
-        <p class="next">Outbound audio closed 2026-09-26 without its own flight: latency under a
-          second does not read as laggy, callout queueing was fixed by flight feedback rather than
-          graded, and a generic voice survives a loud cockpit while staying monotonous.
-          The only change this cycle was one word of vocabulary: <code>silence</code> and its two
-          phrasings, so the body layer's mute command can be spoken rather than typed.
+        <p class="next">Nothing shipped here this cycle, and two items arrived from elsewhere that
+          are squarely this layer's: the <b>1&nbsp;s pause after a spoken line</b> belongs in the audio
+          path rather than in the attack run that asked for it (urgent lines exempt), and a verb
+          should anchor on <b>its position in the sentence</b>, not on the word alone &mdash; your call
+          after seeing the measured collision: <em>&ldquo;Add attack, fix the anchoring properly.&rdquo;</em>
           <b>Next:</b> press-to-readback latency, measured at ~3&nbsp;s &mdash; the lag a pilot
           actually feels, and it is upstream in speech-to-text.</p>
         <span class="more">Details</span>
@@ -649,11 +657,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 
   <section>
     <h2>Dependency map</h2>
-    <p class="section-note">What gates what, done work included. The crew-behaviour chain grew two
-      more green nodes this cycle and they feed the same red one &mdash; <code>BL-13</code> and
-      <code>BL-12</code> are both merged and both unheard. The new edge worth reading is the one
-      out of <code>BL-12</code> into an <em>open</em> node: the milestone shipped with half of a
-      measured defect fixed and the other half filed, on purpose.</p>
+    <p class="section-note">What gates what, done work included. The shape that changed this cycle is
+      that the funnel <em>discharged once</em>: a sortie finally happened, three merged milestones got
+      ears on them, and the flight immediately minted a new chain of its own. Follow the edges out of
+      the sortie node &mdash; every one of them is work that did not exist before the aircraft left
+      the ground.</p>
 
     <div class="diagram-wrap">
       <button class="expand" id="gv-open" data-graph="#graph-deps" type="button">Expand graph</button>
@@ -667,57 +675,60 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  WM["World Model&lt;br/&gt;M0–M10"]:::done
+  WM["World Model&lt;br/&gt;M0-M10"]:::done
   AL["Aircraft Layer&lt;br/&gt;DCS I/O + audio + PTT"]:::done
-  MI["Mission Interpreter&lt;br/&gt;MI-0–MI-6, tested"]:::done
+  MI["Mission Interpreter&lt;br/&gt;MI-0-MI-6, tested"]:::done
 
-  BL27["BL-2 … BL-7&lt;br/&gt;contacts → mission phase"]:::done
+  BL27["BL-2 ... BL-7&lt;br/&gt;contacts to mission phase"]:::done
   BL5a["BL-5a&lt;br/&gt;text crew interaction"]:::done
-  BL7I["BL-7 reaches nothing&lt;br/&gt;in a sortie"]:::hold
-
-  GC["Group contacts&lt;br/&gt;stages 0–4a, angular"]:::done
+  GC["Group contacts&lt;br/&gt;stages 0-4a, angular"]:::done
 
   S1["Slice 1&lt;br/&gt;voice out, accepted"]:::done
-  ST15["Speech in 1–5&lt;br/&gt;gate → capture → real PTT"]:::done
-  CONES["Cones 1 · 2A–2C&lt;br/&gt;optics, gaze, scan loop"]:::done
+  ST15["Speech in 1-5&lt;br/&gt;gate to capture to real PTT"]:::done
+  CONES["Cones 1 and 2A-2C&lt;br/&gt;optics, gaze, scan loop"]:::done
   CALL["Callouts + groups&lt;br/&gt;+ movement"]:::done
-  EVS["Eyes-and-voice sortie&lt;br/&gt;FLOWN 2026-09-25&lt;br/&gt;8 defects, not a pass"]:::done
-  NOISE["2026-09-28 sortie&lt;br/&gt;5 reports/min, 25 min"]:::done
-  GREP["Group reporting&lt;br/&gt;one line per group"]:::done
-  CONF["Confirm band&lt;br/&gt;answerable at last"]:::done
-  COH["Cohesion redesign&lt;br/&gt;size-relative, kind-aware"]:::done
-  N1004["2026-10-04 sortie&lt;br/&gt;same units, reported twice"]:::done
-  SIL["silence command&lt;br/&gt;one word, absolute quiet"]:::done
-  FLOOD["Merge-echo suppression&lt;br/&gt;17 of 34 foundings silent"]:::done
-  RGD["Group lines stop&lt;br/&gt;restating known members"]:::done
-  BUBBLE["10 km player bubble&lt;br/&gt;built, no cockpit observable"]:::done
-  PRUNE["BL-B23 lost contacts&lt;br/&gt;out of clustering"]:::done
-  BL13["BL-13 crew query path&lt;br/&gt;one slotted command, one summary"]:::done
-  SPACING["16 m median spacing&lt;br/&gt;vs a 600 m gate"]:::done
-  BL12["BL-12 group identity&lt;br/&gt;stages 0–4, ambiguity inverted"]:::done
-  BL14["BL-14 attack run&lt;br/&gt;needs a resolution mechanism"]:::open
-  B59["BL-B59 · BL-B58&lt;br/&gt;one fold's displacement bounded"]:::done
-  TIERS["Attention tiers&lt;br/&gt;resolution depends on attention"]:::active
-  COLL["collapse(group, depth)&lt;br/&gt;DoD-passed, awaiting merge"]:::active
-  CBS["On main, still unheard&lt;br/&gt;eight cards (four accepted 10-09)"]:::block
+  QUIET["Quieting chain&lt;br/&gt;cohesion, merge-echo, silence"]:::done
+  FLOWN05["2026-10-05 sortie&lt;br/&gt;flood + confirm band PASSED"]:::done
+  BL13["BL-13 crew query path&lt;br/&gt;FLOWN 2026-10-15, PASSED"]:::done
+  BL12["BL-12 group identity&lt;br/&gt;ambiguity inverted"]:::done
+  B59["BL-B59&lt;br/&gt;one fold's displacement bounded"]:::done
+  COLL["collapse(group, depth)&lt;br/&gt;merged 2026-10-13"]:::done
+  TIERS["Attention tiers&lt;br/&gt;direction captured, no entry"]:::open
+  BL11["BL-11 tick cost&lt;br/&gt;answered from sortie logs"]:::done
+
+  BL14["BL-14 attack run&lt;br/&gt;Stages 1-7, merged 10-14"]:::done
+  SORT15["Attack-run sorties x2&lt;br/&gt;2026-10-15 - it talks, wrongly"]:::done
+  B70["BL-B70 four defects&lt;br/&gt;38% dead repeats fixed"]:::done
+  B76["BL-B76 obstructed&lt;br/&gt;has no live caller"]:::open
+  B76S1["Step 1: widen the tripwire&lt;br/&gt;measure, do not act"]:::done
+  B71["BL-B71 optic ladder&lt;br/&gt;least capable that suffices"]:::open
+
+  K64["BL-B64 9K113 sight&lt;br/&gt;perception half, merged"]:::done
+  K66["BL-B66 effectors&lt;br/&gt;the cockpit switches move"]:::open
+  K67["BL-B67 ATGM attack run&lt;br/&gt;azimuth, launch, impact"]:::open
+  K65["BL-B65 weapons safety&lt;br/&gt;its own cockpit action"]:::open
+
+  EMA["Emitter Stage A&lt;br/&gt;a burning unit, AC-B7"]:::done
+  EMB["Emitter Stage B&lt;br/&gt;gun fire, BL-B73 + AC-B8"]:::done
+  EMC["BL-B74 SAM smoke&lt;br/&gt;a decaying lifetime"]:::open
+  EMD["BL-B75 markers&lt;br/&gt;if DCS exports them"]:::hold
+
+  TUNE["X-T26 tuning file&lt;br/&gt;Stages 1-2, now standard"]:::active
+  CBS["Still unheard in the air&lt;br/&gt;24 entries tagged needs-flight"]:::block
 
   PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
-  DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
+  DMG["Hit and kill reporting&lt;br/&gt;transport done, voice unbuilt"]:::open
 
-  LOS["LOS tolerance&lt;br/&gt;grid error buried a unit"]:::done
   BRIDGE["Bridge cost measured&lt;br/&gt;568 units, 1.99 ms"]:::done
   TREE["Tree LOS probe&lt;br/&gt;no DCS call sees trees"]:::done
   OSMV["Forest gate, Mac-side&lt;br/&gt;in forest = not seen"]:::done
   DLOS["DCS answers LOS&lt;br/&gt;units + statics, fail closed"]:::done
   SURF[".surface5 payload wall&lt;br/&gt;hit twice, deferred"]:::hold
 
-  M6["M6 curvature detector&lt;br/&gt;checkerboard noise"]:::done
-  WSHED["Watershed detector&lt;br/&gt;merged, then judged wrong"]:::done
-  WMB6["WM-B6 geomorphons&lt;br/&gt;classify · thin · trace · cache"]:::done
+  WMB6["WM-B6 geomorphons&lt;br/&gt;classify, thin, trace, cache"]:::done
   GATE["Relief gate + decimation&lt;br/&gt;720 MB, 234,799 lines"]:::done
-  WMB1["WM-B1 Latin place names&lt;br/&gt;cleared on the same build"]:::done
-  PARK["Callout stages 3–5&lt;br/&gt;unbuilt, waiting on a consumer"]:::open
-  GRIDOUT["Retire the elevation grid&lt;br/&gt;now unblocked"]:::open
+  PARK["Callout stages 3-5&lt;br/&gt;unbuilt, waiting on a consumer"]:::open
+  GRIDOUT["Retire the elevation grid&lt;br/&gt;no live readers left"]:::open
 
   BL8["BL-8&lt;br/&gt;memory interfaces"]:::open
   BR1["BR-1 Stage 1&lt;br/&gt;async wire, stub decider"]:::done
@@ -727,44 +738,47 @@ flowchart LR
   WM --> BL27
   AL --> BL27
   MI --> BL27
-  BL27 --> BL7I -.->|"deferred to the brain"| BR1
   BL27 --> BL5a
   BL27 --> GC
-  BL5a --> S1
-  S1 --> ST15 --> BR1
-  BL27 --> CONES --> CALL --> EVS
-  EVS --> NOISE --> GREP --> COH --> CBS
-  GC --> GREP
-  NOISE --> CONF --> CBS
-  GREP --> CBS
-  LOS --> CBS
-  COH --> N1004
-  N1004 --> SIL --> CBS
-  N1004 --> FLOOD --> RGD --> CBS
-  COH --> PRUNE --> CBS
-  BL27 --> BUBBLE --> CBS
-  BL5a --> BL13 --> CBS
-  NOISE --> SPACING --> BL12 --> CBS
-  COH --> BL12
-  BL13 -.->|"nine findings filed, not improvised"| BL12
-  BL12 -->|"the half it did not fix"| B59 --> CBS
-  B59 -.->|"fixing accuracy exposed existence"| TIERS
-  BL12 --> TIERS
-  TIERS -->|"serves the reporting half only"| COLL
-  TIERS -->|"per-unit records, attention-driven"| BL14
-  COLL -.->|"no resolution, no audible change"| BL14
-  AL --> PROBE --> DMG
-  AL --> BRIDGE --> TREE
-  TREE --> OSMV --> CBS
+  BL5a --> S1 --> ST15 --> BR1
+  BL27 --> CONES --> CALL --> QUIET
+  GC --> QUIET
+  QUIET --> FLOWN05
+  QUIET --> BL12 --> B59
+  BL12 --> COLL
+  BL12 -.->|"the half it did not fix"| TIERS
+  BL5a --> BL13
+  B59 --> CBS
+  COLL --> CBS
+  BL11 --> CBS
+  BL13 -->|"flown, so it left the queue"| BL11
+  TIERS -.->|"dissolved: the target is exactly one contact"| BL14
+  BL5a --> BL14 --> SORT15
+  DLOS --> BL14
+  SORT15 --> B70 --> B76 --> B76S1
+  SORT15 --> B71
+  B70 -->|"cause taxonomy it reads"| B71
+  B70 --> CBS
+  B76S1 -.->|"a mountainous sortie, not a repeat"| CBS
+  K64 --> K66 --> K67
+  K65 -->|"stated prerequisite"| K67
+  K64 --> CBS
+  BL14 -.->|"the gun and rocket run; ATGM is its own"| K67
+  B71 -.->|"the ladder the sight joins"| K64
+  AL --> PROBE --> EMA --> EMB --> EMC
+  EMB -.->|"lowest priority of the family"| EMD
+  PROBE --> DMG
+  EMA -.->|"fire is not attribution"| DMG
+  AL --> BRIDGE --> TREE --> OSMV --> CBS
   TREE -.->|"placement exists, unaddressable"| SURF
   BRIDGE --> DLOS
-  LOS -.->|"a mitigation; DLOS was the fix"| DLOS
+  EMB -.->|"both bypass the same gates"| OSMV
   BR1 --> BR2 --> BRAIN
   CBS -.->|"tunes"| BRAIN
+  CBS -.->|"what the tuning file is for"| TUNE
   BL27 -.->|"needs real flights"| BL8 -.-> BRAIN
-  WM --> M6 --> WSHED --> WMB6 --> GATE --> PARK
-  WM --> WMB1 -.->|"one rebuild carried both"| GATE
-  DLOS -->|"BL-11 closed: the grid lost its last live reader"| GRIDOUT
+  WM --> WMB6 --> GATE --> PARK
+  DLOS -->|"the grid lost its last live reader"| GRIDOUT
 </pre>
       </div>
     </div>
@@ -780,12 +794,11 @@ flowchart LR
 
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
-    <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing
-      that is done. This cycle the groups changed membership rather than size: the perception group
-      lost its knowingly-shipped defect and gained two of your 2026-10-13 directions, and a
-      <em>new</em> group appeared for the attack run &mdash; the only chain here whose first node is
-      a mechanism nobody has built. The largest group is still the one that cannot be reasoned about
-      from a desk.</p>
+    <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing that is
+      done. The groups were regrouped this cycle because the work moved: the attack-run group is no
+      longer a chain waiting on a mechanism that does not exist, it is a chain written <em>by a
+      flight</em>, and a new one appeared for emitters. The perception group lost two members to
+      merges and gained one filed defect.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -799,88 +812,90 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  SORTIE["Still unheard in the air&lt;br/&gt;eight cards, one flight"]:::block
-  SAY["What does he SAY about&lt;br/&gt;sixteen vehicles in one sector?"]:::block
+  FLIGHT["24 entries tagged needs-flight&lt;br/&gt;three capabilities, one queue"]:::block
+  MTN["A mountainous sortie&lt;br/&gt;the desert cannot judge obstructed"]:::block
   FOREST["Forest gate: flip the default?&lt;br/&gt;needs units parked in canopy"]:::block
+  SAY["What does he SAY about&lt;br/&gt;sixteen vehicles in one sector?"]:::block
+  THEATRE["Caucasus + Kola builds&lt;br/&gt;only your machine runs them"]:::block
 
-  subgraph REPORT ["Crew behaviour &mdash; everything here is downstream of the flight"]
+  subgraph ATTACK ["The attack run &mdash; this chain was written by a flight"]
     direction LR
-    GBOUND["Cohesion constants are guesses&lt;br/&gt;500 m cap · 20 unit widths · stage 5"]:::open
-    POL["Callout policy follow-ons&lt;br/&gt;repetition · sector fairness · damage"]:::open
-    OVER["Over-suppression risk&lt;br/&gt;a real split sounds like an echo"]:::open
+    OBST["BL-B76 move the lookup&lt;br/&gt;read the live gate, not the contact"]:::open
+    LADDER["BL-B71 optic ladder&lt;br/&gt;escalate and de-escalate"]:::open
+    EFF["BL-B66 9K113 effectors&lt;br/&gt;warm-up, OBSERV, slew loop"]:::open
+    ATGM["BL-B67 the ATGM run&lt;br/&gt;azimuth, launch, impact"]:::open
+    SAFE["BL-B65 weapons safety&lt;br/&gt;before any ATGM run"]:::open
   end
 
-  subgraph PERC ["Perception &mdash; two of your 10-13 directions land here"]
+  subgraph EMIT ["Emitters &mdash; two built, one owed, one maybe"]
     direction LR
-    CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
-    COND["Conditions&lt;br/&gt;f(condition, optical path) + a ceiling"]:::open
-    AMB["BL-B24 · BL-B25&lt;br/&gt;rule inverted; neither re-measured"]:::open
+    SAM["BL-B74 SAM smoke&lt;br/&gt;first decaying lifetime"]:::open
+    MARK["BL-B75 smoke and flares&lt;br/&gt;if exportable at all"]:::hold
+  end
+
+  subgraph PERC ["Perception &mdash; the belief side, unmoved by the sortie"]
+    direction LR
+    AMB["BL-B24 and BL-B25&lt;br/&gt;rule inverted; never re-measured"]:::open
     MOTION["Uncertainty keyed on observed&lt;br/&gt;movement, not on class"]:::open
-    SPEEDT["BL-B57 · BL-B60&lt;br/&gt;the speed table is asserted, not measured"]:::open
-    TREELINE["Treeline: near, not inside&lt;br/&gt;needs altitude data we dropped"]:::hold
+    COND["Conditions&lt;br/&gt;f(condition, optic) plus a ceiling"]:::open
+    CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
+    PERM["BL-B69 object permanence&lt;br/&gt;skips the spatial gate"]:::open
   end
 
-  subgraph ATTACK ["The attack run &mdash; the chain that does not exist yet"]
+  subgraph CREW ["Crew behaviour"]
     direction LR
-    TIERS["Attention tiers&lt;br/&gt;low · medium · high"]:::open
-    RESOLVE["Promotion resolves a group&lt;br/&gt;into individuals — unbuilt"]:::open
-    BL14["BL-14 attack run&lt;br/&gt;spec written, no plan"]:::open
+    GBOUND["Cohesion constants are guesses&lt;br/&gt;plus callout policy follow-ons"]:::open
   end
 
-  subgraph LOSG ["Line of sight &mdash; closed; what is left is budget and hygiene"]
+  subgraph INFRA ["Tuning and hygiene"]
     direction LR
-    CAP128["BL-B42 the 128 cap binds&lt;br/&gt;amortise, do not enlarge"]:::open
-    HYG["Trace + probe-Hook hygiene&lt;br/&gt;BL-B43 · BL-B44 · AC-B5"]:::open
-    BUILD["X-B31 buildings half&lt;br/&gt;gated on the LAN topology"]:::open
-  end
-
-  subgraph LANDF ["Landform &mdash; detection solved, nothing consumes it"]
-    direction LR
-    PARK["Callout stages 3–5&lt;br/&gt;adjacency · bearing · the phrase"]:::open
-    DENS["Density is a product question&lt;br/&gt;234,799 lines, few worth speaking"]:::open
-    GRID["Retire the elevation grid&lt;br/&gt;49 MB, and no live readers left"]:::hold
+    TUNE["X-T26 Stages 3-5&lt;br/&gt;80 more keys, after X-B37"]:::open
+    RESTART["BL-B68 mission restart&lt;br/&gt;deferred with the lifecycle"]:::hold
   end
 
   subgraph BRAINCHAIN ["The brain layer"]
     direction LR
     D10["Structured candidates&lt;br/&gt;follow still cannot pick"]:::open
-    BR3["Stage 3 &mdash; answer questions&lt;br/&gt;from belief, never truth"]:::open
+    BR3["Stage 3 - answer questions&lt;br/&gt;from belief, never truth"]:::open
   end
 
-  subgraph SPEECH ["Speech"]
+  subgraph SPEECH ["Speech and audio"]
     direction LR
-    LAT["Press-to-readback&lt;br/&gt;~3s, next real problem"]:::open
-    AUD["Voice character&lt;br/&gt;+ cockpit audio state"]:::hold
+    LAT["Press-to-readback&lt;br/&gt;~3s, the next real problem"]:::open
+    APATH["AA-B4 and AA-B5&lt;br/&gt;anchoring, the 1s gap, stop signal"]:::open
   end
 
-  BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
-  THEATRE["Multi-theatre&lt;br/&gt;Caucasus + Kola, builds user-run"]:::open
+  LANDF["Callout stages 3-5 + density&lt;br/&gt;detection solved, nothing speaks it"]:::open
+  BL8["BL-8 memory interfaces&lt;br/&gt;deliberately last"]:::open
 
-  SORTIE --> GBOUND
-  SORTIE --> POL
-  SORTIE --> OVER
-  SORTIE --> CAP
-  SORTIE -.->|"judge after flying"| COND
-  SORTIE --> LAT
-  SORTIE -.->|"needs many flights"| BL8
-  SORTIE -.->|"tunes the prompts"| D10
-  SORTIE --> SAY --> POL
-  SORTIE -.->|"watch for a lagging fast mover"| SPEEDT
-  OVER -.->|"BL-12 inverted the rule; the claim is unverified"| AMB
-  MOTION -.->|"same one table, re-keyed"| SPEEDT
+  FLIGHT --> OBST
+  FLIGHT --> LADDER
+  FLIGHT --> EFF
+  FLIGHT --> GBOUND
+  FLIGHT --> CAP
+  FLIGHT -.->|"judge after flying"| COND
+  FLIGHT --> LAT
+  FLIGHT -.->|"needs many flights"| BL8
+  FLIGHT -.->|"tunes the prompts"| D10
+  FLIGHT -.->|"what the tuning file exists for"| TUNE
+  FLIGHT --> SAY --> GBOUND
+  FLIGHT --> SAM
+  MTN -->|"the only terrain that fires it"| OBST
+  OBST -.->|"same gap: the target needs richer perception"| LADDER
+  EFF --> ATGM
+  SAFE -->|"stated prerequisite"| ATGM
+  LADDER -.->|"the sight is a rung on it"| EFF
+  SAM -.->|"same bypass, other half"| MARK
+  RESTART -.->|"until it lands, restart between missions"| EFF
   MOTION -.->|"a stopped unit stops inflating the gate"| AMB
-  FOREST -->|"the A/B is also the treeline's only evidence"| TREELINE
-  FOREST -.->|"same occluder layer, other half"| BUILD
-  SAY --> TIERS
-  TIERS --> RESOLVE --> BL14
-  TIERS -.->|"low/medium want the fold kept"| AMB
-  BL14 -.->|"9K113 channel unbuilt: no ATGM guidance"| RESOLVE
-  CAP128 -.->|"unblocked: the grid lost its last live reader"| GRID
-  PARK --> DENS
-  SAY -.->|"same question, different data"| DENS
+  PERM -.->|"both fold two things into one contact"| AMB
+  FOREST -.->|"the emitter bypass crosses the same gate"| SAM
+  FOREST -->|"its A/B is the treeline's only evidence"| LANDF
+  SAY -.->|"same question, different data"| LANDF
   D10 --> BR3
-  BR3 -.->|"a question needs a contact resolver"| D10
-  BR3 -.->|"high tier is reached by asking"| TIERS
+  BR3 -.->|"high tier is reached by asking"| CAP
+  APATH -.->|"the gap the attack run asked for"| LAT
+  THEATRE -.->|"a second theatre re-tests every constant"| TUNE
 </pre>
       </div>
     </div>
@@ -893,91 +908,102 @@ flowchart LR
     </div>
 
     <p class="section-note"><strong>What the drawing shows that the lists do not.</strong>
-      <strong>Nearly everything now hangs off one node</strong>, and it is a flight. Eight separate
-      acceptance cards have accumulated on <code>main</code> because feature after feature was
-      merged ahead of its sortie &mdash; which was the right call each time, on your own reasoning
-      that intertwined work is better tested against current HEAD, and which has the compounding
-      side effect this picture makes obvious. The board has stopped being a set of parallel chains
-      and become a funnel.</p>
-    <p class="section-note"><strong>The rule this note used to call untouched is now
-      inverted &mdash; and the node did not disappear.</strong> For three cycles this board said
-      that merge-echo suppression and the group-disclosure fix were muting <em>symptoms</em> of
-      <code>ContactStore.ingest</code>'s &ldquo;two-or-more candidates &rarr; always found a new
-      contact&rdquo; rule while the rule itself stood. <code>BL-12</code> Stage 3 inverted it: inside
-      one believed group, ambiguity folds onto the remembered contact. What is worth drawing is that
-      <code>BL-B24</code> and <code>BL-B25</code> are <em>still open</em> anyway. The plan claims
-      they are superseded; nothing re-measured the 554-contacts-for-444-objects churn on the new
-      code, so they were left open on recheck notes rather than closed on a design claim. A rule
-      changing is not the same as its consequence being observed.</p>
-    <p class="section-note"><strong>A new group appeared, and it is the first one gated entirely
-      behind something that does not exist.</strong> The known defect this note used to describe
-      (<code>BL-B59</code>, the fold evicting a real member) is fixed &mdash; and fixing it is what
-      produced the <code>ATTACK</code> chain. The bound made held positions accurate; it could not
-      make absent records exist, and two of six real units had no record either way. So
-      <code>BL-14</code> does not depend on a constant being tuned or a plan being written: it
-      depends on <strong>promotion to high attention resolving a group into individuals</strong>, a
-      mechanism nothing on this board has started. Everything else open here is downstream of a
-      flight or of a decision. This chain is downstream of a build, and the drawing is where that
-      distinction becomes visible.</p>
-    <p class="section-note"><strong>And one merged item cannot enter the funnel at all.</strong>
-      Every other card on <code>main</code> is settled by flying the aircraft somewhere. The forest
-      gate is not: it fires on 1&ndash;3% of ground positions theatre-wide and <strong>0% of 300
-      sampled points at Latakia itself</strong>, so an ordinary sortie produces no evidence either
-      way &mdash; a <em>clean</em> flight would say nothing about it. It needs a mission built to
-      exercise it, which makes it the first thing here that asks you for <em>setup</em> rather than
-      for ears. That same setup is the only route to the treeline model you asked about, which is
-      why the drawing points the two at each other.</p>
-    <p class="section-note"><strong>Closing the live path unblocked something nobody
-      filed.</strong> The elevation grid's retirement had been gated on &ldquo;whatever removes its
-      last live reader&rdquo;, and that is exactly what <code>BL-11</code> Stage 4 did: with
-      world-model's line-of-sight primitive out of the live path, the grid has no runtime reader
-      left. The dashed edge into <code>GRID</code> used to be a dependency; it is now a statement
-      that the condition has been met. Nothing in the roadmaps says this, because the consequence
-      landed in a different subproject from the change.</p>
-    <p class="section-note"><strong>Two probe Hooks, two stutters, and the pilot found both.</strong>
-      <code>AC-B5</code> reads as a tidiness item until you notice it has happened twice: the
-      elevation-cost probe drew <em>&ldquo;a small but annoying stutter every few seconds&rdquo;</em>
-      on 2026-10-05, and a forgotten unit-id-join probe Hook drew another on 2026-10-08 &mdash; the
-      second one after three separate hypotheses had been tested against log evidence and refuted
-      while the real cause sat in the Hooks directory. A probe is heavier than production code by
-      construction, nothing distinguishes one once deployed, and nothing removes it. That makes it a
-      measurement-integrity problem, not housekeeping: both sorties were flown to measure cost, and
-      a leftover probe is a confounder in exactly that measurement.</p>
+      <strong>A flight is still the hub &mdash; but it is no longer the same flight.</strong> Last
+      cycle every chain hung off one undifferentiated sortie. Now there are
+      <em>two</em> blocked nodes in the attack-run chain and they are not interchangeable: the queue
+      of 24 merged-but-unheard entries, and a sortie that has to be flown <strong>over
+      mountains</strong>. Both 2026-10-15 flights were over flat desert, which is exactly where the
+      <code>&ldquo;obstructed&rdquo;</code> register barely fires &mdash; your own read was
+      <em>&ldquo;terrain blocked LOS can happen if in mountainous region, airframe blocking is more
+      common.&rdquo;</em> A repeat of the same ground would measure the same nothing. That is a
+      property of <em>where</em> you fly, which no list on this page had ever had to express
+      before.</p>
+    <p class="section-note"><strong>The project chose to measure instead of to build, and the
+      drawing is where that choice is visible.</strong> <code>BL-B76</code>'s first step is not a
+      fix: it widens a log so the two cases that currently look identical &mdash; the target was
+      <em>blocked</em> versus <em>no verdict arrived</em> &mdash; can be told apart. Your direction
+      was explicit: <em>&ldquo;before acting on LOS none, we should know how often that happens. As
+      it stands now, log it and then ignore in cockpit behaviour.&rdquo;</em> The instrument built
+      for that measurement had a one-line defect that made it blind to the exact case it existed to
+      count: its loop skipped every candidate whose gate outcome was not <code>ADMITTED</code>, and
+      a blocked target is by definition not admitted. An instrument that reports the thing it cannot
+      see as absent is worse than no instrument.</p>
+    <p class="section-note"><strong>The emitter chain is the first group here where the
+      <em>target</em> acts.</strong> Everything else in the perception group is a function of the
+      observer &mdash; range, optic, gaze, occlusion. A burning hull and a muzzle flash are
+      properties of the thing being looked at, and they deliberately bypass the range and canopy
+      gates while clamping to presence only: a flash at 9&nbsp;km says <em>something is shooting
+      there</em>, never <em>that is a BMP-2</em>. It closes a gap the pilot meets immediately &mdash;
+      a unit firing from 4&nbsp;km was invisible, because that is past the naked eye's ~2.3&nbsp;km
+      presence threshold for a 7&nbsp;m vehicle. <strong>The thing most worth telling you about was
+      the hardest for Petrovich to see.</strong> The remaining member is the one with a genuinely new
+      shape: a SAM launch's smoke outlives its own event, so it is the first perception source with a
+      <em>decaying external lifetime</em> &mdash; where the launcher <em>was</em>, which belief
+      already models, and must never read as where a launcher is now.</p>
+    <p class="section-note"><strong>And one prediction on this board was simply wrong.</strong> For
+      two cycles the forward map carried an <code>ATTACK</code> group whose first node was
+      &ldquo;promotion resolves a group into individuals&rdquo; &mdash; a mechanism nobody had
+      started, drawn as gating <code>BL-14</code> entirely. <code>BL-14</code> shipped without it.
+      The requirement dissolved when you answered the cheap question: <em>&ldquo;I can myself
+      approximate attacking a group by picking an individual unit there. No need to build targeting
+      group if not supported already.&rdquo;</em> The invariant reduced to <strong>the target is
+      exactly one contact</strong>, and guidance derives from a new ownship-relative datum rather
+      than from map belief, because <em>where is it relative to me</em> and <em>where is it on the
+      map</em> are different questions with different error models. Worth keeping on the page because
+      the same shape has now removed three workstreams &mdash; the F10 contact list, the planned
+      transport, and this &mdash; each time by asking the pilot whether he would just do the simpler
+      thing instead.</p>
   </section>
 
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Five. Nothing here was cleared this cycle and the flight got heavier again: two more
-        merges landed ahead of their sortie, and one of them is the first thing on this board that
-        <em>cannot</em> be judged by flying wherever you like &mdash; the forest gate fires on 1&ndash;3%
-        of ground positions theatre-wide and <strong>0% of 300 points at Latakia itself</strong>, so
-        it needs units deliberately parked in canopy or nothing happens. The rest: one batched
-        flight, one small check that rides along with it, a design conversation, and a theatre build
-        only your machine can run.</p>
+      <p>Five, and the list changed character rather than length. One flight was flown and it
+        <em>paid</em>: the crew query path passed, tick cost got a real answer, and two older fixes
+        turned out to have been flown and passed on 2026-10-05 all along. What replaced them is a
+        heavier queue &mdash; 24 entries now carry <code>#needs-flight</code>, including three
+        capabilities merged in the last eight days &mdash; plus one new constraint that is about
+        <em>terrain</em> rather than about ears.</p>
       <ul class="blockers">
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
           <div>
-            <b>Eight cards left on <code>main</code>, up from six</b>
-            <p>Four were accepted outright on 2026-10-09 without a debrief &mdash; the 10&nbsp;km
-              player bubble, the 12&nbsp;m line-of-sight tolerance, the group lines that stopped
-              restating known members, and <code>silence</code>. Four more have arrived since:
-              <code>BL-13</code>'s crew query path (does a summary beat an enumeration over an
-              intercom in a hover, and is ~10&nbsp;s too long there?), <code>BL-12</code>'s group
-              identity (does the churn actually stop, does <em>&ldquo;still moving north&rdquo;</em>
-              appear, and is anything placed in a group it visibly is not in?),
-              <code>BL-B59</code>'s bounded fold &mdash; where what to listen for is a
+            <b>Twenty-four entries are merged and unheard &mdash; three of them are new capabilities</b>
+            <p>Branch to check out: <code>main</code> &mdash; everything below is merged.
+              <strong>The three worth flying first, because they are new behaviour rather than
+              tuning:</strong> <code>BL-14</code>'s attack run with
+              <code>BL-B70</code>'s fixes on top (does the guidance stop repeating itself, does
+              reaching the 12&nbsp;o'clock sector get called, does it go <em>silent</em> when the
+              target is behind the airframe instead of talking at it); the <b>9K113 sight</b>
+              (<code>BL-B64</code> &mdash; the wide and narrow optics, a long dwell, approximate
+              range, OBSERV on a voice command &mdash; and <strong>restart the body-layer service
+              between missions</strong> until <code>BL-B68</code> lands, or last mission's belief
+              follows you into this one); and <b>emitters</b> (<code>BL-B73</code>/<code>AC-B8</code>
+              &mdash; park an AAA piece well past naked-eye range and listen for presence while it
+              fires, and nothing once it stops). Then the older queue: <code>BL-12</code>'s group
+              identity, <code>BL-B59</code>'s bounded fold &mdash; where what to listen for is a
               <strong>misclassified fast mover whose position visibly lags</strong>, not silence
-              &mdash; and the forest gate, which has its own entry below because it needs a
-              deliberate setup. Branch to check out: <code>main</code> &mdash; all four are merged. What still wants ears alongside them: the
-              confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, and
-              the cohesion redesign. <strong>The risk they share is the reason to fly rather than keep merging</strong>:
-              all of them reduce what you hear, and a genuine contact split immediately after a merge
-              is indistinguishable from a merge echo at the speech layer, so it also goes quiet. That
-              is an accepted cost on paper; whether it is ever <em>noticed</em> is a cockpit
-              question. Fly with <code>--detection-trace</code> &mdash; the belief log structurally
-              cannot record a <em>rejected</em> candidate.</p>
+              &mdash; <code>BL-11</code>'s two log lines, the brain's first real model, and the
+              2026-09-26 crew-behaviour fixes. Fly with <code>--detection-trace</code>; the belief log
+              structurally cannot record a <em>rejected</em> candidate.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="mountain">
+          <span class="chip block">Your terrain, not just your ears</span>
+          <div>
+            <b>The <code>&ldquo;obstructed&rdquo;</code> sortie has to be over mountains</b>
+            <p>Both 2026-10-15 flights were over flat desert, and that is the one terrain where the
+              register in question almost never fires &mdash; your own words:
+              <em>&ldquo;terrain blocked LOS can happen if in mountainous region. Airframe blocking is
+              more common.&rdquo;</em> The airframe case is already answered by silence
+              (<code>BL-B70</code> §2). So a repeat sortie over the same ground would re-measure a
+              case that barely occurs, which is why the acceptance flight for the
+              <code>&ldquo;obstructed&rdquo;</code> work is specified as <strong>mountainous</strong>
+              rather than as &ldquo;another attack run&rdquo;. This is the first acceptance request on
+              this board that constrains <em>where</em> you fly rather than what you listen for. Also
+              worth knowing before you plan it: <code>BL-14</code>'s own entry says
+              <strong>do not re-fly the attack run until the fixes land</strong> &mdash; they have, so
+              it is now clear.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="forest">
@@ -989,15 +1015,14 @@ flowchart LR
               and 2 are the mechanism and the wiring; <strong>Stage 3 is flipping the default on, and
               that is deliberately yours to decide after flying the A/B</strong>. The obstacle is
               that an ordinary sortie will not exercise it: 9,710 of the theatre's 44,811 landcover
-              polygons are forest, but only <strong>1&ndash;3% of ground positions sit inside
-              one</strong> (2.8% Latakia region, 0.0% Palmyra, 0% of 300 sampled points at Latakia
-              itself), so units have to be parked <em>in</em> canopy and at its edge for the gate to
-              fire at all. The densest belt is the coast north-east of Latakia at 3.2% areal. That
-              setup is also what would generate the evidence for the deferred treeline
-              <code>/explore</code> &mdash; the case you flagged yourself, where canopy blocks some
-              bearings and not others. Branch: <code>main</code>. Card:
-              <code>plans/forest-occlusion/dod-check.md</code> and the published acceptance
-              artifact.</p>
+              polygons are forest, but only <strong>1&ndash;3&nbsp;% of ground positions sit inside
+              one</strong> (2.8&nbsp;% Latakia region, 0.0&nbsp;% Palmyra, 0&nbsp;% of 300 sampled
+              points at Latakia itself), so units have to be parked <em>in</em> canopy and at its edge
+              for the gate to fire at all. The densest belt is the coast north-east of Latakia at
+              3.2&nbsp;% areal. There is a new reason to care: the emitter bypass crosses this exact
+              gate &mdash; a firing unit is seen <em>through</em> canopy by design &mdash; so the
+              forest A/B and the emitter sortie exercise the same code from opposite sides. Branch:
+              <code>main</code>.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="saywhat">
@@ -1010,40 +1035,28 @@ flowchart LR
               contact</em>, not as sixteen separately-resolvable singular ones &mdash; and the
               2026-09-28 log showed the clustering is right to see sixteen. The remaining lever is
               what a crew member would actually <em>say</em>, and no amount of code reading produces
-              that sentence. <code>BL-B42</code>'s cap question now sits next to it: over Damascus
-              152 candidates compete for 128 sightlines, and the measured cost says amortise the
-              budget rather than raise it &mdash; which is a design conversation, not a fix.</p>
-          </div>
-        </li>
-        <li class="bl" role="button" tabindex="0" data-detail="logvis">
-          <span class="chip block">Rides along</span>
-          <div>
-            <b>Confirm two log lines, on any sortie</b>
-            <p>The only thing <code>BL-11</code> left unverified, and it needs no dedicated flight.
-              Stage 4's guard has no in-cockpit observable by design &mdash; it is a regression
-              guard, not something Petrovich says &mdash; so what is owed is just that its two lines
-              behave on a real run: the end-of-run summary appears with plausible totals and reads
-              <code>0/N</code> when the feed is healthy, and the transition warning stays quiet.
-              <strong>The gate itself must not be re-flown</strong>; it was authorised on the
-              2026-10-08 evidence. This exists as a separate item only because the identical claim
-              was verified by four gates through <code>caplog</code> and was still false in
-              production. Card:
-              <code>docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md</code>.</p>
+              that sentence. <code>BL-B42</code>'s cap question sits next to it: over Damascus 152
+              candidates compete for 128 sightlines, and the measured cost says amortise the budget
+              rather than raise it &mdash; a design conversation, not a fix. The attack run narrowed
+              this question rather than answering it: for a <em>target</em> the answer is settled
+              (exactly one contact, and you pick a unit inside a group yourself), so what is left is
+              purely the reporting case.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="theatre">
           <span class="chip block">Your machine</span>
           <div>
-            <b>Two theatre builds nobody else can run</b>
-            <p>Caucasus and Kola are implemented, reviewer-approved and merged &mdash; projections,
-              region entries, beacons and towns, coordinate tests. What is left is not design but a
+            <b>Caucasus and Kola need a build each, on the Windows box</b>
+            <p>Both are implemented and reviewer-approved on
+              <code>origin/feature/multi-theatre-caucasus-kola</code>, unmerged. What is left is a
               <strong>build per theatre on the Windows box</strong>, because a full-theatre build
               reads the installed DCS tree and is yours to execute, not this session's. The commands
               are written down per theatre in <code>world-model/RUN.md</code> &sect;8, including the
               one trap: Caucasus capitalises <code>Map/towns.lua</code> and
               <code>Beacons.lua</code> while Kola does not. Both projections stay
               <code>provisional</code> until a live <code>coord_probe.lua</code> run on each, the way
-              Afghanistan's was confirmed.</p>
+              Afghanistan's was confirmed. A second theatre also re-tests every behaviour constant
+              that was tuned on Syria &mdash; which is now a file you can edit rather than code.</p>
           </div>
         </li>
       </ul>
@@ -1052,45 +1065,129 @@ flowchart LR
 
   <section>
     <h2>Open work</h2>
-    <p class="section-note">Milestone-level only. The reasoning behind each — why a constant moved, what an
-      earlier pass got wrong — stays in the roadmap files, which remain the source of truth.</p>
+    <p class="section-note">Milestone-level only. The reasoning behind each &mdash; why a constant
+      moved, what an earlier pass got wrong &mdash; stays in the roadmap files, which remain the
+      source of truth.</p>
 
     <div class="work">
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="wmb6">
-        <span class="who">world-model</span>
+      <div class="row s-open" role="button" tabindex="0" data-detail="obstructed">
+        <span class="who">body-layer</span>
         <div class="what">
-          <b>Landform detection is solved and accepted &mdash; and nothing speaks it yet</b>
-          <p>Geomorphons replaced the watershed detector, the relief gate and decimation fixed what
-            the first theatre build exposed, and your 2026-10-04 rebuild cleared all three
-            acceptance blocks. What is left is not detection: Stages 3&ndash;5 (adjacency, bearing,
-            the actual phrase) are unbuilt and gated on a consumer that wants landform references,
-            and the store now holds 234,799 lines of which very few are worth <em>saying</em>. The
-            density question survived the rewrite unchanged &mdash; it just moved from
-            &ldquo;reconnect the pieces&rdquo; to &ldquo;which of these is worth mentioning&rdquo;.</p>
+          <b>Petrovich says <code>&ldquo;obstructed&rdquo;</code> for a condition his own gate throws away</b>
+          <p>The attack run reads <code>Contact.live_los_clear</code> to decide whether to say it. A
+            contact can only reach belief if its line of sight was <em>clear</em>, so that flag is
+            <code>True</code> or <code>None</code> in live play and <b>never</b> <code>False</code>
+            &mdash; traced end to end, not inferred. The feature is not wrong; its input never
+            arrives. Your direction settled the shape: the gate is <b>right</b> &mdash;
+            <em>&ldquo;no LOS means no observation&rdquo;</em> &mdash; and memory is what should carry
+            the pilot through, so what moves is <b>where the run looks</b>. The cause is already
+            computed every poll for the target specifically and then discarded. Step 1 shipped: widen
+            the tripwire so <em>blocked</em> and <em>no verdict yet</em> stop being the same log row.</p>
         </div>
-        <span class="chip open">Accepted, unconsumed</span>
+        <span class="chip open">Measure first</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="ladder">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Use the least capable optic that still resolves the target &mdash; both directions</b>
+          <p>Your §6/§7 direction from the attack-run sortie: during guidance, escalate when the
+            current instrument cannot see the target and <b>de-escalate as the range closes</b>,
+            evaluated continuously rather than once. It depends on <code>BL-B70</code>'s cause
+            taxonomy &mdash; <em>masked</em>, <em>obstructed</em>, <em>too far</em>, <em>unknown</em>
+            &mdash; which is exactly the distinction an escalation decision needs and which did not
+            exist before the flight. The 9K113 is a rung on this ladder, not a separate feature.</p>
+        </div>
+        <span class="chip open">Planned</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="k9113">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>The 9K113: he can see through it, and cannot yet touch it</b>
+          <p>Perception shipped first, on your reasoning and for your reason &mdash; <em>&ldquo;that
+            lets us test the behaviour&rdquo;</em>: wide and narrow optics, a 20&nbsp;km directional
+            player-bubble exemption, a non-instant slew, long dwell, per-optic position error, OBSERV
+            on a voice command. What is left is two entries in a fixed order &mdash;
+            <code>BL-B66</code> makes the real cockpit systems move (warm-up sequence, OBSERV as an
+            actual mode, the slew closed loop) and only then <code>BL-B67</code> is the ATGM attack
+            run. One stated prerequisite sits in front of the run and is not part of either:
+            <code>BL-B65</code>, the weapons safety circuit switch as its own cockpit action &mdash;
+            your own line, <em>&ldquo;this should be its own roadmap item before ATGM attack
+            run.&rdquo;</em></p>
+        </div>
+        <span class="chip open">Next in order</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="emitters">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>A SAM launch should still show where the launcher was</b>
+          <p>Two of three emitters are merged: a burning hull (polled from per-unit life) and gun
+            fire (from the firing-event channel), both bypassing the range and canopy gates and both
+            clamped to presence. The third is the one with a new shape &mdash; a launch's smoke
+            outlives the event that made it, so <code>BL-B74</code> is the first perception source
+            with a <b>decaying external lifetime</b>, reporting where the launcher <em>was</em>. Your
+            framing: <em>&ldquo;SAM launch shows where the launcher was for quite a while.&rdquo;</em>
+            Static smoke and flares (<code>BL-B75</code>) are deferred by your own priority call, and
+            depend on whether DCS exports them at all.</p>
+        </div>
+        <span class="chip open">One third left</span>
+      </div>
+
+      <div class="row s-active" role="button" tabindex="0" data-detail="tuning">
+        <span class="who">cross-cutting</span>
+        <div class="what">
+          <b>Behaviour constants are a file you edit, for fifteen of them</b>
+          <p>Stages 1&ndash;2 shipped: a loader, a curated ~15-key set with bounds, a generated
+            <code>config/defaults.toml</code>, and <code>--print-tuning</code>. No constant's value
+            moved. It is now <b>standard practice</b> &mdash; your words, <em>&ldquo;X-T26 pattern
+            must become standard practice from now on&rdquo;</em> &mdash; so any new constant that
+            changes what Petrovich sees, says, remembers or waits for is declared this way. Stages 3
+            (~80 more body-layer keys), 4 and 5 are deferred by your own decision, and the milestone's
+            own DoD found the right order: fix the generator's rendering contract (<code>X-B37</code>)
+            <em>before</em> 80 more keys run through it, not after.</p>
+        </div>
+        <span class="chip active">Stages 1&ndash;2 of 5</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="tiers">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Attention tiers: still the right idea, no longer a blocker &mdash; and this board had it wrong</b>
+          <p>Last cycle this page drew the attack run as gated on a mechanism nobody had built:
+            promotion resolving a group into individuals. <code>BL-14</code> shipped without it,
+            because the requirement dissolved rather than being met &mdash; <em>&ldquo;I can myself
+            approximate attacking a group by picking an individual unit there&rdquo;</em>, so
+            <b>the target is exactly one contact</b> and group-as-target is dropped, not deferred.
+            The tiers themselves remain your captured direction and remain worth building: low and
+            medium owe <em>few/several/many</em> and a rough class, high tier gets near-constant
+            eyes-on. What they no longer are is a prerequisite. They still have <b>no roadmap entry
+            of their own</b>, which is the honest status.</p>
+        </div>
+        <span class="chip open">Direction captured</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="quieting">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Two fixes that make him quieter, and both can be too quiet</b>
-          <p>Merge-echo suppression silences a freshly-founded contact's first callout when an
-            existing contact is plausibly the same real thing (17 of 34 foundings on the 2026-10-04
-            sortie, reconstructed); the group fix silences a group's opening line when every member
-            was already named, speaking only the delta. Both push in the direction you asked for.
-            Both share one accepted cost, named in the plan rather than discovered later: <b>a
-            genuine split right after a merge is indistinguishable from an echo</b> and also goes
-            quiet. Only a flight can say whether that is ever noticed.</p>
+          <b>The quieting work got its flight, and half of it passed</b>
+          <p>Merge-echo suppression and the confirm band were both <b>graded pass</b> in the
+            2026-10-05 sortie's own table &mdash; and both were carried on this board as unflown for
+            ten days afterwards, until a sweep found the flight had already happened. The accepted
+            cost is still unobserved rather than disproved: <b>a genuine split right after a merge is
+            indistinguishable from an echo</b> and also goes quiet. The group-disclosure half, which
+            speaks only the delta when every member was already named, has still had no sortie of its
+            own.</p>
         </div>
-        <span class="chip open">Merged, unflown</span>
+        <span class="chip open">Half flown</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="ambiguity">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>The rule underneath all three noise defects has been inverted &mdash; and nothing has
+          <b>The rule underneath the noise defects has been inverted &mdash; and nothing has
             re-measured the churn</b>
           <p><code>ContactStore.ingest</code> used to treat &ldquo;two or more plausible
             candidates&rdquo; as ambiguous and found a <em>new</em> contact rather than guess.
@@ -1100,30 +1197,28 @@ flowchart LR
             different unit&rdquo; is a cheap explanation, and you say DCS is not that world. So
             <code>BL-B24</code> and <code>BL-B25</code> stay <em>open</em> on recheck notes rather
             than closed: the plan claims supersession, but the 554-contacts-for-444-objects figure
-            has not been re-measured on the new code. <code>BL-B59</code> &mdash; the same drift
-            evicting a real member &mdash; <strong>is now fixed</strong>, by bounding the fold rather
-            than by adding a retention term.</p>
+            has not been re-measured on the new code. A rule changing is not the same as its
+            consequence being observed.</p>
         </div>
         <span class="chip open">Inverted, unverified</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="tiers">
+      <div class="row s-open" role="button" tabindex="0" data-detail="perm">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>The attack run needs a mechanism nobody had filed &mdash; and the fold is not the
-            obstacle, <em>unconditional</em> folding is</b>
-          <p>Your <code>/explore</code> answer reframed the question rather than settling it:
-            <strong>resolution depends on attention</strong>, in three tiers. Low and medium owe
-            <em>few/several/many</em> and a rough class, which is exactly what a collapsed group
-            gives &mdash; so the undercount there is correct, not tolerated. High tier (watched,
-            selected, asked about) gets near-constant eyes-on, so the evidence to resolve
-            individuals exists. The consequence is sharp: <code>BL-14</code> cannot be planned as a
-            consumer of today's group model, because <b>bounding the fold fixes accuracy and cannot
-            fix existence</b> &mdash; two of six real units had no record before the bound and have
-            none after. <code>step right</code> walks what you see out the window, so it would land
-            on the fourth record while your eye is on a sixth vehicle.</p>
+          <b>Two filed defects from one test flight, neither with a live trigger</b>
+          <p>Diagnosing a 532&nbsp;km belief-truth tripwire on your 2026-10-15 flight found the
+            cause and one neighbour. The cause: <b>nothing resets belief when a DCS mission
+            reloads</b>, so the previous mission's contacts walk into the next one &mdash; deferred
+            at your direction with the rest of the mission-lifecycle mechanics, which makes
+            &ldquo;restart the service between missions&rdquo; an instruction rather than a bug for
+            now. The neighbour (<code>BL-B69</code>): the object-permanence shortcut in
+            <code>_resolve_continuity</code> bypasses the spatial and class gate entirely, so two
+            genuinely different objects could fold into one contact <b>with no distance check
+            anywhere in the path</b>. Filed on its merits &mdash; no confirmed live trigger, which is
+            exactly how this project's silent regressions have started before.</p>
         </div>
-        <span class="chip open">Needs a plan, not a fix</span>
+        <span class="chip open">Filed, untriggered</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="motion">
@@ -1153,27 +1248,11 @@ flowchart LR
             When the class belief is <em>wrong</em> &mdash; a misclassified fast mover &mdash; the cap
             sits below the unit's real speed and the position lags further with every fold:
             <b>104.2&nbsp;m against the unbounded baseline's 49.8&nbsp;m</b>. Accepted, not fixed
-            here: the classification fold should correct the class over time, and Stage&nbsp;3.5's
-            looser gate remains the safety net for an uncalibrated speed table. The real fix is
-            measuring DCS unit speeds instead of asserting them.</p>
+            here: the classification fold should correct the class over time. The real fix is
+            measuring DCS unit speeds instead of asserting them &mdash; and those speeds are now
+            tunable constants rather than literals, which lowers the cost of correcting them.</p>
         </div>
         <span class="chip open">Known regression</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
-        <span class="who">aircraft-layer</span>
-        <div class="what">
-          <b>The 128-sightline cap binds over a city &mdash; and the cost says amortise, not enlarge</b>
-          <p>DCS answering line of sight is <b>built, flown and closed</b>; what the flight left open
-            is the budget. Over Damascus 152 candidates competed for 128 sightlines and the cap bound
-            for the first time, dropping the 24 farthest &mdash; the right direction, but a real
-            truncation. The measured cost is what decides the fix: 27&nbsp;ms for 128 sightlines is
-            ~0.21&nbsp;ms each, so today's cap is already ~1.6 frames at 60&nbsp;fps and covering the
-            whole wedge in one poll would make the poll the hitch it currently is not. So the answer
-            is a per-poll budget with a rotating offset through the far tail, not a bigger number.
-            <b>BL-B42</b>, and it wants a conversation before a plan.</p>
-        </div>
-        <span class="chip open">Needs /explore</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="cond">
@@ -1185,25 +1264,116 @@ flowchart LR
             and the wide/narrow ordering <em>reverses</em> between rain and darkness &mdash; rain
             attacks the windscreen, which the eye and binoculars look through and the sight does not;
             darkness attacks contrast, where magnification does not help. Detection also needs a
-            <em>ceiling</em>, not a multiplier: in rain both sight fields stop at the same 3.7 km.</p>
+            <em>ceiling</em>, not a multiplier: in rain both sight fields stop at the same 3.7&nbsp;km.
+            Now that a real sight exists in perception, this has a second consumer rather than
+            one.</p>
         </div>
         <span class="chip open">Reshaped</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="gbound">
+      <div class="row s-open" role="button" tabindex="0" data-detail="capture">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Three cohesion constants, all of them agreed guesses</b>
-          <p>Twenty <em>unit widths</em> bounds an ordinary group, so the boundary scales with what the
-            units are rather than being a flat distance. A real SAM installation gets its own
-            500&nbsp;m cap, grounded in S-75/S-125 emplacement doctrine. Infantry merge eagerly by
-            your own direction &mdash; <em>&ldquo;ok to merge infantry too eagerly&rdquo;</em> &mdash;
-            and the part of that which was <em>not</em> intended is closed: the bridge that pulled
-            two non-infantry contacts into one group through an infantry member between them (6&nbsp;km
-            apart, measured) was fixed by <code>BL-12</code> Stage&nbsp;0a/0b. What is left is the
-            constants themselves, and they want ears, not another review round.</p>
+          <b>Attention capture &mdash; nothing outside the cone can interrupt him</b>
+          <p>The scan loop gave him a 30&deg; focus cone, and <code>Optic.peripheral</code> is wired
+            with no triggers behind it. So a muzzle flash at 3 o'clock while he looks at 10 produces
+            nothing. This is a standing exposure created deliberately by 2C, not an oversight &mdash;
+            and it has sharpened this cycle rather than aged: emitters now <em>admit</em> a firing
+            unit at any range out to the bubble, but admission still requires him to be looking that
+            way. The gaze gate is explicitly retained for emitters, by design.</p>
         </div>
-        <span class="chip open">Needs a flight</span>
+        <span class="chip open">Sharpened</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="dcslos">
+        <span class="who">aircraft-layer</span>
+        <div class="what">
+          <b>The 128-sightline cap binds over a city &mdash; and the cost says amortise, not enlarge</b>
+          <p>DCS answering line of sight is <b>built, flown and closed</b>; what the flight left open
+            is the budget. Over Damascus 152 candidates competed for 128 sightlines and the cap bound
+            for the first time, dropping the 24 farthest &mdash; the right direction, but a real
+            truncation. The measured cost is what decides the fix: 27&nbsp;ms for 128 sightlines is
+            ~0.21&nbsp;ms each, so today's cap is already ~1.6 frames at 60&nbsp;fps. The emitter work
+            raised the stakes: a nearest-first cap drops the <em>far</em> candidates, which is exactly
+            where a firing unit is interesting, so in a dense scene a fail-closed LOS gate can
+            silently neuter the whole feature. <b>BL-B42</b>, and it wants a conversation before a
+            plan.</p>
+        </div>
+        <span class="chip open">Needs /explore</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="dmg">
+        <span class="who">aircraft-layer</span>
+        <div class="what">
+          <b>Hit and kill reporting &mdash; the transport exists now, the voice does not</b>
+          <p>The probes answered every question a year's worth of design needed, and this cycle built
+            the channels: a firing-event Hook, and per-unit <code>getLife()</code> on the telemetry
+            feed. What is still unbuilt is Petrovich <em>saying</em> anything about damage. One
+            finding from the emitter pass is worth keeping in front of whoever picks this up:
+            <b>seeing a fire is not answering &ldquo;did we get it&rdquo;</b> &mdash; a burning hull
+            says something there is already dead or dying, not that it was you who did it, and a
+            life-fraction reading carries no attribution at all.</p>
+        </div>
+        <span class="chip open">Half built</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="apath">
+        <span class="who">audio-adapter</span>
+        <div class="what">
+          <b>The one-second pause belongs in the audio path, and a verb should anchor on position</b>
+          <p>Two items arrived from other layers' work and both are properly this one's. The attack
+            run asked for a delay after a readback; your answer put it where it belongs &mdash;
+            <em>&ldquo;the 1&nbsp;s audio gap could live in the audio path. It's fairly natural for
+            humans to pause shortly&rdquo;</em> &mdash; with urgent lines exempt, plus a feedback
+            channel for when playback has <em>actually</em> stopped so the layers above stop
+            predicting it (<code>AC-B6</code> is the collector half). The second: adding one command
+            verb widened the set of ordinary sentences that anchor, measured, and your call was
+            <em>&ldquo;add attack, fix the anchoring properly&rdquo;</em> &mdash; anchor on sentence
+            position or a parseable target slot, not on the word alone.</p>
+        </div>
+        <span class="chip open">Filed, planned</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="latency">
+        <span class="who">audio-adapter</span>
+        <div class="what">
+          <b>Press-to-readback is ~3&nbsp;s</b>
+          <p>Measured on the voice-command sortie. A crew member answers in well under a second, so
+            this is what will keep Petrovich feeling like a machine no matter how good recognition
+            gets. One component is certain rather than estimated: the logger polls transcripts once
+            a second, so half a second is spent purely being noticed.</p>
+        </div>
+        <span class="chip open">Next</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="wmb6">
+        <span class="who">world-model</span>
+        <div class="what">
+          <b>Landform detection is solved and accepted &mdash; and nothing speaks it yet</b>
+          <p>Geomorphons replaced the watershed detector, the relief gate and decimation fixed what
+            the first theatre build exposed, and your 2026-10-04 rebuild cleared all three
+            acceptance blocks. What is left is not detection: Stages 3&ndash;5 (adjacency, bearing,
+            the actual phrase) are unbuilt and gated on a consumer that wants landform references,
+            and the store now holds 234,799 lines of which very few are worth <em>saying</em>. The
+            density question survived the rewrite unchanged &mdash; it just moved from
+            &ldquo;reconnect the pieces&rdquo; to &ldquo;which of these is worth mentioning&rdquo;.</p>
+        </div>
+        <span class="chip open">Accepted, unconsumed</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="theatre">
+        <span class="who">world-model</span>
+        <div class="what">
+          <b>Multi-theatre support</b>
+          <p>Architecture generalises through per-theatre registries, Afghanistan is built and
+            live-confirmed (worst residual under a millimetre), and <b>Caucasus and Kola are
+            implemented and reviewer-approved</b> on
+            <code>origin/feature/multi-theatre-caucasus-kola</code> &mdash; unmerged. <b>Kola needs
+            no new elevation source</b>: DEM3 covers it in the same <code>.hgt</code> format the SRTM
+            ingest already reads, and the files are on the Windows box. What is left is a build per
+            theatre, which only you can run.</p>
+        </div>
+        <span class="chip open">Soon</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="d10">
@@ -1222,66 +1392,29 @@ flowchart LR
         <span class="who">body-layer</span>
         <div class="what">
           <b>An outpost fragments into eighteen contacts</b>
-          <p>Still open, and this cycle established what it is <em>not</em>: the 2026-09-28 callout
-            noise was blamed on it in conversation, then the log showed three of fifty-two contacts
-            ever plural against sixty-two real objects &mdash; near 1:1, the opposite of this
-            defect's signature. Clustering was right; there were simply that many contacts. This
-            remains diagnosed-not-fixed, from a different sortie shape, with four candidate
-            directions and none chosen.</p>
+          <p>Still open, and still diagnosed-not-fixed, with four candidate directions and none
+            chosen. What it is <em>not</em> was established earlier: the 2026-09-28 callout noise was
+            blamed on it in conversation, then the log showed three of fifty-two contacts ever plural
+            against sixty-two real objects &mdash; near 1:1, the opposite of this defect's signature.
+            Clustering was right; there were simply that many contacts.</p>
         </div>
         <span class="chip open">Diagnosed</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="dmg">
-        <span class="who">aircraft-layer</span>
-        <div class="what">
-          <b>Damage and firing reporting &mdash; unblocked, unbuilt</b>
-          <p>The probes flew and answered every question. A ground gun's <code>SHOOTING_START</code>
-            names the player as its target, so &ldquo;we are being shot at&rdquo; needs no inference;
-            <code>getLife()</code> works per unit; gun rounds are <em>not</em> world objects, so
-            tracers must come from the event rather than from perception.</p>
-        </div>
-        <span class="chip open">Ready</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="gc4b">
+      <div class="row s-open" role="button" tabindex="0" data-detail="gbound">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Seeing through woods &mdash; OSM landcover is the answer for every channel</b>
-          <p>The plan split the channels: a statistical per-landcover transmission probability for the
-            eye and binoculars, and the 9K113 asking DCS for the real ray. <b>That second half is now
-            gone.</b> Probed on the Windows box and closed today: <code>isVisible</code>,
-            <code>getIP</code>, <code>searchObjects</code> at any volume and <code>getSurfaceType</code>
-            are all terrain and scenery only, tested against vehicles parked inside canopy. The engine
-            has the capability; it is compiled, and Petrovich's own verdict there is an audio file. So
-            the statistical model covers everything, which it was already built to do.</p>
+          <b>Three cohesion constants, all of them agreed guesses</b>
+          <p>Twenty <em>unit widths</em> bounds an ordinary group, so the boundary scales with what the
+            units are rather than being a flat distance. A real SAM installation gets its own
+            500&nbsp;m cap, grounded in S-75/S-125 emplacement doctrine. Infantry merge eagerly by
+            your own direction &mdash; <em>&ldquo;ok to merge infantry too eagerly&rdquo;</em> &mdash;
+            and the part of that which was <em>not</em> intended is closed: the bridge that pulled
+            two non-infantry contacts into one group through an infantry member between them (6&nbsp;km
+            apart, measured) was fixed by <code>BL-12</code> Stage&nbsp;0a/0b. What is left is the
+            constants themselves, and they want ears, not another review round.</p>
         </div>
-        <span class="chip open">Unblocked, and simplified</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="capture">
-        <span class="who">body-layer</span>
-        <div class="what">
-          <b>Attention capture — nothing outside the cone can interrupt him</b>
-          <p>The scan loop gave him a 30&deg; focus cone, and <code>Optic.peripheral</code> is wired with
-            no triggers behind it. So a muzzle flash at 3 o'clock while he looks at 10 produces nothing.
-            This is a standing exposure created deliberately by 2C, not an oversight — and it is the most
-            likely explanation for the pass where a unit flown past at close range was never identified.</p>
-        </div>
-        <span class="chip open">Next</span>
-      </div>
-
-      <div class="row s-hold" role="button" tabindex="0" data-detail="s2">
-        <span class="who">audio-adapter</span>
-        <div class="what">
-          <b>Cockpit state drives the audio</b>
-          <p>The SRS dependency is dropped — it was never wired, and Windows audio through the collector
-            already did the job. What replaces it is better: the intercom switch gates the crew channel in
-            <em>both</em> directions, and the SPU-8 volume knob sets how loud he is. One physical control
-            turns Petrovich on and off, exactly as the real one does. Deferred at your direction — and its
-            one prerequisite is already gone: the device argument numbers were read off the install.</p>
-        </div>
-        <span class="chip hold">Deferred</span>
+        <span class="chip open">Needs a flight</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="repetition">
@@ -1289,23 +1422,13 @@ flowchart LR
         <div class="what">
           <b>Repetition is better but not gone</b>
           <p>Aggregation works on same-type, same-range, adjacent-clock contacts, and the five-fix
-            sortie's transcript shows it firing — but five presence-level calls in one sector,
+            sortie's transcript shows it firing &mdash; but five presence-level calls in one sector,
             differing only in range, are not aggregated, because range is exactly the part that
-            carries no information at presence level. Two candidate rules, neither chosen yet.</p>
+            carries no information at presence level. Two candidate rules, neither chosen. The attack
+            run hit the same family of defect from a different side and fixed it there: a text-equality
+            veto, after 38&nbsp;% of guidance utterances turned out to be dead repeats.</p>
         </div>
         <span class="chip open">Reopened</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="latency">
-        <span class="who">audio-adapter</span>
-        <div class="what">
-          <b>Press-to-readback is ~3s</b>
-          <p>Measured on the voice-command sortie. A crew member answers in well under a second, so
-            this is what will keep Petrovich feeling like a machine no matter how good recognition
-            gets. One component is certain rather than estimated: the logger polls transcripts once
-            a second, so half a second is spent purely being noticed.</p>
-        </div>
-        <span class="chip open">Next</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="reports">
@@ -1324,34 +1447,23 @@ flowchart LR
         <span class="who">cross-cutting</span>
         <div class="what">
           <b>One command to start the services</b>
-          <p>Four long-running processes across two machines, each launched by hand. Docker covers at most
-            three of five — <code>winsound</code> and macOS <code>say</code>/<code>afplay</code> are
-            exactly the host facilities two services exist to use.</p>
+          <p>Five long-running processes across two machines, each launched by hand. Docker covers at
+            most three &mdash; <code>winsound</code> and macOS <code>say</code>/<code>afplay</code>
+            are exactly the host facilities two services exist to use. Related and also open:
+            <code>tools/</code> sits outside every subproject's documented format and lint gate, so
+            real source can pass &ldquo;all checks&rdquo; while never being checked.</p>
         </div>
         <span class="chip open">Open</span>
-      </div>
-
-      <div class="row s-open" role="button" tabindex="0" data-detail="theatre">
-        <span class="who">world-model</span>
-        <div class="what">
-          <b>Multi-theatre support</b>
-          <p>Further along than this board showed. Architecture generalises through per-theatre
-            registries, Afghanistan is built and live-confirmed, and <b>Caucasus and Kola are
-            implemented and reviewer-approved</b> on <code>origin/feature/multi-theatre-caucasus-kola</code>
-            &mdash; unmerged, and never fetched locally, which is why this page described them as
-            unscoped. <b>Kola needs no new elevation source</b>: DEM3 covers it in the same
-            <code>.hgt</code> format the SRTM ingest already reads, and the files are on the Windows
-            box. What is left is a build per theatre, which only the user can run.</p>
-        </div>
-        <span class="chip open">Soon</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="bl8">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>BL-8 — memory layer interfaces</b>
-          <p>Deliberately last. What is worth remembering is only knowable after BL-2–BL-7 have run for
-            real.</p>
+          <b>BL-8 &mdash; memory layer interfaces</b>
+          <p>Deliberately last. What is worth remembering is only knowable after BL-2&ndash;BL-7 have
+            run for real &mdash; and the <code>&ldquo;obstructed&rdquo;</code> finding is the first
+            time a cockpit requirement has pointed straight at it: <em>&ldquo;no LOS means no
+            observation, but a LOS a moment ago means it's near where it was.&rdquo;</em></p>
         </div>
         <span class="chip open">Gated</span>
       </div>
@@ -1359,7 +1471,7 @@ flowchart LR
       <div class="row s-hold" role="button" tabindex="0" data-detail="gc5">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Stage 5 — composition</b>
+          <b>Stage 5 &mdash; composition</b>
           <p>"Three of them tanks… and something else." Held deliberately: the angular model resolved the
             twelve-unit case that motivated the whole group model, so the headline example largely
             dissolved. Re-judge after flying, not before.</p>
@@ -1367,10 +1479,24 @@ flowchart LR
         <span class="chip hold">Re-judge</span>
       </div>
 
+      <div class="row s-hold" role="button" tabindex="0" data-detail="s2">
+        <span class="who">audio-adapter</span>
+        <div class="what">
+          <b>Cockpit state drives the audio</b>
+          <p>The SRS dependency is dropped &mdash; it was never wired, and Windows audio through the
+            collector already did the job. What replaces it is better: the intercom switch gates the
+            crew channel in <em>both</em> directions, and the SPU-8 volume knob sets how loud he is.
+            One physical control turns Petrovich on and off, exactly as the real one does. Deferred at
+            your direction &mdash; and its one prerequisite is already gone: the device argument
+            numbers were read off the install.</p>
+        </div>
+        <span class="chip hold">Deferred</span>
+      </div>
+
       <div class="row s-hold" role="button" tabindex="0" data-detail="voice">
         <span class="who">audio-adapter</span>
         <div class="what">
-          <b>Voice character — accent and prosody</b>
+          <b>Voice character &mdash; accent and prosody</b>
           <p>Two problems, not one. No Russian-accented English voice exists in macOS <code>say</code>,
             and the delivery is monotonous regardless of whether the line is a routine report or "break
             right". Prosody may matter more than accent.</p>
@@ -1383,10 +1509,10 @@ flowchart LR
 
   <section>
     <h2>Architecture</h2>
-    <p class="section-note">The other two graphs are about time — how we got here, what is next. This
-      one is about shape, and stays useful once every milestone above is done. Two machines, two seam
-      kinds, and and the component that was drawn as absent for
-      three cycles is now built: DCS answers line of sight itself, inside the game.</p>
+    <p class="section-note">The other two graphs are about time &mdash; how we got here, what is
+      next. This one is about shape, and stays useful once every milestone above is done. Two
+      machines, two seam kinds, and a third Hook inside DCS this cycle: the game now tells us who is
+      shooting, as well as what can be seen.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-arch" type="button">Expand graph</button>
@@ -1400,17 +1526,18 @@ flowchart TB
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  subgraph WIN ["Windows — the DCS box"]
+  subgraph WIN ["Windows - the DCS box"]
     direction TB
     DCS["DCS World&lt;br/&gt;Mi-24P / Petrovich cockpit"]:::done
     AL["Aircraft Layer&lt;br/&gt;Export.lua + collector&lt;br/&gt;pinned: needs the install"]:::done
-    LOSQ["LOS Hook &mdash; DCS answers sightlines&lt;br/&gt;units + statics, buildings + terrain&lt;br/&gt;Hook state, 1 Hz, ~5 ms"]:::done
+    LOSQ["LOS Hook - DCS answers sightlines&lt;br/&gt;units + statics, buildings + terrain&lt;br/&gt;Hook state, 1 Hz, ~5 ms"]:::done
+    EVQ["Firing-events Hook + per-unit life&lt;br/&gt;SHOOTING_START/_END, SHOT, getLife&lt;br/&gt;drained per 1 Hz poll"]:::done
   end
 
-  subgraph MAC ["Mac — for now, by decision, not by need"]
+  subgraph MAC ["Mac - for now, by decision, not by need"]
     direction TB
     WM["World Model&lt;br/&gt;offline-built theatre store"]:::done
-    BL["Body Layer&lt;br/&gt;Petrovich's belief state"]:::done
+    BL["Body Layer&lt;br/&gt;Petrovich's belief state&lt;br/&gt;+ tuning file, 15 keys"]:::done
     AA["Audio Adapter&lt;br/&gt;TTS + speech recognition"]:::done
     BRAIN["Brain Layer&lt;br/&gt;async decider, own process"]:::active
     OLL["Ollama&lt;br/&gt;local model runtime"]:::done
@@ -1421,7 +1548,7 @@ flowchart TB
   DCS ==>|"telemetry, world objects,&lt;br/&gt;HelperAI indication"| AL
   AL ==>|"text overlay, F10/voice&lt;br/&gt;commands, audio playback"| DCS
   AL -->|"HTTP/JSON"| BL
-  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)&lt;br/&gt;terrain semantics + landcover &mdash; LOS&lt;br/&gt;left the live path 2026-10-09"| WM
+  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)&lt;br/&gt;terrain semantics + landcover - LOS&lt;br/&gt;left the live path 2026-10-09"| WM
   BL -->|"HTTP/JSON"| AA
   AA -->|"HTTP/JSON"| AL
   MI -.->|"HTTP/JSON, offline query"| WM
@@ -1433,6 +1560,8 @@ flowchart TB
   DCS ==>|"one dostring_in bridge call per poll"| LOSQ
   LOSQ ==>|"UDP 7796, joined by unit_name"| AL
   AL -.->|"UDP 7797, look direction"| LOSQ
+  DCS ==>|"world.addEventHandler in the&lt;br/&gt;scripting state"| EVQ
+  EVQ ==>|"emitter snapshot, joined by unit_name"| AL
 </pre>
       </div>
     </div>
@@ -1444,34 +1573,36 @@ flowchart TB
 
     <p class="section-note">The double-line edges are DCS itself &mdash; read <em>and</em> written,
       never a one-way feed. The single plain edge between Body Layer and World Model is the one
-      in-process import this project allows anywhere; every other subproject boundary, including
-      the two crossing back to Windows, is HTTP. Mission Interpreter runs offline and hands off one
+      in-process import this project allows anywhere; every other subproject boundary, including the
+      ones crossing back to Windows, is HTTP. Mission Interpreter runs offline and hands off one
       artifact before a sortie starts &mdash; it has no seat in the runtime loop. Note which way the
       brain's two edges point: body-layer hands an escalation over and does not wait, and the reply is
       drained in the ordinary poll loop. That is not an implementation detail &mdash; it is the
       constraint the whole layer was designed around, because the game world keeps moving whether or
-      not Petrovich has finished thinking. <strong>Only the aircraft layer is pinned to Windows</strong>
-      &mdash; it needs the DCS install. Body layer and world model sit on the Mac by decision, not by
-      need, and they move together or not at all: that in-process import is the one this project
-      allows, so a service split between them has been rejected rather than merely postponed. <strong>The
-      line-of-sight box inside Windows is no longer dashed.</strong> It was drawn as absent for three
-      cycles; as of 2026-10-09 DCS answers sightlines itself, for units and statics alike, and the
-      world model's own primitive has left the live path entirely &mdash; so the in-process seam to it
-      now carries terrain semantics only. That is the one architectural change this cycle, and it
-      moved a seam rather than adding a box.</p>
+      not Petrovich has finished thinking. <strong>Only the aircraft layer is pinned to
+      Windows</strong> &mdash; it needs the DCS install. Body layer and world model sit on the Mac by
+      decision, not by need, and they move together or not at all. <strong>The change this cycle is a
+      third box inside Windows</strong>: a production firing-events Hook, with per-unit life riding
+      the existing telemetry loop. It matters architecturally because it is the first channel where
+      DCS reports an <em>event</em> rather than answering a query &mdash; everything else on that
+      bridge is polled state, and an event that is missed is simply gone, which is why the receiver
+      side carries a latch and a watchdog rather than trusting the feed.</p>
   </section>
 
   <footer>
-    Generated from <code>ROADMAP.md</code> across six subprojects plus <code>todo/todo.md</code>,
-    <code>todo/backlog.md</code> and each subproject's own <code>BACKLOG.md</code>. This page is a
-    view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
-    files is a bug in this page, not in them. Everything the counts cover lives on <code>main</code>, including
-    <code>BL-B59</code>'s bounded fold and the forest gate. Two things are deliberately drawn here
-    that <code>main</code> does not yet hold: the <code>collapse(group, depth)</code> derivation,
-    DoD-passed on <code>feature/group-collapse</code> and awaiting merge, and the attention-tier
-    direction, which lives as a captured <code>/explore</code> in <code>docs/acceptance/</code> and
-    has no roadmap entry yet. The open count rose again &mdash; 94 to 101 &mdash; which is still not
-    drift: finishing a mechanism is what produces the entries describing what it did not do.
+    Generated from <code>ROADMAP.md</code> across six subprojects plus each subproject's own
+    <code>ROADMAP/</code> and <code>BACKLOG</code> entry files and <code>todo/todo/</code>,
+    <code>todo/backlog/</code>. This page is a view, never a second source of truth &mdash; every
+    status here is derived, and any disagreement with the roadmap files is a bug in this page, not in
+    them. Everything the counts cover lives on <code>main</code>, including the attack run, the 9K113
+    sight's perception half and both built emitters. One thing is drawn here that no roadmap entry
+    holds: the attention-tier direction, which lives as a captured <code>/explore</code> in
+    <code>docs/acceptance/</code>. Two roadmap entries were corrected while generating this page
+    &mdash; <code>BL-B72</code> and <code>AC-B7</code> still read <em>open</em> five days after their
+    stage merged and DoD-passed, because the DoD commit touched the plan and <code>NOTES.md</code> but
+    not the entries. The counts moved together again &mdash; 149 to 160 done, 101 to 118 open &mdash;
+    and that is still not drift: one flight produced three new entries for every defect it closed,
+    which is what a sortie is for.
   </footer>
 
 </div>
@@ -1524,17 +1655,17 @@ const DETAIL = {
   },
 
   tiers: {
-    kicker: "body-layer/", title: "Resolution depends on attention &mdash; and that is a prerequisite, not a tweak", chip: ["open", "Direction captured; BL-14 has no plan yet"],
-    facts: [["Your direction", "2026-10-13, from the BL-14 /explore"], ["Tiers", "low / medium / high"], ["The gap", "2 of 6 real units had no record at all"], ["Your framing", "“Not final word, but concept.”"]],
+    kicker: "body-layer/", title: "Attention tiers &mdash; still right, no longer a blocker", chip: ["open", "Direction captured; no roadmap entry of its own"],
+    facts: [["Your direction", "2026-10-13, from the BL-14 /explore"], ["Tiers", "low / medium / high"], ["This board got it wrong", "drew BL-14 as gated on it"], ["Status", "no entry; a captured /explore"]],
     sections: [
-      { h: "The question that was asked, and the answer that dissolved it", p: "The open question was whether <code>BL-14</code> needs a contact record per unit, or merely better positions for the records Petrovich holds. The measured dilemma: <strong>bounding the fold fixes accuracy and cannot fix existence</strong> (two of six real units had no record before the bound or after it), while <em>not</em> folding reverses an earlier decision and produces 82 contacts for 2 units. Your tiers dissolve it &mdash; resolution is a function of <strong>attention</strong>, not a global policy. The fold is not the enemy of the attack run; <em>unconditional</em> folding is." },
-      { h: "The three tiers, as you stated them", p: "<strong>Low</strong> &mdash; beyond class-detection distance: <em>where</em>, far/mid, few/several/many, collapsed to a group-level report. <strong>Medium</strong> &mdash; inside 5 km: adds how far and a rough class (<em>&ldquo;there's armor&rdquo;</em>). <strong>High</strong> &mdash; watched units, units selected as targets, units you ask about: per-classification counts, individual units selectable with exact positions, and <em>&ldquo;target units get constant eyes-on &hellip; knows their position as perfectly as belief allows, should be practically perfect at near distance.&rdquo;</em> At low and medium the fold's undercount is not tolerated but <strong>correct</strong>; at high tier the evidence to resolve individuals genuinely exists, because he is looking." },
-      { h: "Why step right cannot be served by the belief store as it stands", p: "<em>&ldquo;When I say step right, select the next target to the right from ownship perspective, i.e. what I see out the window.&rdquo;</em> The list being stepped is <strong>the world, not the store</strong>. A group resolved into four records while six vehicles sit there means your third press lands on his fourth record while your eye is on a vehicle he never founded. Per-unit records are a confirmed requirement for <em>selectable targets</em> &mdash; and only there, which is what makes the tiers an answer rather than a reversal." },
-      { h: "A correction to the tiers' own framing, found by building half of it", p: "The capture says the tier's job <em>becomes choosing a depth</em>. A <code>collapse(group, depth)</code> derivation was then built and DoD-passed (awaiting merge) to serve exactly that &mdash; a cheap, derived, depth-bounded view, the right shape for per-target reporting. It supplies <strong>no resolution</strong>: it only ever projects a group's <em>existing</em> members, so the two missing units are still missing after it. Choosing a depth is the reporting half; the tiers also need a resolution mechanism, and that half is unbuilt. Worth knowing before the framing is used as a plan." },
-      { h: "And the ATGM half has a hard prerequisite that is not about groups at all", p: "You split the aiming requirement by <strong>channel, not accuracy</strong>: <em>&ldquo;ATGM guidance is with 9K113 only, there is no naked eye channel for ATGM guidance.&rdquo;</em> So the 40 m held-position figure is acceptable for guns and rockets &mdash; you close the loop with your own eyes &mdash; and simply the wrong instrument for the 9K113 question. The 9K113 sight <strong>does not exist in code</strong>: <code>perception/optics.py</code> declares only unaided and binocular optics, and four other files say so about themselves. ATGM guidance is therefore gated on building that channel, independent of everything above." }
+      { h: "The correction first, because this page made the claim", p: "For two cycles this board drew <code>BL-14</code> as blocked on a mechanism nobody had built: promotion to high attention resolving a group into individuals. <strong>It shipped without one.</strong> The requirement dissolved rather than being met, when you answered the cheap question: <em>\"I can myself approximate attacking a group by picking an individual unit there. No need to build targeting group if not supported already.\"</em> The invariant reduced to <strong>the target is exactly one contact</strong> &mdash; and for a mechanical reason, not a stylistic one: one azimuth and one elevation cannot point at two places, so <em>\"the guidance cannot separate them.\"</em>" },
+      { h: "What guidance reads instead", p: "A new ownship-relative datum (<code>RelativeDirection</code>, exact while looked at), not world-anchored belief &mdash; because <em>where is it on the map</em> and <em>where is it relative to me right now</em> are different questions with different error models. That is why the 40 m held-position figure, which looked disqualifying, was not: the attack run never consults it." },
+      { h: "The tiers themselves are unchanged and still worth building", p: "<strong>Low</strong> &mdash; beyond class-detection distance: where, far/mid, few/several/many, collapsed to a group-level report. <strong>Medium</strong> &mdash; inside 5 km: adds how far and a rough class. <strong>High</strong> &mdash; watched, selected, or asked about: near-constant eyes-on, so the evidence to resolve individuals actually exists. Your own framing: <em>\"not final word, but concept.\"</em> At range the fold's undercount is <em>correct</em> rather than tolerated, which is the part that reframes the whole group model." },
+      { h: "The half that was built, and what it supplies", p: "<code>collapse(group, depth)</code> merged 2026-10-13 &mdash; a cheap, derived, depth-bounded view down the group/class/sub-class/type/contact ladder (named from your own words, not <code>UNIT</code>). It serves the <em>reporting</em> half of a tier and supplies <strong>no resolution</strong>: a collapsed view only ever projects members that were founded, so two of six real units with no record still have none." },
+      { h: "What is honest about its status", p: "It has <strong>no roadmap entry</strong>. It is a captured <code>/explore</code> in <code>docs/acceptance/</code>, drawn on this page because it shapes what comes next, and that gap is itself worth seeing: the direction that reframed the group model is the one thing here with no ID." }
     ],
-    items: [["done","collapse(group, depth) - the reporting half, DoD-passed"],["open","Attention tiers: low / medium / high"],["open","Promotion resolves a group into individuals - unbuilt"],["open","BL-14: spec written 2026-10-11, no plan, /explore owed"],["open","BL-B61: class-level group identity gap under step left/right"],["hold","The 9K113 channel - hard prerequisite for ATGM guidance"]],
-    src: "docs/acceptance/2026-10-13-group-model-and-attention-tiers.md, body-layer/ROADMAP/BL-14.md, plans/group-collapse/dod-check.md"
+    items: [["done","collapse(group, depth) - the reporting half, merged"],["done","BL-14 shipped without the resolution mechanism"],["open","Attention tiers: low / medium / high"],["open","BL-B61: class-level group identity gap under step"],["open","BL-B62: the relative channel is general, fenced to one consumer"]],
+    src: "docs/acceptance/2026-10-13-group-model-and-attention-tiers.md, docs/acceptance/2026-10-14-attack-run-guidance-direction.md, body-layer/ROADMAP/BL-14.md"
   },
 
   motion: {
@@ -1594,15 +1725,16 @@ const DETAIL = {
   },
 
   quieting: {
-    kicker: "body-layer/", title: "Two fixes that make him quieter", chip: ["open", "Both merged, both unflown"],
-    facts: [["Trigger", "your words, mid-flight 2026-10-04"], ["Reconstructed effect", "17 of 34 contact foundings silenced"], ["Shared cost", "a real split can go quiet too"], ["Flight", "one card covers both"]],
+    kicker: "body-layer/", title: "Two fixes that make him quieter", chip: ["open", "Half flown: the flood half passed 10-05"],
+    facts: [["Trigger", "your words, mid-flight 2026-10-04"], ["Reconstructed effect", "17 of 34 contact foundings silenced"], ["Shared cost", "a real split can go quiet too"], ["Flight", "flood half PASSED 2026-10-05"]],
     sections: [
       { h: "What you actually said, and what it turned out to be", p: "<em>\"It feels like many of those reports were about the same units.\"</em> The diagnosis: a naked-eye gaze sweep loses continuity in the <em>merge direction</em> &mdash; when two contacts the store had been tracking separately become one, the surviving contact is founded fresh, and a fresh founding speaks. So you heard the same vehicles announced again as if newly seen." },
       { h: "The first fix, at the speech layer deliberately", p: "A freshly-founded contact's <code>CONTACT_DETECTED</code> callout is suppressed when an existing, not-yet-lost contact is spatially and class-plausibly the same real thing. <code>CONTACT_REACQUIRED</code> and group lines are untouched. Reconstructed against the 2026-10-04 sortie: 17 of 34 foundings would have gone quiet, and the six-vehicle cluster everyone noticed speaks once for each of its four genuinely simultaneous sightings, with the later re-founding echo silent." },
       { h: "The second fix, one layer up", p: "The same thing was happening to <em>groups</em>: a group's first disclosure would read out members the pilot had already been told about individually. Now that opening line is silent when every current member's content already reached him &mdash; including by way of the first fix's suppression &mdash; and speaks only the unreported delta otherwise." },
       { h: "The cost both of them carry, named in the plan rather than discovered later", p: "<strong>A genuine split immediately after a merge is indistinguishable from a merge echo at this layer</strong>, and also goes quiet. Suppression is one-shot and permanent for the sortie, though belief stays queryable with <code>report</code>. This pushes against the risk direction of everything else here: the failure mode is now under-reporting rather than over-reporting, which is harder to notice in the air precisely because nothing happens." },
       { h: "Why they ride one flight", p: "Both change what the pilot hears about the same contact and group stream on the same cockpit, so one sortie settles both questions: does the stream read as signal rather than noise, and did anything go unreported that should not have. The 17-of-34 figure is a <em>retrospective reconstruction from pipeline outputs</em>, not a byte-for-byte replay &mdash; which is exactly why it needs ears." },
-      { h: "What they do not fix, and both roadmap entries say so", p: "Neither touches <code>ContactStore.ingest</code>'s \"two or more candidates means found a new contact\" rule, which is the engine under all of it. <code>BL-B24</code> and the duplication runaway are unaffected. These are symptom fixes at the speech boundary, chosen knowingly." }
+      { h: "What they do not fix, and both roadmap entries say so", p: "Neither touches <code>ContactStore.ingest</code>'s \"two or more candidates means found a new contact\" rule, which is the engine under all of it. <code>BL-B24</code> and the duplication runaway are unaffected. These are symptom fixes at the speech boundary, chosen knowingly." },
+      { h: "It got its flight, and this board was ten days late noticing", p: "Merge-echo suppression and the confirm band were both graded <strong>pass</strong> in the 2026-10-05 sortie's own table. Both were carried here as unflown debt for ten days afterwards, until a 2026-10-15 sweep read the acceptance document rather than the roadmap's summary of it. The reasoning that had kept the flood item open &mdash; <em>no <code>cancel</code> in the speech logs</em> &mdash; was simply invalid. The group-disclosure half still has no sortie of its own, and the shared cost (a genuine split going quiet with the echoes) remains unobserved rather than disproved." }
     ],
     items: [["done","Merge-direction continuity diagnosed"],["done","Merge-echo suppression merged"],["done","Redundant group disclosure merged"],["done","Reviewer, Security, DoD on both"],["open","The flight that judges both"],["open","The root ambiguity rule"]],
     src: "body-layer/ROADMAP.md (Live acceptance debt), plans/contact-report-flood/plan.md, plans/redundant-group-disclosure/implementation.md"
@@ -1637,18 +1769,6 @@ const DETAIL = {
     src: "todo/todo.md (Sortie 2026-09-28), plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md"
   },
 
-  logvis: {
-    kicker: "body-layer/", title: "Two log lines, unverified in the air", chip: ["block", "Rides along with any sortie"],
-    facts: [["Owed", "that two lines print on a real run"], ["NOT owed", "re-flying the fail-closed gate"], ["Found by", "DoD round 1, running the code outside pytest"], ["Missed by", "4 gates, all using caplog.at_level"]],
-    sections: [
-      { h: "Why this is a separate item and not part of the gate's own acceptance", p: "<code>BL-11</code> Stage 4 deliberately has <strong>no in-cockpit observable</strong> &mdash; the roadmap's own words are <em>\"a regression guard rather than an observable\"</em>. Petrovich says nothing new. So the gate itself was accepted on the 2026-10-08 flight evidence (145/145 evaluated objects on a live verdict, 85/85 admitted, against a 76% no-verdict baseline) and <strong>must not be re-flown</strong>. What is left is only that the guard's own two lines appear: the end-of-run summary with plausible totals, reading <code>0/N</code> when the feed is healthy, and the transition warning staying silent when nothing is wrong." },
-      { h: "The reason it earned its own entry at all", p: "The identical claim was verified by four separate gates &mdash; three review rounds and a security deep analysis &mdash; and was <strong>still false in production</strong>. Every test asserted through <code>caplog.at_level(logging.INFO)</code>, which forcibly overrides the level. Nothing in <code>body-layer/src/</code> configured a logging handler, so Python fell back to <code>logging.lastResort</code> at threshold <code>WARNING</code> and the summary was silently dropped on every real run. The tests proved the call <em>fires</em>; none proved it is <em>visible</em>. The DoD caught it by running the module outside pytest, which is the only check that could have." },
-      { h: "What the guard is for, so the lines mean something when you see them", p: "Now that the live DCS verdict is the only path, <strong>a nonzero fallback count is a defect</strong>, not a statistic. The summary logs even at zero precisely so a passing guard is distinguishable from a guard that never ran &mdash; the same reason <code>static_enum_failures</code> exists on the Hook side. If you ever see the transition warning, the live line-of-sight feed stopped mid-sortie and Petrovich went quiet rather than wrong; that is the designed failure direction, and the log is the only place it is visible." }
-    ],
-    items: [["done","Fail-closed gate, authorised on flight evidence"],["done","Coverage counter, always on, all three entry points"],["done","Visibility fixed + pinned by a no-override test"],["block","Confirm both lines on a real run"],["open","BL-B46: propagate would double-print in a host"]],
-    src: "body-layer/ROADMAP.md (BL-11 Stage 4), plans/bl11-stage4-fail-closed/dod-check.md, docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md"
-  },
-
   wm: {
     kicker: "world-model/", title: "World Model", chip: ["done", "M0-M10 complete, landforms accepted"],
     facts: [["Scope", "Persistent geographic knowledge of a DCS theatre"], ["Authority", "DCS geometry always wins; OSM augments, never overrides"], ["Last full build", "syria-full, 2026-10-04 23:59 - geomorphons + Latin names"], ["Store", "720 MB, 234,799 ridge/valley lines"]],
@@ -1664,8 +1784,9 @@ const DETAIL = {
     items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive + 12 m tolerance"],["done","HTTP API server"],["done","WM-B6 geomorphons landforms, accepted at theatre scale"],["done","WM-B1 Latin-script place names"],["open","Callout stages 3-5 (adjacency, bearing, phrase)"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["open","Region-scoped builds do not clip terrain to bbox"],["hold","WM-B4/B5 retired into WM-B6"],["hold","Power lines from DCS data"]],
     src: "world-model/ROADMAP.md"
   },
+
   al: {
-    kicker: "aircraft-layer/", title: "Aircraft Layer", chip: ["done", "Core complete, two new channels accepted"],
+    kicker: "aircraft-layer/", title: "Aircraft Layer", chip: ["done", "Core complete; a third Hook, and it reports events"],
     facts: [["Scope", "Live DCS I/O pipeline"], ["Shape", "Export.lua &rarr; Windows collector &rarr; LAN API"], ["Stable since", "2026-09-07"]],
     sections: [
       { h: "What it does", p: "Telemetry, world objects and Petrovich's own indication text out of DCS; text overlay, F10 radio commands and now audio playback back in. It is the only component that talks to DCS, deliberately — everything above it consumes HTTP." },
@@ -1675,11 +1796,13 @@ const DETAIL = {
       { h: "Open: split the export throttle", p: "<code>EXPORT_INTERVAL_S = 0.2</code> is one shared 5 Hz throttle gating all three feeds together. Ground units do not need 5 Hz; self-data may want to stay fast. The fix is two interval constants. Not urgent, because there is no measured cost to react to yet — see below." },
       { h: "Open: measure the real FPS cost", p: "No quantified per-call cost for <code>LoGetWorldObjects</code> exists at realistic unit counts of 50-200 — only forum folklore. The test is to fly with world-objects export on and off at 5, 2 and 1 Hz and diff frame times. Worth checking at the same time whether being fired at is served by this poll at all; nothing currently reads it for threat detection, and urgent callouts may need their own signal." },
       { h: "A found gap in our own documentation", p: "The clickabledata.lua dump that documents Mi-24P controls missed 13 of 749 elements — precisely the ones with more than one action, including both push-to-talk triggers. Listed by hand in a warning box at the top of the reference for now; the generator is the real fix." },
-      { h: "The bridge stopped being a worry and became a foundation", p: "<code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13, and its cost is now measured rather than feared: <strong>568 units at a mean of 1.99 ms, p99 8 ms, about 2.6 &micro;s an item</strong>. That single figure is what makes batched work on the DCS side affordable &mdash; and it is why line of sight moved here: one bridge call per second over every unit <em>and static</em> in the bubble, instead of body-layer asking per candidate across the LAN. Shipped and flown 2026-10-08; gate 4 now fails closed on the result." }
+      { h: "The bridge stopped being a worry and became a foundation", p: "<code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13, and its cost is now measured rather than feared: <strong>568 units at a mean of 1.99 ms, p99 8 ms, about 2.6 &micro;s an item</strong>. That single figure is what makes batched work on the DCS side affordable &mdash; and it is why line of sight moved here: one bridge call per second over every unit <em>and static</em> in the bubble, instead of body-layer asking per candidate across the LAN. Shipped and flown 2026-10-08; gate 4 now fails closed on the result." },
+      { h: "A third Hook, and the first one that reports events", p: "Line of sight and velocity are <em>queries</em>: DCS answers what is true now, and a missed poll costs nothing. The firing-event channel built 2026-10-15/16 is different &mdash; it registers <code>world.addEventHandler</code> in the scripting state, accumulates <code>SHOOTING_START</code>/<code>_END</code> and <code>SHOT</code> in-state and drains them per 1 Hz poll. <strong>An event that is missed is simply gone</strong>, which is why the receiver carries a latch (a minimum visible duration) and a watchdog rather than trusting the feed; the watchdog was raised 10 s &rarr; 180 s mid-review once it was clear it must protect the <em>sustained-fire</em> case and not the destruction case. Per-unit <code>getLife()</code>/<code>getLife0()</code> landed in the same window, riding the existing telemetry loop rather than a new channel. The one number still owed is the per-unit cost of that widened loop, from a real sortie &mdash; this is the one place in the project where cost means cockpit stutter rather than service latency." }
     ],
     items: [["done","Core telemetry pipeline"],["done","/world_objects/latest"],["done","/petrovich_indication/latest"],["done","Text overlay write channel"],["done","F10 command inbound channel"],["done","POST /audio/play"],["done","/unit_velocity/latest - ACCEPTED 2026-09-23"],["done","Push-to-talk channel - ACCEPTED 2026-09-23"],["open","Split the export throttle"],["open","Measure LoGetWorldObjects FPS cost"],["open","Regenerate command-surface reference with a raw-table parser"]],
     src: "aircraft-layer/ROADMAP.md"
   },
+
   mi: {
     kicker: "mission-interpreter/", title: "Mission Interpreter", chip: ["done", "MI-0-MI-6 complete, tested with notes"],
     facts: [["Scope", "Understands one mission, offline, pre-flight"], ["Model", "qwen3:14b for synthesis (MI-4)"], ["First real test", "2026-09-24, three real missions"]],
@@ -1693,9 +1816,10 @@ const DETAIL = {
     items: [["done","MI-0 - real .miz parse"],["done","MI-1 / MI-1.5 - structured extraction"],["done","MI-2 - world enrichment"],["done","MI-3 - understanding schema"],["done","MI-4 - capable-model synthesis"],["done","MI-5 - player questions, console"],["done","MI-6 - runtime compilation"],["done","First real acceptance - passed with notes"],["open","MI-5b - web form"]],
     src: "mission-interpreter/ROADMAP.md, docs/acceptance/2026-09-24-mission-interpreter-sortie.md"
   },
+
   bl: {
-    kicker: "body-layer/", title: "Body Layer", chip: ["active", "BL-13 and BL-12 merged, neither flown"],
-    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["This cycle", "BL-13 crew query path, BL-12 group identity"], ["Flown", "none of it"]],
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Attack run flown; 9K113 and emitters merged"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["This cycle", "BL-14 attack run, 9K113 perception, emitters"], ["Flown", "the attack run, twice, 2026-10-15"]],
     sections: [
       { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state -- never LLM chat history." },
       { h: "The invariant everything serves", p: "Contact identity is <strong>perceptual</strong>, never a DCS object id or any truth field. That is deliberate: Petrovich can confuse two identical trucks, which is exactly the fallibility this project exists to model." },
@@ -1714,13 +1838,18 @@ const DETAIL = {
       { h: "BL-12: group identity, and a measurement that said per-unit identity is unrecoverable", p: "Nearest-neighbour spacing between distinct tracked objects is <strong>16 m median</strong> (p25 6 m, p75 55 m) against an association gate that inflates to <strong>600 m after 30 s unseen</strong>. No radius is both, so identity cannot be recovered from position at the unit grain &mdash; the same fact the group contact model established for <em>resolution</em>, reappearing in <em>identity</em>. At the group grain it inverts: cluster-to-cluster separation is 236 m median. So a remembered <code>Group</code> is now matched against an observed cluster on kind, composition, movement state and plausible displacement, with remembered-but-unseen groups kept for 60 s. Per-class plausible speed replaced a flat 20 m/s worst case for everything (0 for entrenched, 2 infantry, 8 armour, 15 trucks), and heading comes from centroid displacement across reconciles, smoothed, never from a two-look derivation one bad percept can flip." },
       { h: "What the reviews caught that the tests did not", p: "Three findings worth keeping. A callout test had been <strong>silently neutered</strong> by Stage 1's own change &mdash; found by <em>mutating</em> the suppression function and watching the test still pass. The fix sketched in <code>BL-B58</code> turned out to be a <strong>measured no-op</strong>: the absorbing edge already cleared the backstop at 81.9 m against 88.0 m, so the real cause was a 219 m single-tick fold displacement that <em>persists</em>, which kills every tick-local rule. And Stage 4's extent guard covered only half the sentence it was named for: it suppressed the heading but left the bearing spoken, so a 1.2 km group still said <em>12 o'clock, very close</em>. All three were caught by running or mutating, not by reading." },
       { h: "What BL-12 deliberately did not do", p: "Stage 5 (road-following) is skipped <em>entirely</em> &mdash; the whole of it, including the cheap anisotropic half, goes to <code>BL-8</code>, where the ten-minute horizon makes a road decisive and a disc useless. Stage 6 would have shortened <code>OBJECT_ID_MEMORY_S</code> from ten minutes to the belief layer's own 60 s, and is deferred, which means <strong>the omniscience shortcut it would close is still live</strong>: beyond the re-identification window, continuity still rests on a DCS object id rather than on a judgement a crew could make. The milestone's no-omniscience claim holds at the short horizon only, and says so." },
-      { h: "What's next", p: "The flight. Six acceptance cards are queued on <code>main</code> and nothing else in this subproject is worth starting ahead of them, because most of what remains is calibration the air decides. Behind it: sector fairness (<code>BL-B20</code>, needs its own <code>/explore</code>), attention capture, and the question of what he should say about sixteen vehicles in one sector &mdash; which is yours, not the code's." }
+      { h: "What's next (superseded note kept for the record)", p: "The flight. Six acceptance cards are queued on <code>main</code> and nothing else in this subproject is worth starting ahead of them, because most of what remains is calibration the air decides. Behind it: sector fairness (<code>BL-B20</code>, needs its own <code>/explore</code>), attention capture, and the question of what he should say about sixteen vehicles in one sector &mdash; which is yours, not the code's." },
+      { h: "BL-14: the first thing he does that helps you attack", p: "Stages 1-7 merged 2026-10-14 &mdash; <code>select target</code>, <code>step</code> recomputed angularly around ownship's <em>present</em> position on every press, <code>engage</code>/<code>disengage</code>/<code>drop target</code>, qualitative tier-1 alignment guidance (o'clock outside the 12 o'clock sector, \"come left\"/\"a bit left\" inside it, silence meaning aligned), tier 2's obstructed register, and projection for a moving target. Root <code>CLAUDE.md</code> names exactly two things Petrovich owes the pilot &mdash; evade, and <strong>align for attack runs</strong> &mdash; and nothing built before this served the second. Guidance derives from a new ownship-relative datum rather than from map belief, and the target is <strong>exactly one contact</strong>: one azimuth and one elevation cannot point at two places." },
+      { h: "And it flew, twice, and the flight wrote three items", p: "2026-10-15, 16:44 and 17:55. It talked, and what it said was wrong in four ways &mdash; <strong>38% of utterances were dead repeats</strong>, it kept guiding while the target was behind the airframe (<strong>68% of obstructed calls were rear-aspect</strong>), reaching the 12 o'clock sector was silent, and the obstructed qualifier fired for every reason he was not looking rather than the one it means. All four fixed and merged (<code>BL-B70</code>). Two more items came out of it: the optic ladder (<code>BL-B71</code>) and the finding that the register itself has no live caller (<code>BL-B76</code>). <strong>Do not re-fly it over flat desert</strong> &mdash; that terrain cannot judge the part that is left." },
+      { h: "The 9K113 sight, and emitters", p: "Two capabilities merged alongside: the sight's <strong>perception half</strong> (wide and narrow optics, a directional 20 km bubble exemption, non-instant slew, long dwell, per-optic position error, OBSERV by voice) with the cockpit effectors and the ATGM run deliberately behind it in your stated order; and <strong>emitters</strong> &mdash; a burning hull or a firing gun admits at presence out to the player bubble and through canopy, gaze and FOV still applying. The second is the first perception path where the <em>target's</em> behaviour decides whether it is seen." },
+      { h: "What's next, as of 2026-10-16", p: "The three items the sortie itself wrote: move the <code>obstructed</code> lookup to the live gate outcome (<code>BL-B76</code>, after the measurement step), the optic ladder (<code>BL-B71</code>), and the 9K113's cockpit effectors (<code>BL-B66</code>) ahead of the ATGM run. Then the queue: 24 entries carry <code>#needs-flight</code>, and the next sortie has a terrain requirement rather than only a listening list. Behind all of it, unchanged: attention capture has no triggers, uncertainty is still keyed on class rather than on observed movement, and <code>BL-B24</code>/<code>BL-B25</code>'s churn has never been re-measured against the inverted rule." }
     ],
     items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a (angular)"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Watch reporting + standing modes"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Binoculars, voice completeness, precise position - FLOWN"],["done","Group reporting - the disclosure ladder"],["done","Confirm band answerable (merged, unflown)"],["done","Cohesion redesign (merged, unflown)"],["done","10 km player bubble - no observable, waived"],["done","BL-B23 - lost contacts out of clustering"],["done","silence command (merged, unflown)"],["done","Merge-echo + group-disclosure suppression (unflown)"],["done","BL-13 crew query path, stages 1-3 (unflown)"],["done","BL-12 group identity, stages 0-4 + 3.5 (unflown)"],["done","BL-B59 - bounded fold displacement (unflown)"],["done","Forest occlusion stages 1-2 (unflown, off by default)"],["open","BL-B60 - misclassified fast mover tracked worse"],["open","Attention tiers - resolution by attention"],["open","BL-B20 sector fairness"],["open","BL-B24/B25 - inverted, not re-measured"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - common-fate cohesion"]],
     src: "body-layer/ROADMAP.md"
   },
+
   srs: {
-    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Voice out done - speech in flown & accepted"],
+    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Voice out done; two items arrived from elsewhere"],
     facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Speech in", "Stages 1-5, ACCEPTED 2026-09-23"]],
     sections: [
       { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a speech dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced \u2014 the world-model import remains the sole sanctioned exception." },
@@ -1733,7 +1862,8 @@ const DETAIL = {
       { h: "Capture and real PTT -- FLOWN AND ACCEPTED, 2026-09-23", p: "Both the ~0.14 s device-open gap and the two-stage mechanical trigger (a full press transits the intercom stop for 19-32 ms on its way to radio) were resolved live rather than guessed at. The gap: <em>\"is the natural, normal way how aviation radios work\"</em> -- not felt, nothing built to fix it. The trigger: works, and a radio call stays out of it." },
       { h: "The new problem: press-to-readback is ~3 s", p: "Measured the same sortie. A crew member answers in well under a second, so this -- not recognition accuracy -- is what will keep Petrovich feeling like a machine. One component is certain rather than estimated: the logger polls transcripts once a second, so half a second is spent purely waiting to be noticed. Not a candidate fix: a smaller whisper model -- <code>small.en</code> was chosen on wrong-command count, and trading it for speed would buy latency with the one failure the pilot cannot catch." },
       { h: "Stage 6 closed 2026-09-26 without ever being flown", p: "All three questions it existed to ask were answered across the sorties that actually happened. Latency under a second does not read as laggy - and the number it was written to judge turned out not to be the number that matters, since the lag a pilot feels is upstream in speech-to-text. Callouts arriving together are fine now, but not because the queue was graded acceptable: flight feedback changed the mechanism, so callouts are decided at speech time rather than queued ahead, and the behaviour Stage 6 would have judged no longer exists. The voice survives a loud cockpit and is monotonous - \"fine for now\". Ducking against other sound was answered the same day: it behaves well." },
-      { h: "Next", p: "Press-to-readback latency, measured at ~3 s - the lag that actually reads as machine-like. Cockpit audio state stays deferred at the user's direction, though its prerequisite is already gone: the device argument numbers were read off the install." }
+      { h: "Next", p: "Press-to-readback latency, measured at ~3 s - the lag that actually reads as machine-like. Cockpit audio state stays deferred at the user's direction, though its prerequisite is already gone: the device argument numbers were read off the install." },
+      { h: "Two items arrived from other layers, and both belong here", p: "The attack run wanted a pause after a readback; your direction put it in the audio path instead &mdash; <em>\"the 1 s audio gap could live in the audio path. It's fairly natural for humans to pause shortly\"</em>, urgent lines exempt &mdash; so it applies to everything he says rather than to the one feature that noticed. With it: a <strong>feedback channel for when playback has actually stopped</strong>, because the collector knows and the layers above currently predict (<code>AC-B6</code> is the collector half). Separately, adding one command verb measurably widened the set of ordinary sentences that anchor, and your call was <em>\"add attack, fix the anchoring properly\"</em> &mdash; anchor on sentence position or a parseable target slot, not on the word alone." }
     ],
     src: "audio-adapter/ROADMAP.md, docs/acceptance/2026-09-23-voice-command-sortie.md"
   },
@@ -1748,7 +1878,8 @@ const DETAIL = {
       { h: "The one thing this project forbids, and small models do anyway", p: "Small models silently guess. That is incompatible with the no-omniscience invariant, so the model never writes what Petrovich says: it classifies against a closed set and the code owns the language. \"Unable\" carries a reason from a closed set -- <code>NO_SUCH_COMMAND</code>, <code>NO_MATCH</code>, <code>NO_LINE_OF_SIGHT</code> -- because the user's read was that <em>\"unable &lt;because&gt; is of course most useful\"</em>." },
       { h: "Stage 1 shipped with a stub on purpose", p: "<code>StubDecider</code> has a configurable delay and no model behind it, which proved every hard part of the wire -- non-blocking handoff, stand-by after timeout, staleness revalidation, newest-wins -- at zero model risk. It is also why the live acceptance is honest about being nearly unjudgeable: with no intelligence behind the wire, only responsiveness and timing can be assessed." },
       { h: "Stage 2 merged 2026-09-25, and the gap it leaves is the interesting part", p: "The real model is wired, with a body-side validator standing between it and anything acted on. Reviewer approved three times across the loop, Security and Performance both approved. But <strong>no agent that built or reviewed it could reach a real Ollama</strong>, so every proof is against a fake server - the first real-model run belongs to the pilot." },
-      { h: "What's next", p: "Structured candidates, so <code>follow that tank</code> can resolve at all: the validator's rule is right and currently unsatisfiable, because candidate summaries carry no place names or class/type structure for the pilot's words to match. Then Stage 3's answer leg. A thinking tier (BR-8) is planned for questions where delay is acceptable, kept warm for the mission's duration - which needs a mission-start and mission-end trigger from DCS (already firing in three shipped Hook scripts, just never forwarded), and should share its model with the Mission Interpreter." }
+      { h: "What's next", p: "Structured candidates, so <code>follow that tank</code> can resolve at all: the validator's rule is right and currently unsatisfiable, because candidate summaries carry no place names or class/type structure for the pilot's words to match. Then Stage 3's answer leg. A thinking tier (BR-8) is planned for questions where delay is acceptable, kept warm for the mission's duration - which needs a mission-start and mission-end trigger from DCS (already firing in three shipped Hook scripts, just never forwarded), and should share its model with the Mission Interpreter." },
+      { h: "Unmoved for three weeks, and that is a choice", p: "Nothing shipped here this cycle while the body layer grew an attack run, a sight and emitters. That is scheduling rather than neglect &mdash; those three are what the pilot can hear, and the brain's own next step (structured candidates) is cheap to start whenever. What has changed around it: the tool surface it will query grew a <code>collapse(group, depth)</code> tree key, and the queue of merged-but-unflown work it would be tuned against is now 24 entries deep. Its own first real-model run is still owed and still unflown." }
     ],
     items: [["done","BR-1 Stage 1 - the async round trip"],["done","D1-D11 decided, model chosen by measurement"],["active","Stage 2 - the real decider"],["open","Structured candidates (D10 revision)"],["open","Stage 3 - the A/B answer leg"],["hold","BR-8 thinking tier, kept warm per mission"]],
     src: "plans/brain-layer/plan.md, body-layer/ROADMAP.md"
@@ -1807,46 +1938,31 @@ const DETAIL = {
   },
 
   dmg: {
-    kicker: "aircraft-layer/", title: "Damage and fire reporting", chip: ["open", "Ready"],
-    facts: [["Probes", "Flown 2026-09-25, all questions answered"], ["Fire threshold", "life fraction in (0.69, 0.84]"]],
+    kicker: "aircraft-layer/ + body-layer/", title: "Hit and kill reporting", chip: ["open", "Transport built this cycle; the voice is not"]
+    ,facts: [["Probes", "flown 2026-09-25, do not re-fly"], ["Built since", "firing-event Hook + per-unit life"], ["Still unbuilt", "Petrovich saying anything about it"], ["Key correction", "a fire is not attribution"]],
     sections: [
-      { h: "What the probes settled", p: "The mission bridge can subscribe to <code>world.addEventHandler</code>. A ground gun unit's <code>SHOOTING_START</code> names the player as its target, so \"we are being shot at\" needs no inference at all. <code>getLife()</code> and <code>getLife0()</code> work per unit. And gun rounds are <em>not</em> objects in <code>LoGetWorldObjects</code> -- rockets are -- so tracers have to come from the event, not from perception." },
-      { h: "The correction worth keeping", p: "The visible state is <strong>fire, not smoke</strong>, and the user's reading of what that means is the part that changes the callout: <em>\"smoke = damaged, fire -> give it time -> explodes -> dead.\"</em> Fire is terminal. So \"it's burning\" is a report about something already dead, not a target to re-attack -- a wording problem, not a detection one." },
-      { h: "What is still unknown", p: "The exact fire threshold inside the bracketed band, and whether it is global or per-type. One narrow follow-up, not a blocker." }
+      { h: "What the probes settled", p: "A ground gun's <code>SHOOTING_START</code> names the player as its target, so <em>\"we are being shot at\"</em> needs no inference. <code>getLife()</code> works per unit over the mission-scripting bridge. And gun rounds are <strong>not</strong> world objects, so tracers must come from the event rather than from perception. All of it flown and closed; the acceptance note says explicitly not to re-fly it." },
+      { h: "The transport exists now, which is new", p: "Both channels were built for emitters rather than for damage reporting: a production firing-events Hook draining <code>SHOOTING_START</code>/<code>_END</code> and <code>SHOT</code> per poll, and <code>getLife()</code>/<code>getLife0()</code> riding the existing per-unit telemetry loop. So the remaining work is in the <em>voice</em>, not the pipe &mdash; which is a materially smaller item than it was last cycle." },
+      { h: "The correction worth carrying into whoever plans it", p: "<strong>Seeing a fire is not answering \"did we get it\".</strong> A burning hull says something there is already dead or dying; it carries no attribution, and a life fraction carries none either. That distinction kept damage reporting deliberately out of the emitter feature rather than being folded in because the data happened to be there." },
+      { h: "One structural finding from the same pass", p: "The existing threat path keys on <em>classification</em>, so a presence-only contact &mdash; which is all an emitter admits &mdash; would be scheduled at the lowest priority there is. New event kinds are required; reusing the threat path would silently bury the very calls that matter most." }
     ],
-    items: [["done","Probe: shooting events, tracers, life fractions"],["open","Build the damage/fire channel"],["open","Fire threshold inside (0.69, 0.84]"]],
-    src: "aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md"
+    items: [["done","Damage and firing probes - flown, answered"],["done","AC-B8 firing-event channel (for emitters)"],["done","AC-B7 per-unit life (for emitters)"],["open","Hit, kill and being-shot-at callouts"],["open","New event kinds, not the classification-keyed path"]],
+    src: "aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md, plans/emitter-visibility/plan.md"
   },
 
   crewsortie: {
-    kicker: "Waiting on you", title: "Eight cards on main, none flown", chip: ["block", "Sortie"],
-    facts: [["Branch", "main -- everything here is merged"], ["Accepted 2026-10-09", "bubble, LOS tolerance, group disclosure, silence"], ["Still unheard", "confirm band, 09-26 fixes, brain Stage 2, cohesion"], ["Fly with", "--detection-trace"]],
+    kicker: "acceptance", title: "Twenty-four entries, merged and unheard", chip: ["block", "One queue, three of them new capabilities"],
+    facts: [["Tagged needs-flight", "24 entries, four subprojects"], ["New capabilities", "attack run, 9K113 sight, emitters"], ["Cleared this cycle", "BL-13, BL-11, BL-W1, BL-W5"], ["Branch", "main"]],
     sections: [
-      { h: "What is waiting, and why it keeps growing", p: "Group reporting and the 12 m line-of-sight tolerance, the confirm band, the 2026-09-26 crew-behaviour fixes, the brain's first real model, the cohesion redesign, the <code>silence</code> command, and the two fixes that stop the same units being announced twice. All merged, none heard. Most were merged ahead of their flight at your direction &mdash; <em>\"so many things at this stage are intertwined that it's better to test to current HEAD\"</em> &mdash; which is the right call each time and is also exactly why eight cards now sit behind one flight." },
-      { h: "The newest two are the reason to fly now", p: "Merge-echo suppression and the group-disclosure fix both <em>reduce</em> what you hear, and both carry the same accepted cost: a genuine split right after a merge is indistinguishable from an echo at the speech layer and also goes quiet. Every other item on this list fails loudly if it is wrong. These two fail silently, which makes them the hardest thing here to catch and the thing a flight is most needed for. The 17-of-34 suppression figure is a reconstruction from pipeline outputs, not a replay." },
-      { h: "The single calibration answer worth most", p: "Whether the group boundary draws groups where you perceive them. It is 20 unit widths &mdash; about 140 m between neighbouring vehicles &mdash; and it is your own <em>\"I have no definitive answer. Pick something, we'll refine it later.\"</em> Two audible failure directions: too tight and a convoy fragments; too loose and separate clusters merge into a group you do not perceive. The 500 m installation cap and the air-defence class list are single-source-of-evidence guesses in the same position." },
-      { h: "Fly with the detection trace on", p: "The belief-truth log records what Petrovich believes; it <strong>structurally cannot record a candidate he rejected</strong>. That is precisely why the missed-AAA defect needed an offline reproduction to find at all &mdash; the evidence of the miss was the absence of a row. The trace records every visibility call, including the rejections, which is doubly worth having on a flight whose two newest features work by suppression." },
-      { h: "Three things no flight here can judge", p: "<code>follow &lt;descriptor&gt;</code> still cannot pick the right contact &mdash; the validator's rule is right and currently unsatisfiable, so he will correctly ask rather than pick, and that is not a defect to report. The 12 m tolerance will also reveal units genuinely masked by a ridge by less than that: accepted knowingly, watch for it rather than test it. And sector fairness is explicitly not in any of this &mdash; \"all ten units to my left get identified\" is still expected to fail and must not be read as a regression." },
-      { h: "The card that used to sit outside this set has flown", p: "The elevation-cost probe was flown alone on 2026-10-05 and answered both its questions &mdash; <code>land.getHeight</code> works through the bridge, and it <em>does</em> hitch the frame (<em>&ldquo;a small but annoying stutter every few seconds&rdquo;</em>). Worth carrying forward as a habit rather than a card: a second forgotten probe Hook produced another stutter on 2026-10-08, after three hypotheses had been refuted against log evidence while the real cause sat in the Hooks directory. Check that directory holds only the four shipped scripts before any sortie flown to measure anything." }
+      { h: "The queue discharged once, and it paid", p: "A flight finally happened. <code>BL-13</code>'s crew query path was <strong>flown and passed</strong> &mdash; <em>\"describe summary &rarr; initial impression from today is it's good. Pass. Refine later if needed.\"</em> <code>BL-11</code>'s tick cost stopped being a bench number: median realised period 1.017&ndash;1.020 s across three sorties against a 1 Hz target, with p90 1.8&ndash;4.9 s as the honest residual. And a sweep found two older fixes &mdash; merge-echo suppression and the confirm band &mdash; had <strong>already been flown and passed on 2026-10-05</strong> and were being carried as debt on a stale reading. The lesson there is the project's own: the roadmap said what was next, not what had happened." },
+      { h: "The three worth flying first", p: "They are new <em>behaviour</em>, not tuning. <strong>The attack run</strong> with <code>BL-B70</code>'s fixes on top: does the guidance stop repeating itself (38% of utterances were dead repeats), does reaching the 12 o'clock sector get called, and does it go <em>silent</em> rather than talk at a target behind the airframe (68% of <code>obstructed</code> calls were rear-aspect). <strong>The 9K113 sight</strong>: the wide and narrow optics, a long dwell, approximate range, OBSERV by voice &mdash; and restart the service between missions until <code>BL-B68</code> lands. <strong>Emitters</strong>: park an AAA piece well past naked-eye range and listen for presence while it fires, and nothing once it stops." },
+      { h: "The older queue, still owed", p: "<code>BL-12</code>'s group identity (does the churn stop, does <em>\"still moving north\"</em> appear, is anything placed in a group it visibly is not in), <code>BL-B59</code>'s bounded fold &mdash; where what to listen for is a <strong>misclassified fast mover whose position visibly lags</strong>, not silence &mdash; <code>BL-11</code>'s two log lines (which ride along with any sortie and must not re-fly the gate itself), the brain's first real-model run, and the 2026-09-26 crew-behaviour fixes." },
+      { h: "The shared risk, and why it argues for flying rather than merging", p: "Much of the older queue reduces what you hear, and <strong>a genuine contact split immediately after a merge is indistinguishable from a merge echo</strong> at the speech layer, so it also goes quiet. That is an accepted cost on paper; whether it is ever <em>noticed</em> is a cockpit question. Fly with <code>--detection-trace</code> &mdash; the belief log structurally cannot record a <em>rejected</em> candidate, which is exactly the half the quieting work operates on." }
     ],
-    items: [["done","10 km player bubble - ACCEPTED 2026-10-09"],["done","Group disclosure - ACCEPTED 2026-10-09"],["done","silence - ACCEPTED 2026-10-09"],["done","12 m LOS tolerance - ACCEPTED 2026-10-09"],["open","Merge-echo suppression - the silent failure direction"],["open","Cohesion redesign - six delta branches by ear"],["open","Group reporting - one line per group"],["open","Confirm band - cancel, confirm, stop"],["open","2026-09-26 fixes - observability gate, binoculars"],["open","Brain Stage 2 - the model's own language, first time"]],
-    src: "docs/acceptance/2026-10-05-contact-report-flood-sortie.md, 2026-10-04-silence-command.md, 2026-10-01-group-cohesion-sortie.md, 2026-09-29-group-reporting-sortie.md, 2026-09-29-los-tolerance-sortie.md, 2026-09-28-confirm-band-sortie.md, 2026-09-26-sortie-fixes-sortie.md"
+    items: [["done","BL-13 crew query path - FLOWN, PASSED"],["done","BL-11 tick cost - answered from sortie logs"],["done","BL-W1, BL-W5 - found already flown and passed"],["block","Attack run + BL-B70 fixes"],["block","BL-B64 the 9K113 sight"],["block","BL-B73/AC-B8 emitters"],["block","BL-12, BL-B59, BL-11's log lines, the brain's first model"]],
+    src: "grep -rl '#needs-flight' */ROADMAP/ todo/, body-layer/ROADMAP/BL-13.md, body-layer/ROADMAP/BL-11.md"
   },
 
-  gc4b: {
-    kicker: "body-layer/", title: "Seeing through woods, and under real conditions", chip: ["open", "Unblocked, and simplified"],
-    facts: [["Raised", "2026-09-19"], ["Tree question", "CLOSED 2026-10-01 \u2014 a clean negative"], ["Shipping answer", "OSM landcover polygons, already local"]],
-    sections: [
-      { h: "The framing matters more than the list", p: "Every detection test so far was flown in near-perfect visual conditions. That makes the calibration an <strong>upper bound on what is possible</strong>, not a model of what usually happens \u2014 so conditions do not replace it, they multiply down from it. Optics multiply apparent size up, conditions multiply detectability down, and the three calibrated angular thresholds stay fixed in the middle." },
-      { h: "The tree question closed, and the answer removes half the design", p: "The plan split the channels: a statistical per-landcover probability for the eye and binoculars, and the 9K113 sight asking DCS for a real ray to one target. <strong>No DCS call gives tree-aware line of sight.</strong> Probed on the Windows box against vehicles parked inside canopy: <code>isVisible</code>, <code>getIP</code>, <code>searchObjects</code> at every volume and <code>getSurfaceType</code> are all terrain and scenery only. ED's own AI does sample tree geometry \u2014 <code>trees_LOS_test_T4 = true</code> \u2014 but that path is compiled, and DCS Petrovich's own verdict there is an audio file. So the statistical model covers every channel, which it was already built to do, and the fallback became the answer." },
-      { h: "The placements do exist, and are behind a wall hit twice", p: "<code>Syria.surface5</code> holds per-node tree sections \u2014 8,789 in the first 150 MB, each with ~325-346 twelve-byte positions, indexed into a readable 2,665-entry asset table naming six species. Extrapolated, millions of individual trees. But the field table's offsets are not file offsets, and every candidate base gives degenerate clouds: <strong>the identical blocker the elevation decode hit from a different payload.</strong> Two attempts, two payloads, one wall \u2014 which is the transferable finding, and why a third afternoon on it would be wasted. Three files look like tree data and none is: <code>.sd5</code> parses perfectly and is grass and rock clutter, the <code>.ref</code> siblings are meshes of a single tree." },
-      { h: "Vegetation is nearly free", p: "World-model already resolves landcover \u2014 forest, orchard, scrubland, open fields \u2014 and it already reaches the body layer through enrichment. Nothing new has to be extracted from DCS; it simply is not wired to the visibility gate yet. Light level is next; weather needed research before it could be planned; camouflage is deliberately last, because it interacts with all three." },
-      { h: "The research already overturned an assumption", p: "Movement was the standing guess for our biggest gap against ED \u2014 a moving vehicle being far more detectable than a static one, with no term for it in our model. <strong>Neither ED nor we model movement, or dwell.</strong> So it is not catch-up; if it gets built it is a design choice to argue on crew realism rather than parity. That is exactly the kind of thing reading our own code could never have told us." },
-      { h: "And corroborated a decision", p: "ED never exposes a raw numeric range on any crew-facing channel \u2014 only a coarse range bucket, or nothing. Handing our belief layer a ground-truth distance departs from the sim's own conventions as much as from a crew member's senses. Weather also turned out live-readable after all, reversing an assumption recorded a day earlier." },
-      { h: "What is still unknown", p: "Three grep passes found zero consumers of <code>min_contrast_f</code>, <code>min_fog_transparency</code> or <code>extra_eyesight_ratio</code> anywhere in the Mi-24P tree, so the engine-wide <code>Scripts/AI/Detection.lua</code> is where they are most likely used. It is confirmed present in the file listing and has never been read \u2014 the single highest-value thing to open on the Windows box." }
-    ],
-    src: "body-layer/ROADMAP.md, todo/backlog.md (X-B4 closed, X-B31, X-B32), aircraft-layer/research/2026-09-29-tree-los-probe-results.md"
-  },
   gc5: {
     kicker: "body-layer/", title: "Stage 5 - composition", chip: ["hold", "Re-judge after flying"],
     facts: [["Status", "Deliberately unresolved"], ["Decided by", "The next sortie"]],
@@ -1857,6 +1973,7 @@ const DETAIL = {
     ],
     src: "body-layer/ROADMAP.md"
   },
+
   reports: {
     kicker: "body-layer/", title: "Contact report fine tuning", chip: ["open", "Running list"],
     facts: [["Opened", "2026-09-18, from flying with TTS"], ["Shape", "Append as things are noticed"]],
@@ -1868,6 +1985,7 @@ const DETAIL = {
     ],
     src: "body-layer/ROADMAP.md"
   },
+
   services: {
     kicker: "cross-cutting", title: "One command to start the services", chip: ["open", "Gets worse with each service"],
     facts: [["Today", "Four processes, two machines, launched by hand"], ["Coming", "SRS, a brain layer"]],
@@ -1879,6 +1997,7 @@ const DETAIL = {
     ],
     src: "todo/todo.md"
   },
+
   repetition: {
     kicker: "body-layer/", title: "Repetition is better but not gone", chip: ["open", "Reopened 2026-09-23"],
     facts: [["Fixed", "Same-type, same-range, adjacent-clock"], ["Not fixed", "Same-sector, differing range only"]],
@@ -1888,6 +2007,7 @@ const DETAIL = {
     ],
     src: "body-layer/ROADMAP.md"
   },
+
   latency: {
     kicker: "audio-adapter/", title: "Press-to-readback is ~3s", chip: ["open", "Measured 2026-09-23"],
     facts: [["Measured on", "the voice-command sortie"], ["Certain component", "poll interval, 0-1s"]],
@@ -1898,6 +2018,7 @@ const DETAIL = {
     ],
     src: "audio-adapter/ROADMAP.md"
   },
+
   capture: {
     kicker: "body-layer/", title: "Attention capture", chip: ["open", "Standing exposure"],
     facts: [["Created by", "Cones 2C"], ["Status", "Wired, no triggers"]],
@@ -1909,6 +2030,7 @@ const DETAIL = {
     ],
     src: "body-layer/ROADMAP.md"
   },
+
   s2: {
     kicker: "audio-adapter/", title: "Cockpit state drives the audio", chip: ["open", "Next"],
     facts: [["Replaces", "SRS intercom injection"], ["Decided", "2026-09-20"]],
@@ -1920,6 +2042,7 @@ const DETAIL = {
     ],
     src: "audio-adapter/ROADMAP.md"
   },
+
   bl8: {
     kicker: "body-layer/", title: "BL-8 - memory layer interfaces", chip: ["open", "Deliberately gated"],
     facts: [["Decision", "User, 2026-09-10"], ["Gated on", "BL-2..BL-7 flying for real"]],
@@ -1930,6 +2053,7 @@ const DETAIL = {
     ],
     src: "body-layer/ROADMAP.md"
   },
+
   theatre: {
     kicker: "world-model/", title: "Multi-theatre support", chip: ["open", "Approved, unmerged, builds user-run"],
     facts: [["Raised", "2026-09-13"], ["Afghanistan", "built + live-confirmed 2026-10-05"], ["Caucasus + Kola", "implemented, Reviewer APPROVED, unmerged"], ["Blocking", "a user-run build per theatre"]],
@@ -1940,6 +2064,7 @@ const DETAIL = {
     ],
     src: "world-model/ROADMAP.md"
   },
+
   voice: {
     kicker: "audio-adapter/", title: "Voice character", chip: ["hold", "Backlog"],
     facts: [["Deferred at", "TTS slice, Decision 7"], ["Cost to try", "One command per candidate"]],
@@ -1949,6 +2074,108 @@ const DETAIL = {
       { h: "Options when picked up", p: "A different local engine with a suitable voice, a trained or cloned voice, or accepting a generic one permanently. Auditioning is cheap: the local playback target speaks a line on the Mac with nothing else running, so each candidate costs one command." }
     ],
     src: "audio-adapter/ROADMAP.md"
+  },
+
+  obstructed: {
+    kicker: "body-layer/", title: "The register with no live caller", chip: ["open", "Narrowed by you; measure before building"],
+    facts: [["Found", "2026-10-15, in BL-B70's own review"], ["Confirmed by", "tracing the live path, not inference"], ["No-verdict rate", "~8% of gate-4 evaluations, 16:44 sortie"], ["Next step", "a log fix, not a behaviour change"]],
+    sections: [
+      { h: "What is actually wrong", p: "<code>BL-14</code> appends <code>\", obstructed\"</code> when <code>Contact.live_los_clear</code> is <code>False</code>. It never is. Gate 4 of <code>check_visibility</code> is <strong>fail-closed</strong>: a candidate whose line of sight is blocked is <em>rejected</em>, never admitted &mdash; so the field is populated only from already-admitted observations, every member of which is <code>True</code>, and the per-cluster fold can yield <code>True</code> or <code>None</code> and nothing else. <strong>The information is discarded at admission.</strong> Being blocked is not a property belief ever learns; it is a reason the observation did not exist. The feature is correct and its input never arrives." },
+      { h: "Why it is not simply \"delete the word\"", p: "For an <em>already-engaged</em> target, <em>\"I cannot see it right now\"</em> is a fact the crewman genuinely has and the pilot wants &mdash; he knows he is looking at a ridge rather than at the tank, which touches no part of the no-omniscience invariant. The current design cannot express it because admission is all-or-nothing: either the contact updates, or nothing happened." },
+      { h: "Your narrowing, and the two options it deleted", p: "<em>\"On LOS false never arriving. That's correct since the LOS false means we don't see it. But belief is there based on earlier observation. Like in real life, if a unit drives behind a building, I cannot see it, nothing but my brain tells me it is there &hellip; No LOS means no observation, but a LOS a moment ago means it's near where it was. In which case memory and belief serve as guidance.\"</em> So the two candidate fixes that widened what reaches belief are <strong>dead, not deferred</strong>. The gate is right. What is wrong is <em>where the attack run looks</em>: the cause is computed every poll for the target specifically &mdash; mask, terrain, range, or no verdict &mdash; and then thrown away. Reading the live gate outcome needs no change to admission, no new channel, and no widening of belief." },
+      { h: "And the one open sub-question got an instrument instead of a design", p: "<em>\"Before acting on LOS none, we should know how often that happens. As it stands now, log it and then ignore in cockpit behaviour.\"</em> The fail-open <em>unknown</em> arm stays as it is until the rate is known for the attack target. The tripwire built for exactly that measurement had a one-line blind spot: its loop skips every entry whose outcome is not <code>ADMITTED</code>, and a blocked target is by definition not admitted &mdash; so <strong>\"blocked\" and \"no answer yet\" were indistinguishable in the one log built to tell them apart</strong>. Step 1 widened it. An instrument that reports what it cannot see as absent is worse than no instrument." },
+      { h: "The acceptance flight has a terrain requirement", p: "<em>\"Terrain blocked LOS can happen if in mountainous region. Airframe blocking is more common.\"</em> Both 2026-10-15 sorties were over flat desert. The airframe case is already answered by silence, so the sortie that judges this must be <strong>mountainous</strong> or it re-measures a case that barely fires." }
+    ],
+    items: [["done","BL-B70: the qualifier now fires for one meaning only"],["done","Step 1: tripwire splits rejected from no-verdict"],["open","Move the lookup to the live gate outcome"],["block","A mountainous acceptance sortie"],["open","BL-8: memory is what carries the pilot through a block"]],
+    src: "body-layer/ROADMAP/BL-B76.md, docs/acceptance/2026-10-15-attack-run-sortie-feedback.md"
+  },
+
+  ladder: {
+    kicker: "body-layer/", title: "The least-capable-optic guidance ladder", chip: ["open", "Planned; depends on BL-B70's taxonomy"],
+    facts: [["Your direction", "2026-10-15, sections 6 and 7"], ["Rule", "least capable optic that still resolves"], ["Both directions", "escalate, and de-escalate as range closes"], ["Depends on", "BL-B70's cause taxonomy"]],
+    sections: [
+      { h: "The rule", p: "During guidance, Petrovich should use the <em>least</em> capable instrument that can still resolve the target, re-evaluated continuously &mdash; escalating when the current one cannot see it and <strong>de-escalating as the range closes</strong>. The second half is the part a naive reading misses: an optic ladder that only climbs leaves him squinting down a narrow sight at a vehicle that is now 600 m away." },
+      { h: "Why it could not have been built before the flight", p: "An escalation decision needs to know <em>why</em> the current instrument is failing, and until <code>BL-B70</code> there was no such distinction &mdash; every non-look collapsed into one qualifier. That pass introduced a four-way cause taxonomy (<em>masked</em>, <em>obstructed</em>, <em>too far</em>, <em>unknown</em>) computed in the real gate order, which is exactly the input this needs. Range failure argues for escalation; a mask argues for turning the head; terrain argues for neither." },
+      { h: "The 9K113 is a rung, not a separate feature", p: "The sight's perception half shipped with its own optics, dwell shape and position error, so the ladder has a top rung to reach for. Keeping them as one mechanism is what stops \"use the sight\" becoming a special case bolted onto guidance." }
+    ],
+    items: [["done","BL-B70 cause taxonomy, in real gate order"],["done","BL-B64: the sight exists as an optic"],["open","Continuous evaluation, both directions"],["block","The sortie that judges whether it sounds right"]],
+    src: "body-layer/ROADMAP/BL-B71.md, plans/attack-run-sortie-fixes/plan.md"
+  },
+
+  k9113: {
+    kicker: "body-layer/", title: "The 9K113 sight &mdash; perception first, by your reasoning", chip: ["open", "1 of 3 merged; the order is yours"],
+    facts: [["Merged", "BL-B64, 2026-10-15 (ec39c0e)"], ["Split into", "perception, effectors, the ATGM run"], ["Reason for the order", "testability, not cost"], ["Prerequisite", "BL-B65 weapons safety switch"]],
+    sections: [
+      { h: "Why perception went first, in your words", p: "<em>\"Let's start with that, that lets us test the behaviour. We'll then add actually manipulating the systems in cockpit. Only then can we add the ATGM attack run.\"</em> It also depends on nothing outside body-layer, while every cockpit-visible use sits behind a write channel on devices 6/7 that is still unverified. The capability was one backlog item; your direction made it three entries in a fixed order &mdash; and deliberately <em>not</em> an umbrella, which would have sat open indefinitely and made the backlog unreadable." },
+      { h: "What shipped", p: "Wide and narrow optics with their own angular limits, a <strong>directional 20 km player-bubble exemption</strong> rather than a global one, a non-instant slew, a long-dwell timing shape, per-optic position error (so a sight seeing to 8 km no longer reports naked-eye-grade range), and OBSERV on a voice command. The F10 menu item was skipped by your direction and belongs to the effector entry. One security finding was worth the pass on its own: the sight's <em>field of regard</em> was not enforced at look selection, so it could be aimed where the real instrument cannot point." },
+      { h: "What is left, and the one thing in front of it", p: "<code>BL-B66</code> makes the real systems move &mdash; warm-up sequence, OBSERV as an actual mode, the slew closed loop, pinpoint-on-request. Then <code>BL-B67</code> is the ATGM run: azimuth-only guidance, in-range/out-of-range, the launch callout, impact, resetting the guidance transmitter. Sitting in front of the run and belonging to neither: <code>BL-B65</code>, the weapons safety circuit switch as its own cockpit action &mdash; your own line, <em>\"this should be its own roadmap item before ATGM attack run.\"</em>" },
+      { h: "A flying instruction attaches to this one", p: "Its acceptance card says to <strong>restart the body-layer service between missions</strong> until <code>BL-B68</code> lands &mdash; nothing resets belief on a DCS mission reload, so the previous mission's contacts otherwise follow you into the next one." }
+    ],
+    items: [["done","BL-B64 perception - optics, slew, dwell, sigma"],["done","BL-B55 closed inside it: per-optic position error"],["open","BL-B66 effectors - the cockpit systems move"],["open","BL-B65 weapons safety circuit switch"],["open","BL-B67 the ATGM attack run"],["block","BL-B64's own acceptance sortie"]],
+    src: "body-layer/ROADMAP/BL-B64.md, docs/concept/9K113.md, docs/acceptance/2026-10-15-9k113-sight-direction.md"
+  },
+
+  emitters: {
+    kicker: "body-layer/ + aircraft-layer/", title: "Emitters &mdash; when the target gives itself away", chip: ["open", "Two of three built; the third has a new shape"],
+    facts: [["Your direction", "2026-10-15, three emitter kinds"], ["Built", "burning (Stage A), gun fire (Stage B)"], ["Bypassed gates", "range/size and tree cover only"], ["Tier clamp", "presence, never class or type"]],
+    sections: [
+      { h: "Why this is more than its size", p: "It is <strong>the first perception path where the target's own behaviour decides whether it is seen</strong>, rather than the observer's instrument or the geometry. Everything before it is a function of range, size, optic and occlusion. And it closes a gap the pilot meets immediately: a unit shooting from 4 km was invisible, because that is past the naked eye's ~2.3 km presence threshold for a 7 m vehicle. <strong>The thing most worth telling you about was the hardest for Petrovich to see.</strong> Measured on the 17:55 sortie, where the attack target sat unresolvable between 2.6 and 2.36 km for fifteen seconds." },
+      { h: "The asymmetry is the whole feature", p: "Gaze still applies &mdash; he must be looking that way. The cockpit mask still applies. The optic's field of view still applies, in your own words: <em>\"with optic where FOV allows seeing.\"</em> What is bypassed is <strong>range/size and tree cover</strong>, out to the player bubble: <em>\"a unit firing from a forest gives its location away.\"</em> And it admits at presence only, clamped in code &mdash; a flash at 9 km says <em>something is shooting there</em>, not <em>that is a BMP-2</em>." },
+      { h: "Three kinds, and what each cost", p: "<strong>Burning</strong> (Stage A) needed no new transport at all &mdash; <code>getLife()</code>/<code>getLife0()</code> ride the existing per-unit telemetry loop, and burning is a polled state rather than an event, which keeps the resolver a pure function of this poll. <strong>Gun fire</strong> (Stage B) needed the production firing-event Hook, because machine-gun and autocannon fire routes to <code>SHOOTING_START</code> while missiles route to <code>SHOT</code> &mdash; and that split is why the feature became two stages rather than one. <strong>SAM smoke</strong> (<code>BL-B74</code>) is the one left, and it is the first perception source with a <em>decaying external lifetime</em>: the smoke outlives the event, so it reports where the launcher <em>was</em>, which belief already models, and must never read as where one is now." },
+      { h: "A correction worth keeping", p: "Seeing a fire is <strong>not</strong> answering \"did we get it\". A burning hull says something there is already dead or dying; it carries no attribution, and neither does a life fraction. That kept damage <em>reporting</em> out of this feature deliberately rather than by omission." },
+      { h: "The risk the plan named rather than discovered", p: "The LOS Hook's nearest-first 128-sightline cap drops the <em>far</em> candidates &mdash; which is exactly where a firing unit is interesting. With a fail-closed LOS gate, a dense scene can silently neuter the whole feature. That is <code>BL-B42</code>, and the emitter work is why it stopped being a tidiness item." }
+    ],
+    items: [["done","AC-B7: per-unit life on the telemetry loop"],["done","Stage A: the shared bypass + burning hulls"],["done","AC-B8: production firing-event channel"],["done","Stage B: BL-B73 gun fire out to the bubble"],["open","BL-B74: SAM launch smoke, decaying"],["hold","BL-B75: static smoke and flares, if exportable"],["block","An emitter sortie: AAA past naked-eye range"]],
+    src: "body-layer/ROADMAP/BL-B72.md, body-layer/ROADMAP/BL-B73.md, body-layer/ROADMAP/BL-B74.md, aircraft-layer/ROADMAP/AC-B8.md"
+  },
+
+  tuning: {
+    kicker: "cross-cutting", title: "Behaviour constants are a file you edit", chip: ["active", "Stages 1-2 of 5; now standard practice"],
+    facts: [["Your ask", "2026-10-14, a User priority task"], ["Shipped", "loader + ~15 keys + defaults.toml"], ["Values moved", "none; 1870 tests unchanged"], ["Now", "standard practice for new constants"]],
+    sections: [
+      { h: "The ask, and the narrowing you accepted", p: "<em>\"Go through the code files and find all magic constants &hellip; then gather the declared constants and make them configurable via configuration files &hellip; add proper but short description of what each constant does.\"</em> Offered the narrowing that what matters is the <strong>behaviour-affecting</strong> ones rather than every literal in the tree, your answer was yes. So a constant that changes what Petrovich sees, says, remembers or waits for is declared with bounds and a comment; a buffer size or a format width stays an ordinary literal." },
+      { h: "It became a rule, not a one-off", p: "Your words once it shipped: <em>\"X-T26 pattern must become standard practice from now on.\"</em> It is now in the implementer and reviewer role definitions, so new behaviour constants arrive this way rather than as literals somebody later has to find." },
+      { h: "Three traps, all measured rather than reasoned about", p: "Constants bind <em>by value</em> at import, so a module that imported the old literal keeps it; <code>lo</code>/<code>hi</code> bounds must be AST literals to be extractable; and per-key bounds cannot catch <strong>cross-key couplings</strong> &mdash; two individually-valid values that are invalid together, which crashed the loader until it was fixed. And the habit worth repeating: check the <em>rendered</em> TOML, not the source comment it was generated from. The generator emits only the first sentence, so a warning written second reaches nobody &mdash; which survived three review passes by readers reading the diff." },
+      { h: "The right order for what is left, found by its own DoD", p: "Stages 3 (~80 more body-layer keys), 4 (audio-adapter) and 5 (world-model query path) are deferred by your own decision, not waived. The milestone's own inspect-and-adapt finding: fix the generator's rendering contract (<code>X-B37</code>) <strong>before</strong> 80 more keys run through it. Three review passes found rendering defects on just 15 keys; doing it after would mean rewriting ~95 blocks instead of 15." }
+    ],
+    items: [["done","Stage 1-2: loader, 15 keys, defaults.toml, --print-tuning"],["done","Promoted to standard practice in the role definitions"],["open","X-B37: settle the generator's rendering contract"],["open","Stage 3: ~80 remaining body-layer keys"],["open","Stages 4-5: audio-adapter, world-model"],["open","X-B36: tools/ is outside every lint gate"]],
+    src: "todo/todo/X-T26.md, plans/configurable-constants/dod-check.md, body-layer/CLAUDE.md"
+  },
+
+  perm: {
+    kicker: "body-layer/", title: "Two defects from one test flight", chip: ["open", "One deferred by you, one filed untriggered"],
+    facts: [["Symptom", "a belief-truth tripwire at 532 km"], ["Cause", "nothing resets belief on mission reload"], ["Your call", "defer the mission lifecycle"], ["Neighbour", "BL-B69, no confirmed live trigger"]],
+    sections: [
+      { h: "What the tripwire was actually telling us", p: "A 532 km belief-versus-truth divergence looked like a position defect and was not one. The collector holds every piece of belief state in plain dataclass fields with <strong>no lifecycle hook</strong>, so a DCS mission reload inside one service run carries the whole of the previous mission's belief into the next one. Diagnosed from your own test flight rather than from a fixture." },
+      { h: "Deferred, with an instruction in its place", p: "Your direction: defer the mission end/start mechanics and do them together, later. So the live consequence is an <em>operating instruction</em> rather than a bug for now &mdash; restart the body-layer service between missions, which is written on the 9K113 acceptance card because that is the sortie most likely to hit it." },
+      { h: "The neighbour, filed on its merits", p: "<code>BL-B69</code>: <code>_resolve_continuity</code>'s object-permanence shortcut bypasses the spatial and class gate entirely, so two genuinely different objects could be folded into one contact <strong>with no distance check anywhere in the path</strong>. There is no confirmed live trigger &mdash; it was found while reading the path for something else. That is worth filing precisely because an untested-but-accepted edge case is this project's own recurring regression shape." }
+    ],
+    items: [["done","Diagnosed: stale ContactStore across a mission restart"],["hold","BL-B68: mission lifecycle, deferred by you"],["open","BL-B69: object-permanence shortcut skips the gate"],["done","Operating instruction on the 9K113 card"]],
+    src: "body-layer/ROADMAP/BL-B68.md, body-layer/ROADMAP/BL-B69.md, plans/position-belief-runaway/debug-2026-10-15.md"
+  },
+
+  mountain: {
+    kicker: "acceptance", title: "The obstructed sortie needs mountains", chip: ["block", "A terrain requirement, not an ears requirement"],
+    facts: [["Both 10-15 sorties", "flat desert"], ["Your read", "terrain blocks in mountains; airframe is common"], ["Airframe case", "already answered by silence"], ["Also clear now", "BL-14 may be re-flown"]],
+    sections: [
+      { h: "Why the terrain is the requirement", p: "<code>\", obstructed\"</code> means DCS line of sight &mdash; terrain or buildings &mdash; by your own settlement of the question. Over flat desert that case barely occurs, and the common case there is the airframe itself, which <code>BL-B70</code> §2 now answers with <em>silence</em> rather than a word. So a repeat sortie over the same ground would measure the same nothing. This is the first acceptance request on this board that constrains <strong>where</strong> you fly." },
+      { h: "What it should establish", p: "Two things. Whether the qualifier fires at all when a ridge is genuinely between the aircraft and the target &mdash; and separately, the rate of the <em>no fresh verdict</em> case for the attack target specifically, which is log-only by your direction and must not be given a word of its own until the rate is known." },
+      { h: "One constraint lifted", p: "<code>BL-14</code>'s entry said <em>do not re-fly until the fixes land</em>, because a repeat would only reproduce known defects. They have landed, so the attack run is open for flying again &mdash; and this sortie can carry both." }
+    ],
+    items: [["done","BL-B70 shipped: the four defects fixed"],["done","Step 1: the measurement instrument widened"],["block","A mountainous attack run"],["open","Then: move the lookup to the live gate outcome"]],
+    src: "body-layer/ROADMAP/BL-B76.md, body-layer/ROADMAP/BL-14.md"
+  },
+
+  apath: {
+    kicker: "audio-adapter/ + aircraft-layer/", title: "The audio path owes a pause and a verb anchor", chip: ["open", "Both arrived from other layers' work"]
+    ,facts: [["Filed", "2026-10-14, from BL-14 and the voice vocabulary"], ["The gap", "1 s after a spoken line, urgent exempt"], ["Feedback channel", "playback has actually stopped"], ["Collector half", "AC-B6"]],
+    sections: [
+      { h: "Where the one-second gap belongs", p: "The attack run wanted a delay after a readback. Your answer put it one layer down: <em>\"the 1 s audio gap could live in the audio path. It's fairly natural for humans to pause shortly.\"</em> Urgent lines are exempt. This is the better home for it &mdash; a pause enforced in the audio path applies to everything Petrovich says, rather than to the one feature that noticed it was missing." },
+      { h: "And the layers above should stop predicting", p: "<em>\"It'd also be good to have a feedback channel to body/brain of when speaking (= audio playback) has stopped.\"</em> Today the body layer estimates when he has finished; the collector actually knows, because a single <code>winsound</code> worker thread plays the WAV. <code>AC-B6</code> is that half." },
+      { h: "The verb anchoring, and the measurement behind your call", p: "Adding one command verb widened the set of <em>ordinary</em> sentences that anchor &mdash; measured, not feared. Shown three options with the collision in front of you, your answer was <em>\"add attack, fix the anchoring properly\"</em>: anchor on sentence position or on a parseable target slot, not on the word alone. Until that lands, every new verb is a small widening of the false-trigger surface." }
+    ],
+    items: [["open","AA-B5: the 1 s gap in the audio path"],["open","AA-B5: playback-stopped feedback channel"],["open","AC-B6: the collector half of that signal"],["open","AA-B4: anchor on position, not on the word"]],
+    src: "audio-adapter/ROADMAP/AA-B4.md, audio-adapter/ROADMAP/AA-B5.md, aircraft-layer/ROADMAP/AC-B6.md"
   }
 };
 
