@@ -264,6 +264,88 @@ def test_callout_priority_ranks_newer_event_above_older_at_same_range() -> None:
     assert callout_priority(facts, newer, 5.0) < callout_priority(facts, older, 5.0)
 
 
+def test_callout_priority_firing_seen_outranks_an_ordinary_priority_attention_event() -> (
+    None
+):
+    """`plans/emitter-visibility/plan.md` Stage B, finding 2 -- a
+    `CONTACT_FIRING_SEEN` candidate must not be buried behind even the
+    highest *ordinary* attention rank, because its urgency is independent
+    of `-attention_rank` entirely (its own `threat_band` already sorts
+    ahead of `_DEFAULT_THREAT_BAND` before attention is ever consulted)."""
+    firing_event = Event(
+        id="E1",
+        contact_id="C1",
+        kind="CONTACT_FIRING_SEEN",
+        t_sim=0.0,
+        certainty="observed",
+    )
+    ordinary_event = Event(
+        id="E2",
+        contact_id="C2",
+        kind="CONTACT_DETECTED",
+        t_sim=0.0,
+        certainty="observed",
+    )
+    firing_facts: dict[str, object] = {"attention": "normal"}
+    priority_facts: dict[str, object] = {"attention": "priority"}
+
+    assert callout_priority(firing_facts, firing_event, 0.0) < callout_priority(
+        priority_facts, ordinary_event, 0.0
+    )
+
+
+def test_callout_priority_firing_targeting_ownship_outranks_firing_not_targeting() -> (
+    None
+):
+    """*"Taking fire"* is more urgent than *"something firing... far"* --
+    `_FIRING_TARGETS_OWNSHIP_THREAT_BAND` is strictly below `_FIRING_
+    THREAT_BAND`."""
+    targeting = Event(
+        id="E1",
+        contact_id="C1",
+        kind="CONTACT_FIRING_SEEN",
+        t_sim=0.0,
+        certainty="observed",
+        targets_ownship=True,
+    )
+    not_targeting = Event(
+        id="E2",
+        contact_id="C2",
+        kind="CONTACT_FIRING_SEEN",
+        t_sim=0.0,
+        certainty="observed",
+        targets_ownship=False,
+    )
+    facts: dict[str, object] = {"attention": "normal"}
+
+    assert callout_priority(facts, targeting, 0.0) < callout_priority(
+        facts, not_targeting, 0.0
+    )
+
+
+def test_callout_priority_firing_not_targeting_still_outranks_default_band() -> None:
+    not_targeting = Event(
+        id="E1",
+        contact_id="C1",
+        kind="CONTACT_FIRING_SEEN",
+        t_sim=0.0,
+        certainty="observed",
+        targets_ownship=False,
+    )
+    ordinary = Event(
+        id="E2",
+        contact_id="C2",
+        kind="CONTACT_DETECTED",
+        t_sim=0.0,
+        certainty="observed",
+    )
+    facts: dict[str, object] = {"attention": "normal"}
+
+    assert callout_priority(facts, not_targeting, 0.0) < callout_priority(
+        facts, ordinary, 0.0
+    )
+
+
 # --- report_priority (plans/voice-command-completeness/plan.md) ------------
 
 

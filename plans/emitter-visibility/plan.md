@@ -160,7 +160,11 @@ cluster keeps the ordinary value, following `Cluster.classification_raw`'s exist
     take an emitter provenance.
 12. One sortie per stage, read through the detection trace's new `emitter_kind` column. Stage A's
     acceptance is the one that retunes `FIRE_LIFE_FRACTION_MAX`; Stage C's retunes
-    `LAUNCH_SMOKE_DISSIPATION_S`.
+    `LAUNCH_SMOKE_DISSIPATION_S`. **Stage B's acceptance must additionally answer the open DCS
+    question above**: does `S_EVENT_SHOOTING_START` retrigger during a sustained burst? Hold a
+    unit firing continuously at the player past `FIRING_WATCHDOG_S` (180 s) and confirm from the
+    detection trace whether the sighting ever drops while the unit is still visibly firing, and
+    whether further `START` events appear in the log during the same burst.
 
 ---
 
@@ -330,6 +334,19 @@ rather than a probe.
   theatre-wide. That is a provenance concern, not a leak — the emitter map is intersected with the
   bubble-filtered candidate list before any gate sees it, and the LOS/gaze/mask gates still stand.
   Worth one explicit test: no emitter ever bypasses a gate the user said still applies.
+- **Whether `S_EVENT_SHOOTING_START` retriggers during a sustained burst, or fires once per
+  trigger-pull, is unconfirmed** (raised in Stage B review, `AC-B8`/`BL-B73`). The project's own
+  prior research already flagged this exact question as open —
+  `aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md:178-179`,
+  *"Whether `S_EVENT_SHOOTING_START` fires once per burst or is retriggered mid-burst is **not
+  documented**"* — and the Lua handler's own one-shot `PB_ACTIVE_FIRING_UNITS[initName] = true`
+  write implements the no-retrigger assumption with no mid-burst refresh. If that assumption is
+  right, `EmitterTracker`'s `FIRING_WATCHDOG_S` (`aircraft-layer/src/collector/firing_receiver.py`)
+  is the only thing standing between a long, uninterrupted burst and a silently-dropped sighting —
+  raised to `180.0` s as a conservative floor pending a live answer, not a measured one. **Needs a
+  live sortie**: hold a unit firing continuously at the player past 180 s (or confirm from the
+  detection trace that `START` events repeat during one continuous burst) before this value's true
+  safe floor — or whether a watchdog is even the right mechanism here — is known.
 
 ---
 

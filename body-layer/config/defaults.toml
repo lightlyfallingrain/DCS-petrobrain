@@ -112,6 +112,11 @@ SCAN_PLAN = [12, 11, 10, 9, 12, 1, 2, 3]
 # source: perception/naked_eye_source.py:ATTACK_TARGET_LOS_MAX_AGE_S
 ATTACK_TARGET_LOS_MAX_AGE_S = 1.5
 
+# plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the maximum age, in sim seconds, a `GET /firing/latest` snapshot's own `dcs_model_time_s` may be before its join onto this poll's world-objects snapshot is discarded (same shape/reasoning as `LOS_MAX_AGE_S` above).
+# status: judgement | range: 1.0 .. 15.0
+# source: perception/naked_eye_source.py:FIRING_MAX_AGE_S
+FIRING_MAX_AGE_S = 3.0
+
 [perception.visibility]
 # Type tier ("that specific BMP variant"): a *smaller* value here means a *longer* naked-eye type-ID range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.25 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
 # status: measured | range: 0.002 .. 0.08

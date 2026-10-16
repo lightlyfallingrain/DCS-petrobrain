@@ -87,6 +87,7 @@ from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_ENGAGEMENT_CHANGED,
+    CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     EVENT_COOLDOWN_S,
@@ -96,6 +97,7 @@ from belief.events import (
     burning_event_kind,
     cardinality_event,
     classification_event,
+    firing_event_kind,
     lifecycle_event_kind,
     motion_event_kind,
 )
@@ -379,6 +381,18 @@ class Contact:
     events.burning_event_kind`'s comparison -- written only by
     `ContactStore.tick`, never by `record`.
 
+    `is_firing`/`firing_targets_ownship`/`last_emitted_firing`
+    (`plans/emitter-visibility/plan.md` Stage B, `BL-B73`) are `is_burning`/
+    `last_emitted_burning`'s direct siblings: `is_firing` is written
+    directly by `record`/`from_percept` from `percept.emitter_kind ==
+    EmitterKind.FIRING.value`, the same overwritten-not-folded posture;
+    `firing_targets_ownship` rides alongside it from `percept.
+    targets_ownship`, written only when `is_firing` is also being set this
+    look (so a stale `True` from an earlier firing look cannot survive
+    into a later, non-firing percept's targets_ownship read -- see
+    `record`'s own comment); `last_emitted_firing` is `last_emitted_
+    burning`'s twin, for `belief.events.firing_event_kind`'s comparison.
+
     `last_event_emitted_sim` is BL-4's per-contact-per-kind emission
     cooldown state (`belief.events.EVENT_COOLDOWN_S`): the `t_sim` at which
     an event of each `EventKind` was last actually appended to the log for
@@ -437,6 +451,12 @@ class Contact:
     #: class docstring's paragraph on `is_burning`/`last_emitted_burning`.
     is_burning: bool = False
     last_emitted_burning: bool | None = None
+    #: `plans/emitter-visibility/plan.md`, `BL-B73` Stage B -- see the
+    #: class docstring's paragraph on `is_firing`/`firing_targets_ownship`/
+    #: `last_emitted_firing`.
+    is_firing: bool = False
+    firing_targets_ownship: bool = False
+    last_emitted_firing: bool | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
     #: `plans/watch-reporting/plan.md` Decision 5's kilometre-crossing
     #: bookkeeping -- the whole-kilometre band this contact was last
@@ -679,6 +699,18 @@ class Contact:
         # folded (class docstring's own paragraph on why there is nothing
         # to fold for a flat boolean).
         self.is_burning = percept.emitter_kind == EmitterKind.BURNING.value
+        # `BL-B73` Stage B -- same overwrite posture. `firing_targets_
+        # ownship` is written in the same statement as `is_firing`, both
+        # from this percept alone: if this look is not a firing look at
+        # all, `percept.targets_ownship` is always `False` anyway
+        # (`Percept`'s own docstring), so there is no risk of a stale
+        # `True` surviving -- but writing them together, rather than
+        # `firing_targets_ownship` unconditionally, keeps the two fields
+        # readable as one fact ("is it firing, and if so at us") rather
+        # than two independently-overwritten ones that could in principle
+        # be read mid-update.
+        self.is_firing = percept.emitter_kind == EmitterKind.FIRING.value
+        self.firing_targets_ownship = self.is_firing and percept.targets_ownship
         self.last_percept = percept
         self._extend_or_open_span(percept)
 
@@ -755,6 +787,16 @@ class Contact:
             # event_kind`'s "contact, and it's moving" reasoning), not
             # suppressed as a same-tick redundant pair.
             is_burning=percept.emitter_kind == EmitterKind.BURNING.value,
+            # `BL-B73` Stage B -- a contact founded already firing is real
+            # information, the same "contact, and it's moving" reasoning
+            # `motion_event_kind`'s own docstring already gives for
+            # founding-tick evidence, mirrored by `burning_event_kind`'s
+            # comment just above for the burning case.
+            is_firing=percept.emitter_kind == EmitterKind.FIRING.value,
+            firing_targets_ownship=(
+                percept.emitter_kind == EmitterKind.FIRING.value
+                and percept.targets_ownship
+            ),
             last_percept=percept,
         )
         contact.contributing_observation_ids.append(percept.observation_id)
@@ -1545,6 +1587,36 @@ class ContactStore:
                 )
                 contact.last_event_emitted_sim[CONTACT_BURNING_SEEN] = now_sim
             contact.last_emitted_burning = contact.is_burning
+
+            # `plans/emitter-visibility/plan.md`, `BL-B73` Stage B --
+            # `is_firing`'s direct sibling block, same no-`observable_or_
+            # grace`-check reasoning as `CONTACT_BURNING_SEEN` just above
+            # (`CalloutScheduler.tick`'s own gate already covers every
+            # `_TEMPLATED_KINDS` member uniformly at speak-time). Unlike
+            # burning, this kind *is* exempt from that gate at the speech
+            # layer for its own reason -- see `belief.callouts.
+            # _OBSERVABILITY_EXEMPT_KINDS`'s docstring for why it is not
+            # listed there either: the exemption bar is about *silencing*
+            # an already-watched threat cue, which does not apply to a
+            # kind this gate does not suppress in the first place.
+            firing_kind = firing_event_kind(
+                contact.last_emitted_firing, contact.is_firing
+            )
+            if firing_kind is not None and self._cooldown_elapsed(
+                contact, CONTACT_FIRING_SEEN, now_sim
+            ):
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_FIRING_SEEN,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                        targets_ownship=contact.firing_targets_ownship,
+                    )
+                )
+                contact.last_event_emitted_sim[CONTACT_FIRING_SEEN] = now_sim
+            contact.last_emitted_firing = contact.is_firing
 
             current_attention, _area_id = effective_attention(
                 contact.attention, contact.last_position, self.areas

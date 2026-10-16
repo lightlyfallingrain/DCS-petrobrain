@@ -49,6 +49,12 @@ produces no event, the same first-tick convention as the other two kinds.
 function's own docstring for why it fires only on the entering transition,
 unlike every other comparison in this module.
 
+`firing_event_kind` is Stage B's (`BL-B73`) direct sibling, over `belief.
+contacts.Contact.is_firing` instead of `is_burning` -- same one-directional
+shape, same reasoning (gun fire has no accepted "stopped firing" callout
+either, and a contact simply not being re-observed says nothing confident
+about whether it stopped firing or merely went out of view).
+
 `motion_event_kind` is `plans/movement-detection/plan.md` Stage 3's twin,
 over `belief.motion.MotionBelief.state` (`"moving"`/`"stopped"`) instead of
 `Certainty`/`ClassificationBelief`/`Attention` -- the project's first
@@ -119,6 +125,7 @@ EventKind = Literal[
     "CONTACT_RANGE_CROSSED",
     "CONTACT_ENGAGEMENT_CHANGED",
     "CONTACT_BURNING_SEEN",
+    "CONTACT_FIRING_SEEN",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -157,6 +164,19 @@ CONTACT_ENGAGEMENT_CHANGED: Final[EventKind] = "CONTACT_ENGAGEMENT_CHANGED"
 #: either -- it rides `callout_priority`'s ordinary attention-based
 #: ordering unchanged.
 CONTACT_BURNING_SEEN: Final[EventKind] = "CONTACT_BURNING_SEEN"
+#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- a contact's
+#: `Observation.provenance` became one of `naked_eye_source.py`'s two
+#: `PROVENANCE_EMITTER_FIRING*` values (`belief.contacts.Contact.
+#: is_firing` went from not-firing to firing). **Also deliberately not
+#: routed through `belief.threat.envelope_for`**, for the identical reason
+#: `CONTACT_BURNING_SEEN` is not -- but unlike burning, this *is* a threat
+#: cue (*"something there is dangerous now"*, the plan's own contrast with
+#: burning's *"something there is already dead or dying"*), so it needs an
+#: elevated priority the ordinary attention-based ordering does not give
+#: it. `belief.callouts.callout_priority` special-cases this kind (and its
+#: `targets_ownship` variant more so) rather than reusing a classification-
+#: derived band -- see that function's own docstring.
+CONTACT_FIRING_SEEN: Final[EventKind] = "CONTACT_FIRING_SEEN"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 
@@ -236,6 +256,15 @@ class Event:
     #: `False` means "now believed outside it" (a safe-from call).
     previous_engaged: bool | None = None
     engaged: bool | None = None
+    #: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`)'s addition --
+    #: only a `CONTACT_FIRING_SEEN` event populates this, from the
+    #: contact's own `Contact.firing_targets_ownship` at the moment the
+    #: event fires. `False` is the default, same as every other kind that
+    #: does not use it -- not a tri-state, because "unknown whether it
+    #: targets ownship" is not a state `belief.contacts.Contact.record`
+    #: ever produces (`Percept.targets_ownship` is itself a plain `bool`,
+    #: never `None`).
+    targets_ownship: bool = False
 
 
 def lifecycle_event_kind(
@@ -356,6 +385,25 @@ def burning_event_kind(previous: bool | None, current: bool) -> EventKind | None
     was_burning = previous is True
     if current and not was_burning:
         return CONTACT_BURNING_SEEN
+    return None
+
+
+def firing_event_kind(previous: bool | None, current: bool) -> EventKind | None:
+    """`plans/emitter-visibility/plan.md` Stage B's (`BL-B73`) direct
+    sibling of `burning_event_kind` just above, over `belief.contacts.
+    Contact.is_firing` instead of `is_burning`. Same shape, same reasoning:
+    fires only on the entering transition (not-firing -> firing), never
+    the reverse -- there is no accepted *"stopped firing"* callout (the
+    accepted wording only has *"taking fire"*/*"something firing... far"*,
+    both describing an active state), and a contact that stops being
+    re-observed says nothing confident about whether it actually stopped
+    firing or merely passed out of view. `previous is None` (first tick)
+    is treated as not-firing, the same convention `burning_event_kind`
+    follows -- a contact founded already firing still gets one
+    `CONTACT_FIRING_SEEN`."""
+    was_firing = previous is True
+    if current and not was_firing:
+        return CONTACT_FIRING_SEEN
     return None
 
 

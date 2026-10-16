@@ -148,3 +148,42 @@ def test_los_code_prefix_sets_both_globals_the_bridged_chunk_reads() -> None:
     # And the bridged body actually reads both names back.
     assert "MAX_SIGHTLINES" in text
     assert "BUBBLE_RADIUS_M" in text
+
+
+# --- AC-B8's sort-key splice (plans/emitter-visibility/plan.md Stage B) ----
+
+
+def test_candidate_sort_reads_the_active_firing_units_global() -> None:
+    """The 128-sightline-cap mitigation: a currently-firing unit must sort
+    ahead of every non-firing one, regardless of range, so the
+    nearest-first truncation can never drop it. No DCS-side test harness
+    exists for this (same limitation the module docstring states for the
+    rest of this file), so this is a static guard that the mechanism is
+    actually wired into the sort comparator, not a behavioural proof."""
+    text = _LUA_PATH.read_text(encoding="utf-8")
+    assert "local firingUnits = PB_ACTIVE_FIRING_UNITS or {}" in text
+    # The comparator must consult `firingUnits` for *both* candidates
+    # before falling back to a plain range comparison -- a comparator
+    # that only checked one side would not actually reorder anything.
+    sort_call = re.search(
+        r"table\.sort\(candidates, function\(a, b\)(.*?)end\)", text, re.DOTALL
+    )
+    assert sort_call is not None, "candidates table.sort call not found"
+    body = sort_call.group(1)
+    assert "firingUnits[a.name]" in body
+    assert "firingUnits[b.name]" in body
+    assert "a.rangeM < b.rangeM" in body
+
+
+def test_los_code_prefix_still_sorts_nearest_first_within_each_group() -> None:
+    """The splice changes *which* group a candidate sorts into, not the
+    within-group order -- the module docstring's own "sorts by range
+    within that group the same as before" claim, checked against the
+    actual comparator body rather than only asserted in prose."""
+    text = _LUA_PATH.read_text(encoding="utf-8")
+    sort_call = re.search(
+        r"table\.sort\(candidates, function\(a, b\)(.*?)end\)", text, re.DOTALL
+    )
+    assert sort_call is not None
+    body = sort_call.group(1)
+    assert "return a.rangeM < b.rangeM" in body

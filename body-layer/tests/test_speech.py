@@ -29,6 +29,7 @@ from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
     CONTACT_CLASSIFICATION_CHANGED,
+    CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
     Event,
 )
@@ -68,7 +69,11 @@ from belief.speech import (
 from belief.tools import describe_contact
 from belief.utterance import ReferenceCandidate
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
-from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
+from perception.naked_eye_source import (
+    PROVENANCE_EMITTER_BURNING,
+    PROVENANCE_EMITTER_FIRING,
+    PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+)
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
 _FAKE_CONN = sqlite3.connect(":memory:")
@@ -2112,6 +2117,125 @@ def test_route_event_contact_burning_seen_auto_acknowledges(
     )
 
     assert burning_event not in store.unacknowledged_events
+
+
+# --- CONTACT_FIRING_SEEN speech (plans/emitter-visibility/plan.md,
+# BL-B73 Stage B) --
+
+
+def _firing_observation(*, obs_id: str, t_sim: float, provenance: str) -> Observation:
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw="BMP-2",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance=provenance,
+    )
+
+
+def test_route_event_contact_firing_seen_not_targeting_says_something_firing_far(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The accepted wording (user decision 3) for the not-targeting-us
+    case -- claims presence only, carries no range figure, and ends in the
+    literal word "far"."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _firing_observation(
+                obs_id="OBS_1", t_sim=0.0, provenance=PROVENANCE_EMITTER_FIRING
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    firing_event = next(e for e in store.events if e.kind == CONTACT_FIRING_SEEN)
+
+    speech = route_event(
+        store, firing_event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text == "Something firing, 12 o'clock, far."
+
+
+def test_route_event_contact_firing_seen_targeting_ownship_says_taking_fire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _firing_observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                provenance=PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    firing_event = next(e for e in store.events if e.kind == CONTACT_FIRING_SEEN)
+
+    speech = route_event(
+        store, firing_event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text == "Taking fire, 12 o'clock."
+    # Never a range, and never attribution.
+    assert "kilomet" not in speech.text.lower()
+    assert "we got it" not in speech.text.lower()
+
+
+def test_route_event_contact_firing_seen_omits_range() -> None:
+    """Same "no current bearing, say nothing" rule as `CONTACT_BURNING_
+    SEEN`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _firing_observation(
+                obs_id="OBS_1", t_sim=0.0, provenance=PROVENANCE_EMITTER_FIRING
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    firing_event = next(e for e in store.events if e.kind == CONTACT_FIRING_SEEN)
+
+    speech = route_event(store, firing_event, now_sim=0.0)
+
+    assert speech is None
+
+
+def test_route_event_contact_firing_seen_auto_acknowledges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _firing_observation(
+                obs_id="OBS_1", t_sim=0.0, provenance=PROVENANCE_EMITTER_FIRING
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    firing_event = next(e for e in store.events if e.kind == CONTACT_FIRING_SEEN)
+    assert firing_event in store.unacknowledged_events
+
+    route_event(
+        store, firing_event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert firing_event not in store.unacknowledged_events
 
 
 # --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --

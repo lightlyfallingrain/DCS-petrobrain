@@ -8,7 +8,11 @@ import dataclasses
 
 from belief.percept import Percept, percept_of
 from perception.emitters import EmitterKind
-from perception.naked_eye_source import PROVENANCE_EMITTER_BURNING
+from perception.naked_eye_source import (
+    PROVENANCE_EMITTER_BURNING,
+    PROVENANCE_EMITTER_FIRING,
+    PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+)
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
 _TRUTH_FIELD_NAMES = frozenset(
@@ -130,3 +134,36 @@ def test_percept_of_carries_live_los_clear_through_unchanged() -> None:
     for value in (True, False, None):
         observation = _observation(live_los_clear=value)
         assert percept_of(observation).live_los_clear is value
+
+
+def test_percept_of_maps_both_firing_provenance_values_to_firing_kind() -> None:
+    """`plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- both of
+    `naked_eye_source.py`'s `FIRING` provenance values resolve to the same
+    `EmitterKind`; which one it was crosses separately via
+    `targets_ownship`."""
+    not_targeting = _observation(provenance=PROVENANCE_EMITTER_FIRING)
+    targeting = _observation(provenance=PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP)
+
+    assert percept_of(not_targeting).emitter_kind == EmitterKind.FIRING.value
+    assert percept_of(targeting).emitter_kind == EmitterKind.FIRING.value
+
+
+def test_percept_of_maps_targets_ownship_provenance_to_true() -> None:
+    observation = _observation(provenance=PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP)
+
+    assert percept_of(observation).targets_ownship is True
+
+
+def test_percept_of_maps_non_targeting_firing_provenance_to_false() -> None:
+    observation = _observation(provenance=PROVENANCE_EMITTER_FIRING)
+
+    assert percept_of(observation).targets_ownship is False
+
+
+def test_percept_of_maps_every_other_provenance_to_targets_ownship_false() -> None:
+    """Including `BURNING`, which carries no notion of a target at all."""
+    burning = _observation(provenance=PROVENANCE_EMITTER_BURNING)
+    ordinary = _observation()
+
+    assert percept_of(burning).targets_ownship is False
+    assert percept_of(ordinary).targets_ownship is False

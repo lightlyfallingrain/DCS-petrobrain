@@ -237,6 +237,7 @@ from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_ENGAGEMENT_CHANGED,
+    CONTACT_FIRING_SEEN,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
@@ -277,6 +278,15 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
         #: watched or not -- it is informational, not a threat cue tied to
         #: an engagement envelope).
         CONTACT_BURNING_SEEN,
+        #: `plans/emitter-visibility/plan.md` Stage B, `BL-B73`. Also not
+        #: in `_OBSERVABILITY_EXEMPT_KINDS` and not in `_WATCHED_ONLY_
+        #: KINDS` -- it fires for any firing contact the gaze/LOS/cockpit-
+        #: mask gates already admitted this look, watched or not, the same
+        #: "informational, not tied to a watch" posture `CONTACT_BURNING_
+        #: SEEN` has. Unlike burning, it IS a threat cue -- `callout_
+        #: priority` gives it an elevated band for that reason, not this
+        #: set.
+        CONTACT_FIRING_SEEN,
     }
 )
 
@@ -504,6 +514,27 @@ CALLOUT_GROUP_MAX_SPAN_HOURS: Final[int] = 2
 #: tuple shape does not have to change when it does.
 _DEFAULT_THREAT_BAND: Final[int] = 0
 
+#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the plan's
+#: finding 2: `callout_priority` cannot derive a `CONTACT_FIRING_SEEN`
+#: candidate's urgency from `_DEFAULT_THREAT_BAND` the way it (eventually)
+#: will for a classification-derived band, because a `PRESENCE`-only
+#: contact (which a firing-bypass admission always is, detection-only,
+#: `visibility.py`'s tier clamp) matches no `belief.threat.envelope_for`
+#: envelope at all -- it would fall to whatever the *lowest*-urgency band
+#: is, burying the single most urgent thing in the scene. So these two
+#: bands are **independent of the classification-derived band entirely**,
+#: not a reuse of it, assigned by `event.kind`/`event.targets_ownship`
+#: rather than by anything `envelope_for` could ever answer about a
+#: presence-only contact. Lower sorts first (`callout_priority`'s own
+#: "ascending... lowest tuple is the best candidate"), so both are
+#: negative -- strictly more urgent than `_DEFAULT_THREAT_BAND`'s `0`,
+#: which every other kind still uses unchanged. `_FIRING_TARGETS_OWNSHIP_
+#: THREAT_BAND` is the more urgent of the two: *"taking fire"* is a
+#: direct, personal threat; *"something firing... far"* is situational
+#: awareness about a threat to someone or something else.
+_FIRING_THREAT_BAND: Final[int] = -1
+_FIRING_TARGETS_OWNSHIP_THREAT_BAND: Final[int] = -2
+
 #: `belief.attention._ATTENTION_RANK`'s ordering, restated here rather than
 #: imported -- that name is module-private to `attention.py` (its own
 #: docstring: "the one place that ordering is encoded"), and no other
@@ -535,12 +566,21 @@ def callout_priority(
     """`(threat_band, -attention_rank, range_m, -event.t_sim)` -- ascending
     sort order, so the *lowest* tuple is the best candidate. See module
     docstring's "Priority" section for why each surviving key is here:
-    `threat_band` is `_DEFAULT_THREAT_BAND` today (a disposable placeholder,
+    `threat_band` is `_DEFAULT_THREAT_BAND` for every kind except
+    `CONTACT_FIRING_SEEN` (a disposable placeholder for everything else,
     not a real assessment); `-attention_rank` ranks priority > watch >
     normal > ignore; `range_m` is nearer-first (what goes stale fastest);
     `-event.t_sim` is newer-first (what makes "backlogged" impossible by
     construction -- combined with `CALLOUT_MAX_AGE_S` expiry, an old
     candidate starving is the intended outcome, not a bug).
+
+    **`CONTACT_FIRING_SEEN` gets its own `threat_band`, independently of
+    classification** (`plans/emitter-visibility/plan.md` Stage B, finding
+    2 -- `_FIRING_THREAT_BAND`/`_FIRING_TARGETS_OWNSHIP_THREAT_BAND`'s own
+    docstring has the full reasoning for why this cannot be derived from
+    `belief.threat.envelope_for`). This is the one kind-specific branch in
+    this function; every other kind still gets the flat
+    `_DEFAULT_THREAT_BAND` placeholder.
 
     `range_m` falls back to `math.inf` (sorts last, never first) when no
     `EnrichmentContext` was supplied -- `facts["relative_now"]` is then
@@ -559,7 +599,14 @@ def callout_priority(
         assert isinstance(range_m, float)
     else:
         range_m = math.inf
-    return (_DEFAULT_THREAT_BAND, -rank, range_m, -event.t_sim)
+    threat_band = _DEFAULT_THREAT_BAND
+    if event.kind == CONTACT_FIRING_SEEN:
+        threat_band = (
+            _FIRING_TARGETS_OWNSHIP_THREAT_BAND
+            if event.targets_ownship
+            else _FIRING_THREAT_BAND
+        )
+    return (threat_band, -rank, range_m, -event.t_sim)
 
 
 def group_priority(

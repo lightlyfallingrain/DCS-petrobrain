@@ -100,6 +100,26 @@ Note the **nearest-first sort is load-bearing now**: `table.sort` by
 `rangeM` before the cap means truncation drops the *far* candidates, which
 is the right failure direction.
 
+**The sort key is spliced, not purely range, as of `AC-B8`.** A unit
+firing at any range is exactly the thing `[[BL-B73]]` exists to admit, and
+this cap is nearest-first -- a scene with >=128 candidates inside the
+look-wedge would otherwise truncate a distant firing unit before it ever
+gets a sightline, the plan's own named risk (`plans/emitter-visibility/
+plan.md`, "Risks & Unknowns": *"this introduces the first exception to the
+forest gate... MAX_SIGHTLINES_PER_CALL... can silently neuter the whole
+feature"*). `PB_ACTIVE_FIRING_UNITS` is a plain name set maintained in
+real time by `petrobrain-firing-events-hook.lua`'s own event handler (that
+file's header has the full reasoning for why it lives there and not in a
+collector round trip) -- a global in the same `"scripting"` mission state
+this file already reads `PB_LOOK_HOUR`/`PB_LOOK_FOV_DEG` from, so reading
+it here needs no new transport. `candidates` is sorted by `(not firing,
+rangeM)` instead of `rangeM` alone: every currently-firing unit sorts
+ahead of every non-firing one, regardless of range, and sorts by range
+*within* that group the same as before. `PB_ACTIVE_FIRING_UNITS or {}` is
+a true no-op when that Hook script is not loaded (or has never seen an
+event) -- this file's own behaviour is then byte-identical to before this
+change.
+
 **The cap and the bubble radius are spliced into the bridged chunk from
 `MAX_SIGHTLINES_PER_CALL` and `PLAYER_BUBBLE_RADIUS_M`, not re-typed** (a
 previous performance pass flagged the duplicated `128` literal as drift
@@ -533,7 +553,21 @@ for _, coa in pairs(sides) do
     end
 end
 
-table.sort(candidates, function(a, b) return a.rangeM < b.rangeM end)
+-- `AC-B8`'s splice (file header): read once, outside the comparator, so
+-- the lookup cost is O(1) per candidate rather than per comparison.
+-- `PB_ACTIVE_FIRING_UNITS` is a global in this same mission-scripting
+-- state, maintained in real time by `petrobrain-firing-events-hook.lua`'s
+-- own event handler -- `or {}` makes this a true no-op when that Hook
+-- script is not loaded or has not yet seen an event this mission.
+local firingUnits = PB_ACTIVE_FIRING_UNITS or {}
+table.sort(candidates, function(a, b)
+    local aFiring = firingUnits[a.name] ~= nil
+    local bFiring = firingUnits[b.name] ~= nil
+    if aFiring ~= bFiring then
+        return aFiring
+    end
+    return a.rangeM < b.rangeM
+end)
 
 local function buildingClear(fromPoint, toPoint)
     local hit = false

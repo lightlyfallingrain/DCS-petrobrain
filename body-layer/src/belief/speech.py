@@ -220,6 +220,7 @@ from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_ENGAGEMENT_CHANGED,
+    CONTACT_FIRING_SEEN,
     CONTACT_LOST,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
@@ -3152,6 +3153,25 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         assert isinstance(relative_now, dict)
         clock = relative_now["clock_position"]
         return f"Something burning, {clock} o'clock."
+    if event.kind == CONTACT_FIRING_SEEN:
+        # `plans/emitter-visibility/plan.md` Stage B -- the accepted
+        # wording (user decision 3), same bespoke-line reasoning as
+        # `CONTACT_BURNING_SEEN` just above: detection-only, no unit-type
+        # claim, no range (the accepted wording for the not-targeting-us
+        # case carries the literal word "far" instead of a figure --
+        # this is a `PRESENCE`-tier emitter-bypass admission, so a precise
+        # range would overclaim what was actually perceived). Silently
+        # says nothing when there is no current bearing to report, the
+        # same "do not invent a look that was not taken" reasoning
+        # `CONTACT_BURNING_SEEN` already follows.
+        relative_now = result["facts"].get("relative_now")
+        if relative_now is None:
+            return None
+        assert isinstance(relative_now, dict)
+        clock = relative_now["clock_position"]
+        if event.targets_ownship:
+            return f"Taking fire, {clock} o'clock."
+        return f"Something firing, {clock} o'clock, far."
     if event.kind == CONTACT_ENGAGEMENT_CHANGED:
         # Decision 3's two wordings, taken from `docs/concept/
         # STATE_TRANSITIONS.md`'s own "danger <unit> <where>"/"safe from
