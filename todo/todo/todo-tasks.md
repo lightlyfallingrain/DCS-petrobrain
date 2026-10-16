@@ -43,15 +43,21 @@ Next open items, not blocked on the user: [[X-T4]] (grouping is the priority), [
 comes back "Unable"), [[X-T23]] (no identification on a very close pass), [[X-T24]] (16 s flank
 revisit), and the three in-progress crew-behaviour findings [[X-T6]], [[X-T7]], [[X-T8]].
 
-**In flight, not on this list** (as of 2026-10-16; the [[BL-12]] text that stood here was stale —
-BL-12 merged 2026-10-12, `#status/done #needs-flight`, and its branch is gone):
+**Nothing is mid-sequence as of 2026-10-16.** Both branches that were in flight earlier that day
+merged the same evening, and what they owe now is **your flying, not more agent passes** — they are
+`#status/done #needs-flight` on their own entries:
 
-- **`feature/attack-run-fixes`** — [[BL-B70]], attack-run guidance: what to say and when.
-  Implemented, reviewed, fixed, re-reviewed APPROVED; Performance APPROVED. Owes Security and DoD.
-  [[BL-B71]] (the §6/§7 optic ladder) is deliberately **not** on this branch and is unstarted.
-- **`feature/emitter-events`** — Stage B of emitter visibility (`AC-B8` + [[BL-B73]], the gun-fire
-  event channel). Implemented, reviewed NEEDS REVISION, fix applied; re-review in progress. Stage A
-  merged 2026-10-15; Stage C (SAM launch) unstarted.
+- **[[BL-B70]]** (attack-run guidance, merged `077d188`) — plain checkout, pure Python. Five test
+  cases in `plans/attack-run-sortie-fixes/dod-check.md`. Do **not** read a never-heard
+  `", obstructed"` as a failure: that is [[BL-B76]], still open.
+- **`AC-B8`/[[BL-B73]]** (emitter visibility Stage B, merged `e0da664`) — needs the production Hook
+  `petrobrain-firing-events-hook.lua` deployed to `Saved Games\DCS\Scripts\Hooks\` and an app-level
+  DCS restart before it does anything. Six test cases in
+  `plans/emitter-visibility/dod-check-stage-b.md`, one of which answers an open DCS question (hold a
+  unit firing past 180 s).
+
+Unstarted and adjacent: [[BL-B71]] (the §6/§7 optic ladder, deliberately split off BL-B70),
+`BL-B74` (Stage C, SAM launch), and [[BL-B76]], which has direction but no implementation.
 
 **Questions waiting on you live in `todo/questions.md`** (new 2026-10-06) — created when you asked
 for input to be queued rather than asked. Two open as of this writing, neither blocking.
