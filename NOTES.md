@@ -1205,6 +1205,29 @@ two functions that must agree (2026-09-19).
   nothing about resolvability changed there. The general shape: when a register narrates a
   transition, name the condition as the thing that actually matters to the listener, not as
   whatever happened to be true on the tick before.
+- **A docstring's "X and Y together is not reachable in practice, because Z" is a claim pinned to
+  whatever makes Z true today, and a feature that changes Z can make the claim false the moment it
+  ships — silently, because "unreachable" is exactly why nobody wrote a test for the combination.**
+  `BL-B71`'s `attack_run.decide` asserted `tier == 1` with `cause == "too_far"` was unreachable
+  because a fresh relative percept implies the naked eye already admitted it within its own
+  presence range — true only while the admitting optic was fixed at `UNAIDED_OPTIC`. `BL-B71` is
+  precisely the feature that stops that optic being fixed, and the function's own cause taxonomy
+  kept testing range against the old fixed value, producing a "last I saw…" callout about a target
+  being actively tracked through the granted optic. When a changed function's docstring (or one it
+  reads from) asserts two states cannot co-occur, re-derive the claim against the diff rather than
+  trusting it, especially when the diff touches a value the claim's "because" clause depends on.
+- **A review's required fix can name a correct-sounding but narrower target than the defect it
+  describes, and a fix that faithfully implements the named target can still miss the point.**
+  `BL-B71`'s review named `OpticState.guidance_optic` (the ladder's own standing grant) as the fix
+  for "the range gate must use the optic actually resolving the look." The two agree in the common
+  case — hence passing the new tests — and diverge exactly where they matter: `guidance_optic` is
+  `None` through ordinary glassing with no guidance grant standing, so the first fix round
+  reintroduced the original bug in miniature for that case. Asked directly, the user's ruling was
+  broader than the review's wording: "actual behavior must measure by used optic," which meant
+  `runner.optic` — the value that actually admitted the tick's percept — not any one named field
+  that usually tracks it. When a review names a specific field as *the* fix, treat the name as the
+  reviewer's best guess at the requirement, not the requirement itself, and check whether the
+  defect's own English description is broader than the named target.
 
 ## The 9K113 sight (BL-B64)
 

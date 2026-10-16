@@ -1,9 +1,69 @@
 # BL-B71 — The least-capable-optic guidance ladder
 
-- [ ] **During guidance, use the *least* capable optic that can still resolve the target, evaluated
+- [x] **During guidance, use the *least* capable optic that can still resolve the target, evaluated
   continuously in both directions — escalate when the current instrument cannot see it, de-escalate
-  as the range closes.** #status/open Planned 2026-10-15,
+  as the range closes.** #status/done #needs-flight Planned 2026-10-15,
   `plans/attack-run-sortie-fixes/plan.md`. Depends on `[[BL-B70]]` for the cause taxonomy it reads.
+  Merged `feature/bl-b71-optic-ladder` (DoD pass, tip `91b3c489`); mechanical checks green
+  (ruff format/check, `mypy src` 60 files, `pytest` 2090 passed/4 xfailed), full
+  Architect(roadmap entry)→Implementer→Reviewer(×2)→Performance→Security chain complete and
+  APPROVED at every gate.
+
+  **What shipped**, exactly as specified above: `_LADDER` (presence-ascending over the shipped
+  optic table), `least_capable_sufficient_optic`/`guidance_request_for` (the hysteresis-guarded
+  escalate-immediately/de-escalate-one-rung-at-a-time ladder, guards 1-3 all as planned), and
+  `OpticState.guidance_optic`/`_apply_guidance`'s structural sight-ceiling clamp (re-derives
+  `home_phase` fresh every call — the hard gate holds under direct mutation testing by Reviewer
+  and independently by Security). `attack_run` requests, `optic_policy` grants, exactly the module
+  boundary the plan drew.
+
+  **One required Reviewer fix, caught and corrected twice, not once.** The first review found
+  `_no_look_cause`'s range gate hardcoded to `UNAIDED_OPTIC` — once the ladder grants binoculars,
+  a live resolvable look could still be reported `"too_far"` and trigger the "last I saw…" branch
+  about a target currently in view, exactly the defect class this feature exists to prevent. The
+  first fix round wired the *granted* optic (`OpticState.guidance_optic`); asked directly whether
+  this was a test artefact or real behaviour, the user ruled **"actual behavior must measure by
+  used optic"** — `guidance_optic` is `None` through ordinary glassing with no guidance grant
+  standing, so that fix reintroduced the same bug in miniature for the ordinary-glassing case. The
+  second round rewired it to `runner.optic` (renamed `resolving_optic`), the value that actually
+  admitted the tick's percept, confirmed by Reviewer and Security independently tracing the full
+  call chain (`logger.py` → `naked_eye_source.py` → `visibility.check_visibility`) rather than
+  trusting the fix's own account. **The lesson generalises beyond this item**: a fix that answers a
+  review's narrower wording can still miss the user's actual direction behind it — see
+  `.claude/agent-memory/dod/project_fix_answers_review_wording_not_user_direction.md`.
+
+  **Acceptance boundary, stated plainly.** Everything above is verified against fixtures and unit
+  tests — 2090 passed, including hand-built diverged states (`guidance_optic is SIGHT_WIDE_OPTIC`
+  while `home_phase is SCANNING`) and three independently-rerun mutation counterfactuals. No
+  fixture can confirm whether the ladder's *cadence* reads right in the air — whether escalation
+  and de-escalation feel responsive rather than jumpy or laggy at the pilot's own closing rates.
+  The sight rung is also unreachable without the pilot's own prior "Observ on" command, so the
+  common case a flight will actually exercise is naked-eye ↔ binoculars; the full four-rung ladder
+  including the 9K113 sight needs a run flown with OBSERV already commanded on to be exercised at
+  all. That is exactly what the next sortie is for.
+
+  **Two accepted gaps are carried forward, not fixed, and named here so a flight planner sees
+  them:**
+  - `GUIDANCE_OPTIC_MIN_INTERVAL_S`/`HANDS_BUSY_DURATION_S` cross-key coupling: at the declared
+    bound extremes (`MIN_INTERVAL_S=1.0`, `HANDS_BUSY_DURATION_S=5.0`) a grant could re-charge
+    hands-busy before the previous charge finishes — Petrovich going quiet mid-run under
+    aggressive manual tuning. Single-key tuning is safe by a wide margin; this needs more than one
+    key retuned together to trigger, which is not the motivating case. No code change — flagged in
+    the constant's own rendered `#:` comment.
+  - A two-poll (not the usual one-poll) revocation lag on `disengage`/`drop_target`: the guidance
+    request can stare at an already-dropped target for one extra poll (sub-second to ~1 s) before
+    clearing. Bounded, symmetric across both exit paths, and cannot grant a sight rung that was not
+    already pilot-authorized (Security, `project_optic_revocation_two_poll_lag.md`). Worth
+    revisiting when `[[BL-B66]]`'s planned `OpticPhase.GUIDING` consolidation touches this same
+    revocation path.
+
+  **Downstream effect, per the Milestone Completion question:** does not change what `[[BL-B66]]`
+  or `[[BL-B76]]` should do next. `[[BL-B66]]`'s planned `OpticPhase.GUIDING` consolidation
+  (gaze/optic unification for the slew controller) will want to absorb both the known structural
+  seam named below and the two-poll revocation lag above while it is already rewriting these
+  files — noted, not newly assigned. `[[BL-B76]]` (the `", obstructed"` dead-code gap) is
+  independent of this entry: this ladder reads `_no_look_cause`'s cause taxonomy but does not touch
+  the `live_los_clear` admission path `BL-B76` is about.
 
   Source of truth is `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` §6 and §7. User's
   words: *"for guidance using other than ATGM - use the least capable optic that can see the target.
