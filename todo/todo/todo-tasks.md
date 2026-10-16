@@ -30,9 +30,9 @@ and marked, because root `CLAUDE.md`'s Session Start step 2 and its Backlog Mana
 send every session to this file for User priority tasks — so the priority items have to be visible
 on the index without opening anything.
 
-- [[X-T25]] — Compact the agent-memory indexes — **FIRST TASK OF THE NEXT SESSION** (user direction
-  2026-10-11: queued deliberately, ahead of resuming [[BL-12]]; two indexes are at the read limit
-  and six agents in one session correctly declined to fix it)
+- [[X-T25]] — Compact the agent-memory indexes — **DONE 2026-10-16**, closed by user direction and
+  resolved by deleting the indexes rather than compacting them: each is now a 747-byte pointer to
+  `memory-search.py`, which derives the index on demand, and the hook that nagged six agents is gone
 - [[X-T26]] — Make behaviour-affecting constants configurable — queued 2026-10-14, after the
   `BL-14` merge and before the `BL-B64` 9K113 Architect pass; scope narrowed to behaviour-affecting
   constants by user direction, not every literal
@@ -43,9 +43,15 @@ Next open items, not blocked on the user: [[X-T4]] (grouping is the priority), [
 comes back "Unable"), [[X-T23]] (no identification on a very close pass), [[X-T24]] (16 s flank
 revisit), and the three in-progress crew-behaviour findings [[X-T6]], [[X-T7]], [[X-T8]].
 
-**In flight, not on this list:** [[BL-12]] Stage 0 is built, reviewed and fixed on
-`feature/bl12-group-contact-identity`, and still owes Security, Performance and DoD before it can
-merge. Stage 1 has not started. Resume there *after* [[X-T25]].
+**In flight, not on this list** (as of 2026-10-16; the [[BL-12]] text that stood here was stale —
+BL-12 merged 2026-10-12, `#status/done #needs-flight`, and its branch is gone):
+
+- **`feature/attack-run-fixes`** — [[BL-B70]], attack-run guidance: what to say and when.
+  Implemented, reviewed, fixed, re-reviewed APPROVED; Performance APPROVED. Owes Security and DoD.
+  [[BL-B71]] (the §6/§7 optic ladder) is deliberately **not** on this branch and is unstarted.
+- **`feature/emitter-events`** — Stage B of emitter visibility (`AC-B8` + [[BL-B73]], the gun-fire
+  event channel). Implemented, reviewed NEEDS REVISION, fix applied; re-review in progress. Stage A
+  merged 2026-10-15; Stage C (SAM launch) unstarted.
 
 **Questions waiting on you live in `todo/questions.md`** (new 2026-10-06) — created when you asked
 for input to be queued rather than asked. Two open as of this writing, neither blocking.
