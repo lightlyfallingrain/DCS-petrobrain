@@ -2624,22 +2624,27 @@ def test_render_group_disclosure_appends_watched_when_any_member_is_watched() ->
     assert speech.text == "Group, watched."
 
 
-def test_render_group_disclosure_undifferentiated_pair_says_a_couple_of() -> None:
+def test_render_group_disclosure_undifferentiated_pair_says_couple() -> None:
     """A two-member group, still undifferentiated, is worded with the
     hedged form of the word (`plans/group-reporting/plan.md`'s Stage 4
-    addendum, user direction 2026-09-28) -- `"a couple of"` is the same
-    hedge `_cardinality_phrase` already uses for a lo-2-hi-3 interval
-    *within* one contact; here it is the same word for the same reason
-    (nothing precise is known yet), just counting distinct members
-    instead. Three-or-more undifferentiated members are unaffected, still
-    the bare `"Group"` (`test_render_group_disclosure_undifferentiated_
-    group_says_bare_group`, above)."""
+    addendum, user direction 2026-09-28) -- `_cardinality_phrase(2, 2)`'s
+    own bare-stem hedge, `"couple"`, the identical register call a single
+    contact's own count clause uses for a lo-2-hi-3 interval; here it is
+    the same word for the same reason (nothing precise is known yet),
+    just counting distinct members instead. `BL-B77` unified this branch
+    onto that shared register -- it previously carried its own hardcoded
+    `"A couple of"` literal, a second, inconsistent phrasing of the same
+    hedge the 2026-09-23 radio-brevity direction already converted the
+    register itself to bare stems for. Three-or-more undifferentiated
+    members are unaffected, still the bare `"Group"`
+    (`test_render_group_disclosure_undifferentiated_group_says_bare_group`,
+    above)."""
     store, group = _cohering_group_store([("Ural truck", 1), ("Ural truck", 1)])
 
     speech = render_group_disclosure(store, group, now_sim=0.0)
 
     assert speech is not None
-    assert speech.text == "A couple of contacts."
+    assert speech.text == "Couple contacts."
 
 
 def test_render_group_disclosure_homogeneous_pair_says_pair_of() -> None:

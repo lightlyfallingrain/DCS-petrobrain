@@ -35,7 +35,42 @@
   sortie shape, whose 3 → 5 mitigation was never re-flown — but it is not what made this flight
   loud.
 
-  **Needs the user's judgement before any plan**: what a crew member should *say* when sixteen
+  ~~**Needs the user's judgement before any plan**~~: what a crew member should *say* when sixteen
   individually-resolvable vehicles sit in one sector. The 2026-09-19 vocabulary decisions do not
   cover it — they assumed the plural case arrives as one plural contact, not as sixteen singular
   ones.
+
+  **ANSWERED 2026-10-16, and explored to completion the same day** —
+  `docs/acceptance/2026-10-16-contacts-callout-direction.md` carries the verbatim direction and the
+  three rounds of answers. The judgement this entry was waiting on is no longer outstanding; the
+  work is now an ordinary implementation item, pending an Architect pass on
+  `feature/contacts-callout`.
+
+  His answer, in short: **a set of contacts that does not cohere into a `Group` still gets one
+  group-shaped line**, with `"contacts"` rather than `"group"` as the signal word — *"saying
+  'contacts' instead of 'group' makes that distinction clear"*. Settled fields:
+
+  | field | rule |
+  |---|---|
+  | signal word | `"contacts"`, never `"group"` |
+  | count | the **existing** `_cardinality_phrase` hedge register, unchanged (*"use the existing hedge vocabulary"*) |
+  | classes | an array — every class present in that set |
+  | bearing | **one line per clock hour**, mandatory (*"o'clock position is a must"*, *"relative position is important as is contact class"*) |
+  | range | whatever span that hour's members cover — 2–6 km is one line, so range never splits a set |
+  | cadence | **delta only**, like a group's disclosure |
+  | watched contacts | unchanged from today, exact-count path included |
+
+  Form: *"\<hedge\> contacts, \<classes\>, \<clock hour\> o'clock, \<range or span\>."*
+
+  **The lever is still callout policy, exactly as the correction above found** — nothing here
+  changes the association gate, and [[X-B6]] stays separately open.
+
+  **PLANNED 2026-10-16** — `plans/contacts-callout/plan.md`, on `feature/contacts-callout`. Five
+  stages, two open decisions left for the user (whether the hedge keeps the radio-brevity register's
+  dropped articles, and whether a hedge-word crossing counts as a delta). One correction worth
+  carrying: `belief.callouts.group_candidates` **no longer exists** — retired by
+  `plans/group-reporting/plan.md` Stage 4 — so the push path has no report-space aggregation at all
+  today, and the surviving `group_facts`/`render_group_report` are reachable only from the pull path
+  (`report`). The pull path's own degeneration (three separate group lines because the range words
+  differ, quoted in the 09-28 log analysis) is deliberately **not** in that plan's scope and wants
+  its own `BL-B` item.
