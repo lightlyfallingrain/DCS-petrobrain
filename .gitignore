@@ -42,3 +42,12 @@ __pycache__/
 # the pilot's own, hand-written, sparse PETROBRAIN_TUNING file. The
 # generated, committed default is */config/defaults.toml, never this.
 */config/tuning.toml
+
+# ED-copyrighted DCS material -- keep it on disk, never in the repo. The
+# Mi-24P QuickStart manual ships with DCS World and is Eagle Dynamics'
+# copyright, so it cannot live in a public repository; it was committed on
+# 2026-09-11 and removed from the whole history on 2026-10-16 (git-filter-repo,
+# force-pushed). Research notes derived from it stay -- it is the PDF itself
+# that cannot be redistributed. Put any further DCS-shipped manual, mission or
+# asset in this directory and it is ignored by the same rule.
+docs/concept/mi-24_info/*.pdf
