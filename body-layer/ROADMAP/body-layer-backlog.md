@@ -125,6 +125,8 @@ sequence — mint from `grep -oE '^BR-B[0-9]+'`, never the prefix-agnostic `[A-Z
 return this directory's `BL-B` maximum instead.
 
 - [[BR-B1]] — The wider `CLASSIFY_COMMAND_VOCABULARY` the duplicate Stage 2 branch built
+- [[BR-B2]] — `brain-layer`'s HTTP server trusts the `Content-Length` header itself
+- [[BR-B3]] — the Ollama response body is read without a byte cap (an unfiled Stage 2 recommendation)
 
 ## Two entries worth knowing about before you read them
 

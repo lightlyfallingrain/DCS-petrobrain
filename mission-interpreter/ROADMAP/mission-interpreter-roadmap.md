@@ -41,6 +41,22 @@ subproject, so the prefix stays reserved.
 - [[MI-5b]] — Player questions — web form
 - [[MI-6]] — Runtime compilation
 
+## Backlog
+
+**First entries in the `MI-B<n>` space, filed 2026-10-16** — until then this subproject had no
+Backlog section and root `CLAUDE.md`'s ID table recorded the prefix as *reserved for
+mission-interpreter, which has no Backlog section yet*. The three below come from this subproject's
+first whole-subproject security and performance surveys (`research/2026-10-16-security-audit.md`,
+`research/2026-10-16-performance-review.md`), which closed the remaining half of `[[X-B8]]`/`[[X-B9]]`.
+Items here take the next unused number and numbers are never reused, the same discipline every
+sibling follows.
+
+- [[MI-B1]] — `TriggerZone.hidden` is parsed and never consulted by the author-only filter —
+  needs an investigator pass before any code change
+- [[MI-B2]] — a malformed `.miz` escapes as `RecursionError`/`TypeError` rather than `MizParseError`
+- [[MI-B3]] — world enrichment is one serialized HTTP call per item, and the real item count has
+  never been measured
+
 `MI-6` was the last planned Mission Interpreter stage per the parent plan's own stage list. The
 two sections below are orientation narrative rather than entries, and are kept here verbatim: the
 acceptance record is the only account in the repo of what happened when this subproject first met
