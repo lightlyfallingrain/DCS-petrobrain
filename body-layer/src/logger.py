@@ -2007,16 +2007,28 @@ def _run_crew_text_poll_loop(
                             runner.attack_run_state,
                             runner.last_t_sim,
                             runner.last_ownship_state,
-                            # Review's required fix (`BL-B71`): the optic
-                            # that actually admitted *this* poll's
-                            # percepts -- `decide_optic` (called inside
-                            # `run_once`, earlier this same poll) has
-                            # already updated this field for this tick,
-                            # so it is not one poll stale the way `self.
-                            # attack_run_state.requested_optic` (read the
-                            # other direction, into `decide_optic` above)
-                            # deliberately is.
-                            granted_optic=runner.optic_state.guidance_optic,
+                            # Review's required fix (`BL-B71`), corrected
+                            # 2026-10-16 (user direction: "actual behavior
+                            # must measure by used optic"): `runner.optic`,
+                            # not `runner.optic_state.guidance_optic`. The
+                            # latter is the ladder's own standing *grant*
+                            # and is `None` through ordinary glassing
+                            # (`OpticPhase.GLASSING` with no guidance
+                            # request at all), which would misattribute a
+                            # live binocular look as "too far" against the
+                            # naked eye's own narrower threshold. `runner.
+                            # optic` is `optic_decision.optic` from this
+                            # same poll's `decide_optic` call (inside
+                            # `run_once`, earlier this poll, assigned at
+                            # `self.optic = optic_decision.optic` and onto
+                            # `source.optic` by `_apply_active_gaze`) --
+                            # the exact optic `perception.visibility.
+                            # check_visibility` resolved this tick's
+                            # percepts against, so it is not one poll stale
+                            # the way `self.attack_run_state.requested_
+                            # optic` (read the other direction, into
+                            # `decide_optic` above) deliberately is.
+                            resolving_optic=runner.optic,
                         )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever

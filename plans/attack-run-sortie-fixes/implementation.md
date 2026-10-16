@@ -670,3 +670,87 @@ used optic."**
   put binoculars in use for an unrelated reason. Not fixed here (the review named `guidance_optic`
   specifically and the user's direction was about measuring against the *granted* optic, not every
   possible admitting optic); worth noting for anyone revisiting this area.
+
+## BL-B71 `resolving_optic` correction round (2026-10-16)
+
+The "Not fixed here" note directly above was wrong to leave as a known gap. The user, asked
+directly whether the naked-eye-only range test was a test artefact or real behaviour, ruled: **"actual
+behavior must measure by used optic."** `OpticState.guidance_optic` is the attack-run guidance
+ladder's own standing *grant* — it is `None` through ordinary glassing (`OpticPhase.GLASSING` with
+no guidance request at all), so the previous round's fix, wired at `logger.py:2019` as
+`granted_optic=runner.optic_state.guidance_optic`, reintroduced the original defect in miniature:
+binoculars raised for an ordinary look, no guidance grant, a target resolvable at binoculars and
+not the naked eye — `_no_look_cause` fell back to `UNAIDED_OPTIC`'s narrower threshold and the run
+could say "last I saw…" about a target actively being tracked.
+
+### Files Changed (this round)
+
+- `body-layer/src/logger.py` — the `drain_attack_run` call site (line ~2019) now passes
+  `resolving_optic=runner.optic` instead of `granted_optic=runner.optic_state.guidance_optic`.
+  `runner.optic` is `optic_decision.optic` from this same poll's `decide_optic` call (`self.optic =
+  optic_decision.optic`, `run_once`), and is the exact value `_apply_active_gaze` assigns onto
+  `source.optic`, which `NakedEyePerceptionSource.poll` passes straight to
+  `perception.visibility.check_visibility`'s `optic=` keyword — confirmed by reading that call
+  chain (`naked_eye_source.py:754`, `:1174`), not assumed. Nothing overwrites `runner.optic` between
+  `run_once()` and the `drain_attack_run` call later in the same poll iteration of
+  `_run_crew_text_poll_loop`, so it is not one poll stale.
+- `body-layer/src/belief/attack_run.py` — `decide()`'s keyword renamed `granted_optic` →
+  `resolving_optic` (it no longer means "the ladder's grant"); docstrings on `decide` and
+  `_no_look_cause` corrected to describe the used-optic contract and to say explicitly that the
+  prior `granted_optic`/`guidance_optic` wiring was wrong, not merely superseded.
+- `body-layer/src/belief/crew_console.py` — `drain_attack_run()`'s keyword renamed to match, and its
+  docstring corrected the same way.
+- `body-layer/tests/test_attack_run.py` — updated the one existing `decide(..., granted_optic=...)`
+  call site to the new keyword; no behavioural change, this test already exercised the right
+  value.
+- `body-layer/tests/test_logger.py` — new regression test (below), inserted after the
+  `test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block` block.
+
+### Tests Added (this round)
+
+- `test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant` — drives the real
+  `_run_crew_text_poll_loop` on a thread (the established pattern this file already uses for
+  loop-level wiring, e.g. the coverage-summary tests immediately above it), with `runner.run_once`
+  replaced by a no-op so the loop body runs against hand-set `runner` state: `runner.optic =
+  BINOCULAR_OPTIC`, `runner.optic_state = OpticState(phase=OpticPhase.GLASSING, guidance_optic=
+  None)` — the narrower case from the review: ordinary glassing, no guidance grant at all.
+  `crew_console.drain_attack_run` is replaced with a spy that only records its `resolving_optic`
+  kwarg (not a reimplementation of `decide`'s own logic — that combination is already covered by
+  `test_attack_run.py`'s `resolving_optic`-at-the-`decide()`-level tests). Asserts the captured
+  value is `BINOCULAR_OPTIC`, not `runner.optic_state.guidance_optic` (which is `None`).
+
+  **Counterfactual confirmed, not merely asserted**: reverted the call site back to
+  `resolving_optic=runner.optic_state.guidance_optic`, re-ran the new test — failed with
+  `AssertionError: assert None is Optic(name='binocular', ...)`, exactly the stated failure mode
+  (the test would have gone on to misattribute a live binocular look as "too far"). Restored the
+  fix; `shasum` of `logger.py` before and after the mutation matched exactly.
+
+### Checks (this round)
+
+- `ruff format --check src tests`: pass, 133 files already formatted (one file — the new test —
+  needed `ruff format` applied once before the check passed; recorded here per the quality-gate
+  habit, not left silently fixed).
+- `ruff check src tests`: pass, all checks passed.
+- `mypy src` (from inside `body-layer/`): pass, no issues in 60 source files.
+- `pytest tests -q`: **2090 passed, 4 xfailed** (baseline for this round: 2089 passed / 4 xfailed;
+  +1 for the new test, confirmed by name in unfiltered `-v` output, not a `-k` run).
+
+### Notable Discoveries (this round)
+
+- **`runner.optic` confirmed as the right datum**, by reading the call chain rather than assuming
+  it: `self.optic = optic_decision.optic` (`logger.py:593`) and `source.optic = optic`
+  (`_apply_active_gaze`, same `decision.optic` value, `logger.py:1020`) are the same value, which
+  `NakedEyePerceptionSource.poll` passes to `visibility.check_visibility(..., optic=self.optic,
+  ...)` (`naked_eye_source.py:754`) — the exact instrument admitting this tick's percepts. Nothing
+  sits between `run_once()` and the `drain_attack_run` call in `_run_crew_text_poll_loop` that could
+  overwrite `runner.optic` for the same poll.
+- **The previous round's "Not fixed here" edge case** (guard-3-refused grants, where
+  `decision.optic` and `state.guidance_optic` can briefly disagree) is now moot: `resolving_optic`
+  reads `runner.optic` (== `decision.optic`) directly, which is the *more* accurate of the two, not
+  the more conservative one the previous round chose. No remaining known gap in this area.
+- Writing the new test exposed how little of the real perception/attack-run pipeline is actually
+  needed to pin this specific regression: no naked-eye detection chain, no `ContactStore`, no
+  command-dispatched `select target`/`engage` — hand-setting `runner.optic`/`runner.optic_state`
+  before a no-op'd `run_once()` and spying on `drain_attack_run` isolates the wiring defect from
+  everything already covered elsewhere (`test_attack_run.py` for `decide()`'s own logic,
+  `test_optic_policy.py` for `decide_optic`'s GLASSING-continuation branch).

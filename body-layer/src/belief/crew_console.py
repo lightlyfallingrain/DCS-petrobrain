@@ -2237,7 +2237,7 @@ class CrewConsole:
         now_sim: float,
         ownship: OwnshipState,
         *,
-        granted_optic: Optic | None = None,
+        resolving_optic: Optic | None = None,
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
@@ -2248,12 +2248,21 @@ class CrewConsole:
         the current state and returns its replacement, the same contract
         `decide` itself has.
 
-        `granted_optic` (`BL-B71`'s review, required fix) is the optic
-        that actually admitted this poll's percepts -- the caller's
-        `OpticState.guidance_optic`, read *after* this same poll's
+        `resolving_optic` (`BL-B71`'s review, required fix) is the optic
+        that actually admitted this poll's percepts. **Not** the caller's
+        `OpticState.guidance_optic` -- that is the ladder's own standing
+        *grant*, which reads `None` through ordinary glassing with no
+        guidance request at all, so testing against it mis-measures a
+        live binocular look as the naked eye's own (narrower) range. User
+        direction, 2026-10-16: "actual behavior must measure by used
+        optic." The caller (`logger.py`'s poll loop) passes its own
+        `runner.optic` -- the same value `logger._apply_active_gaze` just
+        assigned onto `source.optic` for this poll, i.e. the optic
+        `perception.visibility.check_visibility` actually resolved this
+        tick's percepts against -- read *after* this same poll's
         `decide_optic` call (`logger.py`'s own ordering comment on
-        `requested_optic`/`drain_attack_run`) -- passed straight through
-        to `belief.attack_run.decide`'s own `granted_optic`. `None` (its
+        `requested_optic`/`drain_attack_run`), passed straight through to
+        `belief.attack_run.decide`'s own `resolving_optic`. `None` (its
         default) for a caller with no optic ladder, read by `decide` as
         `UNAIDED_OPTIC`.
 
@@ -2310,7 +2319,7 @@ class CrewConsole:
             ownship=ownship,
             contact=contact,
             group=group,
-            granted_optic=granted_optic,
+            resolving_optic=resolving_optic,
         )
         if speech is None:
             return new_state

@@ -1431,7 +1431,7 @@ def test_decide_with_granted_binoculars_resolves_tier_1_instead_of_losing_sight(
         now_sim=0.1,
         ownship=_ownship(),
         contact=contact,
-        granted_optic=BINOCULAR_OPTIC,
+        resolving_optic=BINOCULAR_OPTIC,
     )
 
     assert speech is not None

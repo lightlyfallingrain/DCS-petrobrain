@@ -459,11 +459,19 @@ def _no_look_cause(
     `perception.detection_trace.DetectionTrace` (a diagnostic channel;
     using it as a control input would make the log load-bearing).
 
-    `optic` is the optic that actually resolved this tick's look (`BL-
-    B71`'s granted `OpticState.guidance_optic`, threaded in by `decide`
-    below), defaulting to `UNAIDED_OPTIC` when the caller passes nothing
-    (no standing grant, or a caller -- e.g. a direct test -- that has no
-    optic ladder at all). **User direction, 2026-10-16, asked directly
+    `optic` is the optic that actually resolved this tick's look -- `BL-
+    B71`'s review asked for `OpticState.guidance_optic` here, but that is
+    the ladder's own *grant*, not necessarily the optic admitting this
+    tick's percepts: ordinary glassing (`OpticPhase.GLASSING`, no
+    guidance request at all) raises binoculars with `guidance_optic`
+    left `None`, and a guidance grant can itself go stale for a poll the
+    way `requested_optic` already does elsewhere in this module. `decide`
+    below threads through `runner.optic` instead -- `logger.
+    ConsolePerceptionRunner`'s own record of which optic's `source.optic`
+    assignment this poll's percepts were actually filtered through
+    (`logger._apply_active_gaze`'s `optic = decision.optic`) -- defaulting
+    to `UNAIDED_OPTIC` when the caller passes nothing (no optic ladder at
+    all, e.g. a direct test). **User direction, 2026-10-16, asked directly
     whether the naked-eye-only range test was a test artefact or real
     behaviour: "actual behavior must measure by used optic."** Range (gate
     3 below) must therefore test against the instrument actually admitting
@@ -558,7 +566,7 @@ def decide(
     ownship: OwnshipState,
     contact: Contact,
     group: Group | None = None,
-    granted_optic: Optic | None = None,
+    resolving_optic: Optic | None = None,
 ) -> tuple[AttackRunState, OutgoingSpeech | None]:
     """One tick of attack-run guidance: `(new_state, speech)`.
 
@@ -569,16 +577,22 @@ def decide(
     resolves it from `self.store.group_for_contact(contact.id)`; tier 1
     never reads it, since a live look needs no projection.
 
-    `granted_optic` is the optic that actually admitted this tick's
-    percepts -- `OpticState.guidance_optic` at the point `logger.
-    ConsolePerceptionRunner` calls `decide_optic` for this same poll,
-    threaded through `drain_attack_run` -- defaulting to `None` (read as
-    `UNAIDED_OPTIC` by `_no_look_cause`) for callers with no optic ladder
-    at all. Passed straight through to `_no_look_cause`'s range gate,
-    never read anywhere else in this function; `requested_optic`'s own
-    ladder evaluation below is independent of it (one is what this run
-    is asking for, the other is what was actually granted for this
-    look).
+    `resolving_optic` is the optic that actually admitted this tick's
+    percepts -- **not** a guidance grant. User direction, 2026-10-16:
+    "actual behavior must measure by used optic." A prior cut of this
+    parameter was named `granted_optic` and wired to `OpticState.
+    guidance_optic`, which reads `None` through all of ordinary glassing
+    (`OpticPhase.GLASSING` with no standing guidance request) -- the
+    caller (`logger.py`'s poll loop, via `drain_attack_run`) now threads
+    through `runner.optic` itself: the same value `logger.
+    _apply_active_gaze` just assigned onto `source.optic` for this poll,
+    i.e. the optic `perception.visibility.check_visibility` actually
+    tested the percept against. Defaults to `None` (read as `UNAIDED_
+    OPTIC` by `_no_look_cause`) for callers with no optic ladder at all.
+    Passed straight through to `_no_look_cause`'s range gate, never read
+    anywhere else in this function; `requested_optic`'s own ladder
+    evaluation below is independent of it (one is what this run is
+    asking for, the other is what actually resolved this look).
 
     **`plans/attack-run-sortie-fixes/plan.md` BL-B70's cause taxonomy
     (`_no_look_cause`) decides three things on top of the tier, in this
@@ -657,7 +671,7 @@ def decide(
         ownship,
         contact,
         now_sim,
-        optic=granted_optic if granted_optic is not None else UNAIDED_OPTIC,
+        optic=resolving_optic if resolving_optic is not None else UNAIDED_OPTIC,
     )
 
     tier: Literal[1, 2]
@@ -730,7 +744,7 @@ def decide(
     # `BL-B71`'s optic ladder is live and `_no_look_cause` above is fed
     # the wrong (narrower) optic: a fresh relative percept only implies
     # admission within *some* optic's presence range, not necessarily
-    # the one `_no_look_cause` tests against. `granted_optic` closes that
+    # the one `_no_look_cause` tests against. `resolving_optic` closes that
     # gap by testing the same optic that actually admitted the percept
     # (review's required fix, `plans/attack-run-sortie-fixes/
     # review-bl-b71.md`) -- a prior cut of this docstring called the

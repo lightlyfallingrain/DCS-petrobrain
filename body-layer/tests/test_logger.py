@@ -2958,6 +2958,115 @@ def test_crew_text_poll_loop_logs_the_coverage_summary_in_its_finally_block(
     ], summaries
 
 
+# -- `BL-B71`'s review fix round, corrected 2026-10-16 (user direction:
+# "actual behavior must measure by used optic") -- `_run_crew_text_poll_
+# loop` must pass `drain_attack_run` the optic that actually resolved
+# this poll's look (`runner.optic`), not the guidance ladder's own grant
+# (`runner.optic_state.guidance_optic`), which is `None` through ordinary
+# glassing with no standing guidance request at all. -------------------
+
+
+def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drives the real `_run_crew_text_poll_loop` with `run_once` replaced
+    by a no-op, so the loop body runs against hand-set `runner` state
+    rather than a freshly recomputed one -- the only piece this test
+    cares about is which field the loop's own `drain_attack_run` call
+    site reads, not how `decide_optic` arrives at either value (that is
+    `test_optic_policy.py`'s job).
+
+    The scenario is the narrower case the review's divergence note
+    named: ordinary glassing has `runner.optic` at `BINOCULAR_OPTIC`
+    this poll (`OpticPhase.GLASSING`, continuing a steady look), while
+    `runner.optic_state.guidance_optic` is `None` -- no attack-run
+    guidance grant exists at all. `crew_console.drain_attack_run` is
+    replaced with a spy (not a stub of `decide`'s own logic -- that is
+    covered directly by `test_attack_run.py`'s `resolving_optic` tests)
+    so this test asserts exactly one thing: the value crossing the
+    `logger.py`/`crew_console.py` boundary.
+
+    Confirmed to fail for the stated reason: reverting the call site
+    to `resolving_optic=runner.optic_state.guidance_optic` makes
+    `captured["resolving_optic"]` come back `None` instead of
+    `BINOCULAR_OPTIC` -- `UNAIDED_OPTIC` is what `_no_look_cause` would
+    then test range against, misattributing a live binocular look as
+    "too far." Restored afterward; `git diff --stat` empty."""
+    from belief.attack_run import AttackRunState
+    from belief.optic_policy import OpticPhase, OpticState
+    from perception.optics import BINOCULAR_OPTIC
+
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store)
+
+    # Hand-set the state a completed poll would have left behind, rather
+    # than letting a real `run_once()` compute it -- `decide_optic`'s own
+    # GLASSING-continuation branch is exercised elsewhere
+    # (`test_optic_policy.py`); this test only needs the two fields to
+    # disagree the way the bug made them agree.
+    runner.last_t_sim = 0.0
+    runner.last_ownship_state = OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+    )
+    runner.optic = BINOCULAR_OPTIC
+    runner.optic_state = OpticState(
+        phase=OpticPhase.GLASSING, phase_started_sim=0.0, guidance_optic=None
+    )
+    runner.attack_run_state = AttackRunState()
+    monkeypatch.setattr(runner, "run_once", lambda: None)
+
+    captured: dict[str, object] = {}
+    done = threading.Event()
+
+    def spy_drain_attack_run(
+        state: AttackRunState | None,
+        now_sim: float,
+        ownship: OwnshipState,
+        *,
+        resolving_optic: object = None,
+    ) -> AttackRunState | None:
+        captured["resolving_optic"] = resolving_optic
+        done.set()
+        return state
+
+    monkeypatch.setattr(crew_console, "drain_attack_run", spy_drain_attack_run)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        assert done.wait(timeout=5.0), (
+            "drain_attack_run was never called -- the hand-set poll state "
+            "did not reach the call site under test"
+        )
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert captured["resolving_optic"] is BINOCULAR_OPTIC
+    assert captured["resolving_optic"] is not runner.optic_state.guidance_optic
+
+
 def test_connection_reporter_says_disconnected_once_then_connected_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
