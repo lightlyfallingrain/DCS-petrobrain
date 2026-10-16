@@ -557,68 +557,135 @@ def _alignment_clock_hour(azimuth_deg: float) -> int:
     return 12 if hour == 0 else hour
 
 
+def alignment_clock_hour(azimuth_deg: float) -> int | None:
+    """The clock hour `render_alignment` would speak for `azimuth_deg`, or
+    `None` when it is inside the 12 o'clock sector (the qualitative
+    register applies instead) -- exported so `belief.attack_run.decide`
+    (`plans/attack-run-sortie-fixes/plan.md` BL-B70 §4) can track
+    `AttackRunState.last_spoken_clock_hour` against the *same* sector test
+    `render_alignment`/`alignment_phrase` use internally, rather than a
+    second one risking disagreement at the boundary."""
+    outside_sector_deg = CLOCK_BUCKET_DEG / 2.0
+    if abs(azimuth_deg) <= outside_sector_deg:
+        return None
+    return _alignment_clock_hour(azimuth_deg)
+
+
+def alignment_phrase(
+    azimuth_deg: float,
+    elevation_deg: float,
+    *,
+    azimuth_table: tuple[_AlignmentWordRow, ...],
+    elevation_table: tuple[_AlignmentWordRow, ...],
+) -> str:
+    """The bare guidance phrase -- lowercase, no terminal punctuation, no
+    qualifier -- `"come left"` / `"lined up"` / `"three o'clock"`.
+    `render_alignment` wraps this for the ordinary tick; `belief.
+    attack_run.decide` (`plans/attack-run-sortie-fixes/plan.md` BL-B70
+    §10) also calls it directly to compose the "losing sight"/"regaining
+    sight" transition sentences, which do not fit this module's plain
+    qualifier-suffix shape.
+
+    Outside the 12 o'clock sector (`alignment_clock_hour` returning a real
+    hour) speaks the clock hour; inside it, the qualitative word tables,
+    and `"lined up"` once both axes clear their own gate (the table's own
+    last row)."""
+    clock = alignment_clock_hour(azimuth_deg)
+    if clock is not None:
+        return f"{_ALIGNMENT_CLOCK_WORDS[clock]} o'clock".lower()
+    azimuth_phrase = _alignment_phrase_for(azimuth_deg, azimuth_table)
+    elevation_phrase = _alignment_phrase_for(elevation_deg, elevation_table)
+    if azimuth_phrase is None and elevation_phrase is None:
+        return "lined up"
+    phrases = [phrase for phrase in (azimuth_phrase, elevation_phrase) if phrase]
+    return ", ".join(phrases)
+
+
 def render_alignment(
     azimuth_deg: float,
     elevation_deg: float,
     *,
-    tier: Literal[1, 2],
     azimuth_table: tuple[_AlignmentWordRow, ...],
     elevation_table: tuple[_AlignmentWordRow, ...],
+    qualifier: str | None = None,
+    announce_twelve: bool = False,
 ) -> OutgoingSpeech:
     """The ongoing attack-run guidance utterance (`plans/attack-run/
-    plan.md`'s "Spoken vocabulary") -- outside the 12 o'clock sector
-    (the wider of `azimuth_table`'s rows plus half of `CLOCK_BUCKET_DEG`'s
-    own half-width is inside it by construction, so "outside" is simply
-    "the o'clock register still applies") speaks the clock hour; inside
-    it, the register switches to the qualitative word tables, and
-    `"lined up"` once both axes clear their own gate (the table's own
-    last row), never again until something changes (Decision 7's
-    change-driven cadence is the caller's job, not this function's --
-    this renders one tick's state, it does not remember the last one).
+    plan.md`'s "Spoken vocabulary"), built from `alignment_phrase`
+    (Decision 7's change-driven cadence is the caller's job, not this
+    function's -- this renders one tick's state, it does not remember the
+    last one).
 
-    `tier` selects the register (Decision 11 REVISED/Decision 17 REVISED).
     `azimuth_table`/`elevation_table` are supplied by the caller
     (`attack_run.decide`), not read from a tier-keyed lookup here --
     tier 1 passes `attack_run.AZIMUTH_WORD_TABLE`/`ELEVATION_WORD_TABLE`,
     tier 2 passes `attack_run.TIER2_AZIMUTH_WORD_TABLE` and the *same*
     `ELEVATION_WORD_TABLE` (its one row carries no large/small split
-    either way). This function stays ignorant of which tier's table is
-    which; it only ever applies the one it is handed.
+    either way).
 
-    **Tier 2 (Stage 6) is the qualifier `", obstructed"` appended to
-    whatever the branches above would otherwise have rendered -- one
-    rule, applied uniformly, not a second table of pre-qualified
-    phrases.** This includes the o'clock branch and the `"lined up"`
-    case: the user's own words (2026-10-14, second direction pass) are
-    `"lined up, obstructed"`, composing exactly the way `"right,
-    obstructed"` does, because the qualifier marks *how the information
-    was obtained*, not which branch fired. Confirmed again
-    (2026-10-14, third pass): on regaining sight while still lined up, a
-    bare `"lined up"` is spoken once, symmetric with `"lined up,
-    obstructed"` on losing it -- both are tier *transitions*, and both
-    fall out of `attack_run._should_emit`'s own text-comparison with no
-    tier-aware code here or there, because the qualifier's presence is
-    part of `text` and therefore part of what "changed" means. A
-    *within*-tier-2 repeat (still obstructed, still lined up) renders the
-    identical string as the previous tick and is suppressed by that same
-    comparison, exactly like tier 1's own `"Lined up."`-then-silence."""
-    outside_sector_deg = CLOCK_BUCKET_DEG / 2.0
-    if abs(azimuth_deg) > outside_sector_deg:
-        clock = _alignment_clock_hour(azimuth_deg)
-        text = f"{_ALIGNMENT_CLOCK_WORDS[clock]} o'clock"
-    else:
-        azimuth_phrase = _alignment_phrase_for(azimuth_deg, azimuth_table)
-        elevation_phrase = _alignment_phrase_for(elevation_deg, elevation_table)
-        if azimuth_phrase is None and elevation_phrase is None:
-            text = "lined up"
-        else:
-            phrases = [
-                phrase for phrase in (azimuth_phrase, elevation_phrase) if phrase
-            ]
-            text = ", ".join(phrases)
-    if tier == 2:
-        text = f"{text}, obstructed"
+    **`qualifier` (`plans/attack-run-sortie-fixes/plan.md` BL-B70 §8,
+    revising Stage 6's own unconditional-on-tier-2 rule) is appended
+    verbatim, caller-chosen rather than tier-driven** -- a leading
+    `", "` is the caller's responsibility (e.g. `", obstructed"`), so this
+    function stays ignorant of why a qualifier was or was not supplied.
+    `None` (the ordinary tier-1 case, and tier-2's own `"unknown"`-cause
+    fail-open case) speaks the bare phrase. The §10 "too far" register's
+    own transition sentences do **not** go through this parameter --
+    `belief.attack_run.decide` composes those directly from
+    `alignment_phrase` instead, since their shape (an appended
+    what/where/age clause, or an `"Eyes on, "` prefix) is not a suffix.
+
+    **`announce_twelve` (§4) prefixes `"Twelve o'clock, "`** -- the
+    ordering the user asked for (the announcement precedes the
+    qualitative guidance), and it changes `text`, so `attack_run.
+    _should_emit`'s veto emits it with no special case."""
+    text = alignment_phrase(
+        azimuth_deg,
+        elevation_deg,
+        azimuth_table=azimuth_table,
+        elevation_table=elevation_table,
+    )
+    if qualifier is not None:
+        text = f"{text}{qualifier}"
+    if announce_twelve:
+        return OutgoingSpeech(text=f"Twelve o'clock, {text}.", template="attack_run")
     return OutgoingSpeech(text=f"{text[0].upper()}{text[1:]}.", template="attack_run")
+
+
+def render_attack_run_lost_sight(
+    phrase: str, what: str, where: str | None, ago_s: float
+) -> OutgoingSpeech:
+    """BL-B70 §10's "losing sight" transition (`plans/
+    attack-run-sortie-fixes/plan.md`) -- spoken once, the moment the
+    attack-run target's cause becomes `"too_far"` after a resolved
+    (tier-1) look: the full remembered-sighting claim, `"<phrase> <what>
+    <where>, last seen <age> ago."` -- the user's own template, §10.
+    `phrase` is `alignment_phrase`'s bare guidance word; `belief.
+    attack_run.decide` tracks whether this has already been spoken for
+    the current too-far episode (`AttackRunState.last_spoken_unresolved`),
+    this function has no memory of its own.
+
+    `where` is `None` (the reviewer's required fix 2,
+    `plans/attack-run-sortie-fixes/review.md`) when `belief.attack_run.
+    decide` judges that it would restate `phrase` verbatim -- `phrase`
+    outside the 12 o'clock sector is itself a clock-hour phrase, so a
+    `<where>` clause there spoke the same position twice, once worded and
+    once as a bare digit, which was the defect. This function only omits
+    the clause on `None`; it is never the one deciding when that applies."""
+    age = _attack_run_last_seen_phrase(ago_s)
+    capitalized_phrase = f"{phrase[0].upper()}{phrase[1:]}"
+    if where is None:
+        sentence = f"{capitalized_phrase} {what}, last seen {age} ago"
+    else:
+        sentence = f"{capitalized_phrase} {what} {where}, last seen {age} ago"
+    return OutgoingSpeech(text=f"{sentence}.", template="attack_run")
+
+
+def render_attack_run_regained_sight(phrase: str) -> OutgoingSpeech:
+    """BL-B70 §10's "regaining sight" transition -- `"Eyes on,
+    <phrase>."`, spoken once on the tier-2 too-far -> tier-1 transition,
+    symmetric with `render_attack_run_lost_sight`."""
+    return OutgoingSpeech(text=f"Eyes on, {phrase}.", template="attack_run")
 
 
 def render_stand_by() -> OutgoingSpeech:
@@ -1034,6 +1101,28 @@ def _spoken_age_phrase(ago_s: float) -> str:
     if minutes == 2:
         return "a couple minutes old"
     return f"about {_spoken_number(minutes)} minutes old"
+
+
+def _attack_run_last_seen_phrase(ago_s: float) -> str:
+    """`"last seen {phrase} ago"` 's own `{phrase}` (`plans/
+    attack-run-sortie-fixes/plan.md` BL-B70 §10) -- deliberately **not**
+    `_spoken_age_phrase`, which already ends in `"old"` and would double
+    up against this caller's own trailing `"ago"` (`"last seen under a
+    minute old ago"`). Same coarse-by-intent rungs, worded as a bare
+    duration: *"a moment"*, *"a minute"*, *"a couple of minutes"*, *"about
+    N minutes"* -- the user's own words (§10: *"rounded to something
+    sensible like 'moment' 'minute' 'couple of minutes'"*), because
+    Petrovich is saying how stale his last look was, not reading a clock,
+    the same instinct that keeps the guidance register qualitative rather
+    than numeric (2026-10-14 direction §9)."""
+    minutes = round(ago_s / 60.0)
+    if minutes <= 0:
+        return "a moment"
+    if minutes == 1:
+        return "a minute"
+    if minutes == 2:
+        return "a couple of minutes"
+    return f"about {_spoken_number(minutes)} minutes"
 
 
 def _summary_air_defence_freshness_clause(

@@ -215,6 +215,8 @@ def _trace_entry(
     observation_id: str | None,
     outcome: GateOutcome = GateOutcome.ADMITTED,
     cluster_member_object_ids: tuple[int, ...] | None = None,
+    live_los_clear: bool | None = None,
+    los_skew_s: float | None = None,
 ) -> DetectionTrace:
     return DetectionTrace(
         object_id=object_id,
@@ -227,6 +229,8 @@ def _trace_entry(
         outcome=outcome,
         observation_id=observation_id,
         cluster_member_object_ids=cluster_member_object_ids,
+        live_los_clear=live_los_clear,
+        los_skew_s=los_skew_s,
     )
 
 
@@ -327,6 +331,86 @@ def test_write_poll_no_tripwire_line_for_ordinary_row(tmp_path: Path) -> None:
     writer.close()
 
     assert stderr.getvalue() == ""
+
+
+def test_write_poll_attack_run_tripwire_present_in_snapshot(tmp_path: Path) -> None:
+    """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §9: when the caller
+    names an attack-run target contact, one extra `kind:
+    "attack_run_los_tripwire"` row is written per poll, carrying whether
+    this poll's snapshot actually joined the target's `unit_name` and the
+    join's own skew."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+
+    collector = DetectionTraceCollector()
+    collector.records.append(
+        _trace_entry(observation_id="OBS_1", live_los_clear=True, los_skew_s=0.2)
+    )
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+    writer.write_poll(
+        collector, store, _ownship(), attack_run_target_contact_id="CONTACT_1"
+    )
+    writer.close()
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    tripwire_rows = [
+        json.loads(line)
+        for line in lines
+        if json.loads(line).get("kind") == "attack_run_los_tripwire"
+    ]
+    assert len(tripwire_rows) == 1
+    assert tripwire_rows[0]["contact_id"] == "CONTACT_1"
+    assert tripwire_rows[0]["present_in_snapshot"] is True
+    assert tripwire_rows[0]["join_skew_s"] == 0.2
+    assert tripwire_rows[0]["live_los_clear"] is True
+
+
+def test_write_poll_attack_run_tripwire_absent_from_snapshot(tmp_path: Path) -> None:
+    """The honest negative: the target's `unit_name` was not in this
+    poll's resolved entries at all (e.g. outside the pushed wedge, F5's
+    own residual cause) -- `present_in_snapshot=False`, no skew, no
+    verdict, never a guessed value."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+
+    collector = DetectionTraceCollector()  # nothing admitted this poll
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+    writer.write_poll(
+        collector, store, _ownship(), attack_run_target_contact_id="CONTACT_1"
+    )
+    writer.close()
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    tripwire_rows = [json.loads(line) for line in lines]
+    assert len(tripwire_rows) == 1
+    assert tripwire_rows[0]["kind"] == "attack_run_los_tripwire"
+    assert tripwire_rows[0]["present_in_snapshot"] is False
+    assert tripwire_rows[0]["join_skew_s"] is None
+    assert tripwire_rows[0]["live_los_clear"] is None
+
+
+def test_write_poll_no_attack_run_tripwire_row_without_a_target(tmp_path: Path) -> None:
+    """`attack_run_target_contact_id=None` (the default, no run active) --
+    `write_poll` writes no `attack_run_los_tripwire` row at all."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    store = ContactStore()
+    collector = DetectionTraceCollector()
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+    writer.write_poll(collector, store, _ownship())
+    writer.close()
+
+    assert path.read_text(encoding="utf-8") == ""
 
 
 def test_write_speech_rows_carry_gaze_at_the_moment_of_speech(

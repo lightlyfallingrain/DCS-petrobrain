@@ -390,18 +390,37 @@ class BeliefTruthLogWriter:
         collector: DetectionTraceCollector,
         store: ContactStore,
         ownship: OwnshipState,
+        *,
+        attack_run_target_contact_id: str | None = None,
     ) -> None:
         """Match this poll's admitted `DetectionTrace` entries against
         `store`'s current contacts (via `detection_trace_writer.
         observation_id_to_contact_id`, the shared join) and write one row
         per matched pair. **Deliberately does not clear `collector.
         records`** -- see module docstring; the poll loop owns that, once
-        every reader of this poll's collector has had its turn."""
+        every reader of this poll's collector has had its turn.
+
+        `attack_run_target_contact_id` (`plans/attack-run-sortie-fixes/
+        plan.md` BL-B70 §9) is the caller's (`logger.py`'s poll loop,
+        reading `ConsolePerceptionRunner.attack_run_state.last_contact_id`)
+        own knowledge of which contact an active attack run is guiding
+        on -- this module computes nothing about *which* contact matters,
+        it only measures the one it is told about. When supplied, writes
+        one extra `kind: "attack_run_los_tripwire"` row per poll
+        (`_write_attack_run_tripwire`) -- a measurement, not an invariant
+        assertion (the plan's own reasoning: an unenforced guarantee
+        declared in one stage and never checked in the next is exactly
+        `BL-B64`'s field-of-regard finding's shape)."""
         if self._disabled:
             return
         contacts_by_id = {contact.id: contact for contact in store.contacts}
         obs_to_contact_id = observation_id_to_contact_id(store)
         observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+
+        if attack_run_target_contact_id is not None:
+            self._write_attack_run_tripwire(
+                collector, obs_to_contact_id, attack_run_target_contact_id
+            )
 
         for entry in collector.records:
             if (
@@ -450,6 +469,55 @@ class BeliefTruthLogWriter:
         self._polls_since_flush += 1
         if self._polls_since_flush >= self._flush_every_n_polls:
             self.flush()
+
+    def _write_attack_run_tripwire(
+        self,
+        collector: DetectionTraceCollector,
+        obs_to_contact_id: dict[str, str],
+        attack_run_target_contact_id: str,
+    ) -> None:
+        """One `kind: "attack_run_los_tripwire"` row per poll, for the one
+        contact an active attack run is guiding on -- `plans/
+        attack-run-sortie-fixes/plan.md` BL-B70 §9's own measurement:
+        whether this poll's snapshot carried the target's `unit_name` at
+        all (`present_in_snapshot`), and the live-LOS join's own skew for
+        it (`join_skew_s`, `DetectionTrace.los_skew_s`) when it did.
+        `present_in_snapshot=False` does not by itself mean a problem --
+        the target may simply be outside the pushed wedge this poll (F5's
+        own residual cause) -- it is the countable number the plan asks
+        for, not a pass/fail verdict."""
+        t_sim: float | None = None
+        present = False
+        join_skew_s: float | None = None
+        live_los_clear: bool | None = None
+        for entry in collector.records:
+            if (
+                entry.outcome is not GateOutcome.ADMITTED
+                or entry.observation_id is None
+            ):
+                continue
+            if (
+                obs_to_contact_id.get(entry.observation_id)
+                != attack_run_target_contact_id
+            ):
+                continue
+            t_sim = entry.t_sim
+            present = True
+            join_skew_s = entry.los_skew_s
+            live_los_clear = entry.live_los_clear
+            break
+        row: dict[str, object] = {
+            "kind": "attack_run_los_tripwire",
+            "t_sim": t_sim,
+            "contact_id": attack_run_target_contact_id,
+            "present_in_snapshot": present,
+            "join_skew_s": join_skew_s,
+            "live_los_clear": live_los_clear,
+        }
+        try:
+            self._file.write(json.dumps(row) + "\n")
+        except OSError as exc:
+            self._fail(exc)
 
     def flush(self) -> None:
         if self._disabled:

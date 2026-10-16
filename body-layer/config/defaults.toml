@@ -10,11 +10,6 @@
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
 [belief.attack_run]
-# ATTACK_RUN_CHANGE_THRESHOLD_DEG` (3.0): `BEARING_SIGMA_DEG` again -- do not re-speak until the error has moved by more than belief's own noise would.
-# status: agreed-guess | range: 0.5 .. 14.0
-# source: belief/attack_run.py:ATTACK_RUN_CHANGE_THRESHOLD_DEG
-ATTACK_RUN_CHANGE_THRESHOLD_DEG = 3.0
-
 # ATTACK_RUN_ELEVATION_GATE_DEG` (10.0): deliberately wide (§11: "it's there to make me aim at the correct unit, not wrong one"), so a lofted nose stays inside it.
 # status: agreed-guess | range: 1.0 .. 45.0
 # source: belief/attack_run.py:ATTACK_RUN_ELEVATION_GATE_DEG
@@ -110,6 +105,12 @@ FOCUS_DWELL_S = 2.0
 # status: judgement
 # source: perception/gaze.py:SCAN_PLAN
 SCAN_PLAN = [12, 11, 10, 9, 12, 1, 2, 3]
+
+[perception.naked_eye_source]
+# plans/attack-run-sortie-fixes/plan.md` (BL-B70 §9) -- how stale the attack-run target's own live LOS verdict may be before `belief.attack_run._no_look_cause` treats it as no verdict at all (`"unknown"`, fail-open) rather than a real `"obstructed"` call; a *smaller* value here is the dangerous direction, since it starts discarding genuinely fresh verdicts and reporting `"unknown"` instead.
+# status: agreed-guess | range: 0.5 .. 3.0
+# source: perception/naked_eye_source.py:ATTACK_TARGET_LOS_MAX_AGE_S
+ATTACK_TARGET_LOS_MAX_AGE_S = 1.5
 
 [perception.visibility]
 # Type tier ("that specific BMP variant"): a *smaller* value here means a *longer* naked-eye type-ID range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.25 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.

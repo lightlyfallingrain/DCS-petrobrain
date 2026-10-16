@@ -1,8 +1,10 @@
 """Tests for `belief.attack_run` -- `plans/attack-run/plan.md` Stages 3/6/7's
 pure alignment derivation (tier 1, the live look; tier 2, the degraded
-fallback with Decision 10's projection) plus `belief.speech.
-render_alignment`'s word-table rendering, and the grep fence that keeps
-`Percept.relative_direction` to its two sanctioned readers."""
+fallback with Decision 10's projection), `plans/attack-run-sortie-fixes/
+plan.md` BL-B70's cause taxonomy and §1/§2/§4/§8/§9/§10/§11 fixes, plus
+`belief.speech.render_alignment`'s word-table rendering, and the grep
+fence that keeps `Percept.relative_direction` to its two sanctioned
+readers."""
 
 from __future__ import annotations
 
@@ -15,7 +17,6 @@ import pytest
 from belief import attack_run as attack_run_module
 from belief import percept as percept_module
 from belief.attack_run import (
-    ATTACK_RUN_CHANGE_THRESHOLD_DEG,
     ATTACK_RUN_ELEVATION_GATE_DEG,
     ATTACK_RUN_LINED_UP_AZIMUTH_DEG,
     ATTACK_RUN_RELATIVE_MAX_AGE_S,
@@ -23,6 +24,7 @@ from belief.attack_run import (
     ELEVATION_WORD_TABLE,
     TIER2_AZIMUTH_WORD_TABLE,
     AttackRunState,
+    _no_look_cause,
     _tier1_alignment,
     _tier2_alignment,
     decide,
@@ -33,6 +35,7 @@ from belief.motion import MotionBelief, MotionState
 from belief.percept import Percept
 from belief.position_belief import Covariance2D, PositionEstimate
 from belief.speech import render_alignment
+from perception.naked_eye_source import ATTACK_TARGET_LOS_MAX_AGE_S
 from perception.source import OwnshipState, RelativeDirection
 
 _RELATIVE_DIRECTION_PATTERN = re.compile(
@@ -140,7 +143,13 @@ def test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept() -> Non
     is `None`, so no tier-1 look has ever supplied a remembered height,
     Decision 4 REVISED's fail-open case): the contact sits dead ahead at
     the founding bearing/range (0 deg, 1000 m), so tier 2's azimuth is
-    "lined up" and the elevation axis never fires at all."""
+    "lined up" and the elevation axis never fires at all.
+
+    **No qualifier** -- `BL-B70`'s cause taxonomy (`plans/
+    attack-run-sortie-fixes/plan.md` §8): this contact carries no live LOS
+    verdict at all (`live_los_clear` defaults `None`), which is the
+    `"unknown"` cause, fail-open, no qualifier -- not `", obstructed"`,
+    which now fires only on a fresh `live_los_clear is False`."""
     contact = Contact.from_percept(
         "CONTACT_1",
         Percept(
@@ -159,7 +168,7 @@ def test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept() -> Non
     new_state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
 
     assert speech is not None
-    assert speech.text == "Lined up, obstructed."
+    assert speech.text == "Lined up."
     assert new_state.last_spoken_tier == 2
 
 
@@ -186,6 +195,17 @@ def test_decide_falls_through_to_tier_2_once_the_relative_observation_goes_stale
     assert speech1.text == "A little lower."
     assert state.last_known_target_alt_m == pytest.approx(200.0)
 
+    # Tier 1's and tier 2's elevation axis render the identical "A little
+    # lower." with no live LOS verdict at all (the `"unknown"` cause,
+    # fail-open, no qualifier) -- so the tier transition is silent by
+    # `_should_emit`'s own text-equality veto (the same accepted collapse
+    # `test_decide_lined_up_tier2_unknown_cause_collapses_the_transition`
+    # documents). A fresh, genuine DCS LOS block distinguishes the two
+    # ticks' text so the memory this test actually cares about (tier 2's
+    # elevation reading the *remembered* altitude, not `ownship.alt_m`)
+    # is still visible in what is spoken.
+    contact.live_los_clear = False
+    contact.last_seen_sim = ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.01
     _state2, speech2 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.01,
@@ -300,10 +320,10 @@ def test_decide_oblique_heading_and_banked_ownship_does_not_mix_axes() -> None:
 
 
 def test_decide_change_driven_cadence_resuppresses_unchanged_errors() -> None:
-    """Decision 7: emit when the rendered text differs from the last
-    *spoken* one, or either axis has moved by more than `ATTACK_RUN_
-    CHANGE_THRESHOLD_DEG` since that same last-spoken baseline -- not the
-    previous sample."""
+    """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §1: emit if and only
+    if the rendered text differs from the last *spoken* one -- text
+    equality is a veto, the angular change-driven clause (`ATTACK_RUN_
+    CHANGE_THRESHOLD_DEG`, since removed) is gone entirely."""
     # 20 degrees right -- outside the sector, "two" o'clock-ish register.
     contact = _contact_with_relative_direction(
         ownship_at_observation=_ownship(),
@@ -330,7 +350,15 @@ def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction(
     re-fires on the qualifier appearing/disappearing (no tier-aware code
     needed, see `_should_emit`'s docstring), while the *sign* of the
     azimuth error is unaffected because tier 2's world-anchored position
-    is set to agree with tier 1's relative observation here."""
+    is set to agree with tier 1's relative observation here.
+
+    **`plans/attack-run-sortie-fixes/plan.md` BL-B70 §8: the qualifier is
+    cause-keyed, not tier-keyed.** `contact.live_los_clear` is set `False`
+    with a fresh `last_seen_sim` (within `ATTACK_TARGET_LOS_MAX_AGE_S`)
+    specifically so the tier-2 ticks below have the `"obstructed"` cause
+    -- without that, the qualifier would not appear at all (a contact
+    with no live LOS verdict is the `"unknown"` cause, fail-open, see
+    `test_decide_falls_through_to_tier_2_when_the_contact_has_no_percept`)."""
     relative = RelativeDirection(forward_m=1000.0, right_m=100.0, up_m=0.0)
     contact = _contact_with_relative_direction(
         ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
@@ -358,7 +386,9 @@ def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction(
     # single-row table reads the same ~5.7 deg as "right" (not "a bit
     # right": that word is structurally unreachable in tier 2, see
     # `test_tier2_azimuth_never_speaks_tier_1s_fine_grained_words`), plus
-    # the qualifier.
+    # a fresh, genuine DCS LOS block -- the `"obstructed"` cause.
+    contact.live_los_clear = False
+    contact.last_seen_sim = ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1
     state, speech2 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1,
@@ -369,8 +399,9 @@ def test_decide_tier_transition_speaks_the_qualifier_without_flipping_direction(
     assert speech2.text == "Right, obstructed."
     assert state.last_spoken_tier == 2
 
-    # Still stale, unchanged geometry -- silent (the steady-state repeat
-    # suppression tier 1's own "Lined up."-then-silence has).
+    # Still stale, unchanged geometry, LOS verdict still fresh enough
+    # (1.0 s < `ATTACK_TARGET_LOS_MAX_AGE_S`) -- silent (the steady-state
+    # repeat suppression tier 1's own "Lined up."-then-silence has).
     state, speech3 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 1.1,
@@ -413,7 +444,15 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
     spoken once on entering it and once on leaving it -- `"lined up"` and
     `"lined up, obstructed"` are each spoken exactly once, never repeated
     while the state holds, mirroring tier 1's own `"Lined up."`-then-
-    silence (§4)."""
+    silence (§4).
+
+    **`contact.live_los_clear = False` + fresh `last_seen_sim`, same
+    reasoning as the directional test above** -- BL-B70 §8 makes the
+    qualifier cause-keyed, so without a genuine fresh DCS LOS block the
+    tier-2 tick below would be the `"unknown"` cause (no qualifier, and
+    `"Lined up."` both tiers, which is `test_decide_lined_up_
+    tier2_unknown_cause_collapses_the_transition`'s own, deliberately
+    different, point)."""
     relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
     contact = _contact_with_relative_direction(
         ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
@@ -435,7 +474,10 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
     state, speech2 = decide(state, now_sim=0.2, ownship=_ownship(), contact=contact)
     assert speech2 is None
 
-    # Lose sight -- still lined up, but tier 2: spoken once.
+    # Lose sight -- still lined up, but tier 2 with a fresh, genuine DCS
+    # LOS block: spoken once.
+    contact.live_los_clear = False
+    contact.last_seen_sim = ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1
     state, speech3 = decide(
         state,
         now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1,
@@ -478,6 +520,346 @@ def test_decide_lined_up_tier_transition_speaks_once_each_way() -> None:
         contact=contact,
     )
     assert speech6 is None
+
+
+def test_decide_lined_up_tier2_unknown_cause_collapses_the_transition() -> None:
+    """The plan's own flagged Risk (`plans/attack-run-sortie-fixes/
+    plan.md` BL-B70, "UNKNOWN speaks tier-2 guidance with no qualifier at
+    all. Honest... but the pilot cannot distinguish it from a live
+    look."), pinned as a structural property rather than left implicit:
+    when tier 1 goes stale with **no** live LOS verdict at all (the
+    `"unknown"` cause -- the ordinary case for a contact `BL-B71`'s optic
+    ladder has not reached for yet), both tiers render the identical bare
+    `"Lined up."`, so `_should_emit`'s text-equality veto suppresses the
+    tier-1 -> tier-2 transition entirely. This is the accepted
+    consequence of making the qualifier cause-keyed (§8) rather than
+    tier-keyed -- contrast with `test_decide_lined_up_tier_transition_
+    speaks_once_each_way` immediately above, where a genuine fresh
+    `"obstructed"` cause *does* re-speak."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(), relative=relative, t_sim=0.0
+    )
+    contact.position = PositionEstimate(
+        x=1000.0,
+        z=0.0,
+        covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+    )
+    state = AttackRunState()
+
+    state, speech1 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech1 is not None and speech1.text == "Lined up."
+    assert state.last_spoken_tier == 1
+
+    # Tier 1 goes stale, no live LOS verdict ever set -- cause is
+    # "unknown", same text, no re-speak, but `last_spoken_tier` silently
+    # keeps its old value (`1`) because nothing emitted to update it --
+    # the one reachable case `test_last_spoken_tier_cannot_silently_
+    # carry_a_wrong_value_across_a_retarget` names as "silently unspoken,"
+    # not "silently wrong" (the stale `1` is also the one this function
+    # actually computed internally, just never surfaced).
+    state, speech2 = decide(
+        state,
+        now_sim=ATTACK_RUN_RELATIVE_MAX_AGE_S + 0.1,
+        ownship=_ownship(),
+        contact=contact,
+    )
+    assert speech2 is None
+    assert state.last_spoken_tier == 1
+    assert state.last_spoken_text == "Lined up."
+
+
+# -- decide(): the cause taxonomy (§2 masked, §8 obstructed/too_far/unknown) -
+
+
+def _contact_at(
+    *, bearing_deg: float, range_m: float, classification_raw: str = "OP_ARMORED"
+) -> Contact:
+    """A contact founded with no relative-direction percept at all, so
+    `_tier1_alignment` always returns `None` and `decide` is forced to
+    tier 2 regardless of `now_sim` -- these cause-taxonomy tests are about
+    `_no_look_cause`, not tier selection."""
+    return Contact.from_percept(
+        "CONTACT_1",
+        Percept(
+            t_sim=0.0,
+            source="naked_eye_visual_filtered",
+            classification_raw=classification_raw,
+            bearing_deg=bearing_deg,
+            range_m=range_m,
+            ownship_at_observation=_ownship(),
+            observation_id="OBS_1",
+            relative_direction=None,
+        ),
+    )
+
+
+def _move_contact_to(contact: Contact, *, x: float, z: float, now_sim: float) -> None:
+    """Re-points `contact.last_position` (a read-only property over
+    `contact.position`) without going through `record()` -- the same
+    direct-mutation pattern the pre-existing tier-transition tests above
+    already use for `contact.position`."""
+    contact.position = PositionEstimate(
+        x=x,
+        z=z,
+        covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+        as_of_sim=now_sim,
+        fused_at_sim=now_sim,
+        fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+    )
+
+
+def test_no_look_cause_masked_behind_the_cockpit_mask() -> None:
+    """§2: a target dead astern (`rear_cutoff_deg=130`) is `"masked"`
+    regardless of range or LOS -- `cockpit_mask.is_visible` short-circuits
+    before either of the other two gates is even consulted, matching
+    `check_visibility`'s own gate order."""
+    contact = _contact_at(bearing_deg=180.0, range_m=1000.0)
+    assert _no_look_cause(_ownship(), contact, now_sim=0.0) == "masked"
+
+
+def test_no_look_cause_obstructed_only_on_a_fresh_false_verdict() -> None:
+    """§8/F2: `"obstructed"` fires only on `live_los_clear is False` with
+    a verdict fresher than `ATTACK_TARGET_LOS_MAX_AGE_S` -- `None` (no
+    verdict) and a stale `False` both fall through to `"unknown"`,
+    fail-open."""
+    contact = _contact_at(bearing_deg=0.0, range_m=1000.0)
+    assert _no_look_cause(_ownship(), contact, now_sim=0.0) == "unknown"
+
+    contact.live_los_clear = False
+    contact.last_seen_sim = 0.0
+    assert (
+        _no_look_cause(_ownship(), contact, now_sim=ATTACK_TARGET_LOS_MAX_AGE_S - 0.1)
+        == "obstructed"
+    )
+    assert (
+        _no_look_cause(_ownship(), contact, now_sim=ATTACK_TARGET_LOS_MAX_AGE_S + 0.1)
+        == "unknown"
+    )
+
+    contact.live_los_clear = True
+    assert (
+        _no_look_cause(_ownship(), contact, now_sim=ATTACK_TARGET_LOS_MAX_AGE_S - 0.1)
+        == "unknown"
+    )
+
+
+def test_no_look_cause_too_far_beyond_naked_eye_presence_range() -> None:
+    """§5/§6: beyond the naked eye's own presence threshold for this
+    object's profile (`UNAIDED_OPTIC`, `BL-B71`'s ladder out of scope),
+    the cause is `"too_far"` -- checked after masking but *before* LOS,
+    matching `check_visibility`'s own gate order (range/size is gate 3,
+    terrain LOS is gate 4)."""
+    near = _contact_at(bearing_deg=0.0, range_m=1000.0)
+    assert _no_look_cause(_ownship(), near, now_sim=0.0) == "unknown"
+
+    far = _contact_at(bearing_deg=0.0, range_m=2000.0)
+    assert _no_look_cause(_ownship(), far, now_sim=0.0) == "too_far"
+
+
+def test_no_look_cause_too_far_wins_over_a_fresh_obstructed_verdict() -> None:
+    """The reviewer's own mutation proof (`plans/attack-run-sortie-fixes/
+    review.md`): a contact that is simultaneously (fresh
+    `live_los_clear=False`, beyond the naked eye's presence range) must
+    report `"too_far"`, not `"obstructed"` -- `check_visibility` itself
+    would have rejected it on range (gate 3) before ever reaching terrain
+    LOS (gate 4), so `"obstructed"` would be a misattribution. Before the
+    fix this asserted `"obstructed"` and passed; swapping the two checks
+    in `_no_look_cause` back to the wrong order makes this fail."""
+    far = _contact_at(bearing_deg=0.0, range_m=2000.0)
+    far.live_los_clear = False
+    far.last_seen_sim = 0.0
+
+    assert (
+        _no_look_cause(_ownship(), far, now_sim=ATTACK_TARGET_LOS_MAX_AGE_S - 0.1)
+        == "too_far"
+    )
+
+
+def test_decide_masked_tick_is_silent_and_run_stays_engaged() -> None:
+    """§2: `speech` is `None`, and the run does not end -- `decide` simply
+    returns a state, never a sentinel meaning "stop.\""""
+    contact = _contact_at(bearing_deg=180.0, range_m=1000.0)
+    state = AttackRunState()
+
+    new_state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+
+    assert speech is None
+    assert new_state.last_spoken_text is None
+    assert new_state.last_contact_id == "CONTACT_1"
+
+
+def test_decide_masked_tick_never_moves_the_cadence_or_unresolved_baseline() -> None:
+    """§2's own co-moving-fields rule: a suppressed-for-masking tick must
+    not look like a spoken one to the next tick's comparison -- pinned by
+    first speaking something, then masking, then confirming both
+    `last_spoken_text` and `last_spoken_unresolved` are exactly what they
+    were before the masked tick."""
+    contact = _contact_at(bearing_deg=0.0, range_m=1000.0)
+    state = AttackRunState()
+    state, speech1 = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    baseline_text = state.last_spoken_text
+    baseline_unresolved = state.last_spoken_unresolved
+
+    _move_contact_to(contact, x=-1000.0, z=0.0, now_sim=1.0)  # astern -- masked
+    masked_state, speech2 = decide(
+        state, now_sim=1.0, ownship=_ownship(), contact=contact
+    )
+    assert speech2 is None
+    assert masked_state.last_spoken_text == baseline_text
+    assert masked_state.last_spoken_unresolved == baseline_unresolved
+
+
+def test_decide_losing_and_regaining_sight_keys_on_resolvability_not_masking() -> None:
+    """`docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` §10/§11
+    (direction §11, the user's own words: *"losing sight is expected in a
+    break after a gun/rocket run... the important question is whether
+    Petrovich sees the target when we turn to see what is happening"*):
+    a break that masks the target between two `"too_far"` ticks must not
+    re-announce the loss, and must not announce "eyes on" just because
+    the target came back from behind the mask -- only the resolvable ->
+    unresolvable edge (and back) does that, never a masked tick in
+    between."""
+    contact = _contact_at(bearing_deg=0.0, range_m=2000.0)  # too far
+    state = AttackRunState()
+
+    # Losing sight: the full remembered-sighting claim, once.
+    state, speech1 = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert speech1.text.startswith("Lined up armor")
+    assert "last seen" in speech1.text
+    assert state.last_spoken_unresolved is True
+
+    # A break: the pilot pulls off target, masking it -- not an
+    # announcement, and `last_spoken_unresolved` is untouched.
+    _move_contact_to(contact, x=-1000.0, z=0.0, now_sim=1.0)
+    state, speech2 = decide(state, now_sim=1.0, ownship=_ownship(), contact=contact)
+    assert speech2 is None
+    assert state.last_spoken_unresolved is True
+
+    # Turning back in, still too far (beyond acquisition range) -- no
+    # re-announcement, bare guidance only.
+    _move_contact_to(contact, x=2000.0, z=0.0, now_sim=2.0)
+    state, speech3 = decide(state, now_sim=2.0, ownship=_ownship(), contact=contact)
+    assert speech3 is not None
+    assert speech3.text == "Lined up."
+    assert "last seen" not in speech3.text
+    assert state.last_spoken_unresolved is True
+
+    # Turning back in, now within acquisition range -- "eyes on," once.
+    _move_contact_to(contact, x=1000.0, z=0.0, now_sim=3.0)
+    state, speech4 = decide(state, now_sim=3.0, ownship=_ownship(), contact=contact)
+    assert speech4 is not None
+    assert speech4.text == "Eyes on, lined up."
+    assert state.last_spoken_unresolved is False
+
+
+def test_decide_losing_sight_where_suppressed_when_it_restates_the_clock_hour() -> None:
+    """Review's required fix 2 (`plans/attack-run-sortie-fixes/review.md`):
+    outside the 12 o'clock sector, `phrase` is itself a worded clock-hour
+    phrase (`"Three o'clock"`), so the `<where>` clause is suppressed
+    rather than restating the same position as a bare digit (the old,
+    defective `"Three o'clock armor 3 o'clock, last seen..."`)."""
+    contact = _contact_at(bearing_deg=90.0, range_m=2000.0)  # 3 o'clock, too far
+    state = AttackRunState()
+
+    state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+
+    assert speech is not None
+    assert speech.text.startswith("Three o'clock armor, last seen")
+    assert "3 o'clock" not in speech.text
+
+
+def test_decide_losing_sight_where_phrase_kept_in_the_qualitative_register() -> None:
+    """Inside the 12 o'clock sector, `phrase` is a qualitative word
+    (`"lined up"`/`"come left"`) that carries no position at all, so the
+    `<where>` clause still earns its place there -- `"ahead"` -- unlike
+    the clock-hour case above, where it would be a pure repeat."""
+    contact = _contact_at(bearing_deg=0.0, range_m=2000.0)  # 12 o'clock, too far
+    state = AttackRunState()
+
+    state, speech = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+
+    assert speech is not None
+    assert speech.text.startswith("Lined up armor ahead, last seen")
+
+
+def test_decide_retarget_resets_last_spoken_unresolved() -> None:
+    """§10's own co-moving-fields rule: a new target's first callout must
+    never open with `"Eyes on, ..."` or inherit a last-seen clause from
+    the previous target -- the re-point reset (security-fix review
+    finding 5) already resets the whole state to fresh, and `last_spoken_
+    unresolved` must be one of the fields that resets with it."""
+    contact_a = _contact_at(bearing_deg=0.0, range_m=2000.0)  # too far
+    state = AttackRunState()
+    state, speech_a = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact_a)
+    assert speech_a is not None
+    assert state.last_spoken_unresolved is True
+
+    contact_b = _contact_at(bearing_deg=0.0, range_m=1000.0)  # within range
+    contact_b.id = "CONTACT_2"
+    new_state, speech_b = decide(
+        state, now_sim=0.1, ownship=_ownship(), contact=contact_b
+    )
+
+    assert speech_b is not None
+    assert "eyes on" not in speech_b.text.lower()
+    assert "last seen" not in speech_b.text.lower()
+    assert new_state.last_spoken_unresolved is False
+
+
+# -- decide(): §4 the twelve o'clock marker ------------------------------
+
+
+def test_decide_announces_twelve_oclock_entering_from_the_oclock_register() -> None:
+    """§4: on the sector-entry transition the announcement prefixes the
+    same utterance -- `"Twelve o'clock, come left."` -- rather than a
+    second one, and it fires on *any* entry into the sector from the
+    o'clock register, not only a literal 1->12/11->12 step (direction,
+    resolved decision 1: a hard turn can skip the adjacent sector)."""
+    contact = _contact_at(bearing_deg=40.0, range_m=1000.0)  # outside the sector
+    state = AttackRunState()
+    state, speech1 = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert "o'clock" in speech1.text.lower()
+    assert state.last_spoken_clock_hour is not None
+
+    # Jump straight into the qualitative register -- still counts as
+    # "entering the sector," even though it skipped the adjacent hour.
+    # `_contact_at` forces tier 2 (no relative-direction percept), whose
+    # one-row `TIER2_AZIMUTH_WORD_TABLE` has no "a bit"/"come" split --
+    # bare "right" is the whole word at this gate.
+    _move_contact_to(contact, x=1000.0, z=100.0, now_sim=0.1)  # ~5.7 deg right
+    state, speech2 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech2 is not None
+    assert speech2.text == "Twelve o'clock, right."
+    assert state.last_spoken_clock_hour is None
+
+
+def test_decide_does_not_re_announce_twelve_oclock_while_steady_in_the_sector() -> None:
+    """The marker is a transition, not a standing qualifier -- a second
+    tick still inside the sector must not prefix again."""
+    contact = _contact_at(bearing_deg=40.0, range_m=1000.0)  # outside the sector
+    state = AttackRunState()
+    state, speech1 = decide(state, now_sim=0.0, ownship=_ownship(), contact=contact)
+    assert speech1 is not None
+    assert "o'clock" in speech1.text.lower()
+    assert state.last_spoken_clock_hour is not None
+
+    _move_contact_to(contact, x=1000.0, z=100.0, now_sim=0.1)  # ~5.7 deg right
+    state, speech2 = decide(state, now_sim=0.1, ownship=_ownship(), contact=contact)
+    assert speech2 is not None
+    assert speech2.text == "Twelve o'clock, right."
+    assert state.last_spoken_clock_hour is None
+
+    _move_contact_to(contact, x=1000.0, z=200.0, now_sim=0.2)  # still inside, ~11 deg
+    state, speech3 = decide(state, now_sim=0.2, ownship=_ownship(), contact=contact)
+    assert speech3 is not None
+    assert speech3.text == "Right."
 
 
 def test_tier2_projects_a_moving_target_forward_but_holds_a_stopped_one() -> None:
@@ -544,9 +926,9 @@ def test_tier2_azimuth_never_speaks_tier_1s_fine_grained_words() -> None:
     speech = render_alignment(
         6.0,
         0.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech.text == "Right, obstructed."
     assert "come" not in speech.text.lower()
@@ -666,46 +1048,17 @@ def test_decide_speaks_the_first_callout_about_a_retargeted_contact_even_if_the_
     assert new_state.last_spoken_tier == 1
 
 
-def test_last_spoken_tier_cannot_silently_carry_a_wrong_value_across_a_retarget() -> (
-    None
-):
-    """Documents a structural property discovered while auditing `last_
-    spoken_tier` for the same finding (`plans/attack-run/review.md`
-    finding 5): a *wrong* carried-over tier number cannot actually survive
-    `_should_emit`'s suppression, because `render_alignment` always
-    appends tier 2's `", obstructed"` qualifier -- so a tier-1 text and a
-    tier-2 text can never be equal strings, and `_should_emit`'s own
-    `text != state.last_spoken_text` check fires (forcing an emit, hence a
-    fresh, correct `tier`) *whenever the two ticks' tiers actually
-    differ*. The only way `last_spoken_tier` goes stale is when the old
-    and new tiers are the **same** -- in which case the stale value is
-    also the correct one, so there is no reachable case where this field
-    is silently wrong (only the reachable case, covered by the previous
-    test, where it is silently *unspoken*). Mechanical check, not a
-    reproduction: tier 1 and tier 2 renders of the same angle never
-    collide."""
-    for azimuth_deg, elevation_deg in (
-        (0.0, 0.0),
-        (6.0, 0.0),
-        (0.0, 12.0),
-        (20.0, 0.0),
-        (6.0, 12.0),
-    ):
-        tier1_speech = render_alignment(
-            azimuth_deg,
-            elevation_deg,
-            tier=1,
-            azimuth_table=AZIMUTH_WORD_TABLE,
-            elevation_table=ELEVATION_WORD_TABLE,
-        )
-        tier2_speech = render_alignment(
-            azimuth_deg,
-            elevation_deg,
-            tier=2,
-            azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
-            elevation_table=ELEVATION_WORD_TABLE,
-        )
-        assert tier1_speech.text != tier2_speech.text
+# The pre-BL-B70 version of this module had a mechanical test here
+# (`test_last_spoken_tier_cannot_silently_carry_a_wrong_value_across_a_
+# retarget`) asserting that a tier-1 render and a tier-2 render of the
+# same angle can never collide as strings -- true when `render_alignment`
+# unconditionally appended tier 2's `", obstructed"` qualifier. BL-B70 §8
+# makes the qualifier cause-keyed instead, so the two registers *can* now
+# collide (the `"unknown"`-cause, no-qualifier case) -- the property is
+# gone, not merely re-pinned, and `test_decide_lined_up_tier2_unknown_
+# cause_collapses_the_transition` above documents the replacement fact:
+# `last_spoken_tier` can go stale in that case, harmlessly, because
+# nothing emits when it does.
 
 
 # -- render_alignment: the register switch and the two-gate evaluation ---
@@ -715,7 +1068,6 @@ def test_render_alignment_outside_sector_speaks_o_clock() -> None:
     speech = render_alignment(
         90.0,
         0.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
@@ -726,7 +1078,6 @@ def test_render_alignment_large_azimuth_error_says_come() -> None:
     speech = render_alignment(
         10.0,
         0.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
@@ -737,7 +1088,6 @@ def test_render_alignment_small_azimuth_error_says_a_bit() -> None:
     speech = render_alignment(
         6.0,
         0.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
@@ -748,7 +1098,6 @@ def test_render_alignment_left_is_the_negative_phrase() -> None:
     speech = render_alignment(
         -10.0,
         0.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
@@ -759,7 +1108,6 @@ def test_render_alignment_elevation_combines_with_azimuth_when_both_fire() -> No
     speech = render_alignment(
         10.0,
         15.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
@@ -772,7 +1120,6 @@ def test_render_alignment_elevation_only_fires_without_azimuth_word() -> None:
     speech = render_alignment(
         0.0,
         -15.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
@@ -783,40 +1130,42 @@ def test_render_alignment_both_gates_satisfied_is_lined_up() -> None:
     speech = render_alignment(
         1.0,
         1.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
     )
     assert speech.text == "Lined up."
 
 
-def test_render_alignment_tier_2_appends_the_qualifier_outside_the_sector() -> None:
+def test_render_alignment_qualifier_appends_outside_the_sector() -> None:
+    """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §8: `qualifier` is
+    caller-supplied, not tier-driven -- `render_alignment` itself no
+    longer knows about tiers at all."""
     speech = render_alignment(
         90.0,
         0.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech.text == "Three o'clock, obstructed."
 
 
-def test_render_alignment_tier_2_appends_the_qualifier_to_the_direction_word() -> None:
+def test_render_alignment_qualifier_appends_to_the_direction_word() -> None:
     speech = render_alignment(
         10.0,
         0.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech.text == "Right, obstructed."
 
     speech_left = render_alignment(
         -10.0,
         0.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech_left.text == "Left, obstructed."
 
@@ -828,36 +1177,52 @@ def test_render_alignment_tier_2_elevation_word_is_unchanged_from_tier_1() -> No
     speech = render_alignment(
         0.0,
         -15.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech.text == "A little lower, obstructed."
 
 
-def test_render_alignment_tier_2_combines_both_axes_then_the_qualifier() -> None:
+def test_render_alignment_qualifier_combines_with_both_axes() -> None:
     speech = render_alignment(
         10.0,
         15.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech.text == "Right, higher, obstructed."
 
 
-def test_render_alignment_tier_2_lined_up_speaks_the_qualifier_too() -> None:
+def test_render_alignment_lined_up_speaks_the_qualifier_too() -> None:
     """The user's own words (2026-10-14, second direction pass):
     `"lined up, obstructed"` composes exactly like the directional words
     -- no silence, no alternative phrasing."""
     speech = render_alignment(
         1.0,
         1.0,
-        tier=2,
         azimuth_table=TIER2_AZIMUTH_WORD_TABLE,
         elevation_table=ELEVATION_WORD_TABLE,
+        qualifier=", obstructed",
     )
     assert speech.text == "Lined up, obstructed."
+
+
+def test_render_alignment_announce_twelve_prefixes_without_capitalizing_the_rest() -> (
+    None
+):
+    """`plans/attack-run-sortie-fixes/plan.md` BL-B70 §4: `"Twelve
+    o'clock, come left."`, not two sentences, and the guidance clause
+    stays lowercase after the prefix's own comma."""
+    speech = render_alignment(
+        -10.0,
+        0.0,
+        azimuth_table=AZIMUTH_WORD_TABLE,
+        elevation_table=ELEVATION_WORD_TABLE,
+        announce_twelve=True,
+    )
+    assert speech.text == "Twelve o'clock, come left."
 
 
 def test_both_axes_share_one_table_lookup_helper() -> None:
@@ -874,7 +1239,6 @@ def test_both_axes_share_one_table_lookup_helper() -> None:
     speech = render_alignment(
         0.0,
         3.0,
-        tier=1,
         azimuth_table=AZIMUTH_WORD_TABLE,
         elevation_table=finer_elevation_table,
     )
@@ -884,7 +1248,9 @@ def test_both_axes_share_one_table_lookup_helper() -> None:
 # -- constants, stated as assumptions, not tuned here --------------------
 
 
-def test_the_three_constants_are_unchanged_assumptions() -> None:
+def test_the_two_constants_are_unchanged_assumptions() -> None:
+    """`ATTACK_RUN_CHANGE_THRESHOLD_DEG` is removed entirely by BL-B70 §1
+    (F1: no threshold could fix a comparison finer-grained than the
+    vocabulary it guards) -- the other two assumptions stand."""
     assert ATTACK_RUN_LINED_UP_AZIMUTH_DEG == 5.0
     assert ATTACK_RUN_ELEVATION_GATE_DEG == 10.0
-    assert ATTACK_RUN_CHANGE_THRESHOLD_DEG == 3.0

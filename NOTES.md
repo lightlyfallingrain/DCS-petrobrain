@@ -1175,6 +1175,37 @@ two functions that must agree (2026-09-19).
   "this now appears in `<generated file>`" needs that file opened after the fix, not inferred from
   a correct-looking source diff.
 
+- **A disjunctive suppression check can re-fire from its secondary clause even once a stricter
+  primary clause already covers every real case — the secondary clause only needs to be
+  satisfied, not to change the output.** `BL-B70`'s `_should_emit` compared rendered-text equality
+  *or* an angular-delta threshold; the text comparison alone already caught every case worth
+  catching, but the angular clause's own 3° threshold was finer than the vocabulary's own
+  quantisation (10°/30°/7.5° word gates), so it kept firing on changes too small to change the
+  words and re-spoke identical text 38% of the time in one sortie's own log. When a suppression
+  rule is a disjunction, check whether every clause actually widens what gets through, or whether
+  one of them is just a narrower false-positive generator layered on top of a sufficient check.
+- **A fail-closed admission gate discards its own verdict, not just the rejected candidate.**
+  `BL-B70`'s cause taxonomy wanted to distinguish "masked," "obstructed," and "too far" for an
+  already-known contact, and the obvious place to read that from — the contact's own stored
+  `live_los_clear` field — turns out structurally unable to ever hold `False`, because the gate
+  that field feeds only lets a candidate survive admission when its look succeeded; a blocked look
+  simply never updates the contact, so `False` is never written anywhere belief can read it later
+  (filed as `BL-B76`). The gate itself is correct — it is not inventing sightings that didn't
+  happen — but the per-tick reason for rejection is computed and then thrown away, leaving nothing
+  for a later feature that wants to explain *why* the last update didn't arrive. Any fail-closed
+  gate that drops a candidate silently is also dropping the one explanation a downstream feature
+  might later need, and that gap only shows up when something tries to read it, not when the gate
+  itself is reviewed.
+- **Keying a state transition on resolvability, not on the proximate interruption, prevents a
+  spurious re-announcement from an orthogonal interruption.** `BL-B70`'s losing-sight/regaining-
+  sight register is deliberately keyed on `cause == "too_far"` rather than on tier or on having
+  been masked, per direction: "the important question is whether Petrovich sees the target... not
+  whether a break masked him in the meantime." A target that goes too-far → masked → too-far
+  without ever resolving must not narrate a loss-and-regain pair at the masked step, because
+  nothing about resolvability changed there. The general shape: when a register narrates a
+  transition, name the condition as the thing that actually matters to the listener, not as
+  whatever happened to be true on the tick before.
+
 ## The 9K113 sight (BL-B64)
 
 - **A field that should carry a physical/mechanical bound and is only ever read with `is not

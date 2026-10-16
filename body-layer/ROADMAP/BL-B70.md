@@ -1,10 +1,57 @@
 # BL-B70 — Attack-run guidance: what to say and when
 
-- [ ] **Four defects and one new requirement from the 2026-10-15 attack-run sortie — the callout
+- [x] **Four defects and one new requirement from the 2026-10-15 attack-run sortie — the callout
   repeats with nothing audibly changed, guidance keeps talking while the target is behind the
   airframe, reaching the 12 o'clock sector is silent, and `", obstructed"` is spoken for every
   reason Petrovich is not looking at the target rather than only for the one it means.**
-  #status/open Planned 2026-10-15, `plans/attack-run-sortie-fixes/plan.md`.
+  #status/done #needs-flight Planned 2026-10-15, `plans/attack-run-sortie-fixes/plan.md`. Merged
+  `feature/attack-run-fixes` (DoD pass, tip `3b69371`); mechanical checks green
+  (ruff format/check, `mypy src` 60 files, `pytest` 2016 passed/4 xfailed), full
+  Architect→Implementer→Reviewer(×2)→Performance→Security chain complete and APPROVED at every
+  gate. **Not yet flown** — this is sortie-feedback work and §1/§2/§4/§8/§9 can only be validated
+  in the air; see the Acceptance Testing Plan in `plans/attack-run-sortie-fixes/dod-check.md` for
+  what the next sortie must confirm.
+
+  **What shipped**, all inside `belief/attack_run.py`/`belief/speech.py`, pure functions, no optic
+  involvement: a `_no_look_cause` taxonomy (`masked`/`obstructed`/`too_far`/`unknown`) computed in
+  `check_visibility`'s real gate order; `_should_emit` reduced to a text-equality veto (§1), deleting
+  the angular-change clause that was re-speaking unchanged text; a masked tick now returns silence
+  while the run stays engaged (§2); a `"twelve o'clock"` marker on entry into the 12 o'clock sector
+  from the o'clock register (§4); `", obstructed"` now fires only for a fresh DCS live-LOS `False`
+  verdict, its one remaining meaning (§8); and a per-poll LOS-freshness tripwire for the attack
+  target plus a dedicated `ATTACK_TARGET_LOS_MAX_AGE_S` (§9), as a measurement rather than a fix to
+  LOS priority itself — the priority question stays open, scheduled by user decision rather than
+  deferred by oversight (see below). The §5 fallback phrasing was superseded mid-task by direction
+  §10/§11 (pulled in from `main`): a four-state losing-sight/regaining-sight register keyed on
+  `cause == "too_far"` resolvability, not on tier and not on having been masked.
+
+  **Two defects caught and fixed inside the loop, not shipped**: the first review found
+  `_no_look_cause` checking `obstructed` before `too_far`, backwards from `check_visibility`'s real
+  gate order (traced to source, not trusted from the function's own docstring claim) — mirrors this
+  file's own `BL-B64` "trap that is one keystroke away" callout, same lesson, different site; and
+  `where` built from a raw int rather than routed through `_ALIGNMENT_CLOCK_WORDS`, speaking the
+  clock hour twice in one sentence. Both fixed in `571e898`, re-reviewed and approved in `review-2.md`.
+
+  **Acceptance boundary, stated plainly**: everything above is verified against fixture logs and
+  unit tests, which prove the code does what it says — they cannot prove it is the right thing to
+  say at the controls. §1's suppression rate (38% of utterances were dead repeats) and §2's masked
+  rate (68% of `obstructed` calls were rear-aspect) are measured from the *failing* sortie's own
+  logs, not from a flight with the fix flying. Nothing here can tell whether the twelve-o'clock
+  marker lands at the moment a pilot actually needs it, whether the four-state register sounds
+  natural in the cockpit rather than merely correct on paper, or whether `", obstructed"`'s new
+  narrower meaning still reads as informative rather than terse. That is exactly what the next
+  sortie is for.
+
+  **Downstream effect, per the Milestone Completion question**: `[[BL-B71]]` (the §6/§7 optic
+  ladder) now has a real cause taxonomy to consume rather than a flat tier signal — the ladder can
+  key its naked-eye/binoculars/9K113 choice on `too_far` specifically rather than re-deriving "no
+  look" from scratch. `[[BL-B76]]` (filed on `main`, narrowed 2026-10-16) is the one place this
+  milestone's own taxonomy is currently dead code in production: the `", obstructed"` branch is
+  unreachable because `Contact.live_los_clear` cannot carry `False` through the live admission
+  pipeline as currently gated — a pre-existing question this plan traced but correctly left alone,
+  since it sits outside BL-B70's Affected Modules. Until `BL-B76` resolves, the `"obstructed"` arm
+  of this taxonomy is unverified in practice even once flown, because the condition that would
+  trigger it may never actually fire live.
 
   Source of truth is `docs/acceptance/2026-10-15-attack-run-sortie-feedback.md` §1, §2, §4, §8, §9
   plus §5's fallback phrasing. The user's own words there outrank the plan.
