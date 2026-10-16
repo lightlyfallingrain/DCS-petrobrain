@@ -83,5 +83,55 @@
   **Do not pick one from this entry** — it is a perception-boundary change and wants an `/explore`
   with the user, who has already given three rounds of direction on what this word means.
 
+  ## `/explore`d 2026-10-16 — measure the no-verdict case before designing for it
+
+  Two answers, both narrowing this further.
+
+  **On whether the word earns its place at all:**
+
+  > *"Terrain blocked LOS can happen if in mountainous region. Airframe blocking is more common."*
+
+  So `", obstructed"` stays — it is real, just not on the flat desert both 2026-10-15 sorties were
+  flown over. The acceptance sortie for this should be **mountainous**, not a repeat of that
+  terrain, or it will again measure a case that barely fires. The common case is the airframe,
+  which §2 already resolves with silence.
+
+  **On the no-fresh-verdict case (`live_los_clear is None`, ~8% of gate-4 evaluations in the 16:44
+  sortie), which §9 left open as the one thing neither silence nor `", obstructed"` answers:**
+
+  > *"Before acting on LOS none, we should know how often that happens. As it stands now, log it
+  > and then ignore in cockpit behaviour."*
+
+  **So §9's third sub-question is answered for now: no cockpit behaviour, log only.** The current
+  fail-open `"unknown"` arm (speak the guidance, no qualifier) is correct as it stands and must not
+  be given a word of its own until the rate is known for the attack target specifically.
+
+  ### The instrument that exists does not answer this, and the gap is one line
+
+  `belief_truth_log._write_attack_run_tripwire` already writes one
+  `kind: "attack_run_los_tripwire"` row per poll for the attack target, carrying
+  `present_in_snapshot`, `join_skew_s` and `live_los_clear` — built by `[[BL-B70]]` for exactly this
+  §9 measurement. **But its loop skips every entry whose outcome is not `ADMITTED`:**
+
+  ```python
+  if entry.outcome is not GateOutcome.ADMITTED or entry.observation_id is None:
+      continue
+  ```
+
+  A target rejected *at gate 4* is therefore recorded as `present_in_snapshot: false`, which is the
+  same value it gets when the target was simply outside the pushed wedge that poll. **The two cases
+  the user wants counted — "blocked" versus "no answer yet" — are indistinguishable in the one log
+  built to count them**, because both land in the rejected set that this loop never reads.
+
+  The detection trace itself does record `GateOutcome.TERRAIN_LOS` for rejected candidates, and
+  `live_los_coverage` counts `evaluated`/`no_verdict` across *all* candidates — so the theatre-wide
+  rate is already measurable. What is missing is the target-specific split, which is what the
+  direction asks for.
+
+  **Scope for this entry, as it now stands:** widen the tripwire to read the target's rejected entry
+  too and record its `GateOutcome` and `live_los_clear` (`False` versus `None`). That is a logging
+  change in `belief_truth_log.py` only — no change to admission, no change to what belief holds, no
+  new word in the cockpit. Then fly it mountainous and read the rate before deciding anything else.
+
   Related: `[[BL-B70]]` (implements §8 against this dead input), `[[BL-14]]`, `[[X-B29]]` (the live
   LOS feed), `[[AC-8]]`/`[[WM-W2]]` (its availability).
