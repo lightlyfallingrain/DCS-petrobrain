@@ -565,9 +565,13 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
           under 50&nbsp;m of relief, 234,799 lines, a 720&nbsp;MB store &mdash; and Latin-script
           place names cleared on the same run. <b>Next:</b> nothing urgent, and nothing moved here
           this cycle. Callout stages 3&ndash;5 stay unbuilt and gated on a consumer that wants
-          landform references; multi-theatre is the other open milestone and is further along than
-          it looks &mdash; Caucasus and Kola are implemented and reviewer-approved on an unmerged
-          branch, each waiting on a build only your machine can run.</p>
+          landform references; multi-theatre moved while nothing was looking &mdash; all three
+          theatres are registered <b>and merged</b>, and as of 2026-10-16 <b>all three stores are
+          built</b> on your Windows box. What is owed on them is <b>verification, not building</b>:
+          nothing has read <code>afghanistan-full</code>, <code>caucasus-full</code> or
+          <code>kola-full</code>, and the Caucasus and
+          Kola projections stay <code>provisional</code> until a live <code>coord_probe.lua</code>
+          on each.</p>
         <span class="more">Details</span>
       </article>
 
@@ -816,7 +820,7 @@ flowchart LR
   MTN["A mountainous sortie&lt;br/&gt;the desert cannot judge obstructed"]:::block
   FOREST["Forest gate: flip the default?&lt;br/&gt;needs units parked in canopy"]:::block
   SAY["What does he SAY about&lt;br/&gt;sixteen vehicles in one sector?"]:::block
-  THEATRE["Caucasus + Kola builds&lt;br/&gt;only your machine runs them"]:::block
+  THEATRE["Three stores built, none read&lt;br/&gt;verify, do not rebuild"]:::block
 
   subgraph ATTACK ["The attack run &mdash; this chain was written by a flight"]
     direction LR
@@ -1046,17 +1050,21 @@ flowchart LR
         <li class="bl" role="button" tabindex="0" data-detail="theatre">
           <span class="chip block">Your machine</span>
           <div>
-            <b>Caucasus and Kola need a build each, on the Windows box</b>
-            <p>Both are implemented and reviewer-approved on
-              <code>origin/feature/multi-theatre-caucasus-kola</code>, unmerged. What is left is a
-              <strong>build per theatre on the Windows box</strong>, because a full-theatre build
-              reads the installed DCS tree and is yours to execute, not this session's. The commands
-              are written down per theatre in <code>world-model/RUN.md</code> &sect;8, including the
-              one trap: Caucasus capitalises <code>Map/towns.lua</code> and
-              <code>Beacons.lua</code> while Kola does not. Both projections stay
-              <code>provisional</code> until a live <code>coord_probe.lua</code> run on each, the way
-              Afghanistan's was confirmed. A second theatre also re-tests every behaviour constant
-              that was tuned on Syria &mdash; which is now a file you can edit rather than code.</p>
+            <b>Three theatre stores are built and <em>none</em> has been read</b>
+            <p>Afghanistan, Caucasus and Kola are all registered, merged and <strong>built</strong>
+              &mdash; your own report, 2026-10-16: <em>&ldquo;the files are on my windows box. No
+              verification has been done on those files, but the build has been done.&rdquo;</em> So
+              the expensive half is done and what is left is reading them, which is also yours
+              because the stores live on that box. Two things:
+              <strong>store sanity per theatre</strong> (<code>RUN.md</code> &sect;3.5 then &sect;4
+              &mdash; every feature kind non-zero, then one known place spot-checked), and a live
+              <strong><code>coord_probe.lua</code> on Caucasus and Kola</strong>, whose projections
+              are still <code>provisional</code> from a beacon fit; Afghanistan's is already
+              live-confirmed and must not be re-run. Two expected gaps that are not defects: Kola's
+              unstaged DEM tile <code>N71E023</code> leaves a small void at Tufjord, and
+              <code>airfield</code> counts undercount everywhere because they are navaid-derived
+              (Afghanistan read 7 of ~26). A second theatre also re-tests every behaviour constant
+              tuned on Syria &mdash; which is now a file you can edit rather than code.</p>
           </div>
         </li>
       </ul>
@@ -1397,15 +1405,16 @@ flowchart LR
         <span class="who">world-model</span>
         <div class="what">
           <b>Multi-theatre support</b>
-          <p>Architecture generalises through per-theatre registries, Afghanistan is built and
-            live-confirmed (worst residual under a millimetre), and <b>Caucasus and Kola are
-            implemented and reviewer-approved</b> on
-            <code>origin/feature/multi-theatre-caucasus-kola</code> &mdash; unmerged. <b>Kola needs
-            no new elevation source</b>: DEM3 covers it in the same <code>.hgt</code> format the SRTM
-            ingest already reads, and the files are on the Windows box. What is left is a build per
-            theatre, which only you can run.</p>
+          <p>Architecture generalises through per-theatre registries, and the whole of it is now
+            merged: Afghanistan (2026-10-05, projection live-confirmed to under a millimetre) and
+            Caucasus + Kola (2026-10-10). <b>All three stores were built on 2026-10-16</b> and
+            <b>none has been read</b>. <b>Kola needed no new elevation source</b> after all: DEM3
+            covers it in the same <code>.hgt</code> format the SRTM ingest already reads. What is
+            left is verification &mdash; feature-kind sanity on each store, and a live
+            <code>coord_probe.lua</code> on Caucasus and Kola to take their projections off
+            <code>provisional</code>.</p>
         </div>
-        <span class="chip open">Soon</span>
+        <span class="chip open">Built, unverified</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="d10">
@@ -1809,7 +1818,7 @@ const DETAIL = {
       { h: "Why it's effectively finished", p: "Every query surface the layers above it need is live. The last full-theatre rebuild validated both the junction-streaming fix and the OSM ingest split in one run — OSM now contributes landcover, coastline, water and named places, and never roads. DCS <code>.routes</code> stays authoritative for those. OSM landcover also just became the <em>shipping</em> answer for seeing through woods rather than a fallback: no DCS call sees trees." },
       { h: "The landform line: three detectors, and the third one holds", p: "M6's curvature classifier gave checkerboard noise; the marker-controlled watershed passed every check set for it and was then judged wrong by eye; geomorphons was chosen from rendered comparisons and is the one that shipped. Two defects the first theatre build exposed &mdash; no relief gate, and stored geometry 16x denser than a 90 m DEM justifies &mdash; were fixed, and your 2026-10-04 rebuild cleared all three acceptance blocks. <strong>The stored <code>ridge</code>/<code>valley</code> rows are now a layer later work can build on</strong>, which is the opposite of what this entry said four days ago. Nothing consumes them yet." },
       { h: "Latin-script place names, cleared on the same build", p: "<code>WM-B1</code>: named places stored OSM's raw <code>name</code>, which in Syria is frequently Arabic script &mdash; and DCS cannot render non-Latin-1 text, so those names reached the cockpit overlay as blanks. Body-layer was already dropping them at render time, which made the data usable while losing real information. Ingest now prefers <code>name:en</code>, then <code>int_name</code>, then <code>name</code>, keeping only what actually encodes as Latin-1, and records which tag won. Name-source counts landed exactly as predicted on the real build &mdash; ~12,926 via <code>name:en</code>, ~864 via <code>int_name</code>, 13,073 of 49,226 places affected. Riding one rebuild for both this and the landform pass is why the expensive geomorphons work was unparked when it was." },
-      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and less of it is open than this entry implied. Afghanistan is built and live-confirmed; <strong>Caucasus and Kola are implemented and Reviewer-approved on an unmerged remote branch</strong>, with builds the user runs. Per theatre you still need verified projection parameters, a region bbox and a hand-derived raster chart registration. <strong>Kola is no longer the exception</strong>: the SRTM >60&deg;N gap was resolved on 2026-10-04 &mdash; DEM3 covers it in the same <code>.hgt</code> format the existing ingest reads, so no new elevation source is needed." },
+      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the only open milestone, and less of it is open than this entry implied. Afghanistan is built and live-confirmed; <strong>Caucasus and Kola were merged 2026-10-10</strong>, and as of 2026-10-16 <strong>all three theatre stores are built</strong> &mdash; unverified, which is now the only outstanding half. Per theatre you still need verified projection parameters, a region bbox and a hand-derived raster chart registration. <strong>Kola is no longer the exception</strong>: the SRTM >60&deg;N gap was resolved on 2026-10-04 &mdash; DEM3 covers it in the same <code>.hgt</code> format the existing ingest reads, so no new elevation source is needed." },
       { h: "The elevation grid's future is now in question, and that is new", p: "Line of sight <strong>has moved</strong> to DCS as of 2026-10-09, which was the grid's strongest claimed consumer and is now gone; contact enrichment can use a unit's own DCS-reported altitude, which is exact; and the Mission Interpreter turns out to receive elevation as unread payload rather than reading it. Measured, so the size argument is not guessed at: the grid is 49 MB of a 608 MB store &mdash; about 8% &mdash; while OSM features are the bulk. <strong>The reason to do that work is quality, not disk.</strong>" },
       { h: "Unmeasured", p: "Full-theatre OSM parse time and peak memory were never measured — the validating build hit a warm cache and skipped the parse. Stage 5 of that pipeline also has pathological single-chunk stalls. Both are backlog, neither is a correctness gate." }
     ],
@@ -2087,12 +2096,14 @@ const DETAIL = {
   },
 
   theatre: {
-    kicker: "world-model/", title: "Multi-theatre support", chip: ["open", "Approved, unmerged, builds user-run"],
-    facts: [["Raised", "2026-09-13"], ["Afghanistan", "built + live-confirmed 2026-10-05"], ["Caucasus + Kola", "implemented, Reviewer APPROVED, unmerged"], ["Blocking", "a user-run build per theatre"]],
+    kicker: "world-model/", title: "Multi-theatre support", chip: ["open", "All three built; none verified"],
+    facts: [["Raised", "2026-09-13"], ["Merged", "Afghanistan 10-05, Caucasus + Kola 10-10"], ["Built", "all three stores, 2026-10-16 (user)"], ["Owed", "store sanity + coord_probe on 2 of 3"]],
     sections: [
-      { h: "Why it's cheap, and how far it already got", p: "The architecture generalises: projections and regions are per-theatre registries, not per-theatre code forks. Afghanistan proved the pattern end to end (built, DoD-passed, projection live-confirmed, worst residual under 1 mm). <strong>Caucasus and Kola then followed on <code>origin/feature/multi-theatre-caucasus-kola</code> (<code>d5d0540</code>) &mdash; projections, region entries, beacons, towns, coordinate tests and <code>RUN.md</code> build steps, 359 insertions, Reviewer APPROVED.</strong> It is unmerged and exists only as a remote ref, which is exactly why this page and the orchestrator both kept calling multi-theatre unscoped backlog." },
+      { h: "Why it's cheap, and how far it already got", p: "The architecture generalises: projections and regions are per-theatre registries, not per-theatre code forks. Afghanistan proved the pattern end to end (built, DoD-passed, projection live-confirmed, worst residual under 1 mm). <strong>Caucasus and Kola then followed &mdash; projections, region entries, beacons, towns, coordinate tests and <code>RUN.md</code> build steps, Reviewer APPROVED, merged 2026-10-10.</strong> This page called that branch unmerged for six days and Afghanistan's &ldquo;awaiting merge&rdquo; for eleven; both were on <code>main</code> the whole time, and the root status table carried the stale sentence this page derived from. Corrected 2026-10-16, at the source as well as here." },
+      { h: "All three stores are now built, and that changes what is owed", p: "User report, 2026-10-16: <em>&ldquo;Caucasus, Kola and Afghanistan world builds have been done, the files are on my windows box. No verification has been done on those files, but the build has been done.&rdquo;</em> The expensive, hours-long half is therefore finished for every registered theatre &mdash; and <strong>nothing has read any of the three stores</strong>. Verification is two things: feature-kind sanity per theatre (<code>RUN.md</code> &sect;3.5, every kind non-zero, <code>road</code> DCS-only, then one known place queried), and a live <code>coord_probe.lua</code> on <strong>Caucasus and Kola only</strong> &mdash; Afghanistan's projection is already live-confirmed and re-running it would measure nothing. Both halves are the user's to run, because the stores are on the Windows box." },
+      { h: "Two gaps that are expected rather than wrong", p: "Kola's DEM tile <code>N71E023</code> was deliberately not staged, so there is a small elevation void around Tufjord in the extreme north-east &mdash; fetchable from viewfinderpanoramas if it ever matters. And the <code>airfield</code> count is derived from navaids, so it undercounts on every theatre the way Afghanistan's did (7 rows against ~26 real airfields); the fix is reading <code>world.getAirbases()</code>, which is its own unscoped item. Neither should be read as a bad build." },
       { h: "Per-theatre work", p: "Transverse Mercator projection parameters — fitted values exist for every theatre, but each needs live-DCS verification against real coordinate output rather than being trusted blind. A region bbox entry, which is mechanical. And raster chart registration for the F10 paper map, which was hand-derived from control points for Syria and is genuinely manual per theatre." },
-      { h: "Kola was supposed to be the hard case, and is not", p: "This entry said for weeks that SRTM has no coverage above 60&deg;N, so Kola's elevation source would have to change. <strong>That was retired on 2026-10-04 and this page kept asserting it</strong>: viewfinderpanoramas.org DEM3 covers the Kola area in the <em>same</em> <code>.hgt</code> format the SRTM ingest already reads (user-checked), so no new source and no new code path. The user confirms the required files are present on the Windows box for both remaining theatres. Worth recording as a page failure rather than a project one &mdash; <code>world-model/ROADMAP.md</code> carried the correction the whole time, and the page's own contract is that a disagreement means the page is wrong." }
+      { h: "Kola was supposed to be the hard case, and was not", p: "This entry said for weeks that SRTM has no coverage above 60&deg;N, so Kola's elevation source would have to change. <strong>That was retired on 2026-10-04 and this page kept asserting it</strong>: viewfinderpanoramas.org DEM3 covers the Kola area in the <em>same</em> <code>.hgt</code> format the SRTM ingest already reads (user-checked), so no new source and no new code path. The tiles were present on the Windows box, and the Kola store is now built from them. Worth recording as a page failure rather than a project one &mdash; <code>world-model/ROADMAP.md</code> carried the correction the whole time, and the page's own contract is that a disagreement means the page is wrong." }
     ],
     src: "world-model/ROADMAP.md"
   },
