@@ -64,3 +64,13 @@
 
   **The lever is still callout policy, exactly as the correction above found** — nothing here
   changes the association gate, and [[X-B6]] stays separately open.
+
+  **PLANNED 2026-10-16** — `plans/contacts-callout/plan.md`, on `feature/contacts-callout`. Five
+  stages, two open decisions left for the user (whether the hedge keeps the radio-brevity register's
+  dropped articles, and whether a hedge-word crossing counts as a delta). One correction worth
+  carrying: `belief.callouts.group_candidates` **no longer exists** — retired by
+  `plans/group-reporting/plan.md` Stage 4 — so the push path has no report-space aggregation at all
+  today, and the surviving `group_facts`/`render_group_report` are reachable only from the pull path
+  (`report`). The pull path's own degeneration (three separate group lines because the range words
+  differ, quoted in the 09-28 log analysis) is deliberately **not** in that plan's scope and wants
+  its own `BL-B` item.
