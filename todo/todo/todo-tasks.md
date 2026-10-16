@@ -33,6 +33,9 @@ on the index without opening anything.
 - [[X-T25]] — Compact the agent-memory indexes — **DONE 2026-10-16**, closed by user direction and
   resolved by deleting the indexes rather than compacting them: each is now a 747-byte pointer to
   `memory-search.py`, which derives the index on demand, and the hook that nagged six agents is gone
+- [[X-T27]] — **Standing priority order, 2026-10-16** — bugs first (per-bug judgement), then
+  the 9K113 chain (detection done, effectors, ATGM), then the attack run's remaining halves.
+  Read this before choosing what to start.
 - [[X-T26]] — Make behaviour-affecting constants configurable — queued 2026-10-14, after the
   `BL-14` merge and before the `BL-B64` 9K113 Architect pass; scope narrowed to behaviour-affecting
   constants by user direction, not every literal
