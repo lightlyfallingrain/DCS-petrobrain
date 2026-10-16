@@ -1,7 +1,7 @@
 # WM-W2 — `feature/dcs-driven-los` — the mechanism works, its availability does not
 
-- [~] **`feature/dcs-driven-los` ([[X-B29]]/[[X-B30]], Stages 1-3) — FLOWN 2026-10-05. The mechanism
-  works; its *availability* does not, and that is the first real defect.** #status/in-progress #needs-flight Read from the logs
+- [x] **`feature/dcs-driven-los` ([[X-B29]]/[[X-B30]], Stages 1-3) — FLOWN 2026-10-05, and CLOSED
+  2026-10-16: the availability defect was fixed elsewhere.** #status/done Read from the logs
   rather than the cockpit, since a working LOS gate is invisible in flight
   (`aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`).
 
@@ -18,6 +18,26 @@
   live verdict** — the other 77% silently fell back to the offline SRTM primitive with its 12 m
   tolerance, i.e. exactly the path the user has ruled obsolete for live use. Not truncation: only
   11 of 2,104 polls exceeded the 128-sightline cap, and the *missing* rows are the *nearer* ones.
+
+  **CLOSED 2026-10-16 — the clearing condition below was met, in a different subproject.** This
+  entry said it *"clears when the feed is continuous and the fallback is the exception rather than
+  the rule"*. Both happened, and more than asked:
+
+  - **The 19%-of-polls-with-zero-verdicts intermittency had one cause**, and it was not the feed:
+    the Hook walked `coalition.getGroups()` only, so **static objects could not appear in a result**
+    — 278 of 404 objects in the flown mission. Fixed by enumerating statics (merged 2026-10-08).
+    The 2026-10-08 sortie read **145/145 evaluated objects on a live verdict, 85/85 admitted**,
+    against the 76% no-verdict baseline this entry measured.
+  - **The fallback is not the exception now; it is gone.** `[[BL-11]]` Stage 4 made
+    `visibility.py`'s gate 4 **fail closed** on `live_los_clear` alone, and the offline primitive
+    has zero remaining live call sites. So the 77%-silently-fell-back finding cannot recur by
+    construction rather than by being rarer — which is the stronger outcome and the one the user's
+    *"world model LOS must not be used … testing only"* direction asked for.
+
+  Worth recording as the shape: **an item's clearing condition was satisfied by work in another
+  subproject, and nothing linked the two.** The entry sat `[~]` for eleven days after the thing it
+  was waiting for had shipped. The prior diagnosis in this entry — *"not truncation"* — was also
+  right, and the real cause was a missing engine call rather than anything about the feed.
 
   **`dcs.log` was not captured on this flight**, so the Hook's own `bridge_call_ms` /
   `units_in_wedge` / `sightlines_computed` counters — which exist to answer exactly this — were

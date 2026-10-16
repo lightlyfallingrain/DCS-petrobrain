@@ -16,3 +16,11 @@
   measurements — the card's own commands were run and their output verified before publishing, not
   written from reading the code (DoD role requirement).
 
+  **Part (2) is CLEARED 2026-10-16 — binoculars are used, observed by the user from the debug
+  visualization** (*"binoculars are used now, I can see that in the debug visualization"*), closing
+  `[[X-T7]]`. **Parts (1) and (3) are still owed**, which is why this entry keeps `#needs-flight`:
+  mask/occlusion callout suppression and the interrupted-look behaviour are separate observables of
+  the same merge, and neither is visible in the optic cone. The constants named above
+  (`CALLOUT_OBSERVABILITY_GRACE_S`, `OPTIC_RETRY_INTERVAL_S`) still have no measured feedback — the
+  verdict is that the behaviour fires, not that its cadence is right.
+

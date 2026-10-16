@@ -54,11 +54,11 @@ than normalised.
 - [[X-B5]] — Review this repo's Claude configuration itself
 - [[X-B6]] — An outpost fragments into 18 contacts at range
 - [[X-B7]] — A real-time ASCII view of what Petrovich is looking at
-- [[X-B8]] — Per-module performance review
-- [[X-B9]] — Per-module security review
+- [[X-B8]] — Per-module performance review — **DONE 2026-10-16**: all six subprojects; `MI-B3` filed from the last two passes
+- [[X-B9]] — Per-module security review — **DONE 2026-10-16**: all six subprojects; `BR-B2`, `BR-B3`, `MI-B1`, `MI-B2` filed
 - [[X-B10]] — End-to-end latency measurement
-- [[X-B11]] — The graph was rebuilt under the old node-ID format
-- [[X-B12]] — Re-enable performance-reviewer and security, and catch up
+- [[X-B11]] — The graph was rebuilt under the old node-ID format — **DONE 2026-10-16**: verified 11,738 of 12,176 node IDs in the new format, no ghost pairs
+- [[X-B12]] — Re-enable performance-reviewer and security, and catch up — **DONE 2026-10-16**: closed into `X-B8`/`X-B9` on its own instruction
 - [[X-B13]] — `console.py`'s typed `scan-area` still drives the 9K113
 - [[X-B14]] — Scan commands should drive naked-eye perception
 - [[X-B15]] — Ownship-relative o'clock scan tokens
@@ -82,7 +82,7 @@ than normalised.
 - [[X-B30]] — Building occlusion is not gated on the Windows move
 - [[X-B32]] — DCS's per-tree placement is behind the payload-addressing wall
 - [[X-B33]] — `/invariant-check` cannot see `contextlib.suppress(...)`
-- [[X-B34]] — Two agent-memory indexes have outgrown their read cap
+- [[X-B34]] — Two agent-memory indexes have outgrown their read cap — **DONE 2026-10-16**: premise removed by `X-T25` (the indexes are gone, not compacted)
 - [[X-B35]] — Provenance path resolution is hardcoded to audio-adapter, and the gate it feeds is red
 - [[X-B36]] — `tools/` is outside every subproject's documented format/lint gate
 - [[X-B37]] — The tuning TOML generator renders only a first sentence, and renders markdown into it

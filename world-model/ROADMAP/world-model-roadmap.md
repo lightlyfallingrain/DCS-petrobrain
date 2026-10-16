@@ -54,7 +54,7 @@ backlog entry it was paired with where it had one, so one piece of work has one 
 
 - [[WM-W1]] — LOS elevation-tolerance fix (folded with its own Status entry) — **ACCEPTED
   2026-10-09**
-- [[WM-W2]] — `feature/dcs-driven-los` — flown 2026-10-05; the mechanism works, its availability
+- [[WM-W2]] — `feature/dcs-driven-los` — flown 2026-10-05; the mechanism works, its availability — **DONE 2026-10-16**: the availability defect was fixed by the statics enumeration and `BL-11`'s fail-closed gate
   does not
 - [[WM-W3]] — `fix/landform-relief-gate` — cleared by the 2026-10-04 rebuild
 - [[WM-W4]] — `feature/terrain-landform-features` — confirmed by the user's full-theatre build
@@ -91,7 +91,7 @@ order:
 
 Ahead:
 
-- [[WM-M11]] — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild
+- [[WM-M11]] — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild — **RESCOPED 2026-10-16**: Stage 1 (LOS provenance) rejected, Stages 2–5 stand
 
 ## Backlog (open, unscheduled)
 
@@ -107,7 +107,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[WM-B6]] — Ridge/valley detection rebuilt on geomorphons (carries its own cleared
   live-acceptance record)
 - [[WM-B7]] — A coarse elevation grid from the ridge/valley lines — REJECTED
-- [[WM-B8]] — A fixture-scale fine elevation grid for offline LOS tests
+- [[WM-B8]] — A fixture-scale fine elevation grid for offline LOS tests — **REJECTED 2026-10-16**: offline-LOS tooling, retired with the LOS workstream
 - [[WM-B9]] — `find_place_by_name` scans ~49k rows
 - [[WM-B10]] — `features_in_bbox` embeds one bind parameter per candidate id
 - [[WM-B11]] — `mode=ro` is bypassable two ways

@@ -40,6 +40,16 @@ body and brain deal in text only and never see audio bytes. Renamed from `srs-ad
 Per-layer design docs (status: draft/provisional): `docs/concept/WORLD_MODEL_BUILDER.md`,
 `docs/concept/MISSION_INTERPRETER.md`, `docs/concept/PETROBRAIN_RUNTIME.md`.
 
+## Priority order
+
+**The user's own standing priority order lives in `todo/todo/X-T27.md`** (given 2026-10-16) and
+outranks the order this file's status table implies: reported bugs first, each one triaged by
+judgement rather than all explored by default; then the 9K113 chain — detection (done, awaiting a
+sortie), cockpit effectors, ATGM guidance; then the attack run's remaining halves, of which
+automatic optic selection is in progress and guns/rockets are done. That entry also records the one
+gate the order exposes — everything below 9K113 detection is behind a cockpit-write probe only the
+user can run — and what the order says by omission.
+
 ## Status by subproject
 
 | Subproject | Status | Roadmap |

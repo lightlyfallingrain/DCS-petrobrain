@@ -26,7 +26,7 @@ share this directory, distinguished only by the `-B` in their ID.
 - [[AC-5]] — F10 command inbound channel
 - [[AC-6]] — Unit-velocity channel
 - [[AC-7]] — Hardening — bounded audio queue and a guarded collector `accept()`
-- [[AC-8]] — DCS-driven line of sight, Stages 1-3 — **OPEN**, its own merge/flight claim disagrees
+- [[AC-8]] — DCS-driven line of sight, Stages 1-3 — **OPEN**, its own merge/flight claim disagrees — **DONE 2026-10-16**: user adjudicated the contradiction with `WM-W2`; merged and flown
   with [[WM-W2]]; see the entry
 
 ## Backlog

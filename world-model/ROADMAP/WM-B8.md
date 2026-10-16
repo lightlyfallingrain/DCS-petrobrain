@@ -1,6 +1,23 @@
 # WM-B8 — A fixture-scale fine elevation grid for offline LOS tests
 
-- [ ] **WM-B8 — A fixture-scale fine elevation grid for offline LOS tests. LOW PRIORITY.** #status/open
+- [x] **WM-B8 — REJECTED 2026-10-16 by user direction** (*"WM-* could cleanup and reject the LOS
+  items"*), as part of retiring this subproject's line-of-sight workstream. Never started.
+  #status/done
+
+  **Why rejecting it is right rather than merely cheap.** This would have built a fixture-scale
+  elevation grid so the *offline* LOS primitive could be tested against something fine-grained. That
+  primitive is now **testing-only by user direction** (2026-10-06: *"world model LOS **must not be
+  used** … a testing only tool, not for live flight"*) **and has no live call sites at all** —
+  `[[BL-11]]` Stage 4's fail-closed gate removed the last one. So this was tooling to raise
+  confidence in an oracle that no longer answers anything the pilot hears. The honest ordering was
+  already visible in the entry's own *"LOW PRIORITY"*; the user has now taken it off the board
+  rather than leaving it to decay.
+
+  **If offline LOS ever needs a trustworthy fixture again**, this is the shape to come back to —
+  fine-but-tiny, deterministic, with agreement against DCS as an explicit goal. Filed as rejected,
+  not deleted, so that shape survives. Original rationale follows.
+
+- [>] **(original, superseded)** A fixture-scale fine elevation grid for offline LOS tests. LOW PRIORITY.
   User direction, 2026-10-05, replacing [[WM-B7]]: *"If we build a fine grid for a very small area,
   we can use that for test scenarios."* **Unblocked 2026-10-05, [[X-B29]] DoD gate**: [[WM-B7]]'s "do
   not start before [[X-B29]] lands" gate is cleared now that `feature/dcs-driven-los` has passed DoD

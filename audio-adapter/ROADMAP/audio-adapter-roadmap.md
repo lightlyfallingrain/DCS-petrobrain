@@ -26,7 +26,7 @@ and link form it follows. The index carries links and titles only; status lives 
 
 ## Status
 
-- [[AA-1]] — Slice 1 — outbound TTS
+- [[AA-1]] — Slice 1 — outbound TTS — **DONE**: all six stages complete
   - [[AA-1.1]] — Stage 1 — synthesis + local playback
   - [[AA-1.2]] — Stage 2 — aircraft-layer playback channel
   - [[AA-1.3]] — Stage 3 — `--target aircraft-layer`
@@ -36,7 +36,7 @@ and link form it follows. The index carries links and titles only; status lives 
 - [[AA-2]] — Hardening: per-source `--poll-hz` default + `Content-Length` guard
 - [[AA-3]] — Slice 2 — cockpit state drives the audio (SPU-8 intercom) — carries an unresolved
   acceptance-vs-debt contradiction, see the entry itself
-- [[AA-4]] — Slice 3 — inbound speech (STT + PTT)
+- [[AA-4]] — Slice 3 — inbound speech (STT + PTT) — **DONE as a slice**; `AA-4.7` (press-to-readback ~3 s) stays open on its own
   - [[AA-4.1]] — Stage 1 — the recognition bench
   - [[AA-4.2]] — Stage 2 — the matcher and the command path
   - [[AA-4.3]] — Stage 3 — recognition as a service, body-layer's inbound wiring

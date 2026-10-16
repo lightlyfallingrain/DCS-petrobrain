@@ -1,7 +1,30 @@
 # WM-M11 — Provenance out of the LOS primitive
 
-- [ ] **WM-M11 — Provenance out of the LOS primitive, and the fixes that must ride the forced rebuild.
-  NOT STARTED, filed 2026-10-05.** #status/open From the two whole-subproject passes run on `main` @ `19143fa`
+- [~] **WM-M11 — RESCOPED 2026-10-16: Stage 1 (the LOS primitive's provenance) is REJECTED; Stages
+  2–5 stand. Filed 2026-10-05, not started.** #status/in-progress
+
+  **User direction, 2026-10-16:** *"WM-* could cleanup and reject the LOS items."* Taken at its
+  word for the LOS half and **deliberately not wider**, because this milestone is only
+  partly about line of sight and rejecting it whole would silently drop work that has nothing to do
+  with it:
+
+  | stage | subject | disposition |
+  |---|---|---|
+  | 1 | `line_of_sight_clear` returns a bare `bool` and answers `True` when every sample is void | **REJECTED** — it is an *offline test oracle* now, with zero live call sites (`[[BL-11]]` Stage 4's fail-closed gate), and `[[WM-B8]]`, the fixture work that would have consumed it, is rejected with it |
+  | 2 | the measured vertical error must live in the store, not in a research note | **STANDS** — its LOS framing is dead, but the mechanism protects *every other* elevation consumer, and `11.52` still appears in zero lines of code while `_TERRAIN_TOLERANCE_M = 12.0` is a hand-copy of it. Scopes `[[WM-B3]]` |
+  | 3 | two cheap query-layer fixes, rebuild-gated | **STANDS** — not about LOS |
+  | 4 | the build is ~82 minutes, not 449 s, and two stages are 90% of it | **STANDS** — not about LOS |
+  | 5 | the fix-now security items that are not about provenance | **STANDS** — not about LOS |
+
+  **So this entry keeps its number and loses its headline.** Its own 2026-10-08 note already said
+  Stages 3–5 *"become the milestone's centre of gravity"*; that is now the whole of it. The title
+  still names the LOS primitive and is retained unchanged so the rejection is visible to anyone
+  following a citation rather than reading the table.
+
+  **The one thing the rejection costs, stated plainly:** Stage 1's defect is real and stays real —
+  an offline oracle that answers *"clear"* when it has no data will make tests built on it pass
+  silently. Nothing now plans to fix that. If offline LOS is ever load-bearing for a test anyone
+  trusts, this stage comes back with `[[WM-B8]]`. From the two whole-subproject passes run on `main` @ `19143fa`
   after the first DCS-LOS sortie — `research/2026-10-05-security-audit.md` and
   `research/2026-10-05-performance-review.md`, directed by
   `aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`.
