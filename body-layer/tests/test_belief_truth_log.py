@@ -366,6 +366,8 @@ def test_write_poll_attack_run_tripwire_present_in_snapshot(tmp_path: Path) -> N
     assert len(tripwire_rows) == 1
     assert tripwire_rows[0]["contact_id"] == "CONTACT_1"
     assert tripwire_rows[0]["present_in_snapshot"] is True
+    assert tripwire_rows[0]["outcome"] == "admitted"
+    assert tripwire_rows[0]["gate_outcome"] is None
     assert tripwire_rows[0]["join_skew_s"] == 0.2
     assert tripwire_rows[0]["live_los_clear"] is True
 
@@ -395,8 +397,201 @@ def test_write_poll_attack_run_tripwire_absent_from_snapshot(tmp_path: Path) -> 
     assert len(tripwire_rows) == 1
     assert tripwire_rows[0]["kind"] == "attack_run_los_tripwire"
     assert tripwire_rows[0]["present_in_snapshot"] is False
+    assert tripwire_rows[0]["outcome"] == "absent"
+    assert tripwire_rows[0]["gate_outcome"] is None
     assert tripwire_rows[0]["join_skew_s"] is None
     assert tripwire_rows[0]["live_los_clear"] is None
+
+
+def test_write_poll_attack_run_tripwire_rejected_terrain_los_blocked(
+    tmp_path: Path,
+) -> None:
+    """`BL-B76` Step 1: a target rejected at gate 4 (`TERRAIN_LOS`) with a
+    genuinely blocked live verdict (`live_los_clear=False`) must be
+    recorded as `outcome="rejected"`, `gate_outcome="terrain_los"` --
+    distinguishable from both the admitted case and the no-fresh-verdict
+    case below. The join needs a prior poll's admission to seed the
+    object_id -> contact_id cache (`Contact` itself retains no ground-truth
+    object id), so this test writes two polls: the first admits object_id 1
+    into CONTACT_1, the second rejects that same object_id at gate 4."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+
+    seeding_collector = DetectionTraceCollector()
+    seeding_collector.records.append(
+        _trace_entry(
+            object_id=1, observation_id="OBS_1", cluster_member_object_ids=(1,)
+        )
+    )
+    writer.write_poll(
+        seeding_collector,
+        store,
+        _ownship(),
+        attack_run_target_contact_id="CONTACT_1",
+    )
+
+    rejecting_collector = DetectionTraceCollector()
+    rejecting_collector.records.append(
+        _trace_entry(
+            object_id=1,
+            observation_id=None,
+            outcome=GateOutcome.TERRAIN_LOS,
+            live_los_clear=False,
+        )
+    )
+    writer.write_poll(
+        rejecting_collector,
+        store,
+        _ownship(),
+        attack_run_target_contact_id="CONTACT_1",
+    )
+    writer.close()
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    tripwire_rows = [
+        json.loads(line)
+        for line in lines
+        if json.loads(line).get("kind") == "attack_run_los_tripwire"
+    ]
+    assert len(tripwire_rows) == 2
+    rejected_row = tripwire_rows[1]
+    assert rejected_row["present_in_snapshot"] is True
+    assert rejected_row["outcome"] == "rejected"
+    assert rejected_row["gate_outcome"] == "terrain_los"
+    assert rejected_row["live_los_clear"] is False
+
+
+def test_write_poll_attack_run_tripwire_rejected_terrain_los_no_verdict(
+    tmp_path: Path,
+) -> None:
+    """The sibling case the direction asks to be counted separately: the
+    same gate-4 rejection, but with no fresh live-LOS verdict this poll
+    (`live_los_clear=None`) rather than a genuine block. Must land on the
+    same `outcome="rejected"`/`gate_outcome="terrain_los"` pair as the
+    blocked case, differing only in `live_los_clear` -- the split the
+    direction exists to measure."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+
+    seeding_collector = DetectionTraceCollector()
+    seeding_collector.records.append(
+        _trace_entry(
+            object_id=1, observation_id="OBS_1", cluster_member_object_ids=(1,)
+        )
+    )
+    writer.write_poll(
+        seeding_collector,
+        store,
+        _ownship(),
+        attack_run_target_contact_id="CONTACT_1",
+    )
+
+    rejecting_collector = DetectionTraceCollector()
+    rejecting_collector.records.append(
+        _trace_entry(
+            object_id=1,
+            observation_id=None,
+            outcome=GateOutcome.TERRAIN_LOS,
+            live_los_clear=None,
+        )
+    )
+    writer.write_poll(
+        rejecting_collector,
+        store,
+        _ownship(),
+        attack_run_target_contact_id="CONTACT_1",
+    )
+    writer.close()
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    tripwire_rows = [
+        json.loads(line)
+        for line in lines
+        if json.loads(line).get("kind") == "attack_run_los_tripwire"
+    ]
+    assert len(tripwire_rows) == 2
+    rejected_row = tripwire_rows[1]
+    assert rejected_row["present_in_snapshot"] is True
+    assert rejected_row["outcome"] == "rejected"
+    assert rejected_row["gate_outcome"] == "terrain_los"
+    assert rejected_row["live_los_clear"] is None
+
+
+def test_write_poll_attack_run_tripwire_three_states_are_distinguishable(
+    tmp_path: Path,
+) -> None:
+    """The defect `BL-B76` Step 1 fixes, pinned directly: a rejected
+    target and an absent target used to both write
+    `present_in_snapshot=False` with no way to tell them apart. Build one
+    poll with a rejected candidate for the target and confirm it is not
+    the same row shape the honest-absent case writes."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+
+    seeding_collector = DetectionTraceCollector()
+    seeding_collector.records.append(
+        _trace_entry(
+            object_id=1, observation_id="OBS_1", cluster_member_object_ids=(1,)
+        )
+    )
+    writer.write_poll(
+        seeding_collector, store, _ownship(), attack_run_target_contact_id="CONTACT_1"
+    )
+
+    rejecting_collector = DetectionTraceCollector()
+    rejecting_collector.records.append(
+        _trace_entry(
+            object_id=1,
+            observation_id=None,
+            outcome=GateOutcome.TERRAIN_LOS,
+            live_los_clear=False,
+        )
+    )
+    writer.write_poll(
+        rejecting_collector,
+        store,
+        _ownship(),
+        attack_run_target_contact_id="CONTACT_1",
+    )
+
+    absent_collector = DetectionTraceCollector()  # nothing evaluated this poll
+    writer.write_poll(
+        absent_collector, store, _ownship(), attack_run_target_contact_id="CONTACT_1"
+    )
+    writer.close()
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    tripwire_rows = [
+        json.loads(line)
+        for line in lines
+        if json.loads(line).get("kind") == "attack_run_los_tripwire"
+    ]
+    assert len(tripwire_rows) == 3
+    outcomes = [row["outcome"] for row in tripwire_rows]
+    assert outcomes == ["admitted", "rejected", "absent"]
+    # The rejected and absent rows both now carry present_in_snapshot --
+    # rejected is True (widened meaning), absent stays False -- but
+    # `outcome` is what actually tells them apart.
+    assert tripwire_rows[1]["present_in_snapshot"] is True
+    assert tripwire_rows[2]["present_in_snapshot"] is False
 
 
 def test_write_poll_no_attack_run_tripwire_row_without_a_target(tmp_path: Path) -> None:
