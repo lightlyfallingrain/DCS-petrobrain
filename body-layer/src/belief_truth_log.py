@@ -100,6 +100,7 @@ from belief.classification import (
     parent_class_of,
 )
 from belief.contacts import Contact, ContactStore
+from belief.decay import OBJECT_ID_MEMORY_S
 from detection_trace_writer import observation_id_to_contact_id
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.geometry import GeoPosition, project_from_bearing_range, range_m
@@ -266,6 +267,18 @@ class BeliefTruthLogWriter:
         self._stderr = stderr
         #: Set by `_fail` after the first write error -- see that method.
         self._disabled = False
+        #: `BL-B76`'s own object-permanence cache: the DCS `object_id`s a
+        #: contact's *admitted* observations have ever carried, so a later
+        #: poll's *rejected* candidate (which has an `object_id` but no
+        #: `observation_id` -- `Contact` itself retains no ground-truth
+        #: object id at all, by the no-omniscience boundary) can still be
+        #: attributed to the contact it belongs to. See
+        #: `_update_object_id_contact_cache`/`_object_ids_for_contact`
+        #: below for the join and its one accepted risk (DCS `object_id`
+        #: reuse), bounded by `OBJECT_ID_MEMORY_S` the same way `belief.
+        #: decay.object_id_continuity_valid` already bounds it elsewhere.
+        self._object_id_to_contact_id: dict[int, str] = {}
+        self._object_id_last_seen_sim: dict[int, float] = {}
 
     def write_speech(
         self,
@@ -417,9 +430,20 @@ class BeliefTruthLogWriter:
         obs_to_contact_id = observation_id_to_contact_id(store)
         observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
 
+        # `BL-B76`'s object-permanence cache (see `_write_attack_run_
+        # tripwire`'s own docstring) is kept warm every poll, regardless of
+        # whether a run is active -- a run that starts targeting a contact
+        # that was already being observed should not have to wait for its
+        # own first admission before the cache knows that contact's
+        # object_ids.
+        self._update_object_id_contact_cache(collector, obs_to_contact_id)
+
         if attack_run_target_contact_id is not None:
             self._write_attack_run_tripwire(
-                collector, obs_to_contact_id, attack_run_target_contact_id
+                collector,
+                obs_to_contact_id,
+                attack_run_target_contact_id,
+                now_sim=ownship.t_sim,
             )
 
         for entry in collector.records:
@@ -475,21 +499,93 @@ class BeliefTruthLogWriter:
         collector: DetectionTraceCollector,
         obs_to_contact_id: dict[str, str],
         attack_run_target_contact_id: str,
+        *,
+        now_sim: float,
     ) -> None:
         """One `kind: "attack_run_los_tripwire"` row per poll, for the one
         contact an active attack run is guiding on -- `plans/
-        attack-run-sortie-fixes/plan.md` BL-B70 §9's own measurement:
-        whether this poll's snapshot carried the target's `unit_name` at
-        all (`present_in_snapshot`), and the live-LOS join's own skew for
-        it (`join_skew_s`, `DetectionTrace.los_skew_s`) when it did.
-        `present_in_snapshot=False` does not by itself mean a problem --
-        the target may simply be outside the pushed wedge this poll (F5's
-        own residual cause) -- it is the countable number the plan asks
-        for, not a pass/fail verdict."""
+        attack-run-sortie-fixes/plan.md` BL-B70 §9's own measurement,
+        widened by `BL-B76` Step 1 to distinguish *why* there was no fresh
+        observation this poll, not only whether there was one.
+
+        **Three outcomes, not two.** The original (`present_in_snapshot`
+        alone) could not tell "rejected at gate 4, blocked" apart from
+        "never evaluated this poll" -- both read as `False`. `outcome` now
+        names which of the three actually happened:
+
+        - `"admitted"` -- the target's candidate cleared every gate this
+          poll (the original, only, case `present_in_snapshot=True` used
+          to mean). `join_skew_s`/`live_los_clear` are the live-LOS join's
+          own fields, as before.
+        - `"rejected"` -- the target's candidate was evaluated this poll
+          and a gate rejected it; `gate_outcome` names which one
+          (`GateOutcome.value`: `"terrain_los"`, `"range_or_size"`,
+          `"cockpit_mask"`, `"gaze"`, `"optic_fov"`, `"forest"`,
+          `"player_bubble"`). For a `"terrain_los"` rejection specifically,
+          `live_los_clear` is `False` (genuinely blocked, gate 4's verdict
+          this poll) or `None` (no fresh verdict this poll) -- `annotate_los`
+          (`perception.detection_trace.DetectionTraceCollector`) runs
+          upstream of the gate chain, so it is set on a rejected row exactly
+          as it would be on an admitted one; this `False`-vs-`None` split
+          is the whole point of this change (direction, 2026-10-16: *"Before
+          acting on LOS none, we should know how often that happens ...
+          log it and then ignore in cockpit behaviour."*).
+        - `"absent"` -- the target was not evaluated by `check_visibility`
+          at all this poll (outside the pushed wedge, F5's own residual
+          cause, or gated out even earlier by gaze/player-bubble in a way
+          this module cannot further distinguish without a second join).
+
+        **The join for `"rejected"`, and why it is sound enough to ship.**
+        A rejected `DetectionTrace` entry carries an `object_id` but no
+        `observation_id` (`observation_id` is only ever set on an
+        `ADMITTED` row, once clustering/emission have run) -- and `Contact`
+        itself retains no ground-truth `object_id` at all, by the
+        no-omniscience boundary (`belief/percept.py`), so there is no
+        belief-side field to join a rejected row against. The only sound
+        source left is this poll's own `GateOutcome.ADMITTED` entries from
+        *other* polls: `_update_object_id_contact_cache` remembers, every
+        poll, which `object_id`s an admitted entry's cluster actually
+        contributed to which contact, and `_object_ids_for_contact` reads
+        that memory back, bounded by `OBJECT_ID_MEMORY_S` -- the same
+        window `belief.decay.object_id_continuity_valid` already uses to
+        decide how long a DCS `object_id` is still trusted to name the same
+        real vehicle. Most of the time a stale or wrong entry in that cache
+        can only cause a **miss** (no `"rejected"` row is written; the poll
+        looks `"absent"` instead) -- it is the same trust model this
+        codebase already accepts for object-permanence, not a new one.
+
+        **One residual case is not a miss, and inflates `"rejected"`
+        rather than `"absent"`.** `NakedEyePerceptionSource` resolves a
+        cluster split by majority-overlap vote across its member
+        `object_id`s, and the vote only takes effect once the split child
+        is *admitted* -- `_update_object_id_contact_cache` only ever reads
+        `ADMITTED` rows, so it cannot see a split that happens and is
+        rejected on the same poll. If the attack target's cluster splits
+        and the minority child is rejected that same poll, the cache still
+        holds the previous poll's mapping (child's `object_id` -> target's
+        `contact_id`), and that rejection gets attributed to the target even
+        though it is, or is about to become, a different real contact. This
+        is bounded by `OBJECT_ID_MEMORY_S` the same way the accepted
+        object_id-reuse risk is, but it biases in one direction: it can only
+        ever inflate the `"rejected"` count for the target, never deflate
+        it, and a group scattering under fire -- exactly what an attack run
+        is likely to encounter -- is exactly when it fires. Read the
+        `"rejected"` rate with that in mind; it is an upper bound, not an
+        exact count.
+
+        `present_in_snapshot` is kept for backward compatibility and is now
+        `outcome != "absent"` -- **its meaning has widened**: it used to be
+        `True` only for `"admitted"`, and is now also `True` for
+        `"rejected"`. `plans/`, the `sortie-log-triage` skill, and anything
+        else reading this field for "was this an admission" rather than
+        "was the target evaluated at all" should be checked against the new
+        `outcome` field instead."""
         t_sim: float | None = None
-        present = False
+        outcome = "absent"
+        gate_outcome: str | None = None
         join_skew_s: float | None = None
         live_los_clear: bool | None = None
+
         for entry in collector.records:
             if (
                 entry.outcome is not GateOutcome.ADMITTED
@@ -502,15 +598,34 @@ class BeliefTruthLogWriter:
             ):
                 continue
             t_sim = entry.t_sim
-            present = True
+            outcome = "admitted"
             join_skew_s = entry.los_skew_s
             live_los_clear = entry.live_los_clear
             break
+
+        if outcome == "absent":
+            target_object_ids = self._object_ids_for_contact(
+                attack_run_target_contact_id, now_sim=now_sim
+            )
+            for entry in collector.records:
+                if entry.outcome is GateOutcome.ADMITTED:
+                    continue
+                if entry.object_id not in target_object_ids:
+                    continue
+                t_sim = entry.t_sim
+                outcome = "rejected"
+                gate_outcome = entry.outcome.value
+                join_skew_s = entry.los_skew_s
+                live_los_clear = entry.live_los_clear
+                break
+
         row: dict[str, object] = {
             "kind": "attack_run_los_tripwire",
             "t_sim": t_sim,
             "contact_id": attack_run_target_contact_id,
-            "present_in_snapshot": present,
+            "present_in_snapshot": outcome != "absent",
+            "outcome": outcome,
+            "gate_outcome": gate_outcome,
             "join_skew_s": join_skew_s,
             "live_los_clear": live_los_clear,
         }
@@ -518,6 +633,53 @@ class BeliefTruthLogWriter:
             self._file.write(json.dumps(row) + "\n")
         except OSError as exc:
             self._fail(exc)
+
+    def _update_object_id_contact_cache(
+        self,
+        collector: DetectionTraceCollector,
+        obs_to_contact_id: dict[str, str],
+    ) -> None:
+        """Remember, for every `GateOutcome.ADMITTED` entry this poll that
+        resolved to a real contact, which `object_id`s contributed to it --
+        `entry.object_id` itself plus every id in
+        `entry.cluster_member_object_ids` when clustering/emission filled
+        it in. Runs every poll regardless of whether an attack run is
+        active, so the cache is already warm by the time a run starts
+        guiding on a contact that was seen before the run began. See
+        `_write_attack_run_tripwire`'s own docstring for why this is the
+        only sound source left for the `object_id -> contact_id` join."""
+        for entry in collector.records:
+            if (
+                entry.outcome is not GateOutcome.ADMITTED
+                or entry.observation_id is None
+            ):
+                continue
+            contact_id = obs_to_contact_id.get(entry.observation_id)
+            if contact_id is None:
+                continue
+            self._object_id_to_contact_id[entry.object_id] = contact_id
+            self._object_id_last_seen_sim[entry.object_id] = entry.t_sim
+            if entry.cluster_member_object_ids is not None:
+                for member_id in entry.cluster_member_object_ids:
+                    self._object_id_to_contact_id[member_id] = contact_id
+                    self._object_id_last_seen_sim[member_id] = entry.t_sim
+
+    def _object_ids_for_contact(
+        self, contact_id: str, *, now_sim: float
+    ) -> frozenset[int]:
+        """Every `object_id` the cache still trusts as belonging to
+        `contact_id` -- bounded by `OBJECT_ID_MEMORY_S`, same window and
+        same reasoning as `belief.decay.object_id_continuity_valid`. An
+        entry older than the window is silently excluded rather than
+        trusted indefinitely, so a `contact_id` that has not been admitted
+        in a long time yields an empty set (read as `"absent"`, not a
+        wrong attribution) rather than a stale one."""
+        return frozenset(
+            object_id
+            for object_id, mapped_contact_id in self._object_id_to_contact_id.items()
+            if mapped_contact_id == contact_id
+            and now_sim - self._object_id_last_seen_sim[object_id] <= OBJECT_ID_MEMORY_S
+        )
 
     def flush(self) -> None:
         if self._disabled:

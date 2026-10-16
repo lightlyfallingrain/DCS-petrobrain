@@ -1263,3 +1263,12 @@ two functions that must agree (2026-09-19).
   its own queue global. Worth checking for before reaching for a new transport whenever one Hook
   script's state needs to influence another's `dostring_in` snippet (`plans/emitter-visibility/
   implementation.md`, Notable Discoveries Stage B).
+- **`Contact` carries no DCS `object_id` at all** -- the no-omniscience boundary means belief
+  retains what was *observed*, not the engine's ground-truth identity -- so any later code needing
+  to correlate a raw `object_id` back to a `contact_id` has to build its own cache from admitted
+  rows rather than reading the id off `Contact`. `BL-B76`'s rejected-candidate join hit this and
+  had to invent one; `perception/naked_eye_source.py` already keeps a richer private version for
+  its own majority-overlap clustering. The gap is structural, not an oversight, so expect it to
+  recur whenever new code needs that correlation *outside* a normal admission -- and note that any
+  such cache, being admitted-only, cannot see a cluster split whose child was rejected that poll
+  (`plans/bl-b76-tripwire/implementation.md`).

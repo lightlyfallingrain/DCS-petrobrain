@@ -133,5 +133,30 @@
   change in `belief_truth_log.py` only — no change to admission, no change to what belief holds, no
   new word in the cockpit. Then fly it mountainous and read the rate before deciding anything else.
 
+  ### Step 1 — `[x]` DONE 2026-10-16, `9616235a` (`feature/bl-b76-tripwire-rejected`) #needs-flight
+
+  **The entry's own box stays `[ ]`**: this is one of three steps, and steps 2 (fly it mountainous,
+  read the rate) and 3 (decide whether the attack run should read the live gate outcome rather than
+  the stored contact) are both outstanding.
+
+  Shipped exactly the scope above — `outcome` (`"admitted"`/`"rejected"`/`"absent"`) and, for a
+  rejection, `gate_outcome` and `live_los_clear` (`False` versus `None`), for the attack-run target
+  specifically. Reviewer APPROVED after one required fix, Security APPROVED, Performance
+  APPROVED-MONITOR, DoD PASSED on fixtures. Nothing in the cockpit changed, confirmed by diff.
+
+  **One caveat the Step 2 reading has to account for, and it is the reason this paragraph is here
+  rather than only in a docstring.** `Contact` carries no DCS `object_id` — the no-omniscience
+  boundary — so the join from the attack target to its *rejected* trace rows had to be invented: an
+  `object_id -> contact_id` cache inside the log writer, populated only from **admitted** rows. If
+  the target's perception cluster splits and the minority child is rejected on the same poll the
+  split would have resolved, the cache never sees the split and credits that rejection to the
+  target. **This can only inflate the `"rejected"` count, never deflate it**, and it fires exactly
+  when a group scatters under fire — which is an attack run. So read the Step 2 rate as an **upper
+  bound** on true LOS-blocked, and watch for group-scatter moments near the target when reading it.
+
+  **Step 2 is a mountainous sortie, deliberately.** Both 2026-10-15 sorties were flat desert, where
+  terrain blocking barely fires — which is structurally why the rate is unknown and why a repeat
+  over the same terrain would measure nothing.
+
   Related: `[[BL-B70]]` (implements §8 against this dead input), `[[BL-14]]`, `[[X-B29]]` (the live
   LOS feed), `[[AC-8]]`/`[[WM-W2]]` (its availability).
