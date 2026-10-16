@@ -1334,6 +1334,38 @@ flowchart LR
         <span class="chip open">Filed, planned</span>
       </div>
 
+      <div class="row s-open" role="button" tabindex="0" data-detail="logvis">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Two log lines, still unconfirmed on a real run</b>
+          <p>The only thing <code>BL-11</code> Stage 4 left owed, and it rides along with any sortie:
+            the end-of-run summary appears with plausible totals and reads <code>0/N</code> when the
+            feed is healthy, and the transition warning stays quiet. <b>The gate itself must not be
+            re-flown</b> &mdash; it was authorised on the 2026-10-08 evidence. It is a separate item
+            only because the identical claim was verified by four gates through <code>caplog</code>
+            and was <em>still false in production</em>: nothing configured a handler, so Python fell
+            back to <code>lastResort</code> at <code>WARNING</code> and the line was dropped on every
+            real run.</p>
+        </div>
+        <span class="chip open">Rides along</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="gc4b">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Seeing through woods &mdash; landcover is the answer for every channel</b>
+          <p>The plan split the channels: a statistical per-landcover transmission probability for
+            the eye and binoculars, and the 9K113 asking DCS for the real ray. <b>That second half is
+            gone</b> &mdash; probed on the Windows box against vehicles parked inside canopy,
+            <code>isVisible</code>, <code>getIP</code>, <code>searchObjects</code> at any volume and
+            <code>getSurfaceType</code> are all terrain and scenery only. So the statistical model
+            covers everything, which it was already built to do, and the forest gate is what shipped.
+            The emitter work then cut across it from the other side: a firing or burning unit is seen
+            <em>through</em> canopy by design.</p>
+        </div>
+        <span class="chip open">Closed negative</span>
+      </div>
+
       <div class="row s-open" role="button" tabindex="0" data-detail="latency">
         <span class="who">audio-adapter</span>
         <div class="what">
@@ -2063,6 +2095,33 @@ const DETAIL = {
       { h: "Kola was supposed to be the hard case, and is not", p: "This entry said for weeks that SRTM has no coverage above 60&deg;N, so Kola's elevation source would have to change. <strong>That was retired on 2026-10-04 and this page kept asserting it</strong>: viewfinderpanoramas.org DEM3 covers the Kola area in the <em>same</em> <code>.hgt</code> format the SRTM ingest already reads (user-checked), so no new source and no new code path. The user confirms the required files are present on the Windows box for both remaining theatres. Worth recording as a page failure rather than a project one &mdash; <code>world-model/ROADMAP.md</code> carried the correction the whole time, and the page's own contract is that a disagreement means the page is wrong." }
     ],
     src: "world-model/ROADMAP.md"
+  },
+
+  logvis: {
+    kicker: "body-layer/", title: "Two log lines, unverified in the air", chip: ["block", "Rides along with any sortie"],
+    facts: [["Owed", "that two lines print on a real run"], ["NOT owed", "re-flying the fail-closed gate"], ["Found by", "DoD round 1, running the code outside pytest"], ["Missed by", "4 gates, all using caplog.at_level"]],
+    sections: [
+      { h: "Why this is a separate item and not part of the gate's own acceptance", p: "<code>BL-11</code> Stage 4 deliberately has <strong>no in-cockpit observable</strong> &mdash; the roadmap's own words are <em>\"a regression guard rather than an observable\"</em>. Petrovich says nothing new. So the gate itself was accepted on the 2026-10-08 flight evidence (145/145 evaluated objects on a live verdict, 85/85 admitted, against a 76% no-verdict baseline) and <strong>must not be re-flown</strong>. What is left is only that the guard's own two lines appear: the end-of-run summary with plausible totals, reading <code>0/N</code> when the feed is healthy, and the transition warning staying silent when nothing is wrong." },
+      { h: "The reason it earned its own entry at all", p: "The identical claim was verified by four separate gates &mdash; three review rounds and a security deep analysis &mdash; and was <strong>still false in production</strong>. Every test asserted through <code>caplog.at_level(logging.INFO)</code>, which forcibly overrides the level. Nothing in <code>body-layer/src/</code> configured a logging handler, so Python fell back to <code>logging.lastResort</code> at threshold <code>WARNING</code> and the summary was silently dropped on every real run. The tests proved the call <em>fires</em>; none proved it is <em>visible</em>. The DoD caught it by running the module outside pytest, which is the only check that could have." },
+      { h: "What the guard is for, so the lines mean something when you see them", p: "Now that the live DCS verdict is the only path, <strong>a nonzero fallback count is a defect</strong>, not a statistic. The summary logs even at zero precisely so a passing guard is distinguishable from a guard that never ran &mdash; the same reason <code>static_enum_failures</code> exists on the Hook side. If you ever see the transition warning, the live line-of-sight feed stopped mid-sortie and Petrovich went quiet rather than wrong; that is the designed failure direction, and the log is the only place it is visible." }
+    ],
+    items: [["done","Fail-closed gate, authorised on flight evidence"],["done","Coverage counter, always on, all three entry points"],["done","Visibility fixed + pinned by a no-override test"],["block","Confirm both lines on a real run"],["open","BL-B46: propagate would double-print in a host"]],
+    src: "body-layer/ROADMAP.md (BL-11 Stage 4), plans/bl11-stage4-fail-closed/dod-check.md, docs/acceptance/2026-10-08-bl11-stage4-log-visibility-sortie.md"
+  },
+
+  gc4b: {
+    kicker: "body-layer/", title: "Seeing through woods, and under real conditions", chip: ["open", "Unblocked, and simplified"],
+    facts: [["Raised", "2026-09-19"], ["Tree question", "CLOSED 2026-10-01 \u2014 a clean negative"], ["Shipping answer", "OSM landcover polygons, already local"]],
+    sections: [
+      { h: "The framing matters more than the list", p: "Every detection test so far was flown in near-perfect visual conditions. That makes the calibration an <strong>upper bound on what is possible</strong>, not a model of what usually happens \u2014 so conditions do not replace it, they multiply down from it. Optics multiply apparent size up, conditions multiply detectability down, and the three calibrated angular thresholds stay fixed in the middle." },
+      { h: "The tree question closed, and the answer removes half the design", p: "The plan split the channels: a statistical per-landcover probability for the eye and binoculars, and the 9K113 sight asking DCS for a real ray to one target. <strong>No DCS call gives tree-aware line of sight.</strong> Probed on the Windows box against vehicles parked inside canopy: <code>isVisible</code>, <code>getIP</code>, <code>searchObjects</code> at every volume and <code>getSurfaceType</code> are all terrain and scenery only. ED's own AI does sample tree geometry \u2014 <code>trees_LOS_test_T4 = true</code> \u2014 but that path is compiled, and DCS Petrovich's own verdict there is an audio file. So the statistical model covers every channel, which it was already built to do, and the fallback became the answer." },
+      { h: "The placements do exist, and are behind a wall hit twice", p: "<code>Syria.surface5</code> holds per-node tree sections \u2014 8,789 in the first 150 MB, each with ~325-346 twelve-byte positions, indexed into a readable 2,665-entry asset table naming six species. Extrapolated, millions of individual trees. But the field table's offsets are not file offsets, and every candidate base gives degenerate clouds: <strong>the identical blocker the elevation decode hit from a different payload.</strong> Two attempts, two payloads, one wall \u2014 which is the transferable finding, and why a third afternoon on it would be wasted. Three files look like tree data and none is: <code>.sd5</code> parses perfectly and is grass and rock clutter, the <code>.ref</code> siblings are meshes of a single tree." },
+      { h: "Vegetation is nearly free", p: "World-model already resolves landcover \u2014 forest, orchard, scrubland, open fields \u2014 and it already reaches the body layer through enrichment. Nothing new has to be extracted from DCS; it simply is not wired to the visibility gate yet. Light level is next; weather needed research before it could be planned; camouflage is deliberately last, because it interacts with all three." },
+      { h: "The research already overturned an assumption", p: "Movement was the standing guess for our biggest gap against ED \u2014 a moving vehicle being far more detectable than a static one, with no term for it in our model. <strong>Neither ED nor we model movement, or dwell.</strong> So it is not catch-up; if it gets built it is a design choice to argue on crew realism rather than parity. That is exactly the kind of thing reading our own code could never have told us." },
+      { h: "And corroborated a decision", p: "ED never exposes a raw numeric range on any crew-facing channel \u2014 only a coarse range bucket, or nothing. Handing our belief layer a ground-truth distance departs from the sim's own conventions as much as from a crew member's senses. Weather also turned out live-readable after all, reversing an assumption recorded a day earlier." },
+      { h: "What is still unknown", p: "Three grep passes found zero consumers of <code>min_contrast_f</code>, <code>min_fog_transparency</code> or <code>extra_eyesight_ratio</code> anywhere in the Mi-24P tree, so the engine-wide <code>Scripts/AI/Detection.lua</code> is where they are most likely used. It is confirmed present in the file listing and has never been read \u2014 the single highest-value thing to open on the Windows box." }
+    ],
+    src: "body-layer/ROADMAP.md, todo/backlog.md (X-B4 closed, X-B31, X-B32), aircraft-layer/research/2026-09-29-tree-los-probe-results.md"
   },
 
   voice: {
