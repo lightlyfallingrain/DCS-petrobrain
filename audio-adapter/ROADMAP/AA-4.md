@@ -4,7 +4,15 @@
 **Topics:** #audio-playback #speech-recognition #push-to-talk #intercom
 <!-- doc-provenance:end -->
 
-- [~] **Slice 3 — inbound speech (STT + PTT).** #status/in-progress The larger half. **Next priority** (user,
+- [x] **Slice 3 — inbound speech (STT + PTT). DONE as a slice**, confirmed by the user 2026-10-16.
+  Stages 1–6 and the sortie acceptance (`[[AA-4.1]]`–`[[AA-4.6]]`, `[[AA-4.8]]`) are all `[x]`:
+  the recognition bench cleared its gate at 99.2% top-1 on 252 clips of the pilot's own voice,
+  capture and real PTT through DCS were flown and accepted 2026-09-23.
+  **One sub-entry stays open and is deliberately not closed with the slice: `[[AA-4.7]]`,
+  press-to-readback latency at ~3 s.** That is a performance item against delivered behaviour, not
+  a missing capability — the slice works and the lag is what will keep Petrovich feeling like a
+  machine, so it is tracked where it can be prioritised on its own rather than hidden inside a
+  closed parent. #status/done The larger half. **Next priority** (user,
 2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body receives
 already-transcribed `PlayerUtterance` records and never sees audio. Full design:
 `plans/inbound-speech/plan.md`.

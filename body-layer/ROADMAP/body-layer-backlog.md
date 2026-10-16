@@ -65,7 +65,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B24]] — Ambiguous reacquisition candidates after a long gap
 - [[BL-B25]] — Merge-echo predicate evaluated at the wrong tick
 - [[BL-B26]] — Group member facts gathered three times per tick
-- [[BL-B27]] — `say again` fires on unaddressed cockpit speech
+- [[BL-B27]] — `say again` fires on unaddressed cockpit speech — **DROPPED 2026-10-16**: incorrect STT, not unaddressed speech — a different problem
 - [[BL-B28]] — `report right` is not recognised
 - [[BL-B29]] — `cancel all` is not in the vocabulary
 - [[BL-B30]] — The poll loop runs at ~0.7 Hz against a specified 5 Hz

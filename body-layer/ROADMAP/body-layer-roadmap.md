@@ -89,7 +89,7 @@ Detection cones, perception calibration and the sortie-driven fixes that followe
 - [[BL-W28]] — Five-fix sortie
 - [[BL-W29]] — Internal identifiers were being read aloud
 - [[BL-W30]] — Radio brevity, and cancel became three commands
-- [[BL-W31]] — Repetition is better but not gone
+- [[BL-W31]] — Repetition is better but not gone — **CLOSED 2026-10-16**: superseded by `X-T4`'s contacts callout (not yet fixed in code)
 - [[BL-W11]] — F10 command vocabulary
 - [[BL-W3]] — Sortie refinements (2026-10-05 debrief, items 2/3/4)
 - [[BL-W4]] — Terrain callout, Stages 3-4-5

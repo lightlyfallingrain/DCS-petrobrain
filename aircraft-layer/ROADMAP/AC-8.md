@@ -1,6 +1,16 @@
 # AC-8 — DCS-driven line of sight, Stages 1-3
 
-**OPEN** — this entry's own *"not yet merged, not yet flown"* disagrees with [[WM-W2]], which
+**RESOLVED 2026-10-16 — DONE, by user adjudication.** Asked directly whether this was done, the
+user said yes. That settles the contradiction this entry was created to preserve rather than hide:
+the stale half was this entry's own *"not yet merged, not yet flown"*, exactly as the mechanical
+evidence below already indicated, and [[WM-W2]]'s *"FLOWN 2026-10-05"* was the accurate record.
+`#needs-flight` was being withheld because tagging it would have picked a side; the side is now
+picked, and the 2026-10-08 statics sortie (145/145 evaluated objects on a live verdict, 85/85
+admitted) is the flight that closes it. The original disagreement is kept verbatim below, because
+the lesson is that a contradiction between two records is worth carrying until somebody with
+authority settles it.
+
+**Superseded preamble:** this entry's own *"not yet merged, not yet flown"* disagrees with [[WM-W2]], which
 records the same work as *"FLOWN 2026-10-05"* and reads 101,091 live verdicts off
 `aircraft-layer/research/2026-10-05-dcs-los-first-sortie-log-analysis.md`. Both claims are carried
 verbatim and neither was edited. The merge half is settled mechanically rather than by judgement:
@@ -11,8 +21,8 @@ history carries the branch's whole review/DoD trail (`3b904fc`, *"DoD: X-B29 DCS
 and `#needs-flight` is deliberately withheld while the marker stands, since tagging it would pick
 a side.
 
-- [ ] **DCS-driven line of sight, Stages 1-3 — DoD PASSED on fixtures 2026-10-05, not yet merged, not
-  yet flown** #status/open (`feature/dcs-driven-los`, [[X-B29]]/[[X-B30]] in `todo/backlog.md`). New Hook script
+- [x] **DCS-driven line of sight, Stages 1-3 — DoD PASSED on fixtures 2026-10-05, merged, and flown.**
+  #status/done (`feature/dcs-driven-los`, [[X-B29]]/[[X-B30]] in `todo/backlog.md`). New Hook script
   (`dcs-export/petrobrain-line-of-sight-hook.lua`) computes both terrain and building line of sight
   for every unit inside Petrovich's gaze cone in one batched `world.searchObjects`/`SEGMENT` call per
   poll, replacing body-layer's SRTM-approximated terrain-only answer for any unit the live feed
