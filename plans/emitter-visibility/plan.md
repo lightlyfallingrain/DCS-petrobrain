@@ -279,6 +279,16 @@ rather than a probe.
 
 ### Risks & Unknowns
 
+- **~~Open: does `S_EVENT_SHOOTING_START` retrigger during a sustained burst?~~ ANSWERED by user
+  direction, 2026-10-16** — *"start and end are paired. No unit ever fires for tens of seconds
+  straight. They fire bursts."* So the watchdog's remaining case (unit alive, firing past the
+  timeout) **does not occur in practice**: fire comes in bursts, each with its own paired start and
+  end, and the end arrives. `FIRING_WATCHDOG_S = 180.0` is therefore a pure backstop against a
+  genuinely dropped `END` with no death event either — over-generous by design, and harmless,
+  because nothing should ever reach it. **Do not tune it down on the grounds that 180 s looks long**:
+  its only job now is the case that should never happen, and a short value there is what the
+  review's finding was about.
+
 - **`MAX_SIGHTLINES_PER_CALL = 128`, nearest-first, can silently neuter the whole feature.**
   `petrobrain-line-of-sight-hook.lua` sorts the look-wedge's bubble candidates by range and
   truncates, so **truncation drops the far ones** — precisely the emitters this feature exists to

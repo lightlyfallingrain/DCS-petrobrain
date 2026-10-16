@@ -39,7 +39,38 @@
   needs a richer relationship with perception than an ordinary candidate**, one where a blocked look
   is reported rather than dropped.
 
-  ## Shape of the options, for whoever plans this
+  ## NARROWED by user direction, 2026-10-16 — the admission gate is right, the lookup is wrong
+
+  > *"on LOS false never arriving. That's correct since the LOS false means we don't see it. But
+  > belief is there based on earlier observation. Like in real life, if a unit drives behind a
+  > building, I cannot see it, nothing but my brain tells me it is there. But since I saw it, I saw
+  > it moving behind the building, I can judge that it must be there. This is why memory and belief
+  > are important. In real life a unit could for example drive into a building and hide there, in
+  > which case it would effectively disappear. I would still know it's there somewhere, I just could
+  > not see where exactly. DCS does not allow driving into a building, but the principle stands. No
+  > LOS means no observation, but a LOS a moment ago means it's near where it was. In which case
+  > memory and belief serve as guidance."*
+
+  **So options 1 and 2 below are wrong and must not be built.** Blocked candidates *should* be
+  rejected at admission — no line of sight means no observation, and admitting one would be
+  inventing a sighting that did not happen. The existing fail-closed gate is correct and
+  `Contact.live_los_clear` never being `False` is correct with it. **This entry is not about
+  changing what reaches belief.**
+
+  **What is actually wrong is where the attack run looks for the cause.** `Contact.live_los_clear`
+  is the wrong source: by construction it only ever describes a look that *succeeded*. But the cause
+  is computed every poll anyway — `check_visibility` decides, for the attack target specifically,
+  whether this tick's failure was the mask, terrain LOS, range, or no verdict. **That verdict exists
+  and is thrown away.** Reading it from the live gate outcome for the target, rather than from the
+  stored contact, needs no change to admission, no widening of what belief holds, and no new
+  channel.
+
+  **And the guidance itself is already right**, which is why this is a wording defect rather than a
+  behavioural one: `BL-14` continues guiding from the remembered or projected position precisely
+  because the user's own earlier direction said to (2026-10-14 §7). The pilot keeps getting steered;
+  the only open question is whether Petrovich can say *why* he has stopped seeing it.
+
+  ## ~~Shape of the options, for whoever plans this~~ — superseded above
 
   1. **Pass blocked observations through for an already-known contact**, carrying `live_los_clear =
      False` rather than rejecting. Honest, and makes §8 work as directed — but widens what reaches
