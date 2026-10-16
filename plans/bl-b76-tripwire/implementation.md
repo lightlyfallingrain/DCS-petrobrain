@@ -136,3 +136,44 @@ before/after), then reran the full suite to confirm no deletions survived.
   honest about not introducing a second number to tune for the same concern.
 - **This entry's own cross-key-coupling note doesn't apply here**: the only constant touched is
   reused, not new, and it is already tuned/bounded elsewhere.
+
+### Review fix pass (2026-10-16)
+
+Review (`review.md`) approved with one required fix:
+
+- **Softened `_write_attack_run_tripwire`'s docstring overclaim.** It asserted a stale/wrong cache
+  entry "can only ever cause a miss ... never a wrong contact's rejection being attributed to this
+  one." The reviewer traced a real case where that is false: `NakedEyePerceptionSource` resolves a
+  cluster split by majority-overlap vote, which only takes effect once the split child is
+  *admitted*; if the minority child is instead rejected on the same poll the split would have
+  resolved, `_update_object_id_contact_cache` (which only reads `ADMITTED` rows) never sees it, so
+  the previous poll's stale mapping survives and the rejection is attributed to the attack target
+  even though it belongs to a different, now-distinct contact. Replaced the "can only cause a miss"
+  claim with a named residual case: same-poll split-and-reject inflates the `"rejected"` count for
+  the target (never deflates it), bounded by `OBJECT_ID_MEMORY_S` the same way the already-accepted
+  object_id-reuse risk is. No join, cache, row shape, or test changed — documentation only, per the
+  review's own scope line.
+- **Added the "cache warmed every poll regardless of active run" test** the review flagged as
+  missing (`test_write_poll_attack_run_tripwire_cache_warm_before_run_active`): seeds the cache on
+  a poll with no attack run active (`attack_run_target_contact_id=None`), then starts a run and
+  rejects the same object_id on the very next poll, asserting `outcome="rejected"` rather than
+  `"absent"` — pins exactly the behaviour the `write_poll` comment describes and that no prior test
+  exercised (every existing test passed the target contact id on both the seeding and rejecting
+  poll).
+- **Left the `OBJECT_ID_MEMORY_S` expiry-boundary test owed**, per the review's own "non-blocking"
+  judgment — every test still uses a fixed `t_sim` across polls, so `_object_ids_for_contact`'s
+  `now_sim - last_seen_sim <= OBJECT_ID_MEMORY_S` comparison is exercised nowhere in this diff. Low
+  risk (one-line reuse of an already-tested pattern), but a future stage touching that cache should
+  add it rather than assume it is covered.
+- **`present_in_snapshot` backward-compatibility concern is resolved, not just deferred.** The
+  review grepped `.claude/skills/`, `plans/`, `docs/`, and `body-layer/` for `present_in_snapshot`/
+  `attack_run_los_tripwire` and found no live consumer outside this change's own files, `BL-B76.md`,
+  and the two `attack-run-sortie-fixes` plan documents that describe rather than parse the field.
+  `sortie-log-triage`'s `SKILL.md` has no reference to either name. No action needed; recording this
+  so it is not re-investigated.
+
+Re-ran all checks from this tip: `ruff format --check` pass (133 files already formatted),
+`ruff check` pass, `mypy --strict` pass (60 source files), `pytest -q` → `2061 passed, 4 xfailed`
+(net +1 over the review's own re-measured baseline of 2060, for the one new test). All 33 tests in
+`test_belief_truth_log.py` confirmed passing by name in unfiltered `-v` output, including the new
+one.

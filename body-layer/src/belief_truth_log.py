@@ -549,14 +549,29 @@ class BeliefTruthLogWriter:
         that memory back, bounded by `OBJECT_ID_MEMORY_S` -- the same
         window `belief.decay.object_id_continuity_valid` already uses to
         decide how long a DCS `object_id` is still trusted to name the same
-        real vehicle. A stale or wrong entry in that cache can only ever
-        cause a **miss** (no `"rejected"` row is written; the poll looks
-        `"absent"` instead), never a wrong contact's rejection being
-        attributed to this one, because the cache is only ever consulted
-        for `attack_run_target_contact_id` itself and only ever populated
-        from an `ADMITTED` row that already resolved to a real contact this
-        poll -- it is the same trust model this codebase already accepts
-        for object-permanence, not a new one.
+        real vehicle. Most of the time a stale or wrong entry in that cache
+        can only cause a **miss** (no `"rejected"` row is written; the poll
+        looks `"absent"` instead) -- it is the same trust model this
+        codebase already accepts for object-permanence, not a new one.
+
+        **One residual case is not a miss, and inflates `"rejected"`
+        rather than `"absent"`.** `NakedEyePerceptionSource` resolves a
+        cluster split by majority-overlap vote across its member
+        `object_id`s, and the vote only takes effect once the split child
+        is *admitted* -- `_update_object_id_contact_cache` only ever reads
+        `ADMITTED` rows, so it cannot see a split that happens and is
+        rejected on the same poll. If the attack target's cluster splits
+        and the minority child is rejected that same poll, the cache still
+        holds the previous poll's mapping (child's `object_id` -> target's
+        `contact_id`), and that rejection gets attributed to the target even
+        though it is, or is about to become, a different real contact. This
+        is bounded by `OBJECT_ID_MEMORY_S` the same way the accepted
+        object_id-reuse risk is, but it biases in one direction: it can only
+        ever inflate the `"rejected"` count for the target, never deflate
+        it, and a group scattering under fire -- exactly what an attack run
+        is likely to encounter -- is exactly when it fires. Read the
+        `"rejected"` rate with that in mind; it is an upper bound, not an
+        exact count.
 
         `present_in_snapshot` is kept for backward compatibility and is now
         `outcome != "absent"` -- **its meaning has widened**: it used to be

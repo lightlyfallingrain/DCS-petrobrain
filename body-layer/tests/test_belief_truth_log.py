@@ -529,6 +529,64 @@ def test_write_poll_attack_run_tripwire_rejected_terrain_los_no_verdict(
     assert rejected_row["live_los_clear"] is None
 
 
+def test_write_poll_attack_run_tripwire_cache_warm_before_run_active(
+    tmp_path: Path,
+) -> None:
+    """The cache is warmed every poll regardless of whether a run is
+    active (`write_poll`'s own comment on why `_update_object_id_contact_
+    cache` moved to the top of the method, unconditional on
+    `attack_run_target_contact_id`). Pin it: seed the cache on a poll with
+    no attack run active at all (`attack_run_target_contact_id=None`),
+    then start a run and reject the same object_id on the very next poll
+    -- it must resolve to `"rejected"`, not `"absent"`, proving the cache
+    was already warm before the run's own first poll."""
+    path = Path(str(tmp_path)) / "belief_truth.jsonl"
+    contact = _contact(
+        contact_id="CONTACT_1", x=1000.0, z=0.0, contributing_observation_ids=["OBS_1"]
+    )
+    store = ContactStore()
+    store._contacts["CONTACT_1"] = contact  # type: ignore[attr-defined]
+
+    writer = BeliefTruthLogWriter(path, flush_every_n_polls=1, stderr=io.StringIO())
+
+    seeding_collector = DetectionTraceCollector()
+    seeding_collector.records.append(
+        _trace_entry(
+            object_id=1, observation_id="OBS_1", cluster_member_object_ids=(1,)
+        )
+    )
+    writer.write_poll(seeding_collector, store, _ownship())  # no run active
+
+    rejecting_collector = DetectionTraceCollector()
+    rejecting_collector.records.append(
+        _trace_entry(
+            object_id=1,
+            observation_id=None,
+            outcome=GateOutcome.TERRAIN_LOS,
+            live_los_clear=False,
+        )
+    )
+    writer.write_poll(
+        rejecting_collector,
+        store,
+        _ownship(),
+        attack_run_target_contact_id="CONTACT_1",
+    )
+    writer.close()
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    tripwire_rows = [
+        json.loads(line)
+        for line in lines
+        if json.loads(line).get("kind") == "attack_run_los_tripwire"
+    ]
+    # The seeding poll had no run active, so it wrote no tripwire row.
+    assert len(tripwire_rows) == 1
+    rejected_row = tripwire_rows[0]
+    assert rejected_row["outcome"] == "rejected"
+    assert rejected_row["gate_outcome"] == "terrain_los"
+
+
 def test_write_poll_attack_run_tripwire_three_states_are_distinguishable(
     tmp_path: Path,
 ) -> None:
