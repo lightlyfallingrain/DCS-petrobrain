@@ -1,11 +1,24 @@
 # BL-B77 — One hedge, two registers: the group line's hardcoded `"A couple of contacts."`
 
-- [ ] **BL-B77 — `render_group_disclosure`'s undifferentiated-pair branch speaks a hardcoded
+- [x] **BL-B77 — `render_group_disclosure`'s undifferentiated-pair branch speaks a hardcoded
   `"A couple of contacts."` while `_cardinality_phrase` — the shared hedge register every other
   caller uses — returns the bare stems `"couple"`/`"handful"`/`"several"`/`"many"`. Unify: the group
-  line reads the register, for both the logic and the words.** #status/open User direction,
+  line reads the register, for both the logic and the words.** #status/done User direction,
   2026-10-16: *"group line has a hardcoded 'A couple of contacts.' -> unify, use hedge logic and
   words there too. Fix this first."*
+
+  **Done.** The pair branch (`speech.py`'s `_render_full_group_composition`) now calls
+  `_cardinality_phrase(2, 2)` and composes `"Couple {contacts}."`, replacing the literal.
+  `_cardinality_phrase`'s own docstring is corrected to the bare-stem words it actually returns
+  (function unchanged, per the narrow scope below). The `"Group."` bare-word branch for
+  three-or-more was inspected and left as-is: it has no count to hedge, only a group Petrovich
+  believes in as one thing. `test_speech.py`'s
+  `test_render_group_disclosure_undifferentiated_pair_says_a_couple_of` is renamed to `..._says_
+  couple` and its assertion changed to `"Couple contacts."` — a specification change, not a test
+  fixed to match output, since the whole point of this item is that the spoken line changes.
+  `grep -rn 'couple of' body-layer/src/` found no third site composing this hedge by hand; the
+  other hits are unrelated (a duration-phrase vocabulary, and historical sortie-transcript quotes
+  in comments/docstrings). Unblocks `[[X-T4]]` (`plans/contacts-callout/plan.md`).
 
   **Why it is a prerequisite rather than a cleanup**, and why the user put it first: the
   `[[X-T4]]` contacts callout (`plans/contacts-callout/plan.md`) reuses `_cardinality_phrase`

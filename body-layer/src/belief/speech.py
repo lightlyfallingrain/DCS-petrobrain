@@ -1691,12 +1691,14 @@ def _cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | Non
     bucket.
 
     `None` means "no clause at all" (an exactly-one interval). Otherwise the
-    register is deliberately **hedged**: `"a couple of"` for two or three,
-    `"a handful of"` for four or five, `"many"` from sixteen up, and the safe
-    default `"several"` for everything else plural -- never wrong to say about
-    any plural count. Each phrase carries its own connector, because the
-    grammar is per-phrase: `"several trucks"` is correct with a bare noun and
-    `"a handful trucks"` is not.
+    register is deliberately **hedged**, and returns bare stems with no
+    leading article (BL-B77, correcting this docstring to the 2026-09-23
+    radio-brevity direction the function itself already follows -- see this
+    module's own docstring): `"couple"` for two or three, `"handful"` for
+    four or five, `"many"` from sixteen up, and the safe default `"several"`
+    for everything else plural -- never wrong to say about any plural count.
+    A caller composes its own grammar around the bare stem (`"several
+    trucks"`, `"couple contacts"`); no phrase carries a connector of its own.
 
     **`attended` is where precision is earned** (user, 2026-09-19: "a group of
     watched/tracked contacts is, for whatever reason, more important and should
@@ -2639,7 +2641,13 @@ def _render_full_group_composition(
             text = composition[0].upper() + composition[1:]
         elif is_pair:
             value, level = _classification_key(member_facts[0])
-            text = f"A couple of {_plural_unit_type_display(value, level)}"
+            # BL-B77: read the shared hedge register instead of carrying a
+            # second, inconsistent literal -- `_cardinality_phrase(2, 2)`
+            # never returns `None` (that only happens for lo==hi==1), so
+            # the pair branch always gets a word here.
+            hedge = _cardinality_phrase(2, 2)
+            assert hedge is not None
+            text = f"{hedge.capitalize()} {_plural_unit_type_display(value, level)}"
         else:
             text = "Group"
 
@@ -2899,11 +2907,15 @@ def render_group_disclosure(
     A two-member group is the only size this stage words specially:
 
     - **Undifferentiated** (every member still at `presence`/`unknown`
-      level -- nothing precise is known to speak): `"A couple of
-      {contacts}"` for a pair, the bare word `"Group"` for three or more.
-      `"a couple of"` is `_cardinality_phrase`'s own hedge for two-or-three,
-      reused here rather than invented, because the quantity being hedged
-      is genuinely the same kind of vague count.
+      level -- nothing precise is known to speak): `"Couple {contacts}"`
+      for a pair, the bare word `"Group"` for three or more. The pair's
+      hedge word is `_cardinality_phrase(2, 2)` -- the identical register
+      call, bare stem and all, that a single contact's own count clause
+      uses for a lo-2-hi-3 interval (BL-B77 unified what was a second,
+      hardcoded `"A couple of"` literal here) -- because the quantity
+      being hedged is genuinely the same kind of vague count. Three-or-
+      more stays the bare word: there is no count to hedge, just a group
+      Petrovich believes in as one thing.
     - **Differentiated, and every member shares one classification** (a
       real, identical class/type across the whole group): `"Pair of
       {plural}"` for a pair (e.g. *"Pair of T-72s"*) -- the exact-count form
