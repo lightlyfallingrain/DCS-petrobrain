@@ -204,6 +204,53 @@ MAX_SEARCH_SECTOR_HALF_WIDTH_DEG: Final[float] = 15.0
 #: identification look is for, and it happens on a later cycle.
 SEARCH_STEP_S: Final[float] = 0.8
 
+#: BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that
+#: thrashes at the boundary would be worse than one that never
+#: de-escalates at all") -- a *fraction* of the lower rung's own presence
+#: threshold, not a fixed metre band, because the ladder's rungs are
+#: 2.42x apart (`presence_range_mult`), so a fixed band would be enormous
+#: at the naked-eye rung and negligible at the sight's. Escalation has no
+#: band at all (plan: "Escalate when range_m > threshold(current)") --
+#: only stepping *down* to a less capable optic waits for this margin.
+#: Sized against the sorties' own measured closing rate (median 60 m/s):
+#: 0.25 gives a ~583 m band at the naked-eye rung, about 10 s of closing,
+#: which is what `GUIDANCE_OPTIC_MIN_INTERVAL_S` below must then exceed
+#: against the worst observed *reversal* rate (+130 m/s) to stop a
+#: fly-past re-crossing it before the minimum interval has elapsed. An
+#: `agreed-guess` like every uncalibrated perception constant before its
+#: first sortie.
+GUIDANCE_OPTIC_HYSTERESIS_FRACTION: Final[float] = tuning.real(
+    "belief.optic_policy.GUIDANCE_OPTIC_HYSTERESIS_FRACTION",
+    0.25,
+    lo=0.05,
+    hi=0.9,
+    status="agreed-guess",
+)
+
+#: BL-B71 guard 3: the shortest time between two guidance-optic grants,
+#: clocked by `OpticState.guidance_optic_since_sim` -- must stay above
+#: `HANDS_BUSY_DURATION_S` (tuning it below that makes a grant
+#: re-chargeable before the previous charge even finishes) and must
+#: also exceed the ~4.5 s a fly-past needs to re-cross `GUIDANCE_OPTIC_
+#: HYSTERESIS_FRACTION`'s own band at the worst observed reversal rate
+#: (+130 m/s) -- 10.0 s bounds the worst case to one 1 s blind interval
+#: per 10 s (10% duty). Not derived from `HANDS_BUSY_DURATION_S` directly
+#: (that bound must stay an AST-literal for `tools/generate_defaults.py`
+#: to read it, and the two are independently tunable regardless), so the
+#: coupling above is a tuning caution, not an enforced invariant -- the
+#: declared bounds (this constant's `lo=1.0`, `HANDS_BUSY_DURATION_S`'s
+#: `hi=5.0`) do permit violating it at the extremes; no cross-key check
+#: guards it, same posture as `belief.decay.py`'s own residual coupling
+#: note in `body-layer/CLAUDE.md`'s "Tuning" section. An `agreed-guess`
+#: like `GUIDANCE_OPTIC_HYSTERESIS_FRACTION` above.
+GUIDANCE_OPTIC_MIN_INTERVAL_S: Final[float] = tuning.real(
+    "belief.optic_policy.GUIDANCE_OPTIC_MIN_INTERVAL_S",
+    10.0,
+    lo=1.0,
+    hi=60.0,
+    status="agreed-guess",
+)
+
 
 class OpticPhase(str, Enum):
     """Which part of the cycle is running.
@@ -433,6 +480,23 @@ class OpticState:
     #: same event). `None` while idle (nothing chosen) or outside
     #: `SIGHTING` entirely.
     look_started_sim: float | None = None
+
+    #: `BL-B71`'s standing guidance grant -- the optic `attack_run`'s
+    #: request is currently overriding every other optic decision with,
+    #: or `None` when no attack run is engaged (or `decide` has never
+    #: granted one). **Set only by `decide`'s own `_apply_guidance` step**
+    #: -- never by any of the phase-dispatch branches above, which is what
+    #: makes "the 9K113 is never reached for autonomously" (`BL-B71.md`'s
+    #: hard gate) checkable by reading `_apply_guidance` alone rather than
+    #: auditing every call site. `None` on every pre-existing `OpticState`,
+    #: so a caller that never passes `guidance_request` to `decide` never
+    #: sets this -- a true no-op, same posture as `hands_busy_until_sim`.
+    guidance_optic: Optic | None = None
+    #: When `guidance_optic` was last (re)granted -- `BL-B71` guard 3's own
+    #: clock (`GUIDANCE_OPTIC_MIN_INTERVAL_S`). `None` exactly when
+    #: `guidance_optic` is `None` -- the two are set and cleared together,
+    #: never independently (`_apply_guidance`'s own contract).
+    guidance_optic_since_sim: float | None = None
 
 
 @dataclass(frozen=True)
@@ -758,6 +822,134 @@ def improvement_window_m(
     # presence, unknown, or anything else a belief can hold: the next thing
     # worth learning is what kind of thing it is.
     return unaided_class_m, binocular_class_m
+
+
+#: The ladder `BL-B71`'s guidance override walks, ascending capability --
+#: `Optic.presence_range_mult` ascending *is* `fov_half_angle_deg`
+#: descending across the whole shipped table (`BL-B71.md`'s own
+#: derivation), so this is the existing four-optic table in presence
+#: order, not a new ranking invented for this feature. A future optic
+#: joins the ladder by being added here, in its own presence-ascending
+#: place.
+_LADDER: Final[tuple[Optic, ...]] = (
+    UNAIDED_OPTIC,
+    BINOCULAR_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    SIGHT_NARROW_OPTIC,
+)
+
+
+def least_capable_sufficient_optic(
+    range_m: float, object_type: str, *, floor: Optic, ceiling: Optic
+) -> Optic:
+    """The least capable optic, between `floor` and `ceiling` inclusive on
+    `_LADDER`, whose own presence threshold still reaches `range_m` --
+    `BL-B71`'s naive ladder lookup (`plans/attack-run-sortie-fixes/plan.md`
+    §6/§7 Stage 1).
+
+    **A sibling of `improvement_window_m` above, deliberately not a
+    generalisation of it** (the plan's own framing): that function asks
+    whether binoculars would raise a contact's *recognition tier*, over
+    two hardcoded optics; this one asks whether the instrument in
+    Petrovich's hands can *see* the thing he is guiding on at all, over
+    the whole ladder -- two different questions, kept as two functions
+    (`LOOK_SWEEP_SIGMA`'s own docstring is this module's standing
+    reminder against letting two different questions share one number).
+
+    **No memory of a previous grant** -- this is the naive per-tick
+    answer; `guidance_request_for` below applies the de-escalation
+    hysteresis on top of it, and is what callers with state should use
+    instead. Returns `ceiling` (the most capable optic allowed) if even
+    that cannot resolve the target, rather than raising -- the caller's
+    own `TOO_FAR`/remembered-sighting fallback is what speaks in that
+    case, not this function."""
+    profile = profile_for(object_type)
+    # Aspect is unknown for a belief the same way `improvement_window_m`
+    # treats it -- the profile's own extent, not a guess from a stale
+    # heading.
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+    floor_rank = _LADDER.index(floor)
+    ceiling_rank = _LADDER.index(ceiling)
+    for optic in _LADDER[floor_rank : ceiling_rank + 1]:
+        presence_threshold_m, _class_threshold_m, _type_threshold_m = tier_ranges(
+            presence_size_m=profile.size_m,
+            recognition_extent_m=extent,
+            optic=optic,
+            distinctiveness=distinctiveness,
+        )
+        if presence_threshold_m >= range_m:
+            return optic
+    return ceiling
+
+
+def guidance_request_for(
+    range_m: float,
+    object_type: str,
+    previous: Optic | None,
+    *,
+    floor: Optic,
+    ceiling: Optic,
+) -> Optic:
+    """`BL-B71` Stage 3's hysteresis wrapper around `least_capable_
+    sufficient_optic` above -- escalation is immediate (the plan's own
+    "Escalate when range_m > threshold(current)"); de-escalation steps
+    down one rung at a time and only once `range_m` is past that rung's
+    own presence threshold by `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`'s
+    margin (guard 2). **Guard 1 ("do not re-evaluate while `MASKED`") and
+    guard 3 (the minimum interval between grants) are both the caller's
+    job, not this function's** -- `belief.attack_run.decide` simply never
+    calls this on a masked tick, and `optic_policy.decide`'s own `_apply_
+    guidance` clocks guard 3 against `OpticState.guidance_optic_since_sim`
+    -- neither input exists for this pure range/profile function to read.
+
+    `previous` is the *caller's own* last request (`AttackRunState.
+    requested_optic`), **never** `OpticState.guidance_optic` -- the two
+    can legitimately differ (the sight ceiling may have clamped what was
+    actually granted), and this function's whole job is tracking what the
+    target's geometry alone would ask for, independent of whether `optic_
+    policy` chose to grant it. `None` (no previous request -- a fresh run,
+    or a re-point onto a different contact) means "start from `floor`,
+    nothing to de-escalate from yet."
+    """
+    profile = profile_for(object_type)
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+
+    def presence_threshold_m(optic: Optic) -> float:
+        value, _class_m, _type_m = tier_ranges(
+            presence_size_m=profile.size_m,
+            recognition_extent_m=extent,
+            optic=optic,
+            distinctiveness=distinctiveness,
+        )
+        return value
+
+    floor_rank = _LADDER.index(floor)
+    baseline = previous if previous is not None else floor
+    baseline_rank = _LADDER.index(baseline)
+    if baseline_rank < floor_rank:
+        # The floor itself was raised since the last request (e.g. an
+        # ATGM run's own floor/ceiling parameters) -- never hold a request
+        # below the current floor.
+        baseline = floor
+        baseline_rank = floor_rank
+
+    if range_m > presence_threshold_m(baseline):
+        # Guard 2 does not gate escalation (the plan's own wording) --
+        # walk straight up to whichever rung resolves the target.
+        return least_capable_sufficient_optic(
+            range_m, object_type, floor=baseline, ceiling=ceiling
+        )
+
+    if baseline_rank <= floor_rank:
+        return baseline
+    lower = _LADDER[baseline_rank - 1]
+    if range_m < presence_threshold_m(lower) * (
+        1.0 - GUIDANCE_OPTIC_HYSTERESIS_FRACTION
+    ):
+        return lower
+    return baseline
 
 
 def can_still_improve(target: LookTarget) -> bool:
@@ -1301,7 +1493,7 @@ def _decide_sighting(
     )
 
 
-def decide(
+def _decide_without_guidance(
     state: OpticState,
     *,
     now_sim: float,
@@ -1311,7 +1503,12 @@ def decide(
     search: Sequence[tuple[float, float]] = (),
     sight_steady: bool = True,
 ) -> tuple[OpticState, OpticDecision]:
-    """Advance the cycle one poll and say what to look through.
+    """The ordinary phase-cycle dispatch -- `decide`'s whole body before
+    `BL-B71`, renamed and kept otherwise unchanged so that the public
+    `decide` below can post-process its result through `_apply_guidance`
+    without touching any of the dispatch logic itself (the plan's own
+    "leaves the phase machine otherwise untouched"). Advance the cycle one
+    poll and say what to look through.
 
     `search` is the sweep to run when there is nothing worth a closer look
     -- empty when the active scan is free or its sector is too wide to
@@ -1513,6 +1710,16 @@ def decide(
                     actual_aim_elevation_deg=state.actual_aim_elevation_deg,
                     home_phase=state.home_phase,
                     hands_busy_until_sim=state.hands_busy_until_sim,
+                    # `BL-B71`: also not part of this phase's own
+                    # bookkeeping -- a search-sweep entry unrelated to any
+                    # standing guidance grant must not reset it (`_apply_
+                    # guidance`, which runs after this dispatch, would
+                    # otherwise read a freshly-`None`d `guidance_optic_
+                    # since_sim` as "never granted" and recharge the
+                    # hands-busy cost for a grant that was already
+                    # standing).
+                    guidance_optic=state.guidance_optic,
+                    guidance_optic_since_sim=state.guidance_optic_since_sim,
                 ),
                 OpticDecision(
                     optic=BINOCULAR_OPTIC,
@@ -1577,6 +1784,11 @@ def decide(
             actual_aim_elevation_deg=state.actual_aim_elevation_deg,
             home_phase=state.home_phase,
             hands_busy_until_sim=state.hands_busy_until_sim,
+            # `BL-B71`: same reason as the SEARCHING branch's own comment
+            # above -- an ordinary glass-phase entry must not reset a
+            # standing guidance grant's bookkeeping.
+            guidance_optic=state.guidance_optic,
+            guidance_optic_since_sim=state.guidance_optic_since_sim,
         ),
         OpticDecision(
             optic=BINOCULAR_OPTIC,
@@ -1584,6 +1796,149 @@ def decide(
             look_elevation_deg=first_elevation,
         ),
     )
+
+
+def _apply_guidance(
+    state: OpticState,
+    decision: OpticDecision,
+    now_sim: float,
+    guidance_request: Optic | None,
+) -> tuple[OpticState, OpticDecision]:
+    """`BL-B71`'s override step -- runs after `_decide_without_guidance`
+    has already produced `(state, decision)` from the ordinary phase
+    dispatch, and only ever changes `decision.optic` plus the two
+    `guidance_*` fields on `state`; `phase`, `look_azimuth_deg`, and the
+    whole SCANNING/GLASSING/SEARCHING/SIGHTING cycle are left exactly as
+    the dispatch decided (the plan's own "leaves the phase machine
+    otherwise untouched"). `decide` never calls this while `decision.
+    suppressed` -- the hands-busy window already means no optic yields
+    observations this poll, so there is nothing to override and no grant
+    to charge.
+
+    **The sight ceiling is re-derived from `state.home_phase` on every
+    call, never cached or latched** -- this is what makes "the 9K113 is
+    never reached for autonomously" (`BL-B71.md`'s hard gate) structural
+    rather than a check a caller could forget: a sight-ranked request is
+    silently capped to `BINOCULAR_OPTIC` whenever `home_phase` is not
+    `SIGHTING`, so a pilot's "Observ off" (which only ever changes `home_
+    phase`, read fresh here every poll) demotes any standing sight grant
+    to binoculars on the very next poll, and a violated `sight_steady`
+    (`_force_observ_off`, which also only ever changes `home_phase`)
+    demotes it the same way -- neither transition needs its own special
+    case here, because this function never trusts a cached answer to "is
+    a sight optic currently allowed."
+
+    `guidance_request is None` means the run is not engaged (or `attack_
+    run.decide` has nothing to request this tick, which in practice only
+    happens for a `MASKED` tick -- see that module) -- revokes any
+    standing grant (the Co-moving Fields table's `disengage`/`drop_target`/
+    run-ends row): `guidance_optic`/`guidance_optic_since_sim` both go to
+    `None` together, never independently, and `decision` is returned
+    unchanged (whatever the ordinary phase dispatch already picked)."""
+    if guidance_request is None:
+        if state.guidance_optic is None:
+            return state, decision
+        return (
+            replace(state, guidance_optic=None, guidance_optic_since_sim=None),
+            decision,
+        )
+
+    effective_request = guidance_request
+    if (
+        _LADDER.index(guidance_request) > _LADDER.index(BINOCULAR_OPTIC)
+        and state.home_phase is not OpticPhase.SIGHTING
+    ):
+        effective_request = BINOCULAR_OPTIC
+
+    if effective_request == state.guidance_optic:
+        # Already granted -- re-affirm the override (the ordinary
+        # dispatch's own `decision.optic` may disagree, e.g. a GLASSING
+        # phase busy with an unrelated contact) without touching the
+        # clock or charging hands again.
+        return state, replace(decision, optic=effective_request)
+
+    if (
+        state.guidance_optic_since_sim is not None
+        and now_sim - state.guidance_optic_since_sim < GUIDANCE_OPTIC_MIN_INTERVAL_S
+    ):
+        # Guard 3: too soon since the last grant -- refused. Hold the
+        # standing grant, if any; a refused request must not advance
+        # `hands_busy_until_sim` (refusing costs no hands).
+        if state.guidance_optic is not None:
+            return state, replace(decision, optic=state.guidance_optic)
+        return state, decision
+
+    # A real change: grant `effective_request`, re-stamp the clock, and
+    # charge the 1 s hands-busy cost iff the optic actually in use is
+    # changing -- compared against the standing grant if there is one,
+    # or against the phase's own home optic otherwise (the first grant
+    # of a run, where nothing has been granted yet to compare against).
+    # Known narrow gap, left as-is (review's optional refinement, `plans/
+    # attack-run-sortie-fixes/review-bl-b71.md`): this first-grant
+    # comparison uses `_HOME_OPTIC[state.home_phase]` rather than
+    # `decision.optic`, so a first grant can overcharge hands-busy when
+    # the ordinary phase dispatch already happened to be using the same
+    # optic the request resolves to (e.g. a GLASSING phase already up on
+    # binoculars for an unrelated contact). Not safety-relevant -- it
+    # only ever charges a cost that was not strictly owed, never skips a
+    # real one -- so left uncorrected rather than widened beyond the
+    # required fix this task was scoped to.
+    previous_optic = (
+        state.guidance_optic
+        if state.guidance_optic is not None
+        else _HOME_OPTIC[state.home_phase]
+    )
+    new_state = replace(
+        state,
+        guidance_optic=effective_request,
+        guidance_optic_since_sim=now_sim,
+        hands_busy_until_sim=(
+            now_sim + HANDS_BUSY_DURATION_S
+            if effective_request != previous_optic
+            else state.hands_busy_until_sim
+        ),
+    )
+    return new_state, replace(decision, optic=effective_request)
+
+
+def decide(
+    state: OpticState,
+    *,
+    now_sim: float,
+    scan_cycle_period_s: float,
+    targets: Sequence[LookTarget],
+    steady: bool,
+    search: Sequence[tuple[float, float]] = (),
+    sight_steady: bool = True,
+    guidance_request: Optic | None = None,
+) -> tuple[OpticState, OpticDecision]:
+    """Advance the cycle one poll and say what to look through --
+    `_decide_without_guidance`'s ordinary phase dispatch, then `BL-B71`'s
+    `_apply_guidance` override on top of it.
+
+    `guidance_request` (`plans/attack-run-sortie-fixes/plan.md` §6/§7)
+    defaults to `None` -- a true no-op for every pre-existing caller,
+    exactly like `sight_steady`/`group_salient`/`forest` elsewhere in this
+    module. `logger.py`'s poll loop sets it from `AttackRunState.
+    requested_optic` whenever an attack run is engaged; `belief.attack_
+    run.decide` is the only producer of that value.
+
+    **Never applied while `decision.suppressed`** -- the hands-busy
+    window already means nothing is observed through any optic this
+    poll, so there is nothing for `_apply_guidance` to override and no
+    new grant for it to charge."""
+    new_state, decision = _decide_without_guidance(
+        state,
+        now_sim=now_sim,
+        scan_cycle_period_s=scan_cycle_period_s,
+        targets=targets,
+        steady=steady,
+        search=search,
+        sight_steady=sight_steady,
+    )
+    if decision.suppressed:
+        return new_state, decision
+    return _apply_guidance(new_state, decision, now_sim, guidance_request)
 
 
 def look_target_for(

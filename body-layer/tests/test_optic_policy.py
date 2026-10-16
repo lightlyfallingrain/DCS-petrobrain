@@ -13,6 +13,8 @@ from dataclasses import replace
 import pytest
 
 from belief.optic_policy import (
+    GUIDANCE_OPTIC_HYSTERESIS_FRACTION,
+    GUIDANCE_OPTIC_MIN_INTERVAL_S,
     HANDS_BUSY_DURATION_S,
     MAX_LOOK_S,
     RETRY_RANGE_FRACTION,
@@ -26,9 +28,11 @@ from belief.optic_policy import (
     advance_sight_aim,
     choose_look,
     decide,
+    guidance_request_for,
     improvement_window_m,
     is_steady,
     is_worth_a_look,
+    least_capable_sufficient_optic,
     lower_binoculars,
 )
 from perception.optics import (
@@ -2160,3 +2164,409 @@ class TestSightSteadyRateLimitIsHigherThanBinoculars:
 
     def test_sight_rate_limit_is_at_least_binocular_rate_limit(self) -> None:
         assert SIGHT_STEADY_RATE_LIMIT_DEG_S >= STEADY_RATE_LIMIT_DEG_S
+
+
+# -- `BL-B71`: `least_capable_sufficient_optic` (Stage 1, naive) ---------
+
+# Presence thresholds for "T-72" (`profile_for`), computed once here from
+# the same `tier_ranges` formula the module itself uses, rather than
+# re-measured per assertion: UNAIDED ~2333 m, BINOCULAR ~5647 m,
+# SIGHT_WIDE ~8283 m, SIGHT_NARROW ~13557 m.
+_T72_UNAIDED_M = 2333.3333333333335
+_T72_BINOCULAR_M = 5646.666666666667
+_T72_SIGHT_WIDE_M = 8283.333333333334
+_T72_SIGHT_NARROW_M = 13556.666666666666
+
+
+class TestLeastCapableSufficientOptic:
+    def test_within_naked_eye_range_picks_the_least_capable_optic(self) -> None:
+        """§6/§7: naked eye first, not the most capable instrument
+        available -- the whole product argument (`BL-B71.md`: "more
+        capable means narrower")."""
+        assert (
+            least_capable_sufficient_optic(
+                1000.0, "T-72", floor=UNAIDED_OPTIC, ceiling=SIGHT_NARROW_OPTIC
+            )
+            is UNAIDED_OPTIC
+        )
+
+    def test_beyond_naked_eye_escalates_to_binoculars(self) -> None:
+        assert (
+            least_capable_sufficient_optic(
+                _T72_UNAIDED_M + 1.0,
+                "T-72",
+                floor=UNAIDED_OPTIC,
+                ceiling=SIGHT_NARROW_OPTIC,
+            )
+            is BINOCULAR_OPTIC
+        )
+
+    def test_beyond_binoculars_escalates_to_sight_wide(self) -> None:
+        assert (
+            least_capable_sufficient_optic(
+                _T72_BINOCULAR_M + 1.0,
+                "T-72",
+                floor=UNAIDED_OPTIC,
+                ceiling=SIGHT_NARROW_OPTIC,
+            )
+            is SIGHT_WIDE_OPTIC
+        )
+
+    def test_beyond_everything_falls_back_to_the_ceiling(self) -> None:
+        """Even `SIGHT_NARROW_OPTIC` cannot resolve this -- the function
+        returns the ceiling rather than raising; the caller's own
+        remembered-sighting fallback (`TOO_FAR`) is what speaks in that
+        case."""
+        assert (
+            least_capable_sufficient_optic(
+                _T72_SIGHT_NARROW_M + 1.0,
+                "T-72",
+                floor=UNAIDED_OPTIC,
+                ceiling=SIGHT_NARROW_OPTIC,
+            )
+            is SIGHT_NARROW_OPTIC
+        )
+
+    def test_ceiling_below_binoculars_never_returns_a_sight_optic(self) -> None:
+        """The `BL-B71.md` hard gate's own shape, one layer down: a caller
+        that passes `ceiling=BINOCULAR_OPTIC` (OBSERV off) can never get a
+        sight optic back, no matter how close the range -- confirmed by
+        mutation: removing the `ceiling_rank + 1` slice bound (replacing
+        it with the whole `_LADDER`) makes this assert fail, since the
+        function would then walk past the ceiling to `SIGHT_NARROW_OPTIC`
+        at this range."""
+        result = least_capable_sufficient_optic(
+            50_000.0, "T-72", floor=UNAIDED_OPTIC, ceiling=BINOCULAR_OPTIC
+        )
+        assert result is BINOCULAR_OPTIC
+
+
+# -- `BL-B71`: `guidance_request_for` (Stage 3, hysteresis) --------------
+
+
+class TestGuidanceRequestFor:
+    def test_no_previous_request_starts_from_the_floor(self) -> None:
+        assert (
+            guidance_request_for(
+                1000.0, "T-72", None, floor=UNAIDED_OPTIC, ceiling=SIGHT_NARROW_OPTIC
+            )
+            is UNAIDED_OPTIC
+        )
+
+    def test_escalation_is_immediate_no_band(self) -> None:
+        """§7: "Escalate when range_m > threshold(current)" -- crossing
+        by one metre is enough, no margin."""
+        result = guidance_request_for(
+            _T72_UNAIDED_M + 1.0,
+            "T-72",
+            UNAIDED_OPTIC,
+            floor=UNAIDED_OPTIC,
+            ceiling=SIGHT_NARROW_OPTIC,
+        )
+        assert result is BINOCULAR_OPTIC
+
+    def test_de_escalation_is_withheld_until_the_margin_is_crossed(self) -> None:
+        """Guard 2: sitting just inside `BINOCULAR_OPTIC`'s own threshold
+        is not enough to step back down to `UNAIDED_OPTIC` -- only once
+        the range is comfortably past the unaided threshold by
+        `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`'s own margin. This is the
+        counterfactual: with the margin removed (testable by asserting at
+        exactly `_T72_UNAIDED_M - 1.0`, which sits on the wrong side of
+        the margin but still inside the raw unaided threshold) the naive
+        answer would already be `UNAIDED_OPTIC`, so the two cases below
+        must disagree for the hysteresis to be doing anything at all."""
+        just_inside_unaided_m = _T72_UNAIDED_M - 1.0
+        comfortably_inside_m = (
+            _T72_UNAIDED_M * (1.0 - GUIDANCE_OPTIC_HYSTERESIS_FRACTION) - 1.0
+        )
+        assert just_inside_unaided_m > comfortably_inside_m
+
+        held = guidance_request_for(
+            just_inside_unaided_m,
+            "T-72",
+            BINOCULAR_OPTIC,
+            floor=UNAIDED_OPTIC,
+            ceiling=SIGHT_NARROW_OPTIC,
+        )
+        assert held is BINOCULAR_OPTIC  # still held -- margin not crossed yet
+
+        de_escalated = guidance_request_for(
+            comfortably_inside_m,
+            "T-72",
+            BINOCULAR_OPTIC,
+            floor=UNAIDED_OPTIC,
+            ceiling=SIGHT_NARROW_OPTIC,
+        )
+        assert de_escalated is UNAIDED_OPTIC
+
+    def test_de_escalation_steps_one_rung_at_a_time(self) -> None:
+        """A contact that closes from well beyond `SIGHT_WIDE_OPTIC`'s own
+        threshold straight to naked-eye range de-escalates to
+        `SIGHT_WIDE_OPTIC` first, not straight to `UNAIDED_OPTIC` -- one
+        rung per tick, matching how a real poll loop calls this (every
+        tick, not once at the end of a long closure)."""
+        very_close_m = 100.0
+        result = guidance_request_for(
+            very_close_m,
+            "T-72",
+            SIGHT_NARROW_OPTIC,
+            floor=UNAIDED_OPTIC,
+            ceiling=SIGHT_NARROW_OPTIC,
+        )
+        assert result is SIGHT_WIDE_OPTIC
+
+    def test_previous_below_floor_is_clamped_up_to_the_floor(self) -> None:
+        """A `floor` raised since the last request (the ATGM arm's own
+        shape) must never leave a stale request sitting below it."""
+        result = guidance_request_for(
+            100.0,
+            "T-72",
+            UNAIDED_OPTIC,
+            floor=SIGHT_WIDE_OPTIC,
+            ceiling=SIGHT_NARROW_OPTIC,
+        )
+        assert result is SIGHT_WIDE_OPTIC
+
+
+# -- `BL-B71`: `decide`'s `guidance_request` override --------------------
+
+
+def _idle_scanning_state(**kwargs: object) -> OpticState:
+    return OpticState(phase_started_sim=0.0, **kwargs)  # type: ignore[arg-type]
+
+
+class TestGuidanceOverride:
+    """`decide`'s post-dispatch override step (`_apply_guidance`) --
+    `guidance_request=None` is a true no-op (exercised by every other
+    test in this file, none of which pass it), so these only cover the
+    new behaviour."""
+
+    def test_guidance_request_none_is_a_true_no_op(self) -> None:
+        state = _idle_scanning_state()
+        state_without, decision_without = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+        )
+        state_with, decision_with = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=None,
+        )
+        assert state_with == state_without
+        assert decision_with == decision_without
+
+    def test_a_granted_request_overrides_the_optic(self) -> None:
+        state, decision = decide(
+            _idle_scanning_state(),
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=BINOCULAR_OPTIC,
+        )
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.guidance_optic is BINOCULAR_OPTIC
+        assert state.guidance_optic_since_sim == 1.0
+        # A real change from the SCANNING home optic -- hands-busy charged.
+        assert state.hands_busy_until_sim == 1.0 + HANDS_BUSY_DURATION_S
+
+    def test_the_hard_gate_the_9k113_is_never_reached_for_autonomously(
+        self,
+    ) -> None:
+        """`BL-B71.md`'s hard gate: a sight-ranked request is capped to
+        `BINOCULAR_OPTIC` whenever `home_phase` is not `SIGHTING` -- the
+        pilot has not said "Observ on". Counterfactual: deleting the
+        ceiling-clamp branch in `_apply_guidance` makes this assert
+        `SIGHT_NARROW_OPTIC`, confirmed by temporarily removing the clamp
+        and re-running (the clamp is the only code standing between a
+        guidance request and the sight)."""
+        state, decision = decide(
+            _idle_scanning_state(home_phase=OpticPhase.SCANNING),
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=SIGHT_NARROW_OPTIC,
+        )
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.guidance_optic is BINOCULAR_OPTIC
+
+    def test_the_gate_lifts_once_observ_is_on(self) -> None:
+        state, decision = decide(
+            _idle_scanning_state(
+                phase=OpticPhase.SIGHTING, home_phase=OpticPhase.SIGHTING
+            ),
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=SIGHT_NARROW_OPTIC,
+        )
+        assert decision.optic is SIGHT_NARROW_OPTIC
+        assert state.guidance_optic is SIGHT_NARROW_OPTIC
+
+    def test_the_diverged_state_sight_granted_while_scanning_is_home_demotes_at_once(
+        self,
+    ) -> None:
+        """The hand-built diverged state the plan explicitly calls for:
+        `guidance_optic is SIGHT_WIDE_OPTIC` while `home_phase is
+        OpticPhase.SCANNING` -- every natural path through `decide` keeps
+        the two consistent, so this constructs the divergence directly
+        (`BL-B64`'s own equivalent needed exactly this). A single poll
+        must demote the standing grant to `BINOCULAR_OPTIC`, not merely
+        refuse to escalate further."""
+        diverged = OpticState(
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SCANNING,
+            guidance_optic=SIGHT_WIDE_OPTIC,
+            guidance_optic_since_sim=0.0,
+        )
+        state, decision = decide(
+            diverged,
+            now_sim=GUIDANCE_OPTIC_MIN_INTERVAL_S + 1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=SIGHT_WIDE_OPTIC,
+        )
+        assert decision.optic is BINOCULAR_OPTIC
+        assert state.guidance_optic is BINOCULAR_OPTIC
+
+    def test_guard_3_refuses_a_change_before_the_minimum_interval(self) -> None:
+        granted, decision1 = decide(
+            _idle_scanning_state(),
+            now_sim=0.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=BINOCULAR_OPTIC,
+        )
+        assert decision1.optic is BINOCULAR_OPTIC
+
+        too_soon_s = GUIDANCE_OPTIC_MIN_INTERVAL_S - 1.0
+        refused, decision2 = decide(
+            granted,
+            now_sim=too_soon_s,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=SIGHT_WIDE_OPTIC,
+        )
+        assert decision2.optic is BINOCULAR_OPTIC  # held, not SIGHT_WIDE_OPTIC
+        assert refused.guidance_optic is BINOCULAR_OPTIC
+        # Refusing costs no hands: the charge from the first grant stands
+        # unchanged, not re-stamped.
+        assert refused.hands_busy_until_sim == granted.hands_busy_until_sim
+        assert refused.guidance_optic_since_sim == granted.guidance_optic_since_sim
+
+    def test_guard_3_allows_the_change_once_the_interval_has_passed(self) -> None:
+        """Observ is already on (`home_phase=SIGHTING`), so the only gate
+        left standing between the two grants is guard 3's own clock --
+        isolating this from the hard sight gate, which has its own tests
+        above."""
+        sighting = _idle_scanning_state(
+            phase=OpticPhase.SIGHTING, home_phase=OpticPhase.SIGHTING
+        )
+        granted, _ = decide(
+            sighting,
+            now_sim=0.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=BINOCULAR_OPTIC,
+        )
+        state, decision = decide(
+            granted,
+            now_sim=GUIDANCE_OPTIC_MIN_INTERVAL_S + 1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=SIGHT_WIDE_OPTIC,
+        )
+        assert decision.optic is SIGHT_WIDE_OPTIC
+        assert state.guidance_optic is SIGHT_WIDE_OPTIC
+
+    def test_revocation_on_disengage(self) -> None:
+        """Co-moving Fields: `disengage`/`drop_target`/run ends ->
+        `guidance_request=None` the next poll -> `guidance_optic` and its
+        clock both go back to `None` together."""
+        granted, _ = decide(
+            _idle_scanning_state(),
+            now_sim=0.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=BINOCULAR_OPTIC,
+        )
+        assert granted.guidance_optic is BINOCULAR_OPTIC
+
+        state, decision = decide(
+            granted,
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=None,
+        )
+        assert state.guidance_optic is None
+        assert state.guidance_optic_since_sim is None
+        assert decision.optic is UNAIDED_OPTIC  # whatever the dispatch picked
+
+    def test_suppressed_by_hands_busy_is_never_overridden(self) -> None:
+        """A guidance request arriving during the 1 s hands-busy window
+        must not be granted or charged -- `_apply_guidance` is never even
+        called while `decision.suppressed`."""
+        state = OpticState(phase_started_sim=0.0, hands_busy_until_sim=5.0)
+        new_state, decision = decide(
+            state,
+            now_sim=1.0,
+            scan_cycle_period_s=1000.0,
+            targets=[],
+            steady=True,
+            guidance_request=BINOCULAR_OPTIC,
+        )
+        assert decision.suppressed is True
+        assert decision.optic is UNAIDED_OPTIC
+        assert new_state.guidance_optic is None
+
+    def test_a_fresh_search_phase_entry_does_not_reset_a_standing_grant(
+        self,
+    ) -> None:
+        """The fresh-`OpticState(...)` trap (`BL-B64` Stage 1's own
+        review): entering `SEARCHING` from `SCANNING`-at-home constructs a
+        new `OpticState` rather than `replace`-ing one, so a standing
+        guidance grant's `guidance_optic`/`guidance_optic_since_sim` must
+        be carried forward explicitly there, or an unrelated commanded
+        search would silently reset the grant's clock and trigger a
+        spurious second hands-busy charge. Counterfactual: dropping the
+        two `guidance_optic*` kwargs from that construction site makes
+        `hands_busy_until_sim` jump again here, since `_apply_guidance`
+        would then see a freshly-`None`d clock and treat this as a first
+        grant."""
+        state = OpticState(
+            phase=OpticPhase.SCANNING,
+            phase_started_sim=0.0,
+            guidance_optic=BINOCULAR_OPTIC,
+            guidance_optic_since_sim=0.0,
+            hands_busy_until_sim=0.0 + HANDS_BUSY_DURATION_S,
+        )
+        new_state, decision = decide(
+            state,
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=[(10.0, 0.0), (-10.0, 0.0)],
+            guidance_request=BINOCULAR_OPTIC,
+        )
+        assert new_state.phase is OpticPhase.SEARCHING
+        assert new_state.guidance_optic is BINOCULAR_OPTIC
+        assert new_state.guidance_optic_since_sim == 0.0
+        assert new_state.hands_busy_until_sim == 0.0 + HANDS_BUSY_DURATION_S
+        assert decision.optic is BINOCULAR_OPTIC
