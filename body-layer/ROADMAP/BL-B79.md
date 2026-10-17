@@ -43,3 +43,7 @@
   Not fix-now: same shape as `[[BL-B35]]`'s unbounded `response.read()` — a real gap with no
   current exploit path, filed so it is a named requirement for the dispatcher's own plan rather
   than something discovered after it ships.
+
+  **That dispatcher is now a milestone: `[[BR-2]]`** (filed 2026-10-17, user direction). This item
+  is gated on it in both directions — it cannot fire until BR-2 exists, and BR-2 is what makes it
+  live, so it closes *inside* BR-2 rather than after it.
