@@ -52,7 +52,7 @@ across the Hook/mission-scripting boundary (the same constraint
 `VELOCITY_CODE` packs the whole poll into one string and this Hook wraps it
 in JSON rather than parsing it itself.
 
-**`life`/`life0` (`AC-B7`, the transport half of `[[BL-B72]]`'s burning
+**`life`/`life0` (`AC-B7`, the transport half of `BL-B72`'s burning
 emitter) are the two trailing fields, added to this same loop rather than a
 new feed** (user decision 1, `plans/emitter-visibility/plan.md`): the
 existing `getVelocity()` loop already runs in-state over every live unit and
