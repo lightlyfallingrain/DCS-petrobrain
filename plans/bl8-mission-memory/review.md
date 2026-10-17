@@ -142,3 +142,120 @@ Full read of all seven new `mission_memory/` modules, all eight new/changed test
 both structural guards. Not independently re-derived: the pre-existing `~160` test-file mypy
 findings the implementer reported as unrelated noise (did not re-run `mypy tests` as a batch,
 consistent with this subproject's own stated convention of not doing so).
+
+---
+
+## Re-review of the fix round — 2026-10-17
+
+Branch `feature/bl8-mission-memory`, fix commit `b772500a0820e12ab24f030e2fe0f1dfa7004723`
+(worktree HEAD started at `24f217fc`, 44 commits behind; `git merge --ff-only b772500a` fast-forwarded
+cleanly onto a clean tree). Scope: the fix commit only (`git diff b772500a~1 b772500a`), not a
+re-review of the whole batch.
+
+### Fix 1 — `_seen_how` assertions
+
+Confirmed real, not decorative. `admission._seen_how` (`admission.py:166-179`) reads
+`contact.sighting_spans[-1].source` for `optic`, hardcodes `range_m=None`, and reads
+`confidence`/`certainty` off the live contact belief — the new assertions check exactly that.
+The `air_defence` test's contact is sighted via `source="scope"` (distinct from the `group`
+test's `_contact` default `"naked_eye_visual_filtered"`), so passing both genuinely rules out a
+hardcoded-string implementation: a `seen.optic == "naked_eye_visual_filtered"` literal would fail
+the air-defence assertion. `seen.confidence == GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1` is a safe
+equality — same literal Python expression computed once in the fixture call and compared, no
+cross-float-path drift. `range_m is None` is asserted for the stated reason: the implementer's
+mutation test (changing `range_m=None` to `range_m=999.0` in source and confirming both new
+assertions fail with `AssertionError: assert 999.0 is None`) is the right counterfactual and I
+re-derived it independently by reading the guard rather than re-running it — the code has exactly
+one `range_m=` assignment in `_seen_how`, so the claim holds.
+
+### Fix 2 — Decision 8 theatre tests
+
+Confirmed both guards are structurally identical and both new tests exercise the real branch, not
+an accidental pass:
+
+- `admission._build_entry_position` (`admission.py:182-211`) and `marks._mark_position`
+  (`marks.py:46-66`) both skip the `if theatre is not None:` branch when `theatre=None`, which is
+  what every pre-existing test in both files used. The four new tests are the first in this suite
+  to pass a non-`None` theatre to either function.
+- **Registered case asserts against `dcs_to_wgs84`'s own output, not a copied literal** — all four
+  new tests call `dcs_to_wgs84("Syria", x, z)` directly inside the test body and compare against
+  that return value (`expected_lat, expected_lon = dcs_to_wgs84(...)`), never a hand-typed
+  lat/lon pair. This is the right shape: it would catch a regression in *how* the function is
+  called (wrong argument order, wrong x/z source) without being brittle to the projection's own
+  numeric output.
+- **Unregistered case asserts no exception propagates**, not merely null values — the test bodies
+  call `step(...)`/`mark_here(...)` directly with `theatre="Not_A_Registered_Theatre"` with no
+  `pytest.raises` wrapper; if the `except ValueError` guard were removed, the call itself would
+  raise and the test would fail with an uncaught exception before reaching the `assert pos.lat is
+  None` line — so the null-value assertions are reached only when nothing raised. The
+  implementer's mutation test (removing the `try/except ValueError` in each module and confirming
+  the real `ValueError` propagates and fails the unregistered test, while the registered test
+  stays green) is the correct counterfactual, and I re-ran it myself rather than trusting the
+  report: removing the `except ValueError` block in `admission.py`'s `_build_entry_position`
+  (replacing the `try/except` with a bare call) reproduced a `ValueError` raised from
+  `coordinates/__init__.py`'s `_theatre_crs` and failed exactly
+  `test_unregistered_theatre_yields_null_lat_lon_and_never_raises`, with the registered-theatre
+  test (`test_registered_theatre_populates_lat_lon_from_believed_position`) still passing. Restored
+  via `git checkout -- src/mission_memory/admission.py` and re-ran green (2162 passed, 4 xfailed).
+  Did not additionally re-run the `marks.py` mutation — the guard is structurally identical
+  (confirmed by reading both call sites side by side) and the admission.py run already shows the
+  test harness genuinely exercises the branch.
+
+### Fix 3 — documentation
+
+`body-layer/CLAUDE.md`'s Module map gained a "Mission memory" section between Belief and Surfaces
+with one bullet per module plus the import-direction invariant; `body-layer/docs/STRUCTURE.md`
+gained matching per-module detail entries at the same boundary, each carrying the plan's own
+*why* (Decision 8's believed-position/unregistered-theatre posture, Decision 3's belief-transition
+cadence, Decision 1's import direction, Decision 6's non-shared position-building). Both read as
+accurate against the code just reviewed. `body-layer/ROADMAP/BL-8.md` now reads `[~]`/
+`#status/in-progress` (was `[ ]`/`#status/open`) and records Stages 1/2/3/5 landed with a pointer
+to `review.md`, Stage 4's deferral (schema shipped, trigger blocked on aircraft-layer weapon-export
+and a `getLife()`-based outcome signal) and Stage 6's deferral (belief that the memory itself is
+trustworthy first, gated in `belief/callouts.py`) each with their stated reason, and Sortie A
+named as outstanding with the explicit note that the feature is write-only in flight so acceptance
+is a post-flight file read — a future reader will not go looking for an in-flight observable that
+doesn't exist. `git diff b772500a~1 b772500a -- body-layer/ROADMAP.md` is empty — the pointer file
+was correctly left untouched.
+
+### Nothing new
+
+- `git show b772500a -- body-layer/src` is empty — no production code changed in this commit.
+- `git diff b772500a~1 b772500a -- body-layer/src/tuning.py body-layer/tools/generate_defaults.py
+  body-layer/tests/test_mission_memory_store.py body-layer/config/defaults.toml` is empty — the
+  two Optional Refinements (`tuning.fraction()`'s missing `range:` line; the in-memory-only
+  `ad_link`/`group_link` symmetry test) were correctly left alone, as instructed.
+- The full file list touched is exactly the seven named in the task (`git show b772500a --stat`):
+  the two test files, `CLAUDE.md`, `STRUCTURE.md`, `BL-8.md`, `implementation.md`, and one new
+  `.claude/agent-memory/implementer/` file. No eighth file, no scope creep.
+- No debug code, no new TODOs.
+
+### Verification
+
+Run from the main checkout's `body-layer/.venv` against this worktree's `body-layer/` (worktree
+has no `.venv`, as every prior pass reported):
+
+```
+ruff format --check src tests   -> 152 files already formatted
+ruff check src tests            -> All checks passed!
+mypy src                        -> Success: no issues found in 68 source files
+pytest -q                       -> 2162 passed, 4 xfailed in 16.24s
+```
+
+Matches the implementer's claimed state exactly.
+
+### Verdict
+
+**APPROVED.** All three required fixes are discharged, each verified by reading the guard and
+independently re-running (not merely trusting) the stated mutation test — the `admission.py`
+`ValueError`-guard removal was re-run live in this review and reproduced the claimed failure. The
+fix round introduces no production-code change, touches only the files named, and leaves the two
+Optional Refinements untouched as instructed.
+
+### Review Confidence
+
+Full read of the fix commit's diff (all seven files). Independently re-ran one of the two claimed
+mutation tests (the `admission.py` `ValueError`-guard removal) rather than trusting the report; the
+`marks.py` mutation was verified by code-reading (structurally identical guard) rather than
+re-run, since the admission.py re-run already demonstrates the test harness distinguishes a
+raising guard from a suppressing one.
