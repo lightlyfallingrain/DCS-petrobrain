@@ -8,13 +8,26 @@
   **Reconnaissance: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`** — the full
   11-switch sequence, the 3–4 min and 10–15 s timings, and the device/command/argument numbers.
 
-  **Probe ready to fly, 2026-10-17** — `aircraft-layer/dcs-export/Export.probe-9k113-effectors.lua`
-  on branch `feature/9k113-effectors-probe`, card
-  `docs/acceptance/2026-10-17-9k113-effectors-probe.md`. It answers all four questions of the
-  plan's probe brief in one three-minute ground run, and **question 4b decides Decision 1** (which
-  command channel points the sight) on evidence rather than judgement. Nothing in this entry should
-  be built before it reports: both candidate designs are reachable from here, and only one survives
-  the answer.
+  **Probe flown 2026-10-17 — the switch question is ANSWERED, the sight question is not.**
+  `Export.probe-9k113-effectors.lua`, card `docs/acceptance/2026-10-17-9k113-effectors-probe.md`,
+  pilot's observations `docs/acceptance/2026-10-17-9k113-effectors-probe-results.md`.
+
+  - **`performClickableAction` moves cockpit switches on devices 6 (`WEAP_SYS`) and 7 (`I9K113`)
+    from the pilot's seat, against the operator's panels** — neither device had ever been written
+    to. User's reading, and the operative one: *"several swithces moved -> assume we can move
+    all."* Stage 2's switch sequence is buildable.
+  - **The warm-up *sequence* this probe wrote is wrong, and is deliberately left wrong for now** —
+    *"Let it be, we'll fix later. I can setup the warmup for now."* Writing a switch and ordering
+    the procedure are different questions; only the first is answered.
+  - **The sight-driving questions need their own run with no switch flips at all**, because the
+    flips contaminated the shared flight. User direction: *"I will setup it so that OBSERV is ON
+    and can be used id it is possible via code. Set test to happen at T+60s."* That run is
+    `Export.probe-9k113-slew.lua`, card `docs/acceptance/2026-10-17-9k113-slew-probe.md`, awaiting
+    a flight on branch `feature/9k113-effectors-probe`.
+
+  **Decision 1 (which command channel points the sight) is still open and still blocks this
+  entry** — it is the slew probe's question 4. Both candidate designs remain reachable; only one
+  survives the answer, so building either before it reports means writing one of them twice.
 
   Minted 2026-10-15 from the `[[BL-B64]]` split (user direction §5: *"We'll then add actually
   manipulating the systems in cockpit"*). Entry 2 of 3; `[[BL-B64]]` is perception, `[[BL-B67]]` is
