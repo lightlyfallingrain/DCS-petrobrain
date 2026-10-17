@@ -515,6 +515,20 @@ schema slot waiting with a defined null, so neither gets to invent its own recor
 
 ### Decisions Requiring User Input
 
+> **All three settled by the user, 2026-10-17: *"Recommendations approved. Go ahead."*** Taken in
+> the terms each recommendation below states:
+>
+> 1. **Stage 4's trigger is deferred**; the schema ships in Stage 1 with `weapon`/`outcome`
+>    nullable. The two prerequisites (weapon selector arg 523, `getLife()` over the mission bridge)
+>    are aircraft-layer work, not BL-8's.
+> 2. **"safe from" is Stage 6, its own batch, with its own sortie** — after Sortie A has shown the
+>    memory itself is trustworthy.
+> 3. **`TOOL_SET` 15 → 17 is approved.** So **Stage 5 joins the batch**: the batch is Stages
+>    **1, 2, 3, 5**, one performance pass and one security pass after Stage 5, then DoD.
+>
+> The questions stay below as written, because their reasoning is what the decisions were made
+> against.
+
 1. **Stage 4 (attack runs) — build now with two null fields, or defer until the weapon selector
    and/or `getLife()` route exist?** See the effort/value flag. My recommendation: defer the
    trigger, keep the schema.
