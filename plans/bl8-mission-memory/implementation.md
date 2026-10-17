@@ -359,3 +359,47 @@ pytest -q                       -> 2162 passed, 4 xfailed in 15.14s
 2162 = the Reviewer's baseline of 2158 plus the 4 new tests (2 `seen` assertions added to existing
 tests, not new tests; the 4 new theatre tests). Worktree has no `.venv`, as both prior implementers
 and the Reviewer reported — ran against the main checkout's `body-layer/.venv`.
+
+### DoD follow-up fix: voice vocabulary for `mark_here`/`mark_target`
+
+DoD (`dod-check.md`) found the only real gap: Decision 6 says the mark command is "reachable by
+voice and by the brain tool only," but `mark_here`/`mark_target` were wired as
+`DISPATCHED_COMMAND_TOKENS` in `crew_console.py` with no entry in `audio-adapter/src/
+vocabulary.py`'s `TOKENS`/`PHRASES`, so no real transcript could ever produce them — a pilot had no
+way to set a mark. This file never appeared in the plan's "Affected Modules" list, which is why
+three review passes correctly scoped themselves away from it.
+
+Fix, in `audio-adapter`:
+
+- `src/vocabulary.py` — added `mark_here`/`mark_target` to `VOICE_ONLY_TOKENS`, plain slot-free
+  phrases like `drop_target`/`disengage`/`observ_on`: `mark_here` = `("mark here", "mark this
+  position", "remember this location")`, `mark_target` = `("mark target", "remember target")`.
+  `assert set(PHRASES) == set(TOKENS)` still holds.
+- `tests/test_command_matcher.py` — `TestMarkHereMarkTarget`: both phrasing sets resolve to their
+  token at `match_ratio == 1.0`; neither collides with `select_target`/`drop_target` or each other;
+  four adversarial ordinary-English sentences ("I will remember that for next time", "we marked
+  the spot earlier", "remember me to the crew", "mark my words") all come back `token is None`.
+
+Probed directly against `match_transcript` (not inferred): all five new phrasings resolve to their
+intended token at ratio 1.0, `verb_anchored=True`, `ambiguous=False`; `"select target armor
+north"`/`"drop target"` still resolve to their own tokens unchanged; the four adversarial sentences
+above all stay `token=None`.
+
+**No body-layer change** — `DISPATCHED_COMMAND_TOKENS` already had both tokens; only the
+recognition vocabulary was missing. `body-layer`'s own checks were not re-run since nothing there
+changed.
+
+**Typed-text parity not built, per DoD's instruction**: `belief/utterance.py`'s grammar has no
+"mark" entry either, so a typed (non-`!voice`) console line still cannot set a mark. Flagging per
+DoD's request; this is a scope decision for the user, not folded into this fix.
+
+Checks (audio-adapter, worktree has no `.venv` — ran against the main checkout's
+`audio-adapter/.venv`):
+
+```
+cd audio-adapter
+ruff format --check src tests   -> 29 files already formatted
+ruff check src tests            -> All checks passed!
+mypy src                        -> Success: no issues found in 15 source files
+pytest -q                       -> 284 passed, 1 skipped
+```

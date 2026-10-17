@@ -216,6 +216,17 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # tokens stay at the ordinary `ACT_FLOOR`.
         "observ_on",
         "observ_off",
+        # `mark here` / `mark target` (`plans/bl8-mission-memory/plan.md`
+        # Decision 6) -- the commanded half of mission memory, reachable
+        # by voice and by the brain tool only, deliberately no new F10
+        # radio-menu entry (BL-10's own instruction not to re-expand that
+        # tree). Plain, slot-free phrases, the same posture `drop_target`/
+        # `disengage`/`observ_on` already have: `mark_here` writes
+        # ownship's current position, `mark_target` writes the currently
+        # selected target's believed position. **Unbenched**, like every
+        # token added here without a re-recorded corpus.
+        "mark_here",
+        "mark_target",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -554,6 +565,20 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `VOICE_ONLY_TOKENS`' own comment on why that argues for the
     # *ordinary* `ACT_FLOOR`, not a stricter one.
     "observ_off": ("observ off", "observe off"),
+    # `mark here` -- writes ownship's current position (`plans/
+    # bl8-mission-memory/plan.md` Decision 6). Plain, slot-free phrase,
+    # matching `drop_target`'s own posture. "remember this location" is
+    # the longer, less clipped way this speaker might actually say it --
+    # phonetically distinct from every existing anchor verb (`scan`,
+    # `watch`, `follow`, `report`, `cancel`, `stop`, `silence`, `select`,
+    # `set`, `drop`, `step`, `engage`, `disengage`, `observ(e)`), so it
+    # does not risk the "quiet"/"quite" collision `report_all`'s own
+    # comment warns about.
+    "mark_here": ("mark here", "mark this position", "remember this location"),
+    # `mark target` -- writes the currently selected target's believed
+    # position (reuses `select_target`'s notion of "currently selected").
+    # Same posture as `mark_here` above.
+    "mark_target": ("mark target", "remember target"),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a

@@ -826,6 +826,66 @@ class TestObservOnOff:
             assert result.token == expected, phrase
 
 
+# --- mark_here / mark_target: plans/bl8-mission-memory/plan.md Decision 6 -
+
+
+class TestMarkHereMarkTarget:
+    """`mark_here`/`mark_target` -- plain, slot-free phrases, the only
+    pilot-usable path to BL-8's commanded marks (voice and the brain tool
+    only, no F10 entry per Decision 6). Found missing entirely at DoD:
+    the tokens were wired into `belief.crew_console`'s dispatch table but
+    never given a phrase here, so no real transcript could ever produce
+    them (`plans/bl8-mission-memory/dod-check.md`)."""
+
+    def test_mark_here_phrasings_resolve(self) -> None:
+        for phrase in ("mark here", "mark this position", "remember this location"):
+            result = match_transcript(phrase)
+            assert result.token == "mark_here", phrase
+            assert result.match_ratio == 1.0, phrase
+            assert result.verb_anchored is True, phrase
+            assert result.ambiguous is False, phrase
+            assert result.slots is None, phrase
+
+    def test_mark_target_phrasings_resolve(self) -> None:
+        for phrase in ("mark target", "remember target"):
+            result = match_transcript(phrase)
+            assert result.token == "mark_target", phrase
+            assert result.match_ratio == 1.0, phrase
+            assert result.verb_anchored is True, phrase
+            assert result.ambiguous is False, phrase
+            assert result.slots is None, phrase
+
+    def test_does_not_collide_with_any_existing_phrase(self) -> None:
+        """Neither new token steals a match that belongs to an existing
+        one, and the reverse: an existing lexically-close phrase
+        ("select target armor north", "drop target") still resolves to
+        its own token, not one of these two."""
+        for phrase, expected in (
+            ("mark here", "mark_here"),
+            ("mark this position", "mark_here"),
+            ("remember this location", "mark_here"),
+            ("mark target", "mark_target"),
+            ("remember target", "mark_target"),
+            ("select target armor north", "select_target"),
+            ("drop target", "drop_target"),
+        ):
+            result = match_transcript(phrase)
+            assert result.ambiguous is False, phrase
+            assert result.token == expected, phrase
+
+    def test_ordinary_sentences_do_not_false_fire(self) -> None:
+        """Adversarial sentences containing "mark"/"remember" as ordinary
+        English, not the command -- must not resolve to either token."""
+        for sentence in (
+            "I will remember that for next time",
+            "we marked the spot earlier",
+            "remember me to the crew",
+            "mark my words",
+        ):
+            result = match_transcript(sentence)
+            assert result.token is None, sentence
+
+
 # --- describe: report's synonym (sortie 2026-10-05 debrief,
 # plans/sortie-2026-10-05-refinements/plan.md Item 2) ---
 
