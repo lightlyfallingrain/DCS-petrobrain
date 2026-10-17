@@ -42,6 +42,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B6]] — report when audio playback has actually stopped
 - [[AC-B7]] — per-unit life on the existing mission-scripting bridge
 - [[AC-B8]] — a production firing-event channel over the mission-scripting bridge
+- [[AC-B9]] — three Hook scripts failed to load, and nothing downstream could tell
+- [[AC-B10]] — a dead Hook and an empty scene are indistinguishable downstream
 
 ## Keeping this current
 
