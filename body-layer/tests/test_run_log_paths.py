@@ -316,3 +316,39 @@ def test_group_trace_degrades_rather_than_raising(
 
     assert rolled is None
     assert "group-trace: could not create log directory" in capsys.readouterr().err
+
+
+# --- `_resolve_mission_memory_log_path` (BL-8's own sibling of
+# `_resolve_group_trace_log_path`, same reasoning) ------------------------
+
+
+def test_mission_memory_none_stays_none() -> None:
+    assert logger_module._resolve_mission_memory_log_path(None, when=_WHEN) is None
+
+
+def test_mission_memory_rolls_and_creates_its_parent(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    assert not logs.exists()
+
+    rolled = logger_module._resolve_mission_memory_log_path(
+        logs / "mission-memory.jsonl", when=_WHEN
+    )
+
+    assert rolled == logs / f"mission-memory-{_STAMP}.jsonl"
+    assert logs.is_dir()
+
+
+def test_mission_memory_degrades_rather_than_raising(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same policy as `_per_run_log_paths`'s own logs: an unwritable parent
+    costs this one log, not the sortie."""
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("")
+
+    rolled = logger_module._resolve_mission_memory_log_path(
+        blocker / "mission-memory.jsonl", when=_WHEN
+    )
+
+    assert rolled is None
+    assert "mission-memory: could not create log directory" in capsys.readouterr().err

@@ -666,6 +666,22 @@ still need it, so this narrows rather than removes the coupling.
   outside the visibility cone are exactly what it would hold). Record the dependency there rather
   than leaving this as a permanently dropped feature.
 
+  **Sub-decision, 2026-10-17 — the code pointer above is wrong, which makes the un-defer a second
+  change rather than a switch.** Forced by `plans/bl8-mission-memory/plan.md` Decision 10, written
+  while mapping BL-8's consumers. The paragraph above (and `body-layer/ROADMAP/BL-8.md`, corrected
+  the same day) locates the deferral in `belief/speech.py`'s `engaged=False` branch. **It is not
+  there.** `speech.py` renders *"Safe from …"* fine; the thing holding the callout back is
+  `belief/callouts.py`'s `_OBSERVABILITY_EXEMPT_KINDS`, which exempts only the `engaged is True`
+  danger call — and its stated reason is **independent of mission memory**: *"nothing is evaded by
+  hearing it… silence costs the pilot the chance to stop evading, which is a comfort, not a threat
+  cue."*
+
+  The user direction quoted above is unchanged and is not being reopened: mission memory is what
+  un-defers this. What changes is that un-deferring means editing `callouts.py` and deciding what to
+  do with that observability rationale — not uncommenting a branch in `speech.py` — and that it is an
+  absence-claim callout flown for the first time, so it earns its own acceptance sortie. It is staged
+  separately (BL-8 plan, Stage 6) rather than folded into BL-8's main batch.
+
 - ~~**Cone filtering is an available optimisation, not a requirement**~~ **REVISED by Revision §2
   (2026-10-05): still not required, but the *reason given below is wrong now*. A per-call sightline
   cap with nearest-first ordering is the control that bounds cost, and it subsumes what a cone filter

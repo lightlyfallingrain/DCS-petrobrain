@@ -83,6 +83,27 @@ SIGHT_MAX_DWELL_S = 30.0
 # source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S
 SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 
+[mission_memory.admission]
+# How long, in seconds, a `fired_on` entry for one shooter suppresses a second entry from the same shooter -- the user's own "~2 min" (explore notes, Decision 5), stated there as a tunable.
+# status: judgement | range: 10.0 .. 900.0
+# source: mission_memory/admission.py:FIRED_ON_FOLD_WINDOW_S
+FIRED_ON_FOLD_WINDOW_S = 120.0
+
+# Decision 3's admission floor for the `group` rule: a contact's classification must have reached `CLASS` specificity *and* be held at or above this confidence before its first memory entry is written.
+# status: agreed-guess
+# source: mission_memory/admission.py:GROUP_ENTRY_CONFIDENCE_FLOOR
+GROUP_ENTRY_CONFIDENCE_FLOOR = 0.5
+
+# The minimum sim-time, in seconds, between two memory entries for the same contact -- even a genuine material change (Decision 3's "material change" test) must wait this long since that contact's last entry before it is written again, so a contact oscillating right at the `RESIGHT_MOVE_M` boundary cannot flap the log every poll.
+# status: agreed-guess | range: 5.0 .. 600.0
+# source: mission_memory/admission.py:RESIGHT_MIN_INTERVAL_S
+RESIGHT_MIN_INTERVAL_S = 60.0
+
+# Minimum believed-position displacement, in metres, a re-sighting must show before a new group/air-defence memory line is written in place of the standing one -- set this too low and the log churns on ordinary position-belief jitter rather than real movement, since `belief.position_belief.PositionEstimate` is a continuously fused estimate carrying per-look noise, not the discrete ~500 m step buckets an earlier model used.
+# status: agreed-guess | range: 50.0 .. 2000.0
+# source: mission_memory/admission.py:RESIGHT_MOVE_M
+RESIGHT_MOVE_M = 250.0
+
 [perception.emitters]
 # Below or at this fraction of `getLife0()` (`life / life0`), a unit is burning and becomes detectable at any range through tree cover; above it, it is not.
 # status: judgement | range: 0.69 .. 0.84

@@ -52,4 +52,5 @@ known-first-party = [
     "store",
     "probe_store",
     "tuning",
+    "mission_memory",
 ]

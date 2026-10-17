@@ -346,6 +346,32 @@ Belief — observation *consumption*:
 - `src/belief/tasks.py` — `PendingIntent`/`TaskStore`. `TaskKind` is `"scan_area"`/`"watch_contact"`/`"attack_target"` (BL-14) — the last two share `watch_contact`'s shape exactly (no area, no success/timeout lifecycle).
 - `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6.
 
+Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
+
+- `src/mission_memory/entries.py` — `Entry` and its per-kind payloads (`GroupPayload`,
+  `AirDefencePayload`, `AttackRunPayload`, `MarkPayload`, `FiredOnPayload`), `EntryPosition`,
+  `SeenHow`. Append-only: a frozen dataclass, never mutated once written.
+- `src/mission_memory/store.py` — `MissionMemory.append`, the **single construction site** for
+  `Entry` — `admission.py`/`marks.py`/`query.py`/`tools.py` contain no `Entry(` call at all,
+  grep-enforced (`tests/test_mission_memory_store.py`). Strikes are a separate append (`strikes=
+  <seq>`), never an edit; `struck_by` is rebuilt by replaying the log.
+- `src/mission_memory/admission.py` — the `group`/`air_defence`/`fired_on` admission rules
+  (Decision 3), driven by belief-state transitions once per poll, never by percepts or callouts.
+  Holds the four tuning constants (`RESIGHT_MOVE_M`, `RESIGHT_MIN_INTERVAL_S`,
+  `FIRED_ON_FOLD_WINDOW_S`, `GROUP_ENTRY_CONFIDENCE_FLOOR`).
+- `src/mission_memory/marks.py` — the commanded-mark path, `mark_here`/`mark_target`. Deliberately
+  does not share `admission.py`'s position-building helper — see that module's own docstring.
+- `src/mission_memory/query.py`, `src/mission_memory/tools.py` — the recall/query surface
+  (`recall_memory`, `get_contact_history`'s memory-chain fold) and the brain-facing tool wrappers
+  (`TOOL_SET` 15 → 17).
+- `src/mission_memory/log.py` — JSONL read/write for the store.
+- **Import direction (Decision 1), structurally enforced**: `mission_memory/` imports `belief`,
+  never the reverse — `tool_api.py` is the one `belief/` file allowed to import `mission_memory`,
+  grep-enforced against `src/belief/*.py` by
+  `tests/test_mission_memory_import_direction.py`. `crew_console.py`'s need to drive a write
+  without importing `mission_memory` is resolved by closure injection in `logger.py` (the same
+  pattern `speech_log_sink` already uses), not an exception to the rule.
+
 Surfaces and transports:
 
 - `src/belief/console.py` — line parser + pretty-printer over `tools.py`, owning no belief logic; also `format_event_for_overlay`.

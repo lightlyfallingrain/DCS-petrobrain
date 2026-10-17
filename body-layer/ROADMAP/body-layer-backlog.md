@@ -117,6 +117,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B76]] — `", obstructed"` has no live caller: `live_los_clear` is never `False`
 - [[BL-B77]] — One hedge, two registers: the group line's hardcoded `"A couple of contacts."`
 - [[BL-B78]] — `speech.py`'s module docstring still documents the pre-brevity hedge register
+- [[BL-B79]] — `remember_location`'s `label` needs a bound before any dispatcher calls it
 
 **Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
 its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root

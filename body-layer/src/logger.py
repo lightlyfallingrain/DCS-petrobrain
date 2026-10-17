@@ -215,6 +215,7 @@ from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import (
+    MissionPhaseInfo,
     MissionPhaseTracker,
     MissionUnderstandingData,
     load_mission_understanding,
@@ -245,6 +246,11 @@ from eyesight_view import (
 )
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
+from mission_memory import admission, marks
+from mission_memory.admission import FiredOnTracker
+from mission_memory.entries import MarkPayload
+from mission_memory.log import MissionMemoryLogWriter
+from mission_memory.store import MissionMemory
 from perception.association import PLAYER_BUBBLE_RADIUS_M, SightCone
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
 from perception.detection_trace import DetectionTrace, DetectionTraceCollector
@@ -1490,6 +1496,96 @@ class _ConnectionReporter:
         logger.info("%s connected", self._label)
 
 
+def _mission_memory_step(
+    memory: MissionMemory,
+    runner: ConsolePerceptionRunner,
+    now_sim: float,
+    theatre: str,
+    phase: MissionPhaseInfo | None,
+    fired_on_tracker: FiredOnTracker,
+) -> None:
+    """BL-8's writer, called once per poll from both poll loops, **after**
+    `runner.run_once()` (belief is settled; `ContactStore.tick()` has
+    already materialised this poll's events) and, in the `--crew-text`
+    loop, **before** `crew_console.drain_events` -- `mission_memory.
+    admission`'s module docstring states the same ordering, and this is
+    the one call site responsible for keeping it (plan Decision 3).
+
+    `fired_on_tracker` is owned by the calling poll loop and lives for its
+    whole run (Stage 3) -- `FiredOnTracker`'s own docstring on why this is
+    not state on `MissionMemory` itself.
+
+    **Never propagates.** Decision 8: a memory write must never kill the
+    poll loop. `admission.step` itself only ever raises from a genuine
+    programming error (a malformed `strikes`, a TOML/tuning misread would
+    already have failed at import) -- this guard exists for exactly the
+    cases nobody predicted, the same posture `run_once`'s own callers
+    already take around perception/belief failures elsewhere in these
+    loops."""
+    try:
+        admission.step(
+            memory,
+            runner.store,
+            now_sim,
+            theatre=theatre,
+            phase=phase,
+            enrichment=runner.enrichment,
+            fired_on_tracker=fired_on_tracker,
+        )
+    except Exception:
+        logger.exception("mission-memory step failed; continuing")
+
+
+def _mark_here_fn(
+    memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
+) -> Callable[[float], str]:
+    """Builds `CrewConsole.mark_here_fn` -- the one closure `_handle_
+    mark_here` calls, over the live `MissionMemory` this poll thread
+    writes observed entries into (BL-8 Stage 3, Decision 6). Reads
+    `runner.enrichment` live rather than capturing it, the same reason
+    `_speech_log_sink` does: it is rebuilt by `run_once` and a captured
+    reference would go stale the first time that happens."""
+
+    def mark_here(now_sim: float) -> str:
+        if runner.enrichment is None:
+            return "no world-model connection configured"
+        entry = marks.mark_here(
+            memory,
+            runner.enrichment.ownship,
+            now_sim,
+            theatre=theatre,
+            phase=None,
+            enrichment=runner.enrichment,
+        )
+        assert isinstance(entry.payload, MarkPayload)
+        return f"mark {entry.payload.index} set"
+
+    return mark_here
+
+
+def _mark_target_fn(
+    memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
+) -> Callable[[str, float], str]:
+    """`_mark_here_fn`'s own twin for `CrewConsole.mark_target_fn`."""
+
+    def mark_target(contact_id: str, now_sim: float) -> str:
+        entry = marks.mark_target(
+            memory,
+            runner.store,
+            contact_id,
+            now_sim,
+            theatre=theatre,
+            phase=None,
+            enrichment=runner.enrichment,
+        )
+        if entry is None:
+            return f"no such contact: {contact_id}"
+        assert isinstance(entry.payload, MarkPayload)
+        return f"mark {entry.payload.index} set on {contact_id}"
+
+    return mark_target
+
+
 def _run_console_poll_loop(
     runner: ConsolePerceptionRunner,
     aircraft_client: AircraftLayerClient,
@@ -1502,6 +1598,7 @@ def _run_console_poll_loop(
     eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
     belief_truth_log_path: Path | None = None,
     forest_occlusion: bool = False,
+    mission_memory_path: Path | None = None,
 ) -> None:
     """Stage 4's background poll thread, fixed in Stage 6: opens
     `world_model_conn` and builds `runner.sources` here, on this thread, then
@@ -1535,7 +1632,15 @@ def _run_console_poll_loop(
     clears it (when `--detection-trace` is also active) or this function
     clears it itself (`trace_collector.records.clear()`) -- exactly one
     clear per poll, always after every reader has had its turn, so no
-    reader ever sees a stale or already-cleared collector."""
+    reader ever sees a stale or already-cleared collector.
+
+    `mission_memory_path` (`--mission-memory`, BL-8) builds its own
+    `mission_memory.store.MissionMemory` for this poll thread's whole
+    run -- `_mission_memory_step` is called once per poll, same additive-
+    no-op-when-unset shape as every flag above; the store is unconditional
+    (nothing reads it back yet in `--console`'s own REPL, Stage 5 is what
+    wires the query surface) but the JSONL sink is built only when the
+    path is set."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -1556,6 +1661,10 @@ def _run_console_poll_loop(
         if belief_truth_log_path is not None
         else None
     )
+    mission_memory = MissionMemory()
+    if mission_memory_path is not None:
+        mission_memory.set_sink(MissionMemoryLogWriter(mission_memory_path).write)
+    fired_on_tracker = FiredOnTracker()
     try:
         runner.sources = _build_sources(
             aircraft_client,
@@ -1624,6 +1733,23 @@ def _run_console_poll_loop(
                         runner.scan_plan,
                         runner.last_t_sim,
                         last_gaze_label,
+                    )
+                if runner.last_t_sim is not None:
+                    # BL-8: after `run_once()` has settled this poll's
+                    # belief -- `_mission_memory_step`'s own docstring on
+                    # why this placement.
+                    phase = (
+                        runner.mission_phase_tracker.current_phase()
+                        if runner.mission_phase_tracker is not None
+                        else None
+                    )
+                    _mission_memory_step(
+                        mission_memory,
+                        runner,
+                        runner.last_t_sim,
+                        theatre,
+                        phase,
+                        fired_on_tracker,
                     )
                 connection.report_success()
             except Exception as exc:
@@ -1818,6 +1944,7 @@ def _run_crew_text_poll_loop(
     eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
     belief_truth_log_path: Path | None = None,
     forest_occlusion: bool = False,
+    mission_memory_path: Path | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -1838,7 +1965,9 @@ def _run_crew_text_poll_loop(
     trace`), `eyesight_view`/`eyesight_view_radius_m` (`--eyesight-view`),
     `belief_truth_log_path` (`--belief-truth-log`), and `forest_occlusion`
     (`--forest-occlusion`) mirror `_run_console_poll_loop`'s own wiring
-    exactly -- see that function's docstring for all four."""
+    exactly -- see that function's docstring for all four. `mission_memory_
+    path` (`--mission-memory`, BL-8) is the same shape too -- see that
+    function's own paragraph on it."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -1861,6 +1990,21 @@ def _run_crew_text_poll_loop(
     )
     if belief_truth_writer is not None:
         crew_console.speech_log_sink = _speech_log_sink(belief_truth_writer, runner)
+    mission_memory = MissionMemory()
+    if mission_memory_path is not None:
+        mission_memory.set_sink(MissionMemoryLogWriter(mission_memory_path).write)
+    # BL-8 Stage 3: `mark_here`/`mark_target` reach `crew_console` on the
+    # REPL/brain thread, not this poll thread -- both must write into the
+    # same `MissionMemory` instance this poll thread builds, so the
+    # closures over it are handed to `crew_console` here rather than each
+    # side building its own. `belief/crew_console.py` never imports
+    # `mission_memory` itself (Decision 1) -- these closures are the
+    # entire seam. `phase=None` inside both: `CrewConsole` has no
+    # `MissionPhaseTracker` of its own to resolve a current phase from,
+    # unlike the poll loop's own observed-entry writes just below.
+    crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner, theatre)
+    crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner, theatre)
+    fired_on_tracker = FiredOnTracker()
     try:
         runner.sources = _build_sources(
             aircraft_client,
@@ -2030,6 +2174,23 @@ def _run_crew_text_poll_loop(
                             # `decide_optic` above) deliberately is.
                             resolving_optic=runner.optic,
                         )
+                    # BL-8: after `run_once()` has settled this poll's
+                    # belief, before `drain_events` -- Decision 3's
+                    # ordering (a mark's seq exists before anything that
+                    # might want to name it is drained).
+                    phase = (
+                        runner.mission_phase_tracker.current_phase()
+                        if runner.mission_phase_tracker is not None
+                        else None
+                    )
+                    _mission_memory_step(
+                        mission_memory,
+                        runner,
+                        runner.last_t_sim,
+                        theatre,
+                        phase,
+                        fired_on_tracker,
+                    )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever
                     # `brain_client.poll_replies()` has decided since the
@@ -2357,6 +2518,33 @@ def _resolve_group_trace_log_path(
     except _RESOLVE_FAILURES as exc:
         print(
             f"group-trace: could not create log directory {reported_parent} "
+            f"({exc}); continuing without this log",
+            file=sys.stderr,
+        )
+        return None
+    return stamped
+
+
+def _resolve_mission_memory_log_path(
+    mission_memory_path: Path | None, when: float | None = None
+) -> Path | None:
+    """`_resolve_group_trace_log_path`'s own sibling for `--mission-memory`
+    (BL-8) -- same reasoning, same reproduced-rather-than-shared policy
+    body, same "its own `time.time()` call" divergence. See that
+    function's docstring for why this is a sibling rather than a fifth/
+    sixth parameter on `_per_run_log_paths`."""
+    if mission_memory_path is None:
+        return None
+    stamp_at = time.time() if when is None else when
+    reported_parent = mission_memory_path.parent
+    try:
+        expanded = mission_memory_path.expanduser()
+        reported_parent = expanded.parent
+        stamped = per_run_log_path(expanded, stamp_at)
+        stamped.parent.mkdir(parents=True, exist_ok=True)
+    except _RESOLVE_FAILURES as exc:
+        print(
+            f"mission-memory: could not create log directory {reported_parent} "
             f"({exc}); continuing without this log",
             file=sys.stderr,
         )
@@ -2694,6 +2882,22 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--mission-memory",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per mission-memory entry (group/air-"
+            "defence identifications, pilot-ordered marks, being-fired-"
+            "on events) to this path -- BL-8, plans/bl8-mission-memory/"
+            "plan.md. An append-only, per-sortie record of what Petrovich "
+            "saw/marked/was shot at, written from settled belief after "
+            "every poll's ContactStore.tick(); the in-flight read half is "
+            "in-memory only and not wired by this flag. Only meaningful "
+            "with --console or --crew-text; defaults off, a true no-op "
+            "when absent."
+        ),
+    )
+    parser.add_argument(
         "--belief-truth-log",
         type=Path,
         default=None,
@@ -2767,6 +2971,8 @@ def main() -> None:
         parser.error("--eyesight-view requires --console or --crew-text")
     if args.belief_truth_log is not None and not (args.console or args.crew_text):
         parser.error("--belief-truth-log requires --console or --crew-text")
+    if args.mission_memory is not None and not (args.console or args.crew_text):
+        parser.error("--mission-memory requires --console or --crew-text")
     if args.brain_client == "http" and args.brain_url is None:
         parser.error("--brain-client http requires --brain-url")
 
@@ -2857,11 +3063,16 @@ def main() -> None:
     # function rather than a fifth `_per_run_log_paths` parameter -- see
     # `_resolve_group_trace_log_path`'s own docstring for why.
     args.group_trace = _resolve_group_trace_log_path(args.group_trace)
+    # BL-8: a fifth per-run log, resolved by its own sibling function for
+    # the same reason `--group-trace` has one -- see
+    # `_resolve_mission_memory_log_path`'s own docstring.
+    args.mission_memory = _resolve_mission_memory_log_path(args.mission_memory)
     for label, rolled in (
         ("detection-trace", args.detection_trace),
         ("belief-truth-log", args.belief_truth_log),
         ("speech-log", args.speech_log),
         ("group-trace", args.group_trace),
+        ("mission-memory", args.mission_memory),
     ):
         if rolled is not None:
             print(f"{label}: writing {rolled}", file=sys.stderr)
@@ -2941,6 +3152,7 @@ def main() -> None:
                 args.eyesight_view_radius_m,
                 args.belief_truth_log,
                 args.forest_occlusion,
+                args.mission_memory,
             ),
             daemon=True,
         )
@@ -2982,6 +3194,7 @@ def main() -> None:
                 args.eyesight_view_radius_m,
                 args.belief_truth_log,
                 args.forest_occlusion,
+                args.mission_memory,
             ),
             daemon=True,
         )
