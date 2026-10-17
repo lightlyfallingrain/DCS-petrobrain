@@ -23,6 +23,15 @@
   is 956, not 870. **Settle them by reading arguments while the user throws each switch by hand**,
   not by clicking or by more table archaeology.
 
+  **`CPLR DISTR` is the operator's** — user direction, 2026-10-17, placing it physically: *"right
+  above missile power. right of FDI and left of OPER/TEST1/TEST2."* That adjacency matches
+  `WEAP-DISTR-POWER-OP-PTR` (761) with `WEAP-DISTR-CONTROL-OP-PTR` (762) on its right, so **761 is
+  reinstated as the probable mapping** after being withdrawn earlier the same day — his rejection
+  was conditional on it being pilot-side, and the device column names the owning Lua device, not
+  the seat (today's probe wrote operator panels from the pilot's seat). Still unverified; the
+  read-probe settles it. **So all five power-up switches are the operator's and the sequence waits
+  on nobody.**
+
   **Petrovich is the copilot, so pilot-side steps are not his** (user direction, 2026-10-17: *"The
   quickstart guide includes steps that the pilot does, like the ASP-17 switches. For now Petrovich
   is copilot only."*). Every `ASP_17V` row drops out, including the recon table's `AUTO/MAN` (553)

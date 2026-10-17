@@ -82,7 +82,8 @@ where the two disagree. That table was read off a PDF; this is the pilot's.
 | ЩО `PWR` B1 | **955** | `WEAP_SYS` · `Operator_POWER_SHO_SWITCHER` (3030) | **written successfully today** |
 | `OBSERVE` | **886** | `I9K113` · `Command_NABL` (3002) | **written successfully today** |
 | weapon safety bar | **673** | `WEAP_SYS` · `Operator_SWITCHER_SAFE_WEAP` (3020) | **written successfully today** |
-| `CPLR DISTR` | **unknown** | — | **761 REJECTED by the user, 2026-10-17: *"761 is wrong, if it sits on ASP_17V."*** `ASP_17V` is the pilot's sight; the operator cannot touch it |
+| `CPLR DISTR` | **761, probable** | `ASP_17V` · `asp_commands.USR` (`WEAP-DISTR-POWER-OP-PTR`) | rejected, then reinstated by the user's own layout — see below. **Unverified** |
+| `OPER/TEST1/TEST2` | **762, probable** | `ASP_17V` · `asp_commands.USR_check` (`WEAP-DISTR-CONTROL-OP-PTR`) | not in the five, but it is the switch he used to place `CPLR DISTR`, and it closes recon row 5 |
 | `L166V POWER` | **unknown** | — | **870 rejected** — see below |
 
 ### Both guesses are withdrawn, 2026-10-17 (user corrections)
@@ -90,9 +91,33 @@ where the two disagree. That table was read off a PDF; this is the pilot's.
 > *"870 is probably TEST LMAPS button, B3 on missile selector unit. PWR is B1. 761 is wrong, if it
 > sits on ASP_17V."*
 
-- **`761` is dead on principle, not on detail.** It sits on `ASP_17V`, and this project already
-  holds that the ASP-17V is the **pilot's** sight, which the operator cannot reach. A mapping that
-  lands there is wrong by construction for anything Petrovich does.
+- **`761` was withdrawn, then the user's own layout brought it back. It is now the leading
+  candidate.** Flagged here rather than quietly reinstated, because he rejected it earlier the
+  same day.
+
+  His location, 2026-10-17: *"CPLR DISTR is copilot switch. physically right above missile power.
+  right of FDI and left of OPER/TEST1/TEST2."* Against the command surface:
+
+  | pointer | arg | what it looks like |
+  |---|---|---|
+  | `WEAP-MISSILES-POWER-OP-PTR` | 773 | `MISSILE POWER` — **confirmed**, and he says `CPLR DISTR` is directly above it |
+  | **`WEAP-DISTR-POWER-OP-PTR`** | **761** | distributor **power**, `-OP-` = operator |
+  | `WEAP-DISTR-CONTROL-OP-PTR` | 762 | distributor **control/check** — fits `OPER/TEST1/TEST2`, immediately to its right |
+
+  **The adjacency matches his description exactly**, including the switch to the right that he
+  named. 762 also closes the recon table's row 5 (`OPER / CHECK`, device/arg previously
+  unresolved).
+
+  **His rejection was conditional — *"761 is wrong, if it sits on ASP_17V"* — and the condition
+  does not hold the way it reads.** The device column is the **owning Lua device**, not the seat:
+  today's probe wrote the *operator's* ЩО and ПК switches through `WEAP_SYS` and `I9K113` while
+  the player sat in the **pilot's** seat. Device ownership has already been shown not to determine
+  reachability. So a switch physically on the operator's right panel can legitimately be owned by
+  the `ASP_17V` device — the ASP-17 computer is what a weapons *distributor* would report to.
+
+  **This does not make it verified.** The pointer name and the physical layout agree, which is two
+  independent signals rather than one, but both are still readings of a table. The read-probe below
+  settles it in seconds and should still happen before either number is encoded.
 - **The ЩО's `TEST LAMPS` button is `956`**, not `870` — `SHSCHO-CHECK-PTR` ·
   `Operator_CHECK_LAMPS_9C475` on `WEAP_SYS`, the same panel whose `PWR` B1 is `955`. The user's
   reading of what 870 *is* lands on a real button; the argument number for it is 956.
@@ -112,13 +137,18 @@ archaeology. Fold it into whatever flies next.
 ASP-17 switches. For now Petrovich is copilot only."*
 
 This is the same boundary root `CLAUDE.md` already draws — the pilot owns flying, navigation and
-weapon deployment — applied to the power-up checklist. **A switch on a pilot-side panel is out of
-scope whatever the checklist says**, and `ASP_17V` is exactly that. So the recon table's `AUTO/MAN`
-(553) and PUVL weapon selector (523) steps drop out for the same reason 761 does.
+weapon deployment — applied to the power-up checklist. **A switch on a pilot-side panel is out of scope whatever the checklist says.** The recon table's
+`AUTO/MAN` (553) and PUVL weapon selector (523) drop out on that basis — both are the pilot's own
+instruments, not merely owned by a pilot-ish device.
 
-**Open, and it decides whether `CPLR DISTR` is in this entry at all:** is it reachable from the
-operator's seat? If it is a pilot-side switch, the sequence either waits on the pilot or Petrovich
-asks for it — and that is a behaviour question for the explore pass, not an implementation detail.
+**`CPLR DISTR` is not one of them: the user placed it himself** — *"CPLR DISTR is copilot
+switch"* — so the question of whether the sequence must wait on the pilot is **closed, and the
+answer is no.** All five power-up switches are the operator's, and Petrovich can run the whole
+sequence unaided.
+
+**The lesson worth keeping is the test, not the row.** "Which device owns it" is not "which seat
+reaches it" — today's probe wrote operator panels through `WEAP_SYS` and `I9K113` from the pilot's
+seat. Scope by **where the switch physically is**, which is what the user can see and state.
 
 ## 3b. The warm-up is ~5 minutes, measured
 
