@@ -95,6 +95,26 @@ class MissionMemory:
         with self._lock:
             return self._latest_live.get(belief_ref)
 
+    def latest_entry(self, belief_ref: str) -> Entry | None:
+        """`latest_live_seq(belief_ref)`'s own `Entry`, or `None` -- the
+        read `admission.py`'s material-change check uses to compare a
+        contact's current belief against what was last written.
+
+        **Not O(1)**: the seq lookup itself is, but resolving it to the
+        `Entry` object walks `_entries` from the end. Acceptable at this
+        plan's own estimated volumes (`~3600` entries in a worst-case
+        two-hour sortie, "Risks & Unknowns") -- if the log ever grows large
+        enough for this to matter, add a `seq -> Entry` index alongside
+        `_latest_live` rather than widening this method's contract."""
+        with self._lock:
+            seq = self._latest_live.get(belief_ref)
+            if seq is None:
+                return None
+            for entry in reversed(self._entries):
+                if entry.seq == seq:
+                    return entry
+            return None
+
     def append(
         self,
         *,

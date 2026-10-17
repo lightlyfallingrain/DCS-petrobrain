@@ -1683,7 +1683,7 @@ _SPOKEN_NUMBERS: Final[dict[int, str]] = {
 }
 
 
-def _cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | None:
+def cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | None:
     """The count clause's vocabulary (`plans/group-contact-model/plan.md`'s
     Stage 4b design, Sec 1) -- reads `lo`/`hi` magnitude directly rather than
     matching a `belief.cardinality.CountBucket` name, since a folded interval
@@ -1724,6 +1724,16 @@ def _cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | Non
     if lo >= 2 and hi <= 3:
         return "couple"
     return "several"
+
+
+#: `mission_memory.admission`'s own name for the function above, promoted
+#: to public rather than copied -- `plans/bl8-mission-memory/plan.md`
+#: Decision 2, point 4: a count vocabulary existing in two places is a
+#: thing that diverges silently, and BL-8 goes out of its way to prevent
+#: exactly that one duplication. Kept as a private alias (not a plain
+#: rename) so every pre-existing in-module call site above keeps reading
+#: unchanged -- no behaviour change, per that same decision.
+_cardinality_phrase = cardinality_phrase
 
 
 #: Below this slant range, the exact figure stops mattering and the fact of
