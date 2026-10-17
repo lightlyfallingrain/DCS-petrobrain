@@ -25,7 +25,33 @@ rejected adding a `get_mission_phase` tool here: current mission phase is a
 single global value, a strict id-less subset of what `get_situation`
 already returns, so it was folded into `get_situation`'s facts payload
 instead (`facts["mission_phase"]`) -- `TOOL_SET` itself is unchanged by
-that milestone."""
+that milestone.
+
+**BL-8 (`plans/bl8-mission-memory/plan.md` Decision 5) takes `TOOL_SET`
+15 -> 17, and does both halves BL-7's precedent might seem to argue
+against in one move.** `get_contact_history` is folded rather than given
+a sibling -- but that is not this milestone repeating BL-7's reasoning,
+it is the same reasoning reaching the opposite conclusion for a different
+shape of question: BL-7's mission phase was *"a strict id-less subset of
+what `get_situation` already returns"* -- redundant information, so
+folding it cost nothing. A contact's mission-memory chain is not a subset
+of its sighting/event history; it is the *same question* ("what do we know
+about this contact's history") with the *same key* (`contact_id`), so
+giving it a second tool would be the duplication, not the fold. Where BL-7
+found a subset it declined a tool; here `get_contact_history_with_memory`
+below folds a second source answering the identical question under the
+identical key.
+
+That reasoning has no purchase on the two genuinely new tools,
+`recall_memory`/`remember_location`: a mark, or a group belief has
+forgotten entirely, has no live contact id to key on at all, so there is
+no existing tool's question for either to be a subset of. Mission memory
+is, in the explore conversation's own words, *"the third queryable store
+beside belief and the world model"* -- a store that answers questions
+belief cannot answer, not a view onto one it already can. Reuse where it
+is a subset (the fold); extend where it is a new store (the two new
+tools). `mission_memory/` is this project's second deliberate, documented
+extension of the BL-6 freeze, after BL-7 chose not to be the first."""
 
 from __future__ import annotations
 
@@ -33,6 +59,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from belief import tools
+from belief.contacts import ContactStore
+from mission_memory import query as mission_memory_query
+from mission_memory import tools as mission_memory_tools
+from mission_memory.store import MissionMemory
 
 
 @dataclass(frozen=True)
@@ -45,6 +75,39 @@ class ToolSpec:
     name: str
     description: str
     fn: Callable[..., object]
+
+
+def _history_sort_key(entry: dict[str, object]) -> float:
+    """`tools.get_contact_history`'s own private sort key, duplicated here
+    rather than imported: it is one line, and importing a private name
+    across a module boundary for one line is the wrong kind of DRY --
+    the same judgement `implementation.md`'s point 5 already made for
+    `marks._mark_position` versus `admission._build_entry_position`."""
+    value = entry.get("start_sim", entry.get("t_sim", 0.0))
+    assert isinstance(value, float)
+    return value
+
+
+def get_contact_history_with_memory(
+    store: ContactStore, memory: MissionMemory, contact_id: str
+) -> list[dict[str, object]]:
+    """The `get_contact_history` fold (Decision 5): `tools.
+    get_contact_history`'s belief-side sighting/event history, merged with
+    this contact's mission-memory chain (`mission_memory.query.chain_for`)
+    into one oldest-first ordering. Each memory entry is tagged
+    `"type": "memory"` so a caller can tell the two sources apart the same
+    way it already tells `"sighting"` from `"event"`; its own `struck_by`
+    (from `chain_for`) carries the strike state the fold's description
+    promises. An unknown `contact_id` returns `[]` for both halves, same
+    as `tools.get_contact_history` alone -- this function adds a second
+    source, it does not change the unknown-id behaviour of the first."""
+    history = tools.get_contact_history(store, contact_id)
+    chain = mission_memory_query.chain_for(memory, contact_id)
+    for memory_entry in chain:
+        memory_entry["type"] = "memory"
+    merged = history + chain
+    merged.sort(key=_history_sort_key)
+    return merged
 
 
 TOOL_SET: list[ToolSpec] = [
@@ -64,9 +127,11 @@ TOOL_SET: list[ToolSpec] = [
     ToolSpec(
         name="get_contact_history",
         description=(
-            "A contact's sighting-span and lifecycle-event history, oldest first."
+            "A contact's sighting-span and lifecycle-event history, oldest "
+            "first, folded with its mission-memory chain (BL-8) -- entries "
+            "marked 'memory' carry their own strike state."
         ),
-        fn=tools.get_contact_history,
+        fn=get_contact_history_with_memory,
     ),
     ToolSpec(
         name="find_contact",
@@ -165,5 +230,29 @@ TOOL_SET: list[ToolSpec] = [
             "watching the area it registered."
         ),
         fn=tools.cancel_task,
+    ),
+    # BL-8 (`plans/bl8-mission-memory/plan.md`) -- the second deliberate
+    # extension of the BL-6 freeze, after BL-7 chose not to be the first.
+    ToolSpec(
+        name="recall_memory",
+        description=(
+            "Read the mission-memory notepad: entries newest-first, "
+            "optionally filtered by kind, by a radius around a position, "
+            "and by current-only (default) versus include-struck. For "
+            "marks, dropped contacts, and anything else belief can no "
+            "longer answer for."
+        ),
+        fn=mission_memory_tools.recall_memory,
+    ),
+    ToolSpec(
+        name="remember_location",
+        description=(
+            "Have Petrovich mark a location in mission memory, the way a "
+            "pilot 'mark here'/'mark target' voice command does -- "
+            "anchor='ownship' (default) marks our own current position; "
+            "anchor='target' marks the given contact_id's believed "
+            "position and requires contact_id."
+        ),
+        fn=mission_memory_tools.remember_location,
     ),
 ]

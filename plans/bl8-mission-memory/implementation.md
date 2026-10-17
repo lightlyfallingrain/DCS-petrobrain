@@ -1,9 +1,15 @@
 ### Implementation Summary
 
-Stages 1, 2 and 3 of `plans/bl8-mission-memory/plan.md`, implemented and committed as three
-separate commits on `feature/bl8-mission-memory` (plus one follow-up strengthening a Stage 1
-test). Stage 4 (attack runs), Stage 5 (query surface / `TOOL_SET`), and Stage 6 ("safe from"
-re-enablement) are **not** implemented — out of scope per the orchestrator's instruction.
+Stages 1, 2, 3 and 5 of `plans/bl8-mission-memory/plan.md` are implemented. Stages 1-3 landed as
+three commits (plus one follow-up strengthening a Stage 1 test) before this pass; this pass adds
+Stage 5 (the query surface, the two new brain-facing tools, the `get_contact_history` fold, and
+`TOOL_SET` 15 -> 17). Stage 4 (attack runs) and Stage 6 ("safe from" re-enablement) remain **not**
+implemented — both deferred by the user's 2026-10-17 decision recorded in the plan's "Decisions
+Requiring User Input" section, not out of scope by omission.
+
+---
+
+### Stage 5 — the query surface, `TOOL_SET` 15 -> 17
 
 ### Files Changed
 
@@ -160,3 +166,119 @@ corresponding test; see the per-stage commit messages for the mapping.
   every test the plan named by description exists; no pre-existing test outside the new files
   needed rework (`cardinality_phrase`'s rename kept a private alias specifically to avoid touching
   `test_speech.py`).
+
+---
+
+### Stage 5 — Files Changed
+
+- `src/mission_memory/query.py` (new) — the in-flight read surface: `recall_memory` (newest-first,
+  filtered by `kind`, by a `GeoPosition`+`radius_m` pair, and by `include_struck`) and `chain_for`
+  (oldest-first, one contact's whole memory chain — the building block the `get_contact_history`
+  fold reuses). Both return `entry_to_dict`'s shape, which adds the one field `encode_entry` cannot
+  carry: `struck_by`, a store-level read (Decision 4). No `belief` import — pure over an
+  already-built `MissionMemory`.
+- `src/mission_memory/tools.py` (new) — the two brain-facing tool functions: `recall_memory` (a
+  thin pass-through to `query.recall_memory`) and `remember_location` (dispatches to
+  `marks.mark_here`/`marks.mark_target` by an `anchor` switch). This is the module that imports
+  `belief` on `mission_memory`'s one allowed direction, so no module inside `belief/` other than
+  `tool_api.py` gains a dependency on this package (Decision 1).
+- `src/mission_memory/admission.py` — `_to_phase_info` renamed to public `to_phase_info`: Stage 5
+  needed the same `MissionPhaseInfo` -> `PhaseInfo` conversion `tools.remember_location` does, and
+  duplicating a one-line-but-coupled type conversion in a second file was the wrong kind of DRY to
+  accept. No behaviour change; the one call site inside `admission.step` was updated to match.
+- `src/belief/tool_api.py` — `TOOL_SET` 15 -> 17 (`recall_memory`, `remember_location`); the
+  `get_contact_history` entry's `fn` now points at a new module-level `get_contact_history_with_memory`
+  (defined in this file, the plan's one carved import exception) that merges `tools.
+  get_contact_history`'s belief-side sighting/event history with `mission_memory.query.chain_for`'s
+  memory chain into one oldest-first ordering, tagging each memory entry `"type": "memory"`. The
+  module docstring gained the BL-7-precedent argument Decision 5 asks for: why a fold is right here
+  where BL-7 declined one, and why the two genuinely new tools are not subject to that precedent at
+  all (no existing tool's question either is a subset of).
+- `tests/test_mission_memory_import_direction.py` — docstring corrected: the allowed-importer
+  exception is no longer merely carved out for a future stage, it is exercised.
+- `tests/test_mission_memory_store.py` — `test_admission_and_marks_never_construct_entry_directly`
+  widened to also grep `query.py`/`tools.py` (belt-and-braces: both are read-only by construction,
+  but the same future-author protection the plan asked for on `admission.py`/`marks.py` costs
+  nothing to extend to the two new files in the same package).
+- `tests/test_tool_api.py` — `_EXPECTED_TOOL_NAMES` gained `recall_memory`/`remember_location`.
+
+### Stage 5 — Tests Added
+
+- `tests/test_mission_memory_query.py` — `recall_memory`'s newest-first ordering, `kind` filter,
+  `include_struck` default-excludes-struck behaviour, the matched-pair `ValueError` on a lone
+  `center`/`radius_m`, the radius filter itself (including that a positionless entry, e.g.
+  `fired_on`, never matches one), `chain_for`'s oldest-first ordering and empty-for-unknown-ref
+  case, and `entry_to_dict`'s default `struck_by=None`. Includes the plan's named case directly:
+  `test_recall_memory_struck_chain_reaches_a_dropped_belief_ref` builds a struck chain with no
+  `ContactStore` involved at all, since `query.py` is belief-agnostic by construction — "a contact
+  belief has dropped" and "a contact that never existed" are the same case from this module's point
+  of view, which is the point.
+- `tests/test_mission_memory_tools.py` — `remember_location`'s `anchor="ownship"` default,
+  `anchor="target"` dispatch to the named `contact_id`, the `ValueError` for `anchor="target"` with
+  no `contact_id`, the `None` return for an unknown `contact_id` (mirroring `marks.mark_target`'s
+  own convention rather than raising), and `recall_memory`'s pass-through.
+- `tests/test_tool_api_mission_memory.py` — `get_contact_history_with_memory`: the merge contains
+  all three entry types (`sighting`/`event`/`memory`) in oldest-first order, a memory entry's own
+  strike state survives the fold, an unknown contact id returns `[]` (matching `tools.
+  get_contact_history`'s own convention), and — the plan's own named case —
+  `test_fold_with_no_memory_entries_matches_plain_get_contact_history` asserts the fold is
+  byte-for-byte identical to the unfolded function when there is nothing to fold in, so Stage 5
+  cannot be shown to have changed Stage 1-4's existing behaviour for every contact that has no
+  memory entries yet.
+
+### Stage 5 — Checks
+
+- `ruff format --check src tests`: pass (after `ruff format` fixed three newly-added test files'
+  line lengths)
+- `ruff check src tests`: pass (after removing one unused import and one `RUF015` single-element
+  slice in the new test files)
+- `cd body-layer && .venv/bin/mypy src`: pass, 68 source files (66 + the two new `mission_memory`
+  modules)
+- New/changed test files checked individually with `mypy` (same convention Stages 1-3 used, since
+  `mypy` is never run against `tests/` as a batch in this subproject): all clean except the same
+  class of pre-existing "`object` is not indexable" noise `test_tools.py` itself already carries
+  when checked the same way (`dict[str, object]` values indexed again without a cast) — not a new
+  problem this stage introduced, the established shape of every contact-result test in this
+  codebase.
+- `pytest body-layer/tests -q`: 2158 passed, 4 xfailed (pre-existing xfails, unrelated; 2138 + 20
+  new tests)
+- No new tuning constant: Stage 5 adds no behaviour-affecting threshold of its own (the four
+  Stage 2/3 constants are unchanged), so `config/defaults.toml` was not regenerated this stage.
+
+### Stage 5 — Notable Discoveries
+
+- **No logger.py wiring was needed, and the plan's own scope list already says so** (it names only
+  `query.py`, `tools.py`, the fold, and `TOOL_SET`) — worth confirming explicitly rather than
+  assuming: `TOOL_SET` is not dispatched from anywhere in `logger.py` today (grepped; the brain
+  seam is `belief/escalation.py`'s `BrainClient`/structured replies, not a generic tool-call
+  dispatcher), so `ToolSpec.fn`'s signature answers to no caller yet and Stage 5 is free to give
+  `recall_memory`/`remember_location` whatever keyword-argument shape reads best. The two functions'
+  signatures are therefore a design choice this stage made, not one constrained by an existing
+  dispatcher — flagging this for whoever eventually wires brain-layer HTTP calls through `TOOL_SET`,
+  since that wiring will be the first real test of whether these signatures are actually convenient
+  to call generically.
+- **`remember_location`'s `anchor="target"` path takes `contact_id` directly rather than reusing
+  `crew_console`'s "currently selected target" notion** (`_active_attack_target_task`). This is a
+  deliberate difference from the pilot's voice path, not an oversight: the brain already knows which
+  contact it means (it has `get_contacts`/`describe_contact` to name one), and threading a
+  pilot-UI-specific "selection" concept into a brain tool would import a notion the brain-facing
+  surface has no other use for. Worth stating explicitly since a future reader comparing
+  `_handle_mark_target` and `remember_location` side by side could otherwise read the difference as
+  a gap rather than a decision.
+- **No gaps found between the plan's Stage 5 test-impact list and the actual test suite.** All three
+  named cases exist with a matching test: "recall reaches a mark and a struck-chain for a contact
+  belief has dropped" (`test_recall_memory_reaches_a_mark`,
+  `test_recall_memory_struck_chain_reaches_a_dropped_belief_ref`), "`recall_memory`'s filters behave"
+  (the kind/radius/include_struck tests), and "`get_contact_history` for a live contact returns
+  belief history and memory chain in one ordering" (`test_fold_merges_belief_history_and_memory_
+  chain_oldest_first`). Grepped the existing suite for tests touching `tool_api.py`/`TOOL_SET`
+  beyond the plan's own list (`test_tool_api.py` only) — nothing else references either, so there
+  was no silently-affected fixture to find this time, unlike the 3b-i/naked-eye-source precedent
+  this role's own guidance warns about.
+- **`body-layer/CLAUDE.md` and `body-layer/docs/STRUCTURE.md` still carry no `mission_memory`
+  module-map entry**, despite the plan's Affected Modules section naming both as "Changed." Stages
+  1-3 did not add one either (grepped before starting this stage: zero hits for `mission_memory` in
+  either file). Not added in this pass — it is cross-stage bookkeeping for the whole package, not
+  Stage-5-specific, and doing it piecemeal per stage would leave an inconsistent partial entry.
+  Flagging for whoever closes out the milestone (DoD, or a dedicated doc pass) rather than
+  addressing it silently here.

@@ -1,8 +1,9 @@
 """Decision 1's import direction is structural, not conventional:
 `mission_memory` may import `belief`. No module in `belief/` may import
 `mission_memory`, with exactly one carved exception: `belief/tool_api.py`
-(Stage 5, not yet landed at the time of writing -- so today the allowed-
-importer set is simply empty, which this test tolerates)."""
+(Stage 5, landed -- `tool_api.py` now imports `mission_memory.query`/
+`mission_memory.tools` for the `get_contact_history` fold and the two new
+brain-facing tools)."""
 
 from __future__ import annotations
 

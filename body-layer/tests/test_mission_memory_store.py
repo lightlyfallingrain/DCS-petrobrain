@@ -373,11 +373,14 @@ def test_entry_is_constructed_in_exactly_one_place_in_store_py() -> None:
 
 
 def test_admission_and_marks_never_construct_entry_directly() -> None:
-    """`admission.py`/`marks.py` must go through `store.append`, never
-    build an `Entry` themselves -- the same obligation, checked at the two
-    call sites that will exist once Stage 2/3 land, so a future author
-    bypassing `append` fails a test rather than a review."""
-    for name in ("admission.py", "marks.py"):
+    """`admission.py`/`marks.py`/`query.py`/`tools.py` must go through
+    `store.append`, never build an `Entry` themselves -- the same
+    obligation, checked at every call site that will exist once Stage 2/3/5
+    land, so a future author bypassing `append` fails a test rather than a
+    review. `query.py`/`tools.py` (Stage 5) are read-only by design -- they
+    have no admission decision to make -- so this is a belt-and-braces
+    check on them, not an obligation they were ever expected to need."""
+    for name in ("admission.py", "marks.py", "query.py", "tools.py"):
         path = _SRC / name
         if not path.exists():
             continue

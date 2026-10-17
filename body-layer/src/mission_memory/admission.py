@@ -122,7 +122,14 @@ FIRED_ON_FOLD_WINDOW_S: Final[float] = tuning.real(
 )
 
 
-def _to_phase_info(phase: MissionPhaseInfo | None) -> PhaseInfo | None:
+def to_phase_info(phase: MissionPhaseInfo | None) -> PhaseInfo | None:
+    """Public since Stage 5: `mission_memory.tools.remember_location` (the
+    brain-facing mark tool) needs the same `belief.mission_phase.
+    MissionPhaseInfo` -> `mission_memory.entries.PhaseInfo` conversion this
+    module already does for observed entries, and duplicating a
+    one-line-but-coupled conversion in a second file is exactly the kind
+    of divergence this project's tuning-comment lesson warns about for
+    numbers -- the same applies to a type mapping."""
     if phase is None:
         return None
     return PhaseInfo(name=phase.name, waypoint_index=phase.waypoint_index)
@@ -494,7 +501,7 @@ def step(
     the `fired_on` rule -- every real caller (`logger.py`'s two poll
     loops) owns one `FiredOnTracker` for the run's lifetime and always
     passes it."""
-    phase_info = _to_phase_info(phase)
+    phase_info = to_phase_info(phase)
     for contact in contacts.contacts:
         _maybe_write_entry_for_contact(
             memory, contacts, contact, now_sim, theatre, phase_info, enrichment

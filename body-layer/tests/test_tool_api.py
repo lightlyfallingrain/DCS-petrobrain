@@ -1,8 +1,9 @@
 """Tests for `belief.tool_api` -- a registry-completeness check, not a
 behavioral one (each tool's actual behavior is covered where it's
-implemented, in `test_tools.py`). `plans/bl5-tool-api/plan.md`'s
-acceptance is "TOOL_SET names exactly the twelve BL-5 tools and every
-entry's `fn` is callable"."""
+implemented, in `test_tools.py`/`test_mission_memory_*.py`).
+`plans/bl5-tool-api/plan.md`'s acceptance is "TOOL_SET names exactly the
+twelve BL-5 tools and every entry's `fn` is callable"; BL-8
+(`plans/bl8-mission-memory/plan.md` Decision 5) takes that to 17."""
 
 from __future__ import annotations
 
@@ -27,6 +28,10 @@ _EXPECTED_TOOL_NAMES = {
     "scan_area",
     "get_task_status",
     "cancel_task",
+    # BL-8 (`plans/bl8-mission-memory/plan.md` Decision 5) -- the second
+    # deliberate extension of the BL-6 freeze.
+    "recall_memory",
+    "remember_location",
 }
 
 
