@@ -379,7 +379,17 @@ function LuaExportStart()
     log("9K113 SLEW PROBE -- no switch is ever written by this script")
     local v = try("LoGetVersionInfo", LoGetVersionInfo)
     if type(v) == "table" then
-        log("  DCS version: " .. tostring(v.ProductName) .. " " .. tostring(v.FileVersion))
+        -- FileVersion/ProductVersion are TABLES of numbers, not strings: the
+        -- 2026-10-17 runs logged "DCS table: 000001E9..." and lost the build
+        -- number, which every positional argument number here depends on.
+        local function ver(x)
+            if type(x) ~= "table" then return tostring(x) end
+            local p = {}
+            for _, n in ipairs(x) do p[#p + 1] = tostring(n) end
+            return table.concat(p, ".")
+        end
+        log("  DCS version: " .. tostring(v.ProductName)
+            .. " file=" .. ver(v.FileVersion) .. " product=" .. ver(v.ProductVersion))
     end
     log("  Argument numbers are POSITIONAL -- record the version above.")
     log("#########################################################")

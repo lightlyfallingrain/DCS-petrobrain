@@ -19,15 +19,34 @@
   - **The warm-up *sequence* this probe wrote is wrong, and is deliberately left wrong for now** —
     *"Let it be, we'll fix later. I can setup the warmup for now."* Writing a switch and ordering
     the procedure are different questions; only the first is answered.
-  - **The sight-driving questions need their own run with no switch flips at all**, because the
-    flips contaminated the shared flight. User direction: *"I will setup it so that OBSERV is ON
-    and can be used id it is possible via code. Set test to happen at T+60s."* That run is
-    `Export.probe-9k113-slew.lua`, card `docs/acceptance/2026-10-17-9k113-slew-probe.md`, awaiting
-    a flight on branch `feature/9k113-effectors-probe`.
+  - **A switch write animates over ~3 frames** (`0.32 → 0.64 → 1.00`), so a readback taken
+    immediately catches an intermediate value. The project's own 1 s inter-switch delay covers it.
+  - **The `READY` lamp is not readable.** `list_indication(8)` (`ccGunnersCPanel`, never tried
+    before) returns 0 bytes powered or not; `list_indication(0)` returns the sight viewport's
+    element tree and key-binding help, byte-identical before and after power. A `Ready_9k113` node
+    exists in that tree carrying no value. **Finding 2's `list_indication` workaround is closed as
+    unavailable** — readiness stays a self-run timer.
 
-  **Decision 1 (which command channel points the sight) is still open and still blocks this
-  entry** — it is the slew probe's question 4. Both candidate designs remain reachable; only one
-  survives the answer, so building either before it reports means writing one of them twice.
+  **Decision 1 is ANSWERED by the slew probe, 2026-10-17, and it inverts the plan's
+  recommendation** (`aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`):
+
+  - **The AI axis (3060/3061) is inert.** Five bearings and twelve staircase steps on each axis,
+    in two separate runs, one with the aircraft correctly set up by hand and `OBSERV` confirmed
+    on — args 874/876 never moved off `0.00000`. Every call returned `ok=true`, so the return
+    value distinguishes nothing.
+  - **The player axis (3025/3026) moves the head**, in the same run, same device, same
+    `SetCommand` path, immediately after the AI axis did not: ~45° of azimuth in one ~3 s hold at
+    0.5 deflection (13–16°/s), elevation the same shape and sign-inverted.
+  - **So the rate loop is mandatory, not optional, and `[[BL-B63]]`'s fast lane is a hard
+    dependency again** — as this entry said under direction §12 before `plans/9k113-effectors/
+    plan.md` §0 argued it away on the strength of the 2026-09-11 AI-axis measurement. That older
+    measurement is not overwritten: two live passes disagree and the reason is unknown.
+  - **The plan's own scope caution now applies**: narrow this entry to the switch sequence and
+    `OBSERV`, which are unblocked and buildable today, and file the slew loop as its own entry
+    gated on `BL-B63`.
+  - **One more probe run before any deflection law is fitted.** The slew probe sampled four times
+    per hold and saw two plateaus rather than a ramp; nothing separates "readback is quantised or
+    lagged" from "motion is stepped". The fix is per-frame logging of 874/876.
 
   Minted 2026-10-15 from the `[[BL-B64]]` split (user direction §5: *"We'll then add actually
   manipulating the systems in cockpit"*). Entry 2 of 3; `[[BL-B64]]` is perception, `[[BL-B67]]` is

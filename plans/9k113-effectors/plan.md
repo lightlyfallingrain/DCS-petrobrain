@@ -321,6 +321,35 @@ would be the wrong behaviour, and that is the moment to add *"guidance unit read
 
 ---
 
+## PROBE REPORTED, 2026-10-17 — §0 is withdrawn by measurement and Decision 1 inverts
+
+**Read this before §0 or Decision 1 below; both are superseded on their central claim.** Full
+record: `aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`.
+
+§0 argued that the AI axis is a working position target and the player axis is the unverified one,
+on a five-point live measurement from 2026-09-11. **Both halves measured false today**, in two
+runs, the second with the aircraft set up by hand and `OBSERV` confirmed on:
+
+| channel | commanded | result |
+|---|---|---|
+| AI 3061 / 3060 | 5 bearings + 12 staircase steps each | args 874/876 **never left 0.00000** |
+| player 3026 / 3025 | ±0.5 held ~3 s | **~45° azimuth, elevation the same shape, sign-inverted** |
+
+Every call returned `ok=true`, so only the argument readback separates them — and the player axis
+moved the head in the same run, same device, same `SetCommand` path, seconds after the AI axis did
+not.
+
+**So:** Decision 1 takes the player axis by elimination; the controller, deflection law, deadband
+and limit-cycle risk return; `BL-B63` is a hard dependency again, as direction §12 and `BL-B66`'s
+own entry had it. §0's "find N before accepting that N is unknown" reasoning was sound and its
+conclusion was still wrong, because the number it found described a channel that no longer answers.
+
+**This plan's scope caution is now in force rather than hypothetical** — narrow the entry to the
+switch sequence and `OBSERV` (both measured working today), and file the slew loop separately,
+gated on `BL-B63` and on one more probe run with per-frame slew logging.
+
+---
+
 ## Probe brief — for the user's Windows box
 
 **Self-contained; needs a running DCS and cannot be done by any agent.** Everything below is one
