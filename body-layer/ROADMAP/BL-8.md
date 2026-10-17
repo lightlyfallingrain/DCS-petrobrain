@@ -16,3 +16,13 @@
   remembering after a sortie" — it now has one named in-mission consumer whose feature is switched
   off until it exists (`belief/speech.py`'s `engaged=False` branch).
 
+  **Code-pointer correction, 2026-10-17** (`plans/bl8-mission-memory/plan.md` Decision 10): the
+  sentence above names the wrong module. `belief/speech.py` renders *"Safe from …"* perfectly well;
+  what holds it back is `belief/callouts.py`'s `_OBSERVABILITY_EXEMPT_KINDS`, which exempts only the
+  `engaged is True` danger call — and its stated reason is about **priority, not memory** (*"nothing
+  is evaded by hearing it… silence costs the pilot the chance to stop evading, which is a comfort,
+  not a threat cue"*). **So BL-8 does not automatically unblock this callout.** BL-8 supplies what it
+  needs (a believed position for a contact outside live coverage, via `recall_memory`); flipping the
+  gate is a separate speech decision with its own acceptance sortie, and is an open question on that
+  plan rather than a stage of it.
+
