@@ -185,10 +185,14 @@ more marker and one formatting rule:
 
   **Spell the prefix out.** `'^[A-Z]+-W[0-9]+'` was the published form and it is wrong for the same
   structural reason the delimiter forms below are: one `ROADMAP/` directory holds more than one
-  prefix. `body-layer/ROADMAP/` holds `BL-`, `BL-B`, `BL-W` **and** `BR-` — brain-layer has no
-  directory of its own — so a prefix-agnostic pattern returns the maximum across all of them and
-  mints from the wrong sequence. Found 2026-10-09 (`audits/system-integrity/`, finding 5); it had
-  not fired yet only because no `BR-W` or `BR-B` item exists.
+  prefix. `body-layer/ROADMAP/` holds `BL-`, `BL-B` **and** `BL-W`, and until 2026-10-17 it also
+  held brain-layer's `BR-`/`BR-B`, so a prefix-agnostic pattern returns the maximum across all of
+  them and mints from the wrong sequence. Found 2026-10-09 (`audits/system-integrity/`, finding 5).
+  That finding recorded it as not-yet-fired *"only because no `BR-W` or `BR-B` item exists"*, which
+  was already false — `BR-B1`–`BR-B3` were filed. Brain-layer now has its own
+  `brain-layer/ROADMAP/` (user direction, 2026-10-17), which removes that particular collision
+  rather than documenting it; the rule itself stands, because `BL-`/`BL-B`/`BL-W` still share one
+  directory and so do every other subproject's three prefixes.
 
   **`sort -V`, not `sort -t W -k2 -n`, and this is not a style preference — the delimiter form was
   written here first and it is wrong.** `-t W` splits on the literal `W`, which the `WM-` prefix
