@@ -91,3 +91,39 @@ anything have to happen when an entry leaves the drawn section, or is it purely 
 
 Mock of all three (notepad page, map page, entry anatomy):
 https://claude.ai/artifact/Swg1RDkBbkt4qZihnUrP75
+
+## The reframe that matters most (user, 2026-10-17)
+
+> *"Note that the visualization ARE NOT needed during flight. Petrovich cannot show them to me, the
+> cockpits are in tandem, not side by side. They are very good for debrief though."*
+
+> *"The map and kneeboard are reference ideas, of what the memory might be like, what I am referring
+> to as mission memory. It does not mean we have to implement a kneeboard of any kind for in flight
+> use. You are free to design a format that serves the code well and that can in debrief be read and
+> parsed into a visual representation for human user, the kneeboards are excellent there."*
+
+So the kneeboard is **a metaphor for the content and a debrief renderer, never an in-flight
+surface**. The tandem cockpit settles it physically: Petrovich cannot hand the pilot a page, so
+in-flight the store is consumed by speech and by Petrovich's own reasoning only. Design the format
+for the code; the debrief tool parses it into the two kneeboard views.
+
+Decisions following from that:
+
+7. **The map view is a debrief tool only.** *"Could use the real "paper map" files that come with
+   DCS as the map. Then tile file is one map section."*
+8. **Map content is the same entries plus pilot marks** — no separate drawing vocabulary.
+9. **Direction is frozen at write time, and a change of more than ~45° strikes the old line and
+   appends a new one** — *"This is, again, dependent on observation and belief."* So the threshold
+   is on the believed direction, not on truth, and an unobserved turn simply never gets written.
+10. **The strike-and-append chain IS the per-group history.** *"Not so much needed during flight
+    (maybe), but good at debrief."* No separate history structure.
+
+### One dependency that is not safe to assume: the DCS paper-map tiles
+
+`world-model/research/2026-09-03-m2-rastercharts-recon.md` already looked at this. Caucasus has a
+real tile pyramid of per-tile zips; **Syria ships a single `RasterCharts/rasterCharts.zip`**, and
+the recon explicitly warns the pipeline must not assume the pyramid holds. The tile image format,
+the `.sup5` files and any georeferencing metadata were all left unresolved, and registration was
+expected to need control-point fitting rather than a readable extent. So "one tile file is one map
+section" is a plausible shape, not an established one — an Investigator pass before any plan leans
+on it. `world-model/src/raster/registration.py` exists as the starting point.
