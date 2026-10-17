@@ -62,18 +62,67 @@ _BLOCK_COMMENT_OPEN = "--[["
 #: comment it is a syntax error; in a `--` line comment it is harmless but
 #: still banned here, because a later reflow of line comments into a block
 #: comment would silently reintroduce the fault.
-_WIKI_LINK_RE = re.compile(r"\[\[[A-Za-z][\w-]*\]\]")
+#:
+#: **The `.` in the character class is load-bearing** (Reviewer, 2026-10-17).
+#: `docs/DOC_CONVENTIONS.md` documents a dotted stage-link form -- a parent
+#: milestone links down as `[[AA-1.1]]` -- and `\w` does not include `.`, so
+#: the first version of this pattern matched `[[BL-B73]]` and missed
+#: `[[AA-1.1]]`. A dotted ID pasted into a Hook header would have
+#: reproduced the 2026-10-17 blackout past a guard written to prevent
+#: exactly it.
+#:
+#: Still anchored on a leading letter, so a genuine Lua long-bracket string
+#: literal is not matched: `local NULL_CODE = [[return "x"]]` in
+#: `petrobrain-elevation-cost-probe-hook.lua` is legal Lua and must stay
+#: legal here.
+_WIKI_LINK_RE = re.compile(r"\[\[[A-Za-z][\w.-]*\]\]")
 
 
-def _lua51() -> str | None:
-    """A Lua 5.1-compatible interpreter, or `None`. `luajit` implements
-    5.1's syntax (including its long-bracket rule) and is what reproduced
-    the DCS failure locally; `lua5.1` is the obvious alternative where it
-    is packaged separately."""
-    for name in ("luajit", "lua5.1"):
-        found = shutil.which(name)
-        if found is not None:
-            return found
+#: Parse-only invocations, in preference order, as (tool, argv-tail). Each
+#: must parse the file named by `PB_LUA_CHECK_PATH` *without running it* and
+#: exit nonzero on a syntax error.
+#:
+#: `luac5.1 -p` comes first because it is the check
+#: `aircraft-layer/CLAUDE.md`'s Commands section already documents for these
+#: files, and the one installed where they are deployed -- this test is that
+#: documented command moved somewhere it runs on its own, not a second way of
+#: doing the same thing. It is absent on the Mac dev machine, which is
+#: exactly why the documented form never ran and the 2026-10-17 breakage
+#: shipped. `luajit` and `lua5.1` are the fallbacks; both implement 5.1's
+#: long-bracket rule, and `luajit` is what reproduced DCS's failure locally.
+#:
+#: A newer `luac`/`lua` is deliberately NOT accepted: 5.2+ parses constructs
+#: DCS's embedded 5.1 rejects, so it would pass the very file that breaks in
+#: flight.
+_PARSE_ONLY_TOOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("luac5.1", ("-p",)),
+    ("luajit", ("-bl",)),
+    ("lua5.1", ()),
+)
+
+
+def _parse_command(path: Path) -> list[str] | None:
+    """A parse-only command line for `path`, or `None` when no Lua 5.1
+    tool is installed."""
+    for tool, flags in _PARSE_ONLY_TOOLS:
+        found = shutil.which(tool)
+        if found is None:
+            continue
+        if tool == "lua5.1":
+            # No parse-only flag on the interpreter itself -- `loadfile`
+            # is the equivalent, and the path travels by environment
+            # variable so nothing is spliced into the chunk.
+            return [
+                found,
+                "-e",
+                (
+                    'local chunk, err = loadfile(os.getenv("PB_LUA_CHECK_PATH")); '
+                    "if not chunk then io.stderr:write(err); os.exit(1) end"
+                ),
+            ]
+        # `luac5.1 -p` and `luajit -bl` both take the file as an argument
+        # and neither executes it.
+        return [found, *flags, str(path)]
     return None
 
 
@@ -107,28 +156,22 @@ def test_no_nested_long_bracket_in_block_comment(path: Path) -> None:
 
 @pytest.mark.parametrize("path", _LUA_FILES, ids=lambda p: p.name)
 def test_loads_as_lua(path: Path) -> None:
-    """The file parses as Lua 5.1. Skipped where no 5.1-compatible
-    interpreter is installed -- the check above is the floor."""
-    interpreter = _lua51()
-    if interpreter is None:
-        pytest.skip("no Lua 5.1-compatible interpreter (luajit / lua5.1) on PATH")
-    # `loadfile` parses without executing -- these scripts call into DCS
-    # APIs (`lfs`, `socket`, `LoGetSelfData`) that do not exist here, so
-    # running them is not an option. The whole check must stay inside
-    # `-e`: naming the file as a positional argument makes the
-    # interpreter *run* it, which is how the first version of this test
-    # reported 26 "syntax errors" that were all missing-DCS-API runtime
-    # errors. The path travels by environment variable rather than being
-    # spliced into the chunk, so no path can quote its way out of it.
+    """The file parses as Lua 5.1. Skipped where no 5.1 tool is installed
+    -- the wikilink check above is the floor.
+
+    **Parse, never execute.** These scripts call into DCS APIs (`lfs`,
+    `socket`, `LoGetSelfData`) that do not exist here, so running one
+    fails for reasons that have nothing to do with its syntax. The first
+    version of this test named the file as a positional argument to the
+    *interpreter*, which runs it, and duly reported 26 "syntax errors"
+    that were all missing-DCS-API runtime errors. Every entry in
+    `_PARSE_ONLY_TOOLS` is parse-only by construction."""
+    command = _parse_command(path)
+    if command is None:
+        tools = ", ".join(tool for tool, _ in _PARSE_ONLY_TOOLS)
+        pytest.skip(f"no Lua 5.1 tool on PATH (tried: {tools})")
     result = subprocess.run(
-        [
-            interpreter,
-            "-e",
-            (
-                'local chunk, err = loadfile(os.getenv("PB_LUA_CHECK_PATH")); '
-                "if not chunk then io.stderr:write(err); os.exit(1) end"
-            ),
-        ],
+        command,
         capture_output=True,
         text=True,
         check=False,
