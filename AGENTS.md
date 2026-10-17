@@ -230,6 +230,9 @@ a feature branch deliberately so there was one thing to review rather than sever
 make; the default stands.
 See `.claude/skills/merge/SKILL.md` for the worktree pattern as it applies to merging.
 - Prefer the simplest solution that satisfies correctness, performance, and architectural clarity.
+- **Do not reinvent the wheel.** Use the existing practice, structure or solution where one applies —
+  in code, in architecture, and in how the work itself is organised. Root `CLAUDE.md`, "Do not
+  reinvent the wheel", has the standing form and what counts as a reason to depart from it.
 - Do not switch roles unnecessarily mid-task.
 - For small features, one role may handle the whole task.
 - For complex features, use the appropriate role sequence:

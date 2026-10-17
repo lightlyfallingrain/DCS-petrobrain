@@ -282,6 +282,39 @@ rather than improvising a second one.
 the first sentence, so a warning written second reaches nobody — and that survived three review
 passes by readers reading the diff.
 
+## Do not reinvent the wheel
+
+**User direction, 2026-10-17**, in their own words:
+
+> *"Use existing practices, structures, solutions where applicable. Be it code, architecture or the
+> system of working."*
+
+So the first question on any piece of work is what already exists for it — not what a good solution
+would look like from scratch. All three of the user's categories count:
+
+- **Code** — a helper, a client shape, a fixture pattern, a test harness. Reuse before declaring is
+  already the rule for tuning constants ("Behaviour-affecting constants are tunable"); this
+  generalises it.
+- **Architecture** — the seams this project already has. HTTP/JSON across a subproject boundary, one
+  in-process exception that is named and justified, `TOOL_SET` as the brain's only route into body
+  state, `Percept` as the no-omniscience boundary. A new mechanism alongside one of those needs a
+  stated reason, not just a clean design.
+- **The system of working** — the role sequences, the worktree protocol, the `ROADMAP/` entry
+  layout, the ID spaces, the skills in `.claude/skills/`. If a subproject does something one way,
+  the next subproject does it that way too, and a convention gets changed rather than forked.
+
+**Finding the existing thing is the work.** This project's recurring failure is not missing
+documentation but failing to find documentation that already exists — which is why the knowledge
+graph and `memory-search.py` have observable triggers rather than a "before concluding" rule. The
+same applies here: *"I did not see one"* is not evidence there is none, and a skill, a script or a
+convention you did not look for is the most expensive kind to duplicate.
+
+**Departing is allowed; doing it silently is not.** If the existing thing genuinely does not fit,
+say which thing and what breaks, in a line, and then build what fits. That line is the difference
+between a deliberate exception — like the body-layer ↔ world-model in-process import, which carries
+its justification everywhere it is mentioned — and a second way of doing something that nobody
+decided on.
+
 ## Direction before speed
 
 **Moving in the correct direction beats moving fast.** User direction, 2026-10-05, and it is the
