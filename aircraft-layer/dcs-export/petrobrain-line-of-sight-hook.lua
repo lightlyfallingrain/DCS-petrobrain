@@ -101,7 +101,7 @@ Note the **nearest-first sort is load-bearing now**: `table.sort` by
 is the right failure direction.
 
 **The sort key is spliced, not purely range, as of `AC-B8`.** A unit
-firing at any range is exactly the thing `[[BL-B73]]` exists to admit, and
+firing at any range is exactly the thing `BL-B73` exists to admit, and
 this cap is nearest-first -- a scene with >=128 candidates inside the
 look-wedge would otherwise truncate a distant firing unit before it ever
 gets a sightline, the plan's own named risk (`plans/emitter-visibility/

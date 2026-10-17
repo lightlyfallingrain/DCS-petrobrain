@@ -254,6 +254,17 @@ more marker and one formatting rule:
   still had to exclude `M8_PROBE_STORE.md` by lookahead to avoid exactly this corruption.) One scripted pass over backtick spans
   whose *entire* content is a resolvable ID, skipping fenced blocks and self-references, is both
   safe and enough — it found 56 real links across the three files converted on 2026-10-09.
+- **Never write a wikilink inside a `.lua` file. It is a syntax error, and it grounded Petrovich
+  for a whole sortie.** Lua 5.1 does not nest long brackets, so inside a `--[[ … ]]` header comment
+  the link's `]]` closes the comment early and its `[[` then raises `nesting of [[...]] is
+  deprecated`. On 2026-10-17 three Hook scripts carried one each and **none of them loaded**:
+  `petrobrain-line-of-sight-hook.lua` was one, so `/line_of_sight/latest` served nothing, every
+  candidate reached the fail-closed LOS gate with no verdict, and 23744 traced candidates produced
+  zero detections. DCS reports this only in `dcs.log` at mission load; nothing downstream
+  distinguishes "the Hook is dead" from "nothing is visible". Write the ID in backticks instead —
+  `` `BL-B73` `` — in Lua line comments as well as block ones, since a later reflow moves text
+  between them. Enforced by `aircraft-layer/tests/test_dcs_export_lua_syntax.py`, which also
+  parses every `dcs-export/*.lua` with a Lua 5.1 interpreter when one is on `PATH`.
 - **A parent milestone with its own stages links down to them**, e.g. `Stages: [[AA-1.1]] [[AA-1.2]]
   …` — so opening the parent alone does not lose the stage breakdown that used to be nested
   bullets in the same file.

@@ -78,7 +78,7 @@ raw target identity (see `schema.firing`'s own module docstring on why
 crossing more than that one bit would be more than this feature needs).
 
 **`S_EVENT_SHOT`'s initiator position is resolved once, at event time,
-and never re-read** -- `[[BL-B74]]`'s seam (the SAM launch position must
+and never re-read** -- `BL-B74`'s seam (the SAM launch position must
 be frozen at the moment of launch, never the launcher's current position),
 built here because position is a `Unit:getPosition()` call this Hook's own
 event handler already has the initiator object in hand for; re-deriving it
@@ -137,7 +137,7 @@ local POLL_INTERVAL_S = 1.0
 --:     `pcall`-guarded throughout (a unit that died in the same frame as
 --:     the event can raise on `getName()`/`getID()`);
 --:   * resolves `x`/`z` once, Hook-side, for `S_EVENT_SHOT` only -- the
---:     initiator's position *at event time* (`[[BL-B74]]`'s seam, not
+--:     initiator's position *at event time* (`BL-B74`'s seam, not
 --:     acted on by this stage's collector logic);
 --:   * maintains `PB_ACTIVE_FIRING_UNITS`, the real-time name set the LOS
 --:     Hook's own sort-key splice reads (file header) -- added on
