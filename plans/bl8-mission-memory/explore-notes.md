@@ -127,3 +127,33 @@ the `.sup5` files and any georeferencing metadata were all left unresolved, and 
 expected to need control-point fitting rather than a readable extent. So "one tile file is one map
 section" is a plausible shape, not an established one — an Investigator pass before any plan leans
 on it. `world-model/src/raster/registration.py` exists as the starting point.
+
+## Settled: write-only file, read-in-flight in memory
+
+User, 2026-10-17: *"write-only file, read-in-flight in-memory. -> yes."*
+
+And what the in-flight read is **for**, in their words:
+
+> *"In flight memory is needed for referencing contacts, marks, etc where belief has gone stale,
+> contacts that are out of player bubble, etc. Brain layer will need to be able to query memory,
+> belief and world model."*
+
+So mission memory is the third queryable store beside belief and the world model, and its job is
+precisely the cases belief cannot answer: a stale belief, a contact outside the 10 km player bubble,
+a mark the pilot set twenty minutes ago. That is the same need `BL-8`'s existing *"safe from"*
+consumer has, generalised.
+
+**Consequence worth stating in the plan: this extends a frozen surface.** `belief/tool_api.py`'s
+`TOOL_SET` became the frozen contract once BL-6 landed (its own docstring says so), and the brain
+layer reaches body-layer only through it. Memory queries therefore mean new entries in `TOOL_SET`,
+which is a deliberate, documented act rather than incidental. Note also that `get_contact_history`
+already exists there — the strike-and-append chain may belong behind that name rather than a new
+tool, which is an Architect call, not an explore one.
+
+### DCS paper map: dropped for now
+
+> *"DCS "paper map" -> drop for now. Let's see about it later. Could consider some other map
+> provider or just draw the important things in svg. To be decided when building debrief."*
+
+So the RasterCharts recon dependency above is **not** on BL-8's path. Debrief rendering picks its
+own map substrate when debrief is designed; an SVG drawn from world-model geometry is a live option.
