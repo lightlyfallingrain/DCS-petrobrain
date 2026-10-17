@@ -259,3 +259,103 @@ mutation tests (the `admission.py` `ValueError`-guard removal) rather than trust
 `marks.py` mutation was verified by code-reading (structurally identical guard) rather than
 re-run, since the admission.py re-run already demonstrates the test harness distinguishes a
 raising guard from a suppressing one.
+
+---
+
+## 2026-10-17 — Narrow review: voice vocabulary fix for `mark_here`/`mark_target` (commit `f6b81f4b`)
+
+Branch `feature/bl8-mission-memory`, worktree fast-forwarded cleanly from `24f217fc` to tip
+`f6b81f4b7aad2eb74e866cb0c82fda9f8468e6cb` (tree clean beforehand, 44 commits behind as expected).
+Scope: the single commit answering DoD's one finding — the batch itself (Stages 1/2/3/5) is already
+APPROVED above and is out of scope here.
+
+### Review Summary
+
+`git show f6b81f4b --stat` touches exactly four files: `audio-adapter/src/vocabulary.py`,
+`audio-adapter/tests/test_command_matcher.py`, `plans/bl8-mission-memory/implementation.md`, and
+one new agent-memory file (`.claude/agent-memory/implementer/
+project_voice_token_needs_audio_adapter_vocabulary.md`). No body-layer source change, nothing else
+smuggled in.
+
+The fix is exactly what Decision 6 and the DoD finding required: `mark_here`/`mark_target` added to
+`VOICE_ONLY_TOKENS` with plain, slot-free phrasings matching `drop_target`/`disengage`/`observ_on`'s
+own posture, `PHRASES` entries for both, and a `TestMarkHereMarkTarget` class.
+
+**Independently re-ran `match_transcript`** (not trusted from the report) on all five new
+phrasings — all resolve to the intended token at `match_ratio == 1.0`, `verb_anchored == True`,
+`ambiguous == False`, `slots is None`, matching the claim exactly.
+
+**Collision probe beyond what the implementer tested:** ran the four phrases against
+`select_target`/`drop_target`/`engage` variants not in the implementer's own test
+(`"engage target"`, `"set target two o'clock"`), plus ten adversarial near-misses the implementer's
+four sentences didn't cover (`"mark here now"`, `"mark the target"`, `"remember the target"`,
+`"mark my target"`, `"remember this spot"`, `"mark position"`, `"mark target now"`, `"remember
+here"`, `"mark location"`, `"that's a remarkable sight"`, `"remarkably close call"`). None stole an
+existing token's match and none of the new tokens' near-misses resolved to the wrong token; two
+fuzzy near-misses (`"mark here now"`, `"mark my target"`, `"mark position"`, `"mark target now"`,
+`"remember this spot"`) resolved correctly at a lower ratio (0.67) rather than failing outright,
+which is the matcher working as designed, not a defect. `"remarkable"`/`"remarkably"` interestingly
+anchor the verb (substring match on "mark") but correctly resolve to `token=None` — same tolerance
+the existing design accepts for any anchor word (false anchor is cheap and reversible; false
+rejection is not, per `command_matcher.py`'s own design comment) — not a regression this fix
+introduced.
+
+**Mutation-tested the two new tests directly**, not just read them: removed the two `PHRASES`
+entries while leaving the tokens in `VOICE_ONLY_TOKENS` (simulating "wired into dispatch but no
+vocabulary entry" — the exact defect DoD found) — `assert set(PHRASES) == set(TOKENS)` fails at
+import, confirming the invariant is load-bearing, not coincidental. Removed the tokens from
+`VOICE_ONLY_TOKENS` too (full revert) — all three `TestMarkHereMarkTarget` methods then fail with
+`token=None` where a real token was expected, confirming the tests exercise behaviour through
+`match_transcript`, not the table. File restored byte-for-byte afterward (`git diff` on
+`vocabulary.py` is empty).
+
+**The "remember" verb introduction.** `remember this location`/`remember target` are new anchor
+vocabulary. Judged safe: `VERB_ANCHOR_WORDS` is derived automatically from `PHRASES`
+(`_derive_verb_anchor_words`), so this is the same mechanism every other verb in the table already
+uses, not a special case; the adversarial probe above (including two sentences the implementer
+didn't test) confirms ordinary English containing "remember"/"mark" does not false-fire into either
+token. Style is consistent with the existing table's comment conventions (cites Decision 6, explains
+the posture match, explains why the phrase doesn't collide).
+
+**Public open-source constraint**: phrasings are short, common English ("mark here", "mark target",
+"remember target") with no pilot-specific jargon or idiom, consistent with the rest of the table.
+"remember this location" is slightly more formal than a clipped radio call but that is the
+implementer's own stated reasoning (the longer, less-clipped way a speaker might actually say it) —
+reasonable, not fragile.
+
+**Scope note (not a required fix):** the typed-text path (`belief/utterance.py`'s grammar) still has
+no "mark" entry, so a console-typed line cannot set a mark. DoD flagged it, the implementer
+deliberately left it out as a scope call for the user. Noting it per the task brief; not required.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None beyond what the implementer already flagged (typed-text parity, left to the user's call).
+
+### Verdict
+
+**APPROVED.**
+
+### Verification
+
+Run from this worktree's `audio-adapter/`, against the main checkout's `audio-adapter/.venv` (this
+worktree has none, as every prior pass in this feature reported):
+
+```
+ruff format --check src tests   -> 29 files already formatted
+ruff check src tests            -> All checks passed!
+mypy src                        -> Success: no issues found in 15 source files
+pytest -q                       -> 284 passed, 1 skipped in 28.83s
+```
+
+Matches the implementer's claimed state exactly.
+
+### Review Confidence
+
+Full read of the commit's diff (all four files). Independently re-ran `match_transcript` on all
+claimed phrasings plus 17 additional probes (collisions and adversarial near-misses) not in the
+implementer's own test. Mutation-tested both new tests by two separate reverts (phrase-only, then
+full token+phrase), confirming each fails for the right reason; file restored clean afterward.
