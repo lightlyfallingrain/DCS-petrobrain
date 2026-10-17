@@ -4,12 +4,14 @@ Implementer."""
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 
-from mission_memory.entries import FiredOnPayload, MarkPayload
+from mission_memory.entries import FiredOnPayload, MarkPayload, decode_entry
+from mission_memory.log import MissionMemoryLogWriter
 from mission_memory.store import MissionMemory, rebuild_struck_by
 
 _SRC = Path(__file__).resolve().parent.parent / "src" / "mission_memory"
@@ -119,6 +121,45 @@ def test_replay_rebuilds_struck_by_from_entries_alone() -> None:
         payload=_fired_on_payload(),
     )
     assert rebuild_struck_by(store.entries) == store.struck_by
+
+
+def test_replay_rebuilds_struck_by_from_an_actual_jsonl_file(tmp_path: Path) -> None:
+    """The same chain, but genuinely written to disk through `log.
+    MissionMemoryLogWriter` and read back with `entries.decode_entry` --
+    "from the file alone" taken literally, not merely from the in-memory
+    `Entry` objects `MissionMemory` itself still held."""
+    path = tmp_path / "mission_memory.jsonl"
+    writer = MissionMemoryLogWriter(path)
+    store = MissionMemory()
+    store.set_sink(writer.write)
+
+    a = store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=1.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_1",
+        strikes=None,
+        payload=_fired_on_payload(),
+    )
+    store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=2.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_1",
+        strikes=a.seq,
+        payload=_fired_on_payload(),
+    )
+
+    lines = path.read_text().strip().splitlines()
+    assert len(lines) == 2
+    replayed_entries = [decode_entry(json.loads(line)) for line in lines]
+    assert rebuild_struck_by(replayed_entries) == store.struck_by
 
 
 def test_striking_an_already_struck_entry_is_rejected() -> None:
