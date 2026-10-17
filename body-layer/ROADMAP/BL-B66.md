@@ -8,6 +8,14 @@
   **Reconnaissance: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`** — the full
   11-switch sequence, the 3–4 min and 10–15 s timings, and the device/command/argument numbers.
 
+  **Probe ready to fly, 2026-10-17** — `aircraft-layer/dcs-export/Export.probe-9k113-effectors.lua`
+  on branch `feature/9k113-effectors-probe`, card
+  `docs/acceptance/2026-10-17-9k113-effectors-probe.md`. It answers all four questions of the
+  plan's probe brief in one three-minute ground run, and **question 4b decides Decision 1** (which
+  command channel points the sight) on evidence rather than judgement. Nothing in this entry should
+  be built before it reports: both candidate designs are reachable from here, and only one survives
+  the answer.
+
   Minted 2026-10-15 from the `[[BL-B64]]` split (user direction §5: *"We'll then add actually
   manipulating the systems in cockpit"*). Entry 2 of 3; `[[BL-B64]]` is perception, `[[BL-B67]]` is
   the attack run. **Sequenced after `BL-B64` and before `BL-B67`, by his explicit ordering.**
