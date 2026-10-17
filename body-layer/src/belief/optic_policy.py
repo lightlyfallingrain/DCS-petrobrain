@@ -209,7 +209,10 @@ SEARCH_STEP_S: Final[float] = 0.8
 #: de-escalates at all") -- a *fraction* of the lower rung's own presence
 #: threshold, not a fixed metre band, because the ladder's rungs are
 #: 2.42x apart (`presence_range_mult`), so a fixed band would be enormous
-#: at the naked-eye rung and negligible at the sight's. Escalation has no
+#: at the naked-eye rung and negligible at the sight's, and
+#: `GUIDANCE_OPTIC_MIN_INTERVAL_S` must exceed the time this band buys
+#: (~10 s of closing at 0.25) or a fly-past re-crosses it early, so the two
+#: are retuned together. Escalation has no
 #: band at all (plan: "Escalate when range_m > threshold(current)") --
 #: only stepping *down* to a less capable optic waits for this margin.
 #: Sized against the sorties' own measured closing rate (median 60 m/s):

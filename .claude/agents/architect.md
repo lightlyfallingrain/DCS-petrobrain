@@ -98,8 +98,24 @@ When asked to plan a feature or resolve a design question:
     `replace()`, and a field-of-regard bound declared in one stage and never enforced in the next —
     state that was supposed to move together, with nothing written down to say it must.)
 
+    **Build the table by grepping every construction site of the state type, not by enumerating
+    transitions from the phase narrative.** `grep -n 'OpticState(' body-layer/src/` and the same for
+    every other co-moving dataclass in scope. Transitions are what a reader thinks of; construction
+    sites are where a field silently fails to carry forward, and the two lists are not the same.
+
+    **Worked example, and it is this role's own miss**: `BL-B71`'s table named three exit
+    transitions (`disengage`/`drop_target`, "Observ off", `_force_observ_off`). The Implementer then
+    grepped and found a **fourth** — two fresh-`OpticState(...)` construction sites on `SEARCHING`/
+    `GLASSING` entry from `SCANNING`-at-home, neither carrying `guidance_optic`/
+    `guidance_optic_since_sim` forward, which silently reset a standing grant and double-charged the
+    hands-busy cost on an unrelated ordinary scan. The parenthetical above already named
+    fresh-construction as the recurring root cause; naming it was not enough, because step 6a asked
+    for transitions to be *named* rather than for construction sites to be *found*. Retro
+    2026-10-17, architect's own self-report.
+
     **Immediate application: `BL-B66`** (the 9K113's effector entry, not yet planned) is this shape
-    again — warm-up state, OBSERV state, and slew state are all co-moving. Its plan needs this table.
+    again — warm-up state, OBSERV state, and slew state are all co-moving. Its plan needs this table,
+    built by grep.
 7. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
 8. **State a second-order effect** — one sentence on how this feature affects later milestones (unblocks/narrows/complicates a future one), or "none identified" if genuinely isolated. First-order correctness isn't enough; value chains further than the immediate change.
 9. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs

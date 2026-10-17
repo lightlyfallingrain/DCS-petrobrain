@@ -5,6 +5,16 @@ metadata:
   type: project
 ---
 
+**SUPERSEDED IN ITS WORDING, 2026-10-17 — the conclusion still holds, the rule it cites no longer
+reads that way.** The retro of 2026-10-06→10-17 measured ~19 performance-review passes in ten days
+against a rule that said one per *feature*, and the user restated the cadence as **once per batch of
+stages actually executed together**: stages built back to back share one pass each, stages blocked
+on a sortie or a decision are not waited for, and a stage built alone is its own batch. So the
+finding below — one Security pass per feature, with a missing `security-plan-review.md` being
+expected rather than a gap — is still the right call for the branch it was observed on, which built
+its stages as one batch. Do not cite the *"once per whole feature"* phrasing from this file; read
+root `CLAUDE.md`'s "Agents" section, which now carries the user's own words for the batch rule.
+
 Confirmed on `feature/landform-geomorphons` (WM-B6, DoD 2026-10-02): this branch has a full
 Architect `plan.md`, went through Implementer -> Reviewer (3 rounds, including a Performance-
 Reviewer change-request loop) -> Security (one deep-analysis pass, `security-review.md`,

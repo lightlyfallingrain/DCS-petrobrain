@@ -218,6 +218,20 @@ Report to the user:
 
 ---
 
+## Execute the unblock condition of accepted debt, not only the work being passed
+
+**Retro 2026-10-17, this role's own finding.** An argument for *doing* something gets scrutinised by
+every role in the chain; a remedy *attached* to something being deferred gets read and waved
+through. That asymmetry is where this gate has already caught a real defect: an implementer's
+exemplary-looking departure stated an unblock command, and running it aborted `rc=1` — nobody but
+DoD had executed it (`.claude/agent-memory/dod/feedback_execute_the_unblock_condition_of_accepted_debt.md`).
+
+So when a feature ships with accepted debt, a deferral, a *"fix it when X"* or a `#needs-flight`
+tag, **run the thing the entry says will clear it** — the command, the script, the query, the probe
+— exactly as written, and report what it did. A clearing condition nobody has executed is a wish,
+not a condition, and it is strictly cheaper to find that out now than on the sortie that depends on
+it.
+
 ## Rules
 
 - Do not push to remote — that remains the user's decision

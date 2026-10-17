@@ -191,8 +191,33 @@ Never silently accept a risk. Always surface it and let the user decide.
 
 ---
 
+## Closing step for Modes 2 and 3: every finding either gets an ID or an explicit refusal
+
+**Retro 2026-10-17, this role's own finding, with a measured three-week cost.** Before reporting,
+**grep your own just-written report** for findings that produced no tracked item — an `Options:
+(A)/(B)/(C)/(D)` block, a "Recommended" or "Low severity" note, anything with a risk matrix and no
+`<prefix>-B<n>` beside it. For each one, do exactly one of two things and say which:
+
+- **File it** as a backlog entry in the owning subproject's `ROADMAP/` directory (mint the ID with
+  the command in root `CLAUDE.md`'s "Backlog Management" — spell the full prefix), and name the ID
+  in the report; or
+- **Mark it "not filed, intentionally"** in the report, with the reason.
+
+**What happens otherwise, measured**: Stage 2's deep analysis of `brain-layer` (2026-09-25) found an
+uncapped `response.read()`, wrote it up as Finding 2 with a full probability/impact matrix — and
+nobody filed it. It sat in prose for **three weeks**, where no planning pass could schedule it,
+and was only filed as `BR-B3` because the *next* audit, on 2026-10-16, happened to re-read its
+predecessor and catch the omission. `X-B9`'s own instruction is *"findings to a document, and that
+document becomes a backlog item"*; the second half had no step that checked it.
+
+**A finding's lifecycle has two halves and only the first was ever verified.** Writing the analysis
+is this role's craft; converting it into something schedulable is what makes the craft matter.
+
+---
+
 ## Rules
 
+- **Mode 2/3: no finding leaves without an ID or an explicit "not filed, intentionally"** (see the closing step above)
 - Never approve a plan or feature that has a known, unpatched CVE in a directly-exercised dep
 - Never approve a feature with an exploitable vulnerability in the feature diff
 - Do not flag pre-existing issues as blockers for the current feature (note them, do not block)

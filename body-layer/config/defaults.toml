@@ -42,7 +42,7 @@ SPEECH_RATE_WPS = 2.5
 # source: belief/decay.py:IDENTITY_HALF_LIFE_S
 IDENTITY_HALF_LIFE_S = 600.0
 
-# Past this much elapsed time since last observed, a contact is considered lost outright rather than merely stale.
+# Past this much elapsed time since last observed, a contact is considered lost outright rather than merely stale -- set to 4x `POSITION_HALF_LIFE_S`, so the two must be retuned together.
 # status: judgement | range: 30.0 .. 600.0
 # source: belief/decay.py:LOST_THRESHOLD_S
 LOST_THRESHOLD_S = 120.0
@@ -53,7 +53,7 @@ LOST_THRESHOLD_S = 120.0
 POSITION_HALF_LIFE_S = 30.0
 
 [belief.optic_policy]
-# BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that thrashes at the boundary would be worse than one that never de-escalates at all") -- a *fraction* of the lower rung's own presence threshold, not a fixed metre band, because the ladder's rungs are 2.42x apart (`presence_range_mult`), so a fixed band would be enormous at the naked-eye rung and negligible at the sight's.
+# BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that thrashes at the boundary would be worse than one that never de-escalates at all") -- a *fraction* of the lower rung's own presence threshold, not a fixed metre band, because the ladder's rungs are 2.42x apart (`presence_range_mult`), so a fixed band would be enormous at the naked-eye rung and negligible at the sight's, and `GUIDANCE_OPTIC_MIN_INTERVAL_S` must exceed the time this band buys (~10 s of closing at 0.25) or a fly-past re-crosses it early, so the two are retuned together.
 # status: agreed-guess | range: 0.05 .. 0.9
 # source: belief/optic_policy.py:GUIDANCE_OPTIC_HYSTERESIS_FRACTION
 GUIDANCE_OPTIC_HYSTERESIS_FRACTION = 0.25
@@ -138,7 +138,7 @@ HIRES_ANGULAR_RADIUS_RAD = 0.028
 # source: perception/visibility.py:LOWRES_ANGULAR_RADIUS_RAD
 LOWRES_ANGULAR_RADIUS_RAD = 0.003
 
-# Classification tier ("something is a BMP"): a *smaller* value here means a *longer* naked-eye classification range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction.
+# Classification tier ("something is a BMP"): a *smaller* value here means a *longer* naked-eye classification range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction, and `lo` is floored at the same resolution limit as `LOWRES_ANGULAR_RADIUS_RAD.
 # status: measured | range: 0.00128 .. 0.05
 # source: perception/visibility.py:MEDRES_ANGULAR_RADIUS_RAD
 MEDRES_ANGULAR_RADIUS_RAD = 0.014
