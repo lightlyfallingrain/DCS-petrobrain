@@ -17,6 +17,13 @@
   write and nothing else**: DCS boresights the sight, closes the doors and safes the gyros itself.
   The safety bar is pilot-commanded both ways, plus ARMED automatically at any attack-run start.
 
+  **`L166V POWER` is dropped from the sequence** (user direction, 2026-10-17: *"skip L166V POWER
+  for now, it is not that important, everything works without it too."*). **So the power-up is
+  four switches** — `MISSILE POWER` (773), `CPLR DISTR` (761, probable), `Sight Power` (885), ЩО
+  `PWR` (955) — and **761 is the only argument still unconfirmed**, settled by one read-probe.
+
+  Original note, now partly overtaken:
+
   **Two of the five switches have no known argument.** `CPLR DISTR` and `L166V POWER`: both
   name-match guesses were withdrawn by the user the same day — 761 sits on `ASP_17V`, the pilot's
   sight, so it is wrong by construction; 870's row disagrees with itself and the ЩО's `TEST LAMPS`

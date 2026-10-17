@@ -56,7 +56,11 @@ where the two disagree. That table was read off a PDF; this is the pilot's.
   *"I much prefer the player axis approach."* So the 2026-10-17 probe result and the user's own
   preference agree, and `BL-B63` returning as a dependency is a cost he is accepting knowingly.
 - **`BL-B66` splits**, approved. The switch/`OBSERV` half stays; the slew loop becomes `BL-B80`.
-- **Five switches power the guidance unit, not the recon table's eleven.** Three of the five are
+- **Four switches power the guidance unit** — five were named, then `L166V POWER` was dropped the
+  same day (*"skip L166V POWER for now, it is not that important, everything works without it
+  too."*), which also disposes of the one argument number still unmapped. The buildable sequence
+  is `MISSILE POWER` (773) → `CPLR DISTR` (761, probable) → `Sight Power` (885) → ЩО `PWR` (955),
+  three of them already written successfully in flight. **Not the recon table's eleven.** Three of the five are
   not in that table's warm-up gate at all (`CPLR DISTR`, `L166V POWER`, and the ordering), and two
   of the table's steps (`AUTO/MAN` on the ASP-17, the PUVL weapon selector) do not appear here.
 - **It is the `Sight Power` switch that starts the 3–4 minute warm-up**, not the ЩО `PWR` switch.
@@ -84,7 +88,7 @@ where the two disagree. That table was read off a PDF; this is the pilot's.
 | weapon safety bar | **673** | `WEAP_SYS` · `Operator_SWITCHER_SAFE_WEAP` (3020) | **written successfully today** |
 | `CPLR DISTR` | **761, probable** | `ASP_17V` · `asp_commands.USR` (`WEAP-DISTR-POWER-OP-PTR`) | rejected, then reinstated by the user's own layout — see below. **Unverified** |
 | `OPER/TEST1/TEST2` | **762, probable** | `ASP_17V` · `asp_commands.USR_check` (`WEAP-DISTR-CONTROL-OP-PTR`) | not in the five, but it is the switch he used to place `CPLR DISTR`, and it closes recon row 5 |
-| `L166V POWER` | **unknown** | — | **870 rejected** — see below |
+| `L166V POWER` | **unknown — DROPPED** | — | **Out of the sequence, user direction 2026-10-17:** *"skip L166V POWER for now, it is not that important, everything works without it too."* 870 was rejected; nothing replaced it and nothing needs to |
 
 ### Both guesses are withdrawn, 2026-10-17 (user corrections)
 
@@ -127,9 +131,9 @@ where the two disagree. That table was read off a PDF; this is the pilot's.
   name. **Neither `L166V POWER` nor `CPLR DISTR` has a known argument**, and neither should be
   guessed at again from the table.
 
-**How to settle them: read, don't write.** One pass with the user throwing each switch by hand
-while a probe logs changed arguments identifies both by observation — no clicking, no table
-archaeology. Fold it into whatever flies next.
+**How to settle 761: read, don't write.** One pass with the user throwing each switch by hand
+while a probe logs changed arguments identifies it by observation — no clicking, no table
+archaeology. One switch now, not two. Fold it into whatever flies next.
 
 ## 3a. Petrovich is the copilot, so the pilot's steps are not his to do
 
