@@ -104,7 +104,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B63]] — A selective fast lane for ownship telemetry and the currently-selected target
 - [[BL-B64]] — the 9K113 sight, entry 1 of 3: perception (spec at `docs/concept/9K113.md`)
 - [[BL-B65]] — weapons safety circuit switch, before any ATGM attack run
-- [[BL-B66]] — the 9K113 sight, entry 2 of 3: effectors (the real cockpit switches moving)
+- [[BL-B66]] — the 9K113 sight, entry 2 of 3: effectors — power-up, OBSERV, safety bar (slew loop split to [[BL-B80]])
 - [[BL-B67]] — the 9K113 sight, entry 3 of 3: the ATGM attack run
 - [[BL-B68]] — belief survives a DCS mission restart, because nothing resets it `[>]` deferred
 - [[BL-B69]] — the object-permanence shortcut skips the spatial gate with no distance check
@@ -118,6 +118,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B77]] — One hedge, two registers: the group line's hardcoded `"A couple of contacts."`
 - [[BL-B78]] — `speech.py`'s module docstring still documents the pre-brevity hedge register
 - [[BL-B79]] — `remember_location`'s `label` needs a bound before any dispatcher calls it
+- [[BL-B80]] — the 9K113 slew loop: pointing the sight on the player axis (split from [[BL-B66]])
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

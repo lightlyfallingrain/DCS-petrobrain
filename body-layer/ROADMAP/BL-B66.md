@@ -1,8 +1,24 @@
 # BL-B66 — The 9K113 sight, entry 2 of 3: effectors
 
-- [ ] **BL-B66 — Make the real cockpit systems move: the warm-up sequence, OBSERV as an actual mode,
-  the slew closed loop, and pinpoint-on-request. Everything that is visible to the pilot in the
-  cockpit rather than only inside Petrovich's head.** #status/open
+- [ ] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
+  as an actual cockpit mode, and the weapon safety bar. Everything that is visible to the pilot in
+  the cockpit rather than only inside Petrovich's head.** #status/open
+  **SCOPE NARROWED 2026-10-17** (user direction, *"OK to split BL-B66"*): **the slew loop left
+  this entry and is now `[[BL-B80]]`**, because it is blocked on `[[BL-B63]]` and this half is not.
+  Pinpoint-on-request rides the slew loop and went with it.
+
+  **The procedures are the user's, not the PDF's** —
+  `docs/acceptance/2026-10-17-9k113-procedures-direction.md`, captured verbatim, supersedes
+  `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`'s 11-switch table where they
+  disagree. In his own words, the power-up is five switches: `MISSILE POWER`, `CPLR DISTR`,
+  `Sight Power`, ЩО `PWR` B1, `L166V POWER`. **It is `Sight Power` that starts the 3–4 minute
+  warm-up**, not ЩО `PWR` as the recon note has it. `OBSERV ON` needs `Sight Power` on, warm-up
+  elapsed (`READNS.` lamp) and then an `X s` gyro wait — `X` is still open. **`OBSERV OFF` is one
+  write and nothing else**: DCS boresights the sight, closes the doors and safes the gyros itself.
+  The safety bar is pilot-commanded both ways, plus ARMED automatically at any attack-run start.
+
+  **Two argument numbers are still guesses** — `CPLR DISTR` and `L166V POWER`, mapped by name
+  match only; see that document's table. Confirm them before encoding either.
   **Specification: `docs/concept/9K113.md`** plus
   `docs/acceptance/2026-10-15-9k113-sight-direction.md` §5, §8.
   **Reconnaissance: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`** — the full
@@ -44,9 +60,8 @@
   - **The plan's own scope caution now applies**: narrow this entry to the switch sequence and
     `OBSERV`, which are unblocked and buildable today, and file the slew loop as its own entry
     gated on `BL-B63`.
-  - **One more probe run before any deflection law is fitted.** The slew probe sampled four times
-    per hold and saw two plateaus rather than a ramp; nothing separates "readback is quantised or
-    lagged" from "motion is stepped". The fix is per-frame logging of 874/876.
+  - **The slew half left this entry on the strength of that**: `[[BL-B80]]`, with the `BL-B63`
+    dependency and the one remaining probe run attached to it rather than to this one.
 
   Minted 2026-10-15 from the `[[BL-B64]]` split (user direction §5: *"We'll then add actually
   manipulating the systems in cockpit"*). Entry 2 of 3; `[[BL-B64]]` is perception, `[[BL-B67]]` is
