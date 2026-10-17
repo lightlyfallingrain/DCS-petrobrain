@@ -157,3 +157,12 @@ tool, which is an Architect call, not an explore one.
 
 So the RasterCharts recon dependency above is **not** on BL-8's path. Debrief rendering picks its
 own map substrate when debrief is designed; an SVG drawn from world-model geometry is a live option.
+
+## Scope decision: ship with both fields nullable
+
+User, 2026-10-17: *"Ship BL-8 with both fields nullable"*.
+
+So BL-8 is not gated on the two missing belief pieces. The entry schema carries `motion.dir` and
+`atk.outcome` from the start, both legitimately null/`"unknown"` until a direction belief and a
+destruction determination exist. The 45°-strike rule is written as part of the direction work, not
+this milestone — but the schema must not have to change to accept it.
