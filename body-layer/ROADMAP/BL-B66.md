@@ -1,12 +1,97 @@
 # BL-B66 — The 9K113 sight, entry 2 of 3: effectors
 
-- [ ] **BL-B66 — Make the real cockpit systems move: the warm-up sequence, OBSERV as an actual mode,
-  the slew closed loop, and pinpoint-on-request. Everything that is visible to the pilot in the
-  cockpit rather than only inside Petrovich's head.** #status/open
+- [ ] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
+  as an actual cockpit mode, and the weapon safety bar. Everything that is visible to the pilot in
+  the cockpit rather than only inside Petrovich's head.** #status/open
+  **SCOPE NARROWED 2026-10-17** (user direction, *"OK to split BL-B66"*): **the slew loop left
+  this entry and is now `[[BL-B80]]`**, because it is blocked on `[[BL-B63]]` and this half is not.
+  Pinpoint-on-request rides the slew loop and went with it.
+
+  **The procedures are the user's, not the PDF's** —
+  `docs/acceptance/2026-10-17-9k113-procedures-direction.md`, captured verbatim, supersedes
+  `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`'s 11-switch table where they
+  disagree. In his own words, the power-up is five switches: `MISSILE POWER`, `CPLR DISTR`,
+  `Sight Power`, ЩО `PWR` B1, `L166V POWER`. **It is `Sight Power` that starts the 3–4 minute
+  warm-up**, not ЩО `PWR` as the recon note has it. `OBSERV ON` needs `Sight Power` on, warm-up
+  elapsed (`READNS.` lamp) and then an `X s` gyro wait — `X` is still open. **`OBSERV OFF` is one
+  write and nothing else**: DCS boresights the sight, closes the doors and safes the gyros itself.
+  The safety bar is pilot-commanded both ways, plus ARMED automatically at any attack-run start.
+
+  **`L166V POWER` is dropped from the sequence** (user direction, 2026-10-17: *"skip L166V POWER
+  for now, it is not that important, everything works without it too."*). **So the power-up is
+  four switches** — `MISSILE POWER` (773), `CPLR DISTR` (761, probable), `Sight Power` (885), ЩО
+  `PWR` (955) — and **761 is the only argument still unconfirmed**, settled by one read-probe.
+
+  Original note, now partly overtaken:
+
+  **Two of the five switches have no known argument.** `CPLR DISTR` and `L166V POWER`: both
+  name-match guesses were withdrawn by the user the same day — 761 sits on `ASP_17V`, the pilot's
+  sight, so it is wrong by construction; 870's row disagrees with itself and the ЩО's `TEST LAMPS`
+  is 956, not 870. **Settle them by reading arguments while the user throws each switch by hand**,
+  not by clicking or by more table archaeology.
+
+  **`CPLR DISTR` is the operator's** — user direction, 2026-10-17, placing it physically: *"right
+  above missile power. right of FDI and left of OPER/TEST1/TEST2."* That adjacency matches
+  `WEAP-DISTR-POWER-OP-PTR` (761) with `WEAP-DISTR-CONTROL-OP-PTR` (762) on its right, so **761 is
+  reinstated as the probable mapping** after being withdrawn earlier the same day — his rejection
+  was conditional on it being pilot-side, and the device column names the owning Lua device, not
+  the seat (today's probe wrote operator panels from the pilot's seat). Still unverified; the
+  read-probe settles it. **So all five power-up switches are the operator's and the sequence waits
+  on nobody.**
+
+  **Petrovich is the copilot, so pilot-side steps are not his** (user direction, 2026-10-17: *"The
+  quickstart guide includes steps that the pilot does, like the ASP-17 switches. For now Petrovich
+  is copilot only."*). Every `ASP_17V` row drops out, including the recon table's `AUTO/MAN` (553)
+  and the PUVL selector (523). **Whether `CPLR DISTR` is operator-reachable is open, and it decides
+  whether it belongs in this entry at all** — if it is pilot-side, the sequence either waits on the
+  pilot or Petrovich asks for it, which is a behaviour question for the explore pass.
+
+  **The warm-up is ~5 minutes, measured** (*"The guindace unit warmup took about 5 minutes, I
+  measured."*) — longer than his own earlier 3–4 min and the recon note's 210 s program timer, and
+  it supersedes both. Carried, not built against: the zero-warm-up direction still stands.
   **Specification: `docs/concept/9K113.md`** plus
   `docs/acceptance/2026-10-15-9k113-sight-direction.md` §5, §8.
   **Reconnaissance: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`** — the full
   11-switch sequence, the 3–4 min and 10–15 s timings, and the device/command/argument numbers.
+
+  **Probe flown 2026-10-17 — the switch question is ANSWERED, the sight question is not.**
+  `Export.probe-9k113-effectors.lua`, card `docs/acceptance/2026-10-17-9k113-effectors-probe.md`,
+  pilot's observations `docs/acceptance/2026-10-17-9k113-effectors-probe-results.md`.
+
+  - **`performClickableAction` moves cockpit switches on devices 6 (`WEAP_SYS`) and 7 (`I9K113`)
+    from the pilot's seat, against the operator's panels** — neither device had ever been written
+    to. User's reading, and the operative one: *"several swithces moved -> assume we can move
+    all."* Stage 2's switch sequence is buildable.
+  - **The warm-up *sequence* this probe wrote is wrong, and is deliberately left wrong for now** —
+    *"Let it be, we'll fix later. I can setup the warmup for now."* Writing a switch and ordering
+    the procedure are different questions; only the first is answered.
+  - **A switch write animates over ~3 frames** (`0.32 → 0.64 → 1.00`), so a readback taken
+    immediately catches an intermediate value. The project's own 1 s inter-switch delay covers it.
+  - **The `READY` lamp is not readable.** `list_indication(8)` (`ccGunnersCPanel`, never tried
+    before) returns 0 bytes powered or not; `list_indication(0)` returns the sight viewport's
+    element tree and key-binding help, byte-identical before and after power. A `Ready_9k113` node
+    exists in that tree carrying no value. **Finding 2's `list_indication` workaround is closed as
+    unavailable** — readiness stays a self-run timer.
+
+  **Decision 1 is ANSWERED by the slew probe, 2026-10-17, and it inverts the plan's
+  recommendation** (`aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`):
+
+  - **The AI axis (3060/3061) is inert.** Five bearings and twelve staircase steps on each axis,
+    in two separate runs, one with the aircraft correctly set up by hand and `OBSERV` confirmed
+    on — args 874/876 never moved off `0.00000`. Every call returned `ok=true`, so the return
+    value distinguishes nothing.
+  - **The player axis (3025/3026) moves the head**, in the same run, same device, same
+    `SetCommand` path, immediately after the AI axis did not: ~45° of azimuth in one ~3 s hold at
+    0.5 deflection (13–16°/s), elevation the same shape and sign-inverted.
+  - **So the rate loop is mandatory, not optional, and `[[BL-B63]]`'s fast lane is a hard
+    dependency again** — as this entry said under direction §12 before `plans/9k113-effectors/
+    plan.md` §0 argued it away on the strength of the 2026-09-11 AI-axis measurement. That older
+    measurement is not overwritten: two live passes disagree and the reason is unknown.
+  - **The plan's own scope caution now applies**: narrow this entry to the switch sequence and
+    `OBSERV`, which are unblocked and buildable today, and file the slew loop as its own entry
+    gated on `BL-B63`.
+  - **The slew half left this entry on the strength of that**: `[[BL-B80]]`, with the `BL-B63`
+    dependency and the one remaining probe run attached to it rather than to this one.
 
   Minted 2026-10-15 from the `[[BL-B64]]` split (user direction §5: *"We'll then add actually
   manipulating the systems in cockpit"*). Entry 2 of 3; `[[BL-B64]]` is perception, `[[BL-B67]]` is
