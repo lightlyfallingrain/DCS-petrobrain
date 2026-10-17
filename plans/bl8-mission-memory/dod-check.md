@@ -161,3 +161,74 @@ found at this gate: the commanded-mark path has no live voice (or any other pilo
 surface, contradicting Decision 6 and blocking the "set a mark" half of Sortie A as specified.
 Recommend a small Implementer fix on `audio-adapter/src/vocabulary.py`, a narrow Reviewer check,
 then re-run the `match_transcript` probe before DoD re-issues and the acceptance card is written.
+
+## Re-confirmation — 2026-10-17
+
+Verdict scoped to tip **`40daea7ecf238e58d33a7be64f9a07386bb85ccb`** (worktree HEAD started at
+`24f217fc`, a strict ancestor of the named tip; `git merge --ff-only 40daea7e` fast-forwarded
+cleanly onto a clean tree — confirmed before any check ran).
+
+Two commits closed the finding above:
+
+- `f6b81f4b` — `mark_here`/`mark_target` added to `audio-adapter/src/vocabulary.py`'s
+  `VOICE_ONLY_TOKENS`/`PHRASES` (`mark here` / `mark this position` / `remember this location`;
+  `mark target` / `remember target`), plus four new tests in
+  `audio-adapter/tests/test_command_matcher.py`. Diff confirmed `audio-adapter`-only (plus a plan
+  update and an implementer memory note) — **no `body-layer` file touched**.
+- `40daea7e` — Reviewer: APPROVED (third dated section of `review.md`). Re-ran the probe itself,
+  added 17 further adversarial/near-miss cases, found no collisions, mutation-tested the new
+  tests two ways.
+
+**DoD's own `match_transcript` probe, re-run rather than trusted:**
+
+```
+'mark here'                   -> token='mark_here',   match_ratio=1.0
+'mark this position'          -> token='mark_here',   match_ratio=1.0
+'remember this location'      -> token='mark_here',   match_ratio=1.0
+'mark target'                 -> token='mark_target',  match_ratio=1.0
+'remember target'              -> token='mark_target',  match_ratio=1.0
+'mark the target'              -> token='mark_target',  match_ratio=1.0
+'remember the target'          -> token='mark_target',  match_ratio=1.0
+'remember this spot'           -> token='mark_here',   match_ratio=0.667  (correct fuzzy hit)
+"that's a remarkable sight"    -> token=None,          match_ratio=0.0    (correctly no match)
+'Petrovich, mark here'         -> token='mark_here',   match_ratio=0.667
+'mark here please'             -> token='mark_here',   match_ratio=1.0
+```
+
+All five phrasings resolve; no near-miss or adversarial case collides. The gap DoD found on the
+first pass is closed.
+
+**Subproject checks, re-run from inside this worktree, main-checkout venv interpreters (worktree
+has none):**
+
+```
+audio-adapter: ruff format --check -> 29 files already formatted
+audio-adapter: ruff check          -> All checks passed!
+audio-adapter: mypy src            -> Success: no issues found in 15 source files
+audio-adapter: pytest -q           -> 284 passed, 1 skipped in 28.80s
+body-layer:    ruff format --check -> 152 files already formatted
+body-layer:    ruff check          -> All checks passed!
+body-layer:    mypy src            -> Success: no issues found in 68 source files
+body-layer:    pytest -q           -> 2162 passed, 4 xfailed in 16.29s
+```
+
+All match the implementer's/Reviewer's claimed counts exactly. `git status --porcelain` is empty —
+clean tree, nothing uncommitted, no artifacts committed.
+
+**Milestone Completion question — carried forward, not re-derived:** BL-8's completion unblocks
+`X-B20`'s knowledge gate (previously aspirational, now checkable against a real store) and narrows
+the destruction-determination and motion-direction work to fill an existing schema slot. It does
+**not** make the brain able to use any of this yet — nothing dispatches `TOOL_SET` generically, so
+`recall_memory`/`remember_location`/the `get_contact_history` fold are reachable only from
+body-layer's own test suite today. That dispatcher is the real next dependency, not a BL-8 stage
+and not this gate's problem to solve.
+
+## Overall verdict (re-confirmed)
+
+**PASS, conditional on Sortie A.** The voice-vocabulary gap is closed and independently verified
+(probe output above, not taken on trust). All mechanical checks pass on both touched subprojects.
+Scope, documentation and the deferred-stage decisions (Stage 4, Stage 6) match the plan and the
+user's own 2026-10-17 direction. The feature is write-only in flight by design, so the acceptance
+boundary is a post-flight file read — see `docs/acceptance/2026-10-17-bl8-mission-memory-sortie.md`
+for what that sortie needs to cover and what "good" looks like reading the file back. Not blocked
+on anything further.

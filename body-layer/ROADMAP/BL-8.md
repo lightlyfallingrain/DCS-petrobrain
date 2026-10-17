@@ -1,6 +1,6 @@
 # BL-8 — Memory layer interfaces
 
-- [~] **BL-8 — Memory layer interfaces.** #status/in-progress Deliberately last (user decision, 2026-09-10:
+- [~] **BL-8 — Memory layer interfaces.** #status/in-progress #needs-flight Deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
   Standing awareness note while BL-2..BL-7 touch in-mission memory shapes (`Contact`/`ContactStore`,
   BL-4's `AttentionArea` registry): keep BL-8's eventual mission-end export/persistence boundary in
@@ -45,11 +45,32 @@
     itself is trustworthy; the gate it needs to flip lives in `belief/callouts.py`
     (`_OBSERVABILITY_EXEMPT_KINDS`), a separate speech decision with its own acceptance sortie.
 
+  **DoD's first pass (2026-10-17, `6f7b50cd`) returned NOT YET PASS: Decision 6's commanded-mark
+  path had no live voice input surface.** `mark_here`/`mark_target` were wired into
+  `belief/crew_console.py`'s dispatch table and worked correctly from the `!voice` developer
+  harness, but `audio-adapter/src/vocabulary.py` — the separate subproject that actually turns a
+  spoken phrase into a command token — had no matching entry, so `match_transcript` returned
+  `None` for every plausible phrasing. Three review passes (Reviewer, Performance, Security) had
+  each correctly scoped themselves to body-layer and missed it; DoD caught it only by probing
+  `match_transcript` directly rather than trusting the dispatch-table change. Fixed in `f6b81f4b`
+  (five phrasings added: `mark here` / `mark this position` / `remember this location` for
+  `mark_here`, `mark target` / `remember target` for `mark_target`), re-reviewed and APPROVED in
+  `40daea7e` (17 further adversarial/near-miss cases probed, including `mark the target`,
+  `remember the target`, `remember this spot`, and `that's a remarkable sight` as a deliberate
+  non-match), and DoD re-confirmed the same probe plus both subprojects' full test suites
+  (`audio-adapter`: 284 passed, 1 skipped, mypy clean; `body-layer`: 2162 passed, 4 xfailed,
+  unchanged by the fix) on 2026-10-17. See `plans/bl8-mission-memory/dod-check.md` for the full
+  re-confirmation and `.claude/agent-memory/implementer/
+  project_voice_token_needs_audio_adapter_vocabulary.md` for the generalised lesson: a new
+  voice-dispatchable command token in `body-layer` needs its own `audio-adapter/src/vocabulary.py`
+  entry named explicitly in the plan, not assumed to follow from the dispatch-table change.
+
   **Outstanding: Sortie A.** The feature is write-only in flight — nothing in this batch reads
   `mission_memory`'s own JSONL back during a sortie — so acceptance is a post-flight file read:
-  fly a mission with ground units, air defence, a mark, and something shooting, then check the
-  notepad reads like a kneeboard page (entry count in the tens, not the thousands; a group's
-  strike chain is a sensible history; nothing obviously missing or obviously noise). The three
-  admission thresholds (`RESIGHT_MOVE_M`, `RESIGHT_MIN_INTERVAL_S`, `FIRED_ON_FOLD_WINDOW_S`) are
-  guesses until this sortie runs.
+  fly a mission with ground units, air defence, a mark set by voice, and something shooting, then
+  check the notepad reads like a kneeboard page (entry count in the tens, not the thousands; a
+  group's strike chain is a sensible history; nothing obviously missing or obviously noise). The
+  four admission thresholds (`RESIGHT_MOVE_M`, `RESIGHT_MIN_INTERVAL_S`,
+  `GROUP_ENTRY_CONFIDENCE_FLOOR`, `FIRED_ON_FOLD_WINDOW_S`) are guesses until this sortie runs.
+  Card: `docs/acceptance/2026-10-17-bl8-mission-memory-sortie.md`.
 

@@ -1323,3 +1323,14 @@ two functions that must agree (2026-09-19).
   an import-direction invariant and a "this module gains the handler" plan decision are in tension,
   closure injection from the one module allowed to see both sides is the resolution, not an
   exception to the invariant (`plans/bl8-mission-memory/implementation.md`).
+- **A new voice-dispatchable command token wired into `body-layer`'s dispatch table is not
+  reachable by voice until `audio-adapter/src/vocabulary.py` also gets a matching `TOKENS`/
+  `PHRASES` entry — a cross-subproject step a plan's "Affected Modules" list can silently omit.**
+  `mark_here`/`mark_target` dispatched correctly in unit tests via the `!voice` developer harness,
+  which simulates an already-resolved match, so three review passes (Reviewer, Performance,
+  Security) each correctly scoped themselves to `body-layer` and missed that `audio-adapter` had
+  no entry at all — `match_transcript` returned `None` for every phrasing until DoD probed it
+  directly. A plan adding a voice-reachable command needs to name
+  `audio-adapter/src/vocabulary.py` explicitly, and the check is to probe `match_transcript` on
+  the intended phrasings, not to trust the `!voice` harness, which tests dispatch rather than
+  recognition (`plans/bl8-mission-memory/dod-check.md`).
