@@ -85,7 +85,28 @@ direction) after a cheap final gate reported work as verified when it was not; `
 has what that cost, for anyone tempted to downgrade the last gate to save money again. For
 architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
 
-**`performance-reviewer` and `security` run once per whole feature, immediately before DoD** — not mid-feature, and not once per stage of a multi-stage feature. Enabled 2026-09-24 (user direction, from the 2026-09-22→2026-09-25 retro), replacing the previous blanket skip.
+**`performance-reviewer` and `security` run once per *batch of stages actually executed together*, immediately before DoD** — not once per stage, and never held back waiting for stages that are blocked. Enabled 2026-09-24 (user direction, from the 2026-09-22→2026-09-25 retro) as *"once per whole feature"*, replacing the previous blanket skip; **restated in these terms 2026-10-17**, after that day's retro measured ~19 performance-review passes in ten days against a rule that said one per feature.
+
+The user's own words for the rule now in force:
+
+> *"When stages are being done one right after the other, like stages 1-3, then perf and sec at the
+> end, after stage 3. If there's, say, stage 4 and 5 left but they wait for something, then don't
+> wait for them on perf and sec. → group into a single run when doing stages in a batch."*
+
+So the unit is the **batch**, not the feature and not the stage:
+
+- Stages 1–3 built back to back → **one** performance pass and **one** security pass, after stage 3.
+- Stages 4–5 blocked on a sortie, a probe or a decision → **do not wait for them.** The batch that was
+  built gets its passes and goes to DoD; stages 4–5 get their own passes when they are built.
+- A single stage built alone is its own batch, so a one-stage feature still gets both passes. That is
+  the rule, not a violation of it.
+
+**Why the "whole feature" wording had to go**: it was unenforceable on this project's actual shape,
+where a feature's stages routinely ship in separate merges days or weeks apart. Read strictly it
+would hold both passes until the last stage of `BL-14` or the 9K113 series; read loosely it justifies
+a pass per stage, which is what practice drifted into. Neither was intended. The drift was found by
+*counting commits in a retro*, not by anyone noticing at the time — the same lesson this file already
+records about standing exemptions: a cadence nobody re-checks outlives its premise.
 
 Scoping, in the user's own terms: this is for now a single-user, LAN-only project under active development, so this is one pass per feature rather than "both roles fully on everywhere" — deeper security and performance effort comes once the important milestones (brain and memory) are complete.
 
@@ -349,6 +370,36 @@ signal; a number that shows the work is not.
 
 **Do not narrate process.** "I'll dispatch a reviewer, then DoD" tells them nothing they can use.
 Say what came back and what it means.
+
+**Prefer a picture where it replaces prose.** User direction, 2026-10-17, raised as his own retro
+item:
+
+> *"We should use visualisations. I'm a visual thinker, so graphs, diagrams, mock views of cockpit or
+> map (=svg), all those help me understand and think. Visual representation can often replace lengthy
+> textual representation."*
+
+Note the last clause: a visual **replaces** the text rather than decorating it. A diagram followed by
+the same explanation in prose misses the point and costs more to read than either alone. Reach for
+one whenever the subject is geometry, layout, state over time, a pipeline, or a comparison of options
+— which here is most of it:
+
+| medium | for |
+|---|---|
+| **SVG** | scale geometry: cockpit layout, sightlines, angular separation, a map extract with the numbers on it |
+| **Mermaid** | state machines, flow, dependency, a mechanism before and after |
+| **HTML artifact** | anything worth interacting with or keeping — the status page and the test cards are the precedent |
+| inline ASCII | a quick table only; not a substitute for a drawing |
+
+**Rough and early beats polished and late**, for the same reason `/explore` asks for mock output:
+something concrete is what cues recall, and several of this project's largest corrections arrived
+from the user reading a mock rather than answering a question — including, the day this was written,
+an o'clock bearing missing from a mock callout. **Honest limit, to be stated rather than promised
+around:** there is no image-generation model here, so "visual" means SVG, Canvas, HTML or Mermaid —
+geometry, charts, mock interfaces and diagrams, not photographic or artistic renderings.
+
+**This direction already existed and was scoped too narrowly to fire.** The 2026-09-18 version lives
+in `.claude/skills/explore/SKILL.md`, which only runs during an `/explore` conversation; this
+restatement is general and applies to any answer.
 
 **Still say the uncomfortable thing.** Brevity is not the same as smoothing. A real risk, a wrong
 earlier claim, or a disagreement with a request gets said plainly — in a sentence, not a section.

@@ -344,11 +344,11 @@ LOWRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
 #: Classification tier ("something is a BMP"): a *smaller* value here means
 #: a *longer* naked-eye classification range (`range = size_m / threshold`
 #: under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for
-#: a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction. See
-#: the block above for the calibration this is the `medres` row of.
-#: `lo` is floored at the same `RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128)
-#: as `LOWRES_ANGULAR_RADIUS_RAD` above, for the same reason and the
-#: same literal-not-reference constraint.
+#: a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction, and
+#: `lo` is floored at the same resolution limit as `LOWRES_ANGULAR_RADIUS_RAD`.
+#: See the block above for the calibration this is the `medres` row of.
+#: That floor is `RESOLUTION_ANGULAR_RADIUS_RAD` (0.00128), for the same
+#: reason and under the same literal-not-reference constraint.
 MEDRES_ANGULAR_RADIUS_RAD: Final[float] = tuning.real(
     "perception.visibility.MEDRES_ANGULAR_RADIUS_RAD",
     0.014,

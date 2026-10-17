@@ -230,8 +230,9 @@ assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S, (
 )
 
 #: Past this much elapsed time since last observed, a contact is considered
-#: lost outright rather than merely stale. Set to 4x `POSITION_HALF_LIFE_S`
-#: -- long enough that "estimated" (stale-but-plausible) has had room to mean
+#: lost outright rather than merely stale -- set to 4x `POSITION_HALF_LIFE_S`,
+#: so the two must be retuned together.
+#: Four times over is long enough that "estimated" (stale-but-plausible) has had room to mean
 #: something distinct from "tracked", short enough that a contact does not
 #: linger indefinitely as "estimated" once the crew has plainly lost it.
 LOST_THRESHOLD_S: Final[float] = tuning.real(
