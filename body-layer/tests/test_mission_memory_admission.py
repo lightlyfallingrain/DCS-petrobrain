@@ -106,6 +106,19 @@ def test_group_entry_written_once_crossing_the_confidence_floor() -> None:
     assert memory.entries[0].kind == "group"
     assert memory.entries[0].belief_ref == "CONTACT_1"
 
+    # `_seen_how`'s output, written once per entry: `optic` is the most
+    # recent sighting span's own channel string (`_contact`'s default
+    # source, "naked_eye_visual_filtered"), `range_m` is honestly `None`
+    # (the sighting source cannot supply a range -- module docstring),
+    # and `confidence`/`certainty` are populated from the contact's own
+    # belief, not fabricated.
+    seen = memory.entries[0].seen
+    assert seen is not None
+    assert seen.optic == contact.sighting_spans[-1].source
+    assert seen.range_m is None
+    assert seen.confidence == GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1
+    assert seen.certainty == "observed"
+
     # Same poll state, re-run immediately -- must not write a second time
     # (not enough time has passed, and nothing changed).
     step(memory, store, now_sim=1.0)
@@ -193,6 +206,7 @@ def test_air_defence_class_always_writes_its_own_entry() -> None:
         contact_id="CONTACT_AD",
         class_value="OP_SRSAM",
         confidence=GROUP_ENTRY_CONFIDENCE_FLOOR - 0.3,
+        source="scope",
     )
     store = _store_with(contact)
     memory = MissionMemory()
@@ -200,6 +214,15 @@ def test_air_defence_class_always_writes_its_own_entry() -> None:
     step(memory, store, now_sim=0.0)
     assert len(memory.entries) == 1
     assert memory.entries[0].kind == "air_defence"
+
+    # `seen.optic` tracks whichever channel the contact was actually last
+    # sighted through -- "scope" here, not the group test's naked-eye
+    # default -- so this also distinguishes "reads the real sighting span"
+    # from "hardcodes the common-case string".
+    seen = memory.entries[0].seen
+    assert seen is not None
+    assert seen.optic == "scope"
+    assert seen.range_m is None
 
 
 def test_air_defence_and_group_entries_link_both_ways_eventually() -> None:
@@ -289,6 +312,49 @@ def test_nullable_everything_contact_still_produces_a_valid_entry() -> None:
     assert entry.payload.motion.state is None
     assert entry.payload.motion.dir is None
     assert entry.payload.ad_link is None
+
+
+# --- Decision 8: lat/lon from believed x/z, via a registered theatre -----
+
+
+def test_registered_theatre_populates_lat_lon_from_believed_position() -> None:
+    """Decision 8's first claim: `lat`/`lon` are `dcs_to_wgs84` applied to
+    the believed `x`/`z` -- exercised here against "Syria", a theatre
+    actually registered in `coordinates.projections.THEATRE_PROJECTIONS`,
+    which every other admission test skips by passing `theatre=None`."""
+    from coordinates import dcs_to_wgs84
+
+    contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1, x=1000.0, z=500.0)
+    store = _store_with(contact)
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0, theatre="Syria")
+
+    assert len(memory.entries) == 1
+    pos = memory.entries[0].pos
+    assert pos is not None
+    expected_lat, expected_lon = dcs_to_wgs84("Syria", 1000.0, 500.0)
+    assert pos.lat == expected_lat
+    assert pos.lon == expected_lon
+
+
+def test_unregistered_theatre_yields_null_lat_lon_and_never_raises() -> None:
+    """Decision 8's second claim, and the one place in this batch a
+    regression could silently reintroduce a crash on the poll thread: an
+    unregistered theatre string must not propagate the `ValueError`
+    `dcs_to_wgs84` raises for it (`coordinates/__init__.py`) past
+    `admission.step` -- a memory write must never kill the poll loop."""
+    contact = _contact(confidence=GROUP_ENTRY_CONFIDENCE_FLOOR + 0.1)
+    store = _store_with(contact)
+    memory = MissionMemory()
+
+    step(memory, store, now_sim=0.0, theatre="Not_A_Registered_Theatre")
+
+    assert len(memory.entries) == 1
+    pos = memory.entries[0].pos
+    assert pos is not None
+    assert pos.lat is None
+    assert pos.lon is None
 
 
 # --- fired_on rule (Stage 3) -------------------------------------------

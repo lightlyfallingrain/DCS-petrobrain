@@ -114,3 +114,32 @@ def test_mark_target_unknown_contact_returns_none() -> None:
     result = mark_target(memory, ContactStore(), "CONTACT_NOPE", now_sim=0.0)
     assert result is None
     assert memory.entries == []
+
+
+def test_mark_here_registered_theatre_populates_lat_lon() -> None:
+    """Decision 8's first claim, on `marks.py`'s own `_mark_position` --
+    every other test in this file passes `theatre=None` (the default),
+    which skips the `if theatre is not None:` branch entirely."""
+    from coordinates import dcs_to_wgs84
+
+    memory = MissionMemory()
+    entry = mark_here(memory, _ownship(x=1000.0, z=500.0), now_sim=0.0, theatre="Syria")
+
+    assert entry.pos is not None
+    expected_lat, expected_lon = dcs_to_wgs84("Syria", 1000.0, 500.0)
+    assert entry.pos.lat == expected_lat
+    assert entry.pos.lon == expected_lon
+
+
+def test_mark_here_unregistered_theatre_yields_null_lat_lon_and_never_raises() -> None:
+    """Decision 8's second claim on `marks.py`: an unregistered theatre
+    must not propagate `dcs_to_wgs84`'s `ValueError` past `mark_here` --
+    a memory write must never kill the poll loop."""
+    memory = MissionMemory()
+    entry = mark_here(
+        memory, _ownship(), now_sim=0.0, theatre="Not_A_Registered_Theatre"
+    )
+
+    assert entry.pos is not None
+    assert entry.pos.lat is None
+    assert entry.pos.lon is None

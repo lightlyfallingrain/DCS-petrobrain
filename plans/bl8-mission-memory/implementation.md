@@ -282,3 +282,80 @@ corresponding test; see the per-stage commit messages for the mapping.
   Stage-5-specific, and doing it piecemeal per stage would leave an inconsistent partial entry.
   Flagging for whoever closes out the milestone (DoD, or a dedicated doc pass) rather than
   addressing it silently here.
+
+---
+
+### Reviewer's three required fixes (`plans/bl8-mission-memory/review.md`)
+
+**Fix 1 — `admission._seen_how`'s output was correct by inspection but unverified.** Added
+assertions on `entry.seen` to `test_group_entry_written_once_crossing_the_confidence_floor`
+(`optic` matches `_contact`'s default sighting-span source, `range_m is None`, `confidence`
+matches the contact's own, `certainty == "observed"`) and to
+`test_air_defence_class_always_writes_its_own_entry`, the latter against a contact sighted
+through `"scope"` rather than the group test's naked-eye default — deliberately a different
+optic string, so passing both distinguishes "reads the real sighting span" from "hardcodes the
+common string that happens to match." Mutation-tested per the project's "show the red" convention:
+changed `range_m=None` to `range_m=999.0` in `admission.py`, confirmed both new assertions fail
+for that reason (`seen.range_m is None` → `AssertionError: assert 999.0 is None`), restored by
+`shasum` comparison (matched before/after), re-ran green.
+
+**Fix 2 — Decision 8 (`dcs_to_wgs84` on believed x/z; unregistered theatre never raises) was
+untested against a real registered theatre anywhere in the suite.** Every existing test in
+`test_mission_memory_admission.py`/`test_mission_memory_marks.py` passed `theatre=None`, which
+skips the `if theatre is not None:` branch in both `admission._build_entry_position` and
+`marks._mark_position` entirely. Added, per site, one test with `theatre="Syria"` (registered in
+`coordinates.projections.THEATRE_PROJECTIONS`, confirmed against the module directly rather than
+assumed) asserting `pos.lat`/`pos.lon` equal `dcs_to_wgs84("Syria", x, z)`'s own return value, and
+one with `theatre="Not_A_Registered_Theatre"` asserting `pos.lat`/`pos.lon` are `None` and nothing
+raises. Four new tests total:
+`test_registered_theatre_populates_lat_lon_from_believed_position`,
+`test_unregistered_theatre_yields_null_lat_lon_and_never_raises` (admission), and
+`test_mark_here_registered_theatre_populates_lat_lon`,
+`test_mark_here_unregistered_theatre_yields_null_lat_lon_and_never_raises` (marks).
+**Mutation-tested the one branch the review flagged as the actual safety risk** (a regression
+silently reintroducing a crash on the poll thread): removed the `try/except ValueError` guard in
+both `admission.py` and `marks.py` in turn, confirmed the matching unregistered-theatre test fails
+with the real `ValueError` propagating up through `dcs_to_wgs84`/`_theatre_crs`
+(`coordinates/__init__.py`) while the registered-theatre test still passes unaffected, restored by
+`shasum` comparison, re-ran green. This also confirms the registered-theatre test is not itself
+exercising the guard by accident — it fails for a different reason (or not at all) when the guard
+is intact and the theatre genuinely resolves.
+
+**Fix 3 — the plan's own "Changed" list for `body-layer/CLAUDE.md`, `body-layer/docs/STRUCTURE.md`,
+and `body-layer/ROADMAP/BL-8.md` was still untouched after both prior passes flagged it rather than
+doing it.** Added:
+- `body-layer/CLAUDE.md`'s Module map: a new "Mission memory — the worth-remembering ledger"
+  section between Belief and Surfaces, one bullet per module (`entries.py`, `store.py`,
+  `admission.py`, `marks.py`, `query.py`/`tools.py`, `log.py`) plus the import-direction
+  invariant bullet, mirroring the existing per-area grouping style.
+- `body-layer/docs/STRUCTURE.md`: the same six modules' detail entries, inserted at the
+  belief/surfaces boundary (immediately before `crew_console.py`, which is the first "surfaces"
+  entry), each carrying the *why* the plan and code docstrings already state — Decision 8's
+  believed-position/unregistered-theatre posture, Decision 3's belief-transition-driven cadence,
+  Decision 1's structural import-direction enforcement, Decision 6's deliberate non-sharing of
+  `_build_entry_position` between `admission.py` and `marks.py`.
+- `body-layer/ROADMAP/BL-8.md`: changed `[ ]`/`#status/open` to `[~]`/`#status/in-progress`, and
+  added a block recording Stages 1, 2, 3, 5 as landed (with the package file list and a pointer to
+  `review.md`), Stage 4's trigger and Stage 6 deferred per the user's 2026-10-17 decision (with
+  the reason each was deferred, not just the fact), and Sortie A as outstanding — the feature is
+  write-only in flight, so acceptance is a post-flight file read, which this entry states
+  explicitly so a future reader does not look for an in-flight observable that was never built.
+
+**Nothing else touched.** The Reviewer's Optional Refinements (`tuning.fraction()` rendering no
+`range:` line; the `ad_link`/`group_link` symmetry test being in-memory rather than a genuine
+JSONL replay) are confirmed pre-existing/out-of-scope per the review's own reasoning and were left
+alone, per this task's explicit instruction.
+
+### Checks
+
+```
+cd body-layer
+ruff format --check src tests   -> 152 files already formatted
+ruff check src tests            -> All checks passed!
+mypy src                        -> Success: no issues found in 68 source files
+pytest -q                       -> 2162 passed, 4 xfailed in 15.14s
+```
+
+2162 = the Reviewer's baseline of 2158 plus the 4 new tests (2 `seen` assertions added to existing
+tests, not new tests; the 4 new theatre tests). Worktree has no `.venv`, as both prior implementers
+and the Reviewer reported — ran against the main checkout's `body-layer/.venv`.

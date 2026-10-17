@@ -913,6 +913,65 @@ The entries are in the order they were written, which is roughly perception → 
   defensive structural parse only (skip malformed items, never raise) — **not** D10's semantic
   validator (`belief.brain_reply`, see its own entry below), which checks a `PICK`'s id was
   actually offered and a `BECAUSE` clause's words actually appear in the transcript.
+- `src/mission_memory/entries.py` (BL-8, `plans/bl8-mission-memory/plan.md`) — `Entry`, the
+  append-only record every write produces, and its per-`kind` payload dataclasses
+  (`GroupPayload`/`AirDefencePayload`/`AttackRunPayload`/`MarkPayload`/`FiredOnPayload`). Decision
+  2's split: `EntryPosition.y` is `Contact.last_alt_m` (a last-observed value, no fused estimate,
+  `uncertainty_m` says nothing about it), and `as_of_sim` is kept separate from the entry's own
+  `t_sim` on purpose — an entry written now may record a look taken moments earlier.
+  `AttackRunPayload.outcome`'s `AttackOutcome` literal carries an explicit `"unknown"` (never
+  `None`) so a Stage-4-less entry, if one is ever written before that trigger exists, still has a
+  real value to serialise. `MotionInfo.dir` and `.outcome` both ship nullable-forever-until-later
+  — no direction belief and no destruction-determination signal exist yet (plan's own Risks &
+  Unknowns), not an oversight.
+- `src/mission_memory/store.py` — `MissionMemory`, the in-memory JSONL-backed log.
+  `MissionMemory.append` is the **single construction site** for `Entry` across this whole
+  package: `admission.py`/`marks.py`/`query.py`/`tools.py` contain no `Entry(` call at all,
+  grep-enforced (`tests/test_mission_memory_store.py`'s
+  `test_admission_and_marks_never_construct_entry_directly`, mutation-tested by the Reviewer —
+  injecting a second `Entry(` call anywhere in `admission.py` fails it immediately). Decision 4's
+  append-only rule means a strike is itself a separate append (`strikes=<seq>` on the new entry),
+  never an edit of the struck one; `struck_by` is **rebuilt by replaying the log**
+  (`rebuild_struck_by`), tested against both the in-memory store and a genuine JSONL round-trip.
+- `src/mission_memory/admission.py` — the `group`/`air_defence`/`fired_on` admission rules
+  (Decision 3). **Driven by belief-state transitions, not by percepts or callouts** — `step` is
+  called once per poll from `logger._mission_memory_step`, after `ContactStore.tick()` has settled
+  that poll's belief and before any speech is drained. `_seen_how` reads `Contact.sighting_spans
+  [-1].source` for `SeenHow.optic`, deliberately never `Contact.last_percept` (that field's own
+  docstring names `belief.attack_run` as its one sanctioned reader outside `Contact`'s pulled-on
+  fields, and this module has no standing exception); `SeenHow.range_m` stays `None` — a real fact
+  genuinely unavailable from this channel, not fabricated. `_build_entry_position` is Decision 8:
+  `lat`/`lon` come from `coordinates.dcs_to_wgs84` on the *believed* `x`/`z`, never DCS ground
+  truth, and are `None` for an unregistered theatre — the `ValueError` `dcs_to_wgs84` raises for
+  that case is caught here and must never propagate past a memory write into the poll loop.
+  Holds the four tuning constants: `GROUP_ENTRY_CONFIDENCE_FLOOR` (a new key — searched for an
+  existing "is this nameable yet" threshold on the describe/callout path and found none),
+  `RESIGHT_MOVE_M`, `RESIGHT_MIN_INTERVAL_S`, `FIRED_ON_FOLD_WINDOW_S` (the user's own "~2 min").
+  `FiredOnTracker` is the one admission rule's own per-shooter suppression bookkeeping, owned by
+  the poll loop's caller, deliberately not state on `MissionMemory` itself.
+- `src/mission_memory/marks.py` — the commanded-mark path (Decision 6), `mark_here`/`mark_target`,
+  reachable by voice and the brain tool only — no new F10 radio-menu entry, per BL-10's explicit
+  instruction not to re-expand that tree. **Deliberately does not share `admission.py`'s
+  `_build_entry_position`**: that helper is keyed on a `Contact` (it reuses `EnrichmentContext.
+  cache.get_or_compute`'s per-contact cache); a mark's subject is sometimes ownship itself, which
+  has no `Contact`. The small `dcs_to_wgs84`/landmark duplication in this module's own
+  `_mark_position` is accepted rather than forcing one shape neither call site wants. Same
+  unregistered-theatre posture as `admission.py`: caught, never raised.
+- `src/mission_memory/query.py`, `src/mission_memory/tools.py` — the recall/query surface:
+  `recall_memory`'s filters and `get_contact_history`'s fold of belief history with this store's
+  own chain for a contact, plus the brain-facing tool wrappers that grew `TOOL_SET` from 15 to 17
+  (Decision 5 — `tool_api.py`'s own docstring records the fold-vs-extend reasoning BL-7 argued
+  against reopening, and why these two new tools have no existing tool's question to be a subset
+  of).
+- `src/mission_memory/log.py` — JSONL read/write for the store; no admission or query logic.
+- **Import direction (Decision 1) is structurally enforced, not a convention**:
+  `mission_memory/` may import `belief`; no module in `belief/` may import `mission_memory`,
+  except `belief/tool_api.py` (the composition root of the brain-facing tool surface) —
+  grep-enforced against `src/belief/*.py` by `tests/test_mission_memory_import_direction.py`,
+  mutation-tested by the Reviewer (injecting an import into `contacts.py` fails it immediately).
+  `crew_console.py`'s need to trigger a write without importing `mission_memory` (Decision 6's
+  tension with Decision 1) is resolved by **closure injection in `logger.py`** — the same pattern
+  `speech_log_sink` already uses — rather than carving a second exception.
 - `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
   session, deliberately **not** an extension of `belief.console.Console` (that module is an explicit
   developer debug tool; `CrewConsole` runs typed sentences through `parse_utterance`'s grammar and
