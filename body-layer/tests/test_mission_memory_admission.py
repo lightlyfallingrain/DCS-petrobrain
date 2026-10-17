@@ -14,16 +14,19 @@ from belief.cardinality import (
 )
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact, ContactStore, SightingSpan
+from belief.events import CONTACT_FIRING_SEEN, Event
 from belief.groups import Group
 from belief.motion import MotionBelief
 from belief.position_belief import Covariance2D, PositionEstimate
 from mission_memory.admission import (
+    FIRED_ON_FOLD_WINDOW_S,
     GROUP_ENTRY_CONFIDENCE_FLOOR,
     RESIGHT_MIN_INTERVAL_S,
     RESIGHT_MOVE_M,
+    FiredOnTracker,
     step,
 )
-from mission_memory.entries import AirDefencePayload, GroupPayload
+from mission_memory.entries import AirDefencePayload, FiredOnPayload, GroupPayload
 from mission_memory.store import MissionMemory
 
 _ZERO_COV = Covariance2D(xx=0.0, zz=0.0, xz=0.0)
@@ -286,3 +289,84 @@ def test_nullable_everything_contact_still_produces_a_valid_entry() -> None:
     assert entry.payload.motion.state is None
     assert entry.payload.motion.dir is None
     assert entry.payload.ad_link is None
+
+
+# --- fired_on rule (Stage 3) -------------------------------------------
+
+
+def _firing_event(contact_id: str, event_id: str, t_sim: float) -> Event:
+    return Event(
+        id=event_id,
+        contact_id=contact_id,
+        kind=CONTACT_FIRING_SEEN,
+        t_sim=t_sim,
+        certainty="observed",
+        targets_ownship=True,
+    )
+
+
+def test_two_shots_inside_the_fold_window_produce_one_entry() -> None:
+    store = ContactStore()
+    memory = MissionMemory()
+    tracker = FiredOnTracker()
+
+    store._events.append(_firing_event("CONTACT_SHOOTER", "EVENT_1", 0.0))
+    step(memory, store, now_sim=0.0, fired_on_tracker=tracker)
+
+    store._events.append(
+        _firing_event("CONTACT_SHOOTER", "EVENT_2", FIRED_ON_FOLD_WINDOW_S * 0.5)
+    )
+    step(
+        memory,
+        store,
+        now_sim=FIRED_ON_FOLD_WINDOW_S * 0.5,
+        fired_on_tracker=tracker,
+    )
+
+    fired_on_entries = [e for e in memory.entries if e.kind == "fired_on"]
+    assert len(fired_on_entries) == 1
+
+
+def test_two_shots_outside_the_fold_window_produce_two_entries() -> None:
+    store = ContactStore()
+    memory = MissionMemory()
+    tracker = FiredOnTracker()
+
+    store._events.append(_firing_event("CONTACT_SHOOTER", "EVENT_1", 0.0))
+    step(memory, store, now_sim=0.0, fired_on_tracker=tracker)
+
+    store._events.append(
+        _firing_event("CONTACT_SHOOTER", "EVENT_2", FIRED_ON_FOLD_WINDOW_S * 2)
+    )
+    step(
+        memory,
+        store,
+        now_sim=FIRED_ON_FOLD_WINDOW_S * 2,
+        fired_on_tracker=tracker,
+    )
+
+    fired_on_entries = [e for e in memory.entries if e.kind == "fired_on"]
+    assert len(fired_on_entries) == 2
+    for entry in fired_on_entries:
+        assert isinstance(entry.payload, FiredOnPayload)
+        assert entry.payload.targets_ownship is True
+
+
+def test_fired_on_tracker_never_rescans_already_seen_events() -> None:
+    """Each `step` call only looks at events appended since the last call
+    -- two shooters' events arriving in the same poll must each still
+    produce their own entry, and neither shooter's old event is
+    reprocessed on a later poll with no new events."""
+    store = ContactStore()
+    memory = MissionMemory()
+    tracker = FiredOnTracker()
+
+    store._events.append(_firing_event("CONTACT_A", "EVENT_1", 0.0))
+    store._events.append(_firing_event("CONTACT_B", "EVENT_2", 0.0))
+    step(memory, store, now_sim=0.0, fired_on_tracker=tracker)
+    assert len([e for e in memory.entries if e.kind == "fired_on"]) == 2
+
+    # No new events -- a later poll must not re-write either shooter's
+    # entry a second time.
+    step(memory, store, now_sim=1.0, fired_on_tracker=tracker)
+    assert len([e for e in memory.entries if e.kind == "fired_on"]) == 2

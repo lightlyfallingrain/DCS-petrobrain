@@ -817,6 +817,14 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "cancel_watch",
         "stop_talking",
         "silence",
+        # BL-8 Stage 3 (`plans/bl8-mission-memory/plan.md` Decision 6) --
+        # `_handle_mark_here` always returns a readback or a "no mission
+        # memory configured" line; `_handle_mark_target` additionally
+        # returns "no target selected"/"no such contact" for the two
+        # missing-input cases. Neither needs the no-return-value
+        # exemption.
+        "mark_here",
+        "mark_target",
     }
 )
 
@@ -917,6 +925,22 @@ class CrewConsole:
     #: `scan_*` token reports "no task store configured" and "Cancel Task"
     #: always reports "no pending task", rather than raising.
     tasks: TaskStore | None = None
+    #: BL-8 Stage 3 (`plans/bl8-mission-memory/plan.md` Decision 6) -- the
+    #: commanded-mark path, injected as plain closures rather than a
+    #: `mission_memory.store.MissionMemory` field: Decision 1's import
+    #: direction forbids any module in `belief/` (this one included) from
+    #: importing `mission_memory` at all, so `logger.py` (which sits
+    #: outside `belief/` and may import both) builds these two closures
+    #: over the live `MissionMemory` instance its poll loop writes
+    #: observed entries into, and this console only ever sees a plain
+    #: `str` readback in return -- the same "inject a callable, the caller
+    #: builds it" shape `transcript_log`/`speech_log_sink` already use
+    #: above. `mark_here_fn` takes `now_sim`; `mark_target_fn` takes
+    #: `(contact_id, now_sim)`. `None` (the default, for every surface
+    #: that is not `--crew-text`) means both mark commands report "no
+    #: mission memory configured" rather than raising.
+    mark_here_fn: Callable[[float], str] | None = None
+    mark_target_fn: Callable[[str, float], str] | None = None
     #: How many player commands this console has dispatched, F10 or spoken
     #: -- typed free text and voice's `"fallthrough"` disposition alike
     #: (`plans/binocular-optic/plan.md` D4: "not a special case per
@@ -1433,6 +1457,10 @@ class CrewConsole:
             lines = self._handle_engage(now_sim, slots)
         elif token == "disengage":
             lines = self._handle_disengage()
+        elif token == "mark_here":
+            lines = self._handle_mark_here(now_sim)
+        elif token == "mark_target":
+            lines = self._handle_mark_target(now_sim)
         elif token == "observ_on":
             lines = self._handle_observ_on()
         elif token == "observ_off":
@@ -1967,6 +1995,30 @@ class CrewConsole:
         deselects, for free -- it cancels every active task of every kind,
         `attack_target` included."""
         return self._handle_cancel_task(kinds=("attack_target",))
+
+    def _handle_mark_here(self, now_sim: float) -> list[str]:
+        """`mark here` (`plans/bl8-mission-memory/plan.md` Decision 6) --
+        mark ownship's current position. `self.mark_here_fn` is
+        `logger.py`'s own closure over the live `mission_memory.store.
+        MissionMemory`; this console never imports that package directly
+        (`mark_here_fn`'s own field docstring)."""
+        if self.mark_here_fn is None:
+            return ["no mission memory configured"]
+        return [self.mark_here_fn(now_sim)]
+
+    def _handle_mark_target(self, now_sim: float) -> list[str]:
+        """`mark target` (`plans/bl8-mission-memory/plan.md` Decision 6) --
+        mark the currently selected attack-run target's believed position,
+        reusing `select_target`'s own notion of "the current target"
+        (`_active_attack_target_task`). The "no target selected" failure
+        is the exact wording every other target-keyed command already
+        uses for the same missing input (`_handle_step`'s own check)."""
+        if self.mark_target_fn is None:
+            return ["no mission memory configured"]
+        target_task = self._active_attack_target_task()
+        if target_task is None or target_task.contact_id is None:
+            return ["no target selected"]
+        return [self.mark_target_fn(target_task.contact_id, now_sim)]
 
     def _active_attack_target_task(self) -> PendingIntent | None:
         """The currently active `attack_target` task, or `None` -- shared

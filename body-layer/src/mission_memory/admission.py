@@ -6,8 +6,14 @@ constructing `Entry` itself (`tests/test_mission_memory_store.py`'s
 `test_admission_and_marks_never_construct_entry_directly` enforces this).
 Holds every tuning constant Stage 2/3 introduce.
 
-**Stage 2: the `group` and `air_defence` rules.** `mark`/`fired_on` are
-Stage 3 (`marks.py`); `attack_run` is deferred (plan's effort/value flag).
+**Stage 2 added the `group` and `air_defence` rules. Stage 3 adds
+`fired_on`** -- a `CONTACT_FIRING_SEEN` event is itself a belief-state
+transition `ContactStore.tick()` already materialises, so it belongs here
+alongside the other two rather than in `marks.py` (the commanded-mark
+path, which has no belief-state transition to react to at all -- a mark
+is synchronous on a pilot command, Decision 3's own `mark` row). `mark` is
+Stage 3's other addition, in `marks.py`. `attack_run` is deferred (plan's
+effort/value flag).
 
 **Writer is driven by belief-state transitions, not by percepts or
 callouts** (Decision 3): `step` is called once per poll, from
@@ -26,6 +32,7 @@ field for exactly this case: a real fact genuinely unavailable here)."""
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 from typing import Final
 
 import tuning
@@ -37,6 +44,7 @@ from belief.classification import (
 from belief.contacts import Contact, ContactStore
 from belief.decay import certainty_of
 from belief.enrichment import EnrichmentContext
+from belief.events import CONTACT_FIRING_SEEN
 from belief.mission_phase import MissionPhaseInfo
 from belief.speech import cardinality_phrase
 from belief.threat import envelope_for
@@ -46,6 +54,7 @@ from mission_memory.entries import (
     CompositionItem,
     Entry,
     EntryPosition,
+    FiredOnPayload,
     GroupPayload,
     MotionInfo,
     PhaseInfo,
@@ -97,6 +106,19 @@ RESIGHT_MIN_INTERVAL_S: Final[float] = tuning.real(
     lo=5.0,
     hi=600.0,
     status="agreed-guess",
+)
+
+#: How long, in seconds, a `fired_on` entry for one shooter suppresses a
+#: second entry from the same shooter -- the user's own "~2 min" (explore
+#: notes, Decision 5), stated there as a tunable. Two shots inside this
+#: window from one shooter fold into the one standing entry; past it, a
+#: new one is written.
+FIRED_ON_FOLD_WINDOW_S: Final[float] = tuning.real(
+    "mission_memory.admission.FIRED_ON_FOLD_WINDOW_S",
+    120.0,
+    lo=10.0,
+    hi=900.0,
+    status="judgement",
 )
 
 
@@ -395,6 +417,66 @@ def _maybe_write_air_defence(
     )
 
 
+@dataclass
+class FiredOnTracker:
+    """Per-shooter suppression state for the `fired_on` rule (Decision 3,
+    Stage 3). Owned by the poll loop -- one instance per run, passed into
+    every `step` call, the same lifetime `MissionMemory` itself has in
+    `logger.py`'s two poll loops. Deliberately **not** state on
+    `MissionMemory`: it is this one admission rule's own bookkeeping,
+    not a property of the store."""
+
+    #: How many of `ContactStore.events` have already been scanned --
+    #: every `step` call only looks at events appended since the last one,
+    #: so a long-lived sortie's growing event log is never rescanned from
+    #: the start.
+    _scanned_event_count: int = 0
+    #: Shooter contact id -> the `t_sim` a `fired_on` entry was last
+    #: written for it.
+    _last_write_sim: dict[str, float] = field(default_factory=dict)
+
+
+def _write_fired_on_entries(
+    memory: MissionMemory,
+    contacts: ContactStore,
+    tracker: FiredOnTracker,
+    now_sim: float,
+    phase: PhaseInfo | None,
+) -> None:
+    """Decision 3's `fired_on` rule: one entry per `CONTACT_FIRING_SEEN`
+    event, suppressed per shooter for `FIRED_ON_FOLD_WINDOW_S` -- two
+    shots from one shooter inside the window fold into the one standing
+    entry (no strike/replace; the suppressed shot simply writes nothing),
+    and a shot past the window writes a fresh one."""
+    events = contacts.events
+    new_events = events[tracker._scanned_event_count :]
+    tracker._scanned_event_count = len(events)
+
+    for event in new_events:
+        if event.kind != CONTACT_FIRING_SEEN:
+            continue
+        shooter_id = event.contact_id
+        last_write = tracker._last_write_sim.get(shooter_id)
+        if last_write is not None and now_sim - last_write < FIRED_ON_FOLD_WINDOW_S:
+            continue
+        memory.append(
+            kind="fired_on",
+            provenance="observed",
+            t_sim=now_sim,
+            phase=phase,
+            pos=None,
+            seen=None,
+            belief_ref=shooter_id,
+            strikes=None,
+            payload=FiredOnPayload(
+                shooter_seq=memory.latest_live_seq(shooter_id),
+                shooter_ref=shooter_id,
+                targets_ownship=event.targets_ownship,
+            ),
+        )
+        tracker._last_write_sim[shooter_id] = now_sim
+
+
 def step(
     memory: MissionMemory,
     contacts: ContactStore,
@@ -402,12 +484,20 @@ def step(
     theatre: str | None = None,
     phase: MissionPhaseInfo | None = None,
     enrichment: EnrichmentContext | None = None,
+    fired_on_tracker: FiredOnTracker | None = None,
 ) -> None:
     """Run every admission rule, once, over every current contact. Called
     once per poll by `logger._mission_memory_step`, after
-    `ContactStore.tick()` -- see module docstring."""
+    `ContactStore.tick()` -- see module docstring.
+
+    `fired_on_tracker` is `None` only in a test that does not care about
+    the `fired_on` rule -- every real caller (`logger.py`'s two poll
+    loops) owns one `FiredOnTracker` for the run's lifetime and always
+    passes it."""
     phase_info = _to_phase_info(phase)
     for contact in contacts.contacts:
         _maybe_write_entry_for_contact(
             memory, contacts, contact, now_sim, theatre, phase_info, enrichment
         )
+    if fired_on_tracker is not None:
+        _write_fired_on_entries(memory, contacts, fired_on_tracker, now_sim, phase_info)

@@ -246,7 +246,9 @@ from eyesight_view import (
 )
 from eyesight_view import render_frame as render_eyesight_frame
 from group_trace_log import GroupTraceLogWriter
-from mission_memory import admission
+from mission_memory import admission, marks
+from mission_memory.admission import FiredOnTracker
+from mission_memory.entries import MarkPayload
 from mission_memory.log import MissionMemoryLogWriter
 from mission_memory.store import MissionMemory
 from perception.association import PLAYER_BUBBLE_RADIUS_M, SightCone
@@ -1500,6 +1502,7 @@ def _mission_memory_step(
     now_sim: float,
     theatre: str,
     phase: MissionPhaseInfo | None,
+    fired_on_tracker: FiredOnTracker,
 ) -> None:
     """BL-8's writer, called once per poll from both poll loops, **after**
     `runner.run_once()` (belief is settled; `ContactStore.tick()` has
@@ -1507,6 +1510,10 @@ def _mission_memory_step(
     loop, **before** `crew_console.drain_events` -- `mission_memory.
     admission`'s module docstring states the same ordering, and this is
     the one call site responsible for keeping it (plan Decision 3).
+
+    `fired_on_tracker` is owned by the calling poll loop and lives for its
+    whole run (Stage 3) -- `FiredOnTracker`'s own docstring on why this is
+    not state on `MissionMemory` itself.
 
     **Never propagates.** Decision 8: a memory write must never kill the
     poll loop. `admission.step` itself only ever raises from a genuine
@@ -1523,9 +1530,60 @@ def _mission_memory_step(
             theatre=theatre,
             phase=phase,
             enrichment=runner.enrichment,
+            fired_on_tracker=fired_on_tracker,
         )
     except Exception:
         logger.exception("mission-memory step failed; continuing")
+
+
+def _mark_here_fn(
+    memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
+) -> Callable[[float], str]:
+    """Builds `CrewConsole.mark_here_fn` -- the one closure `_handle_
+    mark_here` calls, over the live `MissionMemory` this poll thread
+    writes observed entries into (BL-8 Stage 3, Decision 6). Reads
+    `runner.enrichment` live rather than capturing it, the same reason
+    `_speech_log_sink` does: it is rebuilt by `run_once` and a captured
+    reference would go stale the first time that happens."""
+
+    def mark_here(now_sim: float) -> str:
+        if runner.enrichment is None:
+            return "no world-model connection configured"
+        entry = marks.mark_here(
+            memory,
+            runner.enrichment.ownship,
+            now_sim,
+            theatre=theatre,
+            phase=None,
+            enrichment=runner.enrichment,
+        )
+        assert isinstance(entry.payload, MarkPayload)
+        return f"mark {entry.payload.index} set"
+
+    return mark_here
+
+
+def _mark_target_fn(
+    memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
+) -> Callable[[str, float], str]:
+    """`_mark_here_fn`'s own twin for `CrewConsole.mark_target_fn`."""
+
+    def mark_target(contact_id: str, now_sim: float) -> str:
+        entry = marks.mark_target(
+            memory,
+            runner.store,
+            contact_id,
+            now_sim,
+            theatre=theatre,
+            phase=None,
+            enrichment=runner.enrichment,
+        )
+        if entry is None:
+            return f"no such contact: {contact_id}"
+        assert isinstance(entry.payload, MarkPayload)
+        return f"mark {entry.payload.index} set on {contact_id}"
+
+    return mark_target
 
 
 def _run_console_poll_loop(
@@ -1606,6 +1664,7 @@ def _run_console_poll_loop(
     mission_memory = MissionMemory()
     if mission_memory_path is not None:
         mission_memory.set_sink(MissionMemoryLogWriter(mission_memory_path).write)
+    fired_on_tracker = FiredOnTracker()
     try:
         runner.sources = _build_sources(
             aircraft_client,
@@ -1685,7 +1744,12 @@ def _run_console_poll_loop(
                         else None
                     )
                     _mission_memory_step(
-                        mission_memory, runner, runner.last_t_sim, theatre, phase
+                        mission_memory,
+                        runner,
+                        runner.last_t_sim,
+                        theatre,
+                        phase,
+                        fired_on_tracker,
                     )
                 connection.report_success()
             except Exception as exc:
@@ -1929,6 +1993,18 @@ def _run_crew_text_poll_loop(
     mission_memory = MissionMemory()
     if mission_memory_path is not None:
         mission_memory.set_sink(MissionMemoryLogWriter(mission_memory_path).write)
+    # BL-8 Stage 3: `mark_here`/`mark_target` reach `crew_console` on the
+    # REPL/brain thread, not this poll thread -- both must write into the
+    # same `MissionMemory` instance this poll thread builds, so the
+    # closures over it are handed to `crew_console` here rather than each
+    # side building its own. `belief/crew_console.py` never imports
+    # `mission_memory` itself (Decision 1) -- these closures are the
+    # entire seam. `phase=None` inside both: `CrewConsole` has no
+    # `MissionPhaseTracker` of its own to resolve a current phase from,
+    # unlike the poll loop's own observed-entry writes just below.
+    crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner, theatre)
+    crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner, theatre)
+    fired_on_tracker = FiredOnTracker()
     try:
         runner.sources = _build_sources(
             aircraft_client,
@@ -2108,7 +2184,12 @@ def _run_crew_text_poll_loop(
                         else None
                     )
                     _mission_memory_step(
-                        mission_memory, runner, runner.last_t_sim, theatre, phase
+                        mission_memory,
+                        runner,
+                        runner.last_t_sim,
+                        theatre,
+                        phase,
+                        fired_on_tracker,
                     )
                     crew_console.drain_events(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever
