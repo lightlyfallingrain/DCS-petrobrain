@@ -82,12 +82,55 @@ where the two disagree. That table was read off a PDF; this is the pilot's.
 | ЩО `PWR` B1 | **955** | `WEAP_SYS` · `Operator_POWER_SHO_SWITCHER` (3030) | **written successfully today** |
 | `OBSERVE` | **886** | `I9K113` · `Command_NABL` (3002) | **written successfully today** |
 | weapon safety bar | **673** | `WEAP_SYS` · `Operator_SWITCHER_SAFE_WEAP` (3020) | **written successfully today** |
-| `CPLR DISTR` | 761? | `ASP_17V` · `asp_commands.USR` (`WEAP-DISTR-POWER-OP-PTR`) | **guess from a name match only.** Needs confirming |
-| `L166V POWER` | 870? | `I9K113` · listed as `Command_CHECK_LAMPS` (`L166V-SWITCH-PTR`) | **guess, and the command name disagrees with the pointer name.** Needs confirming |
+| `CPLR DISTR` | **unknown** | — | **761 REJECTED by the user, 2026-10-17: *"761 is wrong, if it sits on ASP_17V."*** `ASP_17V` is the pilot's sight; the operator cannot touch it |
+| `L166V POWER` | **unknown** | — | **870 rejected** — see below |
 
-The two guesses are the only new probe work this direction creates, and they are cheap — a read of
-each argument while the user throws that switch by hand settles both. Worth folding into whatever
-flies next rather than its own sortie.
+### Both guesses are withdrawn, 2026-10-17 (user corrections)
+
+> *"870 is probably TEST LMAPS button, B3 on missile selector unit. PWR is B1. 761 is wrong, if it
+> sits on ASP_17V."*
+
+- **`761` is dead on principle, not on detail.** It sits on `ASP_17V`, and this project already
+  holds that the ASP-17V is the **pilot's** sight, which the operator cannot reach. A mapping that
+  lands there is wrong by construction for anything Petrovich does.
+- **The ЩО's `TEST LAMPS` button is `956`**, not `870` — `SHSCHO-CHECK-PTR` ·
+  `Operator_CHECK_LAMPS_9C475` on `WEAP_SYS`, the same panel whose `PWR` B1 is `955`. The user's
+  reading of what 870 *is* lands on a real button; the argument number for it is 956.
+- **`870` is left unresolved rather than relabelled.** Its pointer is `L166V-SWITCH-PTR` and its
+  command is `Command_CHECK_LAMPS`, on `I9K113` — a name disagreement inside one row, in a table
+  that is positional. Two check-lamps commands on two panels is plausible; so is a stale pointer
+  name. **Neither `L166V POWER` nor `CPLR DISTR` has a known argument**, and neither should be
+  guessed at again from the table.
+
+**How to settle them: read, don't write.** One pass with the user throwing each switch by hand
+while a probe logs changed arguments identifies both by observation — no clicking, no table
+archaeology. Fold it into whatever flies next.
+
+## 3a. Petrovich is the copilot, so the pilot's steps are not his to do
+
+**User direction, 2026-10-17:** *"The quickstart guide includes steps that the pilot does, like the
+ASP-17 switches. For now Petrovich is copilot only."*
+
+This is the same boundary root `CLAUDE.md` already draws — the pilot owns flying, navigation and
+weapon deployment — applied to the power-up checklist. **A switch on a pilot-side panel is out of
+scope whatever the checklist says**, and `ASP_17V` is exactly that. So the recon table's `AUTO/MAN`
+(553) and PUVL weapon selector (523) steps drop out for the same reason 761 does.
+
+**Open, and it decides whether `CPLR DISTR` is in this entry at all:** is it reachable from the
+operator's seat? If it is a pilot-side switch, the sequence either waits on the pilot or Petrovich
+asks for it — and that is a behaviour question for the explore pass, not an implementation detail.
+
+## 3b. The warm-up is ~5 minutes, measured
+
+**User direction, 2026-10-17:** *"The guindace unit warmup took about 5 minutes, I measured."*
+
+Longer than both earlier figures — his own *"about 3-4 minutes"* in the same day's procedure text,
+and the recon note's 210 s program timer read off the PDF. **The measurement supersedes both.**
+
+It also sharpens a question already on the list: a five-minute silence after *"Observ on"* is a
+long time for a crew member to say nothing. The zero-warm-up direction still stands for now
+(*"ignore until effectors built. Prepare code for it, but use no warmup time"*), so this is a
+number to carry, not to build against yet.
 
 ## 4. Open, for the explore pass before `BL-B80` is planned
 

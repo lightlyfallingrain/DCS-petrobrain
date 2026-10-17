@@ -17,8 +17,22 @@
   write and nothing else**: DCS boresights the sight, closes the doors and safes the gyros itself.
   The safety bar is pilot-commanded both ways, plus ARMED automatically at any attack-run start.
 
-  **Two argument numbers are still guesses** — `CPLR DISTR` and `L166V POWER`, mapped by name
-  match only; see that document's table. Confirm them before encoding either.
+  **Two of the five switches have no known argument.** `CPLR DISTR` and `L166V POWER`: both
+  name-match guesses were withdrawn by the user the same day — 761 sits on `ASP_17V`, the pilot's
+  sight, so it is wrong by construction; 870's row disagrees with itself and the ЩО's `TEST LAMPS`
+  is 956, not 870. **Settle them by reading arguments while the user throws each switch by hand**,
+  not by clicking or by more table archaeology.
+
+  **Petrovich is the copilot, so pilot-side steps are not his** (user direction, 2026-10-17: *"The
+  quickstart guide includes steps that the pilot does, like the ASP-17 switches. For now Petrovich
+  is copilot only."*). Every `ASP_17V` row drops out, including the recon table's `AUTO/MAN` (553)
+  and the PUVL selector (523). **Whether `CPLR DISTR` is operator-reachable is open, and it decides
+  whether it belongs in this entry at all** — if it is pilot-side, the sequence either waits on the
+  pilot or Petrovich asks for it, which is a behaviour question for the explore pass.
+
+  **The warm-up is ~5 minutes, measured** (*"The guindace unit warmup took about 5 minutes, I
+  measured."*) — longer than his own earlier 3–4 min and the recon note's 210 s program timer, and
+  it supersedes both. Carried, not built against: the zero-warm-up direction still stands.
   **Specification: `docs/concept/9K113.md`** plus
   `docs/acceptance/2026-10-15-9k113-sight-direction.md` §5, §8.
   **Reconnaissance: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`** — the full
