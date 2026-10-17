@@ -119,15 +119,12 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B78]] — `speech.py`'s module docstring still documents the pre-brevity hedge register
 - [[BL-B79]] — `remember_location`'s `label` needs a bound before any dispatcher calls it
 
-**Brain-layer backlog items share this index**, because brain-layer has no `ROADMAP/` directory of
-its own and its entries live in this one (root `CLAUDE.md`, "Backlog items carry IDs"; root
-`ROADMAP.md`'s status table says the same about its milestones). They keep their own `BR-B<n>`
-sequence — mint from `grep -oE '^BR-B[0-9]+'`, never the prefix-agnostic `[A-Z]+-B`, which would
-return this directory's `BL-B` maximum instead.
-
-- [[BR-B1]] — The wider `CLASSIFY_COMMAND_VOCABULARY` the duplicate Stage 2 branch built
-- [[BR-B2]] — `brain-layer`'s HTTP server trusts the `Content-Length` header itself
-- [[BR-B3]] — the Ollama response body is read without a byte cap (an unfiled Stage 2 recommendation)
+**Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
+milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
+`BR-B2` and `BR-B3` now live in `brain-layer/ROADMAP/`, indexed by
+`brain-layer/ROADMAP/brain-layer-roadmap.md`, and the two `BR-B` / `BL-B` sequences are
+independent. This directory holds `BL-`, `BL-B` and `BL-W` only — which is also what makes a
+prefix-agnostic mint safe to get wrong here now, rather than merely documented as dangerous.
 
 ## Two entries worth knowing about before you read them
 

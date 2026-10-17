@@ -11,10 +11,10 @@ of it. Update this index (not `../todo/todo.md`) whenever a body-layer branch me
 This is the pointer's index — see `docs/DOC_CONVENTIONS.md` for the directory layout, ID scheme
 and link form it follows. The index carries links and titles only; status lives on each entry.
 
-**`BR-1`/`BR-2` live in this directory too** (`[[BR-1.1]]`, `[[BR-1.2]]`, `[[BR-2]]`), not in a
-`brain-layer/ROADMAP.md`, because brain-layer has no roadmap of its own yet — root `ROADMAP.md`'s
-status table already documents this arrangement; `ls */ROADMAP/` showing five subprojects plus
-this one extra pair is the visible consequence, not an oversight.
+**Brain-layer's entries used to live in this directory and no longer do.** `BR-1.1`, `BR-1.2`,
+`BR-2` and the `BR-B` backlog moved to `brain-layer/ROADMAP/` on 2026-10-17 (user direction),
+indexed by `brain-layer/ROADMAP/brain-layer-roadmap.md`. Read that file for anything brain-layer;
+this one is body-layer's `BL-`, `BL-B` and `BL-W` only.
 
 ## Live acceptance
 
@@ -104,9 +104,6 @@ Position belief, voice, watch/report and the brain seam:
 - [[BL-W35]] — Watch reporting — Stages 1 through 5
 - [[BL-W8]] — Position-belief-runaway fix
 - [[BL-W7]] — Binocular optic, voice command completeness, and precise position belief — sortie closure
-- [[BR-1.1]] — Brain layer, Stage 1 — first working slice
-- [[BR-1.2]] — Brain layer, Stage 2 — OllamaDecider
-- [[BR-2]] — The brain cannot call a single tool: `TOOL_SET` has no dispatcher
 - [[BL-W9]] — 2026-09-25 crew-behaviour sortie card
 - [[BL-W10]] — Two items waiting on the user's own machines
 

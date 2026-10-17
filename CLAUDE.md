@@ -456,10 +456,18 @@ single document left behind as a four-line pointer. The directory is the only pl
 
 `MI-B<n>` is reserved for mission-interpreter, which has no Backlog section yet.
 
-**brain-layer has no `ROADMAP/` of its own**: its milestones live in `body-layer/ROADMAP/`
-(`BR-1.1`, `BR-1.2` are there today), as root `ROADMAP.md`'s status table says, so `BR-B<n>` would
-be minted from that same directory. This matters for the first rule below rather than being
-bookkeeping trivia — see what the mint command does with two prefixes in one directory.
+**`BR-<n>` and `BR-B<n>` are brain-layer's, in `brain-layer/ROADMAP/`** — its own directory as of
+2026-10-17 (user direction: *"Put brain milestone and backlog items under brain layer in folder.
+Same logic as other layers."*), indexed by `brain-layer/ROADMAP/brain-layer-roadmap.md`, with
+`brain-layer/ROADMAP.md` the usual four-line pointer. Both sequences mint from there and are
+independent of body-layer's.
+
+**Until that date they lived in `body-layer/ROADMAP/`, and the reason this is worth recording is
+the mint rule below.** One directory holding `BL-`, `BL-B`, `BL-W` **and** `BR-`/`BR-B` is exactly
+the collision the prefix-agnostic form causes, and the previous version of this paragraph called it
+not-yet-fired *"only because no `BR-B` item exists"* — which was already false when written:
+`BR-B1`–`BR-B3` had been filed. A stale safety claim about a hazard is worse than the hazard, so
+the directories were separated instead.
 
 **`X-T<n>` was missing from this table until 2026-10-09** while 24 live items used it, found by
 that date's integrity audit (finding 5). It is minted by `todo/todo/`'s own conversion and is the

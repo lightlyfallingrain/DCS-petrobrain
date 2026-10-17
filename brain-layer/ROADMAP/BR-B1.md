@@ -7,8 +7,8 @@
   later prompt-tuning pass if the narrow set under-serves real sorties. `[[BR-1.2]]`'s own entry
   names the same open question. This entry exists so the artifact survives the branch: everything
   else that branch held was either folded into `main` or deliberately rejected, and the token list
-  itself was only ever *described* in prose. First `BR-B` item; brain-layer has no `ROADMAP/` of its
-  own, so its entries live here (root `CLAUDE.md`, "Backlog items carry IDs").
+  itself was only ever *described* in prose. First `BR-B` item. It was filed into `body-layer/ROADMAP/`,
+  which held brain-layer's entries until they moved here on 2026-10-17 (user direction).
 
 **What `main` offers the classify prompt today** (7 tokens, no slots, `brain-layer/src/prompts.py`):
 
