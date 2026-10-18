@@ -197,3 +197,94 @@ Agent handoffs and session starts, for a week. The specific regressions this cha
 harvest that skips the `git rev-parse` tip check before `git branch -D` (rule 1 kept its evidence
 precisely because no hook fires there), and a session start that reads the roadmap without checking
 `git branch -v`. If either happens, revert — moved text is verbatim, so it is one command.
+
+---
+
+## Second pass, 2026-10-18 — the brake, because the first pass did not hold
+
+The first pass took 17% off and was erased in nine days.
+
+| | `CLAUDE.md` | `AGENTS.md` |
+|---|---|---|
+| before first pass (2026-10-06) | 4,676 words | — |
+| after first pass (2026-10-09) | **4,201** | **3,194** |
+| measured 2026-10-17 | **6,403** (+52%) | **4,262** (+33%) |
+
+**+2,202 words in nine days, ~245/day, against a one-off saving of 475.** Two new headings in that
+window, so the growth was prose accreting *inside* existing sections: each retro appending its
+evidence to a rule that already existed. That is the finding that changes the work — a trim pass is
+erased in two days, so the slope is the target, not the level.
+
+### What the user approved, and what they declined
+
+Four levers were put up. Their words: *"A and C approved. Use the post-compaction word count as
+guideline, warning, not ceiling."*
+
+| | lever | verdict |
+|---|---|---|
+| **A** | a `PreToolUse` gate on the two always-loaded files that reports standing and routes new prose | **approved** |
+| **B** | audit the 8 `.claude/agents/*.md` role files (140 KB total, architect alone 25 KB) — the dispatch multiplier, never measured | **not taken this pass** |
+| **C** | procedural prose → script: the ID-minting section, 5,322 bytes, 13% of `CLAUDE.md` | **approved** |
+| **D** | cut rules a hook already reprints, not only their evidence | **held** — flagged as the risky one |
+
+**B is the bigger number and is still open.** Every agent dispatch pays `CLAUDE.md` + `AGENTS.md` +
+its role file + any nested `CLAUDE.md` — roughly 25–30k tokens, times the number of dispatches in a
+session. The 2026-10-09 pass never looked at the role files, and neither did this one.
+
+### A — `always-loaded-budget-gate.sh`
+
+`PreToolUse(Write|Edit)`, scoped to the repo-root `CLAUDE.md` and `AGENTS.md` only. Reports the
+current word count against that file's measured post-compaction size, then routes the new material:
+hook → script/skill → file-plus-`docs/`. **Never blocks**, per the user's *"guideline, warning, not
+ceiling"* — over the line is information, and some rules are worth their words.
+
+Scoping needs no list of subprojects: the repo root is the only directory holding both `AGENTS.md`
+and `.claude/`, which is true in the root checkout and in every worktree. Nested
+`<sub>/CLAUDE.md` files stay out of scope (risk 3 above — they load conditionally, and
+`audio-adapter/CLAUDE.md` is 78% dated prose, the durable kind).
+
+### C — `mint-id.sh`
+
+The ID-minting section was the largest in `CLAUDE.md` and was entirely a procedure: one command,
+a prefix-to-directory table, and two measured traps. All three move into the script.
+
+**The prefix-to-directory map is now derived, never written.** `--list` finds each prefix where its
+files actually are. A written map goes stale silently — a list in `CLAUDE.md` has done so four times
+— and this one would have needed editing on 2026-10-17 when brain-layer took its own `ROADMAP/`.
+Deriving it meant that move would have needed no edit at all.
+
+Both documented traps are now structurally impossible rather than warned about: `'^<prefix>[0-9]+'`
+cannot cross prefixes (`BL-` will not match `BL-B12`, because `[0-9]` excludes `B`), and `sort -V`
+is the only ordering the script uses. Verified by running it against all sixteen live spaces (the removed table listed six, which is the
+other half of why a written map was the wrong instrument) —
+`BL-` → 14 (not 80), `BL-W` → 39 (not 9), `WM-W` → 12 (not 9): the three cases the prose warned
+about, each returned correctly without anyone having to remember the warning.
+
+It also refuses rather than guesses in the two cases that matter: a prefix with no existing items
+(no derivable home, so the destination is a decision) and a prefix found in two directories (which
+would collide). The never-reuse rule stays in `CLAUDE.md` with its one-clause why, because it is a
+rule rather than a procedure and no script can enforce it.
+
+**Saving: 511 words from `CLAUDE.md` (6,403 → 5,892), and the duplication is resolved rather than
+moved.** `docs/DOC_CONVENTIONS.md` already carried the same recipe and the same two traps; it now
+points at the script and keeps the reasoning, so there is one executable copy and one reference
+copy instead of three prose copies of a command.
+
+### One stale claim found in passing, the predicted class again
+
+`CLAUDE.md` asserted *"`MI-B<n>` is reserved for mission-interpreter, which has no Backlog section
+yet."* `mission-interpreter/ROADMAP/` holds `MI-B1`–`MI-B3`. Found by running `mint-id.sh --list`,
+which cannot assert anything false about which prefixes exist — the present-tense-assertion class
+the criterion predicts, and the second time a compaction pass has turned one up by reading the
+prose closely enough to compact it.
+
+### What to watch
+
+The slope, not the level. `CLAUDE.md` is 5,892 words — still 1,691 over its guideline, and
+deliberately so: nothing was cut except the procedure the script now owns. **The test of this pass
+is the word count in nine days' time, not today.** If it is back above 6,400 the gate is not
+working and the next lever is B.
+
+Specific regression to watch for: an ID minted by hand against a document instead of by the script,
+which is exactly what the removed prose was guarding. `git log --diff-filter=A --name-only` over the
+ROADMAP directories will show it.
