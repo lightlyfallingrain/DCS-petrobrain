@@ -395,3 +395,90 @@ largest.
   to every copy or to none, and the seven are verified byte-identical by hash.
 - **Lever D** (cutting rules a hook already reprints, not only their evidence) remains held.
 - **The slope, as before.** `CLAUDE.md` at 5,754 words. The test is the number in nine days.
+
+---
+
+## Fourth pass, 2026-10-18 — the same test, applied to code comments
+
+User direction: *"we should apply the 'not all steps, not all evidence needs be recorded, just the
+load carrying parts' to code file comment blocks as well. Not as a sweep, but when implementer
+touches a comment block, clean it up at the same time."* Approved after the measurement below
+changed the shape of it.
+
+### What the measurement changed
+
+| | lines | blocks >=5 lines |
+|---|---|---|
+| standalone comment lines in `*/src/**/*.py` | **8,346** (12.6% of 66,318 code lines) | 636 |
+| of which **`#:` tuning declarations** | **5,156 (62%)** | 382 runs, 4,553 lines, largest **149** |
+| of which plain `#` comments | 3,190 (38%) | 254 runs, 2,404 lines, largest 70 |
+
+Concentrated in `body-layer/src/belief/callouts.py`, `audio-adapter/src/vocabulary.py`,
+`body-layer/src/logger.py`, `world-model/src/build/pipeline.py`.
+
+**Three findings, each of which changed the rule as proposed:**
+
+1. **Most of what looks like the target is not a comment.** `#:` declarations render
+   `body-layer/config/defaults.toml`, so pruning one changes shipped config — and they are the
+   durable kind by construction. The largest, `GROUP_EAGER_MAX_EXTENT_M` at 149 lines, traces 500 m
+   to the speech renderer's rounding step, cross-checks it against four measured figures from the
+   one flown sortie, and records the `math.inf` it replaced and why the relative test could never
+   reject a pair at n = 2 without it. That is exactly what must not be touched. **The exemption is
+   the rule's first clause**, not a footnote.
+2. **The docs justification does not transfer, so the filter must change.** A doc costs tokens every
+   session; a comment costs them only when the file is read, which the reader was doing anyway. The
+   payoff here is **not being misled**, which means pruning for **tense, not length** — a 70-line
+   accurate comment is fine, a two-line stale one is a defect. This is the same finding as
+   *"staleness tracks tense, not length"*, arrived at from the opposite direction.
+3. **Code has a fourth destination that docs do not have, and it is the best one.** A boundary case
+   described in a comment belongs in a test named for it: a test cannot go stale silently, because
+   it fails. Docs have no equivalent, which is why the three-kind routing needed a fourth row here.
+
+### The trigger was retargeted
+
+As proposed — *"when implementer touches a comment block"* — it fires only when the comment is
+already being edited, and **the comments that rot worst are the ones nobody touches**, sitting next
+to code that changed around them. So the rule reads:
+
+> **When you change code, read the comment attached to it.**
+
+The code is the observable event; the comment is not. Same lesson as *"before concluding"* naming an
+internal state that nothing could observe failing. Pruning stays local to that block, because a
+correctness diff that also rewrites comments three functions away is one nobody reads properly.
+
+### The guardrail, which is the part most likely to be needed
+
+**Shorten rather than delete; when in doubt, keep. Never delete a line carrying a date, a verbatim
+user quote, or a measurement with its source.** The asymmetry that makes this necessary: a why looks
+*most* redundant to whoever has just read the code and understood it, and its value is to the next
+reader who has not. The Implementer is always in the first position and never in the second, which
+is why the Reviewer gets the half the Implementer structurally cannot do.
+
+### Where it landed
+
+`implementer.md` does it, `reviewer.md` checks it — the split the tuning pattern already uses, so
+this is an existing practice rather than a new mechanism. One bullet in each file's rules list
+pointing at a section below it, exactly as the tuning rule is wired.
+
+The Reviewer's three checks are ordered cheapest-last on purpose: did a durable line go (a required
+fix, restored verbatim), did a `#:` block change, and **did a boundary case move into a test or just
+vanish** — the last being the one failure mode that silently loses coverage. An unpruned block is
+explicitly *not* a finding, since the rule is opportunistic.
+
+### One thing worth recording about writing it
+
+The first draft of the Implementer section was 607 words and pushed `implementer.md` to 3,619 — over
+the 3,500 guideline set two commits earlier, by the author of that guideline, in the commit that
+added a rule about unnecessary prose. The gate caught it; the section was condensed to 243 words and
+the file came back to 3,428. Worth recording because it is the pass's own thesis demonstrated
+against itself: the brake works and the judgement did not, which is the entire argument for having
+a mechanism rather than an intention.
+
+| file | before | after |
+|---|---|---|
+| `implementer.md` | 3,012 | **3,428** |
+| `reviewer.md` | 2,299 | **2,594** |
+
+Both still under the guideline, and this is the one pass in the series that deliberately *adds*
+words to the always-loaded set: a rule that prunes 2,400 lines of comment prose over time is worth
+roughly 700 words of instruction, and that trade is the user's, made explicitly.

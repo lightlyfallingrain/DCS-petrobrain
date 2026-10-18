@@ -54,6 +54,8 @@ definition, including this one.
 - Never write to the DCS installation directory.
 - **A new constant that affects behaviour goes through the tuning mechanism, not in as a bare module
   literal.** Standard practice as of 2026-10-15 (user direction); see immediately below.
+- **When you change code, read the comment attached to it** — and prune what is no longer
+  load-bearing. User direction, 2026-10-18; see "Prune the comment you are standing next to" below.
 
 ### Behaviour-affecting constants are tunable — standard practice, not a special case
 
@@ -100,6 +102,43 @@ constant normally and say in your report that it is behaviour-affecting and woul
 mechanism if that subproject grows one.
 
 ---
+
+### Prune the comment you are standing next to
+
+**User direction, 2026-10-18:** apply this project's own test — *only the load-bearing parts need
+recording* — to comment blocks, **opportunistically, never as a sweep**.
+
+**The trigger is the code, not the comment.** When you change a function, class or branch, read the
+comment block above **that** code and prune what is no longer load-bearing. The comments that rot
+worst are the ones nobody touches, next to code that changed around them, so a trigger that fires
+only when you were already editing a comment misses the cases that matter. Stay local to that
+block: a correctness diff that also rewrites comments three functions away is one nobody reads.
+
+**`#:` tuning declarations are exempt** — they render `body-layer/config/defaults.toml`, so cutting
+one changes shipped config, and they are 62% of this repo's comment lines. Edit one only when
+changing that constant's own semantics, per the section above.
+
+**Prune for tense, not length.** The saving is not the point — being misled is. A comment outlives
+the line it describes, and a stale one justifies the right action from a premise that is now false,
+which makes it unfixable by reasoning. A 70-line accurate comment is fine; a two-line stale one is a
+defect.
+
+| the comment says | do |
+|---|---|
+| **why** the code is odd — *"DCS returns metres, not feet"* | **keep.** One line, no other home |
+| **what** the code does | delete; the code says it |
+| **what changed** | delete; git says it, and a commit cannot drift |
+| the **boundary case** handled | move into a test named for it — a test cannot go stale silently |
+
+**Shorten rather than delete; when in doubt, keep.** The why looks most redundant to whoever has
+just understood the code, and its value is to the next reader who has not.
+
+**Never delete a line carrying a date, a verbatim user quote, or a measurement with its source.** A
+dated statement cannot go stale, only be superseded (`docs/PROCESS.md`). If one is wrong now, say so
+in your report instead of removing it.
+
+**Say what you pruned in one line of your Implementation Summary** — count and file, so the Reviewer
+knows to look. Volume and the concentrated files: `plans/always-loaded-compaction/plan.md`.
 
 ## Your Process
 

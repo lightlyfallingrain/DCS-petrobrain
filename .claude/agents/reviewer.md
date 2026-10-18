@@ -56,6 +56,9 @@ definition, including this one.
 - No large raw/generated datasets accidentally staged for commit (`world-model/data/` must stay gitignored)?
 - **Every new behaviour-affecting constant goes through the tuning mechanism** — see below. Standard
   practice as of 2026-10-15 (user direction), and yours to verify.
+- **Comments attached to changed code pruned of what is no longer load-bearing, and nothing durable
+  lost with them?** See "Checking a pruned comment block" below. Standard practice as of
+  2026-10-18 (user direction), and yours to verify.
 
 ### Verifying the tuning pattern — read the rendered file, not the source comment
 
@@ -118,6 +121,30 @@ In addition to project-specific checks, always verify:
 - Is any leftover debug code or TODO comments present?
 
 ---
+
+### Checking a pruned comment block
+
+The Implementer is now expected to prune the comment above code it changes (`implementer.md`,
+"Prune the comment you are standing next to"). Your half is the one the Implementer cannot do:
+**it has just understood that code, which is exactly when a load-bearing why looks redundant.**
+
+Check three things, in this order, because the third is cheap and the first is the expensive one:
+
+1. **Did a durable line go?** A date, a verbatim user quote, or a measurement with its source is
+   this project's record, not commentary — a dated statement cannot go stale, only be superseded.
+   `git diff` the block and read what left. A removed line of that kind is a **required fix**,
+   restored verbatim, even if what it documents has changed; supersession is marked, not deleted
+   (`docs/PROCESS.md`).
+2. **Did a `#:` block change?** Those render `body-layer/config/defaults.toml`, so a cut there
+   changes shipped config. Exempt unless that constant's own semantics changed — and then the
+   tuning-pattern checks above apply, including reading the **rendered** file.
+3. **Did a boundary case move into a test, or just vanish?** The rule routes those into a named
+   test. A deleted comment describing an edge case with no test appearing in the same diff is the
+   one failure mode that silently loses coverage.
+
+**Do not ask for prose back that the code now says itself**, and do not treat an unpruned block as a
+finding — the rule is opportunistic, and a block the Implementer did not stand next to is not in
+scope.
 
 ## Your Process
 
