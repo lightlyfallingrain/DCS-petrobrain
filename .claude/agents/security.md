@@ -253,12 +253,6 @@ the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake 
 and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
 alike. Check the path yourself rather than relying on the gate.
 
-**This paragraph was reworded 2026-10-12** because the previous wording said "always
-repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
-system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
-agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
-the gate was built to catch.
-
 Save memories about:
 - Recurring vulnerability patterns found in this codebase
 - False positives you've identified (so you don't re-investigate them)

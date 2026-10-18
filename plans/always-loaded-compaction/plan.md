@@ -288,3 +288,107 @@ working and the next lever is B.
 Specific regression to watch for: an ID minted by hand against a document instead of by the script,
 which is exactly what the removed prose was guarding. `git log --diff-filter=A --name-only` over the
 ROADMAP directories will show it.
+
+---
+
+## Third pass, 2026-10-18 — the three kinds of why, and lever B
+
+User direction, mid-pass: *"are __all__ those examples really needed? Would just some suffice? Maybe
+in a much condensed format? Does prose really bring value?"* Then: *"both. Then do B and apply this
+logic in those files as well."*
+
+### The distinction this forced, which the earlier passes had conflated
+
+"The why" is three things with different economics:
+
+| kind | is | verdict |
+|---|---|---|
+| **mechanism** | why the rule works — *"before concluding names an internal state, so nothing can observe it failing"* | one non-obvious sentence, **always stays** |
+| **calibration** | what the rule rejects — the removed transport, the dropped F10 menu | one or two worked examples, **stays**; it makes a rule applicable rather than abstract |
+| **reinforcement** | a list of incidents all establishing the same single point | **a count does the same work** — this is the fat |
+
+**The repo had already run the A/B on itself without noticing.** The graph-query rule's evidence was
+a 60-word enumeration of eight passes; the 2026-10-09 pass cut it to nine words and that rule is
+still followed — because what fixed it was a hook firing at the point of use. The record does show
+rules stated briefly, ignored, then rewritten at length, which is the counter-argument this session
+raised against its own proposal; in every such case the remedy that worked was the trigger, and the
+words were the half that did not. That retires the objection.
+
+The distinction is now in `always-loaded-budget-gate.sh`, so it fires when someone appends a third
+or fourth incident to a rule that already has one. Without that, a condensing sweep re-accretes —
+which is the whole finding of the second pass.
+
+### The sweep, and an estimate that was wrong
+
+Twelve passages condensed across `CLAUDE.md` and `AGENTS.md`. Both superseded blockquotes were
+**shortened to the one line `docs/PROCESS.md`'s supersession rule actually specifies, not deleted** —
+that rule exists to keep them, and deleting them would have broken it.
+
+**138 words from `CLAUDE.md`, 85 from `AGENTS.md`. The estimate given to the user was 400–700.** It
+was wrong: 223 is ~2% of the always-loaded set, not the 6–10% claimed. The passages were more
+mechanism and less reinforcement than the estimate assumed, and several were trimmed lightly on
+purpose. Recording it because the estimate was offered as a reason to do the work.
+
+One measured fact was genuinely lost on the way and had to be restored: the ~86-bytes-per-entry
+arithmetic that made the agent-memory compaction impossible as phrased existed in no other file, and
+is now in `todo/todo/X-T25.md`, where `CLAUDE.md` points.
+
+### Lever B — and the framing error that has to be corrected first
+
+**The first framing of B was wrong.** It said the 140 KB of `.claude/agents/*.md` is paid on every
+dispatch. It is not: **only one role file loads per dispatch.** The number that matters is one
+file's own size — 1,426 to 3,414 words — not the roster's 20,887. The boilerplate repeated across
+the eight files therefore costs **no tokens at all**; it is a drift risk, which is a different
+problem with a different fix.
+
+Measured, and the duplication checked by hash rather than assumed:
+
+| block | state |
+|---|---|
+| `## Where things live` | **identical** in 6 files, **absent from `dod.md` and `security.md`** — a gap, not drift |
+| `## Persistent Agent Memory` | 8 versions, and the divergence is **substantive and correct** — the "save memories about" list is properly per-role |
+| `### Memory File Format` | identical in 5, two variants (investigator +5 words, security +79) |
+| `## Types of memory` / `## How to save memories` | **architect only**, 460 words, the verbose `<types>` XML schema |
+
+What was cut, all of it history of a documentation fix or boilerplate duplicating a paragraph above
+it:
+
+- **The "This paragraph was reworded 2026-10-12" block, 70 words, from all 8 role files.** It
+  explains why a *wording* changed; the wording itself stands above it, and
+  `agent-memory-path-gate.sh` enforces the rule at the point of use, which is the criterion.
+- **`implementer.md` carried a broken paragraph** — `task's code is scoped to a subproject.**`, with
+  its opening clause missing — that also restated the hazard, the gate and *check the path yourself*
+  from the paragraph directly above. Pre-existing corruption, found by reading closely enough to
+  compact. Replaced by the one thing in it that was unique: the pointer to that role's own
+  `feedback_agent_memory_path.md`.
+- **`architect.md`'s `<types>` XML schema → the compact table the other seven roles manage with**,
+  plus a line of generic personal-assistant framing (*"a complete picture of who the user is"*) that
+  does not describe an architect dispatch.
+- **`dod.md`'s dissolved-list history**, 110 words on why `#needs-flight` replaced a prose list —
+  and with it **a live contradiction**: the next bullet still said a pending item *"belongs on the
+  list"*, three sentences after the text explaining that no list exists. Now says it keeps its tag.
+
+| file | before | after | paid |
+|---|---|---|---|
+| `architect.md` | 3,637 | **3,414** | per architect dispatch |
+| `dod.md` | 3,520 | **3,376** | per DoD dispatch |
+| `implementer.md` | 3,129 | **3,022** | per implementer dispatch |
+| the other five | 1,496–2,531 | −70 each | per dispatch of that role |
+| roster total | 20,887 | **20,074** | never paid as a total |
+
+### The gate now covers role files
+
+Same hook, `.claude/agents/*.md` added, measured on each file's own size. **One generous ceiling of
+3,500 words rather than a stored table of eight numbers**, deliberately: a table is a written list,
+it goes stale the moment a ninth role is added, and a list in an instruction file has gone stale
+four times here. A single threshold covers a new role with no edit, and at 3,500 it sits above every
+current file — so it fires on a genuine outlier instead of adding permanent noise to the three
+largest.
+
+### Still open
+
+- **`## Where things live` is missing from `dod.md` and `security.md`.** Found by this pass, not
+  fixed by it — adding 183 words to two role files is the opposite of this pass's direction, and
+  whether those two roles need it is a judgement about the roles, not about size.
+- **Lever D** (cutting rules a hook already reprints, not only their evidence) remains held.
+- **The slope, as before.** `CLAUDE.md` at 5,754 words. The test is the number in nine days.

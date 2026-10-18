@@ -34,11 +34,28 @@
 # in every such case the remedy that worked was a trigger at the point of use,
 # and the words were the half that did not.
 #
-# Scope is the always-loaded set only: the repo-root CLAUDE.md and AGENTS.md,
-# which every session and every agent dispatch pays unconditionally. Nested
-# <subproject>/CLAUDE.md files load only when work happens in that directory
-# and are deliberately out of scope (that plan's risk 3: audio-adapter's is 78%
-# dated prose, which on the tense finding is the durable kind).
+# Scope: the repo-root CLAUDE.md and AGENTS.md, which every session and every
+# agent dispatch pays unconditionally, plus .claude/agents/*.md, which a
+# dispatch of that role pays.
+#
+# A role file is measured on its OWN size, not the roster's total. Only one
+# role file loads per dispatch, so the 8-file total (20,887 words when this was
+# measured) is not a per-dispatch cost and the boilerplate repeated across the
+# files is not a token cost at all -- it is a drift risk, which is a different
+# problem with a different fix. This session's first framing got that wrong and
+# quoted the total; the number that matters is 1,426-3,414 words, one file.
+#
+# The role-file guideline is one generous ceiling rather than a per-file number,
+# deliberately: a stored table of eight numbers is a written list, it would go
+# stale the moment a ninth role is added, and this repo has had a list in an
+# instruction file go stale four times. A single threshold covers a new role
+# with no edit, and at 3,500 it is above every current file, so it fires on a
+# genuine outlier instead of adding permanent noise to the three largest.
+#
+# Nested <subproject>/CLAUDE.md files load only when work happens in that
+# directory and are deliberately out of scope (plans/always-loaded-compaction/
+# plan.md, risk 3: audio-adapter's is 78% dated prose, which on the tense
+# finding is the durable kind).
 #
 # Fails open and never blocks: a hook that refuses an instruction-file edit on
 # its own bug is worse than the bug.
@@ -50,33 +67,53 @@ path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null
 [ -z "$path" ] && exit 0
 
 base=$(basename "$path")
-case "$base" in
-    CLAUDE.md|AGENTS.md) ;;
-    *) exit 0 ;;
+kind=""
+case "$path" in
+    */.claude/agents/*.md|.claude/agents/*.md)
+        kind=role
+        # One generous ceiling, not a per-file table -- see the header.
+        guideline=3500
+        ;;
 esac
 
-# Repo root, in the root checkout or in any worktree: the only directory
-# holding both AGENTS.md and .claude/. A nested <sub>/CLAUDE.md has neither,
-# so this needs no list of subprojects to stay correct.
-dir=$(dirname "$path")
-[ -d "$dir/.claude" ] || exit 0
-[ -f "$dir/AGENTS.md" ] || exit 0
+if [ -z "$kind" ]; then
+    case "$base" in
+        CLAUDE.md|AGENTS.md) ;;
+        *) exit 0 ;;
+    esac
+    # Repo root, in the root checkout or in any worktree: the only directory
+    # holding both AGENTS.md and .claude/. A nested <sub>/CLAUDE.md has
+    # neither, so this needs no list of subprojects to stay correct.
+    dir=$(dirname "$path")
+    [ -d "$dir/.claude" ] || exit 0
+    [ -f "$dir/AGENTS.md" ] || exit 0
+    kind=always
+    # Measured post-compaction actuals, 2026-10-09 (that plan's result table).
+    case "$base" in
+        CLAUDE.md) guideline=4201 ;;
+        AGENTS.md) guideline=3194 ;;
+    esac
+fi
+
 [ -f "$path" ] || exit 0
-
-# Measured post-compaction actuals, 2026-10-09 (that plan's result table).
-case "$base" in
-    CLAUDE.md) guideline=4201 ;;
-    AGENTS.md) guideline=3194 ;;
-esac
 
 words=$(wc -w < "$path" | tr -d ' ')
 [ -n "$words" ] || exit 0
 
+if [ "$kind" = role ]; then
+    basis="the role-file guideline, which is one ceiling for every role rather than a per-file table"
+    paid="Every dispatch of this role pays this file -- and only this file, so its own size is the number that matters, not the roster's total"
+else
+    basis="its measured post-compaction size, 2026-10-09"
+    paid="Every session and every agent dispatch pays this file unconditionally"
+fi
+
 if [ "$words" -gt "$guideline" ]; then
     over=$((words - guideline))
-    standing="$base is at $words words, $over over the $guideline-word guideline (its measured post-compaction size, 2026-10-09)."
+    standing="$base is at $words words, $over over the $guideline-word guideline ($basis). $paid."
 else
-    standing="$base is at $words words, within the $guideline-word guideline (its measured post-compaction size, 2026-10-09)."
+    under=$((guideline - words))
+    standing="$base is at $words words, $under under the $guideline-word guideline ($basis). $paid."
 fi
 
 jq -n --arg standing "$standing" --arg base "$base" '{

@@ -196,16 +196,8 @@ the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake 
 and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
 alike. Check the path yourself rather than relying on the gate.
 
-**This paragraph was reworded 2026-10-12** because the previous wording said "always
-repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
-system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
-agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
-the gate was built to catch.
-task's code is scoped to a subproject.** Writing to e.g.
-`world-model/.claude/agent-memory/implementer/` instead of the path above is a mistake that has
-recurred multiple times (see `feedback_agent_memory_path.md` in this directory) and is now also
-rejected by the commit-time quality gate — but check the path yourself before writing rather
-than relying on that gate to catch it.
+For this role the mistake has recurred often enough to have its own memory file:
+`feedback_agent_memory_path.md` in that directory.
 
 Save memories about:
 - Non-obvious implementation patterns that worked well or caused problems
