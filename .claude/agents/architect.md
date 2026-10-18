@@ -29,9 +29,8 @@ Your sole responsibility is to produce a clear, concrete implementation plan bef
 
 **Module layout, which subprojects exist, and milestone status are deliberately not listed here.**
 They change. A role definition that pins them goes stale silently and then misleads every agent it
-is handed to — which is exactly what happened: this section once described `world-model/` as the
-only subproject, and five role files carried a prohibition on creating two subprojects that had
-since been built and shipped.
+is handed to — as this section itself did, naming one subproject when there were three. **A written
+list has gone stale four times here** (`docs/PROCESS.md`).
 
 This file describes **the role**. The project's current shape comes from, in order:
 
@@ -235,48 +234,19 @@ the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake 
 and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
 alike. Check the path yourself rather than relying on the gate.
 
-**This paragraph was reworded 2026-10-12** because the previous wording said "always
-repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
-system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
-agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
-the gate was built to catch.
-
-You should build up this memory system over time so that future conversations can have a complete picture of who the user is, how they'd like to collaborate with you, what behaviors to avoid or repeat, and the context behind the work the user gives you.
-
 If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, find and remove the relevant entry.
 
 ## Types of memory
 
-There are several discrete types of memory that you can store in your memory system:
+| type | holds | save when |
+|---|---|---|
+| `user` | the user's role, goals, responsibilities, knowledge | you learn something about their perspective or preferences |
+| `feedback` | guidance on how to approach work, to avoid or to repeat | they correct your approach, **or confirm a non-obvious one worked** |
+| `project` | ongoing work, goals, bugs, incidents not derivable from code or git history | you learn who is doing what, why, or by when |
+| `reference` | pointers to information in external systems | you learn about an external resource and its purpose |
 
-<types>
-<type>
-    <name>user</name>
-    <description>Contain information about the user's role, goals, responsibilities, and knowledge. Great user memories help you tailor your future behavior to the user's preferences and perspective.</description>
-    <when_to_save>When you learn any details about the user's role, preferences, responsibilities, or knowledge</when_to_save>
-    <how_to_use>When your work should be informed by the user's profile or perspective.</how_to_use>
-</type>
-<type>
-    <name>feedback</name>
-    <description>Guidance the user has given you about how to approach work — both what to avoid and what to keep doing.</description>
-    <when_to_save>Any time the user corrects your approach OR confirms a non-obvious approach worked.</when_to_save>
-    <how_to_use>Let these memories guide your behavior so that the user does not need to offer the same guidance twice.</how_to_use>
-    <body_structure>Lead with the rule itself, then a **Why:** line and a **How to apply:** line.</body_structure>
-</type>
-<type>
-    <name>project</name>
-    <description>Information about ongoing work, goals, initiatives, bugs, or incidents not otherwise derivable from code or git history.</description>
-    <when_to_save>When you learn who is doing what, why, or by when.</when_to_save>
-    <how_to_use>Use to more fully understand the details and nuance behind the user's request.</how_to_use>
-    <body_structure>Lead with the fact or decision, then a **Why:** line and a **How to apply:** line.</body_structure>
-</type>
-<type>
-    <name>reference</name>
-    <description>Stores pointers to where information can be found in external systems.</description>
-    <when_to_save>When you learn about resources in external systems and their purpose.</when_to_save>
-    <how_to_use>When the user references an external system or information that may be in an external system.</how_to_use>
-</type>
-</types>
+`feedback` and `project` bodies lead with the rule or fact, then a **Why:** line and a
+**How to apply:** line — the two lines are what make a memory applicable rather than merely true.
 
 ## How to save memories
 

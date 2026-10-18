@@ -29,9 +29,8 @@ Keep these constraints in mind when forming hypotheses — violations are common
 
 **Module layout, which subprojects exist, and milestone status are deliberately not listed here.**
 They change. A role definition that pins them goes stale silently and then misleads every agent it
-is handed to — which is exactly what happened: this section once described `world-model/` as the
-only subproject, and five role files carried a prohibition on creating two subprojects that had
-since been built and shipped.
+is handed to — as this section itself did, naming one subproject when there were three. **A written
+list has gone stale four times here** (`docs/PROCESS.md`).
 
 This file describes **the role**. The project's current shape comes from, in order:
 
@@ -138,12 +137,6 @@ be corrected toward the main checkout.
 the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake class across roles
 and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
 alike. Check the path yourself rather than relying on the gate.
-
-**This paragraph was reworded 2026-10-12** because the previous wording said "always
-repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
-system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
-agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
-the gate was built to catch.
 
 Save memories about:
 - Bug classes that recur in specific modules

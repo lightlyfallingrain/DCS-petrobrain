@@ -102,19 +102,14 @@ one start while its live acceptance is still outstanding. That is deliberate, no
 - **Never block a merge on live acceptance** that the user cannot currently perform. Say what is
   verified, say what is not, and let the work continue.
 - **Record the outstanding item by putting `#needs-flight` on the entry itself**, in the owning
-  subproject's `ROADMAP/` directory, rather than in a one-off note. There is no longer a
-  live-acceptance debt *list* to add a line to: this instruction used to name
-  `body-layer/ROADMAP.md`'s "Live acceptance debt" section, and that section now exists in no file
-  — the list was dissolved into a per-entry tag on 2026-10-09, and `body-layer/ROADMAP.md` is a
-  four-line pointer, so following the old wording would have meant either a one-off note (the
-  exact failure the rule was added after a retro to prevent) or creating a section inside a pointer
-  where nothing reads it. Resolve the entry's directory with
+  subproject's `ROADMAP/` directory, rather than in a one-off note. **There is no live-acceptance
+  debt *list*** — it was dissolved into this per-entry tag on 2026-10-09, which is what makes the
+  debt mechanically countable. Resolve the entry's directory with
   `.claude/scripts/roadmap-source.sh --dir <subproject>/ROADMAP.md` if you are unsure, and never
-  write into the pointer itself. The find-the-set recipe is in `docs/TAGS.md`; the tag is what
-  makes the debt mechanically countable, which the prose list never was.
+  write into the pointer itself. The find-the-set recipe is in `docs/TAGS.md`.
 - **Distinguish deferred from waived.** A milestone whose plan deliberately scopes live testing out
-  is done. A milestone whose live test is merely *pending the next sortie* is debt, and belongs on
-  the list until a real flight clears it — naming which sortie cleared it.
+  is done. A milestone whose live test is merely *pending the next sortie* is debt, and keeps its
+  `#needs-flight` tag until a real flight clears it — naming which sortie cleared it.
 - **Batch what a single flight can clear.** Several outstanding items usually share one sortie;
   saying so turns a scattered set of caveats into one actionable trip.
 
@@ -258,12 +253,6 @@ be corrected toward the main checkout.
 the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake class across roles
 and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
 alike. Check the path yourself rather than relying on the gate.
-
-**This paragraph was reworded 2026-10-12** because the previous wording said "always
-repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
-system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
-agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
-the gate was built to catch.
 
 Save memories about:
 - Recurring DoD failures (which criteria are most often missed)

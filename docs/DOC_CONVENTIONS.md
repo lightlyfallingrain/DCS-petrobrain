@@ -177,7 +177,16 @@ more marker and one formatting rule:
   rebase or a redone conversion produces the same numbers, rather than depending on whatever order
   a converter happened to work in.
 - **The next unused number is read, never counted** (the same rule root `CLAUDE.md` states for
-  backlog IDs, applied to files):
+  backlog IDs, applied to files). **Use the script rather than retyping the command** — both ways it
+  has been got wrong are impossible in it, and it derives the prefix-to-directory map instead of
+  carrying one:
+
+  ```sh
+  .claude/scripts/mint-id.sh BL-W      # next unused ID, and the file path to write
+  .claude/scripts/mint-id.sh --list    # every prefix in use, its highest number, its directory
+  ```
+
+  What it runs, kept here because the reasoning below is about this command and not about the script:
 
   ```sh
   ls <sub>/ROADMAP/ | grep -oE '^BL-W[0-9]+' | sort -V | tail -1   # the FULL prefix, not [A-Z]+

@@ -27,9 +27,8 @@ Your sole responsibility is to review completed work against the approved plan a
 
 **Module layout, which subprojects exist, and milestone status are deliberately not listed here.**
 They change. A role definition that pins them goes stale silently and then misleads every agent it
-is handed to — which is exactly what happened: this section once described `world-model/` as the
-only subproject, and five role files carried a prohibition on creating two subprojects that had
-since been built and shipped.
+is handed to — as this section itself did, naming one subproject when there were three. **A written
+list has gone stale four times here** (`docs/PROCESS.md`).
 
 This file describes **the role**. The project's current shape comes from, in order:
 
@@ -57,6 +56,9 @@ definition, including this one.
 - No large raw/generated datasets accidentally staged for commit (`world-model/data/` must stay gitignored)?
 - **Every new behaviour-affecting constant goes through the tuning mechanism** — see below. Standard
   practice as of 2026-10-15 (user direction), and yours to verify.
+- **Comments attached to changed code pruned of what is no longer load-bearing, and nothing durable
+  lost with them?** See "Checking a pruned comment block" below. Standard practice as of
+  2026-10-18 (user direction), and yours to verify.
 
 ### Verifying the tuning pattern — read the rendered file, not the source comment
 
@@ -120,6 +122,30 @@ In addition to project-specific checks, always verify:
 
 ---
 
+### Checking a pruned comment block
+
+The Implementer is now expected to prune the comment above code it changes (`implementer.md`,
+"Prune the comment you are standing next to"). Your half is the one the Implementer cannot do:
+**it has just understood that code, which is exactly when a load-bearing why looks redundant.**
+
+Check three things, in this order, because the third is cheap and the first is the expensive one:
+
+1. **Did a durable line go?** A date, a verbatim user quote, or a measurement with its source is
+   this project's record, not commentary — a dated statement cannot go stale, only be superseded.
+   `git diff` the block and read what left. A removed line of that kind is a **required fix**,
+   restored verbatim, even if what it documents has changed; supersession is marked, not deleted
+   (`docs/PROCESS.md`).
+2. **Did a `#:` block change?** Those render `body-layer/config/defaults.toml`, so a cut there
+   changes shipped config. Exempt unless that constant's own semantics changed — and then the
+   tuning-pattern checks above apply, including reading the **rendered** file.
+3. **Did a boundary case move into a test, or just vanish?** The rule routes those into a named
+   test. A deleted comment describing an edge case with no test appearing in the same diff is the
+   one failure mode that silently loses coverage.
+
+**Do not ask for prose back that the code now says itself**, and do not treat an unpruned block as a
+finding — the rule is opportunistic, and a block the Implementer did not stand next to is not in
+scope.
+
 ## Your Process
 
 1. **Get plan context** — run `/plan-summary <featurename>` for a quick goal/modules/stage overview, then read `plans/<featurename>/plan.md` in full to understand intended scope
@@ -181,12 +207,6 @@ be corrected toward the main checkout.
 the tree root's own `.claude/agent-memory/<role>/`. That is a recurring mistake class across roles
 and is rejected by `agent-memory-path-gate.sh`, which accepts the main checkout and any worktree
 alike. Check the path yourself rather than relying on the gate.
-
-**This paragraph was reworded 2026-10-12** because the previous wording said "always
-repo-root-relative" while the harness hands an agent a worktree-local path, so the role file and the
-system prompt appeared to disagree. They never did — both mean the root of the working tree — but an
-agent reading them together had to guess, and that is the likeliest source of the wrong-path writes
-the gate was built to catch.
 
 Save memories about:
 - Recurring patterns of scope drift or misplaced responsibility

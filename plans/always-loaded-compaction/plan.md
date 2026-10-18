@@ -197,3 +197,288 @@ Agent handoffs and session starts, for a week. The specific regressions this cha
 harvest that skips the `git rev-parse` tip check before `git branch -D` (rule 1 kept its evidence
 precisely because no hook fires there), and a session start that reads the roadmap without checking
 `git branch -v`. If either happens, revert — moved text is verbatim, so it is one command.
+
+---
+
+## Second pass, 2026-10-18 — the brake, because the first pass did not hold
+
+The first pass took 17% off and was erased in nine days.
+
+| | `CLAUDE.md` | `AGENTS.md` |
+|---|---|---|
+| before first pass (2026-10-06) | 4,676 words | — |
+| after first pass (2026-10-09) | **4,201** | **3,194** |
+| measured 2026-10-17 | **6,403** (+52%) | **4,262** (+33%) |
+
+**+2,202 words in nine days, ~245/day, against a one-off saving of 475.** Two new headings in that
+window, so the growth was prose accreting *inside* existing sections: each retro appending its
+evidence to a rule that already existed. That is the finding that changes the work — a trim pass is
+erased in two days, so the slope is the target, not the level.
+
+### What the user approved, and what they declined
+
+Four levers were put up. Their words: *"A and C approved. Use the post-compaction word count as
+guideline, warning, not ceiling."*
+
+| | lever | verdict |
+|---|---|---|
+| **A** | a `PreToolUse` gate on the two always-loaded files that reports standing and routes new prose | **approved** |
+| **B** | audit the 8 `.claude/agents/*.md` role files (140 KB total, architect alone 25 KB) — the dispatch multiplier, never measured | **not taken this pass** |
+| **C** | procedural prose → script: the ID-minting section, 5,322 bytes, 13% of `CLAUDE.md` | **approved** |
+| **D** | cut rules a hook already reprints, not only their evidence | **held** — flagged as the risky one |
+
+**B is the bigger number and is still open.** Every agent dispatch pays `CLAUDE.md` + `AGENTS.md` +
+its role file + any nested `CLAUDE.md` — roughly 25–30k tokens, times the number of dispatches in a
+session. The 2026-10-09 pass never looked at the role files, and neither did this one.
+
+### A — `always-loaded-budget-gate.sh`
+
+`PreToolUse(Write|Edit)`, scoped to the repo-root `CLAUDE.md` and `AGENTS.md` only. Reports the
+current word count against that file's measured post-compaction size, then routes the new material:
+hook → script/skill → file-plus-`docs/`. **Never blocks**, per the user's *"guideline, warning, not
+ceiling"* — over the line is information, and some rules are worth their words.
+
+Scoping needs no list of subprojects: the repo root is the only directory holding both `AGENTS.md`
+and `.claude/`, which is true in the root checkout and in every worktree. Nested
+`<sub>/CLAUDE.md` files stay out of scope (risk 3 above — they load conditionally, and
+`audio-adapter/CLAUDE.md` is 78% dated prose, the durable kind).
+
+### C — `mint-id.sh`
+
+The ID-minting section was the largest in `CLAUDE.md` and was entirely a procedure: one command,
+a prefix-to-directory table, and two measured traps. All three move into the script.
+
+**The prefix-to-directory map is now derived, never written.** `--list` finds each prefix where its
+files actually are. A written map goes stale silently — a list in `CLAUDE.md` has done so four times
+— and this one would have needed editing on 2026-10-17 when brain-layer took its own `ROADMAP/`.
+Deriving it meant that move would have needed no edit at all.
+
+Both documented traps are now structurally impossible rather than warned about: `'^<prefix>[0-9]+'`
+cannot cross prefixes (`BL-` will not match `BL-B12`, because `[0-9]` excludes `B`), and `sort -V`
+is the only ordering the script uses. Verified by running it against all sixteen live spaces (the removed table listed six, which is the
+other half of why a written map was the wrong instrument) —
+`BL-` → 14 (not 80), `BL-W` → 39 (not 9), `WM-W` → 12 (not 9): the three cases the prose warned
+about, each returned correctly without anyone having to remember the warning.
+
+It also refuses rather than guesses in the two cases that matter: a prefix with no existing items
+(no derivable home, so the destination is a decision) and a prefix found in two directories (which
+would collide). The never-reuse rule stays in `CLAUDE.md` with its one-clause why, because it is a
+rule rather than a procedure and no script can enforce it.
+
+**Saving: 511 words from `CLAUDE.md` (6,403 → 5,892), and the duplication is resolved rather than
+moved.** `docs/DOC_CONVENTIONS.md` already carried the same recipe and the same two traps; it now
+points at the script and keeps the reasoning, so there is one executable copy and one reference
+copy instead of three prose copies of a command.
+
+### One stale claim found in passing, the predicted class again
+
+`CLAUDE.md` asserted *"`MI-B<n>` is reserved for mission-interpreter, which has no Backlog section
+yet."* `mission-interpreter/ROADMAP/` holds `MI-B1`–`MI-B3`. Found by running `mint-id.sh --list`,
+which cannot assert anything false about which prefixes exist — the present-tense-assertion class
+the criterion predicts, and the second time a compaction pass has turned one up by reading the
+prose closely enough to compact it.
+
+### What to watch
+
+The slope, not the level. `CLAUDE.md` is 5,892 words — still 1,691 over its guideline, and
+deliberately so: nothing was cut except the procedure the script now owns. **The test of this pass
+is the word count in nine days' time, not today.** If it is back above 6,400 the gate is not
+working and the next lever is B.
+
+Specific regression to watch for: an ID minted by hand against a document instead of by the script,
+which is exactly what the removed prose was guarding. `git log --diff-filter=A --name-only` over the
+ROADMAP directories will show it.
+
+---
+
+## Third pass, 2026-10-18 — the three kinds of why, and lever B
+
+User direction, mid-pass: *"are __all__ those examples really needed? Would just some suffice? Maybe
+in a much condensed format? Does prose really bring value?"* Then: *"both. Then do B and apply this
+logic in those files as well."*
+
+### The distinction this forced, which the earlier passes had conflated
+
+"The why" is three things with different economics:
+
+| kind | is | verdict |
+|---|---|---|
+| **mechanism** | why the rule works — *"before concluding names an internal state, so nothing can observe it failing"* | one non-obvious sentence, **always stays** |
+| **calibration** | what the rule rejects — the removed transport, the dropped F10 menu | one or two worked examples, **stays**; it makes a rule applicable rather than abstract |
+| **reinforcement** | a list of incidents all establishing the same single point | **a count does the same work** — this is the fat |
+
+**The repo had already run the A/B on itself without noticing.** The graph-query rule's evidence was
+a 60-word enumeration of eight passes; the 2026-10-09 pass cut it to nine words and that rule is
+still followed — because what fixed it was a hook firing at the point of use. The record does show
+rules stated briefly, ignored, then rewritten at length, which is the counter-argument this session
+raised against its own proposal; in every such case the remedy that worked was the trigger, and the
+words were the half that did not. That retires the objection.
+
+The distinction is now in `always-loaded-budget-gate.sh`, so it fires when someone appends a third
+or fourth incident to a rule that already has one. Without that, a condensing sweep re-accretes —
+which is the whole finding of the second pass.
+
+### The sweep, and an estimate that was wrong
+
+Twelve passages condensed across `CLAUDE.md` and `AGENTS.md`. Both superseded blockquotes were
+**shortened to the one line `docs/PROCESS.md`'s supersession rule actually specifies, not deleted** —
+that rule exists to keep them, and deleting them would have broken it.
+
+**138 words from `CLAUDE.md`, 85 from `AGENTS.md`. The estimate given to the user was 400–700.** It
+was wrong: 223 is ~2% of the always-loaded set, not the 6–10% claimed. The passages were more
+mechanism and less reinforcement than the estimate assumed, and several were trimmed lightly on
+purpose. Recording it because the estimate was offered as a reason to do the work.
+
+One measured fact was genuinely lost on the way and had to be restored: the ~86-bytes-per-entry
+arithmetic that made the agent-memory compaction impossible as phrased existed in no other file, and
+is now in `todo/todo/X-T25.md`, where `CLAUDE.md` points.
+
+### Lever B — and the framing error that has to be corrected first
+
+**The first framing of B was wrong.** It said the 140 KB of `.claude/agents/*.md` is paid on every
+dispatch. It is not: **only one role file loads per dispatch.** The number that matters is one
+file's own size — 1,426 to 3,414 words — not the roster's 20,887. The boilerplate repeated across
+the eight files therefore costs **no tokens at all**; it is a drift risk, which is a different
+problem with a different fix.
+
+Measured, and the duplication checked by hash rather than assumed:
+
+| block | state |
+|---|---|
+| `## Where things live` | **identical** in 6 files, **absent from `dod.md` and `security.md`** — a gap, not drift |
+| `## Persistent Agent Memory` | 8 versions, and the divergence is **substantive and correct** — the "save memories about" list is properly per-role |
+| `### Memory File Format` | identical in 5, two variants (investigator +5 words, security +79) |
+| `## Types of memory` / `## How to save memories` | **architect only**, 460 words, the verbose `<types>` XML schema |
+
+What was cut, all of it history of a documentation fix or boilerplate duplicating a paragraph above
+it:
+
+- **The "This paragraph was reworded 2026-10-12" block, 70 words, from all 8 role files.** It
+  explains why a *wording* changed; the wording itself stands above it, and
+  `agent-memory-path-gate.sh` enforces the rule at the point of use, which is the criterion.
+- **`implementer.md` carried a broken paragraph** — `task's code is scoped to a subproject.**`, with
+  its opening clause missing — that also restated the hazard, the gate and *check the path yourself*
+  from the paragraph directly above. Pre-existing corruption, found by reading closely enough to
+  compact. Replaced by the one thing in it that was unique: the pointer to that role's own
+  `feedback_agent_memory_path.md`.
+- **`architect.md`'s `<types>` XML schema → the compact table the other seven roles manage with**,
+  plus a line of generic personal-assistant framing (*"a complete picture of who the user is"*) that
+  does not describe an architect dispatch.
+- **`dod.md`'s dissolved-list history**, 110 words on why `#needs-flight` replaced a prose list —
+  and with it **a live contradiction**: the next bullet still said a pending item *"belongs on the
+  list"*, three sentences after the text explaining that no list exists. Now says it keeps its tag.
+
+| file | before | after | paid |
+|---|---|---|---|
+| `architect.md` | 3,637 | **3,414** | per architect dispatch |
+| `dod.md` | 3,520 | **3,376** | per DoD dispatch |
+| `implementer.md` | 3,129 | **3,022** | per implementer dispatch |
+| the other five | 1,496–2,531 | −70 each | per dispatch of that role |
+| roster total | 20,887 | **20,074** | never paid as a total |
+
+### The gate now covers role files
+
+Same hook, `.claude/agents/*.md` added, measured on each file's own size. **One generous ceiling of
+3,500 words rather than a stored table of eight numbers**, deliberately: a table is a written list,
+it goes stale the moment a ninth role is added, and a list in an instruction file has gone stale
+four times here. A single threshold covers a new role with no edit, and at 3,500 it sits above every
+current file — so it fires on a genuine outlier instead of adding permanent noise to the three
+largest.
+
+### Still open
+
+- **`## Where things live` was missing from `dod.md` and `security.md`.** Resolved for `security.md`
+  by user direction (*"Where things live ok for security"*): it now carries the section, in the same
+  structural slot the other six use. `dod.md` is left as it was, which has its own orientation
+  material. **The clause condensed on the way was condensed in all seven copies at once** — letting
+  one copy diverge for no reason is precisely the drift risk this pass measured, so the edit applies
+  to every copy or to none, and the seven are verified byte-identical by hash.
+- **Lever D** (cutting rules a hook already reprints, not only their evidence) remains held.
+- **The slope, as before.** `CLAUDE.md` at 5,754 words. The test is the number in nine days.
+
+---
+
+## Fourth pass, 2026-10-18 — the same test, applied to code comments
+
+User direction: *"we should apply the 'not all steps, not all evidence needs be recorded, just the
+load carrying parts' to code file comment blocks as well. Not as a sweep, but when implementer
+touches a comment block, clean it up at the same time."* Approved after the measurement below
+changed the shape of it.
+
+### What the measurement changed
+
+| | lines | blocks >=5 lines |
+|---|---|---|
+| standalone comment lines in `*/src/**/*.py` | **8,346** (12.6% of 66,318 code lines) | 636 |
+| of which **`#:` tuning declarations** | **5,156 (62%)** | 382 runs, 4,553 lines, largest **149** |
+| of which plain `#` comments | 3,190 (38%) | 254 runs, 2,404 lines, largest 70 |
+
+Concentrated in `body-layer/src/belief/callouts.py`, `audio-adapter/src/vocabulary.py`,
+`body-layer/src/logger.py`, `world-model/src/build/pipeline.py`.
+
+**Three findings, each of which changed the rule as proposed:**
+
+1. **Most of what looks like the target is not a comment.** `#:` declarations render
+   `body-layer/config/defaults.toml`, so pruning one changes shipped config — and they are the
+   durable kind by construction. The largest, `GROUP_EAGER_MAX_EXTENT_M` at 149 lines, traces 500 m
+   to the speech renderer's rounding step, cross-checks it against four measured figures from the
+   one flown sortie, and records the `math.inf` it replaced and why the relative test could never
+   reject a pair at n = 2 without it. That is exactly what must not be touched. **The exemption is
+   the rule's first clause**, not a footnote.
+2. **The docs justification does not transfer, so the filter must change.** A doc costs tokens every
+   session; a comment costs them only when the file is read, which the reader was doing anyway. The
+   payoff here is **not being misled**, which means pruning for **tense, not length** — a 70-line
+   accurate comment is fine, a two-line stale one is a defect. This is the same finding as
+   *"staleness tracks tense, not length"*, arrived at from the opposite direction.
+3. **Code has a fourth destination that docs do not have, and it is the best one.** A boundary case
+   described in a comment belongs in a test named for it: a test cannot go stale silently, because
+   it fails. Docs have no equivalent, which is why the three-kind routing needed a fourth row here.
+
+### The trigger was retargeted
+
+As proposed — *"when implementer touches a comment block"* — it fires only when the comment is
+already being edited, and **the comments that rot worst are the ones nobody touches**, sitting next
+to code that changed around them. So the rule reads:
+
+> **When you change code, read the comment attached to it.**
+
+The code is the observable event; the comment is not. Same lesson as *"before concluding"* naming an
+internal state that nothing could observe failing. Pruning stays local to that block, because a
+correctness diff that also rewrites comments three functions away is one nobody reads properly.
+
+### The guardrail, which is the part most likely to be needed
+
+**Shorten rather than delete; when in doubt, keep. Never delete a line carrying a date, a verbatim
+user quote, or a measurement with its source.** The asymmetry that makes this necessary: a why looks
+*most* redundant to whoever has just read the code and understood it, and its value is to the next
+reader who has not. The Implementer is always in the first position and never in the second, which
+is why the Reviewer gets the half the Implementer structurally cannot do.
+
+### Where it landed
+
+`implementer.md` does it, `reviewer.md` checks it — the split the tuning pattern already uses, so
+this is an existing practice rather than a new mechanism. One bullet in each file's rules list
+pointing at a section below it, exactly as the tuning rule is wired.
+
+The Reviewer's three checks are ordered cheapest-last on purpose: did a durable line go (a required
+fix, restored verbatim), did a `#:` block change, and **did a boundary case move into a test or just
+vanish** — the last being the one failure mode that silently loses coverage. An unpruned block is
+explicitly *not* a finding, since the rule is opportunistic.
+
+### One thing worth recording about writing it
+
+The first draft of the Implementer section was 607 words and pushed `implementer.md` to 3,619 — over
+the 3,500 guideline set two commits earlier, by the author of that guideline, in the commit that
+added a rule about unnecessary prose. The gate caught it; the section was condensed to 243 words and
+the file came back to 3,428. Worth recording because it is the pass's own thesis demonstrated
+against itself: the brake works and the judgement did not, which is the entire argument for having
+a mechanism rather than an intention.
+
+| file | before | after |
+|---|---|---|
+| `implementer.md` | 3,012 | **3,428** |
+| `reviewer.md` | 2,299 | **2,594** |
+
+Both still under the guideline, and this is the one pass in the series that deliberately *adds*
+words to the always-loaded set: a rule that prunes 2,400 lines of comment prose over time is worth
+roughly 700 words of instruction, and that trade is the user's, made explicitly.
