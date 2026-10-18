@@ -12,6 +12,28 @@ You operate in three modes depending on when you are invoked.
 
 ---
 
+## Where things live
+
+**Module layout, which subprojects exist, and milestone status are deliberately not listed here.**
+They change. A role definition that pins them goes stale silently and then misleads every agent it
+is handed to — as this section itself did, naming one subproject when there were three. **A written
+list has gone stale four times here** (`docs/PROCESS.md`).
+
+This file describes **the role**. The project's current shape comes from, in order:
+
+- **The orchestrator's prompt** — what *this* task is, and which branch and subproject it concerns.
+- **Root `ROADMAP.md`** — which subprojects exist and which is active.
+- **`<subproject>/ROADMAP/`** — that subproject's milestone status; its own source of truth. One
+  file per entry, with an index at `<subproject>/ROADMAP/<subproject>-roadmap.md`.
+  **`<subproject>/ROADMAP.md` is a four-line pointer**, so reading it tells you nothing and
+  writing to it is worse — `.claude/scripts/roadmap-source.sh <path>` resolves either form.
+- **Root and per-subproject `CLAUDE.md`** — structure, commands, conventions.
+
+If your task needs to know what exists, read those. Do not trust a structure cached in a role
+definition, including this one.
+
+---
+
 ## Mode 1 — Plan Review (after Architect, before Implementer)
 
 **Trigger:** Architect has produced `plans/<feature>/plan.md`.

@@ -387,8 +387,11 @@ largest.
 
 ### Still open
 
-- **`## Where things live` is missing from `dod.md` and `security.md`.** Found by this pass, not
-  fixed by it — adding 183 words to two role files is the opposite of this pass's direction, and
-  whether those two roles need it is a judgement about the roles, not about size.
+- **`## Where things live` was missing from `dod.md` and `security.md`.** Resolved for `security.md`
+  by user direction (*"Where things live ok for security"*): it now carries the section, in the same
+  structural slot the other six use. `dod.md` is left as it was, which has its own orientation
+  material. **The clause condensed on the way was condensed in all seven copies at once** — letting
+  one copy diverge for no reason is precisely the drift risk this pass measured, so the edit applies
+  to every copy or to none, and the seven are verified byte-identical by hash.
 - **Lever D** (cutting rules a hook already reprints, not only their evidence) remains held.
 - **The slope, as before.** `CLAUDE.md` at 5,754 words. The test is the number in nine days.
