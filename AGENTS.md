@@ -49,9 +49,8 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
      registers as merged and `git branch -d` works — which answers "has this been harvested?" with
      git instead of bookkeeping. A cherry-pick rewrites the shas, the branch never registers as
      merged, and that unanswerable question is what left 67 agent branches against 58 real ones in
-     September. Revised 2026-10-09; the whole of this session's harvests were cherry-picks under the
-     old wording, which was written when agents started at `origin/main` and a cherry-pick was the
-     only option.
+     September. Revised 2026-10-09, when the old wording — written while agents still started at
+     `origin/main`, where cherry-pick was the only option — stopped being true.
 
      **A fast-forward is only available if the main loop has not advanced the branch while the agent
      held it.** If it has, the branch has diverged and cherry-pick is correct — that is a fallback,
@@ -125,12 +124,10 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    the user. Check `git -C <root> status --short` is empty first; if they have work in progress
    there, stop and ask rather than merging around it.
 
-   > **Superseded.** This read *"The main checkout belongs to the main loop and the user. This is the
-   > inversion: side quests no longer need a worktree, because nothing else is using the checkout."*
-   > That was true of agents-versus-main-loop and is **not** being reversed — agents still always get
-   > a worktree. What is removed is the *main loop's* share of the root, which the 2026-09-21
-   > inversion left in place only because nothing then needed it. The side-quest consequence is
-   > reversed with it: see "Why a feature branch's history still stays clean" below.
+   > **Superseded** by rule 3 above, 2026-10-09: this granted the main loop a share of the repo
+   > root and so exempted side quests from needing a worktree. Agents always getting one is
+   > unchanged; the main loop's share is what went. See "Why a feature branch's history still stays
+   > clean" below.
 
 4. **Name the commit the agent is meant to be looking at, and make the agent check it.** A
    worktree is created from **`origin/HEAD`** — the remote-tracking ref for the default branch — not
@@ -138,8 +135,8 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    2026-10-09 (`branch: Created from origin/main`), so **a stale base is the guaranteed starting
    state for any dispatch whose target is not `origin/main`, which is every feature-branch dispatch
    there will ever be.** Six consecutive dispatches that day landed stale, the worst 35 commits
-   behind; three roles had each verified the wrong code before this rule existed. **Assume a stale
-   base. Never hope for a fresh one.** Mechanism and the open question of whether
+   behind. **Assume a stale base. Never hope for a fresh one.** Mechanism, the three roles that
+   verified the wrong code before this rule existed, and the open question of whether
    `worktree.baseRef` can change it: `plans/agent-stale-base/plan.md`.
 
    - **The dispatching prompt states the branch and the expected tip sha.** "Review the fix" is not
@@ -219,10 +216,9 @@ longer a main-loop session sitting in the root to commit such work directly, so 
 worktree on its own branch**, named after the work, and merges on its own. One more worktree is
 cheap; `git worktree list` showing it is the point.
 
-> **Superseded.** This read *"With the main checkout free, the way to honour it is simply to commit
-> such work on `main` directly rather than on the feature branch — no worktree needed, same
-> outcome."* The root is no longer free — it is the user's — and committing to `main` from it would
-> move the branch under their feet, which is exactly what rule 3 now forbids.
+> **Superseded** by the paragraph above, 2026-10-09: this had cross-cutting work committed to
+> `main` directly from the root, which rule 3 now forbids because it moves the user's branch under
+> their feet.
 
 **The user may override this for a specific piece of work, and did so twice on 2026-10-09**
 (*"Use the same branch"*, *"Continue in this branch"*), putting cross-cutting convention edits onto

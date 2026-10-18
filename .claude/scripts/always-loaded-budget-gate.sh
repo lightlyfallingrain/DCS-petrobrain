@@ -16,6 +16,24 @@
 # blocks. Over the line is information, not a refusal -- some rules are worth
 # their words, and the user sets that call, not a word count.
 #
+# The routing below separates three kinds of "why", because they have different
+# economics and conflating them is what the accretion feeds on:
+#
+#   mechanism      why the rule works. Non-obvious, one sentence, keep always.
+#   calibration    where the boundary is -- what the rule rejects. One or two
+#                  worked examples, keep: they make a rule applicable rather
+#                  than abstract.
+#   reinforcement  proof it matters. A list of incidents establishing one
+#                  point. A COUNT does the same work -- this is the fat.
+#
+# The repo ran its own A/B on this. The graph-query rule's evidence was a
+# 60-word enumeration of eight passes; the 2026-10-09 pass cut it to nine
+# ("followed zero times across eight separate passes on 2026-09-26/27") and
+# that rule is still followed, because what fixed it was a hook, not words. The
+# record does show rules stated briefly, ignored, and rewritten at length -- but
+# in every such case the remedy that worked was a trigger at the point of use,
+# and the words were the half that did not.
+#
 # Scope is the always-loaded set only: the repo-root CLAUDE.md and AGENTS.md,
 # which every session and every agent dispatch pays unconditionally. Nested
 # <subproject>/CLAUDE.md files load only when work happens in that directory
@@ -64,6 +82,6 @@ fi
 jq -n --arg standing "$standing" --arg base "$base" '{
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
-    additionalContext: ("ALWAYS-LOADED BUDGET (\($base)): \($standing) A guideline, not a ceiling -- this never blocks, and prose that earns its words should be written.\n\nBefore adding to it, route the new material:\n  1. Can a hook deliver this rule at the point of use? Then the hook text IS the rule, and this file gets nothing. (Criterion from plans/always-loaded-compaction/plan.md, which is testable against .claude/settings.json rather than argued.)\n  2. Is it a procedure? Then it belongs in a script or a skill, and this file gets the command. A list goes stale silently; a command cannot. Precedents: mint-id.sh, roadmap-source.sh, memory-search.py (X-T25, where the indexes were deleted rather than compacted).\n  3. Otherwise: the rule plus a one-clause why here, the full account in docs/. Moved text goes verbatim, so a revert is one command.\n\nStaleness tracks tense, not length. Every staleness incident this repo has recorded is a present-tense assertion about current state; a dated record of reasoning cannot go stale. So prefer trimming assertions over trimming the why -- and if the edit removes a rule, check whether a hook or a script is carrying it, because a rule nobody delivers at the point of use is a rule that gets forgotten.")
+    additionalContext: ("ALWAYS-LOADED BUDGET (\($base)): \($standing) A guideline, not a ceiling -- this never blocks, and prose that earns its words should be written.\n\nBefore adding to it, route the new material:\n  1. Can a hook deliver this rule at the point of use? Then the hook text IS the rule, and this file gets nothing. (Criterion from plans/always-loaded-compaction/plan.md, which is testable against .claude/settings.json rather than argued.)\n  2. Is it a procedure? Then it belongs in a script or a skill, and this file gets the command. A list goes stale silently; a command cannot. Precedents: mint-id.sh, roadmap-source.sh, memory-search.py (X-T25, where the indexes were deleted rather than compacted).\n  3. Otherwise: the rule plus a one-clause why here, the full account in docs/. Moved text goes verbatim, so a revert is one command.\n\nThen check which KIND of why you are writing, because only one of the three is worth its words here:\n  * MECHANISM -- why the rule works, e.g. \"before concluding names an internal state, so nothing can observe it failing\". Non-obvious, one sentence. KEEP.\n  * CALIBRATION -- what the rule rejects, e.g. the removed transport and the dropped F10 menu. One or two worked examples make a rule applicable instead of abstract. KEEP.\n  * REINFORCEMENT -- a list of incidents all establishing the same one point. A COUNT does the same work: \"this has gone stale four times\" replaces four stories, and \"followed zero times across eight passes\" replaced a 60-word enumeration without weakening the rule. CONDENSE, and put the incidents in docs/ where they are read when the rule is challenged rather than on every dispatch.\nIf you are appending a third or fourth incident to a rule that already has one, you are writing reinforcement. Raise the count instead.\n\nStaleness tracks tense, not length. Every staleness incident this repo has recorded is a present-tense assertion about current state; a dated record of reasoning cannot go stale. So prefer trimming assertions over trimming the why -- and if the edit removes a rule, check whether a hook or a script is carrying it, because a rule nobody delivers at the point of use is a rule that gets forgotten.")
   }
 }'

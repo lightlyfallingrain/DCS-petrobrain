@@ -192,6 +192,51 @@ construction, not by preference. Do not add memory to the corpus to fix this: it
 content that already arrives by recall and leak memory vocabulary into the graph's own terms, which
 is the same failure as the removed `graphify-corpus/` mirror.
 
+## What the condensed counts in `CLAUDE.md` refer to
+
+Root `CLAUDE.md` states several rules with a **count** of the incidents behind them rather than the
+incidents themselves — *"four times"*, *"five of this project's important corrections"*. The count
+does the rule's work; the list is what it refers to, and it is here because it is read when a rule
+is challenged, not on every session and every agent dispatch.
+
+**Why a count and not the list** (user direction, 2026-10-18, and the reasoning is in
+`.claude/scripts/always-loaded-budget-gate.sh`): a *mechanism* — why a rule works — is one
+non-obvious sentence and always stays. A *calibration* example — what the rule rejects — makes a
+rule applicable rather than abstract, and one or two stay. A list of incidents all establishing the
+same single point is *reinforcement*, and a count replaces it without weakening anything. This repo
+ran the A/B on itself: the graph-query rule's evidence was a 60-word enumeration of eight passes,
+was cut to nine words on 2026-10-09, and the rule is still followed — because what fixed it was a
+hook firing at the point of use, not the words.
+
+### The five corrections that came from the user reading *why*
+
+Cited by `CLAUDE.md` "Talking to the user", which requires the reasoning behind a claim to be shown
+compressed rather than hidden. None of these was reachable from a status line:
+
+- a slew limit read off the wrong instrument
+- a *"no velocity anywhere"* finding refuted by naming a tool that does get velocity
+- aspect angle mattering to recognition
+- ten trucks in one glance being one perceptual event, not ten
+- the naked eye belonging as the default optic
+
+### The four flight-feedback readings that a conversation reversed
+
+Cited by `CLAUDE.md` "Flight feedback is captured, then explored, then planned". Each arrived
+*after* a reading that looked obviously right, and each would have been built wrong:
+
+- the Bekaa reversal
+- the water-flow analogue replacing rooms-and-doorways
+- *"still one clock hour at a time"*, correcting a 90° cone that was about to be built
+- the direction word turning out to be per-kind rather than universal
+
+### The four times a written list went stale
+
+Cited by `CLAUDE.md` "Current priority", which is why the subproject list is taken from the status
+table or `git ls-files '*/pyproject.toml'` and never from prose. Three subprojects were named in
+`CLAUDE.md` long after six existed; `AGENTS.md` and four skills inherited the same stale three, and
+those skills could report PASS while never looking at half the repo. Found by the 2026-09-27 and
+2026-10-09 integrity audits (`audits/system-integrity/`).
+
 ## Binary sources: images, PDFs, and anything grep cannot read
 
 A `.jpg`, a `.png` or a `.pdf` is invisible to search, to the knowledge graph, and to every agent

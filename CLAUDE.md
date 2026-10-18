@@ -55,16 +55,15 @@ status table named. Same for `body-layer/BACKLOG.md`, `todo/todo.md` and `todo/b
 **Never take the list of subprojects from a list written in a file — take it from that status table
 or from `git ls-files '*/pyproject.toml'`.** This is the one enumeration rule, and it governs every
 section of this file rather than being restated per section. A written list goes stale silently
-while reading as an instruction: three were named here long after six existed, four skills
-inherited the same three and could report PASS while never looking at half the repo, and a list in
-this file has now gone stale **four** times. The mechanical check costs one command and cannot.
+while reading as an instruction — four skills inherited a stale three-subproject list and could
+report PASS while never looking at half the repo. **A list in this file has now gone stale four
+times** (`docs/PROCESS.md`). The mechanical check costs one command and cannot.
 `todo/` no longer duplicates milestone narrative; it only holds items not yet assigned to
 one subproject's roadmap (cross-cutting backlog, session-scoped notes) and User priority tasks —
 in `todo/todo/` and `todo/backlog/`, indexed by `todo/todo/todo-tasks.md` and
 `todo/backlog/todo-backlog.md`.
-(Deliberately not restated here: two copies of the same fact drift out of sync as milestones
-complete — see the roadmap files' own "Keeping this current" note for how that's enforced at merge
-time.)
+(Not restated here on purpose: two copies of one fact drift. The roadmap files' own "Keeping this
+current" note has how that is enforced at merge time.)
 
 ## Subprojects
 
@@ -105,8 +104,8 @@ So the unit is the **batch**, not the feature and not the stage:
 where a feature's stages routinely ship in separate merges days or weeks apart. Read strictly it
 would hold both passes until the last stage of `BL-14` or the 9K113 series; read loosely it justifies
 a pass per stage, which is what practice drifted into. Neither was intended. The drift was found by
-*counting commits in a retro*, not by anyone noticing at the time — the same lesson this file already
-records about standing exemptions: a cadence nobody re-checks outlives its premise.
+*counting commits in a retro*, not by anyone noticing at the time: a cadence nobody re-checks
+outlives its premise.
 
 Scoping, in the user's own terms: this is for now a single-user, LAN-only project under active development, so this is one pass per feature rather than "both roles fully on everywhere" — deeper security and performance effort comes once the important milestones (brain and memory) are complete.
 
@@ -174,10 +173,9 @@ project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than
 
 A queryable graph over the current-state design documentation lives in `graphify-out/` (gitignored,
 built from a corpus that is **a file list, not a directory** — `.claude/scripts/graph-corpus-files.sh`
-produces it). A copied `graphify-corpus/` mirror was tried and removed: it broke cache lookups keyed
-on mirror paths, and files at the mirror root were keyed `graphify_corpus_*`, leaking a staging
-directory into the graph's own vocabulary. **Do not reintroduce a mirror** — `/graph-refresh` carries
-the full reasoning.
+produces it). A copied `graphify-corpus/` mirror was tried and removed: it keyed cache lookups and
+node names on the staging path, leaking the mirror directory into the graph's own vocabulary. **Do
+not reintroduce a mirror** — `/graph-refresh` carries the full reasoning.
 
 ### When to query it — observable moments, not "before concluding"
 
@@ -213,14 +211,10 @@ ever surface it. **Search every role, not only the one you are in** — the cros
 one the old per-role indexes could not surface at all.
 
 **Why a tool and not the `MEMORY.md` index that used to sit in each directory.** That index was
-loaded on *every* agent dispatch — all eight role files carry `memory: project`, which is a Claude
-Code feature rather than a repo convention — while **no role file ever told an agent to read it**.
-Unconditional cost, optional benefit. It also drifted, outgrew its read limit, and a `PostToolUse`
-hook asked six separate agents in one session to compact it, each correctly refusing because the ask
-was impossible as phrased: fixed cost is ~86 bytes per entry, so a byte target is an entry-count
-target and no prose trimming reaches it. The tool derives the same index on demand from each file's
-`description:` frontmatter — present in 556 of 556 files, measured — so it cannot drift and cannot
-be asked to shrink. Full account: `todo/todo/X-T25.md`.
+loaded on every agent dispatch while no role file ever told an agent to read it — unconditional
+cost, optional benefit — and it drifted. The tool derives the same index on demand from each file's
+`description:` frontmatter, so it cannot drift and cannot be asked to shrink. Full account, and why
+the compaction it was repeatedly asked for was impossible as phrased: `todo/todo/X-T25.md`.
 
 ### Graph to find it, `grep` to prove it is gone
 
@@ -341,11 +335,10 @@ The user's own words:
 3. **Then** plan and build.
 
 **The failure this prevents is not losing the feedback. It is acting on the first reading of it**,
-which repeatedly turns out to be wrong in a way that only a conversation surfaces — the Bekaa
-reversal, the water-flow analogue replacing rooms-and-doorways, *"still one clock hour at a time"*
-correcting a 90° cone that was about to be built, and the direction word turning out to be per-kind
-rather than universal. Every one of those arrived *after* a reading that looked obviously right,
-and each would have been built wrong.
+which repeatedly turns out to be wrong in a way that only a conversation surfaces — **four times
+so far**, most sharply when *"still one clock hour at a time"* corrected a 90° cone that was about
+to be built. Each arrived *after* a reading that looked obviously right, and each would have been
+built wrong. (The four: `docs/PROCESS.md`.)
 
 ### It is enforced structurally, because remembering it does not work
 
@@ -381,11 +374,9 @@ flies the aircraft, not for someone tracking the build.
 - **Status, in one line** — done / in review / blocked on X.
 
 **Show the reasoning — compressed, not hidden.** This is the exception to brevity and it is not
-optional. Most of this project's important corrections came from the user reading *why* something
-was believed and spotting the flaw: a slew limit read off the wrong instrument, a "no velocity
-anywhere" finding refuted by naming a tool that gets velocity, aspect angle mattering to
-recognition, ten trucks in one glance being one perceptual event, the naked eye belonging as the
-default optic. None of those could have come from a status line.
+optional. **Five** of this project's important corrections came from the user reading *why*
+something was believed and spotting the flaw — a slew limit read off the wrong instrument was one.
+None of them was reachable from a status line. (The five: `docs/PROCESS.md`.)
 
 So state **the inference and what it rests on**, in a line or two — enough that a wrong premise is
 visible. Drop the walkthrough, keep the load-bearing step. "X, because Y — which assumes Z" is
@@ -425,8 +416,8 @@ one whenever the subject is geometry, layout, state over time, a pipeline, or a 
 
 **Rough and early beats polished and late**, for the same reason `/explore` asks for mock output:
 something concrete is what cues recall, and several of this project's largest corrections arrived
-from the user reading a mock rather than answering a question — including, the day this was written,
-an o'clock bearing missing from a mock callout. **Honest limit, to be stated rather than promised
+from the user reading a mock rather than answering a question — an o'clock bearing missing from a
+mock callout, spotted 2026-10-17, is one. **Honest limit, to be stated rather than promised
 around:** there is no image-generation model here, so "visual" means SVG, Canvas, HTML or Mermaid —
 geometry, charts, mock interfaces and diagrams, not photographic or artistic renderings.
 
