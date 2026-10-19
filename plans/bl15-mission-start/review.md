@@ -509,3 +509,216 @@ makes refusal mode reachable, not by pattern-matching on what the brief
 asked me to check — the brief asked the right question and the call graph
 happened to (currently) answer it safely, which is itself the finding worth
 recording.
+
+## Batch 3 — review of the fix commit (`ea5f77fc`, diff base `465c4611`)
+
+Reviews the Batch 2 required fix (`CrewConsole.drain_events`/`drain_brain`
+guard against `self.refused`) and the related `fired_on_tracker` reset
+(Batch 2's optional refinement, promoted to done in this batch). Diff scope:
+`body-layer/src/belief/crew_console.py`, `body-layer/src/logger.py`,
+`body-layer/src/mission_memory/admission.py`, plus their tests — read in
+full via `git diff 465c4611 ea5f77fc`, not the whole-batch diff.
+
+### The `drain_events`/`drain_brain` guard
+
+Both methods now open with `if self.refused: return []` (or its
+`drain_brain`-specific equivalent below), placed **after** the one step
+that has to run regardless of `refused` and **before** every step that
+speaks or mutates state on the model's behalf — read directly, not taken on
+the implementer's account:
+
+- `drain_events`: `self.scheduler.tick(...)` runs unconditionally first,
+  then the guard, then `_print`. Confirmed by reading `CalloutScheduler.
+  tick` (`belief/callouts.py`) start to finish: the only state it mutates
+  on a successful pick is its own `busy_until_sim`/`_consumed`/
+  `_last_spoken_sim`/`_last_spoken_signature`, plus (via `route_event` ->
+  `acknowledge_event`) marking the chosen `Event` acknowledged in the
+  store — no `_print`, no network call, no reference into `CrewConsole`
+  itself. So "the event really is consumed out of the store, not left to
+  surface stale once refusal clears" is correct exactly as claimed.
+- `drain_brain`: `self.brain_client.poll_replies()` is drained inside the
+  guard's own branch (not skipped), each reply is popped from
+  `_pending_escalations`/discarded from `_stand_by_spoken_for` directly,
+  and `_handle_brain_reply`/`_speak_stand_by_if_due` are never called.
+  Read `_handle_brain_reply`: it calls `self._print` unconditionally and,
+  via `_handle_brain_pick`/`_handle_brain_confirm`, can call `self._act`
+  (mutates `_pending_confirmation`/tasks/attention) — both are real side
+  effects a discarded return value would not undo, so bypassing the
+  method entirely (rather than calling it and dropping its result) is the
+  only way to actually stop them, exactly the distinction the Batch 2
+  review's "(a)" asked for.
+
+**All three command entry points** (`handle_line`, `handle_command`, and
+the third call site at `crew_console.py:3325`) already routed through
+`_refusal_response` before this batch, confirmed unchanged by this diff —
+so with this fix, every path that can produce speech now checks `refused`:
+the three command entry points via `_refusal_response`, and the two
+proactive-drain entry points via their own direct guard. Grepped
+`self._print(` and `self._act(` across the file against every caller's
+guard rather than trusting the two names the dispatching brief listed, to
+make sure no fifth entry point was missed — none found.
+
+**Mutation-tested both guards by removal myself** (not trusting the
+implementer's reported failure), restoring after each:
+- Removing `drain_events`'s guard: both of its four new tests fail,
+  `AssertionError: assert ['BMP-2.'] == []` — a real, unacknowledged event
+  built directly on the store (bypassing the reset-always-precedes-refusal
+  call graph) gets spoken when the guard is gone.
+- Removing `drain_brain`'s guard: both of its tests fail,
+  `AssertionError: assert ['Unable, no such command.'] == []` — same shape.
+
+Confirmed the four new tests do not merely assert the returned list is
+empty while quietly letting a side effect through: `test_refused_drain_
+brain_speaks_nothing_against_a_pending_escalation` also asserts
+`overlay.pushed == []` and `console._pending_confirmation is None`, which
+is exactly the side-effect class `_handle_brain_reply`/`_act` could leave
+behind if the guard called the method and discarded its result instead of
+bypassing it — the test would not have caught a reversion to that shape by
+checking the return value alone.
+
+### `scheduler.tick` running while refused — one minor, bounded side effect
+
+Checked specifically for this per the dispatching brief, beyond what either
+required fix was scoped to catch. `CalloutScheduler.tick` sets `self.
+busy_until_sim = now_sim + estimate_speech_duration_s(text) +
+INTER_UTTERANCE_GAP_S` on every successful pick (`callouts.py:1358-1360`),
+**unconditionally** — including while `drain_events` is about to discard
+that same `text` because `refused` is `True`. The scheduler has no way to
+know its caller is about to throw the result away, so it occupies itself
+for the estimated speech duration of a line nobody hears.
+
+**Consequence, traced through to its end rather than left as a theoretical
+gap:** because `tick`'s own guard (`if now_sim < self.busy_until_sim:
+return []`) fires *before* any candidate is scored, a second `drain_events`
+call made while still busy returns `[]` immediately without touching the
+store at all — so events are discarded from the store at roughly real
+speech cadence while refused (one phantom "speak" per
+`estimate_speech_duration_s` + `INTER_UTTERANCE_GAP_S`), not instantly.
+This matches the implementer's own stated intent ("consumed... rather than
+piling up") and does not misbehave — it just paces the discard. The only
+observable cost is a bounded one: if refusal clears at a `now_sim` still
+inside a phantom `busy_until_sim` window set moments before clearing, the
+very next real `drain_events` call can return `[]` for up to
+`estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S` (a few seconds
+at current, explicitly-uncalibrated constants) even though nothing is
+actually being said — a short, silent gap immediately after refusal
+clears, not a wrong or stale line. Does not compound across polls (each
+busy window is independent and self-expires) and is invisible from the
+pilot's seat as anything other than "the first callout after a theatre
+recovery landed a couple of seconds later than it might have." Not a
+required fix — logging it as an optional refinement below so it is not
+rediscovered as a mystery later.
+
+### `fired_on_tracker.reset_for_new_mission()`
+
+`FiredOnTracker` has no live-collaborator fields (`_scanned_event_count:
+int = 0`, `_last_write_sim: dict = field(default_factory=dict)`), so
+`self.__init__()` gives the same genuine, mutation-verified completeness
+guarantee `ContactStore`/`TaskStore` already have — not the weaker
+hand-written-list form this project's own reviewer memory
+(`project_reset_pattern_completeness_test_gap_classes.md`) flags for
+`NakedEyePerceptionSource`/`HybridPerceptionSource`. Confirmed by reading
+the dataclass definition directly, not assumed from the method's name.
+
+**Wiring confirmed at both call sites**, by reading rather than by the
+implementation notes' claim: `_reset_mission_state` gained a `fired_on_
+tracker: FiredOnTracker | None = None` parameter (default preserves every
+pre-existing 3-argument call site, including the direct unit-test calls in
+`test_mission_start_reset.py`), `_check_for_new_mission` gained the same
+parameter and passes it straight through, and both `_run_console_poll_loop`
+and `_run_crew_text_poll_loop` already construct one `FiredOnTracker()` per
+loop (pre-existing, for their own `_mission_memory_step` calls) and now
+pass `fired_on_tracker=fired_on_tracker` into their `_check_for_new_mission`
+call — grepped every occurrence of the name in `logger.py` to confirm both
+loops, not just the one the implementation notes walked through in detail.
+
+**Mutation-tested the wiring myself**: removed the `if fired_on_tracker is
+not None: fired_on_tracker.reset_for_new_mission()` line from `_reset_
+mission_state` — `test_reset_mission_state_resets_fired_on_tracker_when_
+given` fails with `AssertionError: assert 500 == 0`, reproducing the stale-
+index defect the method's own docstring describes. Restored; full suite
+green again.
+
+### Tests fail when the fix is removed
+
+Four independent mutations, all confirmed by me (not read off the
+implementer's account), all restored afterward:
+
+1. `drain_events` guard removed -> both of its new tests fail
+   (`['BMP-2.'] == []`).
+2. `drain_brain` guard removed -> both of its new tests fail
+   (`['Unable, no such command.'] == []`).
+3. `fired_on_tracker` reset line removed from `_reset_mission_state` ->
+   `test_reset_mission_state_resets_fired_on_tracker_when_given` fails
+   (`500 == 0`).
+
+### Checks (run myself, from inside body-layer's own venv)
+
+- `ruff format --check src tests` — pass (155 files already formatted).
+- `ruff check src tests` — pass.
+- `mypy --strict` (`cd body-layer && .venv/bin/mypy src`) — pass, 68 source
+  files.
+- `pytest tests -q` — 2216 passed, 4 xfailed (same 4 pre-existing xfails;
+  up from Batch 2's 2209 by exactly the 7 new tests this batch adds —
+  4 for the guard, 3 for `fired_on_tracker`).
+
+`aircraft-layer/`: not touched by this fix commit (confirmed by `git diff
+465c4611 ea5f77fc --stat` — every changed file is under `body-layer/` or
+`plans/`), no checks run.
+
+### Required Fixes
+
+None. The Batch 2 required fix is implemented as a structural guard on
+`CrewConsole` itself (not a consequence of call-graph shape), mutation-
+confirmed on both methods, and does not merely suppress the return value
+while letting `_print`/`_act` side effects through — confirmed by reading
+`_handle_brain_reply` and by the new tests' own side-effect assertions.
+
+### Optional Refinements
+
+- **`CalloutScheduler.tick`'s phantom `busy_until_sim` occupancy while
+  refused** (see above) — bounded, self-expiring, and does not misbehave,
+  but is worth a one-line docstring note on `drain_events` (or on `tick`
+  itself) recording that a discarded pick still occupies the scheduler for
+  its estimated speech duration, so a future reader investigating "why did
+  the first callout after a theatre recovery land a couple seconds late"
+  does not have to re-derive this from `callouts.py:1358`. Low priority —
+  no incorrect speech results, only a bounded, silent delay.
+- **`drain_brain`'s refused branch duplicates the `try`/`except Exception`
+  around `poll_replies()`** that the non-refused branch also has, rather
+  than factoring the poll-and-handle-failure step into one shared helper
+  both branches call. The implementation notes' stated reason (the two
+  branches do genuinely different things with the result) is sound, and
+  the duplication is four lines, but a future change to the exception
+  message or log level would need to remember to touch both copies. Purely
+  cosmetic — not worth blocking on.
+
+### Verdict
+
+APPROVED
+
+Both parts of this fix do exactly what Batch 2's review required and
+nothing more: the guard is structural (a property of `CrewConsole`, not an
+accident of call order), covers the side-effect-bearing path as well as
+the return value, is mutation-confirmed on both methods by me directly,
+and the related `fired_on_tracker` reset closes the optional refinement
+Batch 2 flagged with the same completeness-test rigor the rest of this
+feature's reset mechanism already has. One minor, bounded, self-expiring
+side effect was found while checking beyond the brief's two named
+mechanisms (`scheduler.tick`'s phantom occupancy) — logged as an optional
+refinement, not a blocker, since it produces a short silence, never a
+wrong or stale line.
+
+### Review Confidence
+
+Full read — read the scoped diff (`465c4611..ea5f77fc`) in full across all
+three source files and both test files, not the whole-feature diff; ran
+format/lint/type/test myself in body-layer's own venv rather than trusting
+the implementation notes' reported counts (they matched: 2216 passed, 4
+xfailed); mutation-tested all three mechanisms this batch touches (both
+guards, the `fired_on_tracker` wiring) by removing each and watching the
+specific test fail, then restoring. Went one step further than the
+dispatching brief's two named checks and traced `CalloutScheduler.tick`'s
+own side effects by reading the method in full, which is how the
+phantom-occupancy finding above was found — not by pattern-matching on
+what was asked, the same discipline Batch 2's review notes paid off with.
