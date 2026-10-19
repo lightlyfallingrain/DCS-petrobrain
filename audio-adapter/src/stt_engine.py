@@ -6,8 +6,12 @@
 raising `STTRecognitionError` on any failure rather than returning an
 empty/partial transcript silently. The implementation writes its input to
 a temp file and shells out to an **external binary, never a package**
-(`audio-adapter/CLAUDE.md` "Tech stack"), exactly as `MacSayEngine` does --
-whisper-cli does not read WAV reliably from stdin.
+(`audio-adapter/CLAUDE.md` "Tech stack") -- whisper-cli does not read WAV
+reliably from stdin. `tts_engine.PiperEngine` keeps this project's "external
+tool, not a package dependency" posture too, though as an HTTP client to a
+separately-started process rather than a subprocess call (no working
+standalone Piper binary exists for the Mac, see
+`plans/audio-adapter-os-independent/plan.md`).
 
 `WhisperCliEngine` is the only implementation. **The protocol is kept
 despite having one** for two concrete reasons rather than on the
