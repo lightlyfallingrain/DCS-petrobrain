@@ -36,6 +36,12 @@ INTER_UTTERANCE_GAP_S = 0.75
 # source: belief/callouts.py:SPEECH_RATE_WPS
 SPEECH_RATE_WPS = 2.5
 
+[belief.crew_console]
+# Below this altitude AGL in metres, Petrovich is treated as on the ground: perception stops and a look command is refused rather than dispatched -- too high false-grounds him during genuine low-level/NOE flight, too low lets him scan while the aircraft is still sitting on the ramp.
+# status: uncalibrated | range: 0.5 .. 50.0
+# source: belief/crew_console.py:ON_GROUND_AGL_THRESHOLD_M
+ON_GROUND_AGL_THRESHOLD_M = 10.0
+
 [belief.decay]
 # Slowest-decaying attribute: what a contact *is.
 # status: judgement | range: 60.0 .. 1800.0

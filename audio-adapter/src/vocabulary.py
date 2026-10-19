@@ -227,6 +227,23 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # token added here without a re-recorded corpus.
         "mark_here",
         "mark_target",
+        # `radio check` / `good morning|day|evening|night petrovich`
+        # (`[[BL-B81]]`, `plans/radio-check/plan.md`) -- the user's own
+        # stated reason: "if intercom is off, there's no response. This
+        # is an easy check that A) intercom is ON and volume good B) that
+        # Petrobrain is operational." Both are ordinary commands dispatched
+        # through `handle_command` like any other token (body-layer side
+        # already wired, `01a69ec7`); this vocabulary is what makes them
+        # recognisable from speech. `radio_check` is plain and slot-free,
+        # like `drop_target`. `greeting` carries one parsed slot
+        # (`time_of_day`, `TIME_OF_DAY_WORDS` below) -- the pilot's own
+        # word is echoed back, not enumerated as four separate tokens, the
+        # same `follow`/`report`-style "parse a slot, don't multiply
+        # tokens" choice this file already makes, even though four values
+        # would fit a closed grammar; it keeps one dispatch token on the
+        # body-layer side rather than four.
+        "radio_check",
+        "greeting",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -579,6 +596,22 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # position (reuses `select_target`'s notion of "currently selected").
     # Same posture as `mark_here` above.
     "mark_target": ("mark target", "remember target"),
+    # `radio check` (`[[BL-B81]]`) -- a plain, slot-free phrase, matching
+    # `drop_target`'s posture: one exact wording, no recorded ambiguity to
+    # hedge against yet.
+    "radio_check": ("radio check",),
+    # `good <morning|day|evening|night> petrovich` -- like `follow`/
+    # `report`, the slot (`time_of_day`) is parsed
+    # (`command_matcher.py`'s greeting-slot branch), never enumerated as
+    # four tokens; these four phrasings are recogniser bias hints that
+    # also happen to be the closed set `parse_time_of_day` accepts, one
+    # per `TIME_OF_DAY_WORDS` value below.
+    "greeting": (
+        "good morning petrovich",
+        "good day petrovich",
+        "good evening petrovich",
+        "good night petrovich",
+    ),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
@@ -1080,6 +1113,25 @@ def parse_relative_word(text: str) -> str | None:
     for relative in RELATIVE_WORDS:
         if relative in words:
             return relative
+    return None
+
+
+#: `greeting`'s closed slot vocabulary (`[[BL-B81]]`) -- hand-synced
+#: mirror of body-layer's `belief.crew_console._GREETING_TIMES_OF_DAY`
+#: (module independence -- see `DESCRIPTOR_WORDS`' identical note above),
+#: which must accept exactly these four values and no others.
+TIME_OF_DAY_WORDS: tuple[str, ...] = ("morning", "day", "evening", "night")
+
+
+def parse_time_of_day(text: str) -> str | None:
+    """The `greeting` slot -- the first `TIME_OF_DAY_WORDS` member found
+    anywhere in the normalised transcript, or `None`. Whole-word matching
+    and `TIME_OF_DAY_WORDS` order as the tie-break, exactly as
+    `parse_sector_word`/`parse_relative_word` above."""
+    words = set(normalize_for_match(text).split())
+    for time_of_day in TIME_OF_DAY_WORDS:
+        if time_of_day in words:
+            return time_of_day
     return None
 
 

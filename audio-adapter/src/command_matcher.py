@@ -103,6 +103,7 @@ from vocabulary import (
     parse_sector_word,
     parse_step_count,
     parse_step_direction,
+    parse_time_of_day,
     parse_weapon,
     report_verbs,
 )
@@ -309,6 +310,11 @@ _STEP_VERB = "step"
 #: (a measured verb-anchor collision with an existing pinned adversarial
 #: test, not an oversight).
 _ENGAGE_VERBS: tuple[str, ...] = ("engage",)
+
+#: `greeting`'s own verb (`[[BL-B81]]`), fuzzy-matched for the same reason
+#: every other slotted token's verb is -- `verb` here is already a
+#: possibly-misheard first word.
+_GREETING_VERB = "good"
 
 
 @dataclass(frozen=True)
@@ -606,6 +612,19 @@ def _parse_engage_slots(text: str) -> dict[str, int | str] | None:
     return slots if slots else None
 
 
+def _parse_greeting_slots(text: str) -> dict[str, int | str] | None:
+    """`good <morning|day|evening|night> petrovich`'s one slot
+    (`[[BL-B81]]`), parsed against the *raw* `text` exactly as every other
+    slotted token's parser here is. `None` when no `TIME_OF_DAY_WORDS`
+    member is heard -- a bare "good" (no greeting word at all) then falls
+    through to the ordinary phrase table, exactly like a bare `"follow"`/
+    `"engage"` does, and resolves to nothing there either."""
+    time_of_day = parse_time_of_day(text)
+    if time_of_day is None:
+        return None
+    return {"time_of_day": time_of_day}
+
+
 def _where_slot_count(slots: dict[str, int | str]) -> int:
     """How many of `_WHERE_SLOT_NAMES` are present. Two or more means the
     transcript named the direction twice in incompatible frames
@@ -750,6 +769,26 @@ def match_transcript(text: str) -> MatchResult:
                 match_ratio=1.0,
                 verb_anchored=True,
                 slots=engage_slots,
+            )
+
+    # `good <morning|day|evening|night> petrovich` (`[[BL-B81]]`), tried
+    # before the generic phrase table for the identical reason the slotted
+    # branches above are. No other verb here is close to "good", so there
+    # is no collision to order against, but the ordering is kept
+    # consistent with the others (branch order is pinned by a test). A
+    # bare "good" with no recognised time-of-day word parses to no slots
+    # here (`_parse_greeting_slots` returns `None`) and falls through to
+    # the phrase table, where it resolves to nothing (`"good"` alone is
+    # not one of `greeting`'s recorded phrasings) -- the "say again" shape
+    # every other slotted token's unresolved form takes.
+    if difflib.SequenceMatcher(None, verb, _GREETING_VERB).ratio() >= VERB_FLOOR:
+        greeting_slots = _parse_greeting_slots(text)
+        if greeting_slots is not None:
+            return MatchResult(
+                token="greeting",
+                match_ratio=1.0,
+                verb_anchored=True,
+                slots=greeting_slots,
             )
 
     heard_words = tuple(words)

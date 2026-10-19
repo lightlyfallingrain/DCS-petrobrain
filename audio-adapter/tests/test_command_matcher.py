@@ -1124,3 +1124,113 @@ class TestSlottedReport:
         result = match_transcript("report south of gemerek")
         assert result.token == "report"
         assert result.slots == {"sector": "south"}
+
+
+# -- [[BL-B81]] (radio check / greeting) ---------------------------------
+
+
+def test_radio_check_matches_the_exact_phrase() -> None:
+    result = match_transcript("radio check")
+    assert result == MatchResult(
+        token="radio_check", match_ratio=1.0, verb_anchored=True
+    )
+
+
+def test_each_greeting_resolves_with_its_time_of_day_slot() -> None:
+    cases = {
+        "good morning petrovich": "morning",
+        "good day petrovich": "day",
+        "good evening petrovich": "evening",
+        "good night petrovich": "night",
+    }
+    for text, expected_time_of_day in cases.items():
+        result = match_transcript(text)
+        assert result == MatchResult(
+            token="greeting",
+            match_ratio=1.0,
+            verb_anchored=True,
+            slots={"time_of_day": expected_time_of_day},
+        ), text
+
+
+def test_good_is_derived_into_the_verb_anchor_words() -> None:
+    """Same structural check as `test_follow_is_derived_into_the_verb_
+    anchor_words` -- `"good"` becomes anchorable because it is `greeting`'s
+    phrasings' first word, not by a hand-maintained list."""
+    assert "good" in VERB_ANCHOR_WORDS
+
+
+def test_greeting_with_no_recognisable_time_of_day_says_again() -> None:
+    """A `"good"`-anchored utterance that names no `TIME_OF_DAY_WORDS`
+    member is a detected recognition gap, the same shape `test_follow_
+    with_no_recognisable_slots_says_again` pins for `follow`: it falls
+    through this module's own dedicated branch (no slots resolved), and
+    then through the generic phrase table, which has no bare `"good"`
+    phrasing either."""
+    result = match_transcript("good")
+    assert result.verb_anchored is True
+    assert result.token is None
+
+
+def test_greeting_without_the_word_petrovich_still_resolves() -> None:
+    """The slot parser reads `time_of_day` anywhere in the transcript, the
+    same leniency `follow`'s/`report`'s own slot parsers have -- a
+    dropped "petrovich" (common for a short recognizer clip) must not
+    cost the greeting."""
+    result = match_transcript("good evening")
+    assert result.token == "greeting"
+    assert result.slots == {"time_of_day": "evening"}
+
+
+def test_radio_check_does_not_falsely_fire_on_report_or_check_style_speech() -> None:
+    """`"radio"`'s own anchor word is derived solely from `radio_check`'s
+    one phrasing, so it has no fuzzy-match relationship to `report`'s verb
+    (`report`/`describe`) or to any other existing anchor word -- a
+    transcript that merely contains "report" or "check" without the exact
+    "radio check" sequence must not resolve to `radio_check`, and a
+    transcript anchored on `report` must not resolve to it either."""
+    for text in (
+        "report check",
+        "check report",
+        "radio",
+        "check",
+        "report radio",
+        "report the radio is working",
+    ):
+        result = match_transcript(text)
+        assert result.token != "radio_check", text
+
+
+def test_radio_check_survives_a_trailing_filler_word() -> None:
+    """`strip_filler` drops "please" before this ever reaches the phrase
+    table, the same mechanism `test_filler_words_do_not_cost_a_match`
+    exercises for other short phrases."""
+    result = match_transcript("radio check please")
+    assert result.token == "radio_check"
+
+
+def test_good_night_does_not_collide_with_stop_or_cancel_style_speech() -> None:
+    """`"good night"`/`"good evening"` must not be confused with any
+    existing short command -- in particular `stop_talking`'s bare
+    `"stop"` and `cancel_task`'s bare `"cancel"`, the two shortest
+    existing phrasings and therefore the likeliest accidental collision
+    for another short phrase."""
+    for text in ("good night petrovich", "good evening petrovich"):
+        result = match_transcript(text)
+        assert result.token == "greeting", text
+
+
+def test_good_job_degrades_rather_than_falsely_resolving_a_greeting() -> None:
+    """`"good job petrovich"` anchors on `"good"` but names no
+    `TIME_OF_DAY_WORDS` member, so this module's own dedicated branch
+    finds no slot and falls through; the generic phrase table then scores
+    it against `greeting`'s enumerated phrasings (closest by word-sequence
+    overlap) and can still clear `MATCH_FLOOR` -- a near miss, not a
+    different command, and it must never carry a slot it did not parse:
+    body-layer's own `_handle_greeting` is what turns a slot-less
+    `greeting` into "say again", the same degrade `scan_bearing_deg`'s
+    missing-bearing case takes."""
+    result = match_transcript("good job petrovich")
+    assert result.verb_anchored is True
+    if result.token == "greeting":
+        assert result.slots is None

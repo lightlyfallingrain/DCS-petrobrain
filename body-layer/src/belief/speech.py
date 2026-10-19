@@ -387,6 +387,38 @@ def render_silence_ack() -> OutgoingSpeech:
     return OutgoingSpeech(text="Quiet.", template="readback")
 
 
+#: `[[BL-B81]]`'s greeting echo -- the pilot's own word, not the sim clock
+#: (user, 2026-10-19). Keys match `crew_console._GREETING_TIMES_OF_DAY`
+#: exactly; that set is this dict's own validity check on the caller side.
+_GREETING_TEMPLATES: dict[str, str] = {
+    "morning": "Good morning, commander.",
+    "day": "Good day, commander.",
+    "evening": "Good evening, commander.",
+    "night": "Good night, commander.",
+}
+
+
+def render_radio_check() -> OutgoingSpeech:
+    """`[[BL-B81]]` -- "radio check" -> "Loud and clear." Fixed phrasing,
+    no caller-supplied description: unlike `render_unable`'s closed-reason
+    set, there is exactly one thing this command ever means."""
+    return OutgoingSpeech(text="Loud and clear.", template="readback")
+
+
+def render_greeting(time_of_day: str) -> OutgoingSpeech:
+    """`[[BL-B81]]` -- "good morning/day/evening/night Petrovich" ->
+    "Good morning/day/evening/night, commander." `time_of_day` is expected
+    to be one of `_GREETING_TEMPLATES`'s four keys (the caller,
+    `crew_console.CrewConsole._handle_greeting`, validates it first); an
+    unrecognised value degrades to a plain "Good day, commander." rather
+    than raising, the same defensive posture `render_unable` already takes
+    for an unrecognised reason."""
+    return OutgoingSpeech(
+        text=_GREETING_TEMPLATES.get(time_of_day, _GREETING_TEMPLATES["day"]),
+        template="readback",
+    )
+
+
 def render_confirm_request(description: str) -> OutgoingSpeech:
     """`plans/inbound-speech/plan.md` Stage 2's confirm-band interrogative
     readback (Decision 4 Layer 3): `render_confirm_request("scan left")`
@@ -413,6 +445,11 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # "reason -> spoken text" contract above.
     "NO_GROUP_MEMBERS": "Unable, no other units in the group.",
     "LAST_IN_ORDER": "Unable, that's the last one.",
+    # `[[BL-B82]]` -- a look command (`watch`/`scan`/`follow`) while
+    # `CrewConsole.on_ground` is set. Heard and understood, not doable --
+    # the "unable" half of the project's "say again" vs "unable"
+    # distinction, not "say again".
+    "ON_GROUND": "Unable, on the ground.",
 }
 
 
