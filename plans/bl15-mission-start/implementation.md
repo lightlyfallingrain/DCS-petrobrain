@@ -113,3 +113,159 @@ time this stage was implemented, `firing_receiver.py` already occupied 7798
 (a prior, unrelated feature), so 7799 is the actual next free port. Confirmed
 by grepping every `DEFAULT_PORT` declaration in `aircraft-layer/src/collector/`
 before picking the number, not by trusting the plan's text.
+
+---
+
+## Second batch: Stage 3 (theatre switching, revised), Decision 5 (per-mission
+## log files), Reviewer optional refinement 1
+
+Implemented on top of the reviewed Stage 1-2 batch (`97b76dec`). Scope:
+Stage 3 theatre switching with the user's revised loud-refusal default
+(`stage1-decisions.md` decision 1 REVISED), decision 5's per-mission log
+rollover, and the Reviewer's optional refinement 1 (naked-eye/hybrid reset
+field-coverage tests).
+
+### Files Changed
+
+**body-layer** (three commits on `worktree-agent-a44d45aa18125002c`):
+
+- `src/perception/naked_eye_source.py` — `reset_for_new_mission` now also
+  resets `live_los_coverage` to a fresh `LiveLosCoverage()` (decision 5:
+  per-run logs now roll per mission, so a coverage counter spanning
+  several missions no longer corresponds to any single log file —
+  reverses the prior "process-lifetime regression guard" reading the
+  Reviewer's pass confirmed).
+- `src/belief/crew_console.py` — `refused: bool` field,
+  `WORLD_MODEL_NOT_LOADED_REFUSAL` constant, `_refusal_response(now_sim)`
+  checked at the top of `handle_command`/`handle_line`/`handle_transcript`
+  (the three production entry points; there is no single dispatcher all
+  three already funnel through, so the same check is repeated at each
+  rather than invented as one call site that doesn't exist).
+  `reset_for_new_mission`'s docstring updated to note `refused` resets
+  with the rest of per-mission state (not preserved) — `logger.
+  _maybe_switch_theatre` re-evaluates it immediately afterward.
+- `src/logger.py` — `_enter_refusal_mode` (drops the old store, stops
+  perception, sets `crew_console.refused`), `_maybe_switch_theatre`
+  (resolves/opens/validates the new theatre's store, with the
+  `THEATRE_PROJECTIONS` membership check strictly before path
+  construction — carried over from `main()`'s own startup guard, per the
+  security plan review's Mode-2 requirement), `_check_for_new_mission`
+  widened with `world_model_dir`/`trace_sink`/`forest_occlusion`
+  parameters (all defaulting to the Stage-1/2 no-op values, so every
+  existing call site is unaffected unless it opts in). `_mark_here_fn`/
+  `_mark_target_fn` changed to read `runner.theatre` live rather than a
+  `theatre: str` parameter bound once at construction — found while
+  wiring Stage 3: a runtime switch would otherwise mark future positions
+  under the *previous* theatre's coordinate projection forever, the same
+  stale-closure trap `_speech_log_sink` already had to avoid for
+  `belief_truth_writer`. `_reroll_run_logs` (decision 5): re-stamps each
+  of the five per-run logs to a fresh filename on a detected mission
+  (re)start, reusing `run_log_paths.per_run_log_path` rather than a
+  second stamping scheme; closes the two logs holding an open file handle
+  (`DetectionTraceWriter`/`BeliefTruthLogWriter`) before replacing them,
+  and rebuilds `crew_console.speech_log_sink`'s closure (the one writer
+  captured by value, via `_speech_log_sink`) — the other three
+  (`group_trace_sink`/`transcript_log`/`MissionMemory`'s sink) are plain
+  fields read fresh each call, so reassigning them is the whole fix for
+  those three. Both poll loops wired: `world_model_dir` and the five
+  pre-stamp base paths threaded through as new trailing parameters (all
+  default `None`, no-op when absent), and `_mission_memory_step`'s own
+  `theatre` argument switched from the poll loop's closed-over initial
+  value to `runner.theatre` (the live value `_maybe_switch_theatre`
+  updates). `main()`: `--world-model-dir`'s help text extended to cover
+  its new optional role alongside an explicit `--theatre`/
+  `--world-model-db` pair (not only with `--mission-understanding`); each
+  per-run log's pre-stamp (`~`-expanded) base path is now captured before
+  the stamping calls overwrite `args.*`, threaded to both poll-loop thread
+  constructions as new trailing positional args.
+- `body-layer/CLAUDE.md` — one new block after the `--detection-trace`
+  paragraph documenting mission-start detection, theatre switching
+  (including the `--world-model-dir`-alongside-explicit-pair addition),
+  loud-refusal mode, and per-mission log rollover.
+- Tests: `tests/test_naked_eye_source.py`/`tests/test_hybrid_source.py`
+  (field-coverage completeness tests, Reviewer optional refinement 1 —
+  `NakedEyePerceptionSource` needs three buckets, `HybridPerceptionSource`
+  two, since it has no per-poll-overwritten field at all);
+  `tests/test_crew_console.py` (six refusal-mode tests: all three entry
+  points return the fixed line, a refused command does not dispatch —
+  checked via `TaskStore` staying empty rather than just the returned
+  text, does not end silence or increment `commands_handled`, and an
+  un-refused console dispatches normally); `tests/test_mission_start_
+  reset.py` (unit tests for `_maybe_switch_theatre`/`_enter_refusal_mode`
+  covering the no-op/refusal/success paths, plus two `_check_for_new_
+  mission` end-to-end tests combining reset + switch);
+  `tests/test_logger.py` (`FakeConsoleAircraftClient` gained a
+  `mission_start_theatre` attribute; two wiring-level tests drive the real
+  `_run_crew_text_poll_loop` thread against two small on-disk fixture
+  stores to prove the plumbing, not just the unit-level function);
+  `tests/test_mark_fn_theatre.py` (new — confirms `_mark_here_fn`/
+  `_mark_target_fn` read `runner.theatre` live across a simulated switch,
+  by checking the recorded mark's `lat`/`lon` actually changes);
+  `tests/test_run_log_reroll.py` (new — seven tests for `_reroll_run_logs`
+  covering each of the five logs' reroll, the stale-closure fix, the
+  all-`None` no-op, and the `--console`/no-`CrewConsole` guard).
+
+### Checks
+
+**body-layer/**
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy --strict` (`cd body-layer && .venv/bin/mypy src`): pass (68 source
+  files)
+- `pytest tests -q`: pass (2209 passed, 4 xfailed — same 4 pre-existing,
+  unrelated xfails as the first batch)
+
+**aircraft-layer/**: not touched by this batch, no checks run.
+
+### Notable Discoveries
+
+- **Two stale-closure traps, both found by tracing every place `theatre`/
+  a writer is captured, not by inspection alone.** `_mark_here_fn`/
+  `_mark_target_fn` took `theatre: str` as a plain parameter bound once at
+  `main()`'s call site — a runtime theatre switch updates
+  `runner.theatre`, but a closure that already closed over the old
+  parameter value never sees it. `crew_console.speech_log_sink` (built via
+  `_speech_log_sink(belief_truth_writer, runner)`) has the identical
+  shape for the *writer*, not the theatre. Both were fixed the same way
+  `_speech_log_sink` already handles `runner.scan_plan`/`optic`: read the
+  live field at call time rather than capturing a value. Neither was named
+  in the dispatching brief — found while enumerating every reader of
+  `theatre`/`belief_truth_writer` in `logger.py` before writing the reroll
+  function, per this role's own "scope your verification to the
+  containing unit" guidance.
+- **`runner.enrichment` is a third thing that goes stale on a theatre
+  switch, not mentioned in the plan.** It is built lazily over whichever
+  `world_model_conn`/`theatre` were current the first time `run_once`
+  needed it, then mutated in place every poll after — a switch that
+  replaces `world_model_conn` without also clearing `enrichment` would
+  leave it silently querying a connection `_maybe_switch_theatre` is about
+  to close. Cleared explicitly in both `_maybe_switch_theatre` (success
+  path, so the next poll rebuilds it fresh) and `_enter_refusal_mode`
+  (failure path, so a later recovery does not inherit a reference to an
+  already-closed connection either).
+- **`--console`'s own REPL-thread `EnrichmentContext` (`_run_console_repl`'s
+  `repl_conn`) does *not* follow a theatre switch** — it is built lazily
+  from the `world_model_db`/`theatre` values `main()` passed to that
+  function once, which are never updated. Left alone deliberately:
+  `--console` is a debug harness with no `CrewConsole`/refusal surface at
+  all (per `_enter_refusal_mode`'s own docstring), and widening this would
+  mean re-deriving the REPL thread's own connection-rebuild logic, which
+  is out of this batch's scope. Flagging so a future reader does not
+  assume `--console`'s enrichment tracks a live switch the way
+  `--crew-text`'s does.
+- **The `_mission_memory_step` call sites in both poll loops read a
+  closed-over `theatre: str` function parameter, not `runner.theatre`** —
+  found the same way as the two closures above. Fixed by reading
+  `runner.theatre` (with an `assert ... is not None`, since by the point
+  this runs in the loop it always has been set) instead of the stale
+  local. Without this fix, mission-memory entries written after a
+  successful theatre switch would still be tagged with the *old*
+  theatre's name for whatever `admission.step` does with it.
+- **Test-impact check (per role instructions) found no gaps this round** —
+  grepped the test suite for every existing test touching `_check_for_
+  new_mission`, `ConsolePerceptionRunner`, and `CrewConsole` before
+  starting, and the plan's own Stage 3 test guidance ("fake two-theatre
+  fixture stores ... mirroring `latakia-20km`/`gemerek-20km`") matched
+  what `test_main_rejects_world_model_db_theatre_mismatch` already does in
+  `test_logger.py` — reused that exact pattern (`store.writer.
+  open_for_build`/`insert_region`) rather than inventing a second one.
