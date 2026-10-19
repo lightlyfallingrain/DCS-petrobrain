@@ -415,4 +415,32 @@ interpreter newer than any onnxruntime wheel (Homebrew's default `python3`; its 
 not reported). Rebuilding the venv with `python3.12` (`brew install python@3.12`) installed
 `piper-tts` and synthesized + `afplay`-played the test line. **So Piper's venv must be pinned to
 an interpreter onnxruntime ships wheels for** — independent of whatever Python the rest of the
-project uses. Windows: same route not yet verified.
+project uses.
+
+### Addendum, 2026-10-20 — `piper-tts` on Windows, and why it must stay running
+
+**Measured on the Windows box** (main loop, not the investigator), `piper-tts` 1.8.0 +
+`onnxruntime` 1.31.0 in a venv on the only interpreter installed there, **Python 3.14.7** — so
+onnxruntime does ship Windows cp314 wheels; the Mac failure above was a different, newer
+interpreter or a platform gap, not 3.14 as such. Voice `en_GB-northern_english_male-medium`
+(fetched with `python -m piper.download_voices`); WAV out is 22050 Hz, mono, 16-bit.
+
+| how Piper is driven | per line (3 callouts × 3–5 runs) |
+|---|---|
+| `piper.exe` CLI, one process per line | **mean 2.740 s** (2.416–4.104) |
+| in-process `PiperVoice.synthesize_wav`, warm (load once: 2.016 s) | mean 0.064 s (0.043–0.098) |
+| **`python -m piper.http_server`, `POST /synthesize`, warm** (ready after 2.73 s; first request 0.115 s) | **mean 0.070 s (0.054–0.084)** |
+
+**The `piper-tts` CLI is unusable per line**: 2.7 s against `say`'s 0.6–0.8 s, and almost all of
+it is Python start-up plus model load — the C++ binary's ~0.5 s measured above does not carry over
+to the package. **The answer is a long-lived Piper process, and Piper ships one**: `piper.http_server`
+(Flask; needs the `piper-tts[http]` extra) takes `{"text", "voice"?, "speaker"?, "length_scale"?, …}`
+and returns WAV bytes. Two properties the plan must handle:
+
+- **It defaults to `--host 0.0.0.0`** and exposes `POST /download` (fetches voices from the
+  internet into its data dir) alongside `/synthesize`. Bind it to `127.0.0.1` explicitly.
+- **`"voice"` per request selects any `<name>.onnx` in `--data-dir`, loaded on first use** — which
+  is what makes `ruslan` ([[AA-B1]]) a request field rather than a restart.
+
+Bench scripts (scratch, not committed): `C:\Users\simon\piper-recon\bench_pt.py`,
+`bench_http.py`.
