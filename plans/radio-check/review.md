@@ -133,3 +133,87 @@ summarized from the implementation report), the ground-gate and look-command-ref
 independently mutation-tested, and both subprojects' format/lint/type/test commands were run
 directly rather than taken on the report's word. The one gap found (the asymmetric drift test) was
 found by grepping for the specific claim made in a test docstring, not inferred.
+
+### Fix review
+
+Reviewed fix commit `2f1c8d8c` (`Radio-check review fixes: greeting drift test,
+on-ground-by-default, tuning`) against this review's one required fix and two of its three
+optional refinements, diff base `192c1b0f` (the commit this review itself was written against).
+Four files touched: `body-layer/src/belief/crew_console.py`, `body-layer/tests/test_crew_console.py`,
+`body-layer/config/defaults.toml`, `audio-adapter/tests/test_vocabulary.py`.
+
+- **Required fix (drift-guard asymmetry) — closed, and verified both directions.**
+  `test_greeting_times_of_day_are_exactly_the_four_greetings` was added to
+  `body-layer/tests/test_crew_console.py`, pinning `_GREETING_TIMES_OF_DAY ==
+  frozenset({"morning", "day", "evening", "night"})` — read directly, matches the drift-guard
+  claim exactly. Both test docstrings now name the other side's test function by name (confirmed
+  by reading the diff on both files): `test_time_of_day_words_are_exactly_the_four_greetings`'s
+  docstring in `audio-adapter/tests/test_vocabulary.py` now says "`test_greeting_times_of_day_
+  are_exactly_the_four_greetings` in `body-layer/tests/test_crew_console.py` asserts the same
+  membership," and the new body-layer test names it back — the claim each file makes is now
+  checkable from either side, closing the exact asymmetry flagged.
+- **Optional fix (`on_ground` default flips to `True`) — applied correctly, and the 50-test
+  fallout is setup, not weakening.** Confirmed by diff: the dataclass field default changed from
+  `False` to `True`, with both the field's own docstring and `reset_for_new_mission`'s updated to
+  match (the latter now correctly says resetting to `True` is harmless, since
+  `_check_for_new_mission` re-evaluates it from live telemetry the next poll, same as
+  `enrichment`). Extracted the function each of the 50 new `console.on_ground = False` lines
+  landed in by parsing the diff directly (not trusting the report's count) — all 50 are
+  `watch_nearest`/`follow`/`scan_*`/`cancel_task`-after-a-scan/`handle_transcript`-dispatching-a-
+  look-token tests; none is named or shaped as an on-ground/airborne test, and the six dedicated
+  on-ground tests from the original review (`test_look_command_on_ground_answers_unable` and its
+  five neighbours) already set `on_ground` explicitly both ways and received no new line — so no
+  test now passes vacuously on the new default, and none of the flipped 50 was meant to exercise
+  on-ground behaviour.
+- **Mission-restart interaction checked directly (reviewer's own addition, not in the fix
+  report).** Read `logger.py`'s `_run_crew_text_poll_loop` body end to end: on a detected mission
+  (re)start, `_check_for_new_mission` resets `crew_console` (giving the new `on_ground=True`
+  default) and `runner.run_once()` runs immediately after in the *same* iteration, setting
+  `runner.last_ownship_state` from real telemetry; `crew_console.on_ground` is then refreshed from
+  that same-iteration telemetry (the existing `if runner.last_ownship_state is not None:` block)
+  *before* `_poll_f10_commands`/`_poll_transcripts` run later in that same iteration. So a hot/
+  airborne mission restart does not wrongly refuse a look command in its first poll — by the time
+  any command can dispatch, `on_ground` already reflects the real (airborne) telemetry read that
+  same cycle, not the reset default. The only window the new default actually governs is before
+  the very first `run_once()` of a fresh process ever completes — narrower than "first poll," and
+  the same optional-refinement framing the original review gave it still holds; not a defect.
+- **Optional fix (`ON_GROUND_AGL_THRESHOLD_M` wired through `tuning.py`) — applied correctly,
+  rendered file checked, no cross-key coupling.** Read the **rendered**
+  `body-layer/config/defaults.toml`, not the source `#:` comment: the full warning (what the
+  constant does, which direction is dangerous in both directions, used-by) survives as one
+  rendered line, because the source comment is written as a single sentence with no internal
+  period — the exact trap this role's guidance warns about (generator renders only the first
+  sentence) does not apply here because there is only one sentence to begin with. `status:
+  uncalibrated | range: 0.5 .. 50.0` matches the declared `lo=0.5, hi=50.0`; the value (`10.0`) is
+  unchanged from the prior bare literal, consistent with the fix's own framing. Value-binding
+  trap: grepped every consumer (`logger.py`'s only import site, `from belief.crew_console import
+  ON_GROUND_AGL_THRESHOLD_M`) — Python fully executes `crew_console.py` (including its top-level
+  `tuning.real(...)` call) before binding the name into `logger.py`'s namespace, so the one
+  consumer module sees the loaded override, not the code default. `lo`/`hi` are AST float
+  literals, not references, matching the declaration form `tuning.py` requires. No cross-key
+  coupling: grepped for every other reference to `ON_GROUND_AGL_THRESHOLD_M` in `src/` — the only
+  call sites are `logger.py`'s two poll-loop gates and the on-ground refresh, none sharing an
+  asserted relationship with another tunable (`belief.decay`'s `OBSERVED_WINDOW_S <
+  POSITION_HALF_LIFE_S` coupling is unrelated to this constant).
+- **Checks run directly, not taken from the fix report:** body-layer `ruff format --check`, `ruff
+  check`, `mypy src` (68 files), `pytest tests -q` (2237 passed, 4 xfailed — matches the report's
+  claimed count exactly). audio-adapter `ruff format --check`, `ruff check`, `mypy src` (15 files),
+  `pytest tests -q` (300 passed, 1 pre-existing skip — matches).
+
+**No new required fixes.** Both optional refinements the fix addressed were applied correctly and
+without regressing the behaviour the original review verified; the third (`DISPATCHED_COMMAND_
+TOKENS` membership note) was correctly left alone, as the original review already stated nothing
+needed to change there.
+
+### Final Verdict
+
+APPROVED
+
+### Final Review Confidence
+
+Full read. The fix commit's diff was read in full against the diff base this review was itself
+written against (not re-reading the whole feature branch), the drift-guard pairing and the
+50-test fallout were verified by parsing the diff for function names rather than trusting the
+fix report's count, the mission-restart interaction was independently traced through `logger.py`
+rather than taken from the report, the rendered `defaults.toml` was read directly (not the source
+comment), and both subprojects' format/lint/type/test commands were run directly.
