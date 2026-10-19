@@ -9,6 +9,9 @@
   some point, not now."* Filed so the diagnosis is not re-derived; **do not start without
   instruction.**
 
+  **Scheduled 2026-10-19 as [[BL-15]] Stage 1** (user raised "mission start actions"). This entry
+  stays the diagnosis; work and status move to `BL-15`.
+
   **How it presented.** The belief-truth tripwire fired on 18 contacts at ranges of ~532 km against
   a 10 km cap, with *small* position uncertainties (26–609 m) — belief confidently wrong, not vaguely
   wrong. The user's eyesight view showed every believed contact at the same bearing, −070°, 529–531 km.

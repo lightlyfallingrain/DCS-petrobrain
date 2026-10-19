@@ -126,6 +126,7 @@ Ahead:
 
 - [[BL-13]] — The crew query path
 - [[BL-14]] — Attack run: target selection and run guidance
+- [[BL-15]] — Mission start actions: clean slate, theatre, briefing
 
 ## Backlog (body-layer)
 
