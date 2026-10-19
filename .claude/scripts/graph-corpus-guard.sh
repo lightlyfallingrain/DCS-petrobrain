@@ -29,6 +29,17 @@
 # ceiling change -- the entry files they point at were already in the corpus, so
 # only the redirect stubs left.
 #
+# Ceiling raised 520 -> 660, 2026-10-19, by the NOTES.md split (docs/notes-split): the single
+# NOTES.md became 31 topic files plus notes/notes-index.md under notes/, and the pointer left the
+# corpus. Measured by running graph-corpus-files.sh: 520 before, 551 after (-1 +32).
+#
+# **The previous note's growth estimate was wrong, and by a lot.** It sized 520 for "upwards of
+# eighteen months" at ~+50 entry files/year; the corpus reached exactly 520 ten days later, before
+# this split added anything. Growth is not just new roadmap entries -- acceptance documents,
+# todo items and docs/ all land in the corpus too. 660 is ~20% over the measured 551, the same margin as
+# before; expect to revisit it within weeks, not months, and re-measure rather than re-estimate.
+# Still nowhere near the 1182-file failure this guard exists to catch.
+#
 # Ceiling raised 420 -> 520, 2026-10-09, by the obsidian-links-and-tags Stages 4 and 5
 # conversion (world-model/ROADMAP.md -> world-model/ROADMAP/, aircraft-layer/ROADMAP.md ->
 # aircraft-layer/ROADMAP/, mission-interpreter/ROADMAP.md -> mission-interpreter/ROADMAP/).
@@ -69,7 +80,7 @@
 set -euo pipefail
 
 corpus="${1:-graphify-out/.corpus.txt}"
-max="${2:-520}"
+max="${2:-660}"
 
 if [ ! -f "$corpus" ]; then
     echo "graph-corpus-guard: no corpus file at '$corpus'." >&2

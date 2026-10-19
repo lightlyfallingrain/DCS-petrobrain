@@ -15,7 +15,7 @@ one of them nearly lost work.
 ## The failure this prevents
 
 An agent writes far more than its headline report: agent-memory files under
-`.claude/agent-memory/<role>/`, a `NOTES.md` harvest, research notes, roadmap and `todo/` edits.
+`.claude/agent-memory/<role>/`, a `notes/` harvest, research notes, roadmap and `todo/` edits.
 All of it lives only in the worktree. Copying back the report alone looks like success and
 silently drops the rest — and a memory file that is never harvested is the most expensive loss in
 this system, because its whole purpose is to stop the next agent repeating a mistake.
