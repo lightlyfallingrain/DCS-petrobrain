@@ -1894,11 +1894,22 @@ def _check_for_new_mission(
     A transport failure degrades to "skip this poll, try again next
     cycle," never stops the poll loop -- same posture as every other
     aircraft-layer call in this file's poll loops (e.g. `post_look_
-    direction`'s own try/except)."""
+    direction`'s own try/except).
+
+    **An unreachable collector is skipped silently, not logged here.**
+    This is the one aircraft-layer call that runs *before* `run_once()`
+    in both poll loops, so with the collector down it used to print a
+    full traceback every poll -- the exact spew `_ConnectionReporter`
+    exists to prevent. `run_once()`'s own telemetry read hits the same
+    dead host a moment later and reports the transition once ("aircraft
+    layer disconnected"), so a second message here would only repeat it.
+    Anything that is *not* a connection loss (`_is_connection_loss`:
+    invalid JSON, a defect of ours) keeps its traceback."""
     try:
         event = aircraft_client.get_mission_start_latest()
-    except AircraftLayerError:
-        logger.warning("mission-start poll failed (continuing)", exc_info=True)
+    except AircraftLayerError as exc:
+        if not _is_connection_loss(exc):
+            logger.warning("mission-start poll failed (continuing)", exc_info=True)
         return False
     if event is None:
         return False
