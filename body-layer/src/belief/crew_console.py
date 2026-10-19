@@ -78,17 +78,21 @@ as nothing does not. See `_handle_silence`'s own docstring for the full
 account, including why `self.silenced` gates `_print`'s `speech_client` push
 alone, never `output`/`overlay_client`.
 
-**`maybe_apply_on_ground_default`.** (`plans/spu8-intercom/plan.md` Stage
-5.) A one-shot mission-start default, not a player command: if ownship is
-on the ground the first time it is called, `self.silenced` is set
-directly (no acknowledgement -- there is nothing to acknowledge at
-startup). Reuses `silenced`'s already-shipped end condition unchanged --
-only a subsequent command ends it, per the user's own locked decision that
-leaving the ground does not."""
+**On the ground, Petrovich does not scan** (`plans/radio-check/plan.md`,
+`[[BL-B82]]`, user direction 2026-10-19, replacing the `plans/
+spu8-intercom/plan.md` Stage 5 on-ground silence default above). The gate
+itself lives in `logger.py`'s two poll loops (ownship AGL against
+`ON_GROUND_AGL_THRESHOLD_M`, below), not here -- this class only answers
+for it: `self.on_ground`, set every poll the same way `enrichment` is,
+makes `handle_command` answer any `_LOOK_COMMAND_TOKENS` member with
+"Unable, on the ground." (understood, not doable) rather than dispatching
+it, while every other command -- including `radio_check`/`greeting`,
+`[[BL-B81]]` -- is heard and answered normally."""
 
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO
@@ -125,11 +129,13 @@ from belief.speech import (
     render_contact_report,
     render_disambiguation,
     render_engage_readback,
+    render_greeting,
     render_group_full_disclosure,
     render_group_report,
     render_lost_contact,
     render_no_contact,
     render_no_view,
+    render_radio_check,
     render_readback,
     render_report,
     render_report_summary,
@@ -174,13 +180,17 @@ from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_d
 from perception.optics import Optic
 from perception.source import OwnshipState
 
-#: On-ground altitude threshold (metres AGL) for `maybe_apply_on_ground_
-#: default`'s mission-start silent-mode default (`plans/spu8-intercom/
-#: plan.md` Stage 5). A guessed placeholder pending live-flight
+#: On-ground altitude threshold (metres AGL) -- used by `logger.py`'s two
+#: poll loops to gate perception (`[[BL-B82]]`, "good enough", user
+#: 2026-10-19) and by `CrewConsole.on_ground`/`_LOOK_COMMAND_TOKENS` below
+#: to refuse a look command. A guessed placeholder pending live-flight
 #: calibration -- same debt class as `mission_phase.WAYPOINT_CAPTURE_
 #: RADIUS_M` -- since no weight-on-wheels signal exists anywhere in this
 #: codebase; this is `alt_agl_m` against a placeholder value, not a real
-#: ground-contact sensor. Do not treat as validated.
+#: ground-contact sensor. Do not treat as validated. Not newly wired
+#: through `tuning.py` by `[[BL-B82]]` -- it is not a *new* constant, it is
+#: an existing one doing more work; flagged as behaviour-affecting and
+#: still a bare module literal.
 ON_GROUND_AGL_THRESHOLD_M: Final[float] = 10.0
 
 #: Spoken when "Cancel Task" finds nothing to cancel -- no task store wired
@@ -212,6 +222,43 @@ Anything else is escalated (there is no brain to answer it yet).
 """
 
 _UTTERANCE_ID_PREFIX = "UTTERANCE"
+
+#: `[[BL-B81]]`'s typed-crew-text recognition for "radio check" and the
+#: four greetings -- checked in `handle_line` before it falls through to
+#: `_handle_utterance`/`parse_utterance`'s grammar, the same way
+#: `!inject-urgent`/`!voice` are special-cased just above that call.
+#: `parse_utterance`'s `_PatternRow` table is shaped around extracting and
+#: resolving a contact *reference* (every row has a `ref` group); neither
+#: of these commands references a contact, so they don't fit that grammar
+#: and are matched here instead, directly against the two tokens
+#: `handle_command` dispatches (`radio_check`/`greeting`).
+_RADIO_CHECK_PATTERN = re.compile(r"^radio\s+check\.?$", re.IGNORECASE)
+_GREETING_PATTERN = re.compile(
+    r"^good\s+(morning|day|evening|night)\s+petrovich\.?$", re.IGNORECASE
+)
+
+#: `greeting`'s closed slot vocabulary -- `_handle_greeting`'s valid-value
+#: check and `handle_line`'s own match both key off this one set.
+_GREETING_TIMES_OF_DAY: frozenset[str] = frozenset(
+    {"morning", "day", "evening", "night"}
+)
+
+
+def _match_radio_check_or_greeting(
+    stripped: str,
+) -> tuple[str, dict[str, int | str] | None] | None:
+    """Returns `(token, slots)` for a typed "radio check" or greeting
+    line, `None` for anything else -- `handle_line`'s own literal/regex
+    check, kept as a plain function (no `self` needed) for the same
+    reason `_describe_token_for_confirm` is one."""
+    if _RADIO_CHECK_PATTERN.match(stripped):
+        return "radio_check", None
+    greeting_match = _GREETING_PATTERN.match(stripped)
+    if greeting_match is not None:
+        time_of_day = greeting_match.group(1).lower()
+        return "greeting", {"time_of_day": time_of_day}
+    return None
+
 
 #: Prepended to the overlay-pushed copy of an urgent (`bypass_gate=True`)
 #: line only -- see `CrewConsole._print`'s docstring and `plans/
@@ -434,6 +481,32 @@ _CLOCK_REPORT_LABELS: dict[int, str] = {
 _CLOCK_SCAN_TOKENS: dict[str, int] = {
     f"scan_clock_{p}": p for p in (8, 9, 10, 11, 12, 1, 2, 3, 4)
 }
+
+#: `[[BL-B82]]`'s "look commands" -- tokens whose job is to direct a new
+#: visual search, refused with "Unable, on the ground." while
+#: `CrewConsole.on_ground` (`handle_command`, below). Every scan token
+#: (all four families above plus `scan_bearing_deg`) plus `watch_nearest`/
+#: `watch_nearest_air_defence`/`follow` -- the user's own two named
+#: examples ("watch", "scan forward") plus the one other token that shares
+#: their job exactly: `follow` is the one command that immediately raises
+#: binoculars onto a target (`logger.py`'s "any command lowers binoculars"
+#: glue reads `CrewConsole.last_command_target_contact_id`, which only
+#: `follow` sets). Deliberately **excludes** `select_target`/`engage`/
+#: `step`/every `report*` token -- those only read *existing* belief
+#: (attention/priority flags, attack-run slotting) rather than directing a
+#: new look, and already degrade sensibly ("no such contact") when belief
+#: is thin from not having scanned, so they need no special-casing here.
+_LOOK_COMMAND_TOKENS: frozenset[str] = frozenset(
+    set(_RELATIVE_SCAN_TOKENS)
+    | set(_BEARING_SCAN_TOKENS)
+    | set(_CLOCK_SCAN_TOKENS)
+    | {
+        "scan_bearing_deg",
+        "watch_nearest",
+        "watch_nearest_air_defence",
+        "follow",
+    }
+)
 
 #: `report_bearing_<compass>` -> `belief.attention.Sector` -- the
 #: compass-absolute half of the report vocabulary, `_BEARING_SCAN_TOKENS`'
@@ -825,6 +898,13 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # exemption.
         "mark_here",
         "mark_target",
+        # `[[BL-B81]]` -- the radio check / greeting, an ordinary command
+        # like any other: `_handle_radio_check` always returns one fixed
+        # line, `_handle_greeting` a readback or a "say again" line for a
+        # missing/unrecognised `time_of_day` slot. Neither needs the
+        # no-return-value exemption.
+        "radio_check",
+        "greeting",
     }
 )
 
@@ -1145,46 +1225,13 @@ class CrewConsole:
     #: theatre still fails to resolve).
     refused: bool = field(default=False, repr=False)
 
-    #: Set by `maybe_apply_on_ground_default` the first time it is called,
-    #: regardless of outcome -- an internal one-shot latch, never
-    #: re-evaluated after that first call even if ownship later lands
-    #: again in the same sortie (plan Decision 5: a startup default, not a
-    #: continuous ground/air re-assertion).
-    _on_ground_default_applied: bool = field(default=False, repr=False)
-
-    def maybe_apply_on_ground_default(self, ownship: OwnshipState) -> None:
-        """On-ground mission-start silent-mode default (`plans/spu8-
-        intercom/plan.md` Stage 5, user framing: "if on ground, default
-        to 'silent mode' ... contact reports not needed when not even
-        airborne yet").
-
-        **Evaluated once, ever, per `CrewConsole` instance** -- the first
-        call sets `_on_ground_default_applied` regardless of whether
-        `ownship.alt_agl_m` was actually at/below `ON_GROUND_AGL_
-        THRESHOLD_M`, so a call made while airborne does not leave the
-        door open for a later on-ground call to apply the default
-        retroactively. This is deliberately a startup default, not a
-        continuous ground/air re-assertion (plan Decision 5).
-
-        **Sets `self.silenced` directly, not through `_handle_silence`**
-        -- `_handle_silence` speaks a one-word acknowledgement first,
-        which is right for a player-issued `silence` command but wrong
-        here: an automatic startup default has nothing to acknowledge and
-        should not be the very first thing a cold-starting crew channel
-        says.
-
-        **The end condition is unchanged and locked** (plan Decision 6,
-        user direction 2026-10-05): only a subsequent command ends this,
-        via the existing `handle_command`/`_act` "any command ends
-        silence" logic `_handle_silence`'s own field docstring already
-        describes -- leaving the ground does **not** end it. Reuses
-        `silenced`'s already-shipped behaviour (audio-only gate) with zero
-        new suppression logic."""
-        if self._on_ground_default_applied:
-            return
-        self._on_ground_default_applied = True
-        if ownship.alt_agl_m <= ON_GROUND_AGL_THRESHOLD_M:
-            self.silenced = True
+    #: `[[BL-B82]]` -- refreshed every poll (`logger.py`, the same place
+    #: `enrichment` is refreshed) from `ownship.alt_agl_m <=
+    #: ON_GROUND_AGL_THRESHOLD_M`. Read by `handle_command` to refuse a
+    #: `_LOOK_COMMAND_TOKENS` member with "Unable, on the ground." --
+    #: perception itself is gated in `logger.py`'s poll loops, not here;
+    #: this field only decides what `handle_command` answers.
+    on_ground: bool = field(default=False, repr=False)
 
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
@@ -1205,10 +1252,13 @@ class CrewConsole:
         confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
         `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
         contact_id`, `attack_run_transition`, `observ_transition`,
-        `_on_ground_default_applied`, `enrichment`, `refused`) resets to
-        its declared default -- see `refused`'s own field docstring for
-        why resetting it here is correct even though a mission (re)start
-        is exactly the event that might need to set it right back."""
+        `on_ground`, `enrichment`, `refused`) resets to its declared
+        default -- see `refused`'s own field docstring for why resetting
+        it here is correct even though a mission (re)start is exactly the
+        event that might need to set it right back. `on_ground` resetting
+        to `False` is harmless either way: `logger._check_for_new_mission`
+        re-evaluates it from live telemetry the very next poll, same as
+        `enrichment`."""
         self.__init__(  # type: ignore[misc]
             store=self.store,
             tasks=self.tasks,
@@ -1263,6 +1313,16 @@ class CrewConsole:
             return lines
         if stripped.startswith("!voice"):
             return self._handle_voice_test_command(stripped, now_sim)
+        # `[[BL-B81]]`: typed "radio check" / greeting routes straight to
+        # `handle_command` -- the single dispatcher -- same as voice's
+        # "act" disposition already does, rather than through
+        # `_handle_utterance`'s contact-reference grammar, which has no
+        # row shaped for a reference-less command (see
+        # `_match_radio_check_or_greeting`'s own docstring).
+        radio_check_or_greeting = _match_radio_check_or_greeting(stripped)
+        if radio_check_or_greeting is not None:
+            token, slots = radio_check_or_greeting
+            return self.handle_command(token, now_sim, slots=slots)
         lines = self._handle_utterance(stripped, now_sim)
         self._print(lines, now_sim, bypass_gate=False)
         return lines
@@ -1554,6 +1614,17 @@ class CrewConsole:
         # issued *something* command-shaped, which is the distinction
         # that matters here, not whether this class happens to act on it.
         self.silenced = False
+        # `[[BL-B82]]`: a look command on the ground is heard and
+        # understood -- it already ended silence, above, like any other
+        # command -- but not dispatched; perception is not running
+        # (`logger.py`'s poll-loop gate), so a `scan`/`watch`/`follow`
+        # here would register a task that can never be fulfilled. This is
+        # the "unable", not "say again", half of that distinction: the
+        # command was heard fine, it just cannot be done right now.
+        if self.on_ground and token in _LOOK_COMMAND_TOKENS:
+            lines = [render_unable("ON_GROUND").text]
+            self._print(lines, now_sim)
+            return lines
         bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
         if not isinstance(bearing_degrees, int):
             bearing_degrees = None
@@ -1635,6 +1706,10 @@ class CrewConsole:
                 )
         elif token == "report":
             lines = self._handle_slotted_report(now_sim, slots)
+        elif token == "radio_check":
+            lines = self._handle_radio_check()
+        elif token == "greeting":
+            lines = self._handle_greeting(slots)
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
@@ -2691,6 +2766,34 @@ class CrewConsole:
             relative=relative,
             band=band,
         )
+
+    def _handle_radio_check(self) -> list[str]:
+        """`[[BL-B81]]` -- "radio check" -> "Loud and clear." Reads
+        nothing, touches no belief: this is a liveness check ("intercom is
+        on, Petrobrain is up"), not a query, so it has no on-the-ground or
+        no-belief failure mode -- it always answers the same fixed line
+        (unless `handle_command`'s own refusal/on-ground checks, which run
+        before any token-specific dispatch, already returned first)."""
+        return [render_radio_check().text]
+
+    def _handle_greeting(self, slots: dict[str, int | str] | None) -> list[str]:
+        """`[[BL-B81]]` -- "good morning/day/evening/night Petrovich" ->
+        "Good morning/day/evening/night, commander.", echoing the pilot's
+        own word rather than reading the sim clock (user, 2026-10-19). The
+        word is carried as `slots["time_of_day"]` by whichever surface
+        recognised the phrase (`handle_line`'s own literal match for typed
+        crew-text; `audio-adapter`'s `command_matcher` for voice, once
+        wired there) -- this method only renders it. A missing or
+        unrecognised value is the harness/caller's bug, not the pilot's
+        mistake, but the graceful-degradation posture every other
+        slot-reading branch in this class takes (`scan_bearing_deg`'s
+        missing-bearing case, directly above) is to degrade rather than
+        raise, so this does too."""
+        time_of_day = slots.get("time_of_day") if slots is not None else None
+        if time_of_day not in _GREETING_TIMES_OF_DAY:
+            return ["say again -- no greeting heard"]
+        assert isinstance(time_of_day, str)
+        return [render_greeting(time_of_day).text]
 
     def _handle_report(
         self,

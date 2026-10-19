@@ -1352,6 +1352,104 @@ def test_recognised_free_text_command_ends_silence() -> None:
     assert console.silenced is False
 
 
+# -- `[[BL-B81]]` radio check / greeting -- an ordinary command, like any ---
+# other: it ends an explicit `silence`, is answered on the ground, and gets ---
+# the refusal line in refusal mode (plans/radio-check/plan.md). ------------
+
+
+def test_radio_check_token_answers_loud_and_clear() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    assert console.handle_command("radio_check", now_sim=0.0) == ["Loud and clear."]
+
+
+def test_radio_check_works_on_the_ground() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.on_ground = True
+
+    assert console.handle_command("radio_check", now_sim=0.0) == ["Loud and clear."]
+
+
+def test_radio_check_ends_an_explicit_silence() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.handle_command("silence", now_sim=0.0)
+
+    console.handle_command("radio_check", now_sim=1.0)
+
+    assert console.silenced is False
+
+
+def test_radio_check_in_refusal_mode_gets_the_refusal_line() -> None:
+    from belief.crew_console import WORLD_MODEL_NOT_LOADED_REFUSAL
+
+    console = CrewConsole(store=ContactStore())
+    console.refused = True
+
+    assert console.handle_command("radio_check", now_sim=0.0) == [
+        WORLD_MODEL_NOT_LOADED_REFUSAL
+    ]
+
+
+@pytest.mark.parametrize(
+    "time_of_day,expected",
+    [
+        ("morning", "Good morning, commander."),
+        ("day", "Good day, commander."),
+        ("evening", "Good evening, commander."),
+        ("night", "Good night, commander."),
+    ],
+)
+def test_greeting_token_echoes_the_pilots_own_word(
+    time_of_day: str, expected: str
+) -> None:
+    console = CrewConsole(store=ContactStore())
+
+    assert console.handle_command(
+        "greeting", now_sim=0.0, slots={"time_of_day": time_of_day}
+    ) == [expected]
+
+
+def test_greeting_with_missing_slot_degrades_to_say_again() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    assert console.handle_command("greeting", now_sim=0.0) == [
+        "say again -- no greeting heard"
+    ]
+
+
+def test_typed_radio_check_dispatches_through_handle_line() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    assert console.handle_line("radio check", now_sim=0.0) == ["Loud and clear."]
+
+
+@pytest.mark.parametrize(
+    "phrase,expected",
+    [
+        ("good morning Petrovich", "Good morning, commander."),
+        ("good evening petrovich", "Good evening, commander."),
+        ("Good Night Petrovich.", "Good night, commander."),
+    ],
+)
+def test_typed_greeting_dispatches_through_handle_line(
+    phrase: str, expected: str
+) -> None:
+    console = CrewConsole(store=ContactStore())
+
+    assert console.handle_line(phrase, now_sim=0.0) == [expected]
+
+
+def test_typed_radio_check_in_refusal_mode_gets_the_refusal_line() -> None:
+    from belief.crew_console import WORLD_MODEL_NOT_LOADED_REFUSAL
+
+    console = CrewConsole(store=ContactStore())
+    console.refused = True
+
+    assert console.handle_line("radio check", now_sim=0.0) == [
+        WORLD_MODEL_NOT_LOADED_REFUSAL
+    ]
+
+
 # -- BL-15 Stage 3: loud-refusal mode (plans/bl15-mission-start/plan.md, ----
 # user direction 2026-10-19: "on error loud refusal is better") -- every ----
 # player command gets the fixed line while CrewConsole.refused is set. ------
@@ -1551,109 +1649,85 @@ def test_refused_drain_brain_consumes_rather_than_leaves_the_reply_queued() -> N
     assert console.drain_brain(now_sim=2.0) == []
 
 
-# -- maybe_apply_on_ground_default (plans/spu8-intercom/plan.md Stage 5: ----
-# mission-start on-ground silent-mode default, one-shot, ends only via the ---
-# existing "any command ends silence" logic above -- not by leaving the ----
-# ground) -----------------------------------------------------------------
+# -- on_ground / look-command refusal (`[[BL-B82]]`, replacing the former --
+# `maybe_apply_on_ground_default` silence default -- plans/radio-check/ -----
+# plan.md) -------------------------------------------------------------
 
 
-def _ownship_at_agl(alt_agl_m: float) -> OwnshipState:
-    """Ownship at a given height above ground, for the on-ground silent default.
-
-    Deliberately *not* named `_ownship` -- this module already has one at the
-    top of the file, with a different signature (x/z, fixed 500 m alt). A
-    second module-level `_ownship` silently shadowed it and broke 80
-    pre-existing tests with `unexpected keyword argument 'x'`.
-    """
-    return OwnshipState(
-        t_sim=0.0, x=0.0, z=0.0, alt_m=0.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
-    )
-
-
-def test_on_ground_at_mission_start_applies_silent_mode() -> None:
+def test_look_command_on_ground_answers_unable() -> None:
     console = CrewConsole(store=ContactStore())
+    console.on_ground = True
 
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
+    assert console.handle_command("watch_nearest", now_sim=0.0) == [
+        "Unable, on the ground."
+    ]
 
-    assert console.silenced is True
 
-
-def test_airborne_at_mission_start_does_not_apply_silent_mode() -> None:
+def test_look_command_airborne_dispatches_normally() -> None:
+    """The same token, the same store contents, airborne instead of on the
+    ground -- the only thing that changed is `on_ground`."""
     console = CrewConsole(store=ContactStore())
+    console.on_ground = False
 
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=500.0))
-
-    assert console.silenced is False
-
-
-def test_on_ground_default_does_not_speak_an_acknowledgement() -> None:
-    """Unlike the player-issued `silence` command, there is nothing to
-    acknowledge at a cold mission start -- sets `self.silenced` directly,
-    not through `_handle_silence`."""
-    speech_client = FakeSpeechClient()
-    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
-
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
-
-    assert console.silenced is True
-    assert speech_client.pushed == []
+    assert console.handle_command("watch_nearest", now_sim=0.0) == [
+        "no contact to watch"
+    ]
 
 
-def test_on_ground_default_is_evaluated_only_once() -> None:
-    """An internal one-shot flag, not re-evaluated afterward regardless of
-    later altitude -- a call made on the ground does not get a second
-    chance to reconsider once ownship climbs."""
+def test_scan_command_on_ground_answers_unable() -> None:
     console = CrewConsole(store=ContactStore())
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
-    assert console.silenced is True
+    console.on_ground = True
 
-    # A player command ends silence (the existing, unrelated mechanism) --
-    # then a second on-ground call must be a no-op, not re-silence him.
-    console.handle_command("watch_nearest", now_sim=1.0)
-    assert console.silenced is False
-
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
-
-    assert console.silenced is False
+    assert console.handle_command("scan_ahead", now_sim=0.0) == [
+        "Unable, on the ground."
+    ]
 
 
-def test_airborne_first_call_latches_even_though_later_on_ground() -> None:
-    """The first call sets the one-shot flag regardless of outcome -- a
-    later on-ground call must not apply the default retroactively."""
+def test_follow_on_ground_answers_unable() -> None:
     console = CrewConsole(store=ContactStore())
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=500.0))
-    assert console.silenced is False
+    console.on_ground = True
 
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
+    assert console.handle_command(
+        "follow", now_sim=0.0, slots={"descriptor": "armor"}
+    ) == ["Unable, on the ground."]
 
-    assert console.silenced is False
 
+def test_look_command_on_ground_still_ends_silence() -> None:
+    """A refused-on-the-ground look command is still a real command --
+    it was heard and understood, the "any command ends silence" rule
+    (`plans/silence-command/plan.md`) applies to it exactly like every
+    other command."""
+    console = CrewConsole(store=ContactStore())
+    console.silenced = True
+    console.on_ground = True
 
-def test_on_ground_default_ends_only_via_a_command_not_by_leaving_the_ground() -> None:
-    """Locked user decision, 2026-10-05: leaving the ground does not end
-    silent mode -- reuses `silenced`'s already-shipped end condition
-    unchanged (only a command ends it), with zero new suppression logic."""
-    store = ContactStore()
-    speech_client = FakeSpeechClient()
-    console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
-    console.maybe_apply_on_ground_default(_ownship_at_agl(alt_agl_m=0.0))
-    assert console.silenced is True
-
-    # A drained callout stays suppressed while airborne, same as ordinary
-    # `silence` -- this is the existing mechanism, not new logic.
-    store.ingest(
-        [_observation(obs_id="OBS_1", t_sim=10.0, classification_raw="BMP-2")],
-        now_sim=10.0,
-    )
-    store.tick(now_sim=10.0)
-    spoken = console.drain_events(now_sim=10.0)
-    assert len(spoken) == 1
-    assert speech_client.pushed == []
-
-    # A command ends it -- the existing "any command ends silence" path.
-    console.handle_command("watch_nearest", now_sim=20.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
 
     assert console.silenced is False
+
+
+def test_non_look_command_on_ground_dispatches_normally() -> None:
+    """`mark_here`/`observ_on`/etc are not in `_LOOK_COMMAND_TOKENS` -- on
+    the ground they dispatch exactly as if airborne (they only read
+    existing belief or register a non-perception task)."""
+    console = CrewConsole(store=ContactStore())
+    console.on_ground = True
+
+    assert console.handle_command("observ_on", now_sim=0.0) == ["Observ on."]
+
+
+def test_refusal_mode_wins_over_on_ground_for_a_look_command() -> None:
+    """`[[BL-15]]`'s refusal mode takes precedence over everything else
+    `handle_command` does, on-ground included."""
+    from belief.crew_console import WORLD_MODEL_NOT_LOADED_REFUSAL
+
+    console = CrewConsole(store=ContactStore())
+    console.on_ground = True
+    console.refused = True
+
+    assert console.handle_command("watch_nearest", now_sim=0.0) == [
+        WORLD_MODEL_NOT_LOADED_REFUSAL
+    ]
 
 
 def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:

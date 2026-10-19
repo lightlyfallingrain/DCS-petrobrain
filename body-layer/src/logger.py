@@ -211,7 +211,7 @@ from belief.brain_client import BrainLayerClient
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
-from belief.crew_console import CrewConsole
+from belief.crew_console import ON_GROUND_AGL_THRESHOLD_M, CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import (
@@ -317,11 +317,19 @@ class PerceptionLogger:
         if telemetry is None:
             return []
         ownship = OwnshipState.from_telemetry_dict(telemetry)
-        observations = [
-            observation
-            for source in self.sources
-            for observation in source.poll(ownship.t_sim, ownship)
-        ]
+        # `[[BL-B82]]`: Petrovich does not scan while on the ground --
+        # every time, not only before the first takeoff -- so no source is
+        # polled at all this tick. See `ConsolePerceptionRunner.run_once`'s
+        # identical gate for the full reasoning.
+        observations = (
+            [
+                observation
+                for source in self.sources
+                for observation in source.poll(ownship.t_sim, ownship)
+            ]
+            if ownship.alt_agl_m > ON_GROUND_AGL_THRESHOLD_M
+            else []
+        )
         lines = [format_observation_line(ownship, obs) for obs in observations]
         if self.output is not None:
             for line in lines:
@@ -673,11 +681,22 @@ class ConsolePerceptionRunner:
         )
         if updated_optic_state is not None:
             self.optic_state = updated_optic_state
-        observations = [
-            observation
-            for source in self.sources
-            for observation in source.poll(ownship.t_sim, ownship)
-        ]
+        # `[[BL-B82]]`: Petrovich does not scan while on the ground --
+        # every time, not only before the first takeoff, replacing the
+        # old `CrewConsole.maybe_apply_on_ground_default` one-shot silence
+        # default. No source is polled at all this tick; `self.store.tick`
+        # (below) still runs unconditionally, so existing belief keeps
+        # decaying/aging normally -- he just stops adding anything new to
+        # it, he does not forget what he already believed.
+        observations = (
+            [
+                observation
+                for source in self.sources
+                for observation in source.poll(ownship.t_sim, ownship)
+            ]
+            if ownship.alt_agl_m > ON_GROUND_AGL_THRESHOLD_M
+            else []
+        )
         self.store.ingest(observations, now_sim=ownship.t_sim)
         events_before = len(self.store.events)
         # `plans/watch-reporting/plan.md` Stage 2 -- `ownship` is already in
@@ -2698,14 +2717,17 @@ def _run_crew_text_poll_loop(
                 )
                 if runner.last_t_sim is not None:
                     crew_console.enrichment = runner.enrichment
-                    # plans/spu8-intercom/plan.md Stage 5: a one-shot
-                    # mission-start default, evaluated as soon as a real
-                    # ownship state is available -- before drain_events, so
-                    # a mission-start default (if applied) takes effect
-                    # before anything from this same poll could be spoken.
+                    # `[[BL-B82]]`, replacing `plans/spu8-intercom/
+                    # plan.md` Stage 5's one-shot silence default: refresh
+                    # `on_ground` every poll a real ownship state is
+                    # available, same as `enrichment` above, so a look
+                    # command dispatched this same poll (below) sees the
+                    # current ground/air state rather than a one-shot
+                    # latch from mission start.
                     if runner.last_ownship_state is not None:
-                        crew_console.maybe_apply_on_ground_default(
-                            runner.last_ownship_state
+                        crew_console.on_ground = (
+                            runner.last_ownship_state.alt_agl_m
+                            <= ON_GROUND_AGL_THRESHOLD_M
                         )
                         # `plans/attack-run/plan.md` Stage 5 -- apply
                         # whatever `engage`/`disengage` the previous

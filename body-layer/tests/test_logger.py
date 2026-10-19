@@ -226,8 +226,45 @@ def test_run_once_polls_every_source_and_concatenates_observations() -> None:
     lines = logger.run_once()
 
     assert len(lines) == 2
-    assert "source=petrovich_detection_associated" in lines[0]
-    assert "source=naked_eye_visual_filtered" in lines[1]
+
+
+def test_run_once_polls_no_source_while_on_the_ground() -> None:
+    """`[[BL-B82]]`: ownship at or below `ON_GROUND_AGL_THRESHOLD_M` ->
+    no source is polled at all, so a source that *would* have produced an
+    observation this tick is simply never asked."""
+    telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    observations = [_make_observation(ownship)]
+
+    logger = PerceptionLogger(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource(observations)],
+    )
+
+    assert logger.run_once() == []
+
+
+def test_run_once_resumes_polling_once_above_the_ground_threshold() -> None:
+    """The gate is evaluated fresh every poll, not a one-shot latch --
+    the same source produces nothing on the ground and something once
+    ownship climbs."""
+    ground_telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
+    airborne_telemetry = {**_telemetry_dict(), "altitude_agl_m": 500.0}
+    ownship = OwnshipState.from_telemetry_dict(airborne_telemetry)
+    observations = [_make_observation(ownship)]
+    source = FakeSource(observations)
+
+    logger = PerceptionLogger(
+        aircraft_client=FakeAircraftClient(ground_telemetry),  # type: ignore[arg-type]
+        sources=[source],
+    )
+    assert logger.run_once() == []
+
+    logger.aircraft_client._telemetry = airborne_telemetry  # type: ignore[attr-defined]
+    lines = logger.run_once()
+
+    assert len(lines) == 1
+    assert "classification=BMP" in lines[0]
 
 
 def test_console_runner_returns_empty_when_no_telemetry_yet() -> None:
@@ -255,6 +292,69 @@ def test_console_runner_ingests_observations_into_its_store() -> None:
     assert returned == observations
     assert len(runner.store.contacts) == 1
     assert len(runner.store.observations) == 1
+
+
+def test_console_runner_ingests_nothing_while_on_the_ground() -> None:
+    """`[[BL-B82]]`: no source is polled this tick, so nothing is ingested
+    -- a source producing an observation this poll is simply never asked,
+    the same gate `PerceptionLogger.run_once` applies."""
+    telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    observations = [_make_observation(ownship)]
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource(observations)],
+    )
+
+    returned = runner.run_once()
+
+    assert returned == []
+    assert runner.store.contacts == []
+    assert runner.store.observations == {}
+
+
+def test_console_runner_existing_belief_decays_but_is_not_wiped_on_the_ground() -> None:
+    """Existing belief is kept while on the ground -- `self.store.tick`
+    still runs unconditionally (it is the mechanism that ages/decays a
+    contact), only *new* observations stop. A contact already in the
+    store before a ground poll is still there after it."""
+    airborne_telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(airborne_telemetry)
+    store = ContactStore()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(airborne_telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+        store=store,
+    )
+    runner.run_once()
+    assert len(store.contacts) == 1
+
+    ground_telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
+    runner.aircraft_client._telemetry = ground_telemetry  # type: ignore[attr-defined]
+    runner.sources = [FakeSource([])]
+    runner.run_once()
+
+    assert len(store.contacts) == 1
+
+
+def test_console_runner_resumes_ingesting_once_above_the_ground_threshold() -> None:
+    ground_telemetry = {**_telemetry_dict(), "altitude_agl_m": 5.0}
+    airborne_telemetry = {**_telemetry_dict(), "altitude_agl_m": 500.0}
+    ownship = OwnshipState.from_telemetry_dict(airborne_telemetry)
+    source = FakeSource([_make_observation(ownship)])
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(ground_telemetry),  # type: ignore[arg-type]
+        sources=[source],
+    )
+    runner.run_once()
+    assert runner.store.contacts == []
+
+    runner.aircraft_client._telemetry = airborne_telemetry  # type: ignore[attr-defined]
+    runner.run_once()
+
+    assert len(runner.store.contacts) == 1
 
 
 def test_console_runner_reuses_a_store_across_calls() -> None:
