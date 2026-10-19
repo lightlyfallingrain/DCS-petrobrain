@@ -133,3 +133,41 @@ Full read of Stages 1 and 3 (`tts_engine.py`, its tests, `__main__.py`, all run 
 `test_local_playback.py` (23 tests in that file, 12 new) — the mutation findings above are from
 targeted runs against the two riskiest claims (outage-announcement debounce, "both survive one
 interrupt"), not an exhaustive line audit of the remaining ~21 tests in that file.
+
+### Re-review
+
+Re-reviewed only the fix commit, `eb06586b` (`git diff eb06586b~1 eb06586b`), against the two
+Required Fixes above. (The commit was cherry-picked onto `feature/audio-adapter-os-independent`
+from `main`, so the diff against its parent is the right scope rather than the branch range.)
+
+- **Fix 1 confirmed by re-running the same mutation.** `test_winsound_two_concurrent_delivers_
+  both_survive_one_interrupt` now asserts `not thread_a.is_alive()` / `not thread_b.is_alive()`
+  after the joins. Mutated `_WinsoundLocalSink.interrupt()` again, this time against the fixed
+  test, by changing `for event in events:` to `for event in events[:1]:` (releasing only the
+  first in-flight wait) — the test now **fails**, on `assert not thread_b.is_alive()`, exactly at
+  the point the mutation should be caught. Reverted the mutation (file diffs clean against the
+  merged tip afterward) and confirmed the unmutated suite still passes. This closes the gap
+  identified in the original review: the test now observes what it claims to.
+- **Fix 2 confirmed by reading the rendered file.** `audio-adapter/ROADMAP/AA-B1.md` no longer
+  contains `--voice` or "Piper binary" (grepped). Line 10 now reads `--target local --piper-voice
+  <name>`, matching Decision 4 and the already-correct `BL-B15.md` wording this review compared
+  it against. Line 31 now says "Piper is the `piper-tts` venv, not a binary" with a pointer to the
+  recon's 2026-10-20 addenda, rather than repeating the stale "Piper binary" claim.
+- **Checks**, run from the merged tip (`eb06586b`) inside `audio-adapter/`, using the venv at
+  `/Users/sg/Code/DCS-petrobrain/audio-adapter/.venv` (pyproject unchanged by this fix commit):
+  `ruff format --check` — 67 files already formatted. `ruff check` — all checks passed. `mypy
+  src` (strict) — success, no issues in 15 source files. `pytest -q` — 318 passed, 2 skipped,
+  matching the prior review's numbers (the fix only strengthens an assertion and edits docs, no
+  new tests).
+- No new scope, no leftover debug code, nothing staged outside the two named fixes (`git diff
+  eb06586b~1 eb06586b` touches exactly `test_local_playback.py` and `AA-B1.md`).
+
+#### Verdict
+
+**APPROVED.**
+
+#### Review Confidence
+
+Full read of the fix commit's diff (two files, both required fixes, nothing else). Both fixes
+verified by mutation/direct check rather than by inspection alone, consistent with how the
+original gap was found.
