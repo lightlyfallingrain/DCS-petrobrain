@@ -156,3 +156,23 @@ than the bridge call, but nothing above depends on the answer. Delete the probe 
 - Test 3: exact wording you heard/saw for the refusal, and whether it covered every command.
 - Test 4: how long recovery took.
 - **Anything that surprises you is worth more than anything on this list.**
+
+## Results
+
+### 2026-10-19 evening — Test 1, partial (from `dcs.log`, run against `main`)
+
+```
+20:02:58.694 PetrobrainMissionStart (Main): onSimulationStart sequence=1 theatre=Syria
+20:05:18.316 PetrobrainMissionStart (Main): onSimulationStart sequence=2 theatre=Caucasus
+```
+
+- **Theatre read over the bridge works, and for two theatres**: `theatre=` carried the real name both
+  times, never `nil`.
+- **What was flown between them was a mission *change*, not an in-sim restart.** `dcs.log` shows
+  `Dispatcher: Stop` → `onSimulationStop` at 20:04:21, the Syria terrain unloaded,
+  `load terrain from ./Mods/terrains/Caucasus`, `loadMission … tempMission.miz`,
+  `Terrain theatre Caucasus`, then `sequence=2`. So stop-then-load of another theatre's mission
+  re-fires `onSimulationStart` with the new theatre, as designed.
+- **Still open from Test 1**: pause/resume (must log nothing) and in-sim "Restart Mission" (must log
+  a new sequence). Neither appears in this log window.
+- Tests 2–4 (body-layer side: wipe, refusal, recovery) not reported in this run.
