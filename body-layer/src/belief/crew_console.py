@@ -97,6 +97,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO
 
+import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attack_run import AttackRunState
 from belief.attack_run import decide as decide_attack_run
@@ -180,18 +181,28 @@ from perception.geometry import GeoPosition, angular_delta_deg, signed_angular_d
 from perception.optics import Optic
 from perception.source import OwnshipState
 
-#: On-ground altitude threshold (metres AGL) -- used by `logger.py`'s two
-#: poll loops to gate perception (`[[BL-B82]]`, "good enough", user
-#: 2026-10-19) and by `CrewConsole.on_ground`/`_LOOK_COMMAND_TOKENS` below
-#: to refuse a look command. A guessed placeholder pending live-flight
-#: calibration -- same debt class as `mission_phase.WAYPOINT_CAPTURE_
-#: RADIUS_M` -- since no weight-on-wheels signal exists anywhere in this
-#: codebase; this is `alt_agl_m` against a placeholder value, not a real
-#: ground-contact sensor. Do not treat as validated. Not newly wired
-#: through `tuning.py` by `[[BL-B82]]` -- it is not a *new* constant, it is
-#: an existing one doing more work; flagged as behaviour-affecting and
-#: still a bare module literal.
-ON_GROUND_AGL_THRESHOLD_M: Final[float] = 10.0
+#: Below this altitude AGL in metres, Petrovich is treated as on the
+#: ground: perception stops and a look command is refused rather than
+#: dispatched -- too high false-grounds him during genuine low-level/NOE
+#: flight, too low lets him scan while the aircraft is still sitting on
+#: the ramp. Used by `logger.py`'s two poll loops and by
+#: `CrewConsole.on_ground`/`_LOOK_COMMAND_TOKENS` above. A guessed
+#: placeholder pending live-flight calibration -- same
+#: debt class as `mission_phase.WAYPOINT_CAPTURE_RADIUS_M` -- since no
+#: weight-on-wheels signal exists anywhere in this codebase; this is
+#: `alt_agl_m` against a placeholder value, not a real ground-contact
+#: sensor. Do not treat as validated. Wired through `tuning.py` by
+#: `[[BL-B82]]` (review, 2026-10-19): it now gates perception in two poll
+#: loops plus look-command refusal, not just a one-shot silence default,
+#: so it earns the mechanism per root `CLAUDE.md`'s rule even though its
+#: own value is unchanged.
+ON_GROUND_AGL_THRESHOLD_M: Final[float] = tuning.real(
+    "belief.crew_console.ON_GROUND_AGL_THRESHOLD_M",
+    10.0,
+    lo=0.5,
+    hi=50.0,
+    status="uncalibrated",
+)
 
 #: Spoken when "Cancel Task" finds nothing to cancel -- no task store wired
 #: up, or no still-`pending` task. Deliberately not routed through
@@ -1230,8 +1241,13 @@ class CrewConsole:
     #: ON_GROUND_AGL_THRESHOLD_M`. Read by `handle_command` to refuse a
     #: `_LOOK_COMMAND_TOKENS` member with "Unable, on the ground." --
     #: perception itself is gated in `logger.py`'s poll loops, not here;
-    #: this field only decides what `handle_command` answers.
-    on_ground: bool = field(default=False, repr=False)
+    #: this field only decides what `handle_command` answers. Defaults to
+    #: `True` (reviewer, `plans/radio-check/review.md`, 2026-10-19): before
+    #: the first telemetry poll resolves this from real `OwnshipState`,
+    #: "on the ground" is the safe assumption to refuse look commands
+    #: under, the same direction `alt_agl_m`'s own `0.0` default already
+    #: takes.
+    on_ground: bool = field(default=True, repr=False)
 
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
@@ -1256,7 +1272,7 @@ class CrewConsole:
         default -- see `refused`'s own field docstring for why resetting
         it here is correct even though a mission (re)start is exactly the
         event that might need to set it right back. `on_ground` resetting
-        to `False` is harmless either way: `logger._check_for_new_mission`
+        to `True` is harmless either way: `logger._check_for_new_mission`
         re-evaluates it from live telemetry the very next poll, same as
         `enrichment`."""
         self.__init__(  # type: ignore[misc]

@@ -212,3 +212,65 @@ intercom is ON and volume good B) that Petrobrain is operational."*
 in either file. `body-layer/` — already wired at `01a69ec7`, confirmed to need no change (the
 dispatch reads `slots["time_of_day"]` by key, which this work populates with the identical key
 and the identical four string values).
+
+### Review fixes
+
+Addressing `plans/radio-check/review.md`'s one required fix and two of its optional refinements,
+against reviewed tip `49c24eb1`.
+
+- **Required — the asymmetric `time_of_day` drift guard.** Added
+  `test_greeting_times_of_day_are_exactly_the_four_greetings` to
+  `body-layer/tests/test_crew_console.py`, pinning
+  `_GREETING_TIMES_OF_DAY == frozenset({"morning", "day", "evening", "night"})` (imported
+  `_GREETING_TIMES_OF_DAY` into the test module alongside the other `belief.crew_console`
+  imports). Updated both docstrings to name the other side's test by name — the body-layer test's
+  docstring names `test_time_of_day_words_are_exactly_the_four_greetings` in
+  `audio-adapter/tests/test_vocabulary.py`, and that test's own docstring now names the new
+  body-layer test back, so the drift-guard claim each side makes is checkable from either file.
+- **Optional — `CrewConsole.on_ground` now defaults to `True`.** Changed the dataclass field
+  default (`body-layer/src/belief/crew_console.py`) and updated its own docstring plus
+  `reset_for_new_mission`'s docstring, which referenced the old default's harmlessness. This
+  flipped the implicit assumption of **50** pre-existing tests across `test_crew_console.py` that
+  constructed a bare `CrewConsole(...)` and immediately issued a `_LOOK_COMMAND_TOKENS` member
+  (`watch_nearest`/`follow`/every scan family/confirm-band round trips reaching one of those),
+  relying on the old "airborne until told otherwise" default to let dispatch proceed — enumerated
+  by running the full suite after the flip and reading every failure, not estimated. Each of those
+  50 now sets `console.on_ground = False` immediately after construction (one line per test, same
+  construction-site pattern each already used), restoring their original airborne-starting intent
+  with the assumption now explicit instead of implicit. The review's own on-ground/airborne tests
+  (`test_look_command_on_ground_answers_unable` and its five neighbours) already set `on_ground`
+  explicitly both ways and needed no change. Confirmed by direct REPL: a freshly constructed
+  `CrewConsole(store=ContactStore())` now reports `on_ground == True` and answers a look command
+  `"Unable, on the ground."` before any telemetry has ever been seen.
+- **Optional — `ON_GROUND_AGL_THRESHOLD_M` wired through `tuning.py`.** Declared via
+  `tuning.real("belief.crew_console.ON_GROUND_AGL_THRESHOLD_M", 10.0, lo=0.5, hi=50.0,
+  status="uncalibrated")` in `body-layer/src/belief/crew_console.py` (added `import tuning`),
+  value and bounds unchanged from the prior bare literal — only the declaration form changed, per
+  the review's framing ("already flagged... the right call for this change... noting it here only
+  so a future touch... is the trigger"). Rewrote the constant's own comment so its **first
+  sentence** (the only one `tools/generate_defaults.py` renders) states what it does, which
+  direction is dangerous (too high false-grounds him in genuine low-level/NOE flight; too low lets
+  him scan on the ramp), and is self-contained — the original comment's "below" referred to the
+  constant's position in the source file, which does not survive into `config/defaults.toml`'s
+  rendering; caught by reading the **rendered** file after the first regeneration and rewritten
+  before committing. Regenerated `body-layer/config/defaults.toml` with
+  `tools/generate_defaults.py --write`; `tests/test_tuning_defaults_toml.py` passes, confirming the
+  committed file matches. **Trap check (per `.claude/agents/implementer.md`):** `lo`/`hi` are AST
+  float literals, not references. Every consumer (`logger.py`'s two poll loops and the on-ground
+  refresh in `_run_crew_text_poll_loop`) reads the constant via `from belief.crew_console import
+  ON_GROUND_AGL_THRESHOLD_M`, a standard module-level import that only executes after
+  `crew_console.py`'s own top-level `tuning.real(...)` call has already resolved, so every consumer
+  sees the loaded value, not the code default, when an override is present. **No cross-key
+  coupling identified** — this constant gates perception/look-command refusal only; it shares no
+  asserted relationship with `belief.decay`'s `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` coupling
+  or any other declared tunable.
+- **Not addressed** (correctly, per the review's own framing): the third optional refinement
+  (`DISPATCHED_COMMAND_TOKENS` membership note) was recorded by the reviewer as "verified directly,
+  no fix needed" — nothing to change.
+
+**Checks after these fixes:** body-layer `ruff format --check src tests`, `ruff check src tests`,
+`mypy src` (68 files) — all pass. `pytest tests -q` — 2237 passed (2236 + the one new test), 4
+xfailed, confirmed by name with `-k "greeting_times_of_day"` → 1 passed, not inferred from the
+full-suite count alone. audio-adapter `ruff format --check src tests`, `ruff check src tests`,
+`mypy src` (15 files), `pytest tests -q` — 300 passed, 1 pre-existing skip (unchanged from the
+reviewed state; only a docstring changed on this side).

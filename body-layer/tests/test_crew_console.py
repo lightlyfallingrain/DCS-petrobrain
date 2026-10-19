@@ -29,6 +29,7 @@ from belief.brain_client import BrainLayerClient
 from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
 from belief.contacts import Contact, ContactStore
 from belief.crew_console import (
+    _GREETING_TIMES_OF_DAY,
     _NOTHING_TO_STOP,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
@@ -1409,6 +1410,16 @@ def test_greeting_token_echoes_the_pilots_own_word(
     ) == [expected]
 
 
+def test_greeting_times_of_day_are_exactly_the_four_greetings() -> None:
+    """This side of the `_GREETING_TIMES_OF_DAY` <-> audio-adapter's own
+    `vocabulary.TIME_OF_DAY_WORDS` hand-synced mirror --
+    `test_time_of_day_words_are_exactly_the_four_greetings` in
+    `audio-adapter/tests/test_vocabulary.py` asserts the same membership
+    against its own set; a drift then fails a test on whichever side
+    changed, rather than during a sortie."""
+    assert _GREETING_TIMES_OF_DAY == frozenset({"morning", "day", "evening", "night"})
+
+
 def test_greeting_with_missing_slot_degrades_to_say_again() -> None:
     console = CrewConsole(store=ContactStore())
 
@@ -1738,6 +1749,7 @@ def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store)
+    console.on_ground = False
 
     assert console.handle_command("watch_nearest", now_sim=0.0) == [
         "no contact to watch"
@@ -1749,6 +1761,7 @@ def test_watch_nearest_reports_no_contact_to_watch_when_store_is_empty(
 ) -> None:
     store = ContactStore()
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert console.handle_command("watch_nearest", now_sim=0.0) == [
         "no contact to watch"
@@ -1777,6 +1790,7 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     near_contact = next(c for c in store.contacts if c.classification.value == "T-72")
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("watch_nearest", now_sim=0.0)
 
     # Contact-report wording (unit type, clock, range), no spoken id -- the
@@ -1826,6 +1840,7 @@ def test_watch_nearest_tags_every_group_member_watched(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     lines = console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -1869,6 +1884,7 @@ def test_follow_tags_every_group_member_watched(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
 
@@ -1894,6 +1910,7 @@ def test_watch_nearest_a_single_ungrouped_contact_is_unaffected_by_group_tagging
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     lines = console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -1932,6 +1949,7 @@ def test_watch_nearest_group_readback_counts_only_members_actually_marked(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     lines = console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -1992,6 +2010,7 @@ def test_a_unit_that_joins_the_group_later_is_not_retroactively_watched(
 
 def test_scan_ahead_without_enrichment_reports_not_configured() -> None:
     console = CrewConsole(store=ContactStore())
+    console.on_ground = False
     assert console.handle_command("scan_ahead", now_sim=0.0) == [
         "no world-model connection configured"
     ]
@@ -2003,6 +2022,7 @@ def test_scan_ahead_without_tasks_reports_not_configured(
     console = CrewConsole(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     assert console.handle_command("scan_ahead", now_sim=0.0) == [
         "no task store configured"
     ]
@@ -2025,6 +2045,7 @@ def test_scan_ahead_registers_a_task_and_fires_no_dcs_effector(
         enrichment=_enrichment_context(monkeypatch),
         aircraft_client=client,  # type: ignore[arg-type]
     )
+    console.on_ground = False
 
     lines = console.handle_command("scan_ahead", now_sim=0.0)
 
@@ -2047,6 +2068,7 @@ def test_scan_bearing_n_registers_a_task_with_the_absolute_sector(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     lines = console.handle_command("scan_bearing_n", now_sim=0.0)
 
@@ -2068,6 +2090,7 @@ def test_scan_clock_1_registers_a_task_with_the_relative_clock_hour(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     lines = console.handle_command("scan_clock_1", now_sim=0.0)
 
@@ -2097,6 +2120,7 @@ def test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail() -> None:
         ),
         aircraft_client=client,  # type: ignore[arg-type]
     )
+    console.on_ground = False
 
     lines = console.handle_command("scan_full", now_sim=0.0)
 
@@ -2120,6 +2144,7 @@ def test_scan_then_cancel_task_actually_cancels_it() -> None:
             conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
         ),
     )
+    console.on_ground = False
 
     console.handle_command("scan_ahead", now_sim=0.0)
     task_id = tasks.tasks[0].id
@@ -2150,6 +2175,7 @@ def test_cancel_task_reaches_an_already_succeeded_scan() -> None:
             conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
         ),
     )
+    console.on_ground = False
 
     console.handle_command("scan_ahead", now_sim=0.0)
     task = tasks.tasks[0]
@@ -2230,6 +2256,7 @@ def test_handle_command_pushes_to_overlay_via_the_print_funnel(
         aircraft_client=client,  # type: ignore[arg-type]
         overlay_client=overlay_client,  # type: ignore[arg-type]
     )
+    console.on_ground = False
 
     lines = console.handle_command("scan_ahead", now_sim=0.0)
 
@@ -2263,6 +2290,7 @@ def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
     tank = next(c for c in store.contacts if c.classification.value == "T-72")
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("watch_nearest_air_defence", now_sim=0.0)
 
     assert "Osa" in lines[0]
@@ -2306,6 +2334,7 @@ def test_watch_nearest_air_defence_selects_a_long_range_sam(
     tank = next(c for c in store.contacts if c.classification.value == "T-72")
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("watch_nearest_air_defence", now_sim=0.0)
 
     assert s300.attention == "watch"
@@ -2359,6 +2388,7 @@ def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
     store.tick(now_sim=0.0)
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     # Distinct from the plain "no contact to watch" -- there *is* a contact,
     # it just isn't air defence, and the crew must hear which.
@@ -2417,6 +2447,7 @@ def test_watch_nearest_air_defence_ignores_a_presence_level_contact(
     assert blob.classification.level.name.lower() == "presence"
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     assert console.handle_command("watch_nearest_air_defence", now_sim=0.0) == [
         "no air defence contact to watch"
@@ -2438,6 +2469,7 @@ def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
             conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
         ),
     )
+    console.on_ground = False
 
     console.handle_command("scan_bearing_se", now_sim=0.0)
     lines = console.handle_command("cancel_task", now_sim=1.0)
@@ -2459,6 +2491,7 @@ def test_cancel_task_names_a_clock_hour_scan_by_its_number_word() -> None:
             conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
         ),
     )
+    console.on_ground = False
 
     console.handle_command("scan_clock_1", now_sim=0.0)
     lines = console.handle_command("cancel_task", now_sim=1.0)
@@ -2488,6 +2521,7 @@ def test_watch_nearest_registers_a_cancellable_task(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -2516,6 +2550,7 @@ def test_watch_then_cancel_task_stops_the_watch(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     console.handle_command("watch_nearest", now_sim=0.0)
     assert contact.attention == "watch"
 
@@ -2543,6 +2578,7 @@ def test_watch_nearest_without_tasks_still_falls_back_to_a_bare_mark(
     store.tick(now_sim=0.0)
     contact = store.contacts[0]
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
 
     lines = console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -2570,6 +2606,7 @@ def test_scan_and_watch_coexist_and_cancel_task_stops_both(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     console.handle_command("scan_ahead", now_sim=0.0)
     console.handle_command("watch_nearest", now_sim=0.0)
@@ -2615,6 +2652,7 @@ def test_cancel_task_cancels_superseded_tasks_too_so_none_resurrect(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     console.handle_command("scan_ahead", now_sim=0.0)
     console.handle_command("scan_left", now_sim=1.0)
@@ -2672,6 +2710,7 @@ def test_handle_transcript_acts_above_act_floor(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
 
     lines = console.handle_transcript(
         "scan ahead",
@@ -2776,6 +2815,7 @@ def test_handle_transcript_confirm_then_affirm_commits(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
     confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
@@ -2850,6 +2890,7 @@ def test_handle_transcript_confirm_then_unrelated_answer_discards_and_processes_
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
     confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
@@ -2966,6 +3007,7 @@ def test_handle_transcript_grace_window_does_not_swallow_a_real_utterance(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
     confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
@@ -3006,6 +3048,7 @@ def test_handle_transcript_confirm_commits_on_the_questions_own_word(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
     confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     asked = console.handle_transcript(
         "scan ahead",
@@ -3040,6 +3083,7 @@ def test_handle_transcript_cancel_task_needs_the_higher_floor(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
     console.handle_command("scan_ahead", now_sim=0.0)
     assert len(tasks.tasks) == 1
 
@@ -3070,6 +3114,7 @@ def test_voice_repl_harness_drives_the_same_pipeline(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
+    console.on_ground = False
 
     lines = console.handle_line("!voice scan_ahead 1.0 1.0 1 0 scan ahead", now_sim=0.0)
 
@@ -3108,6 +3153,7 @@ def test_cancel_scan_leaves_the_watch_running(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     console.handle_command("scan_ahead", now_sim=0.0)
     console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -3138,6 +3184,7 @@ def test_cancel_watch_leaves_the_scan_running(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     console.handle_command("scan_ahead", now_sim=0.0)
     console.handle_command("watch_nearest", now_sim=0.0)
 
@@ -3166,6 +3213,7 @@ def test_cancel_scan_with_nothing_scanning_says_so(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     console.handle_command("watch_nearest", now_sim=0.0)
 
     lines = console.handle_command("cancel_scan", now_sim=1.0)
@@ -3913,6 +3961,7 @@ def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
 
     lines = console.handle_command(
         "scan_bearing_deg", now_sim=0.0, slots={"bearing_degrees": 317}
@@ -3963,6 +4012,7 @@ def test_a_confirm_band_bearing_survives_the_affirm_round_trip(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
+    console.on_ground = False
     confirm_confidence = (ACT_FLOOR + CONFIRM_FLOOR) / 2
 
     lines = console.handle_transcript(
@@ -4079,6 +4129,7 @@ def test_follow_with_descriptor_only_picks_the_matching_class(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
     armor_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ARMORED")
     truck_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_TRUCK")
@@ -4123,12 +4174,14 @@ def test_follow_with_clock_only_picks_the_nearest_matching_clock(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("follow", now_sim=0.0, slots={"clock": 2})
     assert "armor" in lines[0].lower()
 
 
 def test_follow_with_no_qualifiers_says_again() -> None:
     console = CrewConsole(store=ContactStore())
+    console.on_ground = False
     lines = console.handle_command("follow", now_sim=0.0)
     assert lines == ["say again -- follow needs at least one of what/where/how far"]
 
@@ -4205,6 +4258,7 @@ def test_follow_records_its_resolved_target(monkeypatch: pytest.MonkeyPatch) -> 
     store.tick(now_sim=0.0)
     contact_id = store.contacts[0].id
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     assert console.last_command_target_contact_id is None
 
     console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
@@ -4234,6 +4288,7 @@ def test_follow_target_resets_between_unrelated_commands(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
     assert console.last_command_target_contact_id is not None
 
@@ -4264,6 +4319,7 @@ def test_follow_beyond_the_match_floor_watches_nothing(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command(
         "follow", now_sim=0.0, slots={"descriptor": "armor", "clock": 2}
     )
@@ -4290,12 +4346,14 @@ def test_follow_with_only_a_clock_names_the_clock_when_nothing_matches(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("follow", now_sim=0.0, slots={"clock": 2})
     assert lines == ["Nothing at two o'clock."]
 
 
 def test_follow_with_no_contacts_at_all() -> None:
     console = CrewConsole(store=ContactStore(), enrichment=None)
+    console.on_ground = False
     lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
     assert lines == ["no world-model connection configured"]
 
@@ -4322,6 +4380,7 @@ def test_follow_unclassified_contact_matches_a_descriptor_softly(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command(
         "follow", now_sim=0.0, slots={"descriptor": "armor", "clock": 2}
     )
@@ -4356,6 +4415,7 @@ def test_follow_group_descriptor_matches_a_plural_cardinality(
         "OP_TO5UNITS", established_sim=0.0
     )
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "group"})
     assert store.contacts[0].attention == "watch"
     assert lines[0] != "Nothing like that."
@@ -4390,6 +4450,7 @@ def test_follow_readback_survives_the_confirm_round_trip(
     )
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.on_ground = False
     confirm_confidence = (ACT_FLOOR + CONFIRM_FLOOR) / 2
 
     lines = console.handle_transcript(

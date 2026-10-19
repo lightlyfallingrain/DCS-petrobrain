@@ -610,9 +610,11 @@ def test_greeting_token_exists_and_is_voice_only() -> None:
 
 def test_time_of_day_words_are_exactly_the_four_greetings() -> None:
     """This side of the `TIME_OF_DAY_WORDS` <-> `belief.crew_console.
-    _GREETING_TIMES_OF_DAY` hand-synced mirror. body-layer asserts the
-    same membership against its own set; a drift then fails a test on
-    whichever side changed, rather than during a sortie."""
+    _GREETING_TIMES_OF_DAY` hand-synced mirror --
+    `test_greeting_times_of_day_are_exactly_the_four_greetings` in
+    `body-layer/tests/test_crew_console.py` asserts the same membership
+    against its own set; a drift then fails a test on whichever side
+    changed, rather than during a sortie."""
     assert set(TIME_OF_DAY_WORDS) == {"morning", "day", "evening", "night"}
     assert len(TIME_OF_DAY_WORDS) == 4
 
