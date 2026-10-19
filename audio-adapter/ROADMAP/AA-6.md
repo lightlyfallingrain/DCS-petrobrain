@@ -23,6 +23,31 @@
   nothing saying why. Piper runs as its own process on port 7800. **Implementation to be done
   from a Mac session** (user direction); Stage 4 needs the user on both machines.
 
+  **Stages 1-3 landed (DoD passed, 2026-10-20)**: `plans/audio-adapter-os-independent/{implementation.md,
+  review.md,performance-review.md,security-review.md,dod-check.md}` — Reviewer APPROVED (one fix
+  loop: a concurrency-test assertion gap and a stale `--voice` doc reference, both fixed and
+  re-reviewed), Performance Reviewer APPROVED/MONITOR, Security deep-analysis APPROVED, and a
+  retroactive Security plan review (missed in sequence, closed at DoD — see "Process note" below)
+  also APPROVED. All mechanical checks (ruff format/check, mypy --strict, pytest: 318 passed/2
+  skipped) pass on tip `6e200483b714d00f86b607e8aa59af59a7a6491d`. `#needs-flight`: **Stage 4
+  (live verification on Mac and Windows) is explicit scope, not done** — it needs the user's own
+  hands on both machines and was never claimed as covered by any automated check. The milestone
+  stays `[~]`, not `[x]`, until Stage 4 runs. Acceptance checklist for Stage 4:
+  `plans/audio-adapter-os-independent/dod-check.md`.
+
+  **Process note**: this batch's Security **plan** review (the Architect→Implementer gate, distinct
+  from the deep-analysis pass above) never ran in sequence — found and closed retroactively at DoD.
+  Second occurrence of this exact gap (`.claude/agent-memory/dod/
+  project_security_plan_review_skipped_by_collapsed_turn.md`); a dispatch-time hook is now warranted.
+
+  **Milestone-completion question (root `CLAUDE.md`)**: does landing Stages 1-3 change what the
+  next milestone should be, or invalidate a downstream assumption? No, for the code itself — the
+  plan's own "Second-order effect" already anticipated this: AA-B1 (voice character/accent) is
+  unblocked at near-zero marginal cost once this lands, since Piper's `"voice"` field is a free
+  per-request parameter. But **AA-B1 cannot be live-verified either until Stage 4 runs** on this
+  milestone first — Stage 4 is also where the decided voice (`en_GB-northern_english_male-medium`)
+  gets its first real cross-machine hearing, which AA-B1's own voice auditioning depends on.
+
   Established before planning (originally open): (Piper was noted in
   `research/2026-09-17-tts-audio-transport-recon.md` from general knowledge only, never tested):
   how Piper is distributed for Windows and macOS today, its CLI/WAV contract, and its latency on the
