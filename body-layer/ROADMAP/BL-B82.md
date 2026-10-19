@@ -5,7 +5,7 @@
   (radio check). Built on `feature/radio-check`, after `[[BL-15]]`'s Stage 1 merged, as this
   entry's own build order specifies. Reviewer/Performance Reviewer/Security all APPROVED; DoD
   passed at merge commit `92ae5b3cbee63548fa49344d171296ff3aca40b8` (`plans/radio-check/
-  dod-check.md`) — **merge to `main` pending**, not blocked on live acceptance. `#needs-flight`:
+  dod-check.md`) — **merged to `main` 2026-10-19 (`14898014`)**, not blocked on live acceptance. `#needs-flight`:
   the gate logic is directly tested (both poll loops, mutation-verified by Reviewer; existing
   belief confirmed to decay but not be wiped on the ground) but whether 10 m AGL and "no callouts
   at all while grounded" feel right in the cockpit is unverified. Acceptance card published:

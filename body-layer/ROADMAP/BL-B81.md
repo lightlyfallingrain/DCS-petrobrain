@@ -4,7 +4,7 @@
   #needs-flight Raised by the user 2026-10-19, built after `[[BL-15]]`'s Stage 1, together with
   `[[BL-B82]]` on `feature/radio-check`. Reviewer/Performance Reviewer/Security all APPROVED; DoD
   passed (mechanical checks, `plans/radio-check/dod-check.md`) at merge commit
-  `92ae5b3cbee63548fa49344d171296ff3aca40b8` — **merge to `main` pending**, not blocked on live
+  `92ae5b3cbee63548fa49344d171296ff3aca40b8` — **merged to `main` 2026-10-19 (`14898014`)**, not blocked on live
   acceptance. `#needs-flight`: the command/greeting tokens are verified directly against
   `match_transcript`/`CrewConsole.handle_command` (not reasoned from the code), but the real
   microphone → whisper → intercom chain is unverified. Acceptance card published:
