@@ -406,3 +406,13 @@ archived C++ release is not a viable binary for the Mac, and "Possible Approache
 falls.** The route proposed to the user instead: `piper-tts` (`piper1-gpl`) installed in a venv of
 its own, invoked as an external `piper` command on both OSes, so the adapter's own code stays
 stdlib-only. Not yet verified on either machine at time of writing.
+
+**`piper-tts` in its own venv: works on the Mac** (user-run, 2026-10-20), with one condition.
+`python3 -m venv` + `pip install piper-tts` first failed with `ResolutionImpossible` — every
+`piper-tts` from 1.3.0 to 1.8.0 needs `onnxruntime>=1,<2`, and pip reported *"no matching
+distributions available for your environment: onnxruntime"*. That is the signature of an
+interpreter newer than any onnxruntime wheel (Homebrew's default `python3`; its exact version was
+not reported). Rebuilding the venv with `python3.12` (`brew install python@3.12`) installed
+`piper-tts` and synthesized + `afplay`-played the test line. **So Piper's venv must be pinned to
+an interpreter onnxruntime ships wheels for** — independent of whatever Python the rest of the
+project uses. Windows: same route not yet verified.
