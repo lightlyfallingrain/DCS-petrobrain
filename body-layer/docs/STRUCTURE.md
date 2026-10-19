@@ -125,28 +125,51 @@ The entries are in the order they were written, which is roughly perception → 
   `NakedEyePerceptionSource` only (`forest: ForestOcclusion | None = None`, Stage 2) via
   `logger.py`'s `--forest-occlusion`/`--no-forest-occlusion` (`argparse.BooleanOptionalAction`,
   default off) — `None` is a true no-op, same posture as `trace_sink`/`live_los_coverage`.
-- `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md`, slice 1 of the "detection
-  cones" milestone) — `Optic` (`name`, `magnification`, `fov_half_angle_deg: float | None`,
-  `boresight_azimuth_deg: float = 0.0`) and two named instances: `UNAIDED_OPTIC` (M=1.0, no FOV
-  restriction, **the default `check_visibility` optic as of 2026-09-20**) and `BINOCULAR_OPTIC`
-  (M=`BINOCULAR_RANGE_MULTIPLIER` = 4.0, **no longer the default** — a deliberate, narrower,
-  raised-to-the-eyes act). `BINOCULAR_OPTIC` is a Б-6 6x30 (~8.5 deg true field): magnification
-  derived as 6x raw glass times a ~0.67 unstabilised-platform penalty (stated in prose, not a
-  separate dataclass field — an earlier same-session `handheld_effectiveness`/
-  `effective_magnification` split was tried and reversed, see `visibility.py`'s own docstring for
-  why: a derating factor invented only to cancel out a magnification change is a behaviour knob
-  dressed as optics), and `fov_half_angle_deg=4.25` (half the true field) — **the first real,
-  non-`None` FOV value in this table**, safe now specifically because binoculars are no longer the
-  default: no concrete `PerceptionSource` calls `check_visibility` with this optic yet (plan
-  Decision 4), so the value cannot misfire a gate in the live path today. `within_optic_fov` tests a
-  circular field of view (true angular separation from `(boresight_azimuth_deg, 0.0)`, spherical
-  law of cosines, not an independent azimuth-box/elevation-box check); `None` means unrestricted.
-  **The 9K113 sight is deliberately deferred out of this slice** (user, 2026-09-20) — its own
-  magnification/FOV/field-of-regard figures, sourced and unverified alike, stay recorded in
-  `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md` until it gets its own slice;
-  `Optic` therefore carries no field-of-regard fields at all (how far an optic can be *pointed*, as
-  opposed to what it shows once pointed) — with no sighted optic in the table they would all be
-  `None` and untested. Pure, no I/O, mirrors `cockpit_mask.py`'s own posture.
+- `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md` slice 1, per-tier multipliers
+  by slice 2A `plans/detection-cones-slice2/plan.md` / `body-layer/research/2026-09-21-slice2-model-
+  decisions.md` decision 1, the two sight optics by `BL-B64` `plans/9k113-sight/plan.md` §11) —
+  `Optic` and four named instances. Fields: `name`; **three separate range multipliers**,
+  `presence_range_mult`/`class_range_mult`/`type_range_mult`, which `visibility.py`'s
+  range-threshold formula and `_achieved_tier` apply to the `lowres`/`medres`/`hires` threshold
+  respectively — per tier because glass buys recognition more than detection (ED's own
+  `recognition_distance_ratio_threshold`, 0.25 naked vs. 0.5 optics, and the 2026-09-21 sortie
+  agree), all BTR-60-derived; `fov_half_angle_deg` (what the optic shows once pointed);
+  `peripheral: bool = True` (slice 2B — whether a wide change-detecting peripheral channel survives
+  alongside the focused view; a `gaze_for` stimulus bypasses the gaze gate only when it is `True`);
+  **three field-of-regard fields**, `regard_azimuth_half_deg`/`regard_elevation_up_deg`/
+  `regard_elevation_down_deg` (how far the optic can be *pointed* at all — three because the 9K113
+  envelope is asymmetric, +20/-15 deg; `None` = pointed by the head, unrestricted); and
+  `range_cap_m: float | None` (`BL-B64` §12a, a per-optic range-admission cap; `None` defers to
+  `visibility.NAKED_EYE_RANGE_CAP_M`, resolved by `visibility.py` so this module never imports from
+  it).
+
+  | optic | presence / class / type | FOV half-angle | peripheral | field of regard | range cap |
+  |---|---|---|---|---|---|
+  | `UNAIDED_OPTIC` — **the default `check_visibility` optic** | 1.0 / 1.0 / 1.0 | 90.0 | yes | head | default |
+  | `BINOCULAR_OPTIC` — Б-6 6x30 | 2.42 / 3.50 / 3.00 | 4.25 | no | head | default |
+  | `SIGHT_WIDE_OPTIC` — 9K113, x3.3 | 3.55 / 7.00 / 6.50 | 5.75 | no | ±60 az, +20/-15 el | 20 km |
+  | `SIGHT_NARROW_OPTIC` — 9K113, x10 | 5.81 / 13.75 / 15.00 | 3.00 | no | ±60 az, +20/-15 el | 20 km |
+
+  **Retired, not renamed:** the single `magnification` field (slice 2A — one number applied
+  uniformly to all three tiers was never right) and `BINOCULAR_RANGE_MULTIPLIER`, the 4.0 constant
+  that once lived in `visibility.py` and was imported here as the binocular magnification. Its
+  deletion also dissolved the circular import between this module and `visibility.py`, which now
+  imports `Optic`/`UNAIDED_OPTIC`/`within_optic_fov` at top level. `Optic.boresight_azimuth_deg` is
+  gone too (slice 2B): an optic is pointed by the head, so the boresight is a parameter of
+  `within_optic_fov`, not of the optic. `UNAIDED_OPTIC.fov_half_angle_deg` is 90.0, not `None`
+  (`docs/acceptance/2026-10-15-9k113-sight-direction.md` §14), so no shipped optic reaches
+  `within_optic_fov`'s `None` branch. Sight FOV figures are user-supplied and unverified; field of
+  regard is sourced from the English Mi-24P manual §3.4 (`body-layer/research/2026-09-20-9k113-
+  sight-optics-from-manual.md`).
+
+  Two pure functions. `within_optic_fov(optic, boresight_azimuth_deg, azimuth_deg, elevation_deg,
+  boresight_elevation_deg=0.0)` tests a circular field of view (true angular separation from the
+  boresight, not an azimuth-box/elevation-box check). `within_field_of_regard(optic, azimuth_deg,
+  elevation_deg)` tests the mount limit, body-relative and fixed to the airframe (azimuth symmetric
+  about dead ahead, elevation against its two bounds independently, each field tested only if set);
+  `belief.optic_policy._decide_sighting` uses it to **reject** an out-of-envelope look target
+  rather than clamp it (`BL-B64` security fix, `plans/9k113-sight/security.md` required fix 1).
+  Pure, no I/O, no DCS/world-model dependency — mirrors `cockpit_mask.py`'s posture.
 - `src/perception/clustering.py` (`plans/group-contact-model/plan.md` Stage 2, reworked
   anisotropic by Stage 3b-i, then reworked again to a true angular predicate by Stage 3b-i rev.2) —
   position-only resolution clustering. **Separability is a 3D angle subtended at the observer,
@@ -156,11 +179,12 @@ The entries are in the order they were written, which is roughly perception → 
   `size_m / slant_range_m`. Two candidates merge when they fail the two-apples criterion
   `theta_sep >= 0.5 * (theta_size(a) + theta_size(b))` — two discs of angular diameter `d_a`, `d_b`
   visually overlap exactly when their centre separation is under `(d_a + d_b) / 2` — **or** fail a
-  named floor, `theta_sep * BINOCULAR_RANGE_MULTIPLIER >= LOWRES_ANGULAR_RADIUS_RAD`, provably
-  non-binding for anything `visibility.py` actually admitted (kept as a one-line self-consistency
-  check, not because it ever fires). No new constant and no magnification term — `M`
-  (`BINOCULAR_RANGE_MULTIPLIER`) cancels out of the merge criterion entirely, since both sides are
-  angles scaled by the same optic. This reproduces the old ellipse's anisotropy *for free*, because
+  named floor, `theta_sep * presence_range_mult >= RESOLUTION_ANGULAR_RADIUS_RAD`, where
+  `presence_range_mult` is the *active optic's* own (`optics.Optic`, passed by the caller), provably
+  non-binding for anything `visibility.py` actually admitted under either admission path at that
+  same optic (kept as a one-line self-consistency check, not because it ever fires). No new
+  constant — the optic's multiplier cancels out of the two-apples criterion entirely, since both
+  sides are angles scaled by the same optic. This reproduces the old ellipse's anisotropy *for free*, because
   Petrovich is airborne: a down-range pair separates by depression angle (shrinks with range), a
   cross-range pair by the full bearing angle — no world-space ellipse required, and no
   acuity-derived radius shared with the association gate any more (see `belief.
