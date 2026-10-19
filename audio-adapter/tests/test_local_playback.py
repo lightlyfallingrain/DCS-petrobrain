@@ -1,7 +1,9 @@
 """Tests for `local_playback` -- `LocalPlaybackSink`'s `--target local`
 `AudioSink` implementation, and `_InFlightTracker`, the interrupted-vs-
 failed bookkeeping it depends on (`plans/inbound-speech/plan.md` Stage 3
-follow-up, review 2026-09-20).
+follow-up, review 2026-09-20); plus `_WinsoundLocalSink`, the Windows
+counterpart (`plans/audio-adapter-os-independent/plan.md` Decision 2), and
+`make_local_sink`'s platform dispatch (Decision 2/6).
 
 `_InFlightTracker` is tested directly, with no real subprocess and no
 threads at all -- `start`/`interrupt`/`finish` are plain synchronous calls,
@@ -14,17 +16,38 @@ threads and hoping the scheduler cooperates.
 `LocalPlaybackSink` itself is tested against a fake `_PlaybackProcess`
 double, injected via the `spawn` constructor parameter -- no real `afplay`
 call, mirroring `aircraft-layer/tests/test_audio_sender.py`'s fake-
-`WavPlayer` posture for the analogous `AudioPlaybackSender.interrupt`."""
+`WavPlayer` posture for the analogous `AudioPlaybackSender.interrupt`.
+
+`_WinsoundLocalSink` is tested against a fake `_WinsoundLike` double,
+injected via the `winsound_api` constructor parameter -- no real `winsound`
+call and no real Windows machine needed, the same posture `ptt_source.py`'s
+fake-`winmm` tests use for Windows-only logic exercised from a Mac. The
+real, off-Windows `_RealWinsound` stand-in (both methods raise
+`RuntimeError`) is also exercised directly, mirroring
+`aircraft-layer/tests/test_audio_sender.py`'s own treatment of
+`_WinsoundPlayer`'s non-Windows branch."""
 
 from __future__ import annotations
 
+import io
 import subprocess
+import sys
 import threading
 import time
+import wave
+from pathlib import Path
 
 import pytest
 
-from local_playback import LocalPlaybackSink, _InFlightTracker, _PlaybackProcess
+from local_playback import (
+    LocalPlaybackSink,
+    _InFlightTracker,
+    _PlaybackProcess,
+    _wav_duration_s,
+    _WinsoundLike,
+    _WinsoundLocalSink,
+    make_local_sink,
+)
 from server import AudioDeliveryError
 
 
@@ -218,3 +241,200 @@ def test_two_concurrent_delivers_both_survive_being_interrupted() -> None:
     assert process_a.kill_calls == 1
     assert process_b.kill_calls == 1
     assert errors == []
+
+
+# -- _wav_duration_s (own copy of audio_sender.py's helper) -----------------
+
+
+def _write_wav(path: Path, *, seconds: float, rate: int = 22050) -> None:
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+
+
+def _make_wav_bytes(*, seconds: float = 0.01, rate: int = 8000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+    return buf.getvalue()
+
+
+def test_wav_duration_matches_the_written_length(tmp_path: Path) -> None:
+    path = tmp_path / "tone.wav"
+    _write_wav(path, seconds=1.5)
+
+    duration = _wav_duration_s(str(path))
+
+    assert duration is not None
+    assert duration == pytest.approx(1.5, abs=0.01)
+
+
+def test_wav_duration_returns_none_for_a_malformed_file(tmp_path: Path) -> None:
+    path = tmp_path / "not-audio.wav"
+    path.write_bytes(b"this is not a RIFF header at all")
+
+    assert _wav_duration_s(str(path)) is None
+
+
+def test_wav_duration_returns_none_for_a_missing_file(tmp_path: Path) -> None:
+    assert _wav_duration_s(str(tmp_path / "absent.wav")) is None
+
+
+# -- _WinsoundLocalSink (against a fake _WinsoundLike, no real winsound) ----
+
+
+class _FakeWinsound:
+    """A `_WinsoundLike` double -- records calls, never touches a real
+    sound device."""
+
+    def __init__(self) -> None:
+        self.play_async_calls: list[str] = []
+        self.purge_calls = 0
+
+    def play_async(self, path: str) -> None:
+        self.play_async_calls.append(path)
+
+    def purge(self) -> None:
+        self.purge_calls += 1
+
+
+def test_winsound_deliver_plays_and_completes_without_interrupt() -> None:
+    winsound_api = _FakeWinsound()
+    sink = _WinsoundLocalSink(winsound_api=winsound_api)
+
+    sink.deliver(_make_wav_bytes(), urgent=False)
+
+    assert len(winsound_api.play_async_calls) == 1
+    assert winsound_api.purge_calls == 0
+
+
+def test_winsound_interrupt_releases_in_flight_wait_without_raising() -> None:
+    """The whole point of `_WinsoundLocalSink`: a `deliver()` call released
+    by `interrupt()` must complete cleanly, not raise."""
+    winsound_api = _FakeWinsound()
+    sink = _WinsoundLocalSink(winsound_api=winsound_api)
+    errors: list[BaseException] = []
+
+    def run_deliver() -> None:
+        try:
+            # Not a real WAV -- duration is unreadable, so deliver() would
+            # otherwise wait the full fallback timeout; interrupt() below
+            # must release it long before that.
+            sink.deliver(b"not-a-real-wav", urgent=False)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_deliver)
+    thread.start()
+    time.sleep(0.1)
+    sink.interrupt()
+    thread.join(timeout=5)
+
+    assert winsound_api.purge_calls == 1
+    assert errors == []
+
+
+def test_winsound_interrupt_with_nothing_playing_is_a_clean_no_op() -> None:
+    winsound_api = _FakeWinsound()
+    sink = _WinsoundLocalSink(winsound_api=winsound_api)
+
+    sink.interrupt()  # no deliver() ever called -- must not raise
+
+    assert winsound_api.purge_calls == 1
+
+
+def test_winsound_two_concurrent_delivers_both_survive_one_interrupt() -> None:
+    """`winsound`'s single global sound slot means one `interrupt()` stops
+    whatever is playing -- both in-flight `deliver()` calls must still
+    return cleanly rather than raising."""
+    winsound_api = _FakeWinsound()
+    sink = _WinsoundLocalSink(winsound_api=winsound_api)
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+
+    def run_deliver() -> None:
+        try:
+            sink.deliver(b"not-a-real-wav", urgent=False)
+        except BaseException as exc:  # noqa: BLE001
+            with lock:
+                errors.append(exc)
+
+    thread_a = threading.Thread(target=run_deliver)
+    thread_b = threading.Thread(target=run_deliver)
+    thread_a.start()
+    thread_b.start()
+    time.sleep(0.1)
+    sink.interrupt()
+
+    thread_a.join(timeout=5)
+    thread_b.join(timeout=5)
+
+    assert winsound_api.purge_calls == 1
+    assert errors == []
+
+
+def test_winsound_deliver_play_async_failure_raises_audio_delivery_error() -> None:
+    class _RaisingWinsound:
+        def play_async(self, path: str) -> None:
+            raise RuntimeError("winsound is only available on Windows")
+
+        def purge(self) -> None:
+            pass
+
+    sink = _WinsoundLocalSink(winsound_api=_RaisingWinsound())
+
+    with pytest.raises(AudioDeliveryError):
+        sink.deliver(b"WAV-BYTES", urgent=False)
+
+
+def test_winsound_default_off_windows_raises_audio_delivery_error() -> None:
+    """`_RealWinsound`'s non-Windows branch, exercised directly -- mirrors
+    `test_audio_sender.py`'s own treatment of `_WinsoundPlayer`'s
+    non-Windows stand-in. Only meaningful off-Windows (this repo's dev
+    machine is a Mac, root `CLAUDE.md` compute-topology note)."""
+    if sys.platform == "win32":
+        pytest.skip("this test exercises the non-Windows _RealWinsound stand-in")
+
+    sink = _WinsoundLocalSink()
+
+    with pytest.raises(AudioDeliveryError):
+        sink.deliver(b"WAV-BYTES", urgent=False)
+
+
+def test_winsound_like_protocol_is_satisfied_by_the_fake() -> None:
+    """Type-level sanity check: `_FakeWinsound` structurally satisfies
+    `_WinsoundLike`, so the injection point is the real seam, not an
+    incidental match on a wider interface."""
+    fake: _WinsoundLike = _FakeWinsound()
+    fake.play_async("/tmp/whatever.wav")
+    fake.purge()
+
+
+# -- make_local_sink (platform dispatch, plan Decision 2/6) -----------------
+
+
+def test_make_local_sink_returns_winsound_sink_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `sys` is a singleton module object -- patching the attribute here is
+    # visible through `local_playback`'s own `import sys` too.
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    sink = make_local_sink()
+
+    assert isinstance(sink, _WinsoundLocalSink)
+
+
+def test_make_local_sink_returns_local_playback_sink_off_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    sink = make_local_sink()
+
+    assert isinstance(sink, LocalPlaybackSink)
