@@ -22,13 +22,14 @@ new_mission`) are unit tests against `logger`'s private functions directly
 from __future__ import annotations
 
 import dataclasses
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from aircraft_client import AircraftLayerClient
+from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.tasks import TaskStore
@@ -253,6 +254,63 @@ class _FakeMissionStartClient:
 
     def get_mission_start_latest(self) -> dict[str, Any] | None:
         return self.event
+
+
+class _FailingMissionStartClient:
+    def __init__(self, exc: AircraftLayerError) -> None:
+        self.exc = exc
+
+    def get_mission_start_latest(self) -> dict[str, Any] | None:
+        raise self.exc
+
+
+def test_check_for_new_mission_is_silent_when_the_collector_is_unreachable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Collector not started: no traceback per poll. The poll loop's own
+    `_ConnectionReporter` reports the disconnect once, from `run_once()`'s
+    telemetry read -- this call runs before it and must not spew."""
+    exc = AircraftLayerError("request to http://host/x failed: no route to host")
+    exc.__cause__ = OSError(65, "No route to host")
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="logger"):
+        reset_happened = _check_for_new_mission(
+            runner,
+            None,
+            MissionMemory(),
+            cast(AircraftLayerClient, _FailingMissionStartClient(exc)),
+        )
+
+    assert reset_happened is False
+    assert caplog.records == []
+
+
+def test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invalid JSON is a defect, not a disconnect -- it still gets logged
+    with its traceback (`_is_connection_loss`'s own distinction)."""
+    exc = AircraftLayerError("invalid JSON from http://host/x: line 1")
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    with caplog.at_level(logging.WARNING, logger="logger"):
+        reset_happened = _check_for_new_mission(
+            runner,
+            None,
+            MissionMemory(),
+            cast(AircraftLayerClient, _FailingMissionStartClient(exc)),
+        )
+
+    assert reset_happened is False
+    assert [r.getMessage() for r in caplog.records] == [
+        "mission-start poll failed (continuing)"
+    ]
+    assert caplog.records[0].exc_info is not None
 
 
 def test_check_for_new_mission_does_nothing_on_first_poll_even_with_sequence_present() -> (
