@@ -178,3 +178,334 @@ body-layer) — `mypy`'s CWD-only config discovery still resolves correctly
 this way since the config file is read from the CWD, not from the
 interpreter's own location. Results matched the implementer's own reported
 counts exactly.
+
+---
+
+## Batch 2
+
+Reviewed BL-15's second implementation batch on `feature/bl15-mission-start`:
+commits `593c206e`, `cf4b7d3c`, `1265abac`, `6cd8c409`, diff base `97b76dec`
+(this file's own Batch 1 approval). Scope: (A) runtime theatre switching with
+the user's revised loud-refusal mode (`stage1-decisions.md` decision 1
+REVISED, 2026-10-19), (B) per-mission log re-roll (decision 5), (C)
+strengthened field-coverage completeness tests for the two perception
+sources (Batch 1's own optional refinement 1).
+
+Branch address verified first: `git rev-parse HEAD` landed at `89ca6c2a`
+(ancestor of the named tip), tree clean, `git merge --ff-only
+6cd8c409f2d8b6cc8cf391bb2c9cc2f69d53232c` fast-forwarded cleanly. All five
+named input documents present and read in full.
+
+**Read the full diff** (12 files, ~1730 insertions across the four commits),
+ran every check myself from inside each subproject's own venv (main
+checkout's `.venv` binaries, same reason as Batch 1 — this worktree carries
+no `.venv` of its own), and mutation-tested three separate load-bearing
+mechanisms rather than one, since this batch touches three independent
+hazard classes (refusal dispatch, security ordering, stale closures).
+
+### (a) Refusal mode matches the user's words, and the command-path hunt
+
+`WORLD_MODEL_NOT_LOADED_REFUSAL = "system error, world model not loaded"` —
+the user's own wording, verbatim, declared once as a literal rather than a
+template (so voice/text/overlay all say exactly the same words). Checked at
+the top of all three production entry points (`handle_command`, `handle_line`,
+`handle_transcript`) via a shared `_refusal_response` helper repeated at each
+call site, correctly — there is no single dispatcher all three already funnel
+through (confirmed by reading each: F10/voice-act reach `handle_command`
+directly, typed/fallthrough-voice reach `handle_line` directly, voice itself
+enters `handle_transcript`), so "repeated at three call sites" is the actual
+single source of truth here, not a missed consolidation.
+
+**Mutation-tested**: removed the refusal check from `handle_command` alone —
+`test_refused_handle_command_returns_the_fixed_refusal_line` and
+`test_refused_does_not_end_silence_or_increment_commands_handled` both failed
+immediately (`commands_handled` went 1→2 when it should have stayed at 1).
+Confirms the gate is load-bearing at each of the three sites independently,
+not just logically present. Restored before continuing.
+
+Old store dropped not kept: `_enter_refusal_mode` closes
+`runner.world_model_conn` and sets it `None`, clears `runner.enrichment`,
+empties `runner.sources` (stops perception outright, not a degraded run
+against a missing store). A later successful switch clears `crew_console.
+refused` (`_maybe_switch_theatre`'s success path, last statement before the
+info log). Confirmed by `test_maybe_switch_theatre_succeeds_rebuilds_sources_
+and_clears_refusal`.
+
+**One command path genuinely worth tracing further, not missed but worth
+naming explicitly**: `_enter_refusal_mode`/`_maybe_switch_theatre` are called
+from *both* poll loops (`_run_console_poll_loop` and
+`_run_crew_text_poll_loop`), and `--console`'s path passes `crew_console=None`
+— correctly a no-op for the refusal-setting line, since `--console` has no
+`CrewConsole` surface to refuse commands on at all (documented in both the
+function's own docstring and `body-layer/CLAUDE.md`). This is the right
+design, not a gap — `--console` is a debug harness with no production command
+surface — but it does mean "every player command on every surface" is
+accurate only for the two surfaces that have one (crew-text, F10, voice all
+funnel through `CrewConsole`); `--console`'s own REPL commands are explicitly
+out of that guarantee by design, and this is stated plainly rather than
+glossed over.
+
+**The brain-layer reply path and proactive callouts — found a real gap, but
+one the current call graph happens to mask, not an active defect.** I traced
+every call that can speak without being a direct player command:
+`crew_console.drain_events` (lifecycle-event callouts) and `crew_console.
+drain_brain` (asynchronous brain-layer replies) are both called
+unconditionally every poll in `_run_crew_text_poll_loop`, after
+`runner.run_once()`, with **no `self.refused` check anywhere in either
+method**. Neither is one of the three gated entry points, and neither needed
+to be *named* as one in the brief, but the review question stands: could
+either still speak stale belief while refused?
+
+Traced it through: `_enter_refusal_mode` is reachable *only* from
+`_maybe_switch_theatre`, which is called *only* from `_check_for_new_mission`
+*after* `_reset_mission_state` has already run that same call — so by
+construction, every time `crew_console.refused` becomes `True`, `ContactStore`
+is already empty, `TaskStore` is already empty, and `CrewConsole._pending_
+escalations` has already been cleared (not preserved by `reset_for_new_
+mission`). With `runner.sources = []` for the rest of refusal mode, no new
+observations are ever ingested, so `ContactStore.tick()` iterates over nothing
+every subsequent poll — no `CONTACT_LOST`/`CONTACT_DETECTED`/range-crossing
+events are ever generated for `drain_events` to speak. A brain reply that
+lands late for an utterance from before the reset finds `_pending_escalations.
+pop(reply.utterance_id, None)` returns `None` (discarded silently,
+`_handle_brain_reply`'s own documented "superseded client-side" case) — no
+stale brain-layer speech either. I confirmed this by reading, not by running
+a scenario that doesn't exist yet in the test suite.
+
+**This correctness is real today but entirely incidental — it depends on an
+invariant (refusal mode is only ever entered immediately after a full
+reset) that is enforced by call-graph shape in two different functions
+across two files, asserted nowhere, and tested nowhere.** If a future change
+adds a second path into `_enter_refusal_mode` that does not go through
+`_reset_mission_state` first (e.g., a startup-time degrade path, or a health
+check that re-validates the store mid-mission without a sequence change),
+`drain_events`/`drain_brain` would resume speaking about whatever belief was
+standing at that moment with no gate stopping them — silently, exactly the
+failure class this project's reviewer memory and `CLAUDE.md`'s "verify state,
+not the account of it" both warn about. This is the kind of thing `/invariant-
+check`-style mechanical enforcement exists for, and there is none here.
+
+**Required fix**: add either (preferred, cheap, structural rather than
+incidental) an explicit `if self.refused: return []` guard at the top of
+`drain_events` and `drain_brain` — the same shape `_refusal_response` already
+gives the three command entry points, just without a spoken line since
+nothing asked a question — or, at minimum, a test that documents and locks in
+the current invariant (e.g., construct a `CrewConsole` with `refused=True`
+and a *non-empty* store/pending-escalation state directly, bypassing the
+reset-always-precedes-refusal call graph, and assert `drain_events`/
+`drain_brain` produce nothing). The guard is the better fix: it makes "no
+proactive speech while refused" a property of `CrewConsole` itself rather
+than a consequence of how two other functions in `logger.py` happen to call
+each other today, and costs four lines.
+
+### (b) `theatre: null` keeps current store
+
+Confirmed in `_maybe_switch_theatre`: `event_theatre is None` returns
+immediately with an info log, no store change, no refusal — matches decision
+1 REVISED's carry-forward ("a `None` theatre has always meant 'unknown,' not
+'mismatch'" — the function's own docstring states this was never revised by
+the loud-refusal decision, correctly, since the earlier-approved Batch 1
+behaviour for this exact case is untouched by Batch 2). Consistent.
+
+### (c) `THEATRE_PROJECTIONS` membership check ordering (security Mode-2 requirement)
+
+Read the implemented code directly (`logger.py:1744` onward): the membership
+check (`if event_theatre not in THEATRE_PROJECTIONS`) runs and returns
+(entering refusal mode) *before* `candidate_db = world_model_dir /
+f"{event_theatre.lower()}-full.sqlite"` is ever constructed and before
+`open_world_model` is ever called — exactly the ordering the security plan
+review's carried-forward Mode-2 requirement asked for, matching `main()`'s
+own startup guard precedent. This is a code-order property, not something a
+behavioural test can distinguish from "check after" (both end in refusal for
+an unbuilt-store scenario), so I verified it by reading the control flow
+directly rather than attempting to mutation-test it — the right instrument
+for an ordering guarantee is reading the order, not running the program.
+
+### (d) Old connection closed only after new is live
+
+Confirmed in `_maybe_switch_theatre`'s success path: `old_conn =
+runner.world_model_conn` is captured, `new_conn`/`runner.sources` are built
+and assigned to `runner.world_model_conn`/`runner.theatre` first, and only
+then `if old_conn is not None: old_conn.close()`. All on the poll thread
+(`_check_for_new_mission` is called synchronously inside each poll loop's own
+`while` body, no new thread spawned for the switch) — both `_run_console_poll_
+loop` and `_run_crew_text_poll_loop` confirmed identical in this respect.
+
+### (e) Stale-closure hunt
+
+All four closures the implementer's notes name were verified fixed by
+reading, not just by the notes' own claim:
+
+- `_mark_here_fn`/`_mark_target_fn` — now read `runner.theatre` live
+  (`assert runner.theatre is not None` at call time), not a bound parameter.
+  **Mutation-tested indirectly via the existing test**:
+  `test_mark_here_fn_reads_runner_theatre_live_across_a_switch` asserts the
+  recorded mark's lat/lon actually changes after mutating `runner.theatre`
+  between two calls to the *same* closure instance — a genuine behavioural
+  proof, not a structural one.
+- `crew_console.speech_log_sink` (`_speech_log_sink(belief_truth_writer,
+  runner)`) — re-built in `_reroll_run_logs` over the new writer.
+  **Mutation-tested directly**: removed the rebuild line from
+  `_reroll_run_logs` and reran `tests/test_run_log_reroll.py` —
+  `test_reroll_closes_the_old_belief_truth_writer_and_rewires_crew_console_
+  sink` failed with `ValueError: I/O operation on closed file`, reproducing
+  exactly the silent-failure-turned-exception the implementer's notes
+  describe. Restored before continuing.
+- `_mission_memory_step`'s `theatre` argument — both poll loops now pass
+  `runner.theatre` (with `assert runner.theatre is not None`) instead of the
+  closed-over parameter. Confirmed by reading both call sites.
+- `runner.enrichment` — cleared in both `_maybe_switch_theatre` (success
+  path, forces a fresh rebuild against the new connection) and
+  `_enter_refusal_mode` (failure path, so a later recovery never inherits a
+  reference into an already-closed connection). Confirmed by reading.
+
+**Hunted for anything else capturing `theatre`/`conn`/a writer by value**,
+beyond what the notes name: grepped every `theatre: str` parameter and every
+closure-returning function in `logger.py`. `_run_console_poll_loop`'s own
+`theatre: str` parameter is used only once, to open the initial connection/
+sources at thread start — never read again inside that function's `while`
+loop body (confirmed by grep: the local name appears nowhere else in the
+function), so it is not a live stale-closure hazard the way the four above
+were; the loop's own `_mission_memory_step` call already reads `runner.
+theatre` (identical fix to the crew-text loop, confirmed by reading). The one
+deliberately-unfixed case is `_run_console_repl`'s own `repl_conn`/
+`repl_enrichment`, built once from the `theatre`/`world_model_db` `main()`
+passed at construction and never refreshed — correctly left alone and
+explicitly flagged in the implementation notes and `body-layer/CLAUDE.md`,
+since `--console` has no `CrewConsole`/refusal surface and widening this
+REPL's own connection-rebuild logic is out of this batch's stated scope. No
+unaccounted-for closure found.
+
+### (f) Log re-roll (decision 5)
+
+All five per-run logs covered, three distinct re-wiring shapes handled
+correctly for the right reasons (open-file-handle closes for the two writers
+that hold one, plain-field reassignment for the three that don't,
+`mission_memory._sink` specifically overwritten after `reset_for_new_
+mission`'s own preserve-then-overwrite sequencing). Reroll only fires when
+`_check_for_new_mission` reports an actual reset, so the *first* mission of a
+process keeps `main()`'s original stamped names (confirmed: `_reroll_
+run_logs` is called conditionally on `_check_for_new_mission`'s return value,
+never unconditionally per poll). Everything runs synchronously on the poll
+thread, no new thread. `--console`'s own no-`CrewConsole` guard confirmed via
+`test_reroll_console_mode_skips_speech_log_with_crew_console_none` (passing
+`crew_console=None` with a non-`None` `speech_log_base` must not raise, and
+doesn't).
+
+**Mutation-tested** (see (e) above — the belief-truth-writer rewire is the
+one of the five with the sharpest failure mode, write-to-closed-file, and it
+reproduced on cue).
+
+### (g) Tests fail when the behaviour is broken
+
+Three independent mutations, all reproducing the exact failure mode the
+implementation notes describe, all restored afterward:
+
+1. Removed `handle_command`'s refusal check → 2 of 6 refusal tests failed
+   (commands_handled changed when it shouldn't have).
+2. Removed the `speech_log_sink` rebuild from `_reroll_run_logs` → the
+   targeted reroll test failed with `ValueError: I/O operation on closed
+   file`.
+3. (By reading rather than mutation, per (c) above — ordering is not a
+   mutation-testable property with the current test shapes.)
+
+### Checks (run myself, from inside each subproject's own venv)
+
+**body-layer/**
+- `ruff format --check src tests` — pass (155 files already formatted).
+- `ruff check src tests` — pass.
+- `mypy --strict` (`cd body-layer && mypy src`) — pass, 68 source files.
+- `pytest tests -q` — 2209 passed, 4 xfailed (same 4 pre-existing xfails as
+  Batch 1, unrelated to this change).
+
+**aircraft-layer/**: not touched by this batch, no checks run (confirmed by
+the diff stat — all 12 changed files are under `body-layer/` or `plans/`).
+
+### Completeness against the field-coverage refinement (C)
+
+`NakedEyePerceptionSource`/`HybridPerceptionSource` now each carry a
+`test_reset_for_new_mission_field_coverage_is_complete` test that enumerates
+`dataclasses.fields()` at test time and asserts the full field set equals the
+union of three explicit, named buckets (preserved / per-poll-overwritten /
+explicitly reset for naked-eye; preserved / reset for hybrid, which has no
+per-poll-overwritten field). This closes exactly the gap Batch 1's own
+Optional Refinement named — a field added later and placed in none of the
+three buckets now fails this test by construction (plain set-equality
+assertion, no mutation test needed to confirm — the mechanism is simple
+enough to verify by inspection). `live_los_coverage` is now in the explicitly-
+reset bucket (reversing Batch 1's "process-lifetime regression guard"
+reading), consistent with decision 5's per-mission log rollover reasoning —
+a coverage counter spanning several missions no longer corresponds to any
+single log file once logs roll per mission.
+
+### Required Fixes
+
+- **Add an explicit `self.refused` guard to `CrewConsole.drain_events` and
+  `CrewConsole.drain_brain`** (or, at minimum, a test asserting they produce
+  nothing while refused against a non-empty store/pending-escalation state
+  constructed directly, not via the reset-always-precedes-refusal call path)
+  — see "(a)" above. Today's correctness is real but incidental: it depends
+  on `_enter_refusal_mode` only ever being reached immediately after
+  `_reset_mission_state` has already emptied belief/tasks/pending
+  escalations, an invariant enforced by nothing but the current shape of two
+  functions' call graph across `logger.py`, asserted nowhere, and would fail
+  silently (not loudly — no test, no crash, just Petrovich quietly speaking
+  about contacts that should not exist) if a future change ever reaches
+  refusal mode by a path that does not go through a full reset first. The
+  guard is four lines and makes "no proactive speech while refused" a
+  property of `CrewConsole` rather than a coincidence of call order.
+
+### Optional Refinements
+
+- **No wiring-level test exercises `_run_console_poll_loop`'s own theatre-
+  switch/refusal path end-to-end**, only `_run_crew_text_poll_loop`'s (via
+  `test_crew_text_poll_loop_resets_belief_on_mission_restart_and_switches_
+  theatre` and its no-store twin). The unit-level `_maybe_switch_theatre`/
+  `_check_for_new_mission` tests do cover `crew_console=None` explicitly
+  (`test_enter_refusal_mode_is_a_true_no_op_for_console_mode`), so the
+  underlying function logic is proven; what's missing is the same
+  real-thread proof the crew-text path has. Low priority — `--console` is a
+  debug harness, not the pilot-facing path, and the function-level coverage
+  already demonstrates correctness for the `crew_console=None` branch
+  specifically.
+- **`fired_on_tracker` (both poll loops) is not reset on a mission restart**
+  and is not mentioned anywhere in this batch or `BL-B68`'s completeness
+  table. Out of this batch's actual scope (it predates BL-15 and Batch 1's
+  review already approved the reset mechanism's coverage against that
+  table), but worth a note for whoever next extends the reset-completeness
+  table, since it is exactly the kind of per-mission-scoped state the
+  pattern exists to catch.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+The one Required Fix is a robustness/structural gap, not an observed defect
+— no test today exercises the call path that would expose it, and the
+current call graph genuinely prevents it from firing. It is required rather
+than optional because it is exactly the property the dispatching brief asked
+to have verified (proactive callouts speaking stale belief while refused),
+the fix is small, and leaving the invariant implicit is the known failure
+shape this project's own process guidance (`CLAUDE.md`'s "verify state, not
+the account of it"; the reviewer's "verify by mutation, per entry" memory
+guidance) exists to prevent. Everything else in this batch — the refusal
+dispatch at all three entry points, the security ordering, the four
+confirmed stale-closure fixes, the log re-roll's five distinct shapes, and
+the field-coverage completeness refinement — is correct, tested, and
+mutation-confirmed where mutation-testing is the right instrument.
+
+### Review Confidence
+
+Full read — read every changed file across all four commits (not
+spot-checked), ran format/lint/type/test myself in body-layer's own venv
+(not trusting the implementer's reported counts, though they matched
+exactly), and mutation-tested three independent mechanisms (refusal
+dispatch at a specific entry point, the belief-truth-writer stale-closure
+fix, and confirmed the theatre-live-read fix behaviourally via the existing
+lat/lon-change test) rather than reading the diff and trusting the
+implementer's own account of what each test proves. The one gap found
+(drain_events/drain_brain) was found by tracing the actual call graph that
+makes refusal mode reachable, not by pattern-matching on what the brief
+asked me to check — the brief asked the right question and the call graph
+happened to (currently) answer it safely, which is itself the finding worth
+recording.
