@@ -21,6 +21,7 @@ from vocabulary import (
     ROUTING_TOKENS,
     SECTOR_WORDS,
     STEP_DIRECTION_WORDS,
+    TIME_OF_DAY_WORDS,
     TOKENS,
     VOICE_ONLY_TOKENS,
     WEAPON_WORDS,
@@ -37,6 +38,7 @@ from vocabulary import (
     parse_sector_word,
     parse_step_count,
     parse_step_direction,
+    parse_time_of_day,
     parse_weapon,
     report_verbs,
     spoken_phrases,
@@ -585,3 +587,59 @@ def test_parse_weapon_reads_each_weapon_word() -> None:
 
 def test_parse_weapon_returns_none_without_a_weapon_word() -> None:
     assert parse_weapon("engage armor north") is None
+
+
+# -- [[BL-B81]] (radio check / greeting) ---------------------------------
+
+
+def test_radio_check_token_exists_and_is_voice_only() -> None:
+    """Same structural check as `test_report_token_exists_and_is_voice_only`
+    above: no F10 button, so it must not be in `LEGACY_F10_TOKENS`."""
+    assert "radio_check" in VOICE_ONLY_TOKENS
+    assert "radio_check" not in LEGACY_F10_TOKENS
+    assert "radio_check" in TOKENS
+    assert PHRASES["radio_check"] == ("radio check",)
+
+
+def test_greeting_token_exists_and_is_voice_only() -> None:
+    assert "greeting" in VOICE_ONLY_TOKENS
+    assert "greeting" not in LEGACY_F10_TOKENS
+    assert "greeting" in TOKENS
+    assert PHRASES["greeting"]
+
+
+def test_time_of_day_words_are_exactly_the_four_greetings() -> None:
+    """This side of the `TIME_OF_DAY_WORDS` <-> `belief.crew_console.
+    _GREETING_TIMES_OF_DAY` hand-synced mirror. body-layer asserts the
+    same membership against its own set; a drift then fails a test on
+    whichever side changed, rather than during a sortie."""
+    assert set(TIME_OF_DAY_WORDS) == {"morning", "day", "evening", "night"}
+    assert len(TIME_OF_DAY_WORDS) == 4
+
+
+def test_greeting_phrasings_cover_every_time_of_day() -> None:
+    """One recorded phrasing per `TIME_OF_DAY_WORDS` value -- the bias
+    hints must actually cover the slot's whole closed set, not just some
+    of it."""
+    phrasings = PHRASES["greeting"]
+    for time_of_day in TIME_OF_DAY_WORDS:
+        assert any(time_of_day in p.split() for p in phrasings)
+
+
+def test_time_of_day_words_do_not_collide_with_any_other_slot_vocabulary() -> None:
+    """Same reasoning as `test_band_words_do_not_collide_with_any_other_
+    slot_vocabulary`: the slot vocabularies must stay disjoint, or one
+    transcript word would resolve to two different slots."""
+    assert not set(TIME_OF_DAY_WORDS) & set(BAND_WORDS)
+    assert not set(TIME_OF_DAY_WORDS) & set(DESCRIPTOR_WORDS)
+    assert not set(TIME_OF_DAY_WORDS) & set(SECTOR_WORDS)
+    assert not set(TIME_OF_DAY_WORDS) & set(RELATIVE_WORDS)
+
+
+def test_parse_time_of_day_reads_each_greeting_word() -> None:
+    for word in TIME_OF_DAY_WORDS:
+        assert parse_time_of_day(f"good {word} petrovich") == word
+
+
+def test_parse_time_of_day_returns_none_without_a_greeting_word() -> None:
+    assert parse_time_of_day("good job petrovich") is None

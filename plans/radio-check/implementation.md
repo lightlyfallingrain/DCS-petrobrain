@@ -135,3 +135,80 @@ actually independent rather than one incidentally covering for the other.
   the final diff — noted here only because the role's own guidance is to record what the
   verification scope should include, and "which file a destructive git command touches" is
   exactly that.
+
+### Voice wiring (follow-up: wiring BL-B81 into `audio-adapter`'s voice recognition)
+
+The paragraph above ("Voice wiring for BL-B81 is a no-op on the body-layer side...") described
+what body-layer was ready for; this is the `audio-adapter` half it deferred — making "radio
+check" and the four greetings recognisable from speech at all, per the user's own stated reason
+in `[[BL-B81]]`: *"if intercom is off, there's no response. This is an easy check that A)
+intercom is ON and volume good B) that Petrobrain is operational."*
+
+**Files changed:**
+
+- `audio-adapter/src/vocabulary.py` —
+  - Added `"radio_check"`/`"greeting"` to `VOICE_ONLY_TOKENS` (no F10 button, same posture as
+    `mark_here`/`drop_target`).
+  - `PHRASES["radio_check"] = ("radio check",)` — plain, slot-free, matching `drop_target`'s
+    one-exact-wording posture.
+  - `PHRASES["greeting"]` — the four `"good <time_of_day> petrovich"` phrasings, one per
+    `TIME_OF_DAY_WORDS` value. Bias hints only, like `follow`'s/`report`'s own phrasings: the
+    slot is parsed, not enumerated, for the identical reason those two give (one dispatch token,
+    not four).
+  - `TIME_OF_DAY_WORDS = ("morning", "day", "evening", "night")` + `parse_time_of_day` — a new
+    hand-synced mirror of `belief.crew_console._GREETING_TIMES_OF_DAY`, built on the exact
+    `SECTOR_WORDS`/`parse_sector_word` template (whole-word match anywhere in the normalised
+    transcript, table order as tie-break). Module independence forecloses importing
+    `crew_console`'s set directly, same as every other cross-seam vocabulary table in this file.
+- `audio-adapter/src/command_matcher.py` —
+  - `_GREETING_VERB = "good"` and `_parse_greeting_slots(text)`, the same shape as
+    `_FOLLOW_VERB`/`_parse_follow_slots`.
+  - A new branch in `match_transcript`, ordered after the `engage` branch and before the generic
+    phrase table, exactly mirroring `follow`/`report`/`select_target`/`step`/`engage`'s own
+    "fuzzy-verb-match, try the slot parser, return on a hit, otherwise fall through unchanged"
+    shape: a `"good"`-anchored utterance with a recognised `time_of_day` resolves immediately
+    (`match_ratio=1.0`); one with no recognised `time_of_day` falls through to the phrase table,
+    which can still score a near miss against `greeting`'s own enumerated phrasings (see
+    `test_good_job_degrades_rather_than_falsely_resolving_a_greeting`) — body-layer's
+    `_handle_greeting` already degrades a slot-less `greeting` to "say again", so this is a safe
+    near-miss outcome, not a bug.
+  - `"radio_check"` needed no matcher change at all — it is a single plain two-word phrase, no
+    slot, resolved by the existing generic phrase table exactly like `drop_target`/`disengage`.
+
+**Checked, not touched (confirmed correct as-is, per the task's own instructions):**
+
+- **Readback**: `audio-adapter/src/server.py`'s `/speak` path is token-agnostic — it synthesizes
+  whatever text `CrewConsole` hands it and adds no readback of its own on any path except
+  `stop_talking`'s documented interrupt-only exception. `"Loud and clear."` reaches the pilot
+  exactly once, from body-layer, with nothing added on this side.
+- **Biasing prompt / hotwords**: `vocabulary.to_prompt()` (used by `__main__.py` as
+  `--prompt`) samples from `TOKENS`/`PHRASES` automatically, so the two new tokens' phrasings are
+  already eligible for inclusion with no separate hotword list to touch. `"petrovich"` was
+  already biased via `wake_petrovich`'s phrasings; `greeting`'s own phrasings end in the same
+  word, reinforcing it rather than needing a new one.
+- **`tools/stt_bench.py`**: has no separate phrase list — `_print_prompts` and the recording
+  layout both iterate `vocabulary.TOKENS`/`PHRASES` directly, so the new tokens are already
+  covered the moment the vocabulary changed. Unbenched on this user's voice as of this work, like
+  every token added without a re-recorded corpus (the same cost `vocabulary.py`'s own docstring
+  notes for `cancel_scan`/`silence`/`observ_on`).
+
+**Near-miss checks (the task's explicit ask) — measured, not assumed:**
+
+- `"good"` becomes a new `VERB_ANCHOR_WORDS` member (derived from `greeting`'s phrasings' first
+  word, same mechanism as every other anchor word) — `difflib.SequenceMatcher("good",
+  "look").ratio() == 0.5`, exactly at `VERB_FLOOR`, so an ordinary sentence starting with "good"
+  now anchors. This is the same already-accepted risk class as `look`/`watch`/`report`/`scan`
+  being ordinary English words (module docstring) — the phrase-scoring pass that follows is the
+  real defence, and `test_greeting_with_no_recognisable_time_of_day_says_again` /
+  `test_good_job_degrades_rather_than_falsely_resolving_a_greeting` pin both of its outcomes.
+- `"radio"`'s best fuzzy match against the pre-existing anchor-word set was 0.444
+  (`"drop"`) — below `VERB_FLOOR` — so `radio_check` introduces no false-anchor risk of its own;
+  confirmed by `test_radio_check_does_not_falsely_fire_on_report_or_check_style_speech`.
+- Full regression run after both changes: `pytest audio-adapter/tests -q` — 300 passed, 1
+  skipped (the pre-existing real-`whisper-cli` skip, unrelated), 16 of the 300 new.
+
+**Not changed:** `audio-adapter/src/stt_engine.py`, `audio-adapter/src/audio_adapter/__main__.py`
+— both already thread `vocabulary.to_prompt()` through generically; nothing token-specific lives
+in either file. `body-layer/` — already wired at `01a69ec7`, confirmed to need no change (the
+dispatch reads `slots["time_of_day"]` by key, which this work populates with the identical key
+and the identical four string values).
