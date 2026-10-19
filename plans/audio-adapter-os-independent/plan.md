@@ -148,17 +148,18 @@ code needed to distinguish it.
 
 ### Decision 4 — CLI flags
 
-- `--piper-url` (default `http://127.0.0.1:7798` — see port choice below) replaces nothing; it's
+- `--piper-url` (default `http://127.0.0.1:7800` — see port choice below) replaces nothing; it's
   new. `PiperEngine(base_url=..., voice=...)`.
 - `--piper-voice` (default `en_GB-northern_english_male-medium`) replaces `--voice`, which only ever
   meant a macOS `say` voice name and has no meaning for Piper's HTTP contract in the same shape
   (Piper's `"voice"` is a model filename, not a system voice list). Sent as the `"voice"` field on
   every `/synthesize` POST — this is also exactly the hook AA-B1 will use later for `ruslan`, free
   of charge from this shape, not built now.
-- **Port 7798** for Piper's own HTTP server: the project's existing loopback/LAN ports on a single
-  box run 7790 (Export.lua listener) through 7797 (LOS inbound UDP); 7798 is the next free one and
-  is what `run-piper-*.sh` below binds Piper to. Worth a cheap verification at implementation time
-  that nothing else on either target machine already claims it.
+- **Port 7800** for Piper's own HTTP server. *(Corrected by the main loop at harvest: the plan
+  first said 7800 as "the next free one after 7797" — it is not. 7800 is `firing_receiver`'s
+  loopback UDP port and 7799 `mission_start_receiver`'s, both on the Windows box; grep
+  `DEFAULT_PORT` in `aircraft-layer/src/collector/`.)* 7800 is unused anywhere in the repo.
+  It is what `run-piper-*.sh` below binds Piper to.
 - No `--piper-python` flag on `audio_adapter`'s own CLI — which interpreter runs Piper is the
   concern of the *separate* run script (Decision 1), not of the HTTP client that talks to it.
 
@@ -167,13 +168,13 @@ code needed to distinguish it.
 New, mirroring the project's one-process-per-script convention (`run-collector.sh`, `run-brain.sh`):
 
 - `run-scripts/run-piper-mac.sh` / `run-scripts/run-piper-windows.sh` — start `python -m
-  piper.http_server --host 127.0.0.1 --port 7798 --data-dir <voices-dir>` from Piper's own venv.
+  piper.http_server --host 127.0.0.1 --port 7800 --data-dir <voices-dir>` from Piper's own venv.
   **Bind `127.0.0.1` explicitly** (recon: it defaults to `0.0.0.0` and exposes `POST /download`,
   which fetches voices from the internet into its data dir — no reason to expose either off-box).
   The venv's interpreter path is machine-specific, so it belongs in `petrobrain.env` (already the
   home of `$DCS_COLLECTOR_IP` and other per-machine values) as a new variable, e.g.
   `$PIPER_VENV_PYTHON` / `$PIPER_VOICES_DIR` — not hardcoded in the committed script.
-- `run-scripts/run-audio-adapter.sh` (existing, Mac) gains `--piper-url http://127.0.0.1:7798
+- `run-scripts/run-audio-adapter.sh` (existing, Mac) gains `--piper-url http://127.0.0.1:7800
   --piper-voice en_GB-northern_english_male-medium` (or just rely on the new defaults and pass
   nothing — defaults already match). Drops nothing it didn't already have (it never passed `--voice`
   explicitly).
@@ -298,8 +299,8 @@ between `POST /speak` and the speaker, never the `/speak` wire contract itself.
   piper.http_server`'s existence, default bind address, and the `/synthesize` contract, but not
   `--host`/`--port`'s exact flag names via `--help`. Cheap to verify at implementation time; flagging
   rather than assuming.
-- **Port 7798 is a fresh choice, not measured against every machine** — confirm nothing already
-  binds it on either the Mac or the Windows box before wiring it into defaults.
+- **Port 7800 is a fresh choice** — unused in the repo; confirm nothing else binds it on either
+  machine before wiring it into defaults.
 - **First-use-of-a-voice load cost on Piper's HTTP server is unmeasured** (only inferred from the
   CLI/in-process model-load figures) — the 10 s timeout (Decision 7) is sized to cover it, but a
   live measurement during Stage 4 would tighten or confirm that number.
