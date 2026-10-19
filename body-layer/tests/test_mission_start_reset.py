@@ -39,6 +39,7 @@ from logger import (
     _maybe_switch_theatre,
     _reset_mission_state,
 )
+from mission_memory.admission import FiredOnTracker
 from mission_memory.entries import FiredOnPayload
 from mission_memory.store import MissionMemory
 from store.models import Region
@@ -110,6 +111,24 @@ def test_task_store_reset_clears_every_field() -> None:
     for name in field_names:
         _assert_value_matches_fresh_default(
             name, getattr(store, name), getattr(fresh, name)
+        )
+
+
+def test_fired_on_tracker_reset_clears_every_field() -> None:
+    """Batch 2 review follow-up (`plans/bl15-mission-start/review.md`):
+    `FiredOnTracker` predates `BL-15` and was not brought under this
+    completeness-test pattern when it was built -- see its own
+    `reset_for_new_mission` docstring for what staleness here costs."""
+    tracker = FiredOnTracker()
+    field_names = set(vars(tracker))
+    _poison(tracker, field_names, preserve=set())
+
+    tracker.reset_for_new_mission()
+
+    fresh = FiredOnTracker()
+    for name in field_names:
+        _assert_value_matches_fresh_default(
+            name, getattr(tracker, name), getattr(fresh, name)
         )
 
 
@@ -351,6 +370,35 @@ def test_reset_mission_state_resets_store_tasks_sources_and_mission_memory() -> 
 
     assert runner.tasks.tasks == []
     assert mission_memory.entries == []
+
+
+def test_reset_mission_state_resets_fired_on_tracker_when_given() -> None:
+    """Batch 2 review follow-up: `fired_on_tracker` is an optional
+    parameter (defaulting to `None`, so every pre-existing three-argument
+    call above is unaffected) -- this is the proof that when a caller does
+    supply one, it is actually reset, not merely accepted and ignored."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    mission_memory = MissionMemory()
+    tracker = FiredOnTracker()
+    tracker._scanned_event_count = 500
+    tracker._last_write_sim["CONTACT_1"] = 42.0
+
+    _reset_mission_state(runner, None, mission_memory, tracker)
+
+    assert tracker._scanned_event_count == 0
+    assert tracker._last_write_sim == {}
+
+
+def test_reset_mission_state_is_a_noop_for_fired_on_tracker_when_omitted() -> None:
+    """The default (`fired_on_tracker=None`) must not raise -- the shape
+    every other optional collaborator in this module follows."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    _reset_mission_state(runner, None, MissionMemory())
 
 
 # --- BL-15 Stage 3: theatre switching (`_maybe_switch_theatre`) and loud- --

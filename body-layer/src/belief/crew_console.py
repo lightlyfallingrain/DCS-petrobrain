@@ -1278,7 +1278,19 @@ class CrewConsole:
         (`plans/attack-run/plan.md` Decision 5), so the scheduler can
         suppress `_WATCHED_ONLY_KINDS` events about that one contact --
         the struck range countdown chief among them -- for the run's
-        duration, without this method needing to know why."""
+        duration, without this method needing to know why.
+
+        **`BL-15` Stage 3 fix: no proactive speech while `self.refused`.**
+        Today's call graph only ever reaches refusal mode immediately
+        after a full reset (`ContactStore` empty, nothing to drain), which
+        makes this guard currently incidental rather than load-bearing --
+        see the review that required it (`plans/bl15-mission-start/
+        review.md`, Batch 2 "(a)") for why that was not good enough on its
+        own. `self.scheduler.tick` still runs (so any event does get
+        consumed out of the store rather than piling up to be spoken
+        stale once refusal clears), its result is just never reached by
+        `_print` or returned to the caller -- drain and discard, not leave
+        queued."""
         target_task = self._active_attack_target_task()
         attack_run_target_contact_id = (
             target_task.contact_id if target_task is not None else None
@@ -1289,6 +1301,8 @@ class CrewConsole:
             self.enrichment,
             attack_run_target_contact_id=attack_run_target_contact_id,
         )
+        if self.refused:
+            return []
         # A scheduler-drained line never carries `bypass_gate=True` (only an
         # injected `UrgentCall`, routed through `handle_line`'s
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
@@ -1306,7 +1320,33 @@ class CrewConsole:
         this loop without ever blocking it (`belief.brain_client.
         BrainLayerClient.handle`'s own docstring is where the
         never-blocks guarantee actually lives; this method is a plain
-        synchronous poll, like the other three)."""
+        synchronous poll, like the other three).
+
+        **`BL-15` Stage 3 fix: no proactive speech while `self.refused`.**
+        `self.brain_client.poll_replies()` is still drained -- a reply
+        left queued in the brain client here would otherwise surface
+        later, once refusal clears, as speech about a world model it was
+        never computed against -- but each reply is only popped from
+        `_pending_escalations`/`_stand_by_spoken_for`, **not** run through
+        `_handle_brain_reply`. That method calls `self._print`
+        unconditionally and, via `_handle_brain_pick`/`_handle_brain_
+        confirm`, can call `self._act` -- both real side effects discarding
+        a return value does not undo, so it cannot be reused here without
+        defeating the guard it is meant to enforce. `_speak_stand_by_if_
+        due` is skipped entirely for the same reason (nothing is "overdue"
+        worth announcing while refused). Drain and discard, matching
+        `drain_events`'s identical choice -- see the review that required
+        this (`plans/bl15-mission-start/review.md`, Batch 2 "(a)")."""
+        if self.refused:
+            try:
+                replies = self.brain_client.poll_replies()
+            except Exception:
+                logger.warning("brain reply poll failed (continuing)", exc_info=True)
+                return []
+            for reply in replies:
+                self._pending_escalations.pop(reply.utterance_id, None)
+                self._stand_by_spoken_for.discard(reply.utterance_id)
+            return []
         self._speak_stand_by_if_due(now_sim)
         try:
             replies = self.brain_client.poll_replies()

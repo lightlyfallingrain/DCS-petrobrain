@@ -269,3 +269,96 @@ field-coverage tests).
   what `test_main_rejects_world_model_db_theatre_mismatch` already does in
   `test_logger.py` — reused that exact pattern (`store.writer.
   open_for_build`/`insert_region`) rather than inventing a second one.
+
+## Batch 3 — Reviewer required fix + one related small item
+
+Addresses `plans/bl15-mission-start/review.md`'s Batch 2 required fix and its
+`fired_on_tracker` optional refinement.
+
+### Required fix: `drain_events`/`drain_brain` guard against `self.refused`
+
+Added an explicit `if self.refused: return []` to both methods in
+`body-layer/src/belief/crew_console.py`, so "no proactive speech while
+refused" is a property of `CrewConsole` itself rather than a consequence of
+`_enter_refusal_mode` currently only ever being reached right after a full
+reset.
+
+**Drain and discard, not leave queued — chosen for both, but implemented
+differently per method because their internal state is shaped differently:**
+
+- `drain_events`: `self.scheduler.tick(...)` still runs unconditionally (it
+  has no network/print side effects — confirmed by reading: it only reads
+  `ContactStore`/`enrichment` and mutates its own `_consumed` set/
+  `busy_until_sim`), and *that* is what marks any real event consumed out of
+  the store. The guard sits after the `tick()` call and before `_print`, so
+  only the "speak it" step is suppressed — the result is discarded, not
+  returned.
+- `drain_brain`: here `self.brain_client.poll_replies()` is still drained
+  (so a reply is not left in the brain client's own queue to resurface
+  later against a world model it was never computed for), but each reply is
+  **not** run through `_handle_brain_reply` — that method calls `self.
+  _print` unconditionally and, via `_handle_brain_pick`/`_handle_brain_
+  confirm`, can call `self._act` (which can mutate `_pending_confirmation`/
+  tasks/attention). Discarding its return value would not undo either side
+  effect, so the guard instead pops the matching `_pending_escalations`/
+  `_stand_by_spoken_for` entries directly and discards the reply, never
+  calling `_handle_brain_reply` at all. `_speak_stand_by_if_due` is skipped
+  entirely too (nothing is "overdue" worth announcing while refused).
+
+**Mutation-tested both guards by removal, per role instructions** — four new
+tests in `test_crew_console.py`, each constructing a `CrewConsole` directly
+with `refused=True` against a non-empty store/pending-escalation state
+(bypassing the reset-always-precedes-refusal call graph the review's own
+finding named as the thing making this incidental rather than structural):
+`test_refused_drain_events_speaks_nothing_against_a_non_empty_store`,
+`test_refused_drain_events_consumes_rather_than_leaves_the_event_queued`,
+`test_refused_drain_brain_speaks_nothing_against_a_pending_escalation`,
+`test_refused_drain_brain_consumes_rather_than_leaves_the_reply_queued`.
+Removing the `drain_events` guard fails both of its tests (`['BMP-2.'] ==
+[]`); removing the `drain_brain` guard fails both of its tests
+(`['Unable, no such command.'] == []`). Restored after each check (full
+suite green, 2216 passed + 4 xfailed before and after).
+
+### Small related item: `fired_on_tracker` is per-mission state, not reset
+
+The reviewer's optional refinement was right that this is a real gap, not
+just a documentation note. `FiredOnTracker._scanned_event_count` indexes
+into `ContactStore.events` by position; `ContactStore.reset_for_new_mission`
+resets that list to empty, but nothing told the tracker. After a restart,
+`events[_scanned_event_count:]` on the now-short new list silently returns
+nothing until the new mission's own event count organically grows past the
+old tracker's count — `fired_on` mission-memory entries stop being written
+for an arbitrary stretch after every restart. `_last_write_sim` (keyed by
+shooter contact id, also mission-scoped since `ContactStore` mints fresh ids
+per mission) is equally stale, though a collision there is less likely.
+
+Brought under the existing pattern:
+- `FiredOnTracker.reset_for_new_mission()` (`body-layer/src/mission_memory/
+  admission.py`) — re-invokes `__init__()`, the same idiom `ContactStore`/
+  `TaskStore` already use.
+- `_reset_mission_state`/`_check_for_new_mission` (`body-layer/src/
+  logger.py`) both gained an optional `fired_on_tracker: FiredOnTracker |
+  None = None` parameter (default `None` so the pre-existing three/
+  four-argument call sites — including the direct unit-test calls in
+  `test_mission_start_reset.py` — are unaffected), threaded through to the
+  new reset call. Both poll loops' `_check_for_new_mission` calls now pass
+  `fired_on_tracker=fired_on_tracker` (the instance each loop already owns
+  for its own `_mission_memory_step` calls).
+
+**Tests added** (`test_mission_start_reset.py`):
+`test_fired_on_tracker_reset_clears_every_field` (the same `vars()`-
+enumerated completeness-test pattern `ContactStore`/`TaskStore` already
+use), `test_reset_mission_state_resets_fired_on_tracker_when_given`,
+`test_reset_mission_state_is_a_noop_for_fired_on_tracker_when_omitted`.
+Mutation-tested the wiring: removing the `if fired_on_tracker is not None:
+fired_on_tracker.reset_for_new_mission()` line from `_reset_mission_state`
+fails `test_reset_mission_state_resets_fired_on_tracker_when_given`
+(`assert 500 == 0`); restored, full suite green again.
+
+### Checks (body-layer, after Batch 3)
+
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass (68 source files)
+- `pytest tests -q`: pass — 2216 passed, 4 xfailed (up from the Batch 2
+  baseline by the 7 new tests above)
