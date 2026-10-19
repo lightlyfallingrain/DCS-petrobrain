@@ -22,15 +22,27 @@ new_mission`) are unit tests against `logger`'s private functions directly
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
+from pathlib import Path
 from typing import Any, cast
+
+import pytest
 
 from aircraft_client import AircraftLayerClient
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.tasks import TaskStore
-from logger import ConsolePerceptionRunner, _check_for_new_mission, _reset_mission_state
+from logger import (
+    ConsolePerceptionRunner,
+    _check_for_new_mission,
+    _enter_refusal_mode,
+    _maybe_switch_theatre,
+    _reset_mission_state,
+)
 from mission_memory.entries import FiredOnPayload
 from mission_memory.store import MissionMemory
+from store.models import Region
+from store.writer import insert_region, open_for_build
 
 #: A single, distinguishable sentinel used to poison every field under
 #: test -- the field's own type is irrelevant here (nothing is read back
@@ -339,3 +351,304 @@ def test_reset_mission_state_resets_store_tasks_sources_and_mission_memory() -> 
 
     assert runner.tasks.tasks == []
     assert mission_memory.entries == []
+
+
+# --- BL-15 Stage 3: theatre switching (`_maybe_switch_theatre`) and loud- --
+# refusal mode (`_enter_refusal_mode`) -- `plans/bl15-mission-start/plan.md`
+# Stage 3, revised by `stage1-decisions.md` decision 1. -----------------------
+
+
+def _build_region_store(path: Path, theatre: str) -> None:
+    """A minimal on-disk world-model store whose embedded `Region.theatre`
+    is `theatre` -- mirrors `test_logger.py`'s own
+    `test_main_rejects_world_model_db_theatre_mismatch` fixture pattern."""
+    conn = open_for_build(path)
+    insert_region(
+        conn,
+        Region(
+            name=f"{theatre.lower()}-full",
+            theatre=theatre,
+            centre_x=0.0,
+            centre_z=0.0,
+            half_extent_x_m=1000.0,
+            half_extent_z_m=1000.0,
+            built_at="2026-10-19T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _runner_on(path: Path, theatre: str) -> ConsolePerceptionRunner:
+    from perception.geometry import open_world_model
+
+    return ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object()),
+        world_model_conn=open_world_model(path),
+        theatre=theatre,
+    )
+
+
+def test_maybe_switch_theatre_is_a_noop_when_event_theatre_is_none() -> None:
+    """A `None` theatre (Hook could not read `env.mission.theatre`) is not
+    evidence of a mismatch -- keep the current store, per decision: "I used
+    the initial silence mode as proxy ... did not touch this point"."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object()), theatre="Syria"
+    )
+    runner.sources = ["sentinel"]  # type: ignore[list-item]
+
+    _maybe_switch_theatre(
+        runner, None, None, None, trace_sink=None, forest_occlusion=False
+    )
+
+    assert runner.theatre == "Syria"
+    assert runner.sources == ["sentinel"]
+
+
+def test_maybe_switch_theatre_is_a_noop_when_theatre_unchanged(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(db_path, "Syria")
+    runner = _runner_on(db_path, "Syria")
+    original_conn = runner.world_model_conn
+    runner.sources = ["sentinel"]  # type: ignore[list-item]
+
+    _maybe_switch_theatre(
+        runner, None, "Syria", tmp_path, trace_sink=None, forest_occlusion=False
+    )
+
+    assert runner.world_model_conn is original_conn
+    assert runner.sources == ["sentinel"]
+
+
+def test_maybe_switch_theatre_enters_refusal_mode_when_world_model_dir_is_none(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(db_path, "Syria")
+    runner = _runner_on(db_path, "Syria")
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    _maybe_switch_theatre(
+        runner,
+        crew_console,
+        "Afghanistan",
+        None,
+        trace_sink=None,
+        forest_occlusion=False,
+    )
+
+    assert runner.world_model_conn is None
+    assert runner.sources == []
+    assert crew_console.refused is True
+    # `theatre` itself is left as the old value -- there is no new one to
+    # switch to, only a store to drop.
+    assert runner.theatre == "Syria"
+
+
+def test_maybe_switch_theatre_enters_refusal_mode_for_unknown_theatre(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(db_path, "Syria")
+    runner = _runner_on(db_path, "Syria")
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    _maybe_switch_theatre(
+        runner,
+        crew_console,
+        "Narnia",
+        tmp_path,
+        trace_sink=None,
+        forest_occlusion=False,
+    )
+
+    assert runner.world_model_conn is None
+    assert runner.sources == []
+    assert crew_console.refused is True
+
+
+def test_maybe_switch_theatre_enters_refusal_mode_when_store_not_built(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(db_path, "Syria")
+    runner = _runner_on(db_path, "Syria")
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    # `tmp_path` has no `afghanistan-full.sqlite` at all.
+
+    _maybe_switch_theatre(
+        runner,
+        crew_console,
+        "Afghanistan",
+        tmp_path,
+        trace_sink=None,
+        forest_occlusion=False,
+    )
+
+    assert runner.world_model_conn is None
+    assert runner.sources == []
+    assert crew_console.refused is True
+
+
+def test_maybe_switch_theatre_enters_refusal_mode_on_region_mismatch(
+    tmp_path: Path,
+) -> None:
+    """A store at the name the mission's theatre resolves to, but whose
+    own embedded `Region.theatre` disagrees -- the same guard `main()`'s
+    own startup path already runs, exercised here at runtime instead."""
+    db_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(db_path, "Syria")
+    runner = _runner_on(db_path, "Syria")
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    # Named for Afghanistan, but built for Syria -- a mismatch the
+    # filename alone cannot catch.
+    mismatched_path = tmp_path / "afghanistan-full.sqlite"
+    _build_region_store(mismatched_path, "Syria")
+
+    _maybe_switch_theatre(
+        runner,
+        crew_console,
+        "Afghanistan",
+        tmp_path,
+        trace_sink=None,
+        forest_occlusion=False,
+    )
+
+    assert runner.world_model_conn is None
+    assert runner.sources == []
+    assert crew_console.refused is True
+
+
+def test_maybe_switch_theatre_succeeds_rebuilds_sources_and_clears_refusal(
+    tmp_path: Path,
+) -> None:
+    syria_path = tmp_path / "syria-full.sqlite"
+    afghanistan_path = tmp_path / "afghanistan-full.sqlite"
+    _build_region_store(syria_path, "Syria")
+    _build_region_store(afghanistan_path, "Afghanistan")
+    runner = _runner_on(syria_path, "Syria")
+    old_conn = runner.world_model_conn
+    runner.enrichment = object()  # type: ignore[assignment]  # sentinel -- must be cleared
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.refused = True  # simulate recovering from an earlier failure
+
+    _maybe_switch_theatre(
+        runner,
+        crew_console,
+        "Afghanistan",
+        tmp_path,
+        trace_sink=None,
+        forest_occlusion=False,
+    )
+
+    assert runner.theatre == "Afghanistan"
+    assert runner.world_model_conn is not None
+    assert runner.world_model_conn is not old_conn
+    assert (
+        len(runner.sources) == 2
+    )  # Hybrid + NakedEye, same as _build_sources always builds
+    assert runner.enrichment is None
+    assert crew_console.refused is False
+    # The old connection was closed, not merely abandoned.
+    with pytest.raises(sqlite3.ProgrammingError):
+        old_conn.execute("SELECT 1")
+
+
+def test_enter_refusal_mode_closes_the_open_connection() -> None:
+    """`_enter_refusal_mode` itself (not just `_maybe_switch_theatre`'s use
+    of it) -- a store for the wrong theatre is dropped, not retained."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    runner.world_model_conn = cast(Any, _FakeClosableConnection())
+    runner.sources = ["sentinel"]  # type: ignore[list-item]
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    _enter_refusal_mode(runner, crew_console)
+
+    assert runner.world_model_conn is None
+    assert runner.sources == []
+    assert crew_console.refused is True
+
+
+class _FakeClosableConnection:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_enter_refusal_mode_is_a_true_no_op_for_console_mode() -> None:
+    """`crew_console is None` (the `--console` debug path) -- no production
+    command surface to refuse on; this call must not raise."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    _enter_refusal_mode(runner, None)  # must not raise
+
+    assert runner.world_model_conn is None
+    assert runner.sources == []
+
+
+def test_check_for_new_mission_switches_theatre_end_to_end(tmp_path: Path) -> None:
+    """Wiring-level proof that `_check_for_new_mission` itself (not just
+    `_maybe_switch_theatre` called directly) performs the switch when a
+    mission (re)start's event carries a new theatre and `world_model_dir`
+    is supplied."""
+    syria_path = tmp_path / "syria-full.sqlite"
+    afghanistan_path = tmp_path / "afghanistan-full.sqlite"
+    _build_region_store(syria_path, "Syria")
+    _build_region_store(afghanistan_path, "Afghanistan")
+    runner = _runner_on(syria_path, "Syria")
+    runner.last_mission_start_sequence = 1
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    client = _FakeMissionStartClient()
+    client.event = {
+        "sequence": 2,
+        "theatre": "Afghanistan",
+        "received_wall_clock_s": 0.0,
+    }
+
+    reset_happened = _check_for_new_mission(
+        runner,
+        crew_console,
+        MissionMemory(),
+        cast(AircraftLayerClient, client),
+        world_model_dir=tmp_path,
+    )
+
+    assert reset_happened is True
+    assert runner.theatre == "Afghanistan"
+    assert crew_console.refused is False
+
+
+def test_check_for_new_mission_refuses_when_new_theatre_has_no_store(
+    tmp_path: Path,
+) -> None:
+    syria_path = tmp_path / "syria-full.sqlite"
+    _build_region_store(syria_path, "Syria")
+    runner = _runner_on(syria_path, "Syria")
+    runner.last_mission_start_sequence = 1
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    client = _FakeMissionStartClient()
+    client.event = {
+        "sequence": 2,
+        "theatre": "Afghanistan",
+        "received_wall_clock_s": 0.0,
+    }
+
+    reset_happened = _check_for_new_mission(
+        runner,
+        crew_console,
+        MissionMemory(),
+        cast(AircraftLayerClient, client),
+        world_model_dir=tmp_path,  # no afghanistan-full.sqlite present
+    )
+
+    assert reset_happened is True  # the belief reset still happened
+    assert crew_console.refused is True

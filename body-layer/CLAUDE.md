@@ -194,6 +194,38 @@ doesn't). The join itself (`src/detection_trace_writer.py`) is the one module in
 deliberately allowed to hold both ground truth and belief at once, and is read-only against
 `ContactStore` — see that module's own docstring for the boundary this preserves.
 
+**A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
+the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
+mission memory, and every perception source a clean slate (`logger._check_for_new_mission`/
+`_reset_mission_state`) — this is what removes the old "restart body-layer between missions"
+workaround.
+
+**Theatre switching (Stage 3).** If the mission-start event's `theatre` differs from the one
+currently running, `logger._maybe_switch_theatre` re-resolves the store at
+`--world-model-dir/<theatre.lower()>-full.sqlite` (the same `<theatre.lower()>-full.sqlite` naming
+`--mission-understanding --world-model-dir` already uses above) and switches to it live —
+`--world-model-dir` is therefore also accepted (optionally) alongside an explicit
+`--theatre`/`--world-model-db` pair, not only with `--mission-understanding`, specifically so this
+runtime switch has somewhere to resolve a new store from regardless of how the *initial* theatre
+was given.
+
+**On any failure to resolve the new theatre's store** — no `--world-model-dir` given, an unknown
+theatre, a store that is not built, fails to open, or fails the built-region mismatch guard — the
+old store is dropped (never kept running against the wrong theatre) and body-layer enters a loud
+refusal mode: perception stops, and every player command (crew-text, F10, voice) is answered with
+exactly `"system error, world model not loaded"` (user direction, 2026-10-19 — "wrong terrain model
+is as useless as not terrain model" / "on error loud refusal is better") until the next mission
+(re)start resolves successfully. `--console` has no `CrewConsole` to refuse commands on, so on that
+path a failed switch only stops perception, silently from the pilot's perspective — expected, since
+`--console` is a debug harness, not the flight path.
+
+**Per-mission log files (Decision 5).** `--detection-trace`/`--belief-truth-log`/`--mission-memory`/
+`--speech-log`/`--group-trace` each roll to a *fresh* stamped filename (same `run_log_paths`
+mechanism as the initial per-run stamp, `BL-11` Stage 5) on every detected mission (re)start, not
+just once at process start — a sortie that restarts the mission mid-process gets its own set of
+log files per mission, the same way starting a fresh process would, rather than one file spanning
+several unrelated missions.
+
 ## Tuning
 
 **`plans/configurable-constants/plan.md`, Stages 1-2.** A curated ~15 behaviour-affecting

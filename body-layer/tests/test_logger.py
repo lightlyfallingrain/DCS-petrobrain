@@ -765,6 +765,10 @@ class FakeConsoleAircraftClient:
         #: `MissionStartCache`. Tests that exercise `_check_for_new_mission`'s
         #: wiring mutate this directly between/before driving the poll loop.
         self.mission_start_sequence: int | None = None
+        #: `BL-15` Stage 3 -- the `theatre` field of the next `get_mission_
+        #: start_latest` event, `None` by default (matching every existing
+        #: Stage 1/2 test, which never cared about theatre switching).
+        self.mission_start_theatre: str | None = None
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -809,7 +813,7 @@ class FakeConsoleAircraftClient:
             return None
         return {
             "sequence": self.mission_start_sequence,
-            "theatre": None,
+            "theatre": self.mission_start_theatre,
             "received_wall_clock_s": 0.0,
         }
 
@@ -3163,6 +3167,125 @@ def test_crew_text_poll_loop_resets_belief_on_mission_restart(
     assert runner.last_mission_start_sequence == 2
     assert runner.tasks.tasks == []
     assert crew_console.commands_handled == 0
+
+
+def test_crew_text_poll_loop_switches_theatre_on_mission_restart(
+    tmp_path: Path,
+) -> None:
+    """`BL-15` Stage 3, wiring-level proof: the real `_run_crew_text_poll_
+    loop` passes `world_model_dir`/`trace_sink`/`forest_occlusion` through
+    to `_check_for_new_mission` correctly, and an event naming a new
+    theatre actually switches `runner.theatre`/`runner.world_model_conn`
+    rather than the unit-level `_maybe_switch_theatre` tests (`test_
+    mission_start_reset.py`) merely exercising the function in isolation."""
+    from store.models import Region
+    from store.writer import insert_region
+
+    syria_path = tmp_path / "syria-full.sqlite"
+    afghanistan_path = tmp_path / "afghanistan-full.sqlite"
+    for path, theatre in ((syria_path, "Syria"), (afghanistan_path, "Afghanistan")):
+        conn = open_for_build(path)
+        insert_region(
+            conn,
+            Region(
+                name=f"{theatre.lower()}-full",
+                theatre=theatre,
+                centre_x=0.0,
+                centre_z=0.0,
+                half_extent_x_m=1000.0,
+                half_extent_z_m=1000.0,
+                built_at="2026-10-19T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    aircraft_client.mission_start_sequence = 2
+    aircraft_client.mission_start_theatre = "Afghanistan"
+
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.last_mission_start_sequence = 1
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            syria_path,
+            10.0,
+            stop_event,
+        ),
+        kwargs={"world_model_dir": tmp_path},
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_mission_start_sequence != 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert runner.theatre == "Afghanistan"
+    assert crew_console.refused is False
+
+
+def test_crew_text_poll_loop_refuses_commands_when_new_theatre_has_no_store(
+    tmp_path: Path,
+) -> None:
+    """Same wiring, the degrade path: the mission's new theatre has no
+    store at `world_model_dir`, so the real poll loop must enter refusal
+    mode rather than crash or silently keep the old store running."""
+    syria_path = tmp_path / "syria-full.sqlite"
+    conn = open_for_build(syria_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    aircraft_client.mission_start_sequence = 2
+    aircraft_client.mission_start_theatre = "Afghanistan"  # no store built for it
+
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.last_mission_start_sequence = 1
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            syria_path,
+            10.0,
+            stop_event,
+        ),
+        kwargs={"world_model_dir": tmp_path},
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while crew_console.refused is False and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert crew_console.refused is True
+    assert crew_console.handle_command("watch_nearest", now_sim=0.0) == [
+        "system error, world model not loaded"
+    ]
 
 
 def test_connection_reporter_says_disconnected_once_then_connected_once(
