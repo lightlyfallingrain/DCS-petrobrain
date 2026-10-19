@@ -68,4 +68,14 @@ All four run fresh by me, from inside each subproject's own venv (`/Users/sg/Cod
 
 ## Overall Verdict: PASS
 
-No blocking gaps. The one gap found (missing `WORKFLOW.md` deploy step) was documentation-only and closed directly in this pass. Proceeding to the Acceptance Boundary statement and Acceptance Testing Plan.
+No blocking gaps. The one gap found (missing `WORKFLOW.md` deploy step) was documentation-only and closed directly in this pass.
+
+## Acceptance Boundary
+
+**What this feature's fixtures structurally cannot reach**, stated before any live testing: the completeness/mutation-tested unit tests prove that *given* a `MissionStartEvent` with a given sequence/theatre, the reset, theatre-switch, and refusal mechanisms behave correctly. No fixture can prove (a) that `onSimulationStart` actually fires, exactly once, on a genuine single-player "restart mission" action in this DCS build — the investigator's own research note (`aircraft-layer/research/2026-10-19-theatre-detection-at-mission-start.md`) states this is unverified without the box; (b) that it does *not* also fire on pause/resume, which is the mid-flight-false-positive risk the plan names as residual; or (c) that `env.mission.theatre` actually resolves over the live `net.dostring_in` bridge at that exact callback in this DCS version. These three are exactly what the acceptance card below asks the user to check, and are the reason this milestone stays `#needs-flight` rather than fully closed at DoD.
+
+## Acceptance Testing Plan
+
+Published as an artifact card (in-cockpit-readable, checkboxes persist): https://claude.ai/artifact/UJsBH2VU64VPLp2vo42TXd — source of truth at `docs/acceptance/2026-10-19-bl15-mission-start-card.md`. Covers: Hook deploy, starting body-layer with `--world-model-dir` (the one new, load-bearing flag this card depends on — independently re-verified by me against a real throwaway Syria store, see that file), same-theatre restart reset, cross-theatre refusal, recovery, and an optional theatre-detection probe. Every command in the card is either run by me with its real output pasted, or explicitly asked of the user as something only their DCS box can answer.
+
+Asking the user: does the feature pass acceptance testing? (yes / no + details)

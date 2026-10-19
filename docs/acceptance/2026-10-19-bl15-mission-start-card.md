@@ -2,6 +2,22 @@
 
 **Published card** (in-cockpit-readable, checkboxes persist): https://claude.ai/artifact/UJsBH2VU64VPLp2vo42TXd
 
+This markdown file is the source of truth; the published card is generated from it for reading in
+the cockpit. The card's own "verified" tag on the full `--world-model-dir`/`--theatre`/
+`--world-model-db`/`--crew-text` combination was independently re-run by me against this worktree
+with a real (throwaway, `store.writer.insert_region`-built) Syria store and a dead
+`--aircraft-layer-url` port — it reached the crew-text banner with no argument error:
+
+```
+$ cd body-layer && PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
+    --aircraft-layer-url http://127.0.0.1:1 --theatre Syria \
+    --world-model-db /tmp/bl15-verify/syria-full.sqlite \
+    --world-model-dir /tmp/bl15-verify --crew-text
+Petrovich crew session -- type naturally, e.g.:
+  watch <id or description>       have Petrovich keep an eye on a contact
+  ...
+```
+
 **Branch:** `feature/bl15-mission-start` (merging to `main` once this card passes).
 **Checkout:** `git checkout feature/bl15-mission-start` — in your own repo root, not a worktree.
 
