@@ -49,9 +49,10 @@ Why, weighing the pilot's actual experience:
   per sortie. One more is consistent with the existing ritual, not a new category of friction.
 - **If Piper dies mid-sortie**, `PiperEngine.synthesize` gets a connection failure on the next line,
   raises `TTSSynthesisError` exactly as `MacSayEngine` does for a missing `say` binary today, and
-  `/speak` answers `503` — `CrewConsole._print`'s existing swallow-and-continue is what stops that
-  from affecting anything beyond one missed line. No new failure posture needed; the existing one
-  already covers "the TTS backend is gone."
+  `/speak` answers `503` — `CrewConsole._print`'s existing swallow-and-continue keeps the crew
+  running. **Correction at harvest: this is not "one missed line" — every line fails until Piper
+  is restarted, so Petrovich is silent for the rest of the sortie.** The `503` posture stands; the
+  outage is announced once in the adapter's terminal — see Decision 3's amendment.
 - **No readiness wait is needed either.** `piper.http_server` takes ~2.7 s to become ready; if
   `audio-adapter` is started before that window closes, the first `/speak` calls simply `503` until
   Piper is listening — the same posture as any other TTS failure, not a special case to code around.
@@ -145,6 +146,34 @@ answers the "Piper unreachable at startup" half of this decision: it is not a sp
 the same failure path as "Piper died mid-sortie" or "Piper hasn't finished booting yet" (Decision
 1). A missing voice file is Piper's own `POST /synthesize` returning non-200 — same path, no new
 code needed to distinguish it.
+
+**Amended (user-approved, 2026-10-20): the outage is announced, once, in the adapter's terminal.**
+The plan as first written called a mid-sortie Piper death "one missed line"; it is not. Every
+`/speak` fails from that point until Piper is restarted, so **Petrovich goes silent for the rest of
+the sortie, and nothing says why.** The `503` contract above is unchanged; what is added is
+visibility:
+
+- **On the first synthesis failure after a success (or at the first `/speak` ever, if Piper was
+  never reachable)**, the server logs one loud line at `WARNING` or higher naming the cause and
+  the URL — e.g. `Piper unreachable at http://127.0.0.1:7800 -- Petrovich is silent until it is
+  back (start run-piper-*.sh)`. A non-200 from Piper (e.g. a missing voice) gets the same treatment
+  with Piper's own status and body excerpt instead of "unreachable".
+- **Subsequent failures in the same outage are not re-logged loudly** (DEBUG at most), so a
+  sortie's worth of callouts does not bury the one line that matters.
+- **On the first success after an outage**, one line: `Piper back at <url> -- speech restored`.
+- **Recovery is automatic**: every `/speak` still tries Piper, so restarting Piper is all the pilot
+  does — no adapter restart.
+
+This is a small state machine (`healthy` ↔ `down`) living with `PiperEngine` or the server's
+`/speak` handler — the implementer's choice, stated in the code. Both transitions are unit-tested
+against the loopback double: the first failure logs loudly, the second does not, the first
+success after logs recovery. Thread-safety matters: `ThreadingHTTPServer` can run two `/speak`
+calls at once, so the transition must be guarded (a lock around the flag) or two simultaneous
+failures could both log the "first" line — harmless but exactly the noise this exists to avoid.
+
+Out of scope for this amendment: telling the pilot *in the cockpit* (there is no voice to say it
+with, by definition). If the text overlay is running, body-layer still shows the lines; that is
+unchanged.
 
 ### Decision 4 — CLI flags
 
@@ -269,7 +298,9 @@ between `POST /speak` and the speaker, never the `/speak` wire contract itself.
 1. **Piper HTTP engine** — `PiperEngine` in `tts_engine.py`, replacing `MacSayEngine` entirely (not
    alongside it). Rewrite `test_tts_engine.py` against a loopback double (Decision 6) plus the
    skip-gated live test. This stage is OS-agnostic (an HTTP client), so it is the right minimal
-   first slice — buildable and fully unit-testable with no live Piper anywhere.
+   first slice — buildable and fully unit-testable with no live Piper anywhere. **Includes the
+   outage announcement** (Decision 3's amendment): one loud line when Piper goes down, one when it
+   comes back, nothing in between — tested against the loopback double.
 2. **Windows local-playback sink** — the hand-synced `winsound` sink in `local_playback.py`
    (Decision 2), platform-dispatched from `__main__.py`, with its own injectable-player tests
    (Decision 6). Still no live Windows/Piper needed to pass automated tests.
@@ -286,6 +317,9 @@ between `POST /speak` and the speaker, never the `/speak` wire contract itself.
      confirm `POST /stop` interrupts it, and confirm `--target aircraft-layer` still round-trips
      correctly now that the adapter itself can run on the same box as the collector (a topology this
      project hasn't exercised before — adapter and collector co-located on Windows).
+   - **On either machine**: stop Piper while the adapter runs and send a `/speak` — expect the one
+     loud "Piper unreachable" line, and no repeat on a second `/speak`; restart Piper, send another
+     — expect "Piper back" and the line heard.
    - Measure the actual end-to-end `/speak` latency on both machines (recon's own "Unresolved": only
      the two halves were measured independently, never the whole HTTP round trip) and report back —
      this is the number that answers whether Piper is a net win over `say` for the pilot, not the

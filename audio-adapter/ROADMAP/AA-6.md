@@ -16,7 +16,13 @@
   rule `say` and `whisper-cli` already follow. Petrovich's voice changes from `say`'s `Daniel` to
   a Piper voice the user picks.
 
-  Still to establish before planning (Piper was noted in
+  **Plan approved (user, 2026-10-20)**: `plans/audio-adapter-os-independent/plan.md`, with the
+  user's addition that a Piper outage is announced once in the adapter's terminal and its recovery
+  once (Decision 3's amendment) — otherwise Petrovich goes silent for the rest of the sortie with
+  nothing saying why. Piper runs as its own process on port 7800. **Implementation to be done
+  from a Mac session** (user direction); Stage 4 needs the user on both machines.
+
+  Established before planning (originally open): (Piper was noted in
   `research/2026-09-17-tts-audio-transport-recon.md` from general knowledge only, never tested):
   how Piper is distributed for Windows and macOS today, its CLI/WAV contract, and its latency on the
   user's machines against `say`'s measured ~0.6–0.8 s.
