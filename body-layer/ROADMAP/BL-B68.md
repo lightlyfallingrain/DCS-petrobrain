@@ -9,15 +9,14 @@
   some point, not now."* Filed so the diagnosis is not re-derived.
 
   **Scheduled 2026-10-19 as [[BL-15]] Stage 1 — fixed on `feature/bl15-mission-start`, DoD-passed
-  2026-10-19, pending merge to `main`** (DoD acceptance testing with the user is the step
-  remaining before that merge — see `plans/bl15-mission-start/dod-check.md`). Every item in the
+  2026-10-19, merged to `main` 2026-10-19 (`a41dd5cd`)** — see
+  `plans/bl15-mission-start/dod-check.md`; the live sortie is tracked on [[BL-15]]. Every item in the
   "Everything that carries over" table below is covered by `logger._reset_mission_state`/
   `reset_for_new_mission()` on each class named, confirmed by Reviewer against this table
   explicitly (`plans/bl15-mission-start/review.md` Batch 1). **This entry stays `[~]`/in-progress,
-  not `[x]`, for two reasons: the merge itself has not happened yet, and the live sortie
-  confirming the fix in the cockpit has not happened either** — the second is tracked on
+  not `[x]`, until the live sortie confirms the fix in the cockpit** — that is tracked on
   `[[BL-15]]` itself as `#needs-flight`, not duplicated here as a second debt marker. Mark `[x]`/
-  `#status/done` once merged and that sortie clears.
+  `#status/done` once that sortie clears.
 
   **How it presented.** The belief-truth tripwire fired on 18 contacts at ranges of ~532 km against
   a 10 km cap, with *small* position uncertainties (26–609 m) — belief confidently wrong, not vaguely
