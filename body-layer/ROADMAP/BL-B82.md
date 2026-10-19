@@ -11,13 +11,19 @@
   it. Silence suppresses *speech*; the user's point is that the thing to suppress on the ramp is the
   *scan* — the trigger is takeoff, not a command.
 
-  **Consequence for `[[BL-B81]]`.** With the ground default gone, "radio check does not end silent
-  mode on ground" no longer has a ground mode to protect. It still matters for the explicit
-  `silence` command: radio check answers through it and leaves it on.
+  **Consequence for `[[BL-B81]]`.** None left: radio check is an ordinary command (user,
+  2026-10-19), and with no ground silence the pilot hears the answer during engine start.
 
-  ## Open — put to the user 2026-10-19
+  ## Decided — user, 2026-10-19
 
-  - One-shot (first takeoff of the mission), or every time on the ground (a FARP landing)?
-  - What still works on the ground: commands (`watch`, `scan forward`, radio check), calls about a
-    threat that is already visible?
-  - What counts as takeoff: the existing 10 m AGL threshold, or something else?
+  1. **Every time on the ground**, not only before the first takeoff — a FARP landing stops the scan
+     too.
+  2. **Not looking on the ground.** Commands are still heard and answered (radio check has to work
+     during engine start); Petrovich simply does not scan. *"(would be looking on troop drop in
+     enemy territory, but modelling that is deferred)"*
+  3. **Takeoff = the existing 10 m AGL threshold** (`ON_GROUND_AGL_THRESHOLD_M`): *"good enough."*
+
+  ## Left to the plan
+
+  - What a look command (`watch`, `scan forward`) answers on the ground — proposed: an "unable"
+    with its reason, per the project's "say again" vs "unable" distinction.

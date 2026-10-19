@@ -20,11 +20,12 @@
 
   ## What it has to fit
 
-  - **It must be answered while silenced, and leave silence on.** `silence` is absolute today —
-    nothing is spoken while `CrewConsole.silenced` is set — and *any* real command ends it
-    (`belief/crew_console.py` module docstring). The on-ground default (`maybe_apply_on_ground_default`)
-    sets that same flag at mission start. So radio check is the first command that both speaks
-    through silence and does not end it.
+  - **It is just another command — silence is not touched.** First read as "answers through
+    silence without ending it"; **dropped by the user, 2026-10-19**: *"Radio check is usually for
+    engine start sequence. Now that ground silence logic changes, let's not modify the normal
+    silence, radio check is just another command."* With the on-ground silence default replaced by
+    `[[BL-B82]]`, there is no silence on the ramp for it to work around. Like any command, it ends
+    an explicit `silence`.
   - **Greeting echoes the pilot's word** ("good evening" → "good evening, commander"), not the sim
     clock.
   - **In `[[BL-15]]`'s refusal mode** (world model not loaded), every command answers "system error,
