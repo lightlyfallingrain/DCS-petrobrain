@@ -7,8 +7,8 @@
   right". Out of scope while the pipeline was being built; worth separating when picked up, since
   prosody may matter more for believability than accent does, and the two have different fixes
   (a different engine or voice for accent; SSML, per-line rate/pitch, or an urgency-aware
-  template for prosody). Auditioning candidates costs one `--target local --voice <name>` command
-  each. See `body-layer/ROADMAP.md`'s backlog entry.
+  template for prosody). Auditioning candidates costs one `--target local --piper-voice <name>`
+  command each (Piper server started with that model available). See `body-layer/ROADMAP.md`'s backlog entry.
 
   **Accent candidate, 2026-10-19: Piper's `ru_RU-ruslan-medium`** (user: *"would be perfect"*).
   Arrives with [[AA-6]], which moves synthesis to Piper on both OSes with
@@ -27,5 +27,6 @@
     words the rules mangle. Petrovich's vocabulary is small and closed (clock bearings, ranges,
     unit types, a few verbs), which is what makes a hand-tuned table plausible here at all.
 
-  Either test is one ~60 MB voice download plus the recon's Piper binary
-  (`research/2026-10-19-piper-cross-platform-recon.md`).
+  Either test is one ~60 MB voice download into the Piper voices directory
+  (`research/2026-10-19-piper-cross-platform-recon.md`; Piper is the `piper-tts` venv, not a binary —
+  see the recon's 2026-10-20 addenda).

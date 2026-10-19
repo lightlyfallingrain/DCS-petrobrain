@@ -371,9 +371,13 @@ def test_winsound_two_concurrent_delivers_both_survive_one_interrupt() -> None:
     time.sleep(0.1)
     sink.interrupt()
 
-    thread_a.join(timeout=5)
-    thread_b.join(timeout=5)
+    thread_a.join(timeout=2)
+    thread_b.join(timeout=2)
 
+    # join(timeout=) returns silently on timeout: assert both were actually
+    # released by the one interrupt(), not left waiting out the fallback.
+    assert not thread_a.is_alive()
+    assert not thread_b.is_alive()
     assert winsound_api.purge_calls == 1
     assert errors == []
 
