@@ -1,5 +1,7 @@
 # BL-15 Stage 1 acceptance — mission start: clean slate + theatre
 
+**Published card** (in-cockpit-readable, checkboxes persist): https://claude.ai/artifact/UJsBH2VU64VPLp2vo42TXd
+
 **Branch:** `feature/bl15-mission-start` (merging to `main` once this card passes).
 **Checkout:** `git checkout feature/bl15-mission-start` — in your own repo root, not a worktree.
 
