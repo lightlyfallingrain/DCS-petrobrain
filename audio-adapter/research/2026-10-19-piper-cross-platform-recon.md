@@ -386,3 +386,23 @@ they can be re-run directly if a number needs rechecking.
   invocation, `winsound` playback mechanics) were measured independently. Once an actual
   `PiperEngine`/Windows sink exists, a live `curl -X POST .../speak` timing (mirroring the
   2026-09-17 recon's own framing) is the number that actually matters to the player.
+
+### Addendum, 2026-10-20 — the archived macOS arm64 asset is an x86_64 binary
+
+**Measured on the user's Mac** (user-run): `piper_macos_aarch64.tar.gz` from release
+`2023.11.14-2`, extracted and de-quarantined, fails before the dylib question (`rhasspy/piper#404`)
+can even arise:
+
+```
+$ echo "Contact, two o'clock, three kilometres." | ./piper/piper -m en_US-lessac-medium.onnx -f test.wav
+zsh: bad CPU type in executable: ./piper/piper
+$ file piper/piper
+piper/piper: Mach-O 64-bit executable x86_64
+```
+
+The asset named `aarch64` contains an Intel binary; that Mac has no Rosetta installed. Rosetta
+would at best run a frozen x86_64 build under translation with #404 still behind it. **So the
+archived C++ release is not a viable binary for the Mac, and "Possible Approaches"' first bullet
+falls.** The route proposed to the user instead: `piper-tts` (`piper1-gpl`) installed in a venv of
+its own, invoked as an external `piper` command on both OSes, so the adapter's own code stays
+stdlib-only. Not yet verified on either machine at time of writing.
