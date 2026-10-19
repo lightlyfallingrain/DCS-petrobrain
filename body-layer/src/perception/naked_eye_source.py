@@ -579,6 +579,23 @@ class NakedEyePerceptionSource:
     )
     _observation_count: int = field(default=0, init=False, repr=False)
 
+    def reset_for_new_mission(self) -> None:
+        """Clear this source's own dedup/acquisition/counter state on a
+        genuine DCS mission (re)start (`BL-15` Stage 1, `BL-B68`'s
+        diagnosed gap). Cannot re-invoke `__init__` wholesale like
+        `belief.contacts.ContactStore.reset_for_new_mission` does -- too
+        many required constructor args (`world_model_conn`, `theatre`,
+        `aircraft_client`, ...) that must stay exactly as they are -- so
+        this clears each dedup/counter attribute directly instead. Does
+        **not** touch `scan_plan`/`optic`/`sight_cone`/`suppressed_until_sim`
+        -- those are per-poll fields the poll loop overwrites every tick
+        (`logger._apply_active_gaze`), not mission-scoped state that would
+        otherwise leak across a restart."""
+        self._previously_seen_at.clear()
+        self._acquired_at.clear()
+        self._object_id_to_last_observation_id.clear()
+        self._observation_count = 0
+
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
         if (
             self.suppressed_until_sim is not None

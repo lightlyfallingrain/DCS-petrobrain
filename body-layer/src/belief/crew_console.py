@@ -1159,6 +1159,42 @@ class CrewConsole:
         if ownship.alt_agl_m <= ON_GROUND_AGL_THRESHOLD_M:
             self.silenced = True
 
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1, `plans/bl15-mission-start/plan.md`). Re-invokes `__init__`
+        on this same object, passing through only the fields that must
+        survive the reset -- the shared `store`/`tasks` references (their
+        own `reset_for_new_mission()` must already have run before this
+        call, via `_reset_mission_state`'s explicit ordering, the same
+        reasoning as `logger.ConsolePerceptionRunner.reset_for_new_
+        mission`), the injected collaborators (`brain_client`, `output`,
+        `aircraft_client`, `mark_here_fn`, `mark_target_fn`, `transcript_
+        log`, `overlay_client`, `speech_client`, `speech_log_sink`), and
+        `silenced` -- whether a pilot's deliberate mute should survive a
+        mission restart is an open product question (see the plan's
+        "Decisions Requiring User Input"); until decided, this preserves it
+        (the conservative default: don't change behaviour the pilot
+        explicitly asked for). Everything else (`scheduler`, `_pending_
+        confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
+        `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
+        contact_id`, `attack_run_transition`, `observ_transition`,
+        `_on_ground_default_applied`, `enrichment`) resets to its declared
+        default."""
+        self.__init__(  # type: ignore[misc]
+            store=self.store,
+            tasks=self.tasks,
+            brain_client=self.brain_client,
+            output=self.output,
+            aircraft_client=self.aircraft_client,
+            mark_here_fn=self.mark_here_fn,
+            mark_target_fn=self.mark_target_fn,
+            transcript_log=self.transcript_log,
+            overlay_client=self.overlay_client,
+            speech_client=self.speech_client,
+            speech_log_sink=self.speech_log_sink,
+            silenced=self.silenced,
+        )
+
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()
         if not stripped:

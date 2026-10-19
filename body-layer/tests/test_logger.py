@@ -107,6 +107,10 @@ class FakeAircraftClient:
 class FakeSource:
     def __init__(self, observations: list[Observation]) -> None:
         self._observations = observations
+        self.reset_count = 0
+
+    def reset_for_new_mission(self) -> None:
+        self.reset_count += 1
 
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
         return self._observations
@@ -756,6 +760,11 @@ class FakeConsoleAircraftClient:
     ) -> None:
         self._telemetry = telemetry
         self._world_objects = world_objects
+        #: `BL-15` Stage 1 -- `None` (the default) means no `onSimulationStart`
+        #: has fired, same "not an error" empty-cache posture as a real
+        #: `MissionStartCache`. Tests that exercise `_check_for_new_mission`'s
+        #: wiring mutate this directly between/before driving the poll loop.
+        self.mission_start_sequence: int | None = None
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -794,6 +803,15 @@ class FakeConsoleAircraftClient:
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         pass
+
+    def get_mission_start_latest(self) -> dict[str, Any] | None:
+        if self.mission_start_sequence is None:
+            return None
+        return {
+            "sequence": self.mission_start_sequence,
+            "theatre": None,
+            "received_wall_clock_s": 0.0,
+        }
 
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return None
@@ -3065,6 +3083,86 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
     assert not poll_thread.is_alive()
     assert captured["resolving_optic"] is BINOCULAR_OPTIC
     assert captured["resolving_optic"] is not runner.optic_state.guidance_optic
+
+
+# -- `BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- the real poll
+# loop detects a genuine mission (re)start and resets belief/mission
+# memory. The per-class completeness guarantee (every field not in a
+# documented preserve-set resets to its constructor default) lives in
+# `test_mission_start_reset.py`; this is the wiring-level proof that
+# `_check_for_new_mission` is actually reached from `_run_crew_text_poll_
+# loop`, once per poll, before `run_once()`. -------------------------
+
+
+def test_crew_text_poll_loop_resets_belief_on_mission_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drives the real `_run_crew_text_poll_loop` with `run_once` replaced
+    by a no-op (same technique as the optic test above) -- this test only
+    cares whether the loop's own `_check_for_new_mission` call site fires a
+    reset when the aircraft layer reports a new `sequence`, not how
+    `run_once` itself behaves."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": []}
+    )
+    # Simulate a process that has already seen sequence 1 (its own first
+    # poll, already settled) -- the aircraft layer now reports sequence 2,
+    # a genuine restart, from this poll loop's very first iteration.
+    aircraft_client.mission_start_sequence = 2
+
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.last_mission_start_sequence = 1
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.commands_handled = 5  # mission-scoped -- must reset
+
+    runner.tasks.create(
+        "scan_area",
+        AttentionArea(
+            id="AREA_1",
+            center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+            radius_m=None,
+            level="watch",
+            source="scan_area",
+            relative_sector="right",
+        ),
+        created_sim=0.0,
+        deadline_sim=100.0,
+        reason="test",
+    )
+    assert runner.tasks.tasks  # pre-condition: not already empty
+
+    monkeypatch.setattr(runner, "run_once", lambda: None)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            10.0,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_mission_start_sequence != 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert runner.last_mission_start_sequence == 2
+    assert runner.tasks.tasks == []
+    assert crew_console.commands_handled == 0
 
 
 def test_connection_reporter_says_disconnected_once_then_connected_once(

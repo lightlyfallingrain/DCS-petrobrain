@@ -1812,3 +1812,23 @@ def test_a_stale_firing_snapshot_is_discarded() -> None:
     observations = source.poll(0.0, _ownship())
 
     assert observations == []
+
+
+def test_reset_for_new_mission_clears_dedup_and_counter_state() -> None:
+    """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- pokes the
+    private dedup/acquisition/counter attributes directly rather than
+    driving a real `poll()` through the visibility pipeline, which is
+    already covered by every other test in this file; this test is only
+    about the reset mechanism itself."""
+    source, _client = _source(None)
+    source._previously_seen_at[7] = 10.0
+    source._acquired_at[7] = 10.0
+    source._object_id_to_last_observation_id[7] = "obs_1"
+    source._observation_count = 3
+
+    source.reset_for_new_mission()
+
+    assert source._previously_seen_at == {}
+    assert source._acquired_at == {}
+    assert source._object_id_to_last_observation_id == {}
+    assert source._observation_count == 0

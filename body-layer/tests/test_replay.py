@@ -29,6 +29,9 @@ class FakePerceptionSource:
         self._snapshot = json.loads(world_objects_fixture_path.read_text())
         self._poll_count = 0
 
+    def reset_for_new_mission(self) -> None:
+        self._poll_count = 0
+
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
         self._poll_count += 1
         objects = self._snapshot["objects"]
@@ -93,6 +96,9 @@ def test_replay_yields_empty_observations_from_a_source_with_nothing_to_report()
     frames = load_ownship_frames(_FIXTURES_DIR / "telemetry_frames.json")
 
     class EmptySource:
+        def reset_for_new_mission(self) -> None:
+            pass
+
         def poll(
             self, now_sim: float, ownship_state: OwnshipState
         ) -> list[Observation]:

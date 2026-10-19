@@ -607,3 +607,23 @@ def test_repeated_scope_observations_of_a_stationary_object_do_not_converge_on_t
     # No single look ever lands on exact truth either -- the mechanical,
     # unperturbed behaviour this fix replaces.
     assert all(range_m_value != true_range_m for range_m_value in ranges_m)
+
+
+def test_reset_for_new_mission_clears_dedup_and_counter_state() -> None:
+    """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- pokes the
+    private dedup/counter attributes directly rather than driving a real
+    `poll()` through the visibility/association pipeline, which is already
+    covered by every other test in this file; this test is only about the
+    reset mechanism itself."""
+    source = HybridPerceptionSource(aircraft_client=object(), theatre=_THEATRE)  # type: ignore[arg-type]
+    source._last_emitted_texts = ("BMP-2",)
+    source._object_id_to_last_observation_id[7] = "obs_1"
+    source._observation_count = 3
+    source._dropped_count = 2
+
+    source.reset_for_new_mission()
+
+    assert source._last_emitted_texts is None
+    assert source._object_id_to_last_observation_id == {}
+    assert source._observation_count == 0
+    assert source._dropped_count == 0

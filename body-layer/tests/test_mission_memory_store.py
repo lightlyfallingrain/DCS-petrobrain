@@ -386,3 +386,106 @@ def test_admission_and_marks_never_construct_entry_directly() -> None:
             continue
         text = path.read_text()
         assert "Entry(" not in text, f"{name} constructs Entry() directly"
+
+
+# --- reset_for_new_mission (BL-15 Stage 1, plans/bl15-mission-start/plan.md) --
+
+
+def test_reset_for_new_mission_clears_entries_and_derived_indices() -> None:
+    store = MissionMemory()
+    store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=1.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_1",
+        strikes=None,
+        payload=_fired_on_payload(),
+    )
+
+    store.reset_for_new_mission()
+
+    assert store.entries == []
+    assert store.struck_by == {}
+    assert store.latest_live_seq("CONTACT_1") is None
+
+
+def test_reset_for_new_mission_restarts_seq_and_mark_index_at_one() -> None:
+    store = MissionMemory()
+    store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=1.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_1",
+        strikes=None,
+        payload=_fired_on_payload(),
+    )
+
+    store.reset_for_new_mission()
+
+    # The next appended entry gets seq 1 again -- the plan's own named
+    # risk (a debrief tool reading one log file across a restart would
+    # see two entries with seq=1), not a defect this test is meant to hide.
+    entry = store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=1.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_2",
+        strikes=None,
+        payload=_fired_on_payload(),
+    )
+    assert entry.seq == 1
+
+
+def test_reset_for_new_mission_preserves_the_sink() -> None:
+    """The one field that must survive the reset -- the open
+    `MissionMemoryLogWriter` (or any other injected sink), per the plan's
+    "reset mechanism" section."""
+    store = MissionMemory()
+    seen: list[object] = []
+    store.set_sink(seen.append)
+
+    store.reset_for_new_mission()
+
+    entry = store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=1.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_1",
+        strikes=None,
+        payload=_fired_on_payload(),
+    )
+    assert seen == [entry]
+
+
+def test_reset_for_new_mission_with_no_sink_configured_stays_a_no_sink_store() -> None:
+    """A store that never had `set_sink` called keeps it that way across a
+    reset -- `_sink` defaults to `None`, and `None` is itself a valid value
+    to "preserve"."""
+    store = MissionMemory()
+
+    store.reset_for_new_mission()
+
+    # No sink configured must not raise on append.
+    store.append(
+        kind="fired_on",
+        provenance="observed",
+        t_sim=1.0,
+        phase=None,
+        pos=None,
+        seen=None,
+        belief_ref="CONTACT_1",
+        strikes=None,
+        payload=_fired_on_payload(),
+    )

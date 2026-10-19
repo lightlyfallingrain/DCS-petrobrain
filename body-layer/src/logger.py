@@ -472,6 +472,64 @@ class ConsolePerceptionRunner:
         default=None, init=False, repr=False
     )
 
+    #: `BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- the last
+    #: `MissionStartEvent.sequence` this runner has seen, or `None` before
+    #: the first poll of this process. `_check_for_new_mission` compares
+    #: each poll's value against this field to detect a genuine DCS
+    #: mission (re)start; `None` means "nothing has been checked yet",
+    #: which is deliberately distinct from "sequence 0 was seen" -- the
+    #: very first poll of a process must never reset (the process just
+    #: started with clean state), even if the collector already holds a
+    #: mission-start event from before body-layer connected. **Not** in
+    #: `reset_for_new_mission`'s preserved-field list below (it resets to
+    #: `None` along with every other per-mission field) -- `_check_for_new_
+    #: mission` re-assigns it explicitly, after `_reset_mission_state`
+    #: returns, to the sequence just processed, so a reset never leaves
+    #: this field looking like "never checked" for the poll that follows.
+    last_mission_start_sequence: int | None = None
+
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1). Re-invokes `__init__` on this same object, passing
+        through only the handful of fields that must survive the reset --
+        open network/sqlite handles and the shared `store`/`tasks`
+        references (see `plans/bl15-mission-start/plan.md`'s "reset
+        mechanism" section for why `store`/`tasks` are passed through
+        **unchanged as objects** rather than cleared here: their own
+        `reset_for_new_mission()` must already have run before this call,
+        via `_reset_mission_state`'s explicit ordering). Everything else
+        (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
+        tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
+        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
+        start_sequence`) resets to its declared default.
+
+        **`_last_look_direction` needs an explicit line, not just the
+        re-invoked `__init__`.** It is declared `field(default=None,
+        init=False, repr=False)` -- a plain `default`, not a
+        `default_factory` -- and dataclasses only emits a `self.attr = ...`
+        assignment inside the generated `__init__` for an `init=False`
+        field when that field has a `default_factory`; a plain `default`
+        on an `init=False` field is a class-level attribute, never
+        reassigned per instance. Confirmed by running it: `self.__init__()`
+        alone left a hand-poisoned `_last_look_direction` untouched, the
+        exact silent-survivor class this method exists to prevent. Every
+        other non-preserved field above is either an ordinary `init=True`
+        field (reassigned as a constructor parameter) or a `default_factory`
+        field (reassigned via a fresh factory call either way), so this is
+        the one field this pattern does not cover for this class."""
+        self.__init__(  # type: ignore[misc]
+            aircraft_client=self.aircraft_client,
+            sources=self.sources,
+            store=self.store,
+            tasks=self.tasks,
+            output=self.output,
+            overlay_client=self.overlay_client,
+            group_trace_sink=self.group_trace_sink,
+            world_model_conn=self.world_model_conn,
+            theatre=self.theatre,
+        )
+        self._last_look_direction = None
+
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
@@ -1536,6 +1594,109 @@ def _mission_memory_step(
         logger.exception("mission-memory step failed; continuing")
 
 
+def _reset_mission_state(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole | None,
+    mission_memory: MissionMemory,
+) -> None:
+    """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
+    piece of belief/mission-memory state a clean slate on a genuine DCS
+    mission (re)start. Theatre/world-model are **not** touched here --
+    `runner.theatre`/`runner.world_model_conn` are in `ConsolePerceptionRunner.
+    reset_for_new_mission`'s preserved-field list, so this call is a true
+    no-op for them, matching `BL-15.md`'s own staging (theatre re-resolution
+    is a separate, not-yet-implemented stage).
+
+    **Shared-reference ordering is the one real hazard here, not a defect
+    in the pattern.** `runner.store`/`crew_console.store` are the same
+    `ContactStore` object (and `tasks` likewise) -- deliberately, per
+    `belief.crew_console.CrewConsole.store`'s own field docstring. Resetting
+    that object happens exactly once, *before* `runner.reset_for_new_mission`/
+    `crew_console.reset_for_new_mission` are called -- those two calls pass
+    the (now-cleared) same objects straight through, they do not clear them
+    a second time. Get this order backwards and `runner.reset_for_new_
+    mission`'s own re-run `__init__` would hand back the *same*, still-
+    stale `store`/`tasks` objects -- reassigning the field, not clearing
+    its contents.
+
+    `crew_console` is `None` for `--console` (the debug REPL path, which
+    has no `CrewConsole` at all, only `belief.console.Console` -- built on
+    the REPL thread, not shared with this poll loop) -- a true no-op for
+    that one call, same "optional collaborator, None is a no-op" shape as
+    every other optional field in this codebase."""
+    runner.store.reset_for_new_mission()  # shared with crew_console.store
+    runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
+    for source in runner.sources:
+        source.reset_for_new_mission()
+    runner.reset_for_new_mission()
+    if crew_console is not None:
+        crew_console.reset_for_new_mission()
+    mission_memory.reset_for_new_mission()
+
+
+def _check_for_new_mission(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole | None,
+    mission_memory: MissionMemory,
+    aircraft_client: AircraftLayerClient,
+) -> bool:
+    """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
+    `sequence` has moved since the last poll, reset belief/mission memory
+    via `_reset_mission_state`. Returns whether a reset was performed this
+    call (callers do not currently use the return value for anything but a
+    future caller -- e.g. a spoken acknowledgement -- might).
+
+    **Does nothing on the very first poll of a process**, even if a
+    sequence is already present (the collector may already hold a mission-
+    start event from before body-layer connected) -- `runner.last_mission_
+    start_sequence is None` is this function's own signal for "never
+    checked before," distinct from "sequence 0 was seen," and the plan's
+    explicit design choice is that the process just started with clean
+    state, so there is nothing to reset yet; firing a reset anyway would be
+    harmless but pointless noise (see the plan's "Decisions Requiring User
+    Input").
+
+    **`runner.last_mission_start_sequence` is re-assigned *after*
+    `_reset_mission_state` returns, not before.** That field is not in
+    `ConsolePerceptionRunner.reset_for_new_mission`'s preserved-field list
+    (deliberately -- it is per-mission state, same as every other field
+    that resets), so a reset wipes it back to `None`; assigning it here
+    afterward is what leaves it holding the sequence just processed rather
+    than looking like "never checked" for the very next poll.
+
+    A transport failure degrades to "skip this poll, try again next
+    cycle," never stops the poll loop -- same posture as every other
+    aircraft-layer call in this file's poll loops (e.g. `post_look_
+    direction`'s own try/except)."""
+    try:
+        event = aircraft_client.get_mission_start_latest()
+    except AircraftLayerError:
+        logger.warning("mission-start poll failed (continuing)", exc_info=True)
+        return False
+    if event is None:
+        return False
+
+    sequence = event.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        logger.warning("mission-start event missing/invalid 'sequence': %r", event)
+        return False
+
+    if runner.last_mission_start_sequence is None:
+        runner.last_mission_start_sequence = sequence
+        return False
+    if sequence == runner.last_mission_start_sequence:
+        return False
+
+    logger.info(
+        "mission (re)start detected (sequence %d -> %d) -- resetting belief/mission memory",
+        runner.last_mission_start_sequence,
+        sequence,
+    )
+    _reset_mission_state(runner, crew_console, mission_memory)
+    runner.last_mission_start_sequence = sequence
+    return True
+
+
 def _mark_here_fn(
     memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
 ) -> Callable[[float], str]:
@@ -1696,6 +1857,14 @@ def _run_console_poll_loop(
             # asymmetry a later reader would take for a deliberate
             # distinction.
             try:
+                # `BL-15` Stage 1: detect a genuine DCS mission (re)start
+                # and reset belief/mission memory before this poll's
+                # `run_once()` ingests anything against stale state. No
+                # `CrewConsole` exists on this path (`--console` builds
+                # `belief.console.Console` instead, on the REPL thread, not
+                # shared with this poll loop) -- `_check_for_new_mission`'s
+                # own docstring on why `None` here is a true no-op.
+                _check_for_new_mission(runner, None, mission_memory, aircraft_client)
                 runner.run_once()
                 if trace_collector is not None:
                     if eyesight_view:
@@ -2055,6 +2224,14 @@ def _run_crew_text_poll_loop(
             # (`security-review.md`), pre-existing rather than introduced
             # by that branch.
             try:
+                # `BL-15` Stage 1: detect a genuine DCS mission (re)start
+                # and reset belief/mission memory before this poll's
+                # `run_once()` ingests anything against stale state --
+                # same ordering as `_run_console_poll_loop`'s own call,
+                # except this path has a real `CrewConsole` to reset too.
+                _check_for_new_mission(
+                    runner, crew_console, mission_memory, aircraft_client
+                )
                 runner.run_once()
                 if trace_collector is not None:
                     if eyesight_view:
