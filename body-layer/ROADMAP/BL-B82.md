@@ -1,7 +1,22 @@
 # BL-B82 — No scanning before takeoff, replacing the on-ground silence default
 
-- [ ] **BL-B82 — Petrovich does not scan before takeoff; this replaces the on-ground silence
-  default.** #status/open Raised by the user 2026-10-19, while scoping `[[BL-B81]]` (radio check).
+- [x] **BL-B82 — Petrovich does not scan before takeoff; this replaces the on-ground silence
+  default.** #status/done #needs-flight Raised by the user 2026-10-19, while scoping `[[BL-B81]]`
+  (radio check). Built on `feature/radio-check`, after `[[BL-15]]`'s Stage 1 merged, as this
+  entry's own build order specifies. Reviewer/Performance Reviewer/Security all APPROVED; DoD
+  passed at merge commit `92ae5b3cbee63548fa49344d171296ff3aca40b8` (`plans/radio-check/
+  dod-check.md`) — **merge to `main` pending**, not blocked on live acceptance. `#needs-flight`:
+  the gate logic is directly tested (both poll loops, mutation-verified by Reviewer; existing
+  belief confirmed to decay but not be wiped on the ground) but whether 10 m AGL and "no callouts
+  at all while grounded" feel right in the cockpit is unverified. Acceptance card published:
+  https://claude.ai/artifact/QxCKq1kgUVKZnG1bfxzd8t (`docs/acceptance/2026-10-19-radio-check-card.md`).
+
+  **Milestone-completion question (root `CLAUDE.md`):** does this change what the next milestone
+  should be, or invalidate a downstream assumption? No — it replaces a narrower mechanism
+  (`maybe_apply_on_ground_default`, a one-shot silence latch) with a strictly more general one (a
+  per-poll on-ground gate that also covers look-command refusal), and nothing downstream depended
+  on the old mechanism's narrower shape; `[[BL-B81]]` was explicitly designed to need no special
+  casing once this landed, and that held.
 
   > *"About the silence on ground. A better approach would be: do not scan before takeoff. That's a
   > better trigger and better behaviour. You can replace the ground silence logic with this one."*

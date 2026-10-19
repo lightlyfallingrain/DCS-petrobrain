@@ -1,7 +1,14 @@
 # BL-B81 — Radio check
 
-- [ ] **BL-B81 — Radio check: a command whose only job is to get an answer.** #status/open Raised
-  by the user 2026-10-19, to be built after `[[BL-15]]`'s Stage 1.
+- [x] **BL-B81 — Radio check: a command whose only job is to get an answer.** #status/done
+  #needs-flight Raised by the user 2026-10-19, built after `[[BL-15]]`'s Stage 1, together with
+  `[[BL-B82]]` on `feature/radio-check`. Reviewer/Performance Reviewer/Security all APPROVED; DoD
+  passed (mechanical checks, `plans/radio-check/dod-check.md`) at merge commit
+  `92ae5b3cbee63548fa49344d171296ff3aca40b8` — **merge to `main` pending**, not blocked on live
+  acceptance. `#needs-flight`: the command/greeting tokens are verified directly against
+  `match_transcript`/`CrewConsole.handle_command` (not reasoned from the code), but the real
+  microphone → whisper → intercom chain is unverified. Acceptance card published:
+  https://claude.ai/artifact/QxCKq1kgUVKZnG1bfxzd8t (`docs/acceptance/2026-10-19-radio-check-card.md`).
 
   ## The user's request, as given
 
