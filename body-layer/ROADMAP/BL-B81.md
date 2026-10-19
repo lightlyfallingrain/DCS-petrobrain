@@ -1,0 +1,33 @@
+# BL-B81 — Radio check
+
+- [ ] **BL-B81 — Radio check: a command whose only job is to get an answer.** #status/open Raised
+  by the user 2026-10-19, to be built after `[[BL-15]]`'s Stage 1.
+
+  ## The user's request, as given
+
+  > - Player: "radio check"
+  > -> Petrovich: "loud and clear"
+  >
+  > Alternative
+  > - Player "good morning|day|evening|night Petrovich"
+  > -> Petrovich "good morning|day|evening|night commander"
+  >
+  > Why?
+  > - if intercom is off, there's no response. This is an easy check that A) intercom is ON and
+  >   volume good B) that Petrobrain is operational.
+  >
+  > Note: radio check does not end silent mode on ground.
+
+  ## What it has to fit
+
+  - **It must be answered while silenced, and leave silence on.** `silence` is absolute today —
+    nothing is spoken while `CrewConsole.silenced` is set — and *any* real command ends it
+    (`belief/crew_console.py` module docstring). The on-ground default (`maybe_apply_on_ground_default`)
+    sets that same flag at mission start. So radio check is the first command that both speaks
+    through silence and does not end it.
+  - **Greeting echoes the pilot's word** ("good evening" → "good evening, commander"), not the sim
+    clock.
+  - **In `[[BL-15]]`'s refusal mode** (world model not loaded), every command answers "system error,
+    world model not loaded". That answer serves the check just as well — the pilot hears that
+    Petrobrain is up and what is wrong — so radio check takes the refusal like every other command.
+  - Input surfaces: voice, crew-text, and F10 if a menu item is wanted.
