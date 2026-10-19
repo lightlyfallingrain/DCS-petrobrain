@@ -23,7 +23,14 @@
      enemy territory, but modelling that is deferred)"*
   3. **Takeoff = the existing 10 m AGL threshold** (`ON_GROUND_AGL_THRESHOLD_M`): *"good enough."*
 
-  ## Left to the plan
+  4. **A look command on the ground** (`watch`, `scan forward`) answers *"unable, on the ground"* —
+     understood, not doable (the "say again" vs "unable" distinction). User: *"fine"*.
 
-  - What a look command (`watch`, `scan forward`) answers on the ground — proposed: an "unable"
-    with its reason, per the project's "say again" vs "unable" distinction.
+  ## Build order (user, 2026-10-19: *"Queue these so that build order makes sense, no need for
+  parallel."*)
+
+  1. `[[BL-15]]` Stage 1 merges first — its refusal mode changes `CrewConsole`'s command dispatch.
+  2. **`BL-B82`** — removes the on-ground silence default, which `BL-15`'s reset also touches.
+  3. `[[BL-B81]]` radio check — on the settled dispatch, an ordinary command.
+
+  `feature/radio-check` is rebased onto `main` after `BL-15` merges, before building.
