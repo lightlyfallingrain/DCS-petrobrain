@@ -12,8 +12,9 @@
 
   **Decided (user, 2026-10-19): Piper on both OSes**, chosen over native-per-OS (`say` + Windows
   SAPI) and over keeping several engines behind a flag. Same voice and same behaviour on either
-  machine. Piper is an external binary plus a voice-model file, the same "binary, never a package"
-  rule `say` and `whisper-cli` already follow. Petrovich's voice changes from `say`'s `Daniel` to
+  machine. Piper is an external tool plus a voice-model file, kept outside the adapter's own code —
+  as installed it is `piper-tts` in a venv of its own (no standalone Piper binary works on the Mac;
+  see the recon's 2026-10-20 addenda), so the adapter itself stays stdlib-only. Petrovich's voice changes from `say`'s `Daniel` to
   a Piper voice the user picks.
 
   **Plan approved (user, 2026-10-20)**: `plans/audio-adapter-os-independent/plan.md`, with the
