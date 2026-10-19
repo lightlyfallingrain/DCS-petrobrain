@@ -890,6 +890,15 @@ STAND_BY_AFTER_S: Final[float] = 2.0
 #: **Unmeasured**, same debt class as `STAND_BY_AFTER_S` above.
 BRAIN_REPLY_MAX_AGE_S: Final[float] = 20.0
 
+#: `BL-15` Stage 3 (`plans/bl15-mission-start/plan.md`, user direction
+#: 2026-10-19: *"On error loud refusal is better."*) -- the fixed line
+#: every player command gets while `CrewConsole.refused` is set, i.e.
+#: while the live mission's theatre could not be resolved to a loaded
+#: world-model store. Deliberately a single literal string, not a
+#: template: the user's own wording, verbatim, so a pilot who hears it
+#: twice (voice, text, overlay) hears exactly the same words each time.
+WORLD_MODEL_NOT_LOADED_REFUSAL: Final[str] = "system error, world model not loaded"
+
 
 @dataclass
 class CrewConsole:
@@ -1118,6 +1127,24 @@ class CrewConsole:
     #: dumped the moment silence ends, it is simply never voiced.
     silenced: bool = field(default=False, repr=False)
 
+    #: `BL-15` Stage 3 -- set by `logger._enter_refusal_mode` when a
+    #: mission-start event's live theatre could not be resolved to a
+    #: loaded world-model store (unknown theatre, missing/unbuilt store, a
+    #: failed open, a mismatched built region, or no `--world-model-dir`
+    #: to resolve one from at all). While `True`, every player command
+    #: this class dispatches (`handle_command`, `handle_line`,
+    #: `handle_transcript`) is answered with the fixed
+    #: `WORLD_MODEL_NOT_LOADED_REFUSAL` line instead of being acted on --
+    #: see `_refusal_response`. Cleared by `logger._maybe_switch_theatre`
+    #: the next time a mission (re)start resolves its theatre
+    #: successfully; never cleared by `reset_for_new_mission` passing it
+    #: through (it resets to `False` with the rest of per-mission state,
+    #: same as every other non-preserved field -- `_check_for_new_mission`
+    #: re-evaluates it immediately afterward via `_maybe_switch_theatre`,
+    #: which sets it right back to `True` if the *new* mission's own
+    #: theatre still fails to resolve).
+    refused: bool = field(default=False, repr=False)
+
     #: Set by `maybe_apply_on_ground_default` the first time it is called,
     #: regardless of outcome -- an internal one-shot latch, never
     #: re-evaluated after that first call even if ownship later lands
@@ -1178,8 +1205,10 @@ class CrewConsole:
         confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
         `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
         contact_id`, `attack_run_transition`, `observ_transition`,
-        `_on_ground_default_applied`, `enrichment`) resets to its declared
-        default."""
+        `_on_ground_default_applied`, `enrichment`, `refused`) resets to
+        its declared default -- see `refused`'s own field docstring for
+        why resetting it here is correct even though a mission (re)start
+        is exactly the event that might need to set it right back."""
         self.__init__(  # type: ignore[misc]
             store=self.store,
             tasks=self.tasks,
@@ -1195,10 +1224,39 @@ class CrewConsole:
             silenced=self.silenced,
         )
 
+    def _refusal_response(self, now_sim: float) -> list[str] | None:
+        """`BL-15` Stage 3's loud-refusal mode. `None` while `self.refused`
+        is `False` -- the overwhelmingly common case -- so every caller's
+        own dispatch logic runs unchanged; a non-`None` result is the
+        fixed `WORLD_MODEL_NOT_LOADED_REFUSAL` line, already printed/
+        pushed via `_print`, for the caller to return immediately without
+        doing anything else.
+
+        **Checked at the top of all three of this class's production
+        entry points** (`handle_command`, `handle_line`, `handle_
+        transcript`) rather than at one shared call site, because there
+        is no single generic dispatcher all three already funnel through:
+        F10 selections and a committed voice "act" disposition reach
+        `handle_command` directly; typed crew-text and voice's
+        "fallthrough" disposition reach `handle_line` directly (the latter
+        via `_act_on_voice_decision`, not through `handle_command` first);
+        voice itself enters through `handle_transcript`, which may act,
+        confirm, say-again, or fall through without ever calling the other
+        two. The same check, the same fixed string, at each, is the
+        actual single source of truth here -- not a single call site."""
+        if not self.refused:
+            return None
+        lines = [WORLD_MODEL_NOT_LOADED_REFUSAL]
+        self._print(lines, now_sim)
+        return lines
+
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()
         if not stripped:
             return []
+        refusal = self._refusal_response(now_sim)
+        if refusal is not None:
+            return refusal
         if stripped.startswith("!inject-urgent"):
             lines, bypass_gate = self._handle_inject_urgent(stripped, now_sim)
             self._print(lines, now_sim, bypass_gate=bypass_gate)
@@ -1420,6 +1478,15 @@ class CrewConsole:
         was silence: a recognised token reaching this method and doing
         nothing was indistinguishable, from the cockpit, from not having
         been heard at all."""
+        # `BL-15` Stage 3: checked first, before anything else this method
+        # does -- while refused, nothing is dispatched, nothing counts
+        # as a command for `commands_handled`/silence-ending purposes,
+        # and no per-dispatch state (`last_command_target_contact_id`/
+        # `attack_run_transition`/`observ_transition`) is touched. The
+        # pilot gets exactly the fixed line and nothing else happens.
+        refusal = self._refusal_response(now_sim)
+        if refusal is not None:
+            return refusal
         self._note_player_command()
         # Reset before dispatch -- see `last_command_target_contact_id`'s
         # own docstring for why a stale value from an earlier `follow`
@@ -3210,6 +3277,14 @@ class CrewConsole:
         the pilot his *command* was rejected, when in fact his *answer*
         was late -- a materially wrong readback, and the reason this
         branch exists rather than leaving the fallthrough alone."""
+        # `BL-15` Stage 3: checked before any of the confirm-band/
+        # late-answer/classify logic below -- while refused, a pending
+        # confirmation (if any) is left exactly as it was rather than
+        # being resolved by this transcript, since the pilot's spoken
+        # words during a system error are not being acted on at all.
+        refusal = self._refusal_response(now_sim)
+        if refusal is not None:
+            return refusal
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:

@@ -1352,6 +1352,94 @@ def test_recognised_free_text_command_ends_silence() -> None:
     assert console.silenced is False
 
 
+# -- BL-15 Stage 3: loud-refusal mode (plans/bl15-mission-start/plan.md, ----
+# user direction 2026-10-19: "on error loud refusal is better") -- every ----
+# player command gets the fixed line while CrewConsole.refused is set. ------
+
+
+def test_refused_handle_command_returns_the_fixed_refusal_line() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.refused = True
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert lines == ["system error, world model not loaded"]
+
+
+def test_refused_handle_line_returns_the_fixed_refusal_line() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store)
+    console.refused = True
+
+    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
+
+    assert lines == ["system error, world model not loaded"]
+
+
+def test_refused_handle_transcript_returns_the_fixed_refusal_line() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.refused = True
+
+    lines = console.handle_transcript(
+        "watch nearest",
+        confidence=0.9,
+        token="watch_nearest",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["system error, world model not loaded"]
+
+
+def test_refused_blocks_dispatch_entirely_not_just_the_readback() -> None:
+    """The refused command must not run at all -- `watch_nearest` would
+    otherwise register a `PendingIntent`; confirm none is created."""
+    tasks = TaskStore()
+    console = CrewConsole(store=ContactStore(), tasks=tasks)
+    console.refused = True
+
+    console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert tasks.tasks == []
+
+
+def test_refused_does_not_end_silence_or_increment_commands_handled() -> None:
+    """A refused command is not dispatch -- it must not reset any of the
+    per-dispatch bookkeeping a real dispatch would (`commands_handled`,
+    `silenced`'s "any command ends silence" rule). `silence` itself is
+    issued *before* `refused` is set, since the whole point is to compare
+    before/after: a real dispatch (this first `silence` call) does count
+    and does set `silenced`; the refused call that follows must change
+    neither."""
+    console = CrewConsole(store=ContactStore())
+    console.handle_command("silence", now_sim=0.0)
+    commands_handled_before_refusal = console.commands_handled
+    console.refused = True
+
+    console.handle_command("watch_nearest", now_sim=1.0)
+
+    assert console.commands_handled == commands_handled_before_refusal
+    assert console.silenced is True
+
+
+def test_not_refused_by_default_dispatches_normally() -> None:
+    """`refused` defaults to `False` -- an ordinary `CrewConsole` built
+    without touching it dispatches exactly as before this stage."""
+    console = CrewConsole(store=ContactStore())
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert lines != ["system error, world model not loaded"]
+
+
 # -- maybe_apply_on_ground_default (plans/spu8-intercom/plan.md Stage 5: ----
 # mission-start on-ground silent-mode default, one-shot, ends only via the ---
 # existing "any command ends silence" logic above -- not by leaving the ----
