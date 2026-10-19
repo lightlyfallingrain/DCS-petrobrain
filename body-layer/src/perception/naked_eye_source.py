@@ -590,11 +590,25 @@ class NakedEyePerceptionSource:
         **not** touch `scan_plan`/`optic`/`sight_cone`/`suppressed_until_sim`
         -- those are per-poll fields the poll loop overwrites every tick
         (`logger._apply_active_gaze`), not mission-scoped state that would
-        otherwise leak across a restart."""
+        otherwise leak across a restart. `peripheral_stimulus_ids` is the
+        same shape (the attention-capture channel that would ever write it
+        does not exist yet -- it stays its construction-time default
+        forever today), so it is likewise left untouched.
+
+        **`live_los_coverage` now resets too** (`BL-15` Stage 1 Decision 5,
+        revising the reviewer's own "process-lifetime regression guard"
+        reading on `feature/bl15-mission-start`'s first batch): per-run log
+        files now roll per *mission*, not just per process (`logger.
+        _reroll_run_logs`), so a coverage counter that kept counting across
+        a mission restart would silently mix two missions' worth of gate-4
+        evaluations into one end-of-run summary line that no longer
+        corresponds to any single log file. A fresh `LiveLosCoverage()` per
+        mission is what makes the counter match what it is logged beside."""
         self._previously_seen_at.clear()
         self._acquired_at.clear()
         self._object_id_to_last_observation_id.clear()
         self._observation_count = 0
+        self.live_los_coverage = LiveLosCoverage()
 
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
         if (

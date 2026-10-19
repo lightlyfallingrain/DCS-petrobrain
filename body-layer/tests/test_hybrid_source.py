@@ -11,6 +11,7 @@ world-model's own coordinate-subsystem tests).
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -627,3 +628,34 @@ def test_reset_for_new_mission_clears_dedup_and_counter_state() -> None:
     assert source._object_id_to_last_observation_id == {}
     assert source._observation_count == 0
     assert source._dropped_count == 0
+
+
+#: Every `HybridPerceptionSource` field, bucketed -- `review.md`'s Optional
+#: Refinement 1 ("would the completeness tests catch a newly-added, unreset
+#: field? ... No for NakedEyePerceptionSource/HybridPerceptionSource"). This
+#: class has no per-poll-overwritten bucket at all (unlike `NakedEyePerception
+#: Source`'s `scan_plan`/`optic`/...): every field here is either a
+#: constructor argument this class never mutates, or dedup/counter state
+#: `reset_for_new_mission` already clears above.
+_PRESERVED_FIELDS: frozenset[str] = frozenset(
+    {"aircraft_client", "theatre", "emit_mode"}
+)
+_RESET_FIELDS: frozenset[str] = frozenset(
+    {
+        "_last_emitted_texts",
+        "_object_id_to_last_observation_id",
+        "_observation_count",
+        "_dropped_count",
+    }
+)
+
+
+def test_reset_for_new_mission_field_coverage_is_complete() -> None:
+    """Enumerates `dataclasses.fields(HybridPerceptionSource)` at test time
+    and asserts every one is accounted for by exactly one of the two buckets
+    above -- a field added later and placed in neither fails this test
+    immediately, rather than silently leaking across a mission restart with
+    no test ever noticing (the gap `review.md` named)."""
+    field_names = {f.name for f in dataclasses.fields(HybridPerceptionSource)}
+    assert field_names == _PRESERVED_FIELDS | _RESET_FIELDS
+    assert _PRESERVED_FIELDS.isdisjoint(_RESET_FIELDS)

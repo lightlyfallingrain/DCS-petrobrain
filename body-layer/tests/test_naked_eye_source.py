@@ -1819,12 +1819,17 @@ def test_reset_for_new_mission_clears_dedup_and_counter_state() -> None:
     private dedup/acquisition/counter attributes directly rather than
     driving a real `poll()` through the visibility pipeline, which is
     already covered by every other test in this file; this test is only
-    about the reset mechanism itself."""
+    about the reset mechanism itself. `live_los_coverage` (Stage 1
+    Decision 5) is poked the same way, since `check_visibility` is the
+    only other writer and this test deliberately avoids driving the real
+    pipeline."""
     source, _client = _source(None)
     source._previously_seen_at[7] = 10.0
     source._acquired_at[7] = 10.0
     source._object_id_to_last_observation_id[7] = "obs_1"
     source._observation_count = 3
+    source.live_los_coverage.evaluated = 5
+    source.live_los_coverage.no_verdict = 2
 
     source.reset_for_new_mission()
 
@@ -1832,3 +1837,55 @@ def test_reset_for_new_mission_clears_dedup_and_counter_state() -> None:
     assert source._acquired_at == {}
     assert source._object_id_to_last_observation_id == {}
     assert source._observation_count == 0
+    assert source.live_los_coverage.evaluated == 0
+    assert source.live_los_coverage.no_verdict == 0
+
+
+#: Every `NakedEyePerceptionSource` field, bucketed -- `review.md`'s Optional
+#: Refinement 1. Three buckets, matching the class's own three shapes of
+#: field (see `reset_for_new_mission`'s own docstring for the per-poll-
+#: overwritten reasoning, and `peripheral_stimulus_ids`'s own field
+#: docstring for why it sits there too despite nothing writing it yet).
+_PRESERVED_FIELDS: frozenset[str] = frozenset(
+    {
+        "aircraft_client",
+        "theatre",
+        "world_model_conn",
+        "forest",
+        "emit_mode",
+        "trace_sink",
+    }
+)
+_PER_POLL_OVERWRITTEN_FIELDS: frozenset[str] = frozenset(
+    {
+        "scan_plan",
+        "optic",
+        "sight_cone",
+        "suppressed_until_sim",
+        "peripheral_stimulus_ids",
+    }
+)
+_RESET_FIELDS: frozenset[str] = frozenset(
+    {
+        "_previously_seen_at",
+        "_acquired_at",
+        "_object_id_to_last_observation_id",
+        "_observation_count",
+        "live_los_coverage",
+    }
+)
+
+
+def test_reset_for_new_mission_field_coverage_is_complete() -> None:
+    """Enumerates `dataclasses.fields(NakedEyePerceptionSource)` at test
+    time and asserts every one is accounted for by exactly one of the
+    three buckets above -- a field added later and placed in none of them
+    fails this test immediately, rather than silently leaking across a
+    mission restart with no test ever noticing (the gap `review.md`
+    named)."""
+    field_names = {f.name for f in dataclasses.fields(NakedEyePerceptionSource)}
+    all_buckets = _PRESERVED_FIELDS | _PER_POLL_OVERWRITTEN_FIELDS | _RESET_FIELDS
+    assert field_names == all_buckets
+    assert _PRESERVED_FIELDS.isdisjoint(_PER_POLL_OVERWRITTEN_FIELDS)
+    assert _PRESERVED_FIELDS.isdisjoint(_RESET_FIELDS)
+    assert _PER_POLL_OVERWRITTEN_FIELDS.isdisjoint(_RESET_FIELDS)
