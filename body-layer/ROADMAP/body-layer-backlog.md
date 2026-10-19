@@ -120,6 +120,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B79]] — `remember_location`'s `label` needs a bound before any dispatcher calls it
 - [[BL-B80]] — the 9K113 slew loop: pointing the sight on the player axis (split from [[BL-B66]])
 - [[BL-B81]] — radio check: an answer through silence, proving intercom and Petrobrain are up
+- [[BL-B82]] — no scanning before takeoff, replacing the on-ground silence default
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
