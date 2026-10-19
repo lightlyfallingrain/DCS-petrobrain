@@ -64,6 +64,22 @@ class MissionMemory:
         pattern in this codebase, e.g. `CrewConsole.speech_log_sink`)."""
         self._sink = sink
 
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1): so nothing from the previous mission can be recalled in
+        this one. Re-invokes `__init__` on this same object, then restores
+        the one field that must survive -- the open `MissionMemoryLogWriter`
+        sink, same mechanism as `belief.contacts.ContactStore.reset_for_
+        new_mission`'s "re-run the constructor" pattern, see that method's
+        own docstring. `_next_seq`/`_next_mark_index` restart at 1 inside
+        whatever log file is still open (the plan's own named risk -- a
+        future debrief tool reading that file across a restart would see
+        two entries with `seq=1`); full per-mission log re-rolling is a
+        separate, not-yet-decided follow-up, not this method's job."""
+        sink = self._sink
+        self.__init__()  # type: ignore[misc]
+        self.set_sink(sink)
+
     @property
     def entries(self) -> list[Entry]:
         """Every entry appended so far, insertion order. A read-only

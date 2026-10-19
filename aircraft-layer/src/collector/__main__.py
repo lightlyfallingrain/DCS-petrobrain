@@ -59,11 +59,18 @@ served by `GET /spu8/state`, and consumed by `_handle_ptt_state` to gate
 also handed to `AudioPlaybackSender` as the gate/volume provider consulted
 before each queued line plays (Stage 3).
 
+A `MissionStartReceiver` (`plans/bl15-mission-start/plan.md`, BL-15 Stage 1)
+is opened and run on its own background thread the same way as
+`unit_velocity_receiver` -- the fifth channel running the Hook-to-collector
+direction, feeding a `MissionStartCache` that `GET /mission_start/latest`
+reads.
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
        [--f10-host HOST] [--f10-port PORT]
        [--unit-velocity-host HOST] [--unit-velocity-port PORT]
+       [--mission-start-host HOST] [--mission-start-port PORT]
        [--dump-interval SECONDS] [--debug]
 """
 
@@ -81,6 +88,7 @@ from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
     LineOfSightCache,
+    MissionStartCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -106,6 +114,13 @@ from collector.firing_receiver import EmitterTracker, FiringEventsReceiver
 from collector.line_of_sight_receiver import DEFAULT_HOST as LOS_DEFAULT_HOST
 from collector.line_of_sight_receiver import DEFAULT_PORT as LOS_DEFAULT_PORT
 from collector.line_of_sight_receiver import LineOfSightReceiver
+from collector.mission_start_receiver import (
+    DEFAULT_HOST as MISSION_START_DEFAULT_HOST,
+)
+from collector.mission_start_receiver import (
+    DEFAULT_PORT as MISSION_START_DEFAULT_PORT,
+)
+from collector.mission_start_receiver import MissionStartReceiver
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
 from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
@@ -196,6 +211,17 @@ def main() -> None:
         help="line-of-sight Hook script's inbound command listener port",
     )
     parser.add_argument(
+        "--mission-start-host",
+        default=MISSION_START_DEFAULT_HOST,
+        help="mission-start Hook script's UDP sender host (loopback)",
+    )
+    parser.add_argument(
+        "--mission-start-port",
+        type=int,
+        default=MISSION_START_DEFAULT_PORT,
+        help="mission-start Hook script's UDP sender port",
+    )
+    parser.add_argument(
         "--firing-host",
         default=FIRING_DEFAULT_HOST,
         help="firing-events Hook script's UDP sender host (loopback)",
@@ -264,6 +290,17 @@ def main() -> None:
         target=line_of_sight_receiver.serve_forever, daemon=True
     )
     line_of_sight_receiver_thread.start()
+    mission_start_cache = MissionStartCache()
+    mission_start_receiver = MissionStartReceiver(
+        mission_start_cache,
+        host=args.mission_start_host,
+        port=args.mission_start_port,
+    )
+    mission_start_receiver.open()
+    mission_start_receiver_thread = threading.Thread(
+        target=mission_start_receiver.serve_forever, daemon=True
+    )
+    mission_start_receiver_thread.start()
     look_direction_sender = LookDirectionSender(
         host=args.look_direction_host, port=args.look_direction_port
     )
@@ -323,6 +360,7 @@ def main() -> None:
         line_of_sight_cache=line_of_sight_cache,
         look_direction_sender=look_direction_sender,
         emitter_tracker=emitter_tracker,
+        mission_start_cache=mission_start_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -346,6 +384,7 @@ def main() -> None:
         line_of_sight_receiver.close()
         look_direction_sender.close()
         firing_events_receiver.close()
+        mission_start_receiver.close()
 
 
 if __name__ == "__main__":

@@ -1352,6 +1352,205 @@ def test_recognised_free_text_command_ends_silence() -> None:
     assert console.silenced is False
 
 
+# -- BL-15 Stage 3: loud-refusal mode (plans/bl15-mission-start/plan.md, ----
+# user direction 2026-10-19: "on error loud refusal is better") -- every ----
+# player command gets the fixed line while CrewConsole.refused is set. ------
+
+
+def test_refused_handle_command_returns_the_fixed_refusal_line() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.refused = True
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert lines == ["system error, world model not loaded"]
+
+
+def test_refused_handle_line_returns_the_fixed_refusal_line() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store)
+    console.refused = True
+
+    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
+
+    assert lines == ["system error, world model not loaded"]
+
+
+def test_refused_handle_transcript_returns_the_fixed_refusal_line() -> None:
+    console = CrewConsole(store=ContactStore())
+    console.refused = True
+
+    lines = console.handle_transcript(
+        "watch nearest",
+        confidence=0.9,
+        token="watch_nearest",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["system error, world model not loaded"]
+
+
+def test_refused_blocks_dispatch_entirely_not_just_the_readback() -> None:
+    """The refused command must not run at all -- `watch_nearest` would
+    otherwise register a `PendingIntent`; confirm none is created."""
+    tasks = TaskStore()
+    console = CrewConsole(store=ContactStore(), tasks=tasks)
+    console.refused = True
+
+    console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert tasks.tasks == []
+
+
+def test_refused_does_not_end_silence_or_increment_commands_handled() -> None:
+    """A refused command is not dispatch -- it must not reset any of the
+    per-dispatch bookkeeping a real dispatch would (`commands_handled`,
+    `silenced`'s "any command ends silence" rule). `silence` itself is
+    issued *before* `refused` is set, since the whole point is to compare
+    before/after: a real dispatch (this first `silence` call) does count
+    and does set `silenced`; the refused call that follows must change
+    neither."""
+    console = CrewConsole(store=ContactStore())
+    console.handle_command("silence", now_sim=0.0)
+    commands_handled_before_refusal = console.commands_handled
+    console.refused = True
+
+    console.handle_command("watch_nearest", now_sim=1.0)
+
+    assert console.commands_handled == commands_handled_before_refusal
+    assert console.silenced is True
+
+
+def test_not_refused_by_default_dispatches_normally() -> None:
+    """`refused` defaults to `False` -- an ordinary `CrewConsole` built
+    without touching it dispatches exactly as before this stage."""
+    console = CrewConsole(store=ContactStore())
+
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
+
+    assert lines != ["system error, world model not loaded"]
+
+
+# -- Batch 2 review required fix (`plans/bl15-mission-start/review.md`, ----
+# "(a)"): `drain_events`/`drain_brain` must not speak proactively while ----
+# `refused` either -- constructed directly against a non-empty store/ -----
+# pending-escalation state, bypassing the reset-always-precedes-refusal ----
+# call graph `logger.py` happens to give today, so these do not depend on ---
+# that invariant holding. -----------------------------------------------
+
+
+def test_refused_drain_events_speaks_nothing_against_a_non_empty_store() -> None:
+    """A real, unacknowledged `CONTACT_DETECTED` event is present (built
+    directly on the store, not via `logger.py`'s reset-then-refuse call
+    graph) and `console.refused` is set directly -- proves the guard is a
+    property of `CrewConsole` itself, not a consequence of the store
+    always being empty by the time refusal is reached."""
+    store = ContactStore()
+    overlay = FakeOverlayClient()
+    console = CrewConsole(store=store, overlay_client=overlay)
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console.refused = True
+
+    spoken = console.drain_events(now_sim=0.0)
+
+    assert spoken == []
+    assert overlay.pushed == []
+
+
+def test_refused_drain_events_consumes_rather_than_leaves_the_event_queued() -> None:
+    """Drain and discard, not leave queued (the review's explicit
+    either/or) -- once refusal clears, the event that was pending while
+    refused must not surface then, spoken against belief computed before
+    the refusal/switch rather than after it."""
+    store = ContactStore()
+    console = CrewConsole(store=store)
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console.refused = True
+    assert console.drain_events(now_sim=0.0) == []
+
+    console.refused = False
+
+    assert console.drain_events(now_sim=0.0) == []
+
+
+def test_refused_drain_brain_speaks_nothing_against_a_pending_escalation() -> None:
+    """A real escalation is outstanding and a reply for it is queued
+    (built directly, not via `logger.py`'s call graph) -- `console.refused`
+    set directly must stop both D8's "stand by" and the reply's own
+    readback/confirm/pick action, not merely suppress the returned lines
+    while still running `_handle_brain_reply`'s side effects
+    (`_print`/`_act`)."""
+    from belief.crew_console import STAND_BY_AFTER_S
+
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    overlay = FakeOverlayClient()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, brain_client=brain_client, overlay_client=overlay, tasks=tasks
+    )
+    console.handle_line("scan somethinggarbled", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id, kind="confirm", t_sim=0.0, token="report_all"
+        )
+    ]
+    console.refused = True
+
+    lines = console.drain_brain(now_sim=STAND_BY_AFTER_S + 5.0)
+
+    assert lines == []
+    assert overlay.pushed == []
+    assert console._pending_confirmation is None
+
+
+def test_refused_drain_brain_consumes_rather_than_leaves_the_reply_queued() -> None:
+    """Drain and discard, not leave queued: the reply drained while
+    refused must not resurface once refusal clears -- `brain_client.
+    poll_replies()` has already handed it over (a real queue-draining
+    client would not return it twice), and `_pending_escalations` must no
+    longer be tracking its `utterance_id` either."""
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="unable",
+            t_sim=0.0,
+            reason="NO_SUCH_COMMAND",
+        )
+    ]
+    console.refused = True
+
+    assert console.drain_brain(now_sim=1.0) == []
+    assert utterance_id not in console._pending_escalations
+
+    console.refused = False
+
+    assert console.drain_brain(now_sim=2.0) == []
+
+
 # -- maybe_apply_on_ground_default (plans/spu8-intercom/plan.md Stage 5: ----
 # mission-start on-ground silent-mode default, one-shot, ends only via the ---
 # existing "any command ends silence" logic above -- not by leaving the ----

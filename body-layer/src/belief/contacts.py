@@ -854,6 +854,19 @@ class ContactStore:
         #: None` branch already uses at emission.
         self._observability_tracked = False
 
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1, `BL-B68`'s diagnosed gap). Re-invokes `__init__` on this
+        same object -- every field above is mission-scoped, nothing to
+        preserve -- so any field added later resets to the constructor's
+        own default automatically rather than needing a second,
+        hand-maintained reset list (see `plans/bl15-mission-start/plan.md`'s
+        "reset mechanism" section). Object identity is unchanged, so
+        `logger.ConsolePerceptionRunner.store`/`belief.crew_console.
+        CrewConsole.store` (the same instance, by design) see the reset
+        with no further wiring."""
+        self.__init__()  # type: ignore[misc]
+
     def callout_observable(self, contact: Contact, now_sim: float) -> bool:
         """Whether a spontaneous callout about `contact` may be *spoken*
         right now, per the no-omniscience invariant: is it observable from

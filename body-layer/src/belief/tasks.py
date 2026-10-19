@@ -187,6 +187,16 @@ class TaskStore:
         self._tasks: dict[str, PendingIntent] = {}
         self._next_task_number = 0
 
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1, `BL-B68`'s diagnosed gap: a pending `scan_area`/
+        `watch_contact`/`attack_target` referencing a contact id that no
+        longer means anything). Re-invokes `__init__` on this same
+        object -- both fields are mission-scoped, nothing to preserve --
+        same mechanism as `belief.contacts.ContactStore.reset_for_new_
+        mission`, see that method's own docstring."""
+        self.__init__()  # type: ignore[misc]
+
     @property
     def tasks(self) -> list[PendingIntent]:
         """Every task, insertion order. A read-only view -- callers must not

@@ -442,6 +442,25 @@ class FiredOnTracker:
     #: written for it.
     _last_write_sim: dict[str, float] = field(default_factory=dict)
 
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`,
+        Batch 2 review follow-up -- this tracker predates `BL-15` and was
+        not brought under its reset mechanism when `ContactStore.
+        reset_for_new_mission`/`TaskStore.reset_for_new_mission` were
+        added). Without this, `_scanned_event_count` keeps indexing into
+        `ContactStore.events` by the *old* mission's length after
+        `_reset_mission_state` has reset that list back to empty --
+        `events[_scanned_event_count:]` then silently returns nothing
+        until the new mission's own event log grows past the old count,
+        so `fired_on` mission-memory entries stop being written for an
+        arbitrary stretch after every restart. `_last_write_sim` is keyed
+        by contact id, which is also mission-scoped (`ContactStore` mints
+        fresh ids per mission), so a stale entry there is equally wrong
+        even though a collision is unlikely. Re-invokes `__init__`, same
+        "every field is mission-scoped, nothing to preserve" idiom
+        `ContactStore.reset_for_new_mission` already uses."""
+        self.__init__()  # type: ignore[misc]
+
 
 def _write_fired_on_entries(
     memory: MissionMemory,

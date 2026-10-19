@@ -34,6 +34,15 @@ co-pilot ICS power, volume). Unlike every cache above, it also exposes
 `gate_state()` -- a derived `Spu8GateState(gate_open, volume)` that
 `collector.audio_sender.AudioPlaybackSender`'s real wiring consults once
 per queued item, fail-safe-closed when no sample has arrived yet.
+
+`MissionStartCache` (`plans/bl15-mission-start/plan.md`, BL-15 Stage 1) is
+the same "latest of one" shape again, for the mission-start signal: a
+single current fact body-layer polls for change (has `sequence` moved
+since it last looked), not a drained event queue like `F10CommandQueue` --
+unlike two F10 selections landing in one poll interval, which must both
+survive, two `onSimulationStart` firings between polls mean two mission
+restarts happened before body-layer ever looked, and only the latest one
+is still relevant.
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ from typing import NamedTuple
 from schema import (
     F10CommandEvent,
     LineOfSightSnapshot,
+    MissionStartEvent,
     PetrovichIndicationSample,
     PetrovichWheelSample,
     PttSample,
@@ -244,6 +254,28 @@ class LineOfSightCache:
 
     def latest(self) -> LineOfSightSnapshot | None:
         """Return the most recently pushed snapshot, or `None` if empty."""
+        return self._latest
+
+
+class MissionStartCache:
+    """Holds the latest `MissionStartEvent` (`plans/bl15-mission-start/
+    plan.md`, BL-15 Stage 1) -- same "latest of one" shape as
+    `TelemetryCache`/`WorldObjectsCache`, see this module's own docstring
+    for why this is `push`/`latest`, not `push`/`drain_all` like
+    `F10CommandQueue`."""
+
+    def __init__(self) -> None:
+        self._latest: MissionStartEvent | None = None
+
+    def push(self, event: MissionStartEvent) -> None:
+        """Record a newly-received mission-start event as the current
+        latest state."""
+        self._latest = event
+
+    def latest(self) -> MissionStartEvent | None:
+        """Return the most recently pushed event, or `None` if no
+        `onSimulationStart` has fired yet this collector process's
+        lifetime."""
         return self._latest
 
 

@@ -128,6 +128,15 @@ the body/brain process, on either Windows or Mac (compute topology note in
   endpoint from `/world_objects/latest`/`/unit_velocity/latest`, same
   "separate feed, separate clock, joined client-side by `unit_name`"
   reasoning as `/unit_velocity/latest`'s own docstring.
+- `GET /mission_start/latest` -> the most recent `MissionStartEvent`
+  (`plans/bl15-mission-start/plan.md`, BL-15 Stage 1) as JSON, or JSON
+  `null` on the same "not an error" basis as every other `/latest`
+  endpoint -- no `onSimulationStart` has fired yet this collector
+  process's lifetime is the ordinary state at startup, not an error. Body-
+  layer polls this and compares `sequence` against the last value it saw
+  to detect a genuine mission (re)start; this endpoint does no comparison
+  or state of its own, same "this layer only serves, interpretation is
+  body-layer's job" split as `/petrovich_indication/latest`.
 - `GET /firing/latest` -> `collector.firing_receiver.EmitterTracker.
   snapshot()` as JSON (`plans/emitter-visibility/plan.md` Stage B,
   `AC-B8`) -- `{"dcs_model_time_s", "received_wall_clock_s", "active":
@@ -184,6 +193,7 @@ from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
     LineOfSightCache,
+    MissionStartCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -211,6 +221,7 @@ _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
 _LINE_OF_SIGHT_LATEST_PATH = "/line_of_sight/latest"
+_MISSION_START_LATEST_PATH = "/mission_start/latest"
 _FIRING_LATEST_PATH = "/firing/latest"
 _PTT_STATE_PATH = "/ptt/state"
 _SPU8_STATE_PATH = "/spu8/state"
@@ -264,6 +275,13 @@ def _handle_line_of_sight_latest(
 ) -> dict[str, Any] | None:
     snapshot = cache.latest()
     return None if snapshot is None else snapshot.to_dict()
+
+
+def _handle_mission_start_latest(
+    cache: MissionStartCache,
+) -> dict[str, Any] | None:
+    event = cache.latest()
+    return None if event is None else event.to_dict()
 
 
 def _handle_firing_latest(tracker: EmitterTracker) -> dict[str, Any]:
@@ -338,6 +356,7 @@ def _make_handler(
     line_of_sight_cache: LineOfSightCache,
     look_direction_sender: LookDirectionSender | None,
     emitter_tracker: EmitterTracker,
+    mission_start_cache: MissionStartCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -358,6 +377,11 @@ def _make_handler(
             if path == _LINE_OF_SIGHT_LATEST_PATH:
                 self._respond_json(
                     200, _handle_line_of_sight_latest(line_of_sight_cache)
+                )
+                return
+            if path == _MISSION_START_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_mission_start_latest(mission_start_cache)
                 )
                 return
             if path == _FIRING_LATEST_PATH:
@@ -617,6 +641,7 @@ class TelemetryAPIServer:
         line_of_sight_cache: LineOfSightCache | None = None,
         look_direction_sender: LookDirectionSender | None = None,
         emitter_tracker: EmitterTracker | None = None,
+        mission_start_cache: MissionStartCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
@@ -662,6 +687,11 @@ class TelemetryAPIServer:
             line_of_sight_cache
             if line_of_sight_cache is not None
             else LineOfSightCache()
+        )
+        self._mission_start_cache = (
+            mission_start_cache
+            if mission_start_cache is not None
+            else MissionStartCache()
         )
         # `EmitterTracker` defaults to a fresh, never-fed instance -- same
         # "unconfigured answers the empty/default state, never crashes"
@@ -717,6 +747,7 @@ class TelemetryAPIServer:
                 self._line_of_sight_cache,
                 self._look_direction_sender,
                 self._emitter_tracker,
+                self._mission_start_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

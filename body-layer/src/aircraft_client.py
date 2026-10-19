@@ -67,6 +67,16 @@ empty state is `[]`, not `None` (the response is always a JSON list, never
 the same posture as every other `get_*` -- only the *empty* state differs
 from the `/latest`-style endpoints.
 
+`get_mission_start_latest` (`plans/bl15-mission-start/plan.md`, BL-15
+Stage 1) is this seam's `GET /mission_start/latest` counterpart to
+`get_line_of_sight_latest` above -- same "not an error" empty-cache
+posture (no `onSimulationStart` has fired yet this collector process's
+lifetime, the ordinary state before a mission ever loads). `logger.py`'s
+`_check_for_new_mission` is the one caller, comparing the returned
+`sequence` against the last one it saw to detect a genuine mission
+(re)start -- this client does no comparison or interpretation itself, same
+split of responsibility as every other `get_*` method here.
+
 `get_firing_latest` (`plans/emitter-visibility/plan.md` Stage B, `AC-B8`)
 is this seam's `GET /firing/latest` counterpart to `get_line_of_sight_
 latest` above, with one difference: the aircraft layer's own response is
@@ -178,6 +188,23 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /line_of_sight/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_mission_start_latest(self) -> dict[str, Any] | None:
+        """`GET /mission_start/latest` -> the most recent
+        `MissionStartEvent` as a dict (see `aircraft-layer/src/schema/
+        mission_start.py`'s `MissionStartEvent.to_dict`, i.e.
+        `{"sequence", "theatre", "received_wall_clock_s"}`), or `None` if
+        no `onSimulationStart` has fired yet this collector process's
+        lifetime -- same "not an error" posture as `get_line_of_sight_
+        latest` (`plans/bl15-mission-start/plan.md`)."""
+        result = self._get_json("/mission_start/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /mission_start/latest, got {type(result).__name__}"
             )
         return result
 

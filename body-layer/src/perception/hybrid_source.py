@@ -184,6 +184,18 @@ class HybridPerceptionSource:
     _observation_count: int = field(default=0, init=False, repr=False)
     _dropped_count: int = field(default=0, init=False, repr=False)
 
+    def reset_for_new_mission(self) -> None:
+        """Clear this source's own dedup/counter state on a genuine DCS
+        mission (re)start (`BL-15` Stage 1, `BL-B68`'s diagnosed gap).
+        Cannot re-invoke `__init__` wholesale -- `theatre`/`aircraft_client`
+        must stay exactly as they are -- so this clears each dedup/counter
+        attribute directly, same reasoning as `NakedEyePerceptionSource.
+        reset_for_new_mission`."""
+        self._last_emitted_texts = None
+        self._object_id_to_last_observation_id.clear()
+        self._observation_count = 0
+        self._dropped_count = 0
+
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
         indication = self.aircraft_client.get_petrovich_indication_latest()
         if indication is None:

@@ -333,3 +333,14 @@ class PerceptionSource(Protocol):
         block indefinitely -- a live-tier implementation is responsible for
         its own network/IO timeouts."""
         ...
+
+    def reset_for_new_mission(self) -> None:
+        """Clear whatever dedup/counter state this source carries across
+        polls, on a genuine DCS mission (re)start (`BL-15` Stage 1,
+        `BL-B68`'s diagnosed gap: both sources' dedup maps feed the
+        object-permanence shortcut, and a stale entry would wrongly
+        correlate a new mission's object id against a prior mission's
+        observation). Required state, not an optional hook -- every
+        concrete source carries state that would otherwise leak across a
+        restart."""
+        ...

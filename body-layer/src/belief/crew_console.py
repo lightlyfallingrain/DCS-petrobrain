@@ -890,6 +890,15 @@ STAND_BY_AFTER_S: Final[float] = 2.0
 #: **Unmeasured**, same debt class as `STAND_BY_AFTER_S` above.
 BRAIN_REPLY_MAX_AGE_S: Final[float] = 20.0
 
+#: `BL-15` Stage 3 (`plans/bl15-mission-start/plan.md`, user direction
+#: 2026-10-19: *"On error loud refusal is better."*) -- the fixed line
+#: every player command gets while `CrewConsole.refused` is set, i.e.
+#: while the live mission's theatre could not be resolved to a loaded
+#: world-model store. Deliberately a single literal string, not a
+#: template: the user's own wording, verbatim, so a pilot who hears it
+#: twice (voice, text, overlay) hears exactly the same words each time.
+WORLD_MODEL_NOT_LOADED_REFUSAL: Final[str] = "system error, world model not loaded"
+
 
 @dataclass
 class CrewConsole:
@@ -1118,6 +1127,24 @@ class CrewConsole:
     #: dumped the moment silence ends, it is simply never voiced.
     silenced: bool = field(default=False, repr=False)
 
+    #: `BL-15` Stage 3 -- set by `logger._enter_refusal_mode` when a
+    #: mission-start event's live theatre could not be resolved to a
+    #: loaded world-model store (unknown theatre, missing/unbuilt store, a
+    #: failed open, a mismatched built region, or no `--world-model-dir`
+    #: to resolve one from at all). While `True`, every player command
+    #: this class dispatches (`handle_command`, `handle_line`,
+    #: `handle_transcript`) is answered with the fixed
+    #: `WORLD_MODEL_NOT_LOADED_REFUSAL` line instead of being acted on --
+    #: see `_refusal_response`. Cleared by `logger._maybe_switch_theatre`
+    #: the next time a mission (re)start resolves its theatre
+    #: successfully; never cleared by `reset_for_new_mission` passing it
+    #: through (it resets to `False` with the rest of per-mission state,
+    #: same as every other non-preserved field -- `_check_for_new_mission`
+    #: re-evaluates it immediately afterward via `_maybe_switch_theatre`,
+    #: which sets it right back to `True` if the *new* mission's own
+    #: theatre still fails to resolve).
+    refused: bool = field(default=False, repr=False)
+
     #: Set by `maybe_apply_on_ground_default` the first time it is called,
     #: regardless of outcome -- an internal one-shot latch, never
     #: re-evaluated after that first call even if ownship later lands
@@ -1159,10 +1186,77 @@ class CrewConsole:
         if ownship.alt_agl_m <= ON_GROUND_AGL_THRESHOLD_M:
             self.silenced = True
 
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1, `plans/bl15-mission-start/plan.md`). Re-invokes `__init__`
+        on this same object, passing through only the fields that must
+        survive the reset -- the shared `store`/`tasks` references (their
+        own `reset_for_new_mission()` must already have run before this
+        call, via `_reset_mission_state`'s explicit ordering, the same
+        reasoning as `logger.ConsolePerceptionRunner.reset_for_new_
+        mission`), the injected collaborators (`brain_client`, `output`,
+        `aircraft_client`, `mark_here_fn`, `mark_target_fn`, `transcript_
+        log`, `overlay_client`, `speech_client`, `speech_log_sink`), and
+        `silenced` -- whether a pilot's deliberate mute should survive a
+        mission restart is an open product question (see the plan's
+        "Decisions Requiring User Input"); until decided, this preserves it
+        (the conservative default: don't change behaviour the pilot
+        explicitly asked for). Everything else (`scheduler`, `_pending_
+        confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
+        `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
+        contact_id`, `attack_run_transition`, `observ_transition`,
+        `_on_ground_default_applied`, `enrichment`, `refused`) resets to
+        its declared default -- see `refused`'s own field docstring for
+        why resetting it here is correct even though a mission (re)start
+        is exactly the event that might need to set it right back."""
+        self.__init__(  # type: ignore[misc]
+            store=self.store,
+            tasks=self.tasks,
+            brain_client=self.brain_client,
+            output=self.output,
+            aircraft_client=self.aircraft_client,
+            mark_here_fn=self.mark_here_fn,
+            mark_target_fn=self.mark_target_fn,
+            transcript_log=self.transcript_log,
+            overlay_client=self.overlay_client,
+            speech_client=self.speech_client,
+            speech_log_sink=self.speech_log_sink,
+            silenced=self.silenced,
+        )
+
+    def _refusal_response(self, now_sim: float) -> list[str] | None:
+        """`BL-15` Stage 3's loud-refusal mode. `None` while `self.refused`
+        is `False` -- the overwhelmingly common case -- so every caller's
+        own dispatch logic runs unchanged; a non-`None` result is the
+        fixed `WORLD_MODEL_NOT_LOADED_REFUSAL` line, already printed/
+        pushed via `_print`, for the caller to return immediately without
+        doing anything else.
+
+        **Checked at the top of all three of this class's production
+        entry points** (`handle_command`, `handle_line`, `handle_
+        transcript`) rather than at one shared call site, because there
+        is no single generic dispatcher all three already funnel through:
+        F10 selections and a committed voice "act" disposition reach
+        `handle_command` directly; typed crew-text and voice's
+        "fallthrough" disposition reach `handle_line` directly (the latter
+        via `_act_on_voice_decision`, not through `handle_command` first);
+        voice itself enters through `handle_transcript`, which may act,
+        confirm, say-again, or fall through without ever calling the other
+        two. The same check, the same fixed string, at each, is the
+        actual single source of truth here -- not a single call site."""
+        if not self.refused:
+            return None
+        lines = [WORLD_MODEL_NOT_LOADED_REFUSAL]
+        self._print(lines, now_sim)
+        return lines
+
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()
         if not stripped:
             return []
+        refusal = self._refusal_response(now_sim)
+        if refusal is not None:
+            return refusal
         if stripped.startswith("!inject-urgent"):
             lines, bypass_gate = self._handle_inject_urgent(stripped, now_sim)
             self._print(lines, now_sim, bypass_gate=bypass_gate)
@@ -1184,7 +1278,19 @@ class CrewConsole:
         (`plans/attack-run/plan.md` Decision 5), so the scheduler can
         suppress `_WATCHED_ONLY_KINDS` events about that one contact --
         the struck range countdown chief among them -- for the run's
-        duration, without this method needing to know why."""
+        duration, without this method needing to know why.
+
+        **`BL-15` Stage 3 fix: no proactive speech while `self.refused`.**
+        Today's call graph only ever reaches refusal mode immediately
+        after a full reset (`ContactStore` empty, nothing to drain), which
+        makes this guard currently incidental rather than load-bearing --
+        see the review that required it (`plans/bl15-mission-start/
+        review.md`, Batch 2 "(a)") for why that was not good enough on its
+        own. `self.scheduler.tick` still runs (so any event does get
+        consumed out of the store rather than piling up to be spoken
+        stale once refusal clears), its result is just never reached by
+        `_print` or returned to the caller -- drain and discard, not leave
+        queued."""
         target_task = self._active_attack_target_task()
         attack_run_target_contact_id = (
             target_task.contact_id if target_task is not None else None
@@ -1195,6 +1301,8 @@ class CrewConsole:
             self.enrichment,
             attack_run_target_contact_id=attack_run_target_contact_id,
         )
+        if self.refused:
+            return []
         # A scheduler-drained line never carries `bypass_gate=True` (only an
         # injected `UrgentCall`, routed through `handle_line`'s
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
@@ -1212,7 +1320,33 @@ class CrewConsole:
         this loop without ever blocking it (`belief.brain_client.
         BrainLayerClient.handle`'s own docstring is where the
         never-blocks guarantee actually lives; this method is a plain
-        synchronous poll, like the other three)."""
+        synchronous poll, like the other three).
+
+        **`BL-15` Stage 3 fix: no proactive speech while `self.refused`.**
+        `self.brain_client.poll_replies()` is still drained -- a reply
+        left queued in the brain client here would otherwise surface
+        later, once refusal clears, as speech about a world model it was
+        never computed against -- but each reply is only popped from
+        `_pending_escalations`/`_stand_by_spoken_for`, **not** run through
+        `_handle_brain_reply`. That method calls `self._print`
+        unconditionally and, via `_handle_brain_pick`/`_handle_brain_
+        confirm`, can call `self._act` -- both real side effects discarding
+        a return value does not undo, so it cannot be reused here without
+        defeating the guard it is meant to enforce. `_speak_stand_by_if_
+        due` is skipped entirely for the same reason (nothing is "overdue"
+        worth announcing while refused). Drain and discard, matching
+        `drain_events`'s identical choice -- see the review that required
+        this (`plans/bl15-mission-start/review.md`, Batch 2 "(a)")."""
+        if self.refused:
+            try:
+                replies = self.brain_client.poll_replies()
+            except Exception:
+                logger.warning("brain reply poll failed (continuing)", exc_info=True)
+                return []
+            for reply in replies:
+                self._pending_escalations.pop(reply.utterance_id, None)
+                self._stand_by_spoken_for.discard(reply.utterance_id)
+            return []
         self._speak_stand_by_if_due(now_sim)
         try:
             replies = self.brain_client.poll_replies()
@@ -1384,6 +1518,15 @@ class CrewConsole:
         was silence: a recognised token reaching this method and doing
         nothing was indistinguishable, from the cockpit, from not having
         been heard at all."""
+        # `BL-15` Stage 3: checked first, before anything else this method
+        # does -- while refused, nothing is dispatched, nothing counts
+        # as a command for `commands_handled`/silence-ending purposes,
+        # and no per-dispatch state (`last_command_target_contact_id`/
+        # `attack_run_transition`/`observ_transition`) is touched. The
+        # pilot gets exactly the fixed line and nothing else happens.
+        refusal = self._refusal_response(now_sim)
+        if refusal is not None:
+            return refusal
         self._note_player_command()
         # Reset before dispatch -- see `last_command_target_contact_id`'s
         # own docstring for why a stale value from an earlier `follow`
@@ -3174,6 +3317,14 @@ class CrewConsole:
         the pilot his *command* was rejected, when in fact his *answer*
         was late -- a materially wrong readback, and the reason this
         branch exists rather than leaving the fallthrough alone."""
+        # `BL-15` Stage 3: checked before any of the confirm-band/
+        # late-answer/classify logic below -- while refused, a pending
+        # confirmation (if any) is left exactly as it was rather than
+        # being resolved by this transcript, since the pilot's spoken
+        # words during a system error are not being acted on at all.
+        refusal = self._refusal_response(now_sim)
+        if refusal is not None:
+            return refusal
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:

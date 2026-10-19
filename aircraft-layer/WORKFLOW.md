@@ -127,6 +127,47 @@ whole collector -> `GET /f10_commands/poll` -> body-layer path before ever
 touching the live Hook script -- see `plans/f10-crew-commands/plan.md`
 Stage 2.
 
+## Deploy the mission-start Hook script (Windows box, once per change)
+
+`plans/bl15-mission-start/plan.md`, BL-15 Stage 1. Unverified against a live DCS session as of
+authorship — same posture as the overlay/F10-commands Hook scripts at their own authorship time.
+Copy:
+
+- `aircraft-layer/dcs-export/petrobrain-mission-start-hook.lua` ->
+  `Saved Games\DCS\Scripts\Hooks\petrobrain-mission-start-hook.lua`
+
+Same discipline as every other Hook script here: the repo copy is canonical, never edit the
+deployed copy in place. Loads once into the GUI Lua state at DCS **application** startup, not
+per-mission — restart DCS (not just the mission) after copying for a change to take effect.
+
+**No `autoexec.cfg` opt-in beyond what the F10-commands Hook already requires.** This script uses
+the same `net.dostring_in("scripting", ...)` bridge at the same `onSimulationStart` callback the
+F10-commands Hook already registers at; if that Hook's `net.allow_dostring_in = { "scripting" }`
+line is already in `Saved Games\DCS\Config\autoexec.cfg`, nothing further is needed. If this script
+is deployed on its own without the F10-commands Hook, add that line (see "Deploy the F10 commands
+Hook script" above).
+
+This registers no F10 menu — it is a one-shot push per mission (re)start, not a drained queue.
+Each `onSimulationStart` firing sends one UDP datagram
+(`{"sequence": <int>, "theatre": "<string>"|null}`) to loopback port 7799 — distinct from every
+other port in this file — picked up by the collector's `MissionStartReceiver` and served from
+`GET /mission_start/latest` (see "Run the collector" below). If `dcs.log` shows no
+`PetrobrainMissionStart` lines, or `theatre` is always `null` on a mission with a resolvable
+theatre, that is exactly what a live check is for; this deploy step alone does not confirm the
+script actually works.
+
+**No-DCS-required manual check** (once the collector is running, see "Run the collector" below):
+send a datagram by hand and confirm `GET /mission_start/latest` reflects it, without needing DCS or
+the Hook script running at all —
+
+```sh
+python3 -c "import socket, json; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(json.dumps({'sequence': 1, 'theatre': 'Syria'}).encode(), ('127.0.0.1', 7799))"
+curl -s http://<collector-host>:7791/mission_start/latest
+```
+
+This is the cheapest possible correctness check for the whole collector -> `GET
+/mission_start/latest` -> body-layer path before ever touching the live Hook script.
+
 ## Run the collector (Windows box)
 
 ```

@@ -472,6 +472,64 @@ class ConsolePerceptionRunner:
         default=None, init=False, repr=False
     )
 
+    #: `BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- the last
+    #: `MissionStartEvent.sequence` this runner has seen, or `None` before
+    #: the first poll of this process. `_check_for_new_mission` compares
+    #: each poll's value against this field to detect a genuine DCS
+    #: mission (re)start; `None` means "nothing has been checked yet",
+    #: which is deliberately distinct from "sequence 0 was seen" -- the
+    #: very first poll of a process must never reset (the process just
+    #: started with clean state), even if the collector already holds a
+    #: mission-start event from before body-layer connected. **Not** in
+    #: `reset_for_new_mission`'s preserved-field list below (it resets to
+    #: `None` along with every other per-mission field) -- `_check_for_new_
+    #: mission` re-assigns it explicitly, after `_reset_mission_state`
+    #: returns, to the sequence just processed, so a reset never leaves
+    #: this field looking like "never checked" for the poll that follows.
+    last_mission_start_sequence: int | None = None
+
+    def reset_for_new_mission(self) -> None:
+        """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
+        Stage 1). Re-invokes `__init__` on this same object, passing
+        through only the handful of fields that must survive the reset --
+        open network/sqlite handles and the shared `store`/`tasks`
+        references (see `plans/bl15-mission-start/plan.md`'s "reset
+        mechanism" section for why `store`/`tasks` are passed through
+        **unchanged as objects** rather than cleared here: their own
+        `reset_for_new_mission()` must already have run before this call,
+        via `_reset_mission_state`'s explicit ordering). Everything else
+        (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
+        tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
+        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
+        start_sequence`) resets to its declared default.
+
+        **`_last_look_direction` needs an explicit line, not just the
+        re-invoked `__init__`.** It is declared `field(default=None,
+        init=False, repr=False)` -- a plain `default`, not a
+        `default_factory` -- and dataclasses only emits a `self.attr = ...`
+        assignment inside the generated `__init__` for an `init=False`
+        field when that field has a `default_factory`; a plain `default`
+        on an `init=False` field is a class-level attribute, never
+        reassigned per instance. Confirmed by running it: `self.__init__()`
+        alone left a hand-poisoned `_last_look_direction` untouched, the
+        exact silent-survivor class this method exists to prevent. Every
+        other non-preserved field above is either an ordinary `init=True`
+        field (reassigned as a constructor parameter) or a `default_factory`
+        field (reassigned via a fresh factory call either way), so this is
+        the one field this pattern does not cover for this class."""
+        self.__init__(  # type: ignore[misc]
+            aircraft_client=self.aircraft_client,
+            sources=self.sources,
+            store=self.store,
+            tasks=self.tasks,
+            output=self.output,
+            overlay_client=self.overlay_client,
+            group_trace_sink=self.group_trace_sink,
+            world_model_conn=self.world_model_conn,
+            theatre=self.theatre,
+        )
+        self._last_look_direction = None
+
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
@@ -1536,24 +1594,477 @@ def _mission_memory_step(
         logger.exception("mission-memory step failed; continuing")
 
 
+def _reset_mission_state(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole | None,
+    mission_memory: MissionMemory,
+    fired_on_tracker: FiredOnTracker | None = None,
+) -> None:
+    """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
+    piece of belief/mission-memory state a clean slate on a genuine DCS
+    mission (re)start. Theatre/world-model are **not** touched here --
+    `runner.theatre`/`runner.world_model_conn` are in `ConsolePerceptionRunner.
+    reset_for_new_mission`'s preserved-field list, so this call is a true
+    no-op for them, matching `BL-15.md`'s own staging (theatre re-resolution
+    is a separate, not-yet-implemented stage).
+
+    **Shared-reference ordering is the one real hazard here, not a defect
+    in the pattern.** `runner.store`/`crew_console.store` are the same
+    `ContactStore` object (and `tasks` likewise) -- deliberately, per
+    `belief.crew_console.CrewConsole.store`'s own field docstring. Resetting
+    that object happens exactly once, *before* `runner.reset_for_new_mission`/
+    `crew_console.reset_for_new_mission` are called -- those two calls pass
+    the (now-cleared) same objects straight through, they do not clear them
+    a second time. Get this order backwards and `runner.reset_for_new_
+    mission`'s own re-run `__init__` would hand back the *same*, still-
+    stale `store`/`tasks` objects -- reassigning the field, not clearing
+    its contents.
+
+    `crew_console` is `None` for `--console` (the debug REPL path, which
+    has no `CrewConsole` at all, only `belief.console.Console` -- built on
+    the REPL thread, not shared with this poll loop) -- a true no-op for
+    that one call, same "optional collaborator, None is a no-op" shape as
+    every other optional field in this codebase.
+
+    `fired_on_tracker` defaults to `None` so every existing test calling
+    this with the original three-argument shape is unaffected (same
+    reasoning `_check_for_new_mission`'s own `world_model_dir`/`trace_sink`/
+    `forest_occlusion` defaults give, see that function's docstring) --
+    `None` only arises if a future caller genuinely has no tracker to
+    reset, since both of `logger.py`'s own poll loops always build one.
+    Batch 2 review follow-up (`plans/bl15-mission-start/review.md`):
+    `FiredOnTracker` predates `BL-15` and was not brought under this
+    mechanism when it was built -- see its own `reset_for_new_mission`
+    docstring for why leaving it out silently stalls `fired_on` mission-
+    memory writes after a restart."""
+    runner.store.reset_for_new_mission()  # shared with crew_console.store
+    runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
+    for source in runner.sources:
+        source.reset_for_new_mission()
+    runner.reset_for_new_mission()
+    if crew_console is not None:
+        crew_console.reset_for_new_mission()
+    mission_memory.reset_for_new_mission()
+    if fired_on_tracker is not None:
+        fired_on_tracker.reset_for_new_mission()
+
+
+def _enter_refusal_mode(
+    runner: ConsolePerceptionRunner, crew_console: CrewConsole | None
+) -> None:
+    """`BL-15` Stage 3 (`plans/bl15-mission-start/plan.md`'s Stage 3, user
+    decision 1 REVISED, 2026-10-19): *"wrong terrain model is as useless as
+    not terrain model ... On failure to load world model, log error. Have
+    Petrovich respond to every player command with 'system error, world
+    model not loaded'. On error loud refusal is better."*
+
+    Drops whatever store was running -- a store for the wrong theatre is
+    not retained (the user's first answer, kept by the revision) -- and
+    stops perception entirely rather than leaving `NakedEyePerceptionSource`
+    running with no terrain line-of-sight gate at all (the revision's own
+    reasoning: rewiring the eyesight source to tolerate a missing store was
+    judged not worth the cost against a loud refusal). `runner.enrichment`
+    is also cleared: it would otherwise keep holding a `WorldEnrichmentCache`
+    built over the connection just closed, and the next successful switch
+    must rebuild it against the *new* connection, not silently keep serving
+    stale enrichment computed from a closed one.
+
+    `crew_console` is `None` for `--console` (no production command surface
+    to refuse on that debug path) -- a true no-op for that one call, same
+    shape as `_reset_mission_state`'s own."""
+    if runner.world_model_conn is not None:
+        runner.world_model_conn.close()
+    runner.world_model_conn = None
+    runner.enrichment = None
+    runner.sources = []
+    if crew_console is not None:
+        crew_console.refused = True
+
+
+def _maybe_switch_theatre(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole | None,
+    event_theatre: object,
+    world_model_dir: Path | None,
+    trace_sink: DetectionTraceCollector | None,
+    forest_occlusion: bool,
+) -> None:
+    """`BL-15` Stage 3 -- re-resolve `runner.theatre`/`runner.world_model_conn`/
+    `runner.sources` against the live mission's own theatre, called by
+    `_check_for_new_mission` immediately after `_reset_mission_state`, only
+    when a mission (re)start was just detected (never on an unchanged
+    sequence -- `_check_for_new_mission`'s own gating).
+
+    **`event_theatre is None`** (the Hook could not read `env.mission.
+    theatre`) is not evidence the live theatre is wrong -- keep the current
+    store, log once, do nothing else (user decision 2026-10-19: *"I used
+    the initial silence mode as proxy..."* did not touch this point, which
+    was never revised -- a `None` theatre has always meant "unknown," not
+    "mismatch").
+
+    **Same theatre as `runner.theatre`**: no-op, no log line -- this is the
+    overwhelmingly common case (a mission restart that does not change
+    theatre) and would otherwise print on every single restart.
+
+    **`world_model_dir is None`**: there is nothing to resolve a new store
+    from even if the theatre did change (this stage needs `--world-model-
+    dir` regardless of whether `--theatre`/`--world-model-db` or
+    `--mission-understanding` supplied the *initial* theatre -- plan Stage
+    3) -- enters refusal mode, logging that `--world-model-dir` was not
+    given.
+
+    **Security ordering, carried over unchanged from `main()`'s own
+    startup guard and required at Mode 2 deep analysis**
+    (`security-plan-review.md`): the `THEATRE_PROJECTIONS` membership
+    check runs *before* `world_model_dir / f"{theatre.lower()}-full.
+    sqlite"` is ever built, and before `open_world_model` is ever called
+    on it -- an externally-sourced `theatre` string (from a DCS Hook read
+    of the live mission, exactly as untrusted as the `.miz`-derived one
+    `main()` already guards) must never reach path construction or a
+    sqlite URI unvalidated.
+
+    On any failure past that point (store not built, fails to open, or
+    fails the built-region mismatch guard): `_enter_refusal_mode` -- the
+    revised decision's "loud refusal, not a reduced crew member," not the
+    plan's original "keep the old store and log loudly" default.
+
+    On success: builds the new sources at this runner's own emit mode
+    (`"every_poll"`, the only mode either poll loop built a runner
+    against), closes the *old* connection only after the new one is
+    confirmed open and sources are already pointed at it, and clears
+    `crew_console.refused` if it was set -- the next successful mission
+    start is this stage's only path out of refusal mode."""
+    if event_theatre is None:
+        logger.info("mission-start event carries no theatre; keeping current store")
+        return
+    if not isinstance(event_theatre, str):
+        logger.warning(
+            "mission-start event theatre is not a string: %r; keeping current store",
+            event_theatre,
+        )
+        return
+    if event_theatre == runner.theatre:
+        return
+    if world_model_dir is None:
+        logger.error(
+            "mission theatre changed to %r but --world-model-dir was not "
+            "given at startup -- cannot resolve a store for it; refusing "
+            "player commands until the next mission (re)start",
+            event_theatre,
+        )
+        _enter_refusal_mode(runner, crew_console)
+        return
+    # Security (carried over from main()'s own startup guard, see this
+    # function's docstring): membership check before any path is built.
+    if event_theatre not in THEATRE_PROJECTIONS:
+        logger.error(
+            "mission theatre %r is not a known theatre -- no entry in "
+            "coordinates.projections.THEATRE_PROJECTIONS; refusing player "
+            "commands until the next mission (re)start",
+            event_theatre,
+        )
+        _enter_refusal_mode(runner, crew_console)
+        return
+    candidate_db = world_model_dir / f"{event_theatre.lower()}-full.sqlite"
+    try:
+        new_conn = open_world_model(candidate_db)
+    except (sqlite3.Error, OSError) as exc:
+        logger.error(
+            "world model for %r not built: %s (%s); refusing player "
+            "commands until the next mission (re)start",
+            event_theatre,
+            candidate_db,
+            exc,
+        )
+        _enter_refusal_mode(runner, crew_console)
+        return
+    try:
+        built_region = load_only_region(new_conn)
+    except sqlite3.Error as exc:
+        new_conn.close()
+        logger.error(
+            "failed to read built region for %s (%s); refusing player "
+            "commands until the next mission (re)start",
+            candidate_db,
+            exc,
+        )
+        _enter_refusal_mode(runner, crew_console)
+        return
+    if built_region is not None and built_region.theatre != event_theatre:
+        new_conn.close()
+        logger.error(
+            "world model %s was built for theatre %r, but the mission "
+            "theatre is %r; refusing player commands until the next "
+            "mission (re)start",
+            candidate_db,
+            built_region.theatre,
+            event_theatre,
+        )
+        _enter_refusal_mode(runner, crew_console)
+        return
+
+    old_conn = runner.world_model_conn
+    runner.sources = _build_sources(
+        runner.aircraft_client,
+        event_theatre,
+        new_conn,
+        emit_mode="every_poll",
+        trace_sink=trace_sink,
+        forest_occlusion=forest_occlusion,
+    )
+    runner.world_model_conn = new_conn
+    runner.theatre = event_theatre
+    # `runner.enrichment` was built (if at all) over `old_conn` -- clear it
+    # so `run_once`'s lazy build rebuilds fresh against `new_conn` on the
+    # next poll, rather than a stale `WorldEnrichmentCache` silently
+    # continuing to query a connection this function is about to close.
+    runner.enrichment = None
+    if old_conn is not None:
+        old_conn.close()
+    if crew_console is not None:
+        crew_console.refused = False
+    logger.info("mission theatre switched to %r (%s)", event_theatre, candidate_db)
+
+
+def _check_for_new_mission(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole | None,
+    mission_memory: MissionMemory,
+    aircraft_client: AircraftLayerClient,
+    world_model_dir: Path | None = None,
+    trace_sink: DetectionTraceCollector | None = None,
+    forest_occlusion: bool = False,
+    fired_on_tracker: FiredOnTracker | None = None,
+) -> bool:
+    """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
+    `sequence` has moved since the last poll, reset belief/mission memory
+    via `_reset_mission_state`, then (Stage 3) re-resolve the theatre/store
+    via `_maybe_switch_theatre`. Returns whether a reset was performed this
+    call -- callers use this to decide whether to re-roll per-run log files
+    too (`_reroll_run_logs`, decision 5), not just for a future spoken
+    acknowledgement.
+
+    `fired_on_tracker` is passed straight through to `_reset_mission_state`
+    -- see that function's own docstring for why it defaults to `None` and
+    what leaving it out would silently break.
+
+    **Does nothing on the very first poll of a process**, even if a
+    sequence is already present (the collector may already hold a mission-
+    start event from before body-layer connected) -- `runner.last_mission_
+    start_sequence is None` is this function's own signal for "never
+    checked before," distinct from "sequence 0 was seen," and the plan's
+    explicit design choice is that the process just started with clean
+    state, so there is nothing to reset yet; firing a reset anyway would be
+    harmless but pointless noise (see the plan's "Decisions Requiring User
+    Input").
+
+    **`runner.last_mission_start_sequence` is re-assigned *after*
+    `_reset_mission_state` returns, not before.** That field is not in
+    `ConsolePerceptionRunner.reset_for_new_mission`'s preserved-field list
+    (deliberately -- it is per-mission state, same as every other field
+    that resets), so a reset wipes it back to `None`; assigning it here
+    afterward is what leaves it holding the sequence just processed rather
+    than looking like "never checked" for the very next poll.
+
+    **`world_model_dir`/`trace_sink`/`forest_occlusion` default to the
+    Stage-1-and-2 no-op values** (`None`/`None`/`False`) so every existing
+    test calling this with the original four-argument shape is unaffected
+    -- `_maybe_switch_theatre` itself is the only thing that reads them,
+    and it is only ever invoked below, after a reset actually fires.
+
+    A transport failure degrades to "skip this poll, try again next
+    cycle," never stops the poll loop -- same posture as every other
+    aircraft-layer call in this file's poll loops (e.g. `post_look_
+    direction`'s own try/except)."""
+    try:
+        event = aircraft_client.get_mission_start_latest()
+    except AircraftLayerError:
+        logger.warning("mission-start poll failed (continuing)", exc_info=True)
+        return False
+    if event is None:
+        return False
+
+    sequence = event.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int):
+        logger.warning("mission-start event missing/invalid 'sequence': %r", event)
+        return False
+
+    if runner.last_mission_start_sequence is None:
+        runner.last_mission_start_sequence = sequence
+        return False
+    if sequence == runner.last_mission_start_sequence:
+        return False
+
+    logger.info(
+        "mission (re)start detected (sequence %d -> %d) -- resetting belief/mission memory",
+        runner.last_mission_start_sequence,
+        sequence,
+    )
+    _reset_mission_state(runner, crew_console, mission_memory, fired_on_tracker)
+    _maybe_switch_theatre(
+        runner,
+        crew_console,
+        event.get("theatre"),
+        world_model_dir,
+        trace_sink=trace_sink,
+        forest_occlusion=forest_occlusion,
+    )
+    runner.last_mission_start_sequence = sequence
+    return True
+
+
+def _reroll_run_logs(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole | None,
+    mission_memory: MissionMemory,
+    *,
+    trace_writer: DetectionTraceWriter | None,
+    belief_truth_writer: BeliefTruthLogWriter | None,
+    detection_trace_base: Path | None,
+    belief_truth_log_base: Path | None,
+    speech_log_base: Path | None,
+    group_trace_base: Path | None,
+    mission_memory_base: Path | None,
+    when: float | None = None,
+) -> tuple[DetectionTraceWriter | None, BeliefTruthLogWriter | None]:
+    """`BL-15` Stage 1 user decision 5 ("per mission", not a marker line in
+    whatever log happened to be open): called once from each poll loop,
+    immediately after `_check_for_new_mission` reports it performed a
+    reset, re-stamps every per-run log that is actually enabled to a fresh
+    filename (`run_log_paths.per_run_log_path`, the same mechanism
+    `main()`'s own CLI boundary already applies once at process start --
+    `BL-11` Stage 5) and re-wires every writer this poll loop and
+    `CrewConsole`/`ConsolePerceptionRunner` hold onto, including the
+    closures that captured one by value.
+
+    **The `*_base` paths are each log's pre-stamp path**, i.e. what
+    `main()` resolved (default/`~`-expansion applied) *before* calling
+    `_per_run_log_paths`/`_resolve_group_trace_log_path`/`_resolve_
+    mission_memory_log_path` -- re-stamping the *already-stamped* path
+    `main()` passed into the poll loop as this log's working filename
+    would double-stamp it (`trace-20261019-120000-20261019-130500.jsonl`),
+    so the caller threads the pre-stamp base through separately rather
+    than this function trying to strip a stamp back off. `None` means that
+    log was never enabled at all -- this function's own no-op for it,
+    mirroring `_per_run_log_paths`'s `None`-passes-through convention.
+
+    **Four distinct re-wiring shapes, enumerated because each is a
+    different trap, not because the count matters:**
+
+    - `trace_writer`/`belief_truth_writer` hold an **open file handle**
+      (`DetectionTraceWriter`/`BeliefTruthLogWriter.__init__` both
+      `open(..., "a")` once) -- closed here before the replacement is
+      constructed, the only two of the five per-run logs that need this
+      (`GroupTraceLogWriter`/`SpeechLogWriter`/`MissionMemoryLogWriter`
+      each `open(..., "a")` fresh per write, so simply constructing a new
+      instance pointed at the new path is enough -- no handle to leak).
+    - **`belief_truth_writer` is also captured by value inside a closure**
+      (`_speech_log_sink(belief_truth_writer, runner)`, built once at poll-
+      loop startup and assigned to `crew_console.speech_log_sink`) --
+      rerolling the local variable alone would leave that closure writing
+      to the *old*, now-closed file forever. Re-building the closure over
+      the new writer is this function's job, not an incidental extra step;
+      missed once, this would be a silent write-to-closed-file failure
+      with no exception (the `OSError` guard inside `write_speech`'s own
+      try/except would simply disable belief-truth logging for the rest
+      of the sortie the first time anything tried to speak).
+    - `runner.group_trace_sink` and `crew_console.transcript_log` are
+      **plain fields read fresh every call** (no closure capturing the
+      writer by value anywhere else), so reassigning them here is the
+      whole of the fix.
+    - `mission_memory._sink` is the one case `_reset_mission_state` itself
+      already touches -- `MissionMemory.reset_for_new_mission` preserves
+      the *old* sink across the belief reset (its own docstring: "the one
+      field that must survive"), and this function's job is to immediately
+      overwrite that just-restored old sink with a new one pointed at the
+      new file, which only makes sense once a reset has actually happened
+      (this function is never called otherwise).
+
+    `crew_console is None` for `--console` (no `CrewConsole`, so no
+    `speech_log_sink`/`transcript_log` to re-wire -- `_reroll_one`'s
+    `speech-log` branch is skipped entirely for that caller, same "None is
+    a no-op" shape as `_reset_mission_state`'s own `crew_console`
+    handling).
+
+    A directory that has since become unwritable degrades that one log to
+    "stop writing it for the rest of this mission" with a line on stderr
+    -- mirrors `_per_run_log_paths`'s own startup-time degrade policy
+    (never crash the sortie over a log)."""
+    stamp_at = time.time() if when is None else when
+
+    def _reroll_one(base: Path | None, label: str) -> Path | None:
+        if base is None:
+            return None
+        stamped = per_run_log_path(base, stamp_at)
+        try:
+            stamped.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(
+                f"{label}: could not create log directory {stamped.parent} "
+                f"({exc}); keeping the previous sortie's log open",
+                file=sys.stderr,
+            )
+            return None
+        print(f"{label}: writing {stamped} (mission restart)", file=sys.stderr)
+        return stamped
+
+    new_detection_trace = _reroll_one(detection_trace_base, "detection-trace")
+    if new_detection_trace is not None:
+        if trace_writer is not None:
+            trace_writer.close()
+        trace_writer = DetectionTraceWriter(new_detection_trace)
+
+    new_belief_truth_log = _reroll_one(belief_truth_log_base, "belief-truth-log")
+    if new_belief_truth_log is not None:
+        if belief_truth_writer is not None:
+            belief_truth_writer.close()
+        belief_truth_writer = BeliefTruthLogWriter(new_belief_truth_log)
+        if crew_console is not None:
+            crew_console.speech_log_sink = _speech_log_sink(belief_truth_writer, runner)
+
+    new_speech_log = _reroll_one(speech_log_base, "speech-log")
+    if new_speech_log is not None and crew_console is not None:
+        crew_console.transcript_log = SpeechLogWriter(new_speech_log).write
+
+    new_group_trace = _reroll_one(group_trace_base, "group-trace")
+    if new_group_trace is not None:
+        runner.group_trace_sink = GroupTraceLogWriter(new_group_trace).write
+
+    new_mission_memory = _reroll_one(mission_memory_base, "mission-memory")
+    if new_mission_memory is not None:
+        mission_memory.set_sink(MissionMemoryLogWriter(new_mission_memory).write)
+
+    return trace_writer, belief_truth_writer
+
+
 def _mark_here_fn(
-    memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
+    memory: MissionMemory, runner: ConsolePerceptionRunner
 ) -> Callable[[float], str]:
     """Builds `CrewConsole.mark_here_fn` -- the one closure `_handle_
     mark_here` calls, over the live `MissionMemory` this poll thread
     writes observed entries into (BL-8 Stage 3, Decision 6). Reads
     `runner.enrichment` live rather than capturing it, the same reason
     `_speech_log_sink` does: it is rebuilt by `run_once` and a captured
-    reference would go stale the first time that happens."""
+    reference would go stale the first time that happens.
+
+    **Reads `runner.theatre` live too, as of `BL-15` Stage 3** -- it used
+    to be a plain `theatre: str` parameter bound once at construction,
+    which went stale the moment a mission-start event switched the live
+    theatre (`_maybe_switch_theatre`), silently marking under the
+    *previous* theatre's coordinate projection. Same fix, same reasoning,
+    as `enrichment` above; `runner.theatre` is never `None` once any poll
+    has run (`run_once`'s own guard), which this method's caller
+    (`_handle_mark_here`, reached only once belief exists) already implies."""
 
     def mark_here(now_sim: float) -> str:
         if runner.enrichment is None:
             return "no world-model connection configured"
+        assert runner.theatre is not None
         entry = marks.mark_here(
             memory,
             runner.enrichment.ownship,
             now_sim,
-            theatre=theatre,
+            theatre=runner.theatre,
             phase=None,
             enrichment=runner.enrichment,
         )
@@ -1564,17 +2075,19 @@ def _mark_here_fn(
 
 
 def _mark_target_fn(
-    memory: MissionMemory, runner: ConsolePerceptionRunner, theatre: str
+    memory: MissionMemory, runner: ConsolePerceptionRunner
 ) -> Callable[[str, float], str]:
-    """`_mark_here_fn`'s own twin for `CrewConsole.mark_target_fn`."""
+    """`_mark_here_fn`'s own twin for `CrewConsole.mark_target_fn`,
+    including its `BL-15` Stage 3 live-`runner.theatre` read."""
 
     def mark_target(contact_id: str, now_sim: float) -> str:
+        assert runner.theatre is not None
         entry = marks.mark_target(
             memory,
             runner.store,
             contact_id,
             now_sim,
-            theatre=theatre,
+            theatre=runner.theatre,
             phase=None,
             enrichment=runner.enrichment,
         )
@@ -1599,6 +2112,11 @@ def _run_console_poll_loop(
     belief_truth_log_path: Path | None = None,
     forest_occlusion: bool = False,
     mission_memory_path: Path | None = None,
+    world_model_dir: Path | None = None,
+    detection_trace_base: Path | None = None,
+    belief_truth_log_base: Path | None = None,
+    group_trace_base: Path | None = None,
+    mission_memory_base: Path | None = None,
 ) -> None:
     """Stage 4's background poll thread, fixed in Stage 6: opens
     `world_model_conn` and builds `runner.sources` here, on this thread, then
@@ -1640,7 +2158,18 @@ def _run_console_poll_loop(
     no-op-when-unset shape as every flag above; the store is unconditional
     (nothing reads it back yet in `--console`'s own REPL, Stage 5 is what
     wires the query surface) but the JSONL sink is built only when the
-    path is set."""
+    path is set.
+
+    `world_model_dir` (`BL-15` Stage 3) enables runtime theatre switching
+    in `_check_for_new_mission` -- `None` (unset) means a mission-start
+    event naming a different theatre than `theatre` above enters refusal
+    mode rather than attempting to resolve a new store, since there is
+    nowhere to resolve one from. `detection_trace_base`/`belief_truth_log_
+    base`/`group_trace_base`/`mission_memory_base` (Decision 5) are each
+    log's pre-stamp path, threaded through so a mission (re)start can
+    re-roll them to a fresh per-mission filename (`_reroll_run_logs`) --
+    `None` for a log that was never enabled, same no-op shape as every
+    other optional path in this function."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -1696,6 +2225,37 @@ def _run_console_poll_loop(
             # asymmetry a later reader would take for a deliberate
             # distinction.
             try:
+                # `BL-15` Stage 1: detect a genuine DCS mission (re)start
+                # and reset belief/mission memory before this poll's
+                # `run_once()` ingests anything against stale state. No
+                # `CrewConsole` exists on this path (`--console` builds
+                # `belief.console.Console` instead, on the REPL thread, not
+                # shared with this poll loop) -- `_check_for_new_mission`'s
+                # own docstring on why `None` here is a true no-op.
+                # Stage 3/Decision 5: re-resolve theatre and re-roll the
+                # per-run logs only when a reset actually fired.
+                if _check_for_new_mission(
+                    runner,
+                    None,
+                    mission_memory,
+                    aircraft_client,
+                    world_model_dir=world_model_dir,
+                    trace_sink=trace_collector,
+                    forest_occlusion=forest_occlusion,
+                    fired_on_tracker=fired_on_tracker,
+                ):
+                    trace_writer, belief_truth_writer = _reroll_run_logs(
+                        runner,
+                        None,
+                        mission_memory,
+                        trace_writer=trace_writer,
+                        belief_truth_writer=belief_truth_writer,
+                        detection_trace_base=detection_trace_base,
+                        belief_truth_log_base=belief_truth_log_base,
+                        speech_log_base=None,
+                        group_trace_base=group_trace_base,
+                        mission_memory_base=mission_memory_base,
+                    )
                 runner.run_once()
                 if trace_collector is not None:
                     if eyesight_view:
@@ -1743,11 +2303,17 @@ def _run_console_poll_loop(
                         if runner.mission_phase_tracker is not None
                         else None
                     )
+                    # `BL-15` Stage 3: `runner.theatre`, not the closed-over
+                    # `theatre` parameter -- a successful theatre switch
+                    # (`_maybe_switch_theatre`) updates `runner.theatre` in
+                    # place, and the local parameter above is only this
+                    # poll loop's *initial* value, never reassigned.
+                    assert runner.theatre is not None
                     _mission_memory_step(
                         mission_memory,
                         runner,
                         runner.last_t_sim,
-                        theatre,
+                        runner.theatre,
                         phase,
                         fired_on_tracker,
                     )
@@ -1945,6 +2511,12 @@ def _run_crew_text_poll_loop(
     belief_truth_log_path: Path | None = None,
     forest_occlusion: bool = False,
     mission_memory_path: Path | None = None,
+    world_model_dir: Path | None = None,
+    detection_trace_base: Path | None = None,
+    belief_truth_log_base: Path | None = None,
+    speech_log_base: Path | None = None,
+    group_trace_base: Path | None = None,
+    mission_memory_base: Path | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -1967,7 +2539,16 @@ def _run_crew_text_poll_loop(
     (`--forest-occlusion`) mirror `_run_console_poll_loop`'s own wiring
     exactly -- see that function's docstring for all four. `mission_memory_
     path` (`--mission-memory`, BL-8) is the same shape too -- see that
-    function's own paragraph on it."""
+    function's own paragraph on it.
+
+    `world_model_dir`/`detection_trace_base`/`belief_truth_log_base`/
+    `group_trace_base`/`mission_memory_base` (`BL-15` Stage 3/Decision 5)
+    mirror `_run_console_poll_loop`'s own identical parameters -- see that
+    function's docstring. `speech_log_base` is this loop's own addition
+    (no `--console` twin, since `--console` has no `CrewConsole`/
+    `transcript_log` to re-wire): the pre-stamp path for `--speech-log`,
+    so a mission (re)start also re-rolls `crew_console.transcript_log` to
+    a fresh per-mission speech log."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -2002,8 +2583,8 @@ def _run_crew_text_poll_loop(
     # entire seam. `phase=None` inside both: `CrewConsole` has no
     # `MissionPhaseTracker` of its own to resolve a current phase from,
     # unlike the poll loop's own observed-entry writes just below.
-    crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner, theatre)
-    crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner, theatre)
+    crew_console.mark_here_fn = _mark_here_fn(mission_memory, runner)
+    crew_console.mark_target_fn = _mark_target_fn(mission_memory, runner)
     fired_on_tracker = FiredOnTracker()
     try:
         runner.sources = _build_sources(
@@ -2055,6 +2636,35 @@ def _run_crew_text_poll_loop(
             # (`security-review.md`), pre-existing rather than introduced
             # by that branch.
             try:
+                # `BL-15` Stage 1: detect a genuine DCS mission (re)start
+                # and reset belief/mission memory before this poll's
+                # `run_once()` ingests anything against stale state --
+                # same ordering as `_run_console_poll_loop`'s own call,
+                # except this path has a real `CrewConsole` to reset too.
+                # Stage 3/Decision 5: re-resolve theatre and re-roll the
+                # per-run logs only when a reset actually fired.
+                if _check_for_new_mission(
+                    runner,
+                    crew_console,
+                    mission_memory,
+                    aircraft_client,
+                    world_model_dir=world_model_dir,
+                    trace_sink=trace_collector,
+                    forest_occlusion=forest_occlusion,
+                    fired_on_tracker=fired_on_tracker,
+                ):
+                    trace_writer, belief_truth_writer = _reroll_run_logs(
+                        runner,
+                        crew_console,
+                        mission_memory,
+                        trace_writer=trace_writer,
+                        belief_truth_writer=belief_truth_writer,
+                        detection_trace_base=detection_trace_base,
+                        belief_truth_log_base=belief_truth_log_base,
+                        speech_log_base=speech_log_base,
+                        group_trace_base=group_trace_base,
+                        mission_memory_base=mission_memory_base,
+                    )
                 runner.run_once()
                 if trace_collector is not None:
                     if eyesight_view:
@@ -2183,11 +2793,15 @@ def _run_crew_text_poll_loop(
                         if runner.mission_phase_tracker is not None
                         else None
                     )
+                    # `BL-15` Stage 3: `runner.theatre`, not the closed-over
+                    # `theatre` parameter -- see `_run_console_poll_loop`'s
+                    # identical note.
+                    assert runner.theatre is not None
                     _mission_memory_step(
                         mission_memory,
                         runner,
                         runner.last_t_sim,
-                        theatre,
+                        runner.theatre,
                         phase,
                         fired_on_tracker,
                     )
@@ -2667,7 +3281,14 @@ def main() -> None:
             "-- required together with --mission-understanding when --theatre/"
             "--world-model-db are omitted, so theatre and store are derived from "
             "the loaded mission-understanding artifact's theatre field instead of "
-            "a remembered flag."
+            "a remembered flag. Also optional alongside an explicit --theatre/"
+            "--world-model-db pair (BL-15 Stage 3, plans/bl15-mission-start/plan.md): "
+            "when given there too, a live mission-start event naming a different "
+            "theatre re-resolves the store at <dir>/<theatre.lower()>-full.sqlite "
+            "and switches to it at runtime. Without it, a theatre change detected "
+            "mid-run has nowhere to resolve a new store from and enters refusal "
+            "mode (every player command answered 'system error, world model not "
+            "loaded') until the next mission (re)start resolves successfully."
         ),
     )
     parser.add_argument(
@@ -3051,6 +3672,33 @@ def main() -> None:
         speech_input=args.speech_input,
     )
 
+    # `BL-15` Stage 1 decision 5 ("per mission", not a marker line):
+    # capture each per-run log's pre-stamp path now, before the stamping
+    # calls below overwrite `args.*` with this run's own stamped filename.
+    # A later in-process mission (re)start re-stamps from these, via
+    # `_reroll_run_logs`, rather than double-stamping an already-stamped
+    # name -- see that function's own docstring for why the pre-stamp path
+    # has to be threaded through separately. `expanduser()` can raise
+    # `RuntimeError` (no such user); degrading to `None` here is harmless,
+    # since the same call inside `_per_run_log_paths`/`_resolve_group_
+    # trace_log_path`/`_resolve_mission_memory_log_path` immediately below
+    # fails identically and already reports it on stderr for the initial
+    # stamp -- a `None` base below then simply means this log gets no
+    # Stage-1-decision-5 reroll, not a second, silent failure.
+    def _expand_log_base(path: Path | None) -> Path | None:
+        if path is None:
+            return None
+        try:
+            return path.expanduser()
+        except RuntimeError:
+            return None
+
+    detection_trace_base = _expand_log_base(args.detection_trace)
+    belief_truth_log_base = _expand_log_base(args.belief_truth_log)
+    speech_log_base = _expand_log_base(args.speech_log)
+    group_trace_base = _expand_log_base(args.group_trace)
+    mission_memory_base = _expand_log_base(args.mission_memory)
+
     # BL-11 Stage 5: each run writes its own files rather than appending to
     # one that grows across sorties. Applied after the default resolution
     # above, so `--speech-log`'s default and an explicit path roll alike.
@@ -3153,6 +3801,12 @@ def main() -> None:
                 args.belief_truth_log,
                 args.forest_occlusion,
                 args.mission_memory,
+                args.world_model_dir,
+                detection_trace_base,
+                belief_truth_log_base,
+                speech_log_base,
+                group_trace_base,
+                mission_memory_base,
             ),
             daemon=True,
         )
@@ -3195,6 +3849,11 @@ def main() -> None:
                 args.belief_truth_log,
                 args.forest_occlusion,
                 args.mission_memory,
+                args.world_model_dir,
+                detection_trace_base,
+                belief_truth_log_base,
+                group_trace_base,
+                mission_memory_base,
             ),
             daemon=True,
         )
