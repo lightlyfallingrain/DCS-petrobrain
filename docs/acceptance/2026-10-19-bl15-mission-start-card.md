@@ -173,6 +173,11 @@ than the bridge call, but nothing above depends on the answer. Delete the probe 
   `load terrain from ./Mods/terrains/Caucasus`, `loadMission … tempMission.miz`,
   `Terrain theatre Caucasus`, then `sequence=2`. So stop-then-load of another theatre's mission
   re-fires `onSimulationStart` with the new theatre, as designed.
-- **Still open from Test 1**: pause/resume (must log nothing) and in-sim "Restart Mission" (must log
-  a new sequence). Neither appears in this log window.
+- **Pause/resume: PASS** (user, 2026-10-19: *"pause, resume -> ok, passes"*) — no new line, so a
+  pause cannot be mistaken for a mission start.
+- **In-sim "Restart Mission": PASS** (user: *"restart -> ok, passes. restart equals start in
+  DCS."*) — re-fires `onSimulationStart` with a new sequence number. This settles the plan's open
+  question (and the research note's finding 5): single-player restart is indistinguishable from a
+  start, which is exactly what the reset needs. `onMissionLoadEnd` as a second signal is not needed.
+- **Test 1: PASS** in full.
 - Tests 2–4 (body-layer side: wipe, refusal, recovery) not reported in this run.
