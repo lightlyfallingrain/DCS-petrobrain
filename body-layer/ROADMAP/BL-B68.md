@@ -1,16 +1,23 @@
 # BL-B68 — Belief survives a DCS mission restart, because nothing resets it
 
-- [>] **The collector holds every piece of belief state in plain dataclass fields with no lifecycle
+- [~] **The collector holds every piece of belief state in plain dataclass fields with no lifecycle
   hook, so a DCS mission reload inside one service run carries the whole of the previous mission's
-  belief into the next one.** #status/deferred Diagnosed 2026-10-15 from the user's own test flight;
-  full evidence in `plans/position-belief-runaway/debug-2026-10-15.md`.
+  belief into the next one.** #status/in-progress Diagnosed 2026-10-15 from the user's own test
+  flight; full evidence in `plans/position-belief-runaway/debug-2026-10-15.md`.
 
   **Deferred by user direction, 2026-10-15:** *"defer mission end/start mechanics. We'll do them at
-  some point, not now."* Filed so the diagnosis is not re-derived; **do not start without
-  instruction.**
+  some point, not now."* Filed so the diagnosis is not re-derived.
 
-  **Scheduled 2026-10-19 as [[BL-15]] Stage 1** (user raised "mission start actions"). This entry
-  stays the diagnosis; work and status move to `BL-15`.
+  **Scheduled 2026-10-19 as [[BL-15]] Stage 1 — fixed on `feature/bl15-mission-start`, DoD-passed
+  2026-10-19, pending merge to `main`** (DoD acceptance testing with the user is the step
+  remaining before that merge — see `plans/bl15-mission-start/dod-check.md`). Every item in the
+  "Everything that carries over" table below is covered by `logger._reset_mission_state`/
+  `reset_for_new_mission()` on each class named, confirmed by Reviewer against this table
+  explicitly (`plans/bl15-mission-start/review.md` Batch 1). **This entry stays `[~]`/in-progress,
+  not `[x]`, for two reasons: the merge itself has not happened yet, and the live sortie
+  confirming the fix in the cockpit has not happened either** — the second is tracked on
+  `[[BL-15]]` itself as `#needs-flight`, not duplicated here as a second debt marker. Mark `[x]`/
+  `#status/done` once merged and that sortie clears.
 
   **How it presented.** The belief-truth tripwire fired on 18 contacts at ranges of ~532 km against
   a 10 km cap, with *small* position uncertainties (26–609 m) — belief confidently wrong, not vaguely
