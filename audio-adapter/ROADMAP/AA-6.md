@@ -21,5 +21,10 @@
   how Piper is distributed for Windows and macOS today, its CLI/WAV contract, and its latency on the
   user's machines against `say`'s measured ~0.6–0.8 s.
 
+  **Voice decided (user, 2026-10-19): `en_GB-northern_english_male-medium`**, chosen after the
+  five-voice sample set (`alan` was the first favourite) and the official samples page. The user
+  also named `ru_RU-ruslan-medium` as *"perfect"* for character — whether a Russian voice can speak
+  English text intelligibly is an open, untested question, not part of this milestone's default.
+
   Out of scope here: the other subprojects' OS-independence (user: *"first"* the audio adapter),
   and a Russian-accented character voice.
