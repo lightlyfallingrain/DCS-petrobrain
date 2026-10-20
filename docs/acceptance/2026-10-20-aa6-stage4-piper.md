@@ -38,6 +38,14 @@ Windows, the co-located `--target aircraft-layer` path, outage/recovery lines, l
 ## Results
 
 **Block 1 (Mac), 2026-10-20 — PASS.** User, verbatim: *"piper - works on mac, very good audio,
-me happy"*. Not yet reported: the live pytest (0 skipped?), end-to-end latency, outage block 4.
+me happy"*. Follow-up, verbatim: *"I did the setup phase. Live test did not skip any lines.
+Stopped piper -> error line correctly, no stack trace as expected. Piper is fast, when warm
+practically instantanous. Very good."*
 
-Blocks 2–5 (Windows, co-located, outage, latency): open.
+- Live pytest against a real Piper: ran, 0 skipped — PASS.
+- Block 4 (outage) on the Mac: the WARNING line appears, no stack trace — PASS. The recovery line
+  (`Piper back …`) and the no-repeat second `/speak` were not mentioned.
+- Block 5 (latency) on the Mac: *"when warm practically instantanous"* — a clear improvement over
+  `say`'s ~0.6–0.8 s. Not timed; the first-line-after-start (voice load) delay was not reported.
+
+Blocks 2–3 (Windows local, co-located) and the Windows half of 4–5: open.
