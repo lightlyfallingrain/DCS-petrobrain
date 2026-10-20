@@ -515,3 +515,142 @@ Drove `decide()` through real multi-poll cycles at 2000 m and 5000 m AGL to chec
 composition and the all-legs-empty case directly, which surfaced `BL-B86` above. Ran
 `ruff format --check`, `ruff check`, `mypy --strict`, and the full `pytest` suite on this exact
 commit tip.
+
+## Review — BL-B85
+
+Reviewed `451c5c451b64f30be9526acf244073fc6bb90397` (cherry-pick of `79921b1c`, tip of
+`feature/9k113-narrow-search`), against `docs/acceptance/2026-10-20-sortie-feedback.md` F4,
+`body-layer/ROADMAP/BL-B85.md`, and the appended "BL-B85" section of `implementation.md`.
+
+### What was checked, and how
+
+- **Starvation scenario, reproduced independently** (not just trusting the committed test): three
+  close contacts (50/80/120 m) held at `presence` forever, driven through `decide()` over 900
+  simulated seconds (the review's own original reproduction length, not the test's 600 s). Measured
+  busy 502/900 (55.8%), every leg (`wide`/`narrow_near`/`narrow_far`) visited — no starvation.
+  Matches the committed `test_three_contacts_stuck_at_presence_still_let_the_search_cycle_run`
+  (600 s/58% busy) in direction and order of magnitude.
+- **Both halves verified load-bearing by mutation**, independently, on this exact commit (not
+  re-derived from the author's own account): reverted only the `stall_cooldown_s` argument passed
+  at `_decide_sighting`'s candidate filter (`SIGHT_STALL_COOLDOWN_S` → `None`) — the 600 s test
+  measured exactly **88.00%** busy, matching the claimed pre-fix figure to two decimal places.
+  Restored, then reverted only `_start_glance_away`'s commit (back to dropping pending marks) —
+  measured **88.00%** busy again, independently. Both reversions confirmed, file restored and
+  `diff`/`git status --porcelain` confirmed byte-identical afterward. The "both halves necessary"
+  claim is correct, not merely plausible.
+- **`SIGHT_STALL_COOLDOWN_S` declaration and bounds**: `tuning.real(..., 132.0, lo=30.0, hi=400.0,
+  status="judgement")` — a real behaviour-affecting constant (how long Petrovich keeps re-granting
+  one contact), correctly routed through the tuning mechanism rather than a bare literal.
+- **Rendered `config/defaults.toml` read directly, not the source comment**: the rendered entry
+  (`body-layer/config/defaults.toml:109-111`) is the clean first sentence of the `#:` block, ending
+  at `` (`BL-B85`). ``, with no truncation and no corrupted markup across the line wrap. The
+  implementer's own account of two earlier, discarded drafts (a blank-`#:`-line paragraph break
+  that rendered only the paragraph nearest the assignment) is consistent with the generator's
+  documented behaviour and does not affect what shipped.
+- **Arithmetic checked against the code's own measurement, not the author's stated figure**: `132.0
+  = 2 × 66 s` is traced to `review.md`'s own prior measurement ("33 leg transitions … each full
+  cycle ~66 s" — 725 s ÷ 33 transitions ≈ 22 s/leg × 3 legs/cycle = 66 s/cycle), not a fresh,
+  unverified claim by this round's author. Grounded, not circular.
+- **`GLASSING` deliberately unchanged, confirmed by inspection**: `is_worth_a_look` has exactly two
+  call sites — `_decide_sighting`'s candidate filter (the only one passing `stall_cooldown_s`) and
+  `_decide_without_guidance`'s (GLASSING's own, no `can_improve`/`stall_cooldown_s` passed, so both
+  default). `_start_glance_away` itself is called from exactly one site, `_decide_sighting`'s
+  scheduled-break check — GLASSING's own natural-end/interruption commit paths are untouched. Both
+  claims verified by `grep`, not assumed.
+- **`SIGHT_MAX_DWELL_S` two-clocks-one-constant note**: agree with the implementer's own assessment
+  — it is a real, correctly-flagged design smell (two conceptually distinct boundaries resolved by
+  check order rather than intent), but this round's fix (commit on the scheduled break, same as the
+  natural end) makes the two paths behaviourally equivalent for the one case that mattered here, and
+  it is not a `lo`/`hi` cross-key violation in the tuning sense. No action needed from this round;
+  correctly filed as a note for future sight/dwell work rather than built around.
+
+### Required Fixes
+
+- **Part 2 changes semantics for every scheduled glance-away, not only stuck contacts — and the
+  entry's own "realistic case" reassurance is now stale, not merely unconfirmed.** `BL-B85.md`'s
+  "Realistic case, for contrast" paragraph (contacts advancing a tier per completed dwell, all
+  reaching `type` by ~t=175 s, 71.5% idle thereafter) was measured **before** this round's fix, when
+  the race described in `implementation.md` meant `_start_glance_away` *never* committed anything
+  for `SIGHTING` — i.e. that number describes a version of the code with no retry throttle reaching
+  the sight at all. After this fix, every look that ends on the scheduled dwell-boundary break now
+  commits, and `is_worth_a_look`'s pre-existing `OPTIC_RETRY_INTERVAL_S` gate (not just the new
+  `SIGHT_STALL_COOLDOWN_S`) engages for the first time for *any* `SIGHTING` look that reaches that
+  boundary — stalled or not. A contact whose level genuinely advances between commits gets the
+  shorter interval (`test_progress_since_the_last_attempt_keeps_the_fast_retry` confirms this), but
+  "shorter" is still `OPTIC_RETRY_INTERVAL_S` (64 s by default), not zero, where before this fix it
+  was zero for every scheduled-break-ended look (the commit never happened, so `is_worth_a_look`'s
+  "never attempted" branch returned `True` unconditionally).
+
+  **Measured directly** (single contact, toy one-step search bands matching the committed test's own
+  harness, level advanced on an external schedule independent of the optic — `presence` until t=50,
+  `class` until t=150, `type` from t=150): under the current code the contact is looked at at
+  t=0 and **not again until t=94** (two look-starts total in the window). Reverting only the
+  `_start_glance_away` commit fix (otherwise identical code) gives look-starts at t=0, 34, 67, 100,
+  133 — every ~33 s (`SIGHT_MAX_DWELL_S` + `SIGHT_GLANCE_AWAY_S`), five in the same window. The
+  contact crosses from `presence` to `class` at t=50, during the 44 s gap this fix newly imposes
+  before it is looked at again — i.e. the sight is not watching it at the exact moment the review
+  brief asked about ("a contact that would have advanced a tier on the next look").
+
+  This is not necessarily wrong — `OPTIC_RETRY_INTERVAL_S`'s own docstring (`plans/
+  sortie-2026-09-26-fixes/decisions.md` Decision 2/2a) already accepts this exact tradeoff for
+  `GLASSING` ("long enough that re-looks don't dominate … search every completed scan cycle"), and
+  this fix's effect is arguably just extending that same, already-shipped design intent to
+  `SIGHTING` for the first time, now that the bug blocking it is fixed, rather than inventing new
+  throttling. But that is an inference, not a confirmed fact: nothing in this round re-measures the
+  "realistic", non-stalled case under the *current* code, and the entry's own BL-B85.md still cites
+  the stale pre-fix number as evidence the normal case is unaffected. Given this feature's entire
+  stated purpose is "classification at distance" (F4), a material slowdown in ordinary (non-stuck)
+  multi-dwell identification is exactly the kind of thing that should be measured and stated, not
+  left as an untested assumption.
+
+  **Fix**: before `BL-B85.md` is marked `#status/done`, re-run (or have the Implementer re-run) the
+  three-contact "realistic case" scenario — classification advancing a tier per completed dwell,
+  not stalled — against the current code, as a committed test (not a one-off narrative number), and
+  update `BL-B85.md`'s "Realistic case, for contrast" paragraph with the current figures. If the new
+  numbers show a material regression in time-to-`type` versus the ~175 s figure, that is a decision
+  for the user: accept the tradeoff (consistent with `GLASSING`'s own precedent), or narrow the
+  retry gate so a contact whose level is actively moving is not penalised at all (rather than
+  merely penalised less than a stalled one).
+
+### Optional Refinements
+
+- **Cross-key coupling, undocumented and unenforced**: `is_worth_a_look` assumes
+  `OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S` (the whole point of the `stall_cooldown_s`
+  branch is "longer than the fast path"), but nothing enforces this. `OPTIC_RETRY_INTERVAL_S` is
+  not itself a `tuning.real` with bounds — it's `4.0 * SCAN_CYCLE_PERIOD_S`, derived at import from
+  `FOCUS_DWELL_S` (`lo=0.5, hi=5.0`) and `SCAN_PLAN`'s length, both independently tunable. At
+  `FOCUS_DWELL_S`'s own `hi=5.0` with the default 8-entry `SCAN_PLAN`, `OPTIC_RETRY_INTERVAL_S`
+  reaches 160 s — already past `SIGHT_STALL_COOLDOWN_S`'s own `lo=30.0`, so a `SIGHT_STALL_COOLDOWN_S`
+  tuned toward its low end while `FOCUS_DWELL_S` is tuned toward its high end silently inverts the
+  intended relationship (a stalled contact would then get the *shorter* wait of the two). Does not
+  crash, and the shipped defaults have a comfortable 2× margin (64 s vs 132 s) — same risk class as
+  the `OBSERVED_WINDOW_S`/`POSITION_HALF_LIFE_S` coupling `body-layer/CLAUDE.md`'s "Tuning" section
+  already documents as unprotected under multi-key tuning. An import-time assertion (the same
+  pattern `belief/decay.py` uses) would close it cheaply if this is worth doing now; otherwise worth
+  a line in that same "known residual coupling" note. (Optional — single-key tuning, the normal
+  case, is unaffected.)
+
+### Verdict
+CHANGES REQUIRED
+
+Both fixes in this commit are correctly built, independently verified by mutation, and the starvation
+problem F4 asked for is genuinely solved — this is not a rejection of the approach. What is missing
+is verification that the fix for the stuck case did not quietly regress the common case, for a
+feature whose whole point is faster classification at distance. That verification is cheap (one
+measurement, ideally captured as a permanent test) and should land before this entry moves past
+`#needs-flight`/`#status/in-progress` — it does not need another full implementation round, just the
+missing number.
+
+### Review Confidence
+Full read of the diff (`optic_policy.py`, `test_optic_policy.py`, `BL-B85.md`,
+`implementation.md`'s appended section, `defaults.toml`). Reproduced the 900 s/three-contact
+starvation scenario independently (not just re-running the committed test). Reproduced both
+mutations myself directly on this commit's source (not re-derived from the author's account),
+confirming 88.00% busy for each in isolation, file restored and verified byte-identical
+(`diff`/`git status --porcelain`) after each. Independently measured the progressing-contact
+re-look cadence under both the current code and a locally-reverted `_start_glance_away`, which is
+the basis for the Required Fix above — this is new evidence this review produced, not a restatement
+of the commit message. Confirmed `GLASSING`'s two relevant call sites by `grep`, not by trusting the
+docstrings. Ran `ruff format --check`, `ruff check`, `mypy --strict`, and the full `pytest` suite
+(2323 passed, 4 xfailed, 0 failed, no flakes this run) on this exact commit tip from inside
+`body-layer/`.
