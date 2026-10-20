@@ -323,3 +323,30 @@ A is built now. C is linked to the existing weather/light/vegetation item (`BL-B
 under real world conditions" section). B is deferred: perception already handles it per look
 (no LOS behind terrain, nearside visible). What is deferred is only the search pattern adapting
 its depth to terrain.
+
+## F4 — narrow looks (user, 2026-10-20)
+
+Implementation found that sight *looks* always resolve to wide: "worth a look" is decided from
+naked-eye/binocular thresholds, so a contact beyond binocular classification range is never worth
+a sight look, and narrow never classifies.
+
+> The narrow thing. Fix it, otherwise the whole point of narrow is missed.
+
+## F1 — latency settled (user, 2026-10-20, next flight)
+
+> 1 - responsiveness is much better when whisped (and audio adapter) run on mac -> this settles it,
+> I'll prioritize whisper (=audio adapter) and brain to run on mac. They must not be dependent on
+> mac, but I'll mostly use them on Mac.
+
+## F8 — "set target" acknowledged late and as an attack run
+
+User, verbatim:
+
+> * Me: "set target, armor, 12 o'clock"
+> * several seonds pass, I make U-turn to stay safe
+> * Petrovich acknowledges target Leopard 2 at 12 o'clock.
+>    * but this is several seconds late. I've already U-turned, there's nothing at 12 o'clock now.
+>    * Petrovich acknowledges attack run. This should not happen, this was selectling target, not
+>      attack run.
+
+Not yet explored.
