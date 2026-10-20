@@ -2199,7 +2199,7 @@ def test_route_event_contact_firing_seen_targeting_ownship_says_taking_fire(
 def test_route_event_contact_firing_seen_visible_firing_at_others_says_type_and_range(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`plans/taking-fire-visible-shooter/plan.md` (second half, F6
+    """`plans/taking-fire-visible-shooter/debug.md` (second half, F6
     follow-up) -- the accepted wording for a unit admitted *without* the
     emitter bypass: unlike the bypass-needed "something firing... far"
     case just above, the type and range are both known and both spoken,

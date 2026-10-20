@@ -3222,7 +3222,7 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         # bearing to report, the same "do not invent a look that was not
         # taken" reasoning `CONTACT_BURNING_SEEN` above follows.
         #
-        # `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+        # `plans/taking-fire-visible-shooter/debug.md` (second half, F6
         # follow-up "visible unit firing at others") adds a third wording,
         # `event.firing_visible`: a unit admitted *without* the bypass is
         # already carrying a real classification, so it is reported the

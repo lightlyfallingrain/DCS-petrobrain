@@ -165,7 +165,7 @@ CONTACT_ENGAGEMENT_CHANGED: Final[EventKind] = "CONTACT_ENGAGEMENT_CHANGED"
 #: ordering unchanged.
 CONTACT_BURNING_SEEN: Final[EventKind] = "CONTACT_BURNING_SEEN"
 #: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`), extended by
-#: `plans/taking-fire-visible-shooter/plan.md`'s second half -- a contact's
+#: `plans/taking-fire-visible-shooter/debug.md`'s second half -- a contact's
 #: `Observation.provenance` became one of `naked_eye_source.py`'s three
 #: `PROVENANCE_EMITTER_FIRING*` values (`belief.contacts.Contact.
 #: is_firing` went from not-firing to firing). **Also deliberately not
@@ -266,7 +266,7 @@ class Event:
     #: ever produces (`Percept.targets_ownship` is itself a plain `bool`,
     #: never `None`).
     targets_ownship: bool = False
-    #: `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+    #: `plans/taking-fire-visible-shooter/debug.md` (second half, F6
     #: follow-up)'s addition -- `targets_ownship`'s direct sibling, from
     #: `Contact.firing_visible` at the moment the event fires. `True` means
     #: this `CONTACT_FIRING_SEEN` was admitted without the emitter bypass

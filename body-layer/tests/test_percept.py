@@ -139,7 +139,7 @@ def test_percept_of_carries_live_los_clear_through_unchanged() -> None:
 
 def test_percept_of_maps_both_firing_provenance_values_to_firing_kind() -> None:
     """`plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- despite the
-    name (predating `plans/taking-fire-visible-shooter/plan.md`'s second
+    name (predating `plans/taking-fire-visible-shooter/debug.md`'s second
     half), this now covers all **three** of `naked_eye_source.py`'s
     `FIRING` provenance values: they all resolve to the same `EmitterKind`;
     which one it was crosses separately via `targets_ownship`/
@@ -175,7 +175,7 @@ def test_percept_of_maps_every_other_provenance_to_targets_ownship_false() -> No
 
 
 def test_percept_of_maps_visible_firing_provenance_to_firing_visible_true() -> None:
-    """`plans/taking-fire-visible-shooter/plan.md` (second half) --
+    """`plans/taking-fire-visible-shooter/debug.md` (second half) --
     `_TARGETS_OWNSHIP_PROVENANCE`'s sibling mapping."""
     observation = _observation(provenance=PROVENANCE_EMITTER_FIRING_VISIBLE)
 

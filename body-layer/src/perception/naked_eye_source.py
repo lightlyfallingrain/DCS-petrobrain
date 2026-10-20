@@ -420,7 +420,7 @@ PROVENANCE_EMITTER_BURNING: Final[str] = "world_objects/emitter_burning"
 #: targets_ownship`'s own docstring). This value is reserved for the
 #: bypass-needed case (`PROVENANCE_EMITTER_FIRING_VISIBLE` below is its
 #: sibling for the ordinary-admission case, `plans/
-#: taking-fire-visible-shooter/plan.md`). A mixed-`targets_ownship` cluster
+#: taking-fire-visible-shooter/debug.md`). A mixed-`targets_ownship` cluster
 #: where every member still needed the bypass (vanishingly unlikely --
 #: `targets_ownship` is resolved per unit, not per cluster, so this only
 #: happens if two different firing units with different targets land in
@@ -432,7 +432,7 @@ PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: Final[str] = (
     "world_objects/emitter_firing_targets_ownship"
 )
 
-#: `plans/taking-fire-visible-shooter/plan.md` (second half, F6 follow-up
+#: `plans/taking-fire-visible-shooter/debug.md` (second half, F6 follow-up
 #: "visible unit firing at others" -- `docs/acceptance/
 #: 2026-10-20-sortie-feedback.md`) -- a third `FIRING` provenance, for a
 #: unit that is firing at something other than ownship *and* was admitted
@@ -924,7 +924,7 @@ class NakedEyePerceptionSource:
                 emitter is not None and emitter.targets_ownship
             )
 
-        # `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+        # `plans/taking-fire-visible-shooter/debug.md` (second half, F6
         # follow-up "visible unit firing at others") -- the collector's own
         # `Emitter.kind is FIRING` fact, read the same bypass-independent
         # way `targets_ownship_by_object_id` immediately above reads
@@ -1324,7 +1324,7 @@ class NakedEyePerceptionSource:
             targets_ownship_by_object_id.get(member.object_id, False)
             for member in cluster.members
         }
-        # `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+        # `plans/taking-fire-visible-shooter/debug.md` (second half, F6
         # follow-up "visible unit firing at others") -- per-member "does
         # this one qualify for the *visible* firing-at-others provenance"
         # flag: currently firing (`firing_by_object_id`, bypass-

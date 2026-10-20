@@ -79,7 +79,7 @@ from perception.source import (
 _EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
     PROVENANCE_EMITTER_BURNING: EmitterKind.BURNING.value,
     # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`), extended by
-    # `plans/taking-fire-visible-shooter/plan.md`'s second half -- all
+    # `plans/taking-fire-visible-shooter/debug.md`'s second half -- all
     # three of `naked_eye_source.py`'s `FIRING` provenance values map to
     # the same `EmitterKind`, since `Percept.emitter_kind` only ever needs
     # to answer "which kind", not "aimed at us" or "already visible
@@ -103,7 +103,7 @@ _TARGETS_OWNSHIP_PROVENANCE: frozenset[str] = frozenset(
     {PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP}
 )
 
-#: `plans/taking-fire-visible-shooter/plan.md` (second half, F6 follow-up
+#: `plans/taking-fire-visible-shooter/debug.md` (second half, F6 follow-up
 #: "visible unit firing at others") -- `_TARGETS_OWNSHIP_PROVENANCE`'s
 #: direct sibling: the one `PROVENANCE_*` value whose presence means "this
 #: is a firing report, and the unit was admitted without the emitter
@@ -204,7 +204,7 @@ class Percept:
     (including `BURNING`, which carries no notion of a target at all)
     resolves to.
 
-    `firing_visible` (`plans/taking-fire-visible-shooter/plan.md`, second
+    `firing_visible` (`plans/taking-fire-visible-shooter/debug.md`, second
     half, F6 follow-up) is `targets_ownship`'s sibling, through its own
     closed mapping (`_VISIBLE_FIRING_PROVENANCE`): `True` means this firing
     report was admitted *without* the emitter bypass, so the classification

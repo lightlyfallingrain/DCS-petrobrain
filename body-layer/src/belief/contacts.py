@@ -458,7 +458,7 @@ class Contact:
     #: `last_emitted_firing`.
     is_firing: bool = False
     firing_targets_ownship: bool = False
-    #: `plans/taking-fire-visible-shooter/plan.md` (second half) -- see the
+    #: `plans/taking-fire-visible-shooter/debug.md` (second half) -- see the
     #: class docstring's paragraph on `is_firing`/`firing_targets_ownship`/
     #: `firing_visible`/`last_emitted_firing`.
     firing_visible: bool = False
@@ -804,7 +804,7 @@ class Contact:
                 percept.emitter_kind == EmitterKind.FIRING.value
                 and percept.targets_ownship
             ),
-            # `plans/taking-fire-visible-shooter/plan.md` (second half) --
+            # `plans/taking-fire-visible-shooter/debug.md` (second half) --
             # `firing_targets_ownship`'s direct sibling, same founding-tick
             # reasoning.
             firing_visible=(

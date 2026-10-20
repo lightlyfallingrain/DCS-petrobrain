@@ -1793,7 +1793,7 @@ def test_a_visible_unit_firing_at_ownship_sets_the_targets_ownship_provenance() 
 
 
 def test_a_visible_unit_firing_at_others_gets_the_firing_visible_provenance() -> None:
-    """**Changed by `plans/taking-fire-visible-shooter/plan.md`'s second
+    """**Changed by `plans/taking-fire-visible-shooter/debug.md`'s second
     half** (F6 follow-up "visible unit firing at others", `docs/acceptance/
     2026-10-20-sortie-feedback.md`): this test used to pin the opposite
     behaviour (ordinary provenance, no firing report at all for a visible
@@ -1868,7 +1868,7 @@ def test_firing_wins_over_burning_for_the_same_unit() -> None:
 
 
 # -- Cluster-level fold, genuine multi-member clusters (`plans/
-# taking-fire-visible-shooter/plan.md` review: every fold test above --
+# taking-fire-visible-shooter/debug.md` review: every fold test above --
 # `member_emitter_kinds` and `member_targets_ownship` alike -- used a
 # single-member cluster, which only trivially satisfies `len({x}) == 1`
 # unanimity. These use the same down-range clustering recipe as
