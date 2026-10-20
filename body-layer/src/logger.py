@@ -276,6 +276,7 @@ from perception.optics import (
     SIGHT_WIDE_OPTIC,
     UNAIDED_OPTIC,
     Optic,
+    within_field_of_regard,
 )
 from perception.source import Observation, OwnshipState, PerceptionSource
 from run_log_paths import per_run_log_path
@@ -1128,7 +1129,23 @@ def _sight_in_regard_sweep(
     """One leg of the sight's own search cycle (wide, or either of
     narrow's near/far bands) over whatever sub-span of the commanded-or-
     default sector the sight can actually reach -- `plans/
-    9k113-narrow-search/plan.md` Stage 3."""
+    9k113-narrow-search/plan.md` Stage 3.
+
+    **Filtered through `within_field_of_regard` (security required fix,
+    `plans/9k113-narrow-search/security-review.md`).** `search_pattern`'s
+    azimuth is already kept inside `regard` by construction
+    (`max_half_width_deg=regard` below), but its elevation is pure
+    range/altitude geometry (`atan2(altitude_agl_m, range_m)`, unbounded
+    below) with no awareness of this optic's own `regard_elevation_down_
+    deg` -- at this feature's own shared near edge (`SIGHT_SEARCH_NEAR_M`)
+    that geometry commands past the sight's -15 deg down limit at any
+    ownship altitude above ~625 m AGL, an ordinary cruise/orbit altitude.
+    Rejecting (not clamping) the offending steps here is the same choice
+    `look_sweep` already makes for the sight's look-sweep path -- a step
+    the mount cannot physically reach is dropped, not pointed at the
+    envelope edge and attributed to ground that was never validated. A
+    leg that filters down to empty is handled by the existing leg-advance/
+    `_idle_sight_rest` fallback, which needs no change for this."""
     regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
     center_deg, half_width_deg = _commanded_or_default_sector(scan_plan, regard)
     in_span, _ = _split_sector_by_regard(center_deg, half_width_deg, regard)
@@ -1138,7 +1155,7 @@ def _sight_in_regard_sweep(
     fov_full_width_deg = (optic.fov_half_angle_deg or 0.0) * 2.0
     if fov_full_width_deg <= 0.0:
         return []
-    return search_pattern(
+    steps = search_pattern(
         center_azimuth_deg=in_center_deg,
         sector_half_width_deg=in_half_width_deg,
         near_m=near_m,
@@ -1147,6 +1164,7 @@ def _sight_in_regard_sweep(
         fov_full_width_deg=fov_full_width_deg,
         max_half_width_deg=regard,
     )
+    return [step for step in steps if within_field_of_regard(optic, step[0], step[1])]
 
 
 def _sight_out_of_regard_sweep(

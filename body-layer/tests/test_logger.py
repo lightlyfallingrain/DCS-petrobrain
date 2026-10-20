@@ -1220,6 +1220,159 @@ class TestSightInRegardSweep:
         assert all(-60.0 <= azimuth <= -30.0 for azimuth in azimuths)
 
 
+class TestSightInRegardSweepElevation:
+    """Security required fix (`plans/9k113-narrow-search/security-review.md`):
+    `search_pattern`'s elevation is pure range/altitude geometry
+    (`atan2(altitude_agl_m, range_m)`) with no awareness of the sight's own
+    `regard_elevation_down_deg=-15.0`. At this feature's own shared near
+    edge (`SIGHT_SEARCH_NEAR_M`) that geometry reaches -23.2 deg at 1000 m
+    AGL -- 8.2 deg past the limit, and an ordinary cruise/orbit altitude,
+    not a stress case (the review's own table). The pre-existing `within_
+    field_of_regard` invariant tests (`TestSightingDwellCycle`'s idle-aim
+    test, `TestIdleAimInvariant`) never caught this because they pass no
+    `sight_*_search` sequences at all, which falls straight through to
+    `_idle_sight_rest` and never calls `search_pattern` -- these drive the
+    real, production near/far-edge wiring instead, at an altitude the
+    review's table names as the one that fails unfiltered."""
+
+    _ALT_AGL_M = 1000.0  # 8.2 deg past -15 deg down-regard at the near edge, unfiltered
+
+    def _legs(
+        self, alt_agl_m: float
+    ) -> tuple[
+        list[tuple[float, float]], list[tuple[float, float]], list[tuple[float, float]]
+    ]:
+        """The same three in-regard legs `PerceptionLogger.run_once` builds
+        (`logger.py`'s `sight_wide_search=`/`sight_narrow_near_search=`/
+        `sight_narrow_far_search=` wiring) -- same near/far edges, so this
+        exercises the real production geometry, not a synthetic stand-in."""
+        from belief.optic_policy import (
+            SIGHT_SEARCH_FAR_M,
+            SIGHT_SEARCH_MID_M,
+            SIGHT_SEARCH_NEAR_M,
+        )
+
+        ownship = _ownship_for_search(alt_agl_m=alt_agl_m)
+        wide = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+        )
+        narrow_near = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_NARROW_OPTIC,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=SIGHT_SEARCH_MID_M,
+        )
+        narrow_far = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            ownship,
+            optic=SIGHT_NARROW_OPTIC,
+            near_m=SIGHT_SEARCH_MID_M,
+            far_m=SIGHT_SEARCH_FAR_M,
+        )
+        return wide, narrow_near, narrow_far
+
+    def test_wide_leg_at_1000m_agl_stays_within_regard(self) -> None:
+        from perception.optics import within_field_of_regard
+
+        wide, _, _ = self._legs(self._ALT_AGL_M)
+        assert wide  # the near edge is still reachable after filtering, not emptied
+        assert all(within_field_of_regard(SIGHT_WIDE_OPTIC, az, el) for az, el in wide)
+
+    def test_narrow_near_leg_at_1000m_agl_stays_within_regard(self) -> None:
+        from perception.optics import within_field_of_regard
+
+        _, narrow_near, _ = self._legs(self._ALT_AGL_M)
+        assert narrow_near
+        assert all(
+            within_field_of_regard(SIGHT_NARROW_OPTIC, az, el) for az, el in narrow_near
+        )
+
+    def test_narrow_far_leg_at_1000m_agl_stays_within_regard(self) -> None:
+        from perception.optics import within_field_of_regard
+
+        _, _, narrow_far = self._legs(self._ALT_AGL_M)
+        assert narrow_far
+        assert all(
+            within_field_of_regard(SIGHT_NARROW_OPTIC, az, el) for az, el in narrow_far
+        )
+
+    def test_the_unfiltered_geometry_really_does_reach_past_the_down_limit(
+        self,
+    ) -> None:
+        """Pins the premise the three tests above guard against, by calling
+        `search_pattern` directly (the function `_sight_in_regard_sweep`
+        wraps and filters) rather than `_sight_in_regard_sweep` itself --
+        if this ever stops failing, the fix above has nothing left to do
+        and should be revisited, not silently kept as dead code."""
+        from belief.optic_policy import SIGHT_SEARCH_NEAR_M, search_pattern
+        from perception.optics import within_field_of_regard
+
+        unfiltered = search_pattern(
+            center_azimuth_deg=0.0,
+            sector_half_width_deg=60.0,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            altitude_agl_m=self._ALT_AGL_M,
+            fov_full_width_deg=(SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0,
+            max_half_width_deg=60.0,
+        )
+        assert any(
+            not within_field_of_regard(SIGHT_WIDE_OPTIC, az, el)
+            for az, el in unfiltered
+        )
+
+    @pytest.mark.parametrize("alt_agl_m", [120.0, 1000.0])
+    def test_a_multi_poll_cycle_never_commits_an_out_of_regard_aim(
+        self, alt_agl_m: float
+    ) -> None:
+        """End-to-end: the three real legs built the way `run_once` builds
+        them, driven through `decide()` for several polls -- enough to
+        cycle `wide -> narrow_near -> narrow_far -> wide` more than once --
+        checking the *committed* `(azimuth, elevation)` on each returned
+        `OpticDecision`, not just the raw pattern. 120 m AGL is this
+        feature's own existing test default (comfortably under the ~625 m
+        threshold, so this also pins "the fix is a no-op at the altitude
+        every other test in this module already uses"); 1000 m AGL is the
+        altitude the security review measured as failing unfiltered."""
+        from belief.optic_policy import OpticPhase, OpticState, decide
+        from perception.optics import within_field_of_regard
+
+        wide, narrow_near, narrow_far = self._legs(alt_agl_m)
+        state = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        now_sim = 0.0
+        for _ in range(12):
+            state, decision = decide(
+                state,
+                now_sim=now_sim,
+                scan_cycle_period_s=16.0,
+                targets=[],
+                steady=True,
+                sight_wide_search=wide,
+                sight_narrow_near_search=narrow_near,
+                sight_narrow_far_search=narrow_far,
+            )
+            assert decision.look_azimuth_deg is not None
+            assert decision.look_elevation_deg is not None
+            assert within_field_of_regard(
+                decision.optic,
+                decision.look_azimuth_deg,
+                decision.look_elevation_deg,
+            )
+            # Comfortably past SEARCH_STEP_S (0.8) each poll, same spacing
+            # `TestSearchCycle` in test_optic_policy.py already uses, for
+            # the same float-drift reason its own docstring gives.
+            now_sim += 1.0
+
+
 class TestSightWideSearchFarM:
     """`_SIGHT_WIDE_SEARCH_FAR_M` -- `docs/acceptance/2026-10-20-sortie-
     feedback.md` F4: the wide sweep's far edge is wide's own useful reach,

@@ -337,3 +337,88 @@ needed a rerun).
 **Derived wide band edge: ~8.28 km** (`8_282.15` m exactly, for the reference vehicle), up from the
 old shared 5.6 km -- inside the 10 km player bubble, so it is wide's genuine reach rather than a
 value the bubble cuts short.
+
+### Security required fix: idle sight search never enforced elevation field of regard
+
+`plans/9k113-narrow-search/security-review.md`, Part 2 Required Fix 1 (verdict NEEDS FIXES).
+Confirmed by direct calculation before touching anything, reproducing the review's own table
+(`math.degrees(math.atan2(alt, 2333.0))`): the idle search cycle's `wide`/`narrow_near` legs
+command an elevation 8.2 deg past the sight's own `regard_elevation_down_deg=-15.0` at 1000 m AGL
+-- an ordinary cruise/orbit altitude, not an edge case -- because `belief.optic_policy.
+search_pattern`'s elevation is pure range/altitude geometry (`atan2`) with no awareness of this
+optic's own field of regard; only its azimuth was ever capped (`max_half_width_deg`).
+
+**Fix, applying the project's own established "reject, not clamp" pattern** (`look_sweep` already
+does this for the sight's look-sweep path; `.claude/agent-memory/implementer/
+feedback_declared_bound_check_at_selection_not_at_consumer.md`): `logger._sight_in_regard_sweep`
+now filters `search_pattern`'s returned steps through `within_field_of_regard(optic, azimuth,
+elevation)` before returning them, dropping any step the optic cannot physically reach rather than
+clamping it to the boundary. This is the one producer every caller of the three in-regard legs
+(`run_once`'s `sight_wide_search=`/`sight_narrow_near_search=`/`sight_narrow_far_search=`) reads
+from, so filtering here protects all three without a second check anywhere else. A leg that
+filters down to empty composes with the existing leg-advance/`_idle_sight_rest` fallback
+unchanged -- `_idle_sight_search`'s `first_nonempty_leg` already treats an empty leg as "advance to
+the next one," and confirmed by test (`test_a_multi_poll_cycle_never_commits_an_out_of_regard_aim`,
+both altitudes) that the fallback itself never yields an out-of-regard aim, since it only ever
+holds the last (already-validated) position or `(0.0, 0.0)`.
+
+**The out-of-regard binocular sweep (`logger._sight_out_of_regard_sweep`) needs no equivalent
+fix.** It calls `search_pattern` with `BINOCULAR_OPTIC`, whose `regard_azimuth_half_deg`/
+`regard_elevation_up_deg`/`regard_elevation_down_deg` are all `None` (confirmed by reading
+`BINOCULAR_OPTIC`'s declaration in `perception/optics.py` -- it is built with no `regard_*`
+keyword at all) -- binoculars genuinely have no field of regard (a head-aimed instrument, not a
+gimballed sight), so `within_field_of_regard` would be a true no-op there by the same convention
+every other binocular caller already relies on. Left unchanged rather than adding a no-op filter.
+
+**Tests added** (`TestSightInRegardSweepElevation`, `tests/test_logger.py`, inserted directly after
+the existing `TestSightInRegardSweep`): the review's own required-test shape, built against the
+real production near/far-edge wiring (`SIGHT_SEARCH_NEAR_M`/`_SIGHT_WIDE_SEARCH_FAR_M`/
+`SIGHT_SEARCH_MID_M`/`SIGHT_SEARCH_FAR_M`), not a synthetic stand-in:
+
+- `test_wide_leg_at_1000m_agl_stays_within_regard`, `test_narrow_near_leg_at_1000m_agl_stays_
+  within_regard`, `test_narrow_far_leg_at_1000m_agl_stays_within_regard` -- each of the three
+  in-regard legs, at 1000 m AGL, every returned step satisfies `within_field_of_regard` for its own
+  optic; each also asserts the leg is non-empty (the filter must not silently empty every leg).
+- `test_the_unfiltered_geometry_really_does_reach_past_the_down_limit` -- calls `search_pattern`
+  directly (the function `_sight_in_regard_sweep` wraps), pinning that the underlying hazard this
+  fix guards against is real production geometry, not a hypothetical; documents what the fix above
+  is for, for a future reader.
+- `test_a_multi_poll_cycle_never_commits_an_out_of_regard_aim` (parametrized `120.0`/`1000.0` m
+  AGL) -- the review's own explicitly-named gap: the **existing** `within_field_of_regard`
+  invariant tests (`TestSightingDwellCycle`'s idle-aim test, `TestIdleAimInvariant`) pass no
+  `sight_*_search` sequences at all, which falls straight through to `_idle_sight_rest` and never
+  calls `search_pattern`. This test instead builds the three real legs the way `run_once` builds
+  them and drives `decide()` through 12 polls (more than one full `wide -> narrow_near ->
+  narrow_far` cycle), checking the **committed** `(azimuth, elevation)` on each `OpticDecision`,
+  not just the raw pattern list. 120 m AGL (this feature's own existing test default) pins that the
+  fix is a true no-op at the altitude every other test in this module already uses; 1000 m AGL is
+  the altitude the security review measured as failing unfiltered.
+
+**Mutation-checked, not merely written** (`shasum` before/after, restored by overwrite): changed
+`_sight_in_regard_sweep`'s `return [step for step in steps if within_field_of_regard(...)]` to a
+bare `return steps` (the pre-fix shape) and reran `TestSightInRegardSweepElevation` -- three of the
+six tests went red for exactly the stated reason: `test_wide_leg_at_1000m_agl_stays_within_regard`,
+`test_narrow_near_leg_at_1000m_agl_stays_within_regard`, and the 1000 m parametrization of
+`test_a_multi_poll_cycle_never_commits_an_out_of_regard_aim` (the failure shows
+`look_elevation_deg=-23.20155444616394` on `SIGHT_WIDE_OPTIC`'s `-54.5` deg azimuth step -- the
+review's own `-23.2 deg` figure at 1000 m AGL, reproduced exactly). `test_narrow_far_leg_at_
+1000m_agl_stays_within_regard` and the 120 m parametrization stayed green under the mutation, which
+is expected and not a gap: `narrow_far`'s near edge is `SIGHT_SEARCH_MID_M` (a shallower depression
+than the shared `SIGHT_SEARCH_NEAR_M` edge the defect lives at), and 120 m AGL is comfortably under
+the ~625 m threshold for any leg -- both are genuine negative cases, not blind spots. Restored by
+overwrite, `shasum`-verified byte-identical to the pre-mutation file.
+
+**Checks (this round)**: `ruff format --check src tests`: pass (one reformat applied to the new
+test class before the check). `ruff check src tests`: pass. `cd body-layer && .venv/bin/mypy src`:
+pass, no issues in 68 source files. `pytest tests -q`: 2286 passed, 4 xfailed, 0 failed. One
+known-flake test needed a rerun in the full-suite pass (`test_connection_reporter_reannounces_
+after_a_recovery_and_a_second_drop`, a timing flake named in the dispatch brief) -- confirmed by
+running it alone immediately after, which passed; unrelated to this change (it never touches
+`logger._sight_in_regard_sweep`/`optic_policy.search_pattern`/`within_field_of_regard`).
+
+**What the pilot will notice**: high up, the idle sweep's closest-range elevation band drops out --
+above roughly 625 m AGL the sight cannot physically look that steeply down to cover the near edge
+of its own search band, so those steps are simply skipped (confirmed: at 1000 m AGL the wide leg's
+near elevation band, -23.2 deg, is dropped in full while its far band, -6.9 deg, is swept normally
+-- 11 of 22 steps), rather than the gunsight being pointed at an elevation the mount cannot
+mechanically hold.
