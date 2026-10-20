@@ -56,7 +56,7 @@ practically instantanous. Very good."*
   The outage line fires once and the recovery line once — as designed. **But the server's own
   pre-existing per-call `TTS synthesis failed for '<text>'` WARNING still fires on every `/speak`**,
   so during an outage each callout adds a line; Decision 3's "subsequent failures not re-logged
-  loudly" holds for `PiperEngine` only. Raised with the user, not yet decided.
+  loudly" holds for `PiperEngine` only. Raised with the user — decided 2026-10-20: *"leave as is, not important"*.
 - Block 5 (latency) on the Mac: *"when warm practically instantanous"* — a clear improvement over
   `say`'s ~0.6–0.8 s. Not timed; the first-line-after-start (voice load) delay was not reported.
 
