@@ -62,10 +62,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+#: Lines `_iter_jsonl` could not parse as JSON this run, as `"path:line"`
+#: strings -- `BL-B88` (security deep analysis, `plans/
+#: voice-latency-instrumentation/security-review.md`, 2026-10-20). The
+#: realistic trigger is a process killed mid-write (a DCS crash, a mission
+#: reload, a power-cycle), which truncates exactly the last line of
+#: whichever file was open -- this must cost that one line, not the whole
+#: reducer run, since the tool is most likely to be reached for immediately
+#: after the kind of event that produces one. Module-level rather than
+#: threaded through every loader's return type, so `load_latency_log`/
+#: `load_speech_log`/`load_belief_truth_log` keep their existing
+#: `list[_Row]`-only signature (their own tests call them directly);
+#: `main` resets this list before loading anything and reports its count
+#: in its own closing summary line.
+_malformed_lines: list[str] = []
 
 #: Fixed pipeline order -- see module docstring for why this is not
 #: inferred from `t_wall`. A row's own stage places it in this list;
@@ -94,13 +110,26 @@ class _Row:
 
 
 def _iter_jsonl(path: Path) -> list[dict[str, Any]]:
+    """One JSON object per non-blank line. A line that fails to parse (a
+    process killed mid-write truncates exactly the last line of whichever
+    file was open) is skipped, warned about on stderr with its file and
+    line number, and recorded in `_malformed_lines` -- it must cost one
+    row, not every row in every file this run (`BL-B88`)."""
     records: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
-        for raw_line in handle:
+        for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.strip()
             if not line:
                 continue
-            records.append(json.loads(line))
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                location = f"{path}:{line_number}"
+                _malformed_lines.append(location)
+                print(
+                    f"warning: skipping malformed JSON line at {location}: {exc}",
+                    file=sys.stderr,
+                )
     return records
 
 
@@ -249,6 +278,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    _malformed_lines.clear()  # a fresh count for this run, not carried over
+    # from an earlier `main()` call in the same process (e.g. the test suite).
+
     rows: list[_Row] = []
     for path in args.latency_log:
         rows.extend(load_latency_log(path))
@@ -284,7 +316,10 @@ def main(argv: list[str] | None = None) -> None:
             print(format_timeline(correlation_id, groups[correlation_id]))
             print()
 
-    print(f"{len(groups)} correlated utterance(s); {unattributed} row(s) with no id.")
+    print(
+        f"{len(groups)} correlated utterance(s); {unattributed} row(s) with no id. "
+        f"{len(_malformed_lines)} malformed line(s) skipped."
+    )
 
 
 if __name__ == "__main__":

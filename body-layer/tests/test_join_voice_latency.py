@@ -190,3 +190,40 @@ def test_main_counts_unattributed_rows_separately(
     out = capsys.readouterr().out  # type: ignore[attr-defined]
     assert "No correlated rows found." in out
     assert "0 correlated utterance(s); 1 row(s) with no id." in out
+
+
+def test_truncated_last_line_is_skipped_and_all_other_rows_still_join(
+    tmp_path: Path, capsys: object
+) -> None:
+    """`BL-B88` -- the realistic trigger for a malformed line is a process
+    killed mid-write (a DCS crash, a mission reload, a power-cycle), which
+    truncates exactly the *last* line of whichever file was open. That one
+    line must cost itself, not every row in the file: the well-formed row
+    above it still joins, the run completes, and the skipped count appears
+    in the closing summary line (not only as a stderr warning nobody
+    pipes)."""
+    path = tmp_path / "latency.jsonl"
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "stage": "capture",
+                    "correlation_id": "corr-1",
+                    "outcome": "sent",
+                    "t_wall": 100.0,
+                }
+            )
+            + "\n"
+        )
+        # Truncated mid-write -- an opening object with no closing brace,
+        # no trailing newline.
+        handle.write('{"stage": "transcribe", "correlation_id": "cor')
+
+    main(["--latency-log", str(path)])
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert "=== corr-1 ===" in captured.out
+    assert "capture" in captured.out
+    assert "1 correlated utterance(s); 0 row(s) with no id." in captured.out
+    assert "1 malformed line(s) skipped." in captured.out
+    assert f"{path}:2" in captured.err

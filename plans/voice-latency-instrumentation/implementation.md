@@ -313,3 +313,87 @@ reading that method directly).
 - `ruff check`: pass
 - `mypy src` (run `cd body-layer && .venv/bin/mypy src`): pass, 68 source files
 - `pytest tests -q`: pass — 2267 passed, 4 xfailed (2264 + 3 new tests; no flake hit this run)
+
+---
+
+## Follow-up: BL-B87/BL-B88 (security deep analysis findings, 2026-10-20)
+
+Both findings from `plans/voice-latency-instrumentation/security-review.md` (filed as `BL-B87`/
+`BL-B88` — the plan's own numbers `BL-B85`/`BL-B86` were already taken on
+`feature/9k113-narrow-search` by the time these were minted, so the review's prose still says
+`BL-B85`/`BL-B86` in places; the roadmap files use the renumbered IDs throughout).
+
+**`BL-B87` — `_pending_positional_replies` had no size bound.** Added
+`_MAX_PENDING_POSITIONAL_REPLIES: Final[int] = 64` (`body-layer/src/belief/crew_console.py`,
+module level, same cap value as `audio-adapter`'s `TranscriptQueue`/`aircraft-layer`'s
+`F10CommandQueue`) and enforced it in `_speak_or_defer`: once the list is at cap, the oldest entry
+is popped before the new one is appended — drop-oldest, mirroring those two siblings exactly. A
+dropped entry is only a spoken echo, never an unexecuted action, since every Stage 6 handler's own
+side effect (resolving a target, writing a mission-memory mark) already ran unconditionally at
+command time, before `_speak_or_defer` is ever reached — confirmed by re-reading that invariant
+rather than assuming it, since it is the same one `4ac44e29`'s mark_target fix (immediately above
+in this same file) exists to guarantee.
+
+**Logging deliberately diverges from the two siblings it mirrors.** `TranscriptQueue`/
+`F10CommandQueue` drop silently (`deque(maxlen=...)`'s own overflow behaviour); this cap instead
+logs one `WARNING` on the first drop, via a new `_positional_reply_overflow_warned` bool field —
+the security review's own recommended fix asked for visibility here specifically ("with a
+`logger.warning` on the drop so it is visible rather than silent"), unlike the oversized-
+`correlation_id` risk the plan review already accepted silently. Rate-limited to once (not once
+per drop) by the same edge-trigger shape `logger.py`'s `_warn_live_los_coverage_gap_once` already
+uses for a different cumulative counter — a sustained flood holds this list at cap continuously,
+so "log every drop" would flood the log for the rest of the sortie. Neither sibling queue has an
+existing rate-limited-repeat-warning pattern to mirror instead (checked: both are silent on drop),
+so this is the project's own established "log once" idiom applied to a new trigger, not an
+invented third pattern. `_positional_reply_overflow_warned` is not in `reset_for_new_mission`'s
+"survives" list (added to its docstring's enumeration alongside the other non-surviving fields), so
+a mission restart gets a fresh warn-once state for free, same as `_pending_positional_replies`
+itself.
+
+Tested: `test_pending_positional_replies_caps_and_drops_oldest_warning_logged_once`
+(`body-layer/tests/test_crew_console.py`) — 69 calls (cap + 5) against a channel held permanently
+busy, asserting the queue settles at exactly 64 entries, the five *oldest* are the ones gone (drop-
+oldest, not drop-newest — checked via `queued_since_sim` on the surviving entries), and exactly one
+`WARNING` record appears in `caplog` despite five separate drop events. Mutation-checked: removed
+the cap-check block, reran — failed with `69 == 64` as expected (the exact assertion the fix makes
+true); restored, `sha256sum src/belief/crew_console.py` matched exactly pre/post.
+
+**`BL-B88` — `join_voice_latency.py`'s `_iter_jsonl` aborted the whole reducer on one malformed
+line.** Wrapped the per-line `json.loads(line)` call in `try`/`except json.JSONDecodeError`: a bad
+line is now skipped, warned about on stderr naming the file and 1-indexed line number, and recorded
+in a new module-level `_malformed_lines` list. `main()` resets that list at the start of each run
+(so repeated `main()` calls in one process — the test suite — don't accumulate across runs) and
+reports its count in its own closing summary line, appended after the existing "N correlated
+utterance(s); N row(s) with no id." sentence rather than folded into it, specifically so the three
+pre-existing tests asserting that exact substring stay unmodified and still pass.
+
+**Why module-level state instead of threading a count through `load_latency_log`/`load_speech_log`/
+`load_belief_truth_log`'s return values**: those three loaders are called directly by their own
+existing tests and must keep returning `list[_Row]` only — changing their signature to also return
+a skip count would have required touching tests this role is not permitted to modify. A module-
+level list that `main` owns the lifecycle of (reset on entry, read at exit) keeps the loaders'
+public shape untouched.
+
+Tested: `test_truncated_last_line_is_skipped_and_all_other_rows_still_join`
+(`body-layer/tests/test_join_voice_latency.py`) — a two-line file whose second (last) line is
+truncated mid-write (an open brace with no closing content, no trailing newline — what a process
+killed mid-write leaves behind), confirming the well-formed first row still joins into its
+timeline, the run completes rather than raising, the stderr warning names `<path>:2`, and the
+closing summary line reports "1 malformed line(s) skipped." Mutation-checked: removed the
+`try`/`except`, reran — failed with an unhandled `json.decoder.JSONDecodeError` ("Unterminated
+string...") propagating straight out, exactly the crash the finding described; restored,
+`sha256sum tools/join_voice_latency.py` matched exactly pre/post.
+
+**Checks (body-layer only, this round's touched set):**
+- `ruff format --check src tests tools`: pass (163 files; 1 file needed `ruff format` applied —
+  the new `test_pending_positional_replies_...` test's one long comprehension line — then passed)
+- `ruff check src tests tools`: pass
+- `mypy src` (run `cd body-layer && .venv/bin/mypy src`): pass, 68 source files
+- `pytest tests -q`: 2268 passed, 4 xfailed on a clean run. Three separate full-suite runs each hit
+  exactly one of the three flagged pre-existing timing flakes
+  (`test_connection_reporter_announces_the_first_connection`,
+  `test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop`,
+  `test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure`), each confirmed
+  passing in isolation on immediate retry — consistent with known flakes, not a regression (neither
+  touched file is anywhere near `logger.py`'s connection-reporter or mission-start-reset code).
+  Both new tests also confirmed by name in an unfiltered `-v` run (not `-k`), both `PASSED`.

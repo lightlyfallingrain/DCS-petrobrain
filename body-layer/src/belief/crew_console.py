@@ -1018,6 +1018,19 @@ BRAIN_REPLY_MAX_AGE_S: Final[float] = 20.0
 #: twice (voice, text, overlay) hears exactly the same words each time.
 WORLD_MODEL_NOT_LOADED_REFUSAL: Final[str] = "system error, world model not loaded"
 
+#: Security deep analysis, `plans/voice-latency-instrumentation/security-review.md`
+#: (2026-10-20, filed as `BL-B87`) -- bounds `_pending_positional_replies` the same
+#: way `audio-adapter`'s `TranscriptQueue`/`aircraft-layer`'s `F10CommandQueue`
+#: already bound themselves (same cap value, same drop-oldest reasoning: a
+#: sustained flood of recognisable-command audio via the network-reachable
+#: `/transcribe` path could otherwise grow this list unboundedly in the live
+#: `CrewConsole` process's own memory, for the whole sortie). A dropped entry is
+#: only a spoken echo, never an unexecuted action -- every command's own
+#: immediate side effect (resolving a target, writing a mission-memory mark)
+#: already ran unconditionally at command time, before `_speak_or_defer` is ever
+#: reached.
+_MAX_PENDING_POSITIONAL_REPLIES: Final[int] = 64
+
 
 @dataclass
 class CrewConsole:
@@ -1260,6 +1273,15 @@ class CrewConsole:
     _pending_positional_replies: list[_PendingPositionalReply] = field(
         default_factory=list, repr=False
     )
+    #: `BL-B87` -- whether the one-time overflow warning below has already
+    #: fired. Logged once rather than once per drop (mirroring `logger.py`'s
+    #: `_warn_live_los_coverage_gap_once` edge-trigger shape): under a
+    #: sustained flood this list sits at `_MAX_PENDING_POSITIONAL_REPLIES`
+    #: continuously, so "log on every drop" would flood the log for the rest
+    #: of the sortie instead of saying it once. Not in `reset_for_new_
+    #: mission`'s "survives" list, so a mission restart resets it to `False`
+    #: for free, same as `_pending_positional_replies` itself.
+    _positional_reply_overflow_warned: bool = field(default=False, repr=False)
     #: Set by `_handle_silence` while `silence` is in effect; cleared the
     #: moment any *other* command reaches `handle_command` or `_act`
     #: (`plans/silence-command/plan.md`, user direction 2026-10-04:
@@ -1329,7 +1351,8 @@ class CrewConsole:
         confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
         `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
         contact_id`, `attack_run_transition`, `observ_transition`,
-        `on_ground`, `enrichment`, `refused`) resets to its declared
+        `on_ground`, `enrichment`, `refused`, `_positional_reply_overflow_
+        warned`) resets to its declared
         default -- see `refused`'s own field docstring for why resetting
         it here is correct even though a mission (re)start is exactly the
         event that might need to set it right back. `on_ground` resetting
@@ -1470,6 +1493,16 @@ class CrewConsole:
         other command whose readback happens to be empty."""
         if now_sim >= self.scheduler.busy_until_sim:
             return render(now_sim)
+        if len(self._pending_positional_replies) >= _MAX_PENDING_POSITIONAL_REPLIES:
+            self._pending_positional_replies.pop(0)
+            if not self._positional_reply_overflow_warned:
+                logger.warning(
+                    "_pending_positional_replies at cap (%d); dropping oldest "
+                    "deferred readback(s) -- the command itself already acted, "
+                    "only its spoken readback is lost (BL-B87)",
+                    _MAX_PENDING_POSITIONAL_REPLIES,
+                )
+                self._positional_reply_overflow_warned = True
         self._pending_positional_replies.append(
             _PendingPositionalReply(
                 correlation_id=correlation_id,

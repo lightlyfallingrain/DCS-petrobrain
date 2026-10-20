@@ -1,8 +1,9 @@
 # BL-B87 — `_pending_positional_replies` has no size bound
 
-- [ ] **BL-B87 — Stage 6's deferred-positional-readback list
+- [x] **BL-B87 — Stage 6's deferred-positional-readback list
   (`CrewConsole._pending_positional_replies`, `plans/voice-latency-instrumentation/plan.md`) grows
-  with no cap, unlike every other queue-shaped structure in this codebase.** Security deep analysis,
+  with no cap, unlike every other queue-shaped structure in this codebase. FIXED**, built on
+  `feature/voice-latency-instrumentation`. #status/done Security deep analysis,
   `plans/voice-latency-instrumentation/security-review.md` (2026-10-20).
 
   `audio-adapter`'s `TranscriptQueue` (`_MAX_QUEUE_LEN = 64`) and `aircraft-layer`'s
@@ -33,3 +34,14 @@
   **Recommended fix**: bound `_pending_positional_replies` the same way `TranscriptQueue`/
   `F10CommandQueue` already do — a fixed cap, drop-oldest (or reject-new) past it, with a `logger.
   warning` on the drop so it is visible rather than silent.
+
+  **Fixed**: `_MAX_PENDING_POSITIONAL_REPLIES = 64` (`body-layer/src/belief/crew_console.py`,
+  same cap value and drop-oldest reasoning as `TranscriptQueue`/`F10CommandQueue`), enforced in
+  `_speak_or_defer`. Unlike those two siblings (which drop silently), a drop here also logs one
+  `WARNING` — rate-limited to once per mission via `_positional_reply_overflow_warned`, so a
+  sustained flood does not flood the log in turn — since a dropped entry here is only a spoken
+  echo (every command's own side effect already ran unconditionally at command time, before
+  `_speak_or_defer`), never an unexecuted action. Tested:
+  `test_pending_positional_replies_caps_and_drops_oldest_warning_logged_once`
+  (`body-layer/tests/test_crew_console.py`), which exceeds the cap by 5 to confirm the warning
+  fires once, not five times.

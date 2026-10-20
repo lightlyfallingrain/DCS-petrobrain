@@ -30,6 +30,7 @@ from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
 from belief.contacts import Contact, ContactStore
 from belief.crew_console import (
     _GREETING_TIMES_OF_DAY,
+    _MAX_PENDING_POSITIONAL_REPLIES,
     _NOTHING_TO_STOP,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
@@ -4781,6 +4782,45 @@ def test_select_target_readback_falls_back_to_lost_contact_if_it_vanishes_before
 
     spoken = console.drain_pending_positional_replies(now_sim=100.0)
     assert spoken == ["Lost him."]
+
+
+def test_pending_positional_replies_caps_and_drops_oldest_warning_logged_once(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`BL-B87` (security deep analysis, `plans/voice-latency-instrumentation/
+    security-review.md`) -- `_pending_positional_replies` must not grow
+    unboundedly under a sustained flood of deferred readbacks, mirroring
+    `TranscriptQueue`/`F10CommandQueue`'s own drop-oldest cap. A dropped
+    entry loses only an already-stale spoken echo, never an action: each
+    `select_target` call below still resolves and registers its own task
+    unconditionally, regardless of whether its readback survives the cap.
+
+    Exceeds the cap by 5 (69 calls against a cap of 64) so the warning's
+    rate limiting is actually exercised, not just its first firing -- five
+    separate drop events occur, and only the *first* may log."""
+    _store, _tasks, console, _armor, _truck = _store_with_armor_and_truck(monkeypatch)
+    console.scheduler.busy_until_sim = 1e9  # always busy -- every call defers
+
+    total_calls = _MAX_PENDING_POSITIONAL_REPLIES + 5
+    with caplog.at_level("WARNING"):
+        for i in range(total_calls):
+            lines = console.handle_command(
+                "select_target", now_sim=float(i), slots={"descriptor": "armor"}
+            )
+            assert lines == []  # deferred every time, channel never clears
+
+    pending = console._pending_positional_replies
+    assert len(pending) == _MAX_PENDING_POSITIONAL_REPLIES
+    # Drop-oldest, not drop-newest: the five oldest entries (calls 0-4) are
+    # gone; the oldest survivor is call 5, the newest is the final call.
+    assert pending[0].queued_since_sim == 5.0
+    assert pending[-1].queued_since_sim == float(total_calls - 1)
+
+    overflow_warnings = [
+        r for r in caplog.records if "_pending_positional_replies" in r.message
+    ]
+    assert len(overflow_warnings) == 1
 
 
 def test_reselecting_a_different_target_via_engage_descriptor_cancels_the_stale_task(

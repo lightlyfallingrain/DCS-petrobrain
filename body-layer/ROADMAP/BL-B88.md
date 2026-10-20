@@ -1,7 +1,8 @@
 # BL-B88 — `join_voice_latency.py` crashes whole on one malformed JSONL line
 
-- [ ] **BL-B88 — `tools/join_voice_latency.py`'s `_iter_jsonl` has no handling for a malformed or
-  truncated JSONL line; one bad line aborts the entire reducer with an unhandled traceback.**
+- [x] **BL-B88 — `tools/join_voice_latency.py`'s `_iter_jsonl` has no handling for a malformed or
+  truncated JSONL line; one bad line aborts the entire reducer with an unhandled traceback. FIXED**,
+  built on `feature/voice-latency-instrumentation`. #status/done
   Security deep analysis, `plans/voice-latency-instrumentation/security-review.md` (2026-10-20),
   confirmed by running it (not inferred): a two-line file with one valid row and one truncated
   (`json.loads` incomplete) row raises `json.decoder.JSONDecodeError` straight out of `main()`, with
@@ -29,3 +30,12 @@
   skip that line, and continue — the same "one bad item must not cost the whole batch" posture this
   project already applies to capture clips (`capture_loop.CaptureEvent`) and queued audio lines
   (`AudioPlaybackSender._run`'s per-item try/except).
+
+  **Fixed**: `_iter_jsonl` now wraps `json.loads` per line in `try`/`except json.JSONDecodeError`,
+  prints a one-line warning to stderr naming the file and line number, and records it in a
+  module-level `_malformed_lines` list that `main` resets per run and reports in its own closing
+  summary line ("N malformed line(s) skipped"). All other rows in the same file, and every other
+  file, still join. Tested:
+  `test_truncated_last_line_is_skipped_and_all_other_rows_still_join`
+  (`body-layer/tests/test_join_voice_latency.py`) — a two-line file whose last line is truncated
+  mid-write, confirming the well-formed row still joins and the count is reported.
