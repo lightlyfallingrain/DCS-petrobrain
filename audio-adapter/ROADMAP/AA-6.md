@@ -1,7 +1,10 @@
 # AA-6 — OS-independent audio adapter (Piper TTS on Mac and Windows)
 
-- [~] **The audio adapter's server runs on Windows as well as the Mac** (`feature/audio-adapter-os-independent`).
-  #status/in-progress User direction, 2026-10-19:
+- [x] **The audio adapter's server runs on Windows as well as the Mac** (`feature/audio-adapter-os-independent`).
+  #status/done **Merged to `main` 2026-10-20 (`a5c61abf`)**, at user direction, after Stage 4 passed on both
+  machines. Flown the same day with the whole stack except brain on Windows (Piper + whisper.cpp
+  `b5454` CPU build); Piper read `~` aloud, fixed by `fix/speech-tilde-about`
+  (`docs/acceptance/2026-10-20-sortie-feedback.md`, F3). User direction, 2026-10-19:
 
   > *"Mac has been running the audio-adapter, but I want it to be OS independent. Everything must
   > be OS independent, except that we need Windows to run DCS. Let's first make the audio adapter
