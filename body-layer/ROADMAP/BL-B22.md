@@ -24,6 +24,11 @@
   calibration *an upper bound on what is possible*, not a model of what usually happens. Conditions
   do not replace it; they multiply down from it.
 
+  **Linked 2026-10-20 (user):** the 9K113 search (`plans/9k113-narrow-search/plan.md`) should also
+  use weather. In poor visibility the far band is worth less, so narrow belongs nearer
+  (`docs/acceptance/2026-10-20-sortie-feedback.md`, F4/F5 "as needed" settled, option C).
+  Body-layer has no weather input today. Terrain-driven depth is `[[BL-B84]]`.
+
   That gives the work the same shape as the optics split the detection-cones milestone owns, and
   the two compose cleanly rather than competing: **optics multiply apparent size up, conditions
   multiply detectability down, and the three calibrated angular thresholds stay fixed in the

@@ -229,3 +229,97 @@ nothing the Hook reported matches tracers at 12 o'clock aimed at ownship. Either
 emits no `S_EVENT_SHOOTING_START` / `S_EVENT_SHOT` the Hook sees, or its event's `target` does not
 name the player. The Hook resolves `targets_ownship` by comparing `event.target`'s name with the
 player's, and for a nil target it answers false. Open.
+
+**Correction (user):** *"0 o'clock -> 9 o'clock. that was my typo"*. So the tracers came from about
+9 o'clock, and they match `Vulcan-2` (2.1 km, ~9 o'clock, firing). The collector had it as
+**`targets_ownship: false`** while it was visibly firing at ownship. That is a third cause, in
+the aircraft-layer Hook rather than body-layer. A tank (`Ground-1-3`) earlier resolved to `true`,
+so the name comparison works in general. The likely reading is that an AAA gun's
+`S_EVENT_SHOOTING_START` carries no `target` (nil, so false), but that is unverified: it is a
+DCS-internals question for an investigator.
+
+## F7 — settlement names in callouts are not useful
+
+User, verbatim:
+
+> I get call outs that refer to settlement by it's name. While correct, I notice that's not very
+> usefull actually. Instead we could just replace names (that are often foreign and tell me nothing
+> and take time to say) with "village" or "city"
+
+**What exists:** the name comes from `body-layer/src/belief/enrichment.py` (`"near {name}
+({distance}m)"`, `"inside {name}"`). Unnamed settlements already read as "a built-up area" or "an
+unnamed settlement". world-model has a size word for some places but not all: OSM points carry
+`place=city|town|village` as `subtype`, OSM settlement polygons carry `area_m2`, and DCS
+`towns.lua` entries carry neither. Not yet explored with the user.
+
+### F7 — settled (user, 2026-10-20)
+
+Asked: (1) village/town/city or fewer, (2) keep the bracketed distance, (3) keep names anywhere,
+(4) other named landmarks.
+
+> 1 - village and town are enough
+> 2 - drop
+> 3 - mission memory
+> 4 - use no name, just landmark feature like road, river etc
+
+So in speech: "near a village" / "in the town", "near a road", "near a river" — no proper names
+and no bracketed distance. Names are kept in mission memory (post-flight).
+
+### F6 — visible unit firing at others (user, 2026-10-20)
+
+Asked whether a unit he can see anyway, firing at someone else, should be an ordinary contact
+report or be reported as firing:
+
+> someone shooting is important, especially if they are close -> report
+
+So a visible unit that is firing is reported as firing, whoever it is firing at. Because he can
+see it, its type is spoken at the tier he already has; only the unseen, muzzle-flash-only case
+stays "something firing, X o'clock" (direction only).
+
+**Follow-up (user):** *"it may have been aiming at my wingman"*. That fits reading (a): the Hook
+correctly resolved `Vulcan-2` as not targeting ownship. Under the "visible unit firing at others
+→ report" decision, it should still have been reported as firing once he could see it (2.1 km,
+9 o'clock, inside the commanded left scan). That case is being built on
+`fix/taking-fire-visible-shooter`. This sortie's `debrief.log` (written at mission end) can confirm
+the target.
+
+**Confirmed from this sortie's `debrief.log`** (written 18:06 at mission end): at sim 335.461 the
+Vulcan with mission ID 434 (`Vulcan-2`, matching the collector's `since_sim`) started shooting at
+**Mi-24P mission ID 447, the wingman**. The player is mission ID 344, pilot name "sg". So
+`targets_ownship: false` was correct, and the Hook is not at fault. Between 322 and 333 s a
+different Vulcan (433) was shooting at the player, and a Leopard-2A5 (368) at 344 s.
+
+## F4/F5 — second amendment round (user, 2026-10-20)
+
+Against the amended plan (wide 2.3–5.6 km, narrow 5.6–13.6 km, binoculars beyond ±60°), and the
+finding that today's binocular search for left/right/full sweeps around dead ahead:
+
+> * fix the binocular search sector.
+> * 9K113: there are many situations where scan beyond 5.6 km is much less useful than 2.3-5.6.
+>   Various reasons why LOS can be blocked, weather, etc. Should use narrow also indide 5.6 km
+>   _as needed_
+> * wait for BL-B66
+
+1. Fix the existing binocular search's sector centre too (not only the new sight call sites).
+2. Narrow is not confined to beyond 5.6 km — it is used inside 5.6 km "as needed". What "as
+   needed" keys on is being explored.
+3. Attack-run guidance's sight-wide-over-binoculars preference waits for `BL-B66` (slew time), so
+   the preference and its quick-look exception land together.
+
+Default search width with nothing commanded — full ±60° regard — was recommended and not objected
+to; proceeding with it.
+
+### F4/F5 — "as needed" settled (user, 2026-10-20)
+
+Options offered: A — narrow sweeps both bands, near first, wide only to orient; B — terrain-aware
+(concentrate near when a ridge closes the far band); C — weather-aware.
+
+> approved. There's already item about taking waether into account, link C with that.
+> B would be a natural consequence of angles. Wherever the 9K113 happens to be pointing, if terrain
+> blocks there's no LOS. However if there's something nearside on that terrain it can be seen. B
+> can be left till later.
+
+A is built now. C is linked to the existing weather/light/vegetation item (`BL-B22`'s "Detection
+under real world conditions" section). B is deferred: perception already handles it per look
+(no LOS behind terrain, nearside visible). What is deferred is only the search pattern adapting
+its depth to terrain.
