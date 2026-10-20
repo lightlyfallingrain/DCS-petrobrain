@@ -18,12 +18,14 @@ from belief.optic_policy import (
     GUIDANCE_OPTIC_MIN_INTERVAL_S,
     HANDS_BUSY_DURATION_S,
     MAX_LOOK_S,
+    OPTIC_RETRY_INTERVAL_S,
     RETRY_RANGE_FRACTION,
     SEARCH_STEP_S,
     SIGHT_GLANCE_AWAY_S,
     SIGHT_MAX_DWELL_S,
     SIGHT_SEARCH_MID_M,
     SIGHT_SEARCH_NEAR_M,
+    SIGHT_STALL_COOLDOWN_S,
     SIGHT_STEADY_RATE_LIMIT_DEG_S,
     STEADY_RATE_LIMIT_DEG_S,
     LookTarget,
@@ -2390,6 +2392,173 @@ class TestSearchCycle:
         assert decision.optic is SIGHT_WIDE_OPTIC
         assert decision.look_azimuth_deg == self._FAR_STEPS[0][0]
         assert decision.look_elevation_deg == self._FAR_STEPS[0][1]
+
+
+class TestSightStallCooldown:
+    """`BL-B85` -- a contact stuck at `presence` forever can fully starve
+    the sight's search cycle (`docs/acceptance/2026-10-20-sortie-
+    feedback.md` F4, `plans/9k113-narrow-search/review.md`'s 900 s/
+    three-contact reproduction: busy 792/900 polls, `sight_search_leg`
+    never advancing past `"wide"`). `SIGHT_STALL_COOLDOWN_S` extends
+    `is_worth_a_look`'s existing retry bookkeeping rather than adding a
+    second mechanism -- see that constant's own docstring."""
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    _WIDE_STEPS = ((0.0, -1.0),)
+    _NEAR_STEPS = ((10.0, -2.0),)
+    _FAR_STEPS = ((20.0, -3.0),)
+
+    def _decide(
+        self, state: OpticState, now_sim: float, targets: Sequence[LookTarget]
+    ) -> tuple[OpticState, OpticDecision]:
+        return decide(
+            state,
+            now_sim=now_sim,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=targets,
+            steady=True,
+            sight_wide_search=self._WIDE_STEPS,
+            sight_narrow_near_search=self._NEAR_STEPS,
+            sight_narrow_far_search=self._FAR_STEPS,
+        )
+
+    def test_a_stalled_contact_is_not_retried_before_the_sight_cooldown(
+        self,
+    ) -> None:
+        """Surgical unit test on `is_worth_a_look` directly: a contact
+        whose level has not moved since its last committed attempt is held
+        out for `SIGHT_STALL_COOLDOWN_S`, longer than the pre-`BL-B85`
+        `OPTIC_RETRY_INTERVAL_S` that let it straight back in."""
+        assert OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S
+        state = OpticState(
+            attempted_at_range_m={"CONTACT_1": 80.0},
+            attempted_at_time_sim={"CONTACT_1": 0.0},
+            attempted_at_level={"CONTACT_1": "presence"},
+        )
+        stalled_target = _target(range_m=80.0, current_level="presence")
+
+        # Past the short GLASSING-era interval, but short of the sight's
+        # own longer cooldown.
+        assert not is_worth_a_look(
+            stalled_target,
+            state,
+            now_sim=OPTIC_RETRY_INTERVAL_S + 1.0,
+            can_improve=sight_can_still_improve,
+            stall_cooldown_s=SIGHT_STALL_COOLDOWN_S,
+        )
+
+    def test_glassing_keeps_the_pre_existing_short_interval(self) -> None:
+        """`GLASSING`'s own call never passes `stall_cooldown_s` -- a
+        stalled contact under binoculars is unaffected by this feature,
+        by construction rather than by a second code path. 1_700.0 m, not
+        the close ranges the other tests in this class use, because
+        `can_still_improve` (the naked-eye/binocular pair `GLASSING` asks)
+        excludes anything the naked eye would resolve for free on its own
+        next dwell -- the same range `TestIsWorthALook`'s own GLASSING
+        tests use."""
+        state = OpticState(
+            attempted_at_range_m={"CONTACT_1": 1_700.0},
+            attempted_at_time_sim={"CONTACT_1": 0.0},
+            attempted_at_level={"CONTACT_1": "presence"},
+        )
+        stalled_target = _target(range_m=1_700.0, current_level="presence")
+        assert is_worth_a_look(
+            stalled_target, state, now_sim=OPTIC_RETRY_INTERVAL_S + 1.0
+        )
+
+    def test_a_stalled_contact_is_retried_once_the_sight_cooldown_elapses(
+        self,
+    ) -> None:
+        state = OpticState(
+            attempted_at_range_m={"CONTACT_1": 80.0},
+            attempted_at_time_sim={"CONTACT_1": 0.0},
+            attempted_at_level={"CONTACT_1": "presence"},
+        )
+        stalled_target = _target(range_m=80.0, current_level="presence")
+        assert is_worth_a_look(
+            stalled_target,
+            state,
+            now_sim=SIGHT_STALL_COOLDOWN_S,
+            can_improve=sight_can_still_improve,
+            stall_cooldown_s=SIGHT_STALL_COOLDOWN_S,
+        )
+
+    def test_progress_since_the_last_attempt_keeps_the_fast_retry(self) -> None:
+        """A contact whose level *did* move since the last committed
+        attempt is not penalised by the longer cooldown -- only a
+        genuinely stuck one is."""
+        state = OpticState(
+            attempted_at_range_m={"CONTACT_1": 80.0},
+            attempted_at_time_sim={"CONTACT_1": 0.0},
+            attempted_at_level={"CONTACT_1": "presence"},
+        )
+        progressed_target = _target(range_m=80.0, current_level="class")
+        assert is_worth_a_look(
+            progressed_target,
+            state,
+            now_sim=OPTIC_RETRY_INTERVAL_S + 1.0,
+            can_improve=sight_can_still_improve,
+            stall_cooldown_s=SIGHT_STALL_COOLDOWN_S,
+        )
+
+    def test_three_contacts_stuck_at_presence_still_let_the_search_cycle_run(
+        self,
+    ) -> None:
+        """The pessimistic reproduction from `plans/9k113-narrow-search/
+        review.md`: three simultaneous close contacts held at `presence`
+        forever (a stuck/stalled belief-layer case, not modelled
+        behaviour). Before `BL-B85` the sight was busy 792/900 polls (88%)
+        and `sight_search_leg` never advanced past `"wide"` for the whole
+        run -- end to end against this exact scenario, measured at 58%
+        busy with every leg visited and every contact re-looked four
+        times over a 600 s run, once both halves of the fix are in place
+        (`_start_glance_away` now committing a timed-out look instead of
+        discarding it, and `SIGHT_STALL_COOLDOWN_S` then bounding the
+        re-grant once there is something committed to bound)."""
+        targets = [
+            _target("CONTACT_1", azimuth_deg=0.0, range_m=50.0),
+            _target("CONTACT_2", azimuth_deg=40.0, range_m=80.0),
+            _target("CONTACT_3", azimuth_deg=-40.0, range_m=120.0),
+        ]
+        state = self._sighting_state()
+        busy_polls = 0
+        total_polls = 0
+        legs_seen: set[str] = set()
+        look_starts: dict[str, int] = {t.contact_id: 0 for t in targets}
+        now_sim = 0.0
+        step_s = 1.0
+        duration_s = 600.0
+        while now_sim < duration_s:
+            state, _decision = self._decide(state, now_sim, targets)
+            total_polls += 1
+            legs_seen.add(state.sight_search_leg)
+            if state.look_contact_id is not None:
+                busy_polls += 1
+                if state.look_started_sim == now_sim:
+                    look_starts[state.look_contact_id] += 1
+            now_sim += step_s
+
+        busy_fraction = busy_polls / total_polls
+        assert busy_fraction < 0.75, (
+            "the sight should not stay busy on identification looks the "
+            f"whole run (pre-BL-B85 measured 88%); measured "
+            f"{busy_fraction:.2%}"
+        )
+        assert legs_seen >= {"wide", "narrow_near", "narrow_far"}, (
+            "the idle search cycle should advance through every leg once "
+            f"the cooldown gives it room; only saw {legs_seen}"
+        )
+        assert all(count >= 2 for count in look_starts.values()), (
+            "every contact should still be re-looked more than once over "
+            f"a 600 s run, not abandoned forever: {look_starts}"
+        )
 
 
 class TestManoeuvreForcesObservOff:

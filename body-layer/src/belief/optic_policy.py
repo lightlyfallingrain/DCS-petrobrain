@@ -190,6 +190,52 @@ RETRY_RANGE_FRACTION: Final[float] = 0.8
 #: a typical encounter rather than after hundreds of seconds.
 OPTIC_RETRY_INTERVAL_S: Final[float] = 4.0 * SCAN_CYCLE_PERIOD_S
 
+#: How long a contact must wait, once a sight look at it has ended without
+#: advancing its classification tier, before the sight is willing to look
+#: at it again -- too low and a stalled contact can still nearly
+#: monopolise the sight as before, too high and one stalled for a merely
+#: transient reason is abandoned for unreasonably long; the default is
+#: about two laps of the search cycle (`BL-B85`). The user's own words:
+#: *"we can't just indefinately look at one thing. Needs a timer value or
+#: the like that forces moving on"* (`docs/acceptance/
+#: 2026-10-20-sortie-feedback.md` F4). Measured empirically: a contact
+#: whose classification never advances past `presence` is re-admitted by
+#: `OPTIC_RETRY_INTERVAL_S` alone every retry interval regardless of
+#: whether the previous look taught anything, and with several such
+#: contacts in regard the sight never reaches an idle poll at all
+#: (`plans/9k113-narrow-search/review.md`'s 900 s/three-contact
+#: reproduction: busy 792/900 polls, `sight_search_leg` never advancing
+#: past `"wide"`). **Extends `is_worth_a_look`'s existing time-based
+#: re-eligibility, not a second mechanism**: when a contact's
+#: classification level is unchanged since its last committed attempt
+#: (`OpticState.attempted_at_level`), this cooldown applies in place of
+#: the shorter `OPTIC_RETRY_INTERVAL_S` -- `RETRY_RANGE_FRACTION`'s
+#: range-based escape (a contact that has genuinely closed) is untouched
+#: either way, so a contact that is merely stuck at long, constant range
+#: still gives way, while one actually closing on the aircraft is retried
+#: as before. **Sight-only.** Only `_decide_sighting`'s own candidate
+#: filter passes this; `GLASSING`'s call to `is_worth_a_look` does not, so
+#: a stalled contact under binoculars keeps the pre-existing `OPTIC_
+#: RETRY_INTERVAL_S` behaviour unchanged -- a mid-range contact stuck at
+#: `presence` inside the binocular window could already starve `GLASSING`
+#: the same way before this feature shipped (`BL-B85.md`), and extending
+#: the same cooldown to it would be a `GLASSING` behaviour change beyond
+#: what this fix was asked for; filed as a backlog note rather than built
+#: here. Picked as roughly two of the search cycle's own full laps (`wide
+#: -> narrow_near -> narrow_far`), measured at ~66 s each in the review's
+#: realistic-case run -- long enough that the search cycle and other
+#: contacts get real time back, short enough that a contact stalled for an
+#: unrelated, transient reason is retried well inside a typical encounter.
+#: A starting value to tune against a flown sortie, same footing as
+#: `OPTIC_RETRY_INTERVAL_S` was when it shipped.
+SIGHT_STALL_COOLDOWN_S: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_STALL_COOLDOWN_S",
+    132.0,
+    lo=30.0,
+    hi=400.0,
+    status="judgement",
+)
+
 #: The widest sector a binocular *search* will sweep (user: *"cap binocular
 #: scan at 30 deg azimuth, there's no wide area binocular scan"*). A wider
 #: commanded scan simply gets no search phase -- see `plans/binocular-optic/
@@ -462,6 +508,26 @@ class OpticState:
     #: contact held at roughly constant range needs a time basis, not only
     #: a range one.
     attempted_at_time_sim: dict[str, float] = field(default_factory=dict)
+    #: `BL-B85` -- `attempted_at_range_m`'s classification-level twin: the
+    #: contact's `LookTarget.current_level` at the moment of the last
+    #: *committed* attempt (merged from `pending_attempted_at_level` the
+    #: same way, and at the same commit sites, as `attempted_at_range_m`
+    #: is merged from `pending_attempted_at_range_m`). Drives `is_worth_a_
+    #: look`'s `stall_cooldown_s` branch: if a fresh candidate's level
+    #: still matches what is recorded here, the look that covered it last
+    #: time taught nothing, and the longer `SIGHT_STALL_COOLDOWN_S`
+    #: applies in place of `OPTIC_RETRY_INTERVAL_S`. Populated alongside
+    #: `attempted_at_range_m` for both `GLASSING` and `SIGHTING` so the two
+    #: dicts never fall out of step with each other regardless of which
+    #: phase last attempted a given contact, even though only `_decide_
+    #: sighting`'s candidate filter currently reads it as a cooldown.
+    attempted_at_level: dict[str, str] = field(default_factory=dict)
+    #: `pending_attempted_at_range_m`'s level twin, same reason
+    #: `attempted_at_level` is `attempted_at_range_m`'s -- the level
+    #: recorded here is the one at *look start*, so what is compared at
+    #: the next candidacy check is "has this contact's level moved since
+    #: the look that attempted it began", not since it ended.
+    pending_attempted_at_level: dict[str, str] = field(default_factory=dict)
     #: `plans/sortie-2026-09-26-fixes/plan.md` Stage 4 (Fix C) -- the
     #: `contact_id` of the *primary* (chosen/centred) target of the current
     #: look, set at the same SCANNING -> GLASSING transition site as
@@ -1156,6 +1222,7 @@ def is_worth_a_look(
     now_sim: float = 0.0,
     *,
     can_improve: Callable[[LookTarget], bool] = can_still_improve,
+    stall_cooldown_s: float | None = None,
 ) -> bool:
     """Whether this contact would gain anything from a *new* look now.
 
@@ -1170,7 +1237,20 @@ def is_worth_a_look(
     sighting`'s candidate filter passes `sight_can_still_improve` instead,
     so a contact beyond binocular's own reach but still within the
     sight's is admitted as a candidate (`plans/9k113-narrow-search/
-    review.md` required fix)."""
+    review.md` required fix).
+
+    `stall_cooldown_s` (`BL-B85`) defaults to `None`, a true no-op for
+    every pre-existing caller -- `GLASSING`'s own call never passes it, so
+    its re-eligibility stays exactly `OPTIC_RETRY_INTERVAL_S` regardless of
+    whether a contact's classification ever moves. `_decide_sighting`'s
+    candidate filter passes `SIGHT_STALL_COOLDOWN_S`: when a contact's
+    level has not changed since its last committed attempt (`state.
+    attempted_at_level`), that longer cooldown governs the time-based
+    branch below in place of `OPTIC_RETRY_INTERVAL_S` -- the sight has had
+    its look and taught nothing, so the search cycle and other contacts
+    get the time back instead. The range-based escape (`RETRY_RANGE_
+    FRACTION`) is unaffected either way: a contact that has genuinely
+    closed is worth retrying regardless of whether its level has moved."""
     if not can_improve(target):
         return False
     if target.contact_id in state.pending_attempted_at_range_m:
@@ -1193,9 +1273,17 @@ def is_worth_a_look(
     # condition suffices.
     closed_enough = target.range_m <= attempted_at * RETRY_RANGE_FRACTION
     attempted_at_time = state.attempted_at_time_sim.get(target.contact_id)
+    attempted_at_level = state.attempted_at_level.get(target.contact_id)
+    retry_interval_s = OPTIC_RETRY_INTERVAL_S
+    if (
+        stall_cooldown_s is not None
+        and attempted_at_level is not None
+        and attempted_at_level == target.current_level
+    ):
+        retry_interval_s = stall_cooldown_s
     time_elapsed_enough = (
         attempted_at_time is not None
-        and now_sim - attempted_at_time >= OPTIC_RETRY_INTERVAL_S
+        and now_sim - attempted_at_time >= retry_interval_s
     )
     return closed_enough or time_elapsed_enough
 
@@ -1413,6 +1501,7 @@ def _back_to_home(
                 look_envelope_azimuth_deg=None,
                 look_envelope_half_width_deg=None,
                 pending_attempted_at_range_m={},
+                pending_attempted_at_level={},
                 look_contact_id=None,
                 look_started_sim=None,
             ),
@@ -1434,6 +1523,7 @@ def _back_to_home(
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
         ),
@@ -1453,8 +1543,34 @@ def _start_glance_away(
     scheduled break *within* OBSERV staying on, not OBSERV turning off
     (that is `_force_observ_off`, a manoeuvre-only path).
 
-    Drops any in-progress pending look the same way `_back_to_home` does
-    on an interruption -- the look did not reach its own natural end."""
+    **Commits any in-progress pending look rather than dropping it**
+    (`BL-B85` -- `plans/9k113-narrow-search/review.md`'s 900 s
+    reproduction, diagnosed). The whole-dwell clock this fires from and
+    the per-look natural-end timeout (`look_is_finished`'s `max_dwell_s`)
+    share the same constant, `SIGHT_MAX_DWELL_S`, and `_decide_sighting`
+    checks this boundary *before* the natural-end check -- so a contact
+    that never resolves (`can_still_improve`/`sight_can_still_improve`
+    stays true the whole dwell) has its look cut off here on every single
+    cycle, never reaching the natural-end commit at all. Previously that
+    meant `attempted_at_range_m`/`attempted_at_time_sim`/`attempted_at_
+    level` never recorded the attempt, so `is_worth_a_look`'s whole retry/
+    cooldown bookkeeping (`RETRY_RANGE_FRACTION`, `OPTIC_RETRY_INTERVAL_S`,
+    `SIGHT_STALL_COOLDOWN_S`) never engaged for exactly the contact that
+    needed it most -- measured as the dominant cause of the review's 88%-
+    busy reproduction, not `OPTIC_RETRY_INTERVAL_S` re-admitting a
+    committed attempt too soon as first assumed. Unlike a genuine
+    interruption (`not sight_steady`, a pilot command), reaching the
+    scheduled dwell boundary while still looking is not evidence the look
+    failed to deliver anything -- it ran the sight's own full allotted
+    time, which is exactly what "committed" has always meant for the
+    ordinary natural-end path two lines below in `_decide_sighting`."""
+    committed_range = dict(state.attempted_at_range_m)
+    committed_time = dict(state.attempted_at_time_sim)
+    committed_level = dict(state.attempted_at_level)
+    for contact_id, attempted_range_m in state.pending_attempted_at_range_m.items():
+        committed_range[contact_id] = attempted_range_m
+        committed_time[contact_id] = now_sim
+        committed_level[contact_id] = state.pending_attempted_at_level[contact_id]
     return (
         replace(
             state,
@@ -1464,7 +1580,11 @@ def _start_glance_away(
             look_elevation_deg=None,
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
+            attempted_at_range_m=committed_range,
+            attempted_at_time_sim=committed_time,
+            attempted_at_level=committed_level,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
         ),
@@ -1527,6 +1647,7 @@ def lower_binoculars(state: OpticState, now_sim: float) -> OpticState:
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
         )
@@ -1598,6 +1719,7 @@ def _enter_binocular_search(
             look_contact_id=None,
             look_started_sim=None,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
             sight_search_leg="wide",
@@ -1802,14 +1924,18 @@ def _decide_sighting(
         # break above ends the dwell itself.
         committed_range = dict(state.attempted_at_range_m)
         committed_time = dict(state.attempted_at_time_sim)
+        committed_level = dict(state.attempted_at_level)
         for contact_id, attempted_range_m in state.pending_attempted_at_range_m.items():
             committed_range[contact_id] = attempted_range_m
             committed_time[contact_id] = now_sim
+            committed_level[contact_id] = state.pending_attempted_at_level[contact_id]
         state = replace(
             state,
             attempted_at_range_m=committed_range,
             attempted_at_time_sim=committed_time,
+            attempted_at_level=committed_level,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
@@ -1869,7 +1995,13 @@ def _decide_sighting(
     worth_looking = [
         target
         for target in targets
-        if is_worth_a_look(target, state, now_sim, can_improve=sight_can_still_improve)
+        if is_worth_a_look(
+            target,
+            state,
+            now_sim,
+            can_improve=sight_can_still_improve,
+            stall_cooldown_s=SIGHT_STALL_COOLDOWN_S,
+        )
         and within_field_of_regard(
             SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg
         )
@@ -1914,9 +2046,11 @@ def _decide_sighting(
     envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
 
     pending = dict(state.pending_attempted_at_range_m)
+    pending_level = dict(state.pending_attempted_at_level)
     for target in worth_looking:
         if _angular_separation_deg(chosen, target) <= envelope_half_width:
             pending[target.contact_id] = target.range_m
+            pending_level[target.contact_id] = target.current_level
 
     first_azimuth, first_elevation = sweep[0]
     new_state = replace(
@@ -1928,6 +2062,7 @@ def _decide_sighting(
         look_envelope_azimuth_deg=chosen.azimuth_deg,
         look_envelope_half_width_deg=envelope_half_width,
         pending_attempted_at_range_m=pending,
+        pending_attempted_at_level=pending_level,
         look_contact_id=chosen.contact_id,
         look_optic=look_optic,
         look_started_sim=now_sim,
@@ -2050,17 +2185,22 @@ def _decide_without_guidance(
             # which only ever drops the *pending* one.
             committed_range = dict(state.attempted_at_range_m)
             committed_time = dict(state.attempted_at_time_sim)
+            committed_level = dict(state.attempted_at_level)
             for (
                 contact_id,
                 attempted_range_m,
             ) in state.pending_attempted_at_range_m.items():
                 committed_range[contact_id] = attempted_range_m
                 committed_time[contact_id] = now_sim
+                committed_level[contact_id] = state.pending_attempted_at_level[
+                    contact_id
+                ]
             return _back_to_home(
                 replace(
                     state,
                     attempted_at_range_m=committed_range,
                     attempted_at_time_sim=committed_time,
+                    attempted_at_level=committed_level,
                 ),
                 now_sim,
             )
@@ -2162,6 +2302,7 @@ def _decide_without_guidance(
                     search_pattern_steps=tuple(search),
                     attempted_at_range_m=dict(state.attempted_at_range_m),
                     attempted_at_time_sim=dict(state.attempted_at_time_sim),
+                    attempted_at_level=dict(state.attempted_at_level),
                     # Not part of this phase's own bookkeeping -- carried
                     # forward explicitly (`OpticState.actual_aim_azimuth_
                     # deg`'s own docstring) rather than reset, since a
@@ -2223,12 +2364,14 @@ def _decide_without_guidance(
     # above is what commits (on `look_is_finished`) or drops (on `not
     # steady`) these marks; `lower_binoculars` reaches the same drop path.
     pending = dict(state.pending_attempted_at_range_m)
+    pending_level = dict(state.pending_attempted_at_level)
     for target in worth_looking:
         if _angular_separation_deg(chosen, target) <= envelope_half_width:
             # Every contact this look covers counts as attempted, not just
             # the one it was centred on -- they all get the benefit, so
             # they all bear the retry rule.
             pending[target.contact_id] = target.range_m
+            pending_level[target.contact_id] = target.current_level
 
     first_azimuth, first_elevation = sweep[0]
     return (
@@ -2244,6 +2387,8 @@ def _decide_without_guidance(
             attempted_at_range_m=dict(state.attempted_at_range_m),
             pending_attempted_at_range_m=pending,
             attempted_at_time_sim=dict(state.attempted_at_time_sim),
+            attempted_at_level=dict(state.attempted_at_level),
+            pending_attempted_at_level=pending_level,
             look_contact_id=chosen.contact_id,
             # Carried forward explicitly, same reason as the SEARCHING
             # branch above.

@@ -1,6 +1,6 @@
 # BL-B85 — a contact stuck at `presence` forever can fully starve the sight's search cycle
 
-- [ ] **BL-B85 — Found by the `9k113-narrow-search` security re-review
+- [~] **BL-B85 — Found by the `9k113-narrow-search` security re-review
   (`plans/9k113-narrow-search/security-review.md`), empirically, not by inspection: a contact
   whose belief classification never advances past `presence` (a stuck/stalled belief-layer case,
   not modelled behaviour) is repeatedly re-admitted as "worth a look" while `OBSERV` is on, and the
@@ -8,7 +8,39 @@
   over 900 simulated seconds with three simultaneous close contacts held at `presence` forever: the
   sight was busy on a look 792/900 polls (88%), idle/search-eligible only 27/900 (3%), and
   `sight_search_leg` never advanced past its initial `"wide"` for the whole run — full starvation
-  of the new active search cycle (`plans/9k113-narrow-search/plan.md` Stage 3).** #status/open
+  of the new active search cycle (`plans/9k113-narrow-search/plan.md` Stage 3).** #status/in-progress
+
+  **Built on `feature/9k113-narrow-search`, not left as backlog** — the user overruled Reviewer/
+  Security's non-blocking disposition: *"BL-B85 is required for 9K113, we can't just indefinately
+  look at one thing. Needs a timer value or the like that forces moving on"*
+  (`docs/acceptance/2026-10-20-sortie-feedback.md` F4). `#needs-flight` — the fix is unflown; the
+  measurement below is a 600 s synthetic reproduction of this entry's own pessimistic scenario, not
+  a live sortie.
+
+  **Two causes, not one, both fixed together** (`plans/9k113-narrow-search/implementation.md` has
+  the full account):
+  1. **The real root cause, found only once the obvious fix was tried and didn't move the
+     reproduction's numbers**: `_start_glance_away` (the scheduled dwell-boundary break,
+     `SIGHT_MAX_DWELL_S`) was dropping an in-progress look's pending marks the same way a genuine
+     interruption does, rather than committing them. Because the scheduled break and the per-look
+     natural-end timeout share that same constant and `_decide_sighting` checks the scheduled break
+     *first*, a contact that never resolves has its look cut off here on *every* cycle — the
+     natural-end commit path was structurally unreachable for exactly the stuck contact this entry
+     is about, so `attempted_at_range_m`/`attempted_at_time_sim` never recorded an attempt at all
+     and the whole pre-existing retry/cooldown mechanism never engaged. Fixed: `_start_glance_away`
+     now commits pending marks exactly as the natural-end path does.
+  2. **The new tunable**, `belief.optic_policy.SIGHT_STALL_COOLDOWN_S` (default 132.0 s, ~two
+     search-cycle laps): once (1) lets an attempt actually commit, `is_worth_a_look` applies this
+     longer cooldown instead of the short `OPTIC_RETRY_INTERVAL_S` (64 s) when a contact's
+     classification level is unchanged since that commit — sight-only, `GLASSING` keeps the
+     pre-existing short interval unchanged.
+
+  **Both halves are load-bearing, measured, not assumed**: with only fix (1) (the commit fix) and
+  the pre-existing short `OPTIC_RETRY_INTERVAL_S`, the reproduction below still measures 88% busy —
+  the short interval alone does not create enough of a gap for the search cycle between three
+  contacts' commits. With both fixes, the same 600 s/three-contact reproduction measures 58% busy,
+  every search leg (`wide`/`narrow_near`/`narrow_far`) visited, and every contact re-looked four
+  times over the run rather than abandoned forever.
 
   **Not a blocker for that feature, and not newly introduced by it** — two reasons, both already
   recorded in `plans/9k113-narrow-search/implementation.md`/`review.md`:
@@ -38,8 +70,16 @@
   to a contact that never advances, and this is the first feature to make that absence of a bound
   visible as a full search stall rather than a merely-delayed `GLASSING` dwell.
 
-  **Needs**: a decision on whether to cap retries/dwell time for a contact that fails to advance
-  classification after N looks (handing search time back regardless), or whether this is accepted
-  as a pre-existing systemic risk that the belief layer is responsible for not triggering. Not
-  explored with the user yet — do before Architect, per `AGENTS.md`'s "Explore Before Deciding," if
-  this is picked up.
+  **Settled and built** (user, 2026-10-20, F4 above) — a time bound, not a count of looks: handled
+  by `SIGHT_STALL_COOLDOWN_S` above rather than an N-looks counter, consistent with the existing
+  `OPTIC_RETRY_INTERVAL_S`/`RETRY_RANGE_FRACTION` retry mechanism this extends. Remaining before
+  `#status/done`: the live sortie (`#needs-flight`), and a judgement on whether 132.0 s is the right
+  default once flown — the whole-encounter timescale a pilot actually experiences this at is not
+  something a synthetic 600 s reproduction can validate by itself.
+
+  **GLASSING left unprotected, deliberately, not overlooked**: the pre-existing risk named just
+  above (a mid-range contact stuck at `presence` could already starve `GLASSING`) is not fixed by
+  this entry — only `_decide_sighting`'s own candidate filter passes `SIGHT_STALL_COOLDOWN_S`;
+  `GLASSING`'s call to `is_worth_a_look` does not, by construction. Extending the same cooldown to
+  `GLASSING` would be a `GLASSING` behaviour change beyond what F4 asked for (binoculars, not the
+  sight); filed as a backlog note rather than built here.

@@ -105,6 +105,11 @@ SIGHT_SEARCH_MID_M = 5647.0
 # source: belief/optic_policy.py:SIGHT_SEARCH_NEAR_M
 SIGHT_SEARCH_NEAR_M = 2333.0
 
+# How long a contact must wait, once a sight look at it has ended without advancing its classification tier, before the sight is willing to look at it again -- too low and a stalled contact can still nearly monopolise the sight as before, too high and one stalled for a merely transient reason is abandoned for unreasonably long; the default is about two laps of the search cycle (`BL-B85`).
+# status: judgement | range: 30.0 .. 400.0
+# source: belief/optic_policy.py:SIGHT_STALL_COOLDOWN_S
+SIGHT_STALL_COOLDOWN_S = 132.0
+
 # The 9K113's own manoeuvre-tolerance threshold, mirroring `STEADY_RATE_LIMIT_DEG_S`'s role but for a gyro-stabilised sight rather than a pair of hands holding binoculars steady -- direction §8 (*"Gyros are sensitive to violent manouvres and OBSERV must be swithced OFF is pilot manouvres violently"*), plan §13. **Deliberately a separate constant, not a reuse** -- a stabilised sight tolerates far more attitude-rate than an arm does, so the same number here would force OBSERV off during perfectly flyable manoeuvring.
 # status: judgement | range: 12.0 .. 90.0
 # source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S

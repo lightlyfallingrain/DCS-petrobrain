@@ -422,3 +422,123 @@ of its own search band, so those steps are simply skipped (confirmed: at 1000 m 
 near elevation band, -23.2 deg, is dropped in full while its far band, -6.9 deg, is swept normally
 -- 11 of 22 steps), rather than the gunsight being pointed at an elevation the mount cannot
 mechanically hold.
+
+### BL-B85: a timer bound so the sight cannot indefinitely re-grant one stuck contact
+
+`docs/acceptance/2026-10-20-sortie-feedback.md` F4 overruled Reviewer/Security's non-blocking
+disposition of `BL-B85` -- *"BL-B85 is required for 9K113, we can't just indefinately look at one
+thing. Needs a timer value or the like that forces moving on"* -- so this round builds it into the
+feature rather than leaving it filed. `body-layer/ROADMAP/BL-B85.md` has the entry's own account;
+this is the decision log.
+
+**Started from the dispatch brief's own framing**: extend `is_worth_a_look`'s existing per-contact
+retry bookkeeping (`attempted_at_range_m`/`attempted_at_time_sim`, `RETRY_RANGE_FRACTION`'s
+range-based re-eligibility and `OPTIC_RETRY_INTERVAL_S`'s time-based one, from the 2026-09-26
+fixes) with a longer, sight-only cooldown applied when a contact's classification level has not
+moved since its last committed attempt. Added `OpticState.attempted_at_level`/`pending_attempted_
+at_level` (the exact `attempted_at_range_m`/`pending_attempted_at_range_m` pattern, one `dict[str,
+str]` twin, populated and committed at every site the range twin already is -- both `GLASSING`'s
+and `SIGHTING`'s look-start and natural-end-commit sites, and every `pending_attempted_at_range_m=
+{}` interruption-drop site, so the two dicts never fall out of step regardless of which phase last
+attempted a contact). Added `is_worth_a_look`'s new `stall_cooldown_s: float | None = None`
+parameter -- `None` for every pre-existing caller (`GLASSING`'s own call never passes it, a true
+no-op), and `_decide_sighting`'s candidate filter passes the new `SIGHT_STALL_COOLDOWN_S` tunable.
+When passed and the contact's level matches what was recorded at the last commit, the longer
+cooldown governs the time-based branch in place of `OPTIC_RETRY_INTERVAL_S`; `RETRY_RANGE_
+FRACTION`'s range-based escape is untouched either way.
+
+**That alone did not fix the reproduction -- a second, deeper defect had to be found first.**
+Wrote the 900 s/three-contact reproduction from `plans/9k113-narrow-search/review.md` as a test
+(three close T-72 contacts, 50/80/120 m, held at `presence` forever, driven through `decide()` with
+real single-step `wide`/`narrow_near`/`narrow_far` search sequences) before trusting the fix above,
+per the dispatch brief's own instruction to reproduce the starvation first. It still measured 88%
+busy with the `stall_cooldown_s` plumbing in place -- `attempted_at_range_m`/`attempted_at_level`
+were staying *empty* the entire run, so the new cooldown branch was never even being reached.
+
+Traced it to `_decide_sighting`'s own dispatch order: it checks the scheduled whole-dwell break
+(`now_sim - dwell_started_sim >= SIGHT_MAX_DWELL_S`, entering `_start_glance_away`) **before**
+checking whether the current look reached its own natural end (`look_is_finished`, which uses the
+same `SIGHT_MAX_DWELL_S` as that look's own per-look ceiling when nothing can resolve it sooner).
+For a contact that never advances, `can_improve` never flips false, so a look only ever ends via
+that shared `SIGHT_MAX_DWELL_S` ceiling -- and because a fresh look always starts on the very poll
+the dwell (re)enters `SIGHTING` (no scan boundary to wait for), the look's own clock and the
+dwell's own clock start within a poll of each other every single cycle, so the scheduled-break
+check wins the race every time. `_start_glance_away` was dropping the pending marks the same way a
+genuine interruption does (`"the look did not reach its own natural end"` -- true by construction,
+never false for a stuck contact), so `attempted_at_range_m`/`attempted_at_time_sim`/`attempted_at_
+level` never recorded anything for it at all: the whole retry/cooldown mechanism this round set out
+to extend was structurally unreachable for exactly the contact it needed to govern. Fixed:
+`_start_glance_away` now commits pending marks into the committed maps exactly as the natural-end
+path in `_decide_sighting` does, rather than discarding them -- a dwell boundary reached while a
+look is still running is not evidence the look delivered nothing; it ran the sight's full allotted
+time, which is what "committed" already means on the ordinary natural-end path two branches below.
+
+**Both halves measured as necessary, independently, by mutation** (`shasum` before/after each,
+restored by overwrite and confirmed byte-identical):
+- Reverting only the `_start_glance_away` commit (back to dropping pending marks), with the
+  `stall_cooldown_s` plumbing left in place: reproduction measures 88% busy -- unchanged from the
+  pre-fix figure, confirming the commit fix is the one that actually lets any bookkeeping happen.
+- Reverting only the `stall_cooldown_s` argument at `_decide_sighting`'s candidate filter (so
+  `is_worth_a_look` falls back to the short `OPTIC_RETRY_INTERVAL_S`, 64 s), with the commit fix
+  left in place: reproduction *also* measures 88% busy -- three contacts' own busy phases (30 s
+  each, 90 s total) outlast the 64 s short interval, so a contact is re-eligible again before the
+  others have even had their turn and no idle gap ever opens. `SIGHT_STALL_COOLDOWN_S` (132 s, ~two
+  search-cycle laps) is long enough to open that gap; this is why the default is roughly double the
+  three-contact busy-phase length, not an arbitrary round number.
+- With both fixes: 58% busy, every leg (`wide`/`narrow_near`/`narrow_far`) visited, every contact
+  re-looked four times over the 600 s run.
+
+**`SIGHT_STALL_COOLDOWN_S`** (`belief/optic_policy.py`, `tuning.real`, default 132.0, `lo=30.0`,
+`hi=400.0`, `status="judgement"`): the rendered `config/defaults.toml` line was checked, not just
+the source comment -- the first draft used blank-`#:`-line paragraph breaks the same way `SIGHT_
+SEARCH_NEAR_M`'s shared-intro-then-bullet comment does, which (per the generator's own documented
+behaviour, `_comment_block_above` stopping upward traversal at the first blank `#:` line) renders
+only the *paragraph nearest the assignment*, not the first paragraph of the whole block -- the
+rendered line came out as an unrelated mid-reasoning sentence the first two times. Rewritten as one
+contiguous `#:` block (the `GUIDANCE_OPTIC_MIN_INTERVAL_S`/`HANDS_BUSY_DURATION_S` pattern) with a
+clean, period-free first sentence and the user's own verbatim quote moved to a later sentence (a
+quote containing its own sentence-ending period would otherwise truncate the rendered line
+mid-quote) -- confirmed by reading `config/defaults.toml` after each attempt, not the diff.
+
+**Does the same bound protect `GLASSING`?** No, by construction, not by oversight -- only `_decide_
+sighting`'s own candidate filter passes `stall_cooldown_s`; `GLASSING`'s call to `is_worth_a_look`
+does not, so a contact stuck under binoculars keeps the pre-existing `OPTIC_RETRY_INTERVAL_S`
+behaviour unchanged. `OpticState.attempted_at_level`/`pending_attempted_at_level` *are* populated
+symmetrically for both phases (so the data exists regardless of which phase last attempted a
+contact), but only the sight's own call site opts into treating it as a cooldown gate. Extending
+the cooldown to `GLASSING` would be a `GLASSING` behaviour change beyond what F4 asked for (the
+9K113, not binoculars); noted in `BL-B85.md` as a backlog item rather than built here.
+
+**Tests added** (`TestSightStallCooldown`, `tests/test_optic_policy.py`, after `TestSearchCycle`):
+- `test_a_stalled_contact_is_not_retried_before_the_sight_cooldown` / `test_a_stalled_contact_is_
+  retried_once_the_sight_cooldown_elapses` -- the surgical unit tests directly on `is_worth_a_look`,
+  pinning the boundary at exactly `SIGHT_STALL_COOLDOWN_S`.
+- `test_glassing_keeps_the_pre_existing_short_interval` -- `GLASSING`'s own call (no `stall_
+  cooldown_s` passed) is unaffected; uses 1_700 m (the existing GLASSING-window convention this
+  module's other tests already use), not the close ranges the sight-specific tests use, since
+  `can_still_improve`'s own lower bound excludes anything that close regardless of this feature.
+- `test_progress_since_the_last_attempt_keeps_the_fast_retry` -- a contact whose level *did* move
+  since the last commit is not penalised by the longer cooldown.
+- `test_three_contacts_stuck_at_presence_still_let_the_search_cycle_run` -- the full 600 s/
+  three-contact reproduction and fix, described above.
+
+**Checks (this round)**: `ruff format --check src tests`: pass. `ruff check src tests`: pass.
+`cd body-layer && mypy src`: pass, no issues in 68 source files. `pytest tests -q`: 2323 passed, 4
+xfailed, 0 failed. One known-flake test needed a rerun in the full-suite pass
+(`test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure`, a timing flake
+named in the dispatch brief) -- confirmed by running `test_mission_start_reset.py` alone
+immediately after, which passed in full; unrelated to this change (it never touches `optic_
+policy.py`). `tools/generate_defaults.py` (no `--write`): confirmed `config/defaults.toml` already
+current after the final edit.
+
+**Notable discovery, relevant to future sight/dwell work**: `SIGHT_MAX_DWELL_S` plays two distinct
+roles today -- the whole-dwell scheduled-break clock (`_decide_sighting`'s own top check) and the
+per-look natural-end ceiling (`look_is_finished`'s `max_dwell_s` parameter) -- and sharing one
+constant between them is what made the scheduled break win the race against the natural-end check
+on *every* cycle for a look that needs its full ceiling, not just occasionally. This round's fix
+(committing on the scheduled break, same as the natural end) resolves the one consequence BL-B85
+named, but the underlying race (two clocks, one constant, resolved by code order rather than by
+which one is conceptually "supposed" to fire first) is still there for any future caller that reads
+one of these events as meaning something the other doesn't. Not a cited constant-coupling in the
+tuning-bounds sense (nothing here is a `lo`/`hi` violation), so it would not be caught by the
+cross-key coupling check `tuning.py`'s docstring warns about -- flagging it here instead.
