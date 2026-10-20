@@ -74,7 +74,7 @@ grep -rn "<key term>" docs/acceptance/                                          
 `grep` to prove it is gone":
 
 - **graph first** for *"where is this discussed, was this decided?"* — it covers `CLAUDE.md`,
-  `AGENTS.md`, roadmaps, `NOTES.md`, `docs/`, research notes and the active plan.
+  `AGENTS.md`, roadmaps, `notes/`, `docs/`, research notes and the active plan.
 - **`grep`** for `.claude/agent-memory/`, which is **deliberately outside the corpus**
   (`graph-corpus-files.sh:25`), and for any *"does anything still say X"* question, where a
   trustworthy negative is needed and the graph's negatives are documented unreliable.

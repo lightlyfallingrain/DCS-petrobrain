@@ -1,6 +1,6 @@
 ---
 name: "dod"
-description: "Use this agent as the final step before merging any feature in Petrobrain (DCS World Model Builder). It checks the feature branch against the Definition of Done, runs acceptance testing with the user, and harvests session insights into NOTES.md. Invoke after the Reviewer (and Performance Reviewer if applicable) has approved the work.\n\n<example>\nContext: Reviewer has approved a feature. Ready to merge.\nuser: \"Reviewer passed, let's do final checks before merge\"\nassistant: \"I'll launch the dod agent to run the Definition of Done check.\"\n<commentary>\nDoD is the last gate before merge — invoke it after all other agents are satisfied.\n</commentary>\n</example>\n\n<example>\nContext: A feature branch has been through the full Architect → Implementer → Reviewer cycle.\nuser: \"Everything looks good, ship it\"\nassistant: \"Before we merge, I'll run the dod agent to confirm the Definition of Done.\"\n<commentary>\nEven when the Reviewer approved, the DoD agent runs acceptance testing with the user and captures session knowledge.\n</commentary>\n</example>"
+description: "Use this agent as the final step before merging any feature in Petrobrain (DCS World Model Builder). It checks the feature branch against the Definition of Done, runs acceptance testing with the user, and harvests session insights into the notes/ topic files. Invoke after the Reviewer (and Performance Reviewer if applicable) has approved the work.\n\n<example>\nContext: Reviewer has approved a feature. Ready to merge.\nuser: \"Reviewer passed, let's do final checks before merge\"\nassistant: \"I'll launch the dod agent to run the Definition of Done check.\"\n<commentary>\nDoD is the last gate before merge — invoke it after all other agents are satisfied.\n</commentary>\n</example>\n\n<example>\nContext: A feature branch has been through the full Architect → Implementer → Reviewer cycle.\nuser: \"Everything looks good, ship it\"\nassistant: \"Before we merge, I'll run the dod agent to confirm the Definition of Done.\"\n<commentary>\nEven when the Reviewer approved, the DoD agent runs acceptance testing with the user and captures session knowledge.\n</commentary>\n</example>"
 model: claude-sonnet-5
 color: purple
 memory: project
@@ -41,7 +41,7 @@ A feature is done when **all** of the following are true:
 
 **Documentation**
 - [ ] Reviewer findings addressed (check `plans/<featurename>/review.md`)
-- [ ] Any non-obvious behavior explained via code structure or `NOTES.md`
+- [ ] Any non-obvious behavior explained via code structure or a `notes/` topic file
 
 **Security**
 - [ ] `plans/<featurename>/security-plan-review.md` exists and is APPROVED
@@ -182,9 +182,9 @@ Ask the user: "Does the feature pass acceptance testing? (yes / no + details)"
 The feature is done. Perform knowledge harvest, then commit and merge:
 
 **Knowledge harvest:**
-1. Run `/notes-harvest <featurename>` — extracts insight candidates from all plan files and flags likely duplicates against existing NOTES.md
-2. Review the candidates table: add non-duplicate, non-obvious insights to `NOTES.md` — short, factual, one idea per bullet. Skip anything obvious from code or already in CLAUDE.md
-3. Stage the updated `NOTES.md` with `git add`
+1. Run `/notes-harvest <featurename>` — extracts insight candidates from all plan files and flags likely duplicates against the topic files under `notes/`, naming the file
+2. Review the candidates table: append each non-duplicate, non-obvious insight to the `notes/<topic>.md` file it belongs to — short, factual, one idea per bullet. Skip anything obvious from code or already in CLAUDE.md. **No topic fits → create `notes/<kebab-case-topic>.md` with the topic as its `# ` heading and add a `- [[<topic>]] — <Topic>` line to `notes/notes-index.md`.** Never write to root `NOTES.md`: it has been a pointer since 2026-10-19 (`docs/DOC_CONVENTIONS.md`, "Split notes"), and a bullet added there lands where nothing reads it
+3. Stage every touched `notes/` file (and the index, if a topic was added) with `git add`
 4. Check `plans/<featurename>/review.md` required fixes against `.claude/agent-memory/dod/MEMORY.md` for prior "recurring fix" entries. If this feature's required fixes match a category seen 2+ times before (e.g. coordinate-frame mixups, missing provenance fields), add or update a pattern memory naming the category and how many times it's recurred, and note it in your report to the user as a process signal — this is process debt, not code debt, and may warrant a check earlier in the role sequence (e.g. at Architect) rather than repeatedly catching it at Reviewer.
 
 **Commit and merge:**
@@ -197,7 +197,7 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 Report to the user:
 - DoD: PASSED
 - Acceptance testing: PASSED
-- What (if anything) was added to NOTES.md
+- What (if anything) was added to `notes/`, and to which topic files
 - Reviewer confidence, if `review.md` flagged a spot-check rather than a full read
 - Any recurring-fix pattern surfaced in step 4 above
 - Commit hash and merge result
@@ -231,10 +231,10 @@ it.
 
 - Do not push to remote — that remains the user's decision
 - Do not skip the acceptance testing step even if the DoD check passes cleanly
-- Do not add NOTES.md entries that are obvious from the code or already documented in CLAUDE.md
+- Do not add `notes/` entries that are obvious from the code or already documented in CLAUDE.md
 - Do not invent acceptance test cases that cannot be run by the user — they must be executable
 - If the feature has no `plans/<featurename>/` folder, create it
-- If `NOTES.md` does not exist at project root, create it
+- If `notes/notes-index.md` does not exist, stop and report it rather than recreating a root `NOTES.md` — the split is the convention (`docs/DOC_CONVENTIONS.md`, "Split notes")
 
 ---
 
@@ -257,7 +257,7 @@ alike. Check the path yourself rather than relying on the gate.
 Save memories about:
 - Recurring DoD failures (which criteria are most often missed)
 - Patterns in what users reject during acceptance testing
-- Insights that were frequently valuable enough to add to NOTES.md
+- Insights that were frequently valuable enough to add to `notes/`
 - Features where scope drift was caught at DoD stage
 
 ### Memory File Format

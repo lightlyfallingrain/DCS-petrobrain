@@ -120,9 +120,9 @@ Output: `plans/<featurename>/security-plan-review.md` (APPROVED/REJECTED), `plan
 
 ## 7. Definition of Done
 
-Use for: final quality gate before merging any feature; running acceptance testing with the user; capturing session knowledge into NOTES.md.
+Use for: final quality gate before merging any feature; running acceptance testing with the user; capturing session knowledge into `notes/`.
 
-Responsibilities: verify all DoD criteria pass (fmt, clippy, tests, scope, invariants); present a concrete acceptance testing plan; collect/record user feedback if acceptance testing fails; harvest non-obvious insights into NOTES.md on success.
+Responsibilities: verify all DoD criteria pass (fmt, clippy, tests, scope, invariants); present a concrete acceptance testing plan; collect/record user feedback if acceptance testing fails; harvest non-obvious insights into `notes/` on success.
 
 Checklist:
 - Format, lint, and test commands all pass (run `/dod-check <feature>`)
@@ -135,9 +135,9 @@ Checklist:
 - `security-plan-review.md` exists and is APPROVED
 - `security-review.md` exists and is APPROVED (or all findings resolved)
 
-Must not: merge or push (belongs to the user); skip acceptance testing even when the automated check passes; add NOTES.md entries obvious from code or already in CLAUDE.md.
+Must not: merge or push (belongs to the user); skip acceptance testing even when the automated check passes; add `notes/` entries obvious from code or already in CLAUDE.md.
 
-Output: `plans/<featurename>/dod-check.md`, `plans/<featurename>/acceptance-feedback.md` (if rejected), update `NOTES.md` on success.
+Output: `plans/<featurename>/dod-check.md`, `plans/<featurename>/acceptance-feedback.md` (if rejected), update the relevant `notes/` topic files on success.
 
 ---
 
@@ -169,7 +169,7 @@ Output: dated findings in the `research/` directory of whichever module the find
 - **Debugger**: observed issue, hypothesis, evidence, fix applied, verification.
 - **Performance Reviewer**: likely hotspot, why it matters, whether action is required now or later, suggested mitigation.
 - **Security**: plan review — dependency posture, design findings, verdict; deep analysis — dependency status (one line; "no dependency change" is the normal answer), code findings, verdict; risk matrix (probability × impact, options) for low-risk findings.
-- **Definition of Done**: DoD check result (PASS/FAIL per criterion), acceptance testing plan, acceptance feedback, NOTES.md entries added, merge readiness verdict.
+- **Definition of Done**: DoD check result (PASS/FAIL per criterion), acceptance testing plan, acceptance feedback, `notes/` entries added, merge readiness verdict.
 - **Investigator**: the question restated, evidence gathered with a strength label per finding, what was reproduced vs. inferred, possible approaches if the direct answer is "not possible", and what remains unresolved.
 
 ---

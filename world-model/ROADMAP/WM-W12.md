@@ -29,7 +29,7 @@
   would turn into a fabricated `nearest_feature` distance because it tests holes before the outer
   ring. The small-extract validation never exercised it; the full theatre hit it 58 times. Class of
   bug worth remembering: individually-valid transforms composing into an invalid structure — see
-  NOTES.md.
+  `notes/osm-multipolygon-assembly-and-simplification-m9.md`.
 
   **Cache-invalidation defect found while reviewing that build's log and fixed here.** The hole fix
   (`638239a`) changed both `_ingest_ring`'s geometry output and `OsmIngestStats`' fields — two of

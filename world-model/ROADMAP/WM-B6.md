@@ -432,7 +432,7 @@ present on `main`. Every sentence below is kept exactly as the source wrote it, 
   should be (Stages 3-5 are still unbuilt and still gated behind a real consumer need, per the
   reopening condition above) — but it does narrow what "trustworthy" means for anyone reading an
   older terrain render: see the `inspect_terrain.py` rewrite note below and the corresponding
-  `NOTES.md` entry — every render judged by eye before this branch (including the ones that
+  `notes/planning-and-process-lessons.md` entry — every render judged by eye before this branch (including the ones that
   produced the 2026-10-01 "choose geomorphons" decision and the 2026-10-02 acceptance renders) was
   of raw/Chaikin-only geometry, not what the store actually holds. That does not reopen the
   geomorphons-vs-alternatives choice itself (made on a different, zoomed-in test window where the
