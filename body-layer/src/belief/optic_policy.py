@@ -34,17 +34,17 @@ deterministic for the same reason `gaze_at` does.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import pairwise
-from typing import Final
+from typing import Final, Literal
 
 import tuning
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.position_belief import PositionEstimate
 from perception.gaze import SCAN_CYCLE_PERIOD_S
-from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.geometry import GeoPosition, body_relative_direction, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 
 #: How many sigma of a contact's own `PositionEstimate.bearing_uncertainty_
@@ -190,6 +190,83 @@ RETRY_RANGE_FRACTION: Final[float] = 0.8
 #: a typical encounter rather than after hundreds of seconds.
 OPTIC_RETRY_INTERVAL_S: Final[float] = 4.0 * SCAN_CYCLE_PERIOD_S
 
+#: How long a contact must wait, once a sight look at it has ended without
+#: advancing its classification tier, before the sight is willing to look
+#: at it again -- too low and a stalled contact can still nearly
+#: monopolise the sight as before, too high and one stalled for a merely
+#: transient reason is abandoned for unreasonably long; the default is
+#: about two laps of the search cycle (`BL-B85`). The user's own words:
+#: *"we can't just indefinately look at one thing. Needs a timer value or
+#: the like that forces moving on"* (`docs/acceptance/
+#: 2026-10-20-sortie-feedback.md` F4). Measured empirically: a contact
+#: whose classification never advances past `presence` is re-admitted by
+#: `OPTIC_RETRY_INTERVAL_S` alone every retry interval regardless of
+#: whether the previous look taught anything, and with several such
+#: contacts in regard the sight never reaches an idle poll at all
+#: (`plans/9k113-narrow-search/review.md`'s 900 s/three-contact
+#: reproduction: busy 792/900 polls, `sight_search_leg` never advancing
+#: past `"wide"`). **Extends `is_worth_a_look`'s existing time-based
+#: re-eligibility, not a second mechanism**: when a contact's
+#: classification level is unchanged since its last committed attempt
+#: (`OpticState.attempted_at_level`), this cooldown applies in place of
+#: the shorter `OPTIC_RETRY_INTERVAL_S` -- `RETRY_RANGE_FRACTION`'s
+#: range-based escape (a contact that has genuinely closed) is untouched
+#: either way, so a contact that is merely stuck at long, constant range
+#: still gives way, while one actually closing on the aircraft is retried
+#: as before. **Sight-only.** Only `_decide_sighting`'s own candidate
+#: filter passes this; `GLASSING`'s call to `is_worth_a_look` does not, so
+#: a stalled contact under binoculars keeps the pre-existing `OPTIC_
+#: RETRY_INTERVAL_S` behaviour unchanged -- a mid-range contact stuck at
+#: `presence` inside the binocular window could already starve `GLASSING`
+#: the same way before this feature shipped (`BL-B85.md`), and extending
+#: the same cooldown to it would be a `GLASSING` behaviour change beyond
+#: what this fix was asked for; filed as a backlog note rather than built
+#: here. Picked as roughly two of the search cycle's own full laps (`wide
+#: -> narrow_near -> narrow_far`), measured at ~66 s each in the review's
+#: realistic-case run -- long enough that the search cycle and other
+#: contacts get real time back, short enough that a contact stalled for an
+#: unrelated, transient reason is retried well inside a typical encounter.
+#: A starting value to tune against a flown sortie, same footing as
+#: `OPTIC_RETRY_INTERVAL_S` was when it shipped.
+SIGHT_STALL_COOLDOWN_S: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_STALL_COOLDOWN_S",
+    132.0,
+    lo=30.0,
+    hi=400.0,
+    status="judgement",
+)
+
+# `is_worth_a_look`'s `stall_cooldown_s` branch only applies when it is
+# actually longer than the fast path it replaces -- `OPTIC_RETRY_INTERVAL_S`
+# is not itself a `tuning.real` (it is derived at import from
+# `FOCUS_DWELL_S`/`SCAN_PLAN`, both independently tunable), so nothing in
+# either constant's own `lo`/`hi` bounds catches a retuning that pushes
+# `OPTIC_RETRY_INTERVAL_S` above `SIGHT_STALL_COOLDOWN_S`'s low end.
+# `plans/9k113-narrow-search/review.md`'s "Review -- F5 boresight + BL-B85
+# refinement" found this coupling was previously guarded by a bare
+# `assert` here -- reachable by a single, realistic, in-bounds
+# `SIGHT_STALL_COOLDOWN_S` override (e.g. 40.0, comfortably inside its own
+# declared `lo=30.0, hi=400.0`) -- which crashed the whole process at
+# import, violating this project's own tuning policy ("a bad value warns
+# and continues on the code default -- it never refuses to start",
+# `body-layer/CLAUDE.md`'s "Tuning"). Floor the effective cooldown instead
+# of asserting the inversion can't happen: a stalled contact then never
+# waits *less* than the ordinary retry interval, whatever either constant
+# is tuned to. No startup warning on an inversion, deliberately: the only
+# once-only startup-warning mechanism this module has is `tuning.py`'s
+# `_check_scan_decay_coupling`, a named check wired into its own registry
+# of `RejectedEntry`/`AppliedEntry` state -- there is no standalone
+# print-once helper to reuse without building a second instance of that
+# same machinery, which this fix was explicitly asked not to do for this
+# pair. The floor also makes a warning less necessary than it would be
+# for `decay.py`'s own coupling: there, a bad combination is silently
+# *rejected back to defaults*, which is worth announcing; here, a bad
+# combination is silently *widened to a safe value*, which is its own
+# intended behaviour, not a rejection.
+_EFFECTIVE_SIGHT_STALL_COOLDOWN_S: Final[float] = max(
+    SIGHT_STALL_COOLDOWN_S, OPTIC_RETRY_INTERVAL_S
+)
+
 #: The widest sector a binocular *search* will sweep (user: *"cap binocular
 #: scan at 30 deg azimuth, there's no wide area binocular scan"*). A wider
 #: commanded scan simply gets no search phase -- see `plans/binocular-optic/
@@ -203,6 +280,60 @@ MAX_SEARCH_SECTOR_HALF_WIDTH_DEG: Final[float] = 15.0
 #: targets then get the dwell behaviour."* Dwelling is what the
 #: identification look is for, and it happens on a later cycle.
 SEARCH_STEP_S: Final[float] = 0.8
+
+#: The near/mid/far band edges the sight's own search cycle sweeps --
+#: `plans/9k113-narrow-search/plan.md` Stage 3, amendment 2 ("narrow
+#: searches both bands, near first"). **Keep in sync with `logger.
+#: _SEARCH_BAND_M`, which independently owns the same two edges for the
+#: binocular search** -- the two tunable sets happen to share today's
+#: defaults (`SIGHT_SEARCH_NEAR_M`/`_SEARCH_BAND_M[0]`,
+#: `SIGHT_SEARCH_MID_M`/`_SEARCH_BAND_M[1]`) but are declared independently
+#: on purpose, by value not by import, since one answers "where does the
+#: naked eye's/binoculars' own reach end" and the other "where does the
+#: sight's own wide/narrow split fall" -- two different questions that
+#: happen to agree today, not one constant wearing two names.
+#:
+#: **Known residual coupling, not caught by per-key bounds** (the same
+#: shape as `belief.decay`'s documented `OBSERVED_WINDOW_S <
+#: POSITION_HALF_LIFE_S` coupling, `body-layer/CLAUDE.md` "Tuning"):
+#: nothing stops `SIGHT_SEARCH_NEAR_M` being tuned above `SIGHT_SEARCH_
+#: MID_M`, or `SIGHT_SEARCH_MID_M` above `SIGHT_SEARCH_FAR_M`,
+#: independently within each one's own declared bounds. Single-key tuning
+#: is safe; tuning more than one of these three together is not protected.
+#:
+#: Where the naked eye's own reach ends -- the wide leg's own near edge,
+#: and (amendment 2) the near edge of narrow's own first ("near first")
+#: band too.
+SIGHT_SEARCH_NEAR_M: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_SEARCH_NEAR_M",
+    2_333.0,
+    lo=1_000.0,
+    hi=4_000.0,
+    status="judgement",
+)
+
+#: Where binoculars' own reach ends -- the wide/narrow-near band's own far
+#: edge, and the far/near boundary between narrow's two bands (amendment
+#: 2: narrow covers both the 2.3-5.6 km band and the 5.6-13.6 km band,
+#: near first).
+SIGHT_SEARCH_MID_M: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_SEARCH_MID_M",
+    5_647.0,
+    lo=4_000.0,
+    hi=10_000.0,
+    status="judgement",
+)
+
+#: The sight narrow setting's own presence reach (`2333 * 5.81`,
+#: `plans/9k113-sight/plan.md` §17) -- the far band's own far edge, and the
+#: whole search cycle's outer limit.
+SIGHT_SEARCH_FAR_M: Final[float] = tuning.real(
+    "belief.optic_policy.SIGHT_SEARCH_FAR_M",
+    13_556.0,
+    lo=8_000.0,
+    hi=20_000.0,
+    status="judgement",
+)
 
 #: BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that
 #: thrashes at the boundary would be worse than one that never
@@ -332,6 +463,17 @@ class LookTarget:
     watched: bool = False
 
 
+#: Which leg of the idle sight's search cycle is current --
+#: `plans/9k113-narrow-search/plan.md` Stage 3, amendment 2. A brief
+#: `"wide"` orientation pass, then `"narrow_near"`/`"narrow_far"`
+#: (*"narrow sweeps both bands, near first, wide only to orient"*), then a
+#: `"binocular"` excursion for any out-of-regard remainder a commanded
+#: sector left over (Stage 2's split). Four names, not two, because
+#: amendment 2 gave narrow its own near/far split -- the original design's
+#: `"narrow"` single leg no longer names one thing.
+SightSearchLeg = Literal["wide", "narrow_near", "narrow_far", "binocular"]
+
+
 @dataclass(frozen=True)
 class OpticState:
     """The cycle's own state, carried across polls by the runner.
@@ -397,6 +539,26 @@ class OpticState:
     #: contact held at roughly constant range needs a time basis, not only
     #: a range one.
     attempted_at_time_sim: dict[str, float] = field(default_factory=dict)
+    #: `BL-B85` -- `attempted_at_range_m`'s classification-level twin: the
+    #: contact's `LookTarget.current_level` at the moment of the last
+    #: *committed* attempt (merged from `pending_attempted_at_level` the
+    #: same way, and at the same commit sites, as `attempted_at_range_m`
+    #: is merged from `pending_attempted_at_range_m`). Drives `is_worth_a_
+    #: look`'s `stall_cooldown_s` branch: if a fresh candidate's level
+    #: still matches what is recorded here, the look that covered it last
+    #: time taught nothing, and the longer `SIGHT_STALL_COOLDOWN_S`
+    #: applies in place of `OPTIC_RETRY_INTERVAL_S`. Populated alongside
+    #: `attempted_at_range_m` for both `GLASSING` and `SIGHTING` so the two
+    #: dicts never fall out of step with each other regardless of which
+    #: phase last attempted a given contact, even though only `_decide_
+    #: sighting`'s candidate filter currently reads it as a cooldown.
+    attempted_at_level: dict[str, str] = field(default_factory=dict)
+    #: `pending_attempted_at_range_m`'s level twin, same reason
+    #: `attempted_at_level` is `attempted_at_range_m`'s -- the level
+    #: recorded here is the one at *look start*, so what is compared at
+    #: the next candidacy check is "has this contact's level moved since
+    #: the look that attempted it began", not since it ended.
+    pending_attempted_at_level: dict[str, str] = field(default_factory=dict)
     #: `plans/sortie-2026-09-26-fixes/plan.md` Stage 4 (Fix C) -- the
     #: `contact_id` of the *primary* (chosen/centred) target of the current
     #: look, set at the same SCANNING -> GLASSING transition site as
@@ -411,6 +573,20 @@ class OpticState:
     #: requiring full envelope-overlap testing. `None` while `SCANNING` or
     #: `SEARCHING`.
     look_contact_id: str | None = None
+    #: Which sight setting the current look is using -- `plans/
+    #: 9k113-narrow-search/plan.md` Stage 4 Part A. Set once, at look-start,
+    #: to `sight_look_optic(chosen)`; read, not recomputed, at look-
+    #: continuation (the look's own envelope/field of view are fixed for
+    #: its whole run, same reason `look_envelope_azimuth_deg` is). **Not**
+    #: `sight_search_leg` below -- a different question asked of a
+    #: different activity (which sight setting resolves a specific chosen
+    #: target, vs. which *search* leg is currently running); `LOOK_SWEEP_
+    #: SIGMA`'s own docstring is this module's standing reminder against
+    #: letting two different questions share one number. Default
+    #: `SIGHT_NARROW_OPTIC` is harmless -- never read outside an active
+    #: look, so a pre-existing `OpticState()` construction carries an unread
+    #: value, not a wrong one.
+    look_optic: Optic = SIGHT_NARROW_OPTIC
     #: Where the sight head *actually* points, as distinct from
     #: `look_azimuth_deg`/`look_elevation_deg` above (belief's *desired*
     #: aim) -- `plans/9k113-sight/plan.md` §15a, direction §12. `None`
@@ -481,8 +657,19 @@ class OpticState:
     #: not any one look's own envelope-sweep timing the way it does for
     #: `GLASSING` (where entering the phase and starting the look are the
     #: same event). `None` while idle (nothing chosen) or outside
-    #: `SIGHTING` entirely.
+    #: `SIGHTING` entirely. **Doubles as the active search leg's own per-leg
+    #: clock** (`plans/9k113-narrow-search/plan.md` Stage 3) -- the same
+    #: field, not a second one, because a look and a search leg are never
+    #: both running at once (`sight_search_leg` only advances while `chosen
+    #: is None`, i.e. no look is in progress), so there is no ambiguity
+    #: about whose clock this is at any given poll.
     look_started_sim: float | None = None
+    #: Which leg of the idle search cycle is current -- `SightSearchLeg`'s
+    #: own docstring has the cycle. Default `"wide"` is a true no-op for
+    #: every pre-existing caller/test: read only inside `_decide_sighting`'s
+    #: idle branch, never by `SCANNING`/`GLASSING`/`SEARCHING`-at-home,
+    #: which have their own, unrelated, single-optic sweeps.
+    sight_search_leg: SightSearchLeg = "wide"
 
     #: `BL-B71`'s standing guidance grant -- the optic `attack_run`'s
     #: request is currently overriding every other optic decision with,
@@ -576,6 +763,8 @@ def search_pattern(
     far_m: float,
     altitude_agl_m: float,
     fov_full_width_deg: float,
+    center_azimuth_deg: float = 0.0,
+    max_half_width_deg: float = MAX_SEARCH_SECTOR_HALF_WIDTH_DEG,
 ) -> list[tuple[float, float]]:
     """The boustrophedon sweep for a binocular search of one sector:
     `(azimuth, elevation)` steps in the order they should be looked at.
@@ -596,12 +785,25 @@ def search_pattern(
     their count is what makes that fall out instead of producing a
     pointlessly slow vertical crawl at low level.
 
-    `sector_half_width_deg` is capped at `MAX_SEARCH_SECTOR_HALF_WIDTH_DEG`
-    (user: *"cap binocular scan at 30 deg azimuth, there's no wide area
-    binocular scan"*) -- a wider commanded scan is swept only across its
-    middle, rather than taking a minute to cover.
+    `sector_half_width_deg` is capped at `max_half_width_deg`, which
+    defaults to `MAX_SEARCH_SECTOR_HALF_WIDTH_DEG` (user: *"cap binocular
+    scan at 30 deg azimuth, there's no wide area binocular scan"*) -- a
+    wider commanded scan is swept only across its middle, rather than
+    taking a minute to cover. **`plans/9k113-narrow-search/plan.md` Stage 3
+    passes the sight's own, much wider field of regard here instead** --
+    the binocular cap is a UX choice about how long a sweep is worth
+    taking, not a property of this function, which the sight's own search
+    legs have no reason to inherit.
+
+    `center_azimuth_deg` (Stage 2 of the same plan) shifts every generated
+    azimuth by this amount -- `0.0` (the default) is a true no-op for every
+    caller that predates it, including `logger._search_sweep`'s own
+    unsplit, free-scan-excluded sweep. Needed once a caller sweeps a
+    sub-span with a genuinely non-zero centre (the in-regard/out-of-regard
+    halves a commanded sector splits into), where sweeping symmetrically
+    about `0.0` regardless of the sector actually asked for would be wrong.
     """
-    half_width = min(sector_half_width_deg, MAX_SEARCH_SECTOR_HALF_WIDTH_DEG)
+    half_width = min(sector_half_width_deg, max_half_width_deg)
     azimuths = _step_centres_deg(half_width, fov_full_width_deg)
 
     near_depression = math.degrees(math.atan2(altitude_agl_m, max(near_m, 1.0)))
@@ -617,7 +819,7 @@ def search_pattern(
     pattern: list[tuple[float, float]] = []
     for band_index, elevation in enumerate(elevations):
         sweep = azimuths if band_index % 2 == 0 else list(reversed(azimuths))
-        pattern.extend((azimuth, elevation) for azimuth in sweep)
+        pattern.extend((center_azimuth_deg + azimuth, elevation) for azimuth in sweep)
     return pattern
 
 
@@ -827,6 +1029,76 @@ def improvement_window_m(
     return unaided_class_m, binocular_class_m
 
 
+def sight_look_optic(target: LookTarget) -> Optic:
+    """Which of the sight's two settings a look at `target` should use --
+    `plans/9k113-narrow-search/plan.md` Stage 4 Part A, direction §8
+    (*"wide<->narrow should use similar logic to naked eye and binocular
+    usage"*) and the settled "least capable optic that suffices"
+    (`docs/acceptance/2026-10-20-sortie-feedback.md`, F4/F5).
+
+    **Not a reuse of `least_capable_sufficient_optic`/`_LADDER`** -- that
+    function answers "can this instrument *see* the target at all" (a
+    presence-tier threshold), a weaker bar than "does this instrument
+    deliver the *specific* recognition gain this look exists for".
+    Instead, this generalises `improvement_window_m`'s own pattern
+    (`profile_for`/`apparent_extent_m`/`distinctiveness_of`/`tier_ranges`),
+    substituting the two sight optics for `UNAIDED_OPTIC`/`BINOCULAR_OPTIC`.
+
+    Stops at wide/narrow by design -- a caller needing the full
+    eye->binocular->wide->narrow ladder still wants `least_capable_
+    sufficient_optic`, not this."""
+    profile = profile_for(target.object_type)
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+
+    def next_tier_threshold_m(optic: Optic) -> float:
+        _, class_m, type_m = tier_ranges(
+            presence_size_m=profile.size_m,
+            recognition_extent_m=extent,
+            optic=optic,
+            distinctiveness=distinctiveness,
+        )
+        return type_m if target.current_level == "class" else class_m
+
+    if target.range_m <= next_tier_threshold_m(SIGHT_WIDE_OPTIC):
+        return SIGHT_WIDE_OPTIC
+    return SIGHT_NARROW_OPTIC
+
+
+def sight_can_still_improve(target: LookTarget) -> bool:
+    """Whether the sight -- wide or narrow, whichever `sight_look_optic`
+    would pick -- could still raise `target`'s tier. The `SIGHTING`
+    counterpart of `can_still_improve`, which asks the same question of
+    the naked eye/binoculars pair; required fix from `plans/
+    9k113-narrow-search/review.md` ("the worth-a-look gate... is bound by
+    the naked-eye/binocular pair, not the sight's own reach").
+
+    **An upper-bound check against `SIGHT_NARROW_OPTIC`'s own class/type
+    threshold, with no lower bound -- deliberately not `improvement_
+    window_m`'s two-sided shape.** That function's lower bound exists
+    because the naked eye reaches the same tier "for free" on its next
+    dwell, making a binocular look below it wasted; while `SIGHTING`
+    nothing dwells in parallel to resolve a close contact for free (the
+    sight *is* the active instrument), so there is no equivalent
+    exclusion here. Using `SIGHT_WIDE_OPTIC`'s own threshold as a lower
+    bound would incorrectly exclude close targets that `sight_look_optic`
+    itself still resolves with wide.
+    """
+    if target.current_level == "type":
+        return False
+    profile = profile_for(target.object_type)
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+    _, class_m, type_m = tier_ranges(
+        presence_size_m=profile.size_m,
+        recognition_extent_m=extent,
+        optic=SIGHT_NARROW_OPTIC,
+        distinctiveness=distinctiveness,
+    )
+    threshold_m = type_m if target.current_level == "class" else class_m
+    return target.range_m <= threshold_m
+
+
 #: The ladder `BL-B71`'s guidance override walks, ascending capability --
 #: `Optic.presence_range_mult` ascending *is* `fov_half_angle_deg`
 #: descending across the whole shipped table (`BL-B71.md`'s own
@@ -976,7 +1248,12 @@ def can_still_improve(target: LookTarget) -> bool:
 
 
 def is_worth_a_look(
-    target: LookTarget, state: OpticState, now_sim: float = 0.0
+    target: LookTarget,
+    state: OpticState,
+    now_sim: float = 0.0,
+    *,
+    can_improve: Callable[[LookTarget], bool] = can_still_improve,
+    stall_cooldown_s: float | None = None,
 ) -> bool:
     """Whether this contact would gain anything from a *new* look now.
 
@@ -984,8 +1261,28 @@ def is_worth_a_look(
     supplied one keeps compiling and behaving identically -- `state.
     attempted_at_time_sim` is empty for those (no committed attempt has a
     time recorded), so the time-based branch below never fires for them
-    regardless of the default's value."""
-    if not can_still_improve(target):
+    regardless of the default's value.
+
+    `can_improve` defaults to `can_still_improve` (the naked-eye/binocular
+    window) -- a true no-op for every pre-existing caller. `_decide_
+    sighting`'s candidate filter passes `sight_can_still_improve` instead,
+    so a contact beyond binocular's own reach but still within the
+    sight's is admitted as a candidate (`plans/9k113-narrow-search/
+    review.md` required fix).
+
+    `stall_cooldown_s` (`BL-B85`) defaults to `None`, a true no-op for
+    every pre-existing caller -- `GLASSING`'s own call never passes it, so
+    its re-eligibility stays exactly `OPTIC_RETRY_INTERVAL_S` regardless of
+    whether a contact's classification ever moves. `_decide_sighting`'s
+    candidate filter passes `SIGHT_STALL_COOLDOWN_S`: when a contact's
+    level has not changed since its last committed attempt (`state.
+    attempted_at_level`), that longer cooldown governs the time-based
+    branch below in place of `OPTIC_RETRY_INTERVAL_S` -- the sight has had
+    its look and taught nothing, so the search cycle and other contacts
+    get the time back instead. The range-based escape (`RETRY_RANGE_
+    FRACTION`) is unaffected either way: a contact that has genuinely
+    closed is worth retrying regardless of whether its level has moved."""
+    if not can_improve(target):
         return False
     if target.contact_id in state.pending_attempted_at_range_m:
         # A look already in progress is covering this contact right now --
@@ -1007,9 +1304,17 @@ def is_worth_a_look(
     # condition suffices.
     closed_enough = target.range_m <= attempted_at * RETRY_RANGE_FRACTION
     attempted_at_time = state.attempted_at_time_sim.get(target.contact_id)
+    attempted_at_level = state.attempted_at_level.get(target.contact_id)
+    retry_interval_s = OPTIC_RETRY_INTERVAL_S
+    if (
+        stall_cooldown_s is not None
+        and attempted_at_level is not None
+        and attempted_at_level == target.current_level
+    ):
+        retry_interval_s = stall_cooldown_s
     time_elapsed_enough = (
         attempted_at_time is not None
-        and now_sim - attempted_at_time >= OPTIC_RETRY_INTERVAL_S
+        and now_sim - attempted_at_time >= retry_interval_s
     )
     return closed_enough or time_elapsed_enough
 
@@ -1074,6 +1379,7 @@ def look_is_finished(
     *,
     started_sim: float | None = None,
     max_dwell_s: float = MAX_LOOK_S,
+    can_improve: Callable[[LookTarget], bool] = can_still_improve,
 ) -> bool:
     """Whether the current look has nothing left to give.
 
@@ -1106,6 +1412,17 @@ def look_is_finished(
     `phase_started_sim` tracks the *whole dwell* since entering the sight,
     not this one look's own clock (`OpticState.look_started_sim`'s own
     docstring).
+
+    `can_improve` defaults to `can_still_improve`, a true no-op for every
+    pre-existing caller. `_decide_sighting` passes `sight_can_still_
+    improve` instead -- it must, and not only at the candidate-admission
+    step (`is_worth_a_look`): if this function kept judging an in-progress
+    sight look against the eye/binocular window, a contact admitted only
+    because the sight can still reach it would read as already outside
+    that narrower window on the very next poll, ending the look one poll
+    after it started and committing `attempted_at_range_m` as if it had
+    actually resolved something -- silently reintroducing the gate defect
+    one poll later (`plans/9k113-narrow-search/review.md` required fix).
     """
     look_started_sim = (
         started_sim if started_sim is not None else state.phase_started_sim
@@ -1113,7 +1430,7 @@ def look_is_finished(
     if look_started_sim is None or now_sim - look_started_sim >= max_dwell_s:
         return True
     return not any(
-        _target_in_current_look(state, target) and can_still_improve(target)
+        _target_in_current_look(state, target) and can_improve(target)
         for target in targets
     )
 
@@ -1186,7 +1503,45 @@ def _back_to_home(
     silently lie the day `home_phase` differs. Every pre-existing call
     site reached only `SCANNING` before this change and still does
     whenever `home_phase` holds its default; this is the generalisation
-    that makes the OBSERV-off path provably unchanged (§13's own claim)."""
+    that makes the OBSERV-off path provably unchanged (§13's own claim).
+
+    **`home_phase is SIGHTING`: the aim is carried through, never nulled**
+    (`plans/9k113-narrow-search/plan.md` Stage 1, closing F5's "idle sight
+    has no aim" defect for every path that reaches here -- an interrupted
+    glance-away, a finished binocular excursion, `lower_binoculars` called
+    mid-interruption). This *is* "the sight stays at last position," for
+    free, once this function stops erasing it -- defaulting to `(0.0, 0.0)`
+    (dead ahead) only if an aim was never set at all (the very first poll
+    after "Observ on"). `home_phase is SCANNING`: byte-for-byte unchanged,
+    aim nulled exactly as before -- `UNAIDED_OPTIC` is unrestricted and
+    free-scans, so it has no "last position" to preserve."""
+    if state.home_phase is OpticPhase.SIGHTING:
+        azimuth = state.look_azimuth_deg if state.look_azimuth_deg is not None else 0.0
+        elevation = (
+            state.look_elevation_deg if state.look_elevation_deg is not None else 0.0
+        )
+        return (
+            replace(
+                state,
+                phase=state.home_phase,
+                phase_started_sim=now_sim,
+                look_azimuth_deg=azimuth,
+                look_elevation_deg=elevation,
+                search_pattern_steps=(),
+                search_step_index=0,
+                look_envelope_azimuth_deg=None,
+                look_envelope_half_width_deg=None,
+                pending_attempted_at_range_m={},
+                pending_attempted_at_level={},
+                look_contact_id=None,
+                look_started_sim=None,
+            ),
+            OpticDecision(
+                optic=SIGHT_WIDE_OPTIC,
+                look_azimuth_deg=azimuth,
+                look_elevation_deg=elevation,
+            ),
+        )
     return (
         replace(
             state,
@@ -1199,6 +1554,7 @@ def _back_to_home(
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
         ),
@@ -1207,7 +1563,7 @@ def _back_to_home(
 
 
 def _start_glance_away(
-    state: OpticState, now_sim: float
+    state: OpticState, now_sim: float, targets: Sequence[LookTarget]
 ) -> tuple[OpticState, OpticDecision]:
     """Force the brief naked-eye glance away from the sight -- direction
     §9's inverted dwell shape (plan §13): entered from `SIGHTING` at its
@@ -1218,8 +1574,49 @@ def _start_glance_away(
     scheduled break *within* OBSERV staying on, not OBSERV turning off
     (that is `_force_observ_off`, a manoeuvre-only path).
 
-    Drops any in-progress pending look the same way `_back_to_home` does
-    on an interruption -- the look did not reach its own natural end."""
+    **Commits a pending contact's mark only if that look made no progress
+    on it** (`BL-B85` required fix, `plans/9k113-narrow-search/review.md`
+    "Review -- BL-B85": Part 2 of the original fix committed every pending
+    mark unconditionally, which also throttled a contact whose
+    classification was genuinely advancing -- measured at a re-look
+    cadence of ~94 s instead of the pre-`BL-B85` ~33 s). "Made no
+    progress" means `pending_attempted_at_level[contact_id]` (the level
+    recorded at *this look's start*, same convention `pending_attempted_
+    at_level`'s own docstring describes) still matches the contact's
+    *current* level in `targets` at the moment the dwell boundary fires.
+    If it does not match, the mark is dropped instead -- the same
+    treatment a genuine interruption already gives it (`_back_to_home`'s
+    Fix B1, `plans/sortie-2026-09-26-fixes/plan.md` Stage 2: "an
+    interrupted look does not mark the target attempted"), because a look
+    that taught something is not the stalled case `SIGHT_STALL_COOLDOWN_S`
+    exists to throttle.
+
+    The whole-dwell clock this fires from and the per-look natural-end
+    timeout (`look_is_finished`'s `max_dwell_s`) share the same constant,
+    `SIGHT_MAX_DWELL_S`, and `_decide_sighting` checks this boundary
+    *before* the natural-end check -- so a contact that never resolves
+    (`can_still_improve`/`sight_can_still_improve` stays true the whole
+    dwell) has its look cut off here on every single cycle, never reaching
+    the natural-end commit at all. A contact stuck like that now gets
+    committed here (this function's original `BL-B85` fix), which is what
+    lets `SIGHT_STALL_COOLDOWN_S` engage for it at all."""
+    current_level_by_id = {
+        target.contact_id: target.current_level for target in targets
+    }
+    committed_range = dict(state.attempted_at_range_m)
+    committed_time = dict(state.attempted_at_time_sim)
+    committed_level = dict(state.attempted_at_level)
+    for contact_id, attempted_range_m in state.pending_attempted_at_range_m.items():
+        look_start_level = state.pending_attempted_at_level[contact_id]
+        # Not found in `targets` (the contact dropped out of candidacy
+        # mid-look, e.g. lost): nothing to compare against, so there is no
+        # evidence of progress -- commit, same as the stalled case.
+        current_level = current_level_by_id.get(contact_id, look_start_level)
+        if current_level != look_start_level:
+            continue
+        committed_range[contact_id] = attempted_range_m
+        committed_time[contact_id] = now_sim
+        committed_level[contact_id] = look_start_level
     return (
         replace(
             state,
@@ -1229,7 +1626,11 @@ def _start_glance_away(
             look_elevation_deg=None,
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
+            attempted_at_range_m=committed_range,
+            attempted_at_time_sim=committed_time,
+            attempted_at_level=committed_level,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
         ),
@@ -1292,10 +1693,209 @@ def lower_binoculars(state: OpticState, now_sim: float) -> OpticState:
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_started_sim=None,
         )
     return _back_to_home(state, now_sim)[0]
+
+
+#: The search cycle's fixed order -- `plans/9k113-narrow-search/plan.md`
+#: Stage 3, amendment 2. `_next_search_leg` walks it; never read directly
+#: outside this module.
+_SEARCH_LEG_ORDER: Final[tuple[SightSearchLeg, ...]] = (
+    "wide",
+    "narrow_near",
+    "narrow_far",
+    "binocular",
+)
+
+#: Which optic each non-binocular leg looks through -- `"binocular"` is
+#: deliberately absent: that leg hands off to `OpticPhase.SEARCHING`
+#: entirely (`_enter_binocular_search`), which already hardcodes
+#: `BINOCULAR_OPTIC` for every one of its callers.
+_SEARCH_LEG_OPTIC: Final[dict[Literal["wide", "narrow_near", "narrow_far"], Optic]] = {
+    "wide": SIGHT_WIDE_OPTIC,
+    "narrow_near": SIGHT_NARROW_OPTIC,
+    "narrow_far": SIGHT_NARROW_OPTIC,
+}
+
+
+def _next_search_leg(leg: SightSearchLeg, *, has_out_of_regard: bool) -> SightSearchLeg:
+    """The next leg after `leg` in the fixed cycle `wide -> narrow_near ->
+    narrow_far -> binocular -> wide`, skipping `binocular` whenever there is
+    no out-of-regard remainder to search (the default-sector and `ahead`
+    cases, where the cycle is `wide -> narrow_near -> narrow_far` only)."""
+    index = _SEARCH_LEG_ORDER.index(leg)
+    candidate = _SEARCH_LEG_ORDER[(index + 1) % len(_SEARCH_LEG_ORDER)]
+    if candidate == "binocular" and not has_out_of_regard:
+        return _SEARCH_LEG_ORDER[(index + 2) % len(_SEARCH_LEG_ORDER)]
+    return candidate
+
+
+def _enter_binocular_search(
+    state: OpticState,
+    now_sim: float,
+    sight_out_of_regard_search: Sequence[tuple[float, float]],
+) -> tuple[OpticState, OpticDecision]:
+    """The `binocular` leg: a commanded sector's out-of-regard remainder,
+    searched via the ordinary `OpticPhase.SEARCHING` dispatch (unchanged --
+    it already hardcodes `BINOCULAR_OPTIC`, correct for this new caller
+    too), not through `_decide_sighting` again.
+
+    **Deliberately omits `look_azimuth_deg`/`look_elevation_deg` from the
+    `replace()` below** -- leaving them exactly as they were is "the sight
+    stays at its last position" (`docs/acceptance/2026-10-20-sortie-
+    feedback.md`, F4/F5 "settled": *"Leave 9K113 at last position"*), for
+    free, simply by never touching them.
+
+    **Sets `sight_search_leg` back to `"wide"` immediately at entry**,
+    not on exit, so that whenever this excursion ends (pattern exhausted,
+    or `not steady`) and `_back_to_home` resumes `SIGHTING`, the very next
+    idle-branch evaluation starts a fresh `wide` pass without needing to
+    distinguish "just returned from binoculars" from any other resume."""
+    first_azimuth, first_elevation = sight_out_of_regard_search[0]
+    return (
+        replace(
+            state,
+            phase=OpticPhase.SEARCHING,
+            phase_started_sim=now_sim,
+            search_pattern_steps=tuple(sight_out_of_regard_search),
+            search_step_index=0,
+            look_contact_id=None,
+            look_started_sim=None,
+            pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
+            look_envelope_azimuth_deg=None,
+            look_envelope_half_width_deg=None,
+            sight_search_leg="wide",
+        ),
+        OpticDecision(
+            optic=BINOCULAR_OPTIC,
+            look_azimuth_deg=first_azimuth,
+            look_elevation_deg=first_elevation,
+        ),
+    )
+
+
+def _idle_sight_rest(state: OpticState) -> tuple[OpticState, OpticDecision]:
+    """The defensive fallback for when no search leg has anything to step
+    through at all. **Never reached in production**: `logger._commanded_
+    or_default_sector` always yields a non-empty in-regard span (Stage 2's
+    own geometry argument -- every named `RelativeSector`, and the
+    synthesized default, straddles or contains azimuth 0), so `_idle_
+    sight_search` below always finds a non-empty leg to step. It is
+    reached by a direct `decide()`/`_decide_sighting()` call that supplies
+    none of the four `sight_*_search` sequences -- most of this module's
+    own tests -- and must still never leave the aim unset (closes F5):
+    hold the last position, or dead ahead if there never was one, exactly
+    `_back_to_home`'s own convention for the same question."""
+    azimuth = state.look_azimuth_deg if state.look_azimuth_deg is not None else 0.0
+    elevation = (
+        state.look_elevation_deg if state.look_elevation_deg is not None else 0.0
+    )
+    return (
+        replace(
+            state,
+            look_azimuth_deg=azimuth,
+            look_elevation_deg=elevation,
+            look_contact_id=None,
+            look_started_sim=None,
+        ),
+        OpticDecision(
+            optic=SIGHT_WIDE_OPTIC,
+            look_azimuth_deg=azimuth,
+            look_elevation_deg=elevation,
+        ),
+    )
+
+
+def _idle_sight_search(
+    state: OpticState,
+    now_sim: float,
+    *,
+    sight_wide_search: Sequence[tuple[float, float]],
+    sight_narrow_near_search: Sequence[tuple[float, float]],
+    sight_narrow_far_search: Sequence[tuple[float, float]],
+    sight_out_of_regard_search: Sequence[tuple[float, float]],
+) -> tuple[OpticState, OpticDecision]:
+    """`_decide_sighting`'s idle branch (nothing worth a closer look):
+    step through whichever leg of the search cycle is current (`state.
+    sight_search_leg`) -- a brief `wide` orientation pass, then `narrow_
+    near`/`narrow_far` (amendment 2's "narrow sweeps both bands, near
+    first"), then a `binocular` excursion for any out-of-regard remainder
+    -- advancing to the next leg once the current one's steps run out.
+    `SEARCH_STEP_S` per step, `look_started_sim` reused as the per-leg
+    clock (its own docstring), exactly the mechanism `GLASSING`/
+    `SEARCHING` already use for their own step timing, generalised to
+    whichever leg is current.
+
+    **Skips an empty leg defensively rather than stalling on it**
+    (`_next_search_leg`'s own skip of `binocular` is the one case this is
+    known to hit in production; see `_idle_sight_rest` for what happens
+    if every leg is empty)."""
+    sequences: dict[
+        Literal["wide", "narrow_near", "narrow_far"], Sequence[tuple[float, float]]
+    ] = {
+        "wide": sight_wide_search,
+        "narrow_near": sight_narrow_near_search,
+        "narrow_far": sight_narrow_far_search,
+    }
+    has_out_of_regard = bool(sight_out_of_regard_search)
+
+    def first_nonempty_leg(starting: SightSearchLeg) -> SightSearchLeg | None:
+        leg = starting
+        for _ in range(len(_SEARCH_LEG_ORDER)):
+            if leg == "binocular":
+                if has_out_of_regard:
+                    return leg
+            elif sequences[leg]:
+                return leg
+            leg = _next_search_leg(leg, has_out_of_regard=has_out_of_regard)
+        return None
+
+    leg = first_nonempty_leg(state.sight_search_leg)
+    if leg is None:
+        return _idle_sight_rest(state)
+    if leg == "binocular":
+        return _enter_binocular_search(state, now_sim, sight_out_of_regard_search)
+
+    steps = sequences[leg]
+    leg_started_sim = (
+        state.look_started_sim
+        if state.sight_search_leg == leg and state.look_started_sim is not None
+        else now_sim
+    )
+    index = int((now_sim - leg_started_sim) // SEARCH_STEP_S)
+    if index >= len(steps):
+        next_leg = first_nonempty_leg(
+            _next_search_leg(leg, has_out_of_regard=has_out_of_regard)
+        )
+        if next_leg is None:
+            return _idle_sight_rest(state)
+        if next_leg == "binocular":
+            return _enter_binocular_search(state, now_sim, sight_out_of_regard_search)
+        leg = next_leg
+        steps = sequences[leg]
+        leg_started_sim = now_sim
+        index = 0
+
+    azimuth, elevation = steps[index]
+    return (
+        replace(
+            state,
+            look_azimuth_deg=azimuth,
+            look_elevation_deg=elevation,
+            search_step_index=index,
+            look_started_sim=leg_started_sim,
+            sight_search_leg=leg,
+        ),
+        OpticDecision(
+            optic=_SEARCH_LEG_OPTIC[leg],
+            look_azimuth_deg=azimuth,
+            look_elevation_deg=elevation,
+        ),
+    )
 
 
 def _decide_sighting(
@@ -1303,6 +1903,11 @@ def _decide_sighting(
     now_sim: float,
     targets: Sequence[LookTarget],
     sight_steady: bool,
+    *,
+    sight_wide_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_near_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_far_search: Sequence[tuple[float, float]] = (),
+    sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
@@ -1313,6 +1918,14 @@ def _decide_sighting(
     that fix, a pilot's "Observ off" changed `home_phase` alone and this
     function had no way to notice, so the two could diverge and this
     docstring's claim did not hold; it is enforced now, not merely assumed.
+
+    The four `sight_*_search` sequences (`plans/9k113-narrow-search/
+    plan.md` Stage 3) are the idle branch's own active search cycle --
+    `logger.py` computes them fresh every poll from the commanded-or-
+    default sector (the same way `search` is computed for `SCANNING`-at-
+    home) and threads them through `decide`/`_decide_without_guidance`
+    unchanged; all four default to empty, a true no-op for every
+    pre-existing caller/test, none of which pass them.
 
     **Plays the role `GLASSING` plays today** -- pick a target via
     `choose_look`, sweep its believed-bearing envelope via `look_sweep`,
@@ -1340,7 +1953,7 @@ def _decide_sighting(
         state.phase_started_sim if state.phase_started_sim is not None else now_sim
     )
     if now_sim - dwell_started_sim >= SIGHT_MAX_DWELL_S:
-        return _start_glance_away(state, now_sim)
+        return _start_glance_away(state, now_sim, targets)
 
     if state.look_contact_id is not None and look_is_finished(
         state,
@@ -1348,6 +1961,7 @@ def _decide_sighting(
         targets,
         started_sim=state.look_started_sim,
         max_dwell_s=SIGHT_MAX_DWELL_S,
+        can_improve=sight_can_still_improve,
     ):
         # The current look's own natural end (recognition succeeded,
         # nothing left to learn in its envelope) -- commit its pending
@@ -1356,14 +1970,18 @@ def _decide_sighting(
         # break above ends the dwell itself.
         committed_range = dict(state.attempted_at_range_m)
         committed_time = dict(state.attempted_at_time_sim)
+        committed_level = dict(state.attempted_at_level)
         for contact_id, attempted_range_m in state.pending_attempted_at_range_m.items():
             committed_range[contact_id] = attempted_range_m
             committed_time[contact_id] = now_sim
+            committed_level[contact_id] = state.pending_attempted_at_level[contact_id]
         state = replace(
             state,
             attempted_at_range_m=committed_range,
             attempted_at_time_sim=committed_time,
+            attempted_at_level=committed_level,
             pending_attempted_at_range_m={},
+            pending_attempted_at_level={},
             look_contact_id=None,
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
@@ -1404,7 +2022,7 @@ def _decide_sighting(
                 search_step_index=index,
             ),
             OpticDecision(
-                optic=SIGHT_NARROW_OPTIC,
+                optic=state.look_optic,
                 look_azimuth_deg=azimuth,
                 look_elevation_deg=elevation,
             ),
@@ -1423,32 +2041,36 @@ def _decide_sighting(
     worth_looking = [
         target
         for target in targets
-        if is_worth_a_look(target, state, now_sim)
+        if is_worth_a_look(
+            target,
+            state,
+            now_sim,
+            can_improve=sight_can_still_improve,
+            stall_cooldown_s=_EFFECTIVE_SIGHT_STALL_COOLDOWN_S,
+        )
         and within_field_of_regard(
             SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg
         )
     ]
     chosen = choose_look(worth_looking)
     if chosen is None:
-        # Nothing worth a closer look: rest wide, pointed ahead -- the
-        # sight's own idle state, the role `UNAIDED_OPTIC` plays for
-        # `SCANNING`-at-home.
-        return (
-            replace(
-                state,
-                look_azimuth_deg=None,
-                look_elevation_deg=None,
-                look_envelope_azimuth_deg=None,
-                look_envelope_half_width_deg=None,
-                look_contact_id=None,
-                look_started_sim=None,
-            ),
-            OpticDecision(optic=SIGHT_WIDE_OPTIC),
+        # Nothing worth a closer look: step through the idle search cycle
+        # instead of resting with no aim (`plans/9k113-narrow-search/
+        # plan.md` Stage 3, closing F5's defect).
+        return _idle_sight_search(
+            state,
+            now_sim,
+            sight_wide_search=sight_wide_search,
+            sight_narrow_near_search=sight_narrow_near_search,
+            sight_narrow_far_search=sight_narrow_far_search,
+            sight_out_of_regard_search=sight_out_of_regard_search,
         )
 
     # Starting a new look at the chosen target -- same shape as `decide`'s
-    # own SCANNING-at-home body entering `GLASSING`, swept against the
-    # narrow sight's own field of view rather than the binoculars'.
+    # own SCANNING-at-home body entering `GLASSING`, swept against
+    # whichever sight setting suffices (`sight_look_optic`, `plans/
+    # 9k113-narrow-search/plan.md` Stage 4 Part A) rather than always
+    # narrow.
     #
     # `regard_optic=SIGHT_WIDE_OPTIC` truncates the sweep at the mount's
     # own field of regard (`look_sweep`'s own docstring has the full
@@ -1458,7 +2080,8 @@ def _decide_sighting(
     # read for the same reason the candidate filter above reads it: one
     # optic has to be named and the two sight optics' `regard_*` fields are
     # identical.
-    fov_full_width_deg = (SIGHT_NARROW_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    look_optic = sight_look_optic(chosen)
+    fov_full_width_deg = (look_optic.fov_half_angle_deg or 0.0) * 2.0
     sweep = look_sweep(
         centre_azimuth_deg=chosen.azimuth_deg,
         centre_elevation_deg=chosen.elevation_deg,
@@ -1469,9 +2092,11 @@ def _decide_sighting(
     envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
 
     pending = dict(state.pending_attempted_at_range_m)
+    pending_level = dict(state.pending_attempted_at_level)
     for target in worth_looking:
         if _angular_separation_deg(chosen, target) <= envelope_half_width:
             pending[target.contact_id] = target.range_m
+            pending_level[target.contact_id] = target.current_level
 
     first_azimuth, first_elevation = sweep[0]
     new_state = replace(
@@ -1483,13 +2108,15 @@ def _decide_sighting(
         look_envelope_azimuth_deg=chosen.azimuth_deg,
         look_envelope_half_width_deg=envelope_half_width,
         pending_attempted_at_range_m=pending,
+        pending_attempted_at_level=pending_level,
         look_contact_id=chosen.contact_id,
+        look_optic=look_optic,
         look_started_sim=now_sim,
     )
     return (
         new_state,
         OpticDecision(
-            optic=SIGHT_NARROW_OPTIC,
+            optic=look_optic,
             look_azimuth_deg=first_azimuth,
             look_elevation_deg=first_elevation,
         ),
@@ -1505,6 +2132,10 @@ def _decide_without_guidance(
     steady: bool,
     search: Sequence[tuple[float, float]] = (),
     sight_steady: bool = True,
+    sight_wide_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_near_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_far_search: Sequence[tuple[float, float]] = (),
+    sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """The ordinary phase-cycle dispatch -- `decide`'s whole body before
     `BL-B71`, renamed and kept otherwise unchanged so that the public
@@ -1519,6 +2150,11 @@ def _decide_without_guidance(
     contact already detected and resolvable is worth more than looking for
     another one, and the user's own sequencing says so (*"detected targets
     then get the dwell behaviour"*).
+
+    The four `sight_*_search` sequences are `search`'s own sibling for the
+    `SIGHTING` branch below (`plans/9k113-narrow-search/plan.md` Stage 3)
+    -- threaded straight through to `_decide_sighting`, read only there.
+    All default to empty, a true no-op for every pre-existing caller.
 
     Pure: same inputs, same outputs, no clock read and no store access --
     which is what keeps a replay identical, the property `gaze_at` was
@@ -1595,17 +2231,22 @@ def _decide_without_guidance(
             # which only ever drops the *pending* one.
             committed_range = dict(state.attempted_at_range_m)
             committed_time = dict(state.attempted_at_time_sim)
+            committed_level = dict(state.attempted_at_level)
             for (
                 contact_id,
                 attempted_range_m,
             ) in state.pending_attempted_at_range_m.items():
                 committed_range[contact_id] = attempted_range_m
                 committed_time[contact_id] = now_sim
+                committed_level[contact_id] = state.pending_attempted_at_level[
+                    contact_id
+                ]
             return _back_to_home(
                 replace(
                     state,
                     attempted_at_range_m=committed_range,
                     attempted_at_time_sim=committed_time,
+                    attempted_at_level=committed_level,
                 ),
                 now_sim,
             )
@@ -1656,7 +2297,16 @@ def _decide_without_guidance(
             # `lower_binoculars`) -- this is not a new mechanism, it is the
             # existing interruption path reached from a third trigger.
             return _back_to_home(state, now_sim)
-        return _decide_sighting(state, now_sim, targets, sight_steady)
+        return _decide_sighting(
+            state,
+            now_sim,
+            targets,
+            sight_steady,
+            sight_wide_search=sight_wide_search,
+            sight_narrow_near_search=sight_narrow_near_search,
+            sight_narrow_far_search=sight_narrow_far_search,
+            sight_out_of_regard_search=sight_out_of_regard_search,
+        )
 
     # state.phase must be SCANNING here (the only phase not already
     # dispatched above). Whether this is the *home* phase or the sight's
@@ -1698,6 +2348,7 @@ def _decide_without_guidance(
                     search_pattern_steps=tuple(search),
                     attempted_at_range_m=dict(state.attempted_at_range_m),
                     attempted_at_time_sim=dict(state.attempted_at_time_sim),
+                    attempted_at_level=dict(state.attempted_at_level),
                     # Not part of this phase's own bookkeeping -- carried
                     # forward explicitly (`OpticState.actual_aim_azimuth_
                     # deg`'s own docstring) rather than reset, since a
@@ -1759,12 +2410,14 @@ def _decide_without_guidance(
     # above is what commits (on `look_is_finished`) or drops (on `not
     # steady`) these marks; `lower_binoculars` reaches the same drop path.
     pending = dict(state.pending_attempted_at_range_m)
+    pending_level = dict(state.pending_attempted_at_level)
     for target in worth_looking:
         if _angular_separation_deg(chosen, target) <= envelope_half_width:
             # Every contact this look covers counts as attempted, not just
             # the one it was centred on -- they all get the benefit, so
             # they all bear the retry rule.
             pending[target.contact_id] = target.range_m
+            pending_level[target.contact_id] = target.current_level
 
     first_azimuth, first_elevation = sweep[0]
     return (
@@ -1780,6 +2433,8 @@ def _decide_without_guidance(
             attempted_at_range_m=dict(state.attempted_at_range_m),
             pending_attempted_at_range_m=pending,
             attempted_at_time_sim=dict(state.attempted_at_time_sim),
+            attempted_at_level=dict(state.attempted_at_level),
+            pending_attempted_at_level=pending_level,
             look_contact_id=chosen.contact_id,
             # Carried forward explicitly, same reason as the SEARCHING
             # branch above.
@@ -1847,10 +2502,18 @@ def _apply_guidance(
         )
 
     effective_request = guidance_request
-    if (
-        _LADDER.index(guidance_request) > _LADDER.index(BINOCULAR_OPTIC)
-        and state.home_phase is not OpticPhase.SIGHTING
+    if _LADDER.index(guidance_request) > _LADDER.index(BINOCULAR_OPTIC) and (
+        state.home_phase is not OpticPhase.SIGHTING or decision.look_azimuth_deg is None
     ):
+        # `plans/9k113-narrow-search/plan.md` Stage 1's fourth path:
+        # `home_phase is SIGHTING` is not by itself proof that a sight tier
+        # has an aim to grant onto -- the glance-away sub-phase's own
+        # decision is bare `OpticDecision(optic=UNAIDED_OPTIC)` (no aim,
+        # because the naked eye never needs one), and a guidance request
+        # arriving during exactly that poll must still be capped, or it
+        # would hand back a sight optic with the glance's own `look_
+        # azimuth_deg=None` untouched -- the same defect F5 found, through
+        # a fourth path.
         effective_request = BINOCULAR_OPTIC
 
     if effective_request == state.guidance_optic:
@@ -1913,6 +2576,10 @@ def decide(
     steady: bool,
     search: Sequence[tuple[float, float]] = (),
     sight_steady: bool = True,
+    sight_wide_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_near_search: Sequence[tuple[float, float]] = (),
+    sight_narrow_far_search: Sequence[tuple[float, float]] = (),
+    sight_out_of_regard_search: Sequence[tuple[float, float]] = (),
     guidance_request: Optic | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """Advance the cycle one poll and say what to look through --
@@ -1926,6 +2593,10 @@ def decide(
     requested_optic` whenever an attack run is engaged; `belief.attack_
     run.decide` is the only producer of that value.
 
+    The four `sight_*_search` sequences (`plans/9k113-narrow-search/
+    plan.md` Stage 3) are `_decide_without_guidance`'s own parameters of
+    the same name, passed straight through; see that function's docstring.
+
     **Never applied while `decision.suppressed`** -- the hands-busy
     window already means nothing is observed through any optic this
     poll, so there is nothing for `_apply_guidance` to override and no
@@ -1938,6 +2609,10 @@ def decide(
         steady=steady,
         search=search,
         sight_steady=sight_steady,
+        sight_wide_search=sight_wide_search,
+        sight_narrow_near_search=sight_narrow_near_search,
+        sight_narrow_far_search=sight_narrow_far_search,
+        sight_out_of_regard_search=sight_out_of_regard_search,
     )
     if decision.suppressed:
         return new_state, decision
@@ -1954,13 +2629,27 @@ def look_target_for(
     current_level: str,
     position: PositionEstimate | None = None,
     watched: bool = False,
+    pitch_deg: float = 0.0,
+    bank_deg: float = 0.0,
 ) -> LookTarget:
     """Build a `LookTarget` from a contact's believed position.
 
     Lives here rather than in the caller so the azimuth/elevation
     convention is stated once: body-relative azimuth (0 dead ahead,
     positive clockwise) and elevation positive up, the same frame
-    `within_optic_fov` tests in.
+    `within_optic_fov` tests in -- via `body_relative_direction`, the same
+    conversion `perception.visibility.check_visibility` uses, rather than a
+    second derivation of it (F5, `docs/acceptance/
+    2026-10-20-sortie-feedback.md`: a look target's azimuth/elevation must
+    rotate with pitch and bank exactly as a live detection's does, or the
+    sight's field-of-regard check it is tested against means two different
+    things depending on which path produced the number it is testing).
+
+    `pitch_deg`/`bank_deg` both default to `0.0` -- a true no-op for every
+    pre-existing call site, mirroring `perception.source.OwnshipState`'s
+    own default convention. `logger._look_targets` is the one caller with
+    a real ownship to hand, and passes `ownship.pitch_deg`/`ownship.
+    bank_deg`.
 
     `position` (`plans/precise-position-belief/plan.md` Stage 5, `Contact.
     position` -- the fused `belief.position_belief.PositionEstimate`) is
@@ -1976,11 +2665,16 @@ def look_target_for(
     `LookTarget`'s own default untouched, for any caller with no
     `PositionEstimate` to hand.
     """
-    true_bearing = bearing_deg(observer, target_position)
     slant_m = range_m(observer, target_position)
-    azimuth = (true_bearing - heading_true_deg + 540.0) % 360.0 - 180.0
-    height_delta = target_position.alt_m - observer.alt_m
-    elevation = math.degrees(math.asin(max(-1.0, min(1.0, height_delta / slant_m))))
+    body_direction = body_relative_direction(
+        observer,
+        target_position,
+        heading_true_deg=heading_true_deg,
+        pitch_deg=pitch_deg,
+        bank_deg=bank_deg,
+    )
+    azimuth = body_direction.azimuth_deg
+    elevation = body_direction.elevation_deg
     kwargs: dict[str, float] = {}
     if position is not None:
         kwargs["bearing_uncertainty_deg"] = (

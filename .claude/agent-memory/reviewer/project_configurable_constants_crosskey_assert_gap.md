@@ -1,6 +1,6 @@
 ---
 name: project_configurable_constants_crosskey_assert_gap
-description: X-T26 configurable-constants review — a module-level assert coupling two independently-tunable constants survived per-key bounds validation and crashed the process; verified by direct mutation, not reading.
+description: X-T26 configurable-constants review — a module-level assert coupling two independently-tunable constants survived per-key bounds validation and crashed the process; verified by direct mutation, not reading. Recurred on 9k113-narrow-search/BL-B85, this time via copying the assert without the coupling-check that makes it safe.
 metadata:
   type: project
 ---
@@ -36,3 +36,23 @@ downstream invariant (an assert, a derived ratio, a structural precondition), do
 values and run it. Flag any hard `assert`/raise reachable from a tunable-constant's own module as a
 required fix if the project's stated policy for that feature is "never refuse to start," regardless
 of whether the implementer already wrote it up as a known gap.
+
+**Recurred, 2026-10-20, `9k113-narrow-search`/`BL-B85` (`body-layer/CLAUDE.md`'s "Tuning" section is
+the user-facing writeup).** A prior review round of mine *suggested* "an import-time assertion (the
+same pattern `belief/decay.py` uses)" as an optional fix for a new coupling
+(`OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S`) — without checking that `decay.py`'s own bare
+assert is only safe because `tuning.py`'s `_check_scan_decay_coupling` pre-validates and falls back
+*before* it runs, and that `_check_scan_decay_coupling`'s `_COUPLED_KEYS` is hardwired to exactly the
+three original keys (its own docstring: *"Not a general mechanism... nothing generalises this to a
+second coupling without writing a second named check"*). The implementer took the suggestion at face
+value and added only the bare assert. Result: `SIGHT_STALL_COOLDOWN_S=40.0` alone (one key, inside
+its own declared `lo=30.0, hi=400.0`, every other key at its code default) reproduces the exact same
+import-time crash the original X-T26 finding did — reproduced directly again, not inferred.
+
+**The sharper lesson this time**: *suggesting* "do what `decay.py` does" is not itself safe advice
+unless the suggestion names the actual protecting mechanism (`_check_scan_decay_coupling`), not just
+the visible assert line next to it — a bare assert that happens to read the same way as a protected
+one is not evidence of protection. When recommending or reviewing a "mirror an existing precedent"
+fix for a cross-key invariant, check what *actually* makes the precedent safe before treating it as a
+template, and verify the new instance the same way (construct the override, run the import,
+don't just confirm the assert text matches).

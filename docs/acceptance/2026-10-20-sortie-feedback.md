@@ -418,3 +418,110 @@ Standing direction, not only this fix:
 2. One mouth: utterances are serialised, never spoken over each other.
 3. Generally, layers talk to each other asynchronously. A blocking cross-layer call needs a stated
    reason.
+## F4 — BL-B85 is required, not backlog (user, 2026-10-20)
+
+Reviewer and security filed `BL-B85` as non-blocking: a contact whose classification never
+advances is re-granted sight looks indefinitely and starves the search cycle.
+
+> BL-B85 is required for 9K113, we can't just indefinately look at one thing. Needs a timer value
+> or the like that forces moving on.
+
+So it is built into `feature/9k113-narrow-search` before merge. A contact that has had its sight
+time without progressing has to give way to the search (and to other contacts) for a while: a
+tunable time bound, not an open-ended re-grant.
+
+## F5 — the 9K113 vertical limits are boresight-relative (user, 2026-10-20)
+
+On the elevation-regard fix (sweep steps below −15° dropped, so the near band drops out above
+~625 m AGL), and BL-B86 (the whole free-scan search stops above ~3.6–4 km AGL):
+
+> 9K113 angular (vertical) limits
+>
+> * they are *boresight* relative. nose low position at high altitude would allow a near scan. Nose
+>   high at low alt would limit near scan. It is *not* about distance, but *angles relative to
+>   boresight*.
+
+The +20°/−15° (and ±60°) limits are relative to the aircraft's boresight, so pitch (and bank)
+matter. A distance/altitude rule is the wrong model.
+
+### F5 — boresight-relative limits: explore answers (user, 2026-10-20)
+
+Asked (with a table of band-edge angles vs AGL and pitch): (1) typical attitude while searching;
+(2) what a real operator does when the band he wants is out of reach; (3) whether the limits tilt
+with the airframe in a bank; (4) what happens when pitching up cuts off a look in progress.
+
+> 1 - less than 1000m meters. 100 - 300 m is typical. In slow flight, maybe 5 deg nose down. 10 deg
+> dose down if fast flight.
+> 3 - correct. The limits are the mechanical rotation limits around aircraft axis. When aircraft
+> rotates, so do the coordinate axis.
+> 4 - reacquire after nose comes down
+> 2 - The band approach is not great...
+>
+> How I would use the 9K113 for scanning
+>
+> * When I know where to point it
+>    * OBSERV ON
+>    * slew to sight to where I want to look at
+>    * first wide to get an overall look, orient and detect what I can
+>    * then narrow to identify/classify what I can and determine distance estimate
+>    * use wide/narrow to slew between targets to build a belief of what's there
+> * When scanning a sector (typically forward)
+>    * OBSERV ON
+>    * first wide S-shaped scan from near to mid distance -> to check for close by threats and
+>      targets
+>    * then S shaped far scan to quickly see if there's something worth taking a closer look at
+>    * from this I have a belief of what's in the scan sector
+>    * then use narrow to look closer
+>       * start from those units that are not yet identified and that might be inside
+>         identification range
+>       * same thing for class
+>       * finally, far sweep with narrow for detection of far away units
+>       * Do not linger on any given targer longer that necessary for identification/classification.
+>         If it's too far or blocked, then move on.
+>       * look around with naked eye, quick all around sweep
+>       * go back to wide, continue scanning
+>       * No use rescanning a known unit it it has not moved accross expected
+>         classification/identification range, except a quick check for position.
+>
+> -> it's not really about a band, more like points of interest to scan around. The wide S-scans
+> purpose is to find the points of interest.
+>
+> Regarding the 9K113 slew limits, let's not build anything too fancy yet, since the effectors will
+> anyhow be a priority soon and then DCS will limit the 9K113 to it's actual limits.
+
+Read:
+1. Typical search: 100–300 m AGL (always < 1000 m), 5° nose down in slow flight, 10° when fast.
+   At those attitudes the −15° limit almost never binds.
+2. The limits rotate with the airframe (pitch and bank). Keep it simple; the effectors (`BL-B66`)
+   will soon make DCS itself enforce the real limits.
+3. A look cut off by pitching up is reacquired once the nose comes down.
+4. **The scan is not a band sweep. It is points of interest.** Wide S-scans (near→mid, then far)
+   find them, and narrow then visits them by priority: unidentified units likely inside
+   identification range first, then class, then a narrow far sweep for detection. Don't linger
+   (too far or blocked → move on), do a quick naked-eye all-round sweep, then go back to wide. Don't
+   re-look a known unit unless it has crossed an identification or classification range, apart
+   from a quick position check.
+5. A second mode, pointing at a known place: slew there, wide to orient and detect, narrow to
+   identify and range, then move between targets.
+
+### F5 — sequencing (user, 2026-10-20)
+
+> sequencing OK.
+
+`feature/9k113-narrow-search` gets a simple boresight-relative limit check (pitch and bank, reusing
+the body-relative conversion; a look cut off by pitching up resumes when the nose comes down), then
+merges once DoD passes. The scanning procedure is `BL-B89`, the next item, with a plan and a mock.
+
+### BL-B89 — how the pilot says where to point (user, 2026-10-20)
+
+Asked how the pilot tells Petrovich where to point the sight in the "when I know where to point it"
+mode:
+
+> "When I know where to point it" -> with current imlementation, it'll have to be a clock hand and
+> maybe distance.
+> Could also be bearing and optional distance.
+> Landmarks, waypoints, player set marks - yes, absolutely, once we get them in reliably. Not quite
+> there yet.
+
+For now: an o'clock or a compass bearing, with an optional distance. Landmarks, waypoints and
+player-set marks come later, once those are reliable.

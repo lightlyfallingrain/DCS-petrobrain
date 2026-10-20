@@ -22,6 +22,13 @@ Found and fixed on `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`/`GUIDANCE_OPTIC_MIN_INTE
 `config/defaults.toml`, not the source diff, exactly the failure mode root `CLAUDE.md`'s "read the
 rendered file, not your source comment" rule exists to catch.
 
+**Recurred 2026-10-20** on a fresh tunable in the same module (`SIGHT_SEARCH_FAR_M`,
+`plans/9k113-narrow-search`), opening with `` `SIGHT_NARROW_OPTIC`'s own presence reach... `` --
+same asymmetric strip, same fix (reworded to "The sight narrow setting's own presence reach...").
+Two instances in the same file, months apart, both caught only by reading the rendered line: the
+habit does not generalize from having been burned once, so keep checking the rendered line as a
+mechanical step, not a thing to remember to do.
+
 This is a sibling bug to [[feedback_backtick_span_across_line_wrap_eats_space]] (same generator,
 same `#:`-comment convention, different trigger: that one is about a span wrapped across two
 physical lines, this one is about a span sitting at the very start of the rendered sentence) and to

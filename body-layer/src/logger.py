@@ -198,7 +198,7 @@ import threading
 import time
 import urllib.error
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, TextIO
@@ -226,6 +226,9 @@ from belief.mission_phase import (
 )
 from belief.optic_policy import (
     HANDS_BUSY_DURATION_S,
+    SIGHT_SEARCH_FAR_M,
+    SIGHT_SEARCH_MID_M,
+    SIGHT_SEARCH_NEAR_M,
     SIGHT_STEADY_RATE_LIMIT_DEG_S,
     LookTarget,
     OpticDecision,
@@ -268,10 +271,22 @@ from perception.gaze import (
     gaze_at,
     legs_within_wedge,
 )
-from perception.geometry import GeoPosition, alignment_direction, open_world_model
+from perception.geometry import (
+    GeoPosition,
+    alignment_direction,
+    heading_relative_to_body_relative,
+    open_world_model,
+)
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
-from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
+from perception.optics import (
+    BINOCULAR_OPTIC,
+    SIGHT_NARROW_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    UNAIDED_OPTIC,
+    Optic,
+    within_field_of_regard,
+)
 from perception.source import Observation, OwnshipState, PerceptionSource
 from run_log_paths import per_run_log_path
 from speech_log import SpeechLogWriter
@@ -651,6 +666,37 @@ class ConsolePerceptionRunner:
                 list(self.attitude_history),
                 rate_limit_deg_s=SIGHT_STEADY_RATE_LIMIT_DEG_S,
             ),
+            # `plans/9k113-narrow-search/plan.md` Stage 3 -- the sight's own
+            # active search cycle, computed fresh every poll the same way
+            # `search` above already is: a brief wide orientation pass out
+            # to wide's own useful reach (`_SIGHT_WIDE_SEARCH_FAR_M`), then
+            # narrow over the near band, then narrow over the far band,
+            # then (Stage 2) a binocular excursion for whatever a commanded
+            # sector left outside the sight's own field of regard.
+            sight_wide_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_WIDE_OPTIC,
+                near_m=SIGHT_SEARCH_NEAR_M,
+                far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            ),
+            sight_narrow_near_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_NARROW_OPTIC,
+                near_m=SIGHT_SEARCH_NEAR_M,
+                far_m=SIGHT_SEARCH_MID_M,
+            ),
+            sight_narrow_far_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_NARROW_OPTIC,
+                near_m=SIGHT_SEARCH_MID_M,
+                far_m=SIGHT_SEARCH_FAR_M,
+            ),
+            sight_out_of_regard_search=_sight_out_of_regard_sweep(
+                self.scan_plan, ownship
+            ),
             # `BL-B71`: the attack run's own standing ladder request, from
             # the *previous* poll -- `drain_attack_run` (which recomputes
             # `AttackRunState.requested_optic` for *this* poll) runs later
@@ -915,6 +961,8 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
             observer=observer,
             target_position=contact.last_position,
             heading_true_deg=ownship.heading_true_deg,
+            pitch_deg=ownship.pitch_deg,
+            bank_deg=ownship.bank_deg,
             object_type=contact.last_class_raw,
             current_level=contact.classification.level.name.lower(),
             position=contact.position,
@@ -934,6 +982,68 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
 #: anyway. Stated as a constant rather than computed per contact because a
 #: search has no contact yet -- that is what it is looking for.
 _SEARCH_BAND_M: tuple[float, float] = (2_333.0, 5_647.0)
+
+#: Wide's own far edge for its idle-search leg -- not `SIGHT_SEARCH_MID_M`
+#: (binoculars' own reach), but the range beyond which wide itself can
+#: bring neither detection nor classification information
+#: (`docs/acceptance/2026-10-20-sortie-feedback.md`, "F4 -- wide sweep
+#: band": *"use it up to where it can bring information, be it detection
+#: or classification. At greater distances it cannot, narrow can."*).
+#:
+#: **Derived, not a new tunable**: `SIGHT_SEARCH_NEAR_M` is already the
+#: reference vehicle's unaided presence reach, and `SIGHT_SEARCH_FAR_M`'s
+#: own comment already establishes the pattern of scaling that same base
+#: by an optic's `presence_range_mult` to get *that* optic's presence
+#: reach for the same vehicle (`2333 * 5.81` for narrow) -- this applies
+#: the identical scaling to `SIGHT_WIDE_OPTIC`'s own multiplier
+#: (`2333 * 3.55 ~= 8282 m`), so it moves automatically if `SIGHT_SEARCH_
+#: NEAR_M` is ever retuned, rather than drifting out of step with it.
+#:
+#: **This is also "the farther of detection and classification reach"
+#: without computing a class threshold separately**: `tier_ranges`' own
+#: chained `min()`s (`perception.visibility.tier_ranges`) make a class
+#: threshold never exceed its own optic's presence threshold, for any
+#: object profile -- so the presence reach computed here already *is* the
+#: larger of the two, and a direct class-reach computation alongside it
+#: would only ever reproduce the smaller number.
+#:
+#: Clamped to `PLAYER_BUBBLE_RADIUS_M` (10 km) -- the tighter of the two
+#: caps that could apply, `SIGHT_WIDE_OPTIC.range_cap_m` being the looser
+#: 20 km -- since nothing beyond the bubble is ever admitted as a
+#: candidate regardless of what any optic could resolve. At ~8.28 km for
+#: the reference vehicle this sits inside the bubble today and the clamp
+#: does not bind, but a retuned `SIGHT_SEARCH_NEAR_M` could push it past
+#: that boundary.
+_SIGHT_WIDE_SEARCH_FAR_M: float = min(
+    SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult,
+    PLAYER_BUBBLE_RADIUS_M,
+)
+
+
+def _to_body_relative_steps(
+    steps: Sequence[tuple[float, float]], ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """Rotate `search_pattern`'s ground-anchored (heading-relative azimuth,
+    horizon-relative depression) steps into true body-relative directions,
+    using the current pitch and bank -- F5 (`docs/acceptance/
+    2026-10-20-sortie-feedback.md`): the 9K113's mechanical limits rotate
+    with the airframe, not with the ground, so a step generated from
+    altitude/range alone must be rotated into the airframe frame before it
+    is tested against `within_field_of_regard` or used as a look aim.
+    Shared by every sweep generator below (`_search_sweep`/`_sight_in_
+    regard_sweep`/`_sight_out_of_regard_sweep`) so the one conversion lives
+    in one place."""
+    body_steps: list[tuple[float, float]] = []
+    for azimuth_deg, elevation_deg in steps:
+        direction = heading_relative_to_body_relative(
+            azimuth_deg,
+            elevation_deg,
+            heading_true_deg=ownship.heading_true_deg,
+            pitch_deg=ownship.pitch_deg,
+            bank_deg=ownship.bank_deg,
+        )
+        body_steps.append((direction.azimuth_deg, direction.elevation_deg))
+    return body_steps
 
 
 def _search_sweep(
@@ -958,21 +1068,202 @@ def _search_sweep(
     to look up a half-width for -- and Stage 5's own scope is gaze, not
     binocular search; extending this to the new commanded-legs cases is
     left for a later stage if wanted.
-    """
+
+    **Swept around the commanded sector's own centre, not dead ahead**
+    (`plans/9k113-narrow-search/plan.md` amendment 2 -- user: *"fix the
+    binocular search sector"*). Before this fix, `search_pattern` had no
+    centre parameter at all and this function discarded the centre it
+    unpacked from `SECTOR_WEDGE_DEG`, so a commanded `left`/`right`/`full`
+    scan swept around 0 deg (dead ahead) regardless of which sector was
+    actually commanded -- harmless only for `ahead`, whose own centre
+    happens to be 0.
+
+    **Rotated into body-relative before being returned** (F5): `search_
+    pattern`'s own steps are heading/horizon-relative (level-flight
+    geometry), but a binocular aim is a body-relative direction like any
+    other (`perception.gaze.Gaze.center_azimuth_deg`'s own convention), so
+    pitch and bank have to be applied before this leaves the function --
+    `_to_body_relative_steps`'s own docstring has the conversion."""
     if scan_plan.commanded_sector is None:
         return []
-    _, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    center_deg, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
     near_m, far_m = _SEARCH_BAND_M
     fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
     if fov_full_width_deg <= 0.0:
         return []
-    return search_pattern(
+    steps = search_pattern(
+        center_azimuth_deg=center_deg,
         sector_half_width_deg=half_width_deg,
         near_m=near_m,
         far_m=far_m,
         altitude_agl_m=max(ownship.alt_agl_m, 0.0),
         fov_full_width_deg=fov_full_width_deg,
     )
+    return _to_body_relative_steps(steps, ownship)
+
+
+def _split_sector_by_regard(
+    center_deg: float, half_width_deg: float, regard_half_deg: float
+) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
+    """Splits a sector's full span into its in-regard sub-span (a single
+    `(center, half_width)`, or `None` if the span and the regard do not
+    overlap at all -- never actually reached by any of the four named
+    `RelativeSector` values, every one of which straddles or contains
+    azimuth 0) and zero, one, or two out-of-regard sub-spans (two only
+    for `full`, whose span strictly contains the whole regard band) --
+    `plans/9k113-narrow-search/plan.md` Stage 2. Pure geometry, no
+    DCS/ownship dependency.
+
+    Worked against `SECTOR_WEDGE_DEG` and `regard_half_deg=60.0`: `ahead`
+    (0,30) -> in-span (0,30), no out-spans (fully inside). `left` (-60,30)
+    -> in-span (-45,15), one out-span (-75,15). `right` (60,30) -> in-span
+    (45,15), one out-span (75,15). `full` (0,90) -> in-span (0,60), two
+    out-spans, (-75,15) and (75,15).
+
+    **Each out-span is clamped to the original span's own far edge**
+    (`min(span_high, -regard_half_deg)` / `max(span_low, regard_half_deg)`)
+    -- not fixed at the regard boundary unconditionally -- so a span that
+    lies *entirely* outside the regard on one side (never reached by any
+    of the four named sectors, which all straddle or contain azimuth 0)
+    still returns its own true extent as the out-span, rather than one
+    stretched to include ground between the regard boundary and the span
+    that was never actually part of the sector."""
+    span_low, span_high = center_deg - half_width_deg, center_deg + half_width_deg
+    in_low, in_high = max(span_low, -regard_half_deg), min(span_high, regard_half_deg)
+    in_span = (
+        ((in_low + in_high) / 2.0, (in_high - in_low) / 2.0)
+        if in_low < in_high
+        else None
+    )
+    out_spans: list[tuple[float, float]] = []
+    if span_low < -regard_half_deg:
+        lo, hi = span_low, min(span_high, -regard_half_deg)
+        out_spans.append(((lo + hi) / 2.0, (hi - lo) / 2.0))
+    if span_high > regard_half_deg:
+        lo, hi = max(span_low, regard_half_deg), span_high
+        out_spans.append(((lo + hi) / 2.0, (hi - lo) / 2.0))
+    return in_span, out_spans
+
+
+def _commanded_or_default_sector(
+    scan_plan: ScanPlan, regard_half_deg: float
+) -> tuple[float, float]:
+    """The sector the sight's own search cycle should cover -- a commanded
+    sector at its own commanded width if one exists (never widened: `ahead`
+    stays 30 deg), else the sight's full field of regard centred on flight
+    direction (`docs/acceptance/2026-10-20-sortie-feedback.md`, F4/F5
+    "settled": "flight direction as normal default") -- there is no
+    commanded width to respect in the default case, and "a genuine physical
+    bound, not an invented UX cap" (the same reasoning `MAX_SEARCH_SECTOR_
+    HALF_WIDTH_DEG` is deliberately *not* applied here) applies identically.
+    Centre `0.0` is the same convention `_back_to_home`'s own dead-ahead
+    fallback uses."""
+    if scan_plan.commanded_sector is not None:
+        return SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    return 0.0, regard_half_deg
+
+
+def _sight_in_regard_sweep(
+    scan_plan: ScanPlan,
+    ownship: OwnshipState,
+    *,
+    optic: Optic,
+    near_m: float,
+    far_m: float,
+) -> list[tuple[float, float]]:
+    """One leg of the sight's own search cycle (wide, or either of
+    narrow's near/far bands) over whatever sub-span of the commanded-or-
+    default sector the sight can actually reach -- `plans/
+    9k113-narrow-search/plan.md` Stage 3.
+
+    **Rotated into body-relative, then filtered through `within_field_of_
+    regard`** (security required fix, `plans/9k113-narrow-search/
+    security-review.md`, sharpened by F5 `docs/acceptance/
+    2026-10-20-sortie-feedback.md`). `search_pattern`'s azimuth is already
+    kept inside `regard` by construction (`max_half_width_deg=regard`
+    below), but its elevation is pure range/altitude geometry
+    (`atan2(altitude_agl_m, range_m)`, unbounded below) with no awareness
+    of pitch, bank, or this optic's own `regard_elevation_down_deg` --
+    the mount's actual limit is relative to the airframe's boresight, not
+    to the ground (*"nose low position at high altitude would allow a
+    near scan... it is not about distance, but angles relative to
+    boresight"*), so a step generated from altitude alone has to be
+    rotated into the body frame (`_to_body_relative_steps`) before the
+    regard check means anything. Rejecting (not clamping) the offending
+    steps here is the same choice `look_sweep` already makes for the
+    sight's look-sweep path -- a step the mount cannot physically reach is
+    dropped, not pointed at the envelope edge and attributed to ground
+    that was never validated. A leg that filters down to empty is handled
+    by the existing leg-advance/`_idle_sight_rest` fallback, which needs
+    no change for this, and is recomputed fresh every poll from the
+    current attitude -- so a leg emptied by a transient nose-up attitude
+    is reachable again (`BL-B86.md`) the moment the nose comes back down,
+    with no extra state to reset."""
+    regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
+    center_deg, half_width_deg = _commanded_or_default_sector(scan_plan, regard)
+    in_span, _ = _split_sector_by_regard(center_deg, half_width_deg, regard)
+    if in_span is None:
+        return []
+    in_center_deg, in_half_width_deg = in_span
+    fov_full_width_deg = (optic.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    steps = search_pattern(
+        center_azimuth_deg=in_center_deg,
+        sector_half_width_deg=in_half_width_deg,
+        near_m=near_m,
+        far_m=far_m,
+        altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+        fov_full_width_deg=fov_full_width_deg,
+        max_half_width_deg=regard,
+    )
+    body_steps = _to_body_relative_steps(steps, ownship)
+    return [
+        step for step in body_steps if within_field_of_regard(optic, step[0], step[1])
+    ]
+
+
+def _sight_out_of_regard_sweep(
+    scan_plan: ScanPlan, ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """Binoculars, for the portion of a *commanded* sector the sight
+    cannot reach -- empty for the no-commanded-sector default (whose
+    synthesized sector is exactly the regard width, by construction, so
+    it never has an out-of-regard remainder). `plans/9k113-narrow-search/
+    plan.md` Stage 3; `full`'s two out-spans are concatenated into one
+    list -- `OpticPhase.SEARCHING`'s own dispatch just steps through
+    whatever sequence it is given, so two remainder pieces need no new
+    state, only a longer list.
+
+    **Rotated into body-relative before being returned** (F5), same as
+    `_sight_in_regard_sweep`'s own aim -- binoculars have no field of
+    regard to filter against, but the binocular aim frame still has to
+    agree with every other optic's, or a step generated here would point
+    at the wrong patch of ground whenever the aircraft is not level."""
+    if scan_plan.commanded_sector is None:
+        return []
+    regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
+    center_deg, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    _, out_spans = _split_sector_by_regard(center_deg, half_width_deg, regard)
+    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    near_m, far_m = (
+        _SEARCH_BAND_M  # unchanged binocular band -- Stage 3 only touches the sight's own
+    )
+    steps: list[tuple[float, float]] = []
+    for out_center_deg, out_half_width_deg in out_spans:
+        steps.extend(
+            search_pattern(
+                center_azimuth_deg=out_center_deg,
+                sector_half_width_deg=out_half_width_deg,
+                near_m=near_m,
+                far_m=far_m,
+                altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+                fov_full_width_deg=fov_full_width_deg,
+            )
+        )
+    return _to_body_relative_steps(steps, ownship)
 
 
 def _apply_active_gaze(

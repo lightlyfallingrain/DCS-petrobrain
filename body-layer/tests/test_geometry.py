@@ -378,3 +378,86 @@ def test_alignment_direction_oblique_heading_and_banked_observer_agree() -> None
         observer, target, heading_true_deg=37.0, pitch_deg=-8.0, bank_deg=60.0
     )
     assert unbanked.azimuth_deg != pytest.approx(full_frame.azimuth_deg)
+
+
+# -- F5 (docs/acceptance/2026-10-20-sortie-feedback.md), plans/
+# 9k113-narrow-search/plan.md: heading_relative_to_body_relative ----------
+
+
+def test_heading_relative_to_body_relative_is_identity_when_level_unbanked() -> None:
+    # Pitch/bank/heading all zero: the conversion must be a true pass-
+    # through, since a heading-relative step already equals its own
+    # body-relative direction at wings-level, unbanked flight.
+    result = geometry.heading_relative_to_body_relative(
+        -23.0, -7.5, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+    assert result.azimuth_deg == pytest.approx(-23.0)
+    assert result.elevation_deg == pytest.approx(-7.5)
+
+
+def test_heading_relative_to_body_relative_cancels_heading_exactly() -> None:
+    # The inverse-yaw construction (docstring: "the yaw cancels exactly")
+    # must hold regardless of which heading is flown -- fix pitch/bank at
+    # real, non-zero values and vary only heading_true_deg; a broken
+    # inverse would leak heading into the result the moment pitch or bank
+    # is non-zero (at pitch=bank=0 this would pass trivially, which is why
+    # both are non-zero here).
+    first = geometry.heading_relative_to_body_relative(
+        20.0, -10.0, heading_true_deg=0.0, pitch_deg=15.0, bank_deg=-25.0
+    )
+    second = geometry.heading_relative_to_body_relative(
+        20.0, -10.0, heading_true_deg=137.0, pitch_deg=15.0, bank_deg=-25.0
+    )
+    assert first.azimuth_deg == pytest.approx(second.azimuth_deg)
+    assert first.elevation_deg == pytest.approx(second.elevation_deg)
+
+
+def test_heading_relative_to_body_relative_nose_down_reduces_depression() -> None:
+    # F5's own worked example: a 1000 m AGL / 2333 m near-edge depression
+    # (23.2 deg, well past the 9K113's -15 deg down limit at level flight)
+    # is brought back to -13.2 deg -- inside the limit -- by 10 deg of
+    # nose-down pitch alone, altitude and range unchanged.
+    depression_deg = math.degrees(math.atan2(1000.0, 2333.0))
+    level = geometry.heading_relative_to_body_relative(
+        0.0, -depression_deg, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+    nose_down = geometry.heading_relative_to_body_relative(
+        0.0, -depression_deg, heading_true_deg=0.0, pitch_deg=-10.0, bank_deg=0.0
+    )
+    assert level.elevation_deg == pytest.approx(-23.2, abs=0.05)
+    assert nose_down.elevation_deg == pytest.approx(-13.2, abs=0.05)
+
+
+def test_heading_relative_to_body_relative_nose_up_increases_depression() -> None:
+    # The other half of the same example -- "nose high at low alt would
+    # limit near scan": a step well clear of the down limit at level
+    # flight (-10 deg) is pushed 10 deg further down by 10 deg of nose-up
+    # pitch, landing just past the -15 deg limit.
+    level = geometry.heading_relative_to_body_relative(
+        0.0, -10.0, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+    nose_up = geometry.heading_relative_to_body_relative(
+        0.0, -10.0, heading_true_deg=0.0, pitch_deg=10.0, bank_deg=0.0
+    )
+    assert level.elevation_deg == pytest.approx(-10.0)
+    assert nose_up.elevation_deg == pytest.approx(-20.0, abs=1e-6)
+
+
+def test_heading_relative_to_body_relative_bank_rotates_elevation_into_azimuth() -> (
+    None
+):
+    # A step 2 deg past the down limit at wings-level (-17 deg, dead ahead)
+    # is carried by 30 deg of bank into a shallower, off-centre direction
+    # -- the same "roll opens up ground to one side" effect `perception.
+    # geometry.body_relative_direction`'s own bank test pins, here shown to
+    # apply to a heading-relative step too, not only to a real target.
+    level = geometry.heading_relative_to_body_relative(
+        0.0, -17.0, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+    banked = geometry.heading_relative_to_body_relative(
+        0.0, -17.0, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=30.0
+    )
+    assert level.azimuth_deg == pytest.approx(0.0)
+    assert level.elevation_deg == pytest.approx(-17.0)
+    assert banked.azimuth_deg == pytest.approx(8.69, abs=0.01)
+    assert banked.elevation_deg == pytest.approx(-14.67, abs=0.01)

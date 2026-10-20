@@ -160,3 +160,96 @@
   comment (a future peripheral-awareness pseudo-optic may want it) rather than deleting it.
   Reconciling 180° peripheral against `FOCUS_CONE_HALF_WIDTH_DEG = 15.0` is explicitly **later**.
 
+  ---
+
+  **Follow-on, 2026-10-20: `feature/9k113-narrow-search` merged, DoD PASS
+  (`plans/9k113-narrow-search/dod-check.md`).** #needs-flight
+
+  Closed two defects the 2026-10-19 sortie found in this entry's own shipped perception (sortie
+  feedback F4/F5, `docs/acceptance/2026-10-20-sortie-feedback.md`): the idle sight had no real
+  aim (F5 — could command an elevation/azimuth outside its own ±60°/+20°/−15° field of regard),
+  and a look through the sight was always narrow, never wide, so the sight never actually
+  *searched* with both its settings (F4). Built, per the user's own settled direction and two
+  amendment rounds that day:
+
+  - The idle sight always carries an aim inside its own field of regard, on every path that can
+    hand out a sight optic (idle rest, resume-from-interruption, resume-from-search, and a
+    guidance-override arriving mid-glance-away) — closes F5.
+  - A real three/four-leg active search cycle (`wide → narrow_near → narrow_far →` an
+    out-of-regard binocular excursion when the commanded sector straddles the sight's own ±60°),
+    replacing the old idle stare — closes F4. Wide's own far edge is derived from its presence-
+    range multiplier (~8.28 km for the reference vehicle), not guessed.
+  - A look at an already-resolved contact now picks the least-capable sight setting (wide vs.
+    narrow) that achieves the needed recognition gain, instead of always narrow
+    (`sight_look_optic`).
+  - A required fix, mid-review: the "worth a look" gate admitting a contact to a sight look was
+    bound to the naked-eye/binocular window, so a contact beyond binocular's own reach never
+    became a sight candidate and narrow was never triggered live — fixed
+    (`sight_can_still_improve`, both of `_decide_sighting`'s call sites).
+  - A required fix from Security's deep analysis: the idle search cycle's generated elevation was
+    never checked against the sight's own down-regard limit (`-15°`), reachable at an ordinary
+    cruise/orbit altitude (>~625 m AGL) — fixed by filtering through `within_field_of_regard`
+    before any step is committed, the same "reject, not clamp" pattern `look_sweep` already uses.
+  - A pre-existing defect found while designing the sector split, fixed per the user's own
+    direction ("fix the binocular search sector"): the existing OBSERV-off binocular search
+    (`_search_sweep`) discarded a commanded sector's own centre and always swept around 0°
+    regardless of which sector (`left`/`right`/`full`) was commanded.
+  - Attack-run guidance's own "prefer sight-wide over binoculars" question (Stage 4 Part B of
+    the plan) was explicitly **not built** — deferred to `[[BL-B66]]`, so the preference and its
+    "quick look" exception (binoculars are faster to bring to bear while slew is instant) land
+    together once real slew time exists.
+
+  **Acceptance test outstanding, same card as this entry's own**: card item A8,
+  `docs/acceptance/2026-10-20-open-flight-tests-results.md` — "still open." Fly it alongside any
+  other open items on that card; one sortie can clear several.
+
+  **Deferred follow-ons, all filed, none blocking**: `[[BL-B83]]` (idle sight searches the
+  mission objective area — no objective datum at runtime yet), `[[BL-B84]]` (search depth adapts
+  to terrain — deferred to "later"), `[[BL-B85]]` (a contact stuck at `presence` forever can
+  starve the search cycle — disclosed, non-blocking, found by this branch's own security
+  re-review), `[[BL-B86]]` (above ~3.6–4 km AGL a free/`ahead` scan's idle search goes fully
+  static — the correct, disclosed consequence of the elevation fix above, not a defect it
+  introduced).
+
+  ---
+
+  **Batch 2, same branch, 2026-10-20/21 — DoD PASS at `9f4b9610`.** Closes F5 properly, not just
+  partway: the elevation fix above (batch 1) checked the idle search cycle's elevation against the
+  sight's own `-15°` down-regard limit, but computed that elevation from ground-anchored
+  range/altitude geometry — correct only at wings-level, nose-level flight. User correction, same
+  sortie feedback doc, second round (*"it is not about distance, but angles relative to
+  boresight... the limits are the mechanical rotation limits around aircraft axis"*): the
+  ±60°/+20°/−15° limits are boresight-relative. Fixed with a shared body-frame conversion
+  (`perception.geometry.heading_relative_to_body_relative`, reusing `body_relative_direction`'s
+  existing rotation) applied before the regard check on every sight/binocular aim producer —
+  verified algebraically (yaw cancels exactly, a general identity not fitted to the test cases) and
+  by mutation.
+
+  Also in this batch: the `BL-B85` stall-cooldown fix's own required follow-up — the first version
+  committed *every* pending mark on the scheduled dwell boundary, including a contact whose
+  classification was genuinely advancing (re-look cadence measured at ~94 s instead of the
+  pre-`BL-B85` ~33 s); fixed so a progressing look is dropped, not committed, the same treatment a
+  genuine interruption already gets. The realistic-case figures in `[[BL-B85]]`'s own entry are now
+  a committed, deterministic test, not a narrative number — two independent prose reproductions of
+  the prior round's figures disagreed with each other, which only a committed test could resolve.
+
+  One self-inflicted, self-corrected defect in this batch, not shipped: a bare
+  `assert OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S` added alongside the stall-cooldown fix
+  crashed the whole process at import on a single, realistic, in-bounds tuning override — caught by
+  Reviewer, replaced with a derived floor (`_EFFECTIVE_SIGHT_STALL_COOLDOWN_S = max(...)`) before
+  this batch's own tip.
+
+  Full account: `plans/9k113-narrow-search/implementation.md`'s "F5", "BL-B85 required fix", and
+  "Required fixes round 2" sections; `plans/9k113-narrow-search/review.md`'s "Review — F5 boresight
+  + BL-B85 refinement" and the two re-reviews after it; `plans/9k113-narrow-search/security-review.md`'s
+  "Deep analysis — batch 2" (APPROVED, no required fixes). Mechanical checks (format/lint/mypy
+  --strict/tests, this subproject) re-run clean by DoD at the merge tip, no flakes.
+
+  `#needs-flight` unchanged — same outstanding sortie (card A8), not a new one; this batch
+  corrects the mechanism the acceptance test will fly, it does not add a second acceptance item.
+  A process note worth carrying into `[[BL-B66]]`: this is the **fourth** occurrence of a
+  field-of-regard enforcement defect on this one subsystem (the first three were "never checked at
+  all"; this one was "checked, in the wrong frame") — see
+  `.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md` and
+  `notes/the-9k113-sight-bl-b64.md`.
+

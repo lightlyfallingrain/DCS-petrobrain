@@ -341,6 +341,62 @@ def alignment_direction(
     )
 
 
+def heading_relative_to_body_relative(
+    azimuth_heading_deg: float,
+    elevation_heading_deg: float,
+    *,
+    heading_true_deg: float,
+    pitch_deg: float,
+    bank_deg: float,
+) -> BodyRelativeDirection:
+    """Rotate a *heading*-relative direction -- azimuth already relative to
+    the aircraft's heading, elevation the depression below the
+    world-horizontal plane -- into the true body-relative frame
+    `within_field_of_regard` and `within_optic_fov` both expect.
+
+    **F5** (`docs/acceptance/2026-10-20-sortie-feedback.md`): the 9K113's
+    mechanical limits are relative to the airframe's own boresight, not to
+    the ground -- *"nose low position at high altitude would allow a near
+    scan... it is not about distance, but angles relative to boresight"*;
+    *"the limits are the mechanical rotation limits around aircraft axis.
+    When aircraft rotates, so do the coordinate axis."* `belief.optic_
+    policy.search_pattern` has no notion of pitch or bank at all (its
+    elevation is pure `atan2(altitude_agl_m, range_m)`), so its steps are
+    ground-anchored and level-flight-only; this is the conversion that
+    makes them usable as a body-relative aim or regard check.
+
+    **Reuses `body_relative_direction` rather than re-deriving its pitch/
+    bank rotation.** A unit-range synthetic target is placed at
+    `(azimuth_heading_deg, elevation_heading_deg)` in the *heading* frame
+    (yaw already removed, exactly as `search_pattern`'s own inputs are),
+    then rotated back out to world north/east with `heading_true_deg` --
+    the algebraic inverse of `body_relative_direction`'s own yaw-removal
+    step. Handing that synthetic target to `body_relative_direction` with
+    the *same* `heading_true_deg` cancels the yaw exactly, leaving only the
+    pitch/bank rotation that function already implements -- so a future
+    change to that rotation (or to its sign conventions) only has one place
+    to be made correctly."""
+    azimuth_rad = math.radians(azimuth_heading_deg)
+    elevation_rad = math.radians(elevation_heading_deg)
+    forward = math.cos(elevation_rad) * math.cos(azimuth_rad)
+    right = math.cos(elevation_rad) * math.sin(azimuth_rad)
+    up = math.sin(elevation_rad)
+
+    heading_rad = math.radians(heading_true_deg)
+    north = forward * math.cos(heading_rad) - right * math.sin(heading_rad)
+    east = forward * math.sin(heading_rad) + right * math.cos(heading_rad)
+
+    origin = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    target = GeoPosition(x=north, z=east, alt_m=up)
+    return body_relative_direction(
+        origin,
+        target,
+        heading_true_deg=heading_true_deg,
+        pitch_deg=pitch_deg,
+        bank_deg=bank_deg,
+    )
+
+
 def elevation_at(
     conn: sqlite3.Connection, theatre: str, x: float, z: float
 ) -> float | None:

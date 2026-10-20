@@ -64,3 +64,53 @@
   recur whenever new code needs that correlation *outside* a normal admission -- and note that any
   such cache, being admitted-only, cannot see a cluster split whose child was rejected that poll
   (`plans/bl-b76-tripwire/implementation.md`).
+- **A helper written for an optic with no field-of-regard limit can have an elevation gap that is
+  a true no-op for every existing caller, and stays invisible until a *new* caller gives it an
+  optic that is actually regard-bound.** `belief.optic_policy.search_pattern`'s elevation
+  (`atan2(altitude_agl_m, range_m)`) was never checked against `regard_elevation_down_deg` —
+  harmless for its original caller (`BINOCULAR_OPTIC`, which has no field of regard at all), and
+  still harmless for the plan's own azimuth-only framing of the fix. `9k113-narrow-search`'s idle
+  search cycle became the function's first caller for a regard-bound sight optic, at an ordinary
+  cruise altitude (>~625 m AGL, not an edge case) — a third occurrence of the exact field-of-regard
+  enforcement gap this entry's first bullet already names, missed by the plan, the implementer and
+  two Reviewer passes, caught only by Security's deep analysis. When a plan reuses an existing
+  helper for a new optic/caller, ask explicitly which of the helper's own silent assumptions were
+  true only because of the *old* caller's properties — "no field of regard" is one such property,
+  and it does not transfer.
+- **An invariant test built with empty/default inputs and a realistic-geometry test that checks
+  only one axis can sit side by side for an entire review cycle without ever covering the
+  combination that matters.** The existing `within_field_of_regard` idle-aim tests passed no real
+  `sight_*_search` sequences at all, so they exercised the trivial hold-last-position fallback, not
+  `search_pattern`; the tests that *did* drive real geometry checked azimuth sub-spans only, never
+  elevation. Neither test was wrong on its own terms, and together they still missed the gap above.
+  When adding a new producer to an existing invariant test, drive it with the real sequence-builder
+  the production call site uses, not a synthetic or empty stand-in, and check every axis the bound
+  has, not just the one the existing tests already cover.
+- **A bound check can be present, tested, and still wrong — if it is evaluated in the wrong
+  reference frame.** The fix above (occurrence 3) checked the idle search cycle's elevation against
+  `regard_elevation_down_deg`, correctly, but computed that elevation from ground-anchored
+  range/altitude geometry (`atan2(altitude_agl_m, range_m)`) — correct only at wings-level,
+  nose-level flight. The user's own correction named the actual requirement: the ±60°/+20°/−15°
+  limits are *boresight*-relative, mechanical rotation limits around the aircraft's own axes, not
+  ground-relative — nose-down at altitude recovers a near scan the ground-anchored formula said was
+  unreachable, and nose-up tightens it the other way. The fix (a shared `heading_relative_to_
+  body_relative`/`body_relative_direction` conversion, applied before the regard check everywhere a
+  sight or binocular aim is produced) is this project's standing frame-correctness question
+  (`notes/solve-the-problem-in-its-natural-coordinate-space.md`) applied to a case that looked
+  settled: a check that is correct "on average" or "in the common case" (level flight is typical)
+  can still be wrong on the axis that actually varies (attitude), and nothing about the check being
+  *present* and *passing its own tests* protects against the tests themselves sharing the same
+  frame assumption as the code.
+- **A fix for a pathological/stuck case can silently throttle the ordinary/healthy case too, and a
+  narrative figure cannot settle whether it did.** `BL-B85`'s stall-cooldown fix (closing a contact
+  stuck forever at `presence` from monopolising the sight) also made every *scheduled* dwell-
+  boundary break commit a pending mark for the first time — including a contact whose
+  classification was genuinely advancing, which the review caught by measuring a concrete case (a
+  progressing contact's re-look cadence went from ~33 s to ~94 s). The first re-measurement of "is
+  the common case still fine" was shipped as prose numbers in the roadmap entry, not a test; a
+  second independent reproduction of that same prose disagreed with it by nearly 2×, because
+  "the poll after the look ends" turned out to be ambiguous enough that two correct-looking scripts
+  resolved it differently. Only a committed, deterministic test — pinning the exact convention in
+  its own docstring — could settle which number was real. When a fix narrows or re-times a shared
+  gate to handle a pathological input, the healthy-input re-measurement belongs in a committed test,
+  not a one-off script's printed number, even when the fix is otherwise obviously correct.
