@@ -664,3 +664,66 @@ which is exactly why this was not caught by reading the docstring alone during e
 the comment said the output already had the property this round adds. The dispatch brief's own
 "confirm, don't assume" instruction for `LookTarget` is what caught it; a plain read of the
 docstring would have reported it as already correct.
+
+### BL-B85 required fix: a progressing look must not burn its own retry window
+
+`plans/9k113-narrow-search/review.md`'s "Review -- BL-B85" required fix, delivered as a user
+decision mid-review: the first BL-B85 round's `_start_glance_away` committed every pending mark on
+the scheduled dwell boundary unconditionally, whether or not the look it cut short had learned
+anything. That throttled a genuinely *progressing* contact the same way as a stalled one -- a
+single contact advancing `presence` -> `class` mid-dwell was measured at a ~94 s re-look cadence
+(dwell + `OPTIC_RETRY_INTERVAL_S`) instead of the pre-`BL-B85` ~33 s (`SIGHT_MAX_DWELL_S` +
+`SIGHT_GLANCE_AWAY_S`) -- a material slowdown on exactly the case this feature exists to speed up
+("classification at distance", F4).
+
+**Fix**: `_start_glance_away` now takes `targets` and commits a pending contact's mark only if its
+classification level is unchanged since the look started -- compares
+`pending_attempted_at_level[contact_id]` (recorded at that look's start, the field's own documented
+convention) against the contact's *current* `current_level` in `targets` at the moment the dwell
+boundary fires. If they differ, the mark is dropped instead of committed -- the same treatment a
+genuine interruption already gives it (`_back_to_home`'s Fix B1, `plans/sortie-2026-09-26-fixes/
+plan.md` Stage 2: "an interrupted look does not mark the target attempted"), so the contact stays
+immediately eligible rather than waiting out `OPTIC_RETRY_INTERVAL_S`/`SIGHT_STALL_COOLDOWN_S` for a
+look that taught something. A contact not found in `targets` at all (dropped out of candidacy
+mid-look, e.g. lost) has nothing to compare against, so it commits -- same as the stalled case,
+since there is no evidence of progress either way. The "pitch puts the target out of regard" case
+(F5) is unaffected by construction: such a target is excluded before `is_worth_a_look` ever runs, so
+it never enters `pending_attempted_at_range_m`/`pending_attempted_at_level` in the first place, and
+this fix only ever looks at entries already in those maps.
+
+**Re-measured end to end, not just unit-tested** (`test_a_progressing_contact_is_relooked_near_the_
+pre_bl_b85_cadence`, `tests/test_optic_policy.py`'s `TestSightStallCooldown`): a single contact
+advancing `presence` -> `class` at t=10 s, during its first look's 0-30 s dwell, is re-looked at
+t=34 s (gap 34 s against the first look's start) -- close to the pre-`BL-B85` ~33 s cadence, not the
+~94 s the unconditional-commit code produced. **Verified by mutation, on this exact source, not
+taken on my own word**: reverted `_start_glance_away`'s conditional commit back to the unconditional
+form (dropping the `targets` parameter's per-contact comparison, `sha1sum`-verified byte-identical
+restore afterward) and reran the new test -- it fails with a measured 94 s gap, the exact review
+figure, confirming the test is real and the fix is what closes it.
+
+**Re-measured the "realistic case" (level advances per completed dwell) against the current code**,
+per the review's own ask, using the same one-step `wide`/`narrow_near`/`narrow_far` toy search legs
+`TestSightStallCooldown`'s committed stuck-case test already uses (a standalone measurement, not
+added as a second committed test -- the dispatch brief's own required tests are the single-contact
+cadence test above and the existing stuck-case test, which still passes unchanged): three contacts
+(50/80/120 m) each bumped a tier the poll after their own look ends, over 900 s. All three reach
+`type` and exit candidacy by t=196 s (130 s/163 s/196 s individually), each needing only two
+look-starts -- no progressing look is throttled. Overall busy fraction across the full 900 s is
+19.4% (175/900 polls), *lower* than the figure this entry's "Realistic case" paragraph used to
+carry (which was measured before BL-B85's first fix existed at all, on code where the scheduled
+break never committed anything for `SIGHTING`, and is now corrected in `BL-B85.md` rather than left
+as a stale claim per the review's own flag). Every search leg is visited, and the remaining 704 s
+run with no contact left to glass. `BL-B85.md`'s own "Required fix" and "Realistic case" paragraphs
+carry the full current numbers.
+
+**Added the reviewer's suggested cross-key coupling assertion** (`belief/optic_policy.py`, next to
+`SIGHT_STALL_COOLDOWN_S`'s declaration, same shape as `belief/decay.py`'s own
+`OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` assert): `assert OPTIC_RETRY_INTERVAL_S <
+SIGHT_STALL_COOLDOWN_S`. Holds at today's defaults (64.0 < 132.0); not a `tuning.*` declaration
+itself so this is a plain module-level assert, not a tunable.
+
+**Checks (this round)**: `ruff format --check src tests`: pass. `ruff check src tests`: pass.
+`cd body-layer && mypy src`: pass, no issues in 68 source files. `pytest tests -q`: 2340 passed,
+4 xfailed, 0 failed -- no rerun needed, none of the task's known-flake tests failed this run.
+`tools/generate_defaults.py` (no `--write`): `config/defaults.toml` already current (the new assert
+is not a tunable, so no regeneration was expected or needed).

@@ -2684,6 +2684,64 @@ class TestSightStallCooldown:
             f"a 600 s run, not abandoned forever: {look_starts}"
         )
 
+    def test_a_progressing_contact_is_relooked_near_the_pre_bl_b85_cadence(
+        self,
+    ) -> None:
+        """`plans/9k113-narrow-search/review.md`'s "Review -- BL-B85"
+        required fix: the first round's `_start_glance_away` committed
+        every pending mark unconditionally, which also throttled a contact
+        whose classification was genuinely advancing, not only a stalled
+        one -- measured there at a re-look cadence of ~94 s (dwell +
+        `OPTIC_RETRY_INTERVAL_S`) instead of the pre-`BL-B85` ~33 s
+        (`SIGHT_MAX_DWELL_S` + `SIGHT_GLANCE_AWAY_S`).
+
+        Here the contact advances `presence` -> `class` at t=10 s, *during*
+        its first look's dwell (which runs t=0-30) -- so that look's
+        pending mark is dropped (progress since the look started), not
+        committed, leaving the contact immediately eligible again once the
+        glance-away ends, rather than waiting out `OPTIC_RETRY_INTERVAL_S`
+        from a stale commit. `class` then holds for the rest of the
+        window, so this test only pins the first re-look gap, which is
+        the one the required fix changes -- the second look's own dwell
+        sees no further progress and commits normally (`SIGHT_STALL_
+        COOLDOWN_S` taking over from there is already covered by the
+        stalled-contact tests above)."""
+        contact_id = "CONTACT_1"
+        level_changes_at_s = 10.0
+
+        def targets_at(now_sim: float) -> list[LookTarget]:
+            level = "presence" if now_sim < level_changes_at_s else "class"
+            return [_target(contact_id, range_m=80.0, current_level=level)]
+
+        state = self._sighting_state()
+        look_starts: list[float] = []
+        now_sim = 0.0
+        step_s = 1.0
+        duration_s = 120.0
+        while now_sim < duration_s:
+            state, _decision = self._decide(state, now_sim, targets_at(now_sim))
+            if state.look_contact_id is not None and state.look_started_sim == now_sim:
+                look_starts.append(now_sim)
+            now_sim += step_s
+
+        assert len(look_starts) >= 2, (
+            f"expected at least two look-starts in {duration_s:.0f} s, got "
+            f"{look_starts}"
+        )
+        pre_bl_b85_cadence_s = SIGHT_MAX_DWELL_S + SIGHT_GLANCE_AWAY_S
+        second_look_gap_s = look_starts[1] - look_starts[0]
+        assert second_look_gap_s < OPTIC_RETRY_INTERVAL_S, (
+            "a contact that progressed during its look should not wait out "
+            f"OPTIC_RETRY_INTERVAL_S ({OPTIC_RETRY_INTERVAL_S:.0f} s) before "
+            f"its next look; measured a {second_look_gap_s:.0f} s gap "
+            f"(pre-BL-B85 cadence: {pre_bl_b85_cadence_s:.0f} s)"
+        )
+        assert second_look_gap_s <= pre_bl_b85_cadence_s + 5.0, (
+            "expected the re-look gap to stay close to the pre-BL-B85 "
+            f"cadence of {pre_bl_b85_cadence_s:.0f} s, measured "
+            f"{second_look_gap_s:.0f} s"
+        )
+
 
 class TestManoeuvreForcesObservOff:
     """Direction §8: *"Gyros are sensitive to violent manouvres and OBSERV

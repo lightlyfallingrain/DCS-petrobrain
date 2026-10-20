@@ -236,6 +236,22 @@ SIGHT_STALL_COOLDOWN_S: Final[float] = tuning.real(
     status="judgement",
 )
 
+# `is_worth_a_look`'s `stall_cooldown_s` branch only applies when it is
+# actually longer than the fast path it replaces -- `OPTIC_RETRY_INTERVAL_S`
+# is not itself a `tuning.real` (it is derived at import from
+# `FOCUS_DWELL_S`/`SCAN_PLAN`, both independently tunable), so nothing in
+# either constant's own `lo`/`hi` bounds catches a retuning that pushes
+# `OPTIC_RETRY_INTERVAL_S` above `SIGHT_STALL_COOLDOWN_S`'s low end --
+# `plans/9k113-narrow-search/review.md`'s "Review -- BL-B85" flagged this as
+# the same residual-coupling shape `belief.decay.py`'s own asserts guard
+# (`body-layer/CLAUDE.md`'s "Tuning"). A stalled contact would then get the
+# *shorter* of the two waits, inverting the intended relationship silently.
+assert OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S, (
+    "OPTIC_RETRY_INTERVAL_S must stay below SIGHT_STALL_COOLDOWN_S or a "
+    "stalled contact's cooldown would resolve to the shorter, non-stalled "
+    "interval instead of the longer one meant to throttle it"
+)
+
 #: The widest sector a binocular *search* will sweep (user: *"cap binocular
 #: scan at 30 deg azimuth, there's no wide area binocular scan"*). A wider
 #: commanded scan simply gets no search phase -- see `plans/binocular-optic/
@@ -1532,7 +1548,7 @@ def _back_to_home(
 
 
 def _start_glance_away(
-    state: OpticState, now_sim: float
+    state: OpticState, now_sim: float, targets: Sequence[LookTarget]
 ) -> tuple[OpticState, OpticDecision]:
     """Force the brief naked-eye glance away from the sight -- direction
     §9's inverted dwell shape (plan §13): entered from `SIGHTING` at its
@@ -1543,34 +1559,49 @@ def _start_glance_away(
     scheduled break *within* OBSERV staying on, not OBSERV turning off
     (that is `_force_observ_off`, a manoeuvre-only path).
 
-    **Commits any in-progress pending look rather than dropping it**
-    (`BL-B85` -- `plans/9k113-narrow-search/review.md`'s 900 s
-    reproduction, diagnosed). The whole-dwell clock this fires from and
-    the per-look natural-end timeout (`look_is_finished`'s `max_dwell_s`)
-    share the same constant, `SIGHT_MAX_DWELL_S`, and `_decide_sighting`
-    checks this boundary *before* the natural-end check -- so a contact
-    that never resolves (`can_still_improve`/`sight_can_still_improve`
-    stays true the whole dwell) has its look cut off here on every single
-    cycle, never reaching the natural-end commit at all. Previously that
-    meant `attempted_at_range_m`/`attempted_at_time_sim`/`attempted_at_
-    level` never recorded the attempt, so `is_worth_a_look`'s whole retry/
-    cooldown bookkeeping (`RETRY_RANGE_FRACTION`, `OPTIC_RETRY_INTERVAL_S`,
-    `SIGHT_STALL_COOLDOWN_S`) never engaged for exactly the contact that
-    needed it most -- measured as the dominant cause of the review's 88%-
-    busy reproduction, not `OPTIC_RETRY_INTERVAL_S` re-admitting a
-    committed attempt too soon as first assumed. Unlike a genuine
-    interruption (`not sight_steady`, a pilot command), reaching the
-    scheduled dwell boundary while still looking is not evidence the look
-    failed to deliver anything -- it ran the sight's own full allotted
-    time, which is exactly what "committed" has always meant for the
-    ordinary natural-end path two lines below in `_decide_sighting`."""
+    **Commits a pending contact's mark only if that look made no progress
+    on it** (`BL-B85` required fix, `plans/9k113-narrow-search/review.md`
+    "Review -- BL-B85": Part 2 of the original fix committed every pending
+    mark unconditionally, which also throttled a contact whose
+    classification was genuinely advancing -- measured at a re-look
+    cadence of ~94 s instead of the pre-`BL-B85` ~33 s). "Made no
+    progress" means `pending_attempted_at_level[contact_id]` (the level
+    recorded at *this look's start*, same convention `pending_attempted_
+    at_level`'s own docstring describes) still matches the contact's
+    *current* level in `targets` at the moment the dwell boundary fires.
+    If it does not match, the mark is dropped instead -- the same
+    treatment a genuine interruption already gives it (`_back_to_home`'s
+    Fix B1, `plans/sortie-2026-09-26-fixes/plan.md` Stage 2: "an
+    interrupted look does not mark the target attempted"), because a look
+    that taught something is not the stalled case `SIGHT_STALL_COOLDOWN_S`
+    exists to throttle.
+
+    The whole-dwell clock this fires from and the per-look natural-end
+    timeout (`look_is_finished`'s `max_dwell_s`) share the same constant,
+    `SIGHT_MAX_DWELL_S`, and `_decide_sighting` checks this boundary
+    *before* the natural-end check -- so a contact that never resolves
+    (`can_still_improve`/`sight_can_still_improve` stays true the whole
+    dwell) has its look cut off here on every single cycle, never reaching
+    the natural-end commit at all. A contact stuck like that now gets
+    committed here (this function's original `BL-B85` fix), which is what
+    lets `SIGHT_STALL_COOLDOWN_S` engage for it at all."""
+    current_level_by_id = {
+        target.contact_id: target.current_level for target in targets
+    }
     committed_range = dict(state.attempted_at_range_m)
     committed_time = dict(state.attempted_at_time_sim)
     committed_level = dict(state.attempted_at_level)
     for contact_id, attempted_range_m in state.pending_attempted_at_range_m.items():
+        look_start_level = state.pending_attempted_at_level[contact_id]
+        # Not found in `targets` (the contact dropped out of candidacy
+        # mid-look, e.g. lost): nothing to compare against, so there is no
+        # evidence of progress -- commit, same as the stalled case.
+        current_level = current_level_by_id.get(contact_id, look_start_level)
+        if current_level != look_start_level:
+            continue
         committed_range[contact_id] = attempted_range_m
         committed_time[contact_id] = now_sim
-        committed_level[contact_id] = state.pending_attempted_at_level[contact_id]
+        committed_level[contact_id] = look_start_level
     return (
         replace(
             state,
@@ -1907,7 +1938,7 @@ def _decide_sighting(
         state.phase_started_sim if state.phase_started_sim is not None else now_sim
     )
     if now_sim - dwell_started_sim >= SIGHT_MAX_DWELL_S:
-        return _start_glance_away(state, now_sim)
+        return _start_glance_away(state, now_sim, targets)
 
     if state.look_contact_id is not None and look_is_finished(
         state,
