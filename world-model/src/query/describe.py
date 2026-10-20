@@ -214,11 +214,16 @@ class SettlementInfo:
     """`subtype` (osm-landcover-optimization) is `"built_up"` for an
     unnamed built-up `landuse` polygon, or `"city"`/`"town"`/`"village"` for
     a named place-area polygon -- see `build.ingest_osm`'s D2 "Areas" rules
-    2-3."""
+    2-3. `area_m2` (landmark-words-no-names) is the same `tags["area_m2"]`
+    `_preferred_settlement` already reads for its tie-break, surfaced here
+    so a caller without subtype-based size evidence (`"built_up"`, or an
+    unrecognised/missing subtype) can still size the settlement; `None` if
+    the feature carries no `area_m2` tag at all."""
 
     name: str | None
     distance_m: float
     subtype: str | None
+    area_m2: float | None
     provenance: str
     confidence: str
     position_uncertainty_m: float
@@ -436,6 +441,7 @@ def _settlement_info(
         name=feature.name,
         distance_m=distance,
         subtype=feature.subtype,
+        area_m2=feature.tags.get("area_m2"),
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,

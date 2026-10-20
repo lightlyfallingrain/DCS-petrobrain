@@ -64,6 +64,30 @@ needs its shape added to the consistency gate's index glob** —
 every entry in that directory report as linked from zero indexes. `*-tasks.md` was added there for
 this reason.
 
+## Split notes
+
+Root `NOTES.md` was split the same way on 2026-10-19 (user direction): one file per former `## `
+topic section under `notes/`, indexed by `notes/notes-index.md`, with `NOTES.md` left in place as a
+pointer so every dated reference to it keeps resolving. Three differences from a roadmap split, each
+because notes are not roadmap entries:
+
+- **Topic files carry no ID and no status.** Nobody cites an insight topic by number, and nothing
+  about it is open or done. Filenames are the kebab-case topic (`debugging-and-root-cause-diagnosis.md`),
+  capped near 60 characters at a word boundary; the H1 is the original section heading. The basename
+  rule above still applies — a new topic file needs a repo-wide-unused basename.
+- **The pointer carries its own sentinel, `<!-- split-notes: see notes/ -->`, not the roadmap one.**
+  `roadmap-source.sh` reads `split-roadmap` as "ID-shaped entries live here" (its `--entries`
+  mode fails on a directory with none), so giving notes that sentinel would make a pointer-resolving
+  consumer report `notes/` as broken. `NOTES.md` is in no roadmap tool's input, so nothing resolves this pointer mechanically —
+  the consumers (`notes-harvest`, `graph-corpus-files.sh`, the DoD harvest step) name `notes/`
+  directly.
+- **New topics are expected.** A harvest bullet goes into the topic file it fits; when none fits,
+  the harvest creates `notes/<topic>.md` and adds a line to the index — `notes/notes-index.md` says
+  how. Moving a bullet between topics is fine: no ID is attached to it.
+
+The split was mechanical and lossless (every non-heading line, in order, checked by script); no
+bullet was edited, merged or re-filed.
+
 ## The ID scheme
 
 Root `CLAUDE.md`'s "Backlog Management" already defines `<prefix>-B<n>` for backlog items and
@@ -115,7 +139,7 @@ more marker and one formatting rule:
 
   | rewritten (live) | left bare (dated record) |
   |---|---|
-  | every `*/ROADMAP/` entry and index, every `CLAUDE.md`, `AGENTS.md`, root `ROADMAP.md`, `docs/` (excluding the two directories opposite), `world-model/docs/`, `world-model/RUN.md`, `todo/` | `plans/`, `audits/`, `*/research/`, `.claude/agent-memory/`, `docs/acceptance/`, `docs/handoff/`, `NOTES.md` and every subproject `NOTES.md`, source, tests and tools |
+  | every `*/ROADMAP/` entry and index, every `CLAUDE.md`, `AGENTS.md`, root `ROADMAP.md`, `docs/` (excluding the two directories opposite), `world-model/docs/`, `world-model/RUN.md`, `todo/` | `plans/`, `audits/`, `*/research/`, `.claude/agent-memory/`, `docs/acceptance/`, `docs/handoff/`, `notes/` (root `NOTES.md` until 2026-10-19), source, tests and tools |
 
   `world-model/RUN.md` and `NOTES.md` were named on neither side when the rename was done, and the
   rule places them on opposite sides, which is the useful part of writing it down. `RUN.md` tells

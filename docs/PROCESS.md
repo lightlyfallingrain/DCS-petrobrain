@@ -51,7 +51,7 @@ when it applies (kept there, not restated here, because that file is always in c
 
 ## Engineering Notes
 
-Maintain `NOTES.md` for non-obvious findings: bugs, perf bottlenecks, framework quirks, chosen solutions, workarounds.
+Maintain `notes/` for non-obvious findings: bugs, perf bottlenecks, framework quirks, chosen solutions, workarounds. One file per topic, indexed by `notes/notes-index.md`; root `NOTES.md` is a pointer (`docs/DOC_CONVENTIONS.md`, "Split notes").
 - Short, factual entries — one idea per bullet, no narrative
 - Add when something non-trivial is discovered; never duplicate code comments
 - Consult before making decisions in areas where prior issues are recorded
@@ -85,7 +85,7 @@ for.
 
 A queryable graph over the current-state design documentation lives in `graphify-out/`, built from
 a curated corpus (`.claude/scripts/graph-corpus-files.sh` — a **file list, never a copied mirror**;
-a mirror silently breaks cache keying and leaks its own name into node ids) — every `ROADMAP.md` and `CLAUDE.md`, `docs/`, `AGENTS.md`, `NOTES.md`, `todo/`,
+a mirror silently breaks cache keying and leaks its own name into node ids) — every `ROADMAP.md` and `CLAUDE.md`, `docs/`, `AGENTS.md`, `notes/`, `todo/`,
 all `*/research/`, and the active plan. **A split roadmap's `ROADMAP/` entry files follow the
 directory, not the filename** (`docs/DOC_CONVENTIONS.md`), so the corpus keeps covering a
 subproject's milestone content after it splits rather than silently dropping it the moment

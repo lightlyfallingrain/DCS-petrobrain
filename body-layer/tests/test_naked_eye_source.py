@@ -33,6 +33,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_BURNING,
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+    PROVENANCE_EMITTER_FIRING_VISIBLE,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
@@ -1765,6 +1766,82 @@ def test_a_unit_firing_at_ownship_sets_the_targets_ownship_provenance() -> None:
     assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
 
 
+def test_a_visible_unit_firing_at_ownship_sets_the_targets_ownship_provenance() -> None:
+    """`docs/acceptance/2026-10-20-sortie-feedback.md` F6 follow-up: a
+    shooter at 1,073 m (well inside the naked-eye `T-72B` hires threshold
+    of 250 m used by `test_a_unit_at_hires_threshold...` above, so no
+    bypass is needed at all) must still produce the `targets_ownship`
+    provenance once it is admitted and the collector says it targets
+    ownship -- the defect was that `targets_ownship_by_object_id` only
+    ever looked at `VisibilityResult.emitter_kind`, which stays `None` for
+    an ordinary, unaided admission. `classification_raw` is asserted at
+    its exact hires value (`"T-72B"`, not `object_model.DEFAULT_OP_CLASS`)
+    to prove the tier clamp the emitter *bypass* applies (`visibility.py`'s
+    "Emitter bypass" section) was correctly never reached -- this fix must
+    not raise or lower classification, only the provenance bit."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1", targets_ownship=True),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
+    assert observations[0].classification_raw == "T-72B"
+
+
+def test_a_visible_unit_firing_at_others_gets_the_firing_visible_provenance() -> None:
+    """**Changed by `plans/taking-fire-visible-shooter/debug.md`'s second
+    half** (F6 follow-up "visible unit firing at others", `docs/acceptance/
+    2026-10-20-sortie-feedback.md`): this test used to pin the opposite
+    behaviour (ordinary provenance, no firing report at all for a visible
+    shooter aimed at anything but ownship) as the deliberate scope boundary
+    of the targets-ownship fix above. The user's own words settled it the
+    other way: *"someone shooting is important, especially if they are
+    close -> report"*. A visible (no-bypass-needed) unit firing at
+    something *other* than ownship now gets `PROVENANCE_EMITTER_FIRING_
+    VISIBLE`, not the bypass-needed `PROVENANCE_EMITTER_FIRING` ("something
+    firing... far" stays reserved for a unit that would otherwise have been
+    invisible) and not the ordinary `PROVENANCE_VISIBILITY_FILTER_ONLY`.
+    `classification_raw` is still asserted at its exact hires value
+    (`"T-72B"`) -- the emitter fact must never raise *or* lower
+    classification, only add the firing report."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1", targets_ownship=False),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_VISIBLE
+    assert observations[0].classification_raw == "T-72B"
+
+
+def test_a_visible_burning_unit_keeps_ordinary_provenance() -> None:
+    """The other emitter kind, same scope boundary: a burning unit well
+    inside its own ordinary presence range (no bypass needed) keeps the
+    ordinary provenance, not `PROVENANCE_EMITTER_BURNING` -- unaffected by
+    the `targets_ownship` fix above, since `BURNING` never carries a
+    `targets_ownship` bit (`Emitter.targets_ownship`'s own docstring)."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(world_objects, unit_velocity=unit_velocity)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
+    assert observations[0].classification_raw == "T-72B"
+
+
 def test_firing_wins_over_burning_for_the_same_unit() -> None:
     """The plan's "Co-moving Fields" precedence, exercised end to end:
     a unit both burning and firing resolves to the `FIRING` provenance."""
@@ -1788,6 +1865,111 @@ def test_firing_wins_over_burning_for_the_same_unit() -> None:
 
     assert len(observations) == 1
     assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
+
+
+# -- Cluster-level fold, genuine multi-member clusters (`plans/
+# taking-fire-visible-shooter/debug.md` review: every fold test above --
+# `member_emitter_kinds` and `member_targets_ownship` alike -- used a
+# single-member cluster, which only trivially satisfies `len({x}) == 1`
+# unanimity. These use the same down-range clustering recipe as
+# `test_two_close_candidates_emit_one_clustered_observation` above (two
+# candidates 20 m apart along the line of sight at ~500 m range, well
+# inside the down-range merge radius there) to exercise the real,
+# 2+-member aggregation. --
+
+
+def _two_unit_firing_active_map(
+    **targets_ownship_by_unit_name: bool,
+) -> dict[str, Any]:
+    return {
+        "dcs_model_time_s": 0.0,
+        "received_wall_clock_s": 0.0,
+        "active": {
+            unit_name: {
+                "kind": "firing",
+                "since_sim": 0.0,
+                "targets_ownship": targets_ownship,
+            }
+            for unit_name, targets_ownship in targets_ownship_by_unit_name.items()
+        },
+    }
+
+
+def test_two_clustered_visible_units_both_firing_at_others_get_the_firing_visible_provenance() -> (
+    None
+):
+    """The positive half of the genuine-cluster gap: two clustered,
+    unaided (no-bypass-needed) members both firing at something other than
+    ownship fold to `PROVENANCE_EMITTER_FIRING_VISIBLE` -- unanimous
+    `True`, nothing less, same "identical keeps" rule `member_emitter_
+    kinds`/`member_targets_ownship` already follow."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=520.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(
+        world_objects,
+        firing=_two_unit_firing_active_map(unit_1=False, unit_2=False),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].count_bucket == "OP_1UNIT"
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_VISIBLE
+
+
+def test_a_mixed_firing_cluster_degrades_to_ordinary_provenance() -> None:
+    """The "disagreement degrades" half: one clustered member firing at
+    others (visible, no bypass needed) alongside one member not firing at
+    all must not inherit the firing-visible provenance -- the exact gap
+    the plan review flagged (every existing fold test, firing or burning,
+    only ever used a single-member cluster)."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=520.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1", targets_ownship=False),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].count_bucket == "OP_1UNIT"
+    assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
+
+
+def test_a_cluster_mixing_targets_ownship_and_firing_at_others_degrades() -> None:
+    """A narrower disagreement than the one above: both members are
+    visible and firing, but one targets ownship and the other does not.
+    Neither `member_targets_ownship` nor the new `member_firing_visible`
+    set is unanimous (the targeting member's own `firing_visible` flag is
+    `False` by construction -- `_build_observation`'s own docstring, check
+    2's condition (c) -- so it cannot smuggle the cluster into
+    `PROVENANCE_EMITTER_FIRING_VISIBLE` either), so this degrades to the
+    ordinary provenance rather than picking either firing wording."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=520.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(
+        world_objects,
+        firing=_two_unit_firing_active_map(unit_1=True, unit_2=False),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].count_bucket == "OP_1UNIT"
+    assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
 
 
 def test_a_stale_firing_snapshot_is_discarded() -> None:

@@ -1,6 +1,11 @@
-# Dropbox-synced scratch channel between Mac and Windows DCS machine —
+# File transfer channel between Mac and Windows DCS machine —
 # not part of this repo. See world-model/WORKFLOW.md.
 /win-mac-sync
+
+# vim backup files
+*~
+*.swp
+*.swo
 
 # skill canditates, not worth tracking in repo
 .claude/agent-memory/skill-candidates.md
@@ -51,3 +56,5 @@ __pycache__/
 # that cannot be redistributed. Put any further DCS-shipped manual, mission or
 # asset in this directory and it is ignored by the same rule.
 docs/concept/mi-24_info/*.pdf
+
+

@@ -1,8 +1,11 @@
-"""`LocalPlaybackSink` -- `--target local`'s `server.AudioSink` implementation
-(`plans/tts-voice-output/plan.md` Decision 8): plays synthesized WAV bytes
-directly on this machine via `afplay`, an already-present macOS CLI (the
-same "external binary, not a package" rule `tts_engine.MacSayEngine`
-follows for `say`).
+"""`LocalPlaybackSink`/`_WinsoundLocalSink` -- `--target local`'s
+`server.AudioSink` implementations (`plans/tts-voice-output/plan.md`
+Decision 8, `plans/audio-adapter-os-independent/plan.md` Decision 2/6):
+play synthesized WAV bytes directly on this machine, via `afplay` on
+macOS/Linux and the stdlib `winsound` module on Windows. `make_local_sink()`
+is the platform-dispatching factory `__main__.py` calls instead of
+hardcoding either class, exactly as `aircraft-layer/src/collector/
+audio_sender.py` already does for `WavPlayer`.
 
 Pulled out of `audio_adapter/__main__.py` into its own module (review,
 `plans/inbound-speech/plan.md` Stage 3 follow-up, 2026-09-20) specifically
@@ -42,8 +45,10 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import threading
+import wave
 from collections.abc import Callable
 from typing import Protocol
 
@@ -257,3 +262,190 @@ class LocalPlaybackSink:
             process.kill()
         except OSError:
             logger.debug("failed to kill in-flight afplay process", exc_info=True)
+
+
+# -- Windows sink (`plans/audio-adapter-os-independent/plan.md` Decision 2) --
+
+#: Added to a WAV's own computed duration before `_WinsoundLocalSink.deliver`
+#: gives up waiting on asynchronous playback -- `winsound` offers no "is it
+#: still playing" query, so this covers device start-up latency and
+#: rounding. Own copy of `aircraft-layer/src/collector/audio_sender.py`'s
+#: constant of the same name/value (module independence forbids importing
+#: it): a hand-synced duplicate, not a precedent to extend elsewhere.
+_WIN_PLAYBACK_MARGIN_S: float = 0.25
+
+#: Used when a file's duration cannot be read (a malformed or non-PCM WAV).
+#: Own copy of `audio_sender.py`'s constant of the same name/value, same
+#: reasoning: wait this long rather than return immediately (which would
+#: overlap the next line) or block forever.
+_WIN_PLAYBACK_FALLBACK_S: float = 10.0
+
+
+def _wav_duration_s(path: str) -> float | None:
+    """Playback duration of the WAV at `path`, or `None` if it cannot be
+    read. Own copy of `audio_sender.py`'s `wav_duration_s` (module
+    independence forbids importing it) -- pure stdlib `wave` header read,
+    needed for the same reason: `winsound` plays asynchronously, so
+    something has to tell the caller how long to wait."""
+    try:
+        with wave.open(path, "rb") as w:
+            rate = w.getframerate()
+            if rate <= 0:
+                return None
+            return w.getnframes() / float(rate)
+    except (wave.Error, OSError, EOFError):
+        return None
+
+
+class _WinsoundLike(Protocol):
+    """Structural subset of `winsound`'s `PlaySound` calls
+    `_WinsoundLocalSink` needs -- exists so tests can inject a fake
+    implementation and drive deterministic interleaving with no real
+    `winsound` call and no real Windows machine (mirrors `_PlaybackProcess`'s
+    role for `LocalPlaybackSink` above, and `ptt_source.py`'s fake-`winmm`
+    precedent for testing Windows-only logic from a Mac)."""
+
+    def play_async(self, path: str) -> None:
+        """Start playing the WAV at `path` asynchronously
+        (`winsound.PlaySound(path, SND_FILENAME | SND_ASYNC)`)."""
+        ...
+
+    def purge(self) -> None:
+        """Stop whatever is currently playing
+        (`winsound.PlaySound(None, SND_PURGE)`)."""
+        ...
+
+
+if sys.platform == "win32":
+    import winsound
+
+    class _RealWinsound:
+        """The real `_WinsoundLike` -- only ever constructed on Windows
+        (`_WinsoundLocalSink`'s default), per the static `sys.platform`
+        guard this module follows throughout (see `_WinsoundLike`'s
+        docstring and `aircraft-layer/src/collector/audio_sender.py`'s own
+        `_WinsoundPlayer` for why this must be a static guard, not a
+        runtime `try`/`except ImportError`, for `mypy --strict` to pass on
+        the Mac dev machine)."""
+
+        def play_async(self, path: str) -> None:
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+
+        def purge(self) -> None:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+
+else:
+
+    class _RealWinsound:
+        """Non-Windows stand-in -- `winsound` does not exist on this
+        platform. Both methods raise `RuntimeError`, caught by
+        `_WinsoundLocalSink.deliver`/`interrupt` like any other playback
+        failure, so a Mac-run adapter process (never a real deploy target
+        for this sink, but useful for tests/dev) degrades rather than
+        crashing."""
+
+        def play_async(self, path: str) -> None:
+            raise RuntimeError("winsound is only available on Windows")
+
+        def purge(self) -> None:
+            raise RuntimeError("winsound is only available on Windows")
+
+
+class _WinsoundLocalSink:
+    """`server.AudioSink` backed by the stdlib `winsound` module -- the
+    Windows `--target local` sink (plan Decision 2), a hand-synced copy of
+    `aircraft-layer`'s already-verified `_WinsoundPlayer` pattern (module
+    independence forbids importing it directly): `SND_FILENAME | SND_ASYNC`
+    to start, block the calling thread on a `threading.Event.wait(timeout=
+    duration+margin)`, `interrupt()` purges the sound and sets the event so
+    the wait ends immediately instead of sitting out the remaining duration.
+
+    **No `_InFlightTracker` equivalent needed** (simplification found while
+    reading the code, not assumed -- plan Decision 2): `_InFlightTracker`
+    exists solely to disambiguate "we killed `afplay` on purpose" from
+    "`afplay` genuinely crashed," because both look like the same non-zero
+    exit code. `winsound.PlaySound` has no such ambiguity -- there is no
+    subprocess exit code at all, just `Event.wait()` returning either
+    because the timeout elapsed (normal completion) or because
+    `interrupt()` set it early (interrupted). Both are a clean return from
+    `deliver()`; nothing needs to be raised or suppressed.
+
+    Every in-flight wait is tracked in a `set`, not a single slot -- the
+    same concurrency reasoning `_InFlightTracker` documents above:
+    `ThreadingHTTPServer` allows two `deliver()` calls at once, and a
+    single "the" event would let a second `deliver()` silently replace the
+    first's event before `interrupt()` could ever reach it.
+
+    **Known, accepted limitation** (recon Finding 5, plan Decision 2):
+    `winsound`'s Win32 API has a single global sound slot -- a second
+    overlapping `play_async` silently replaces whatever the first was
+    playing, unlike `afplay` (independent per process). The pre-empted
+    call's own `deliver()` is not told its audio was cut short (nothing
+    sets *its* event), so it waits out its own full duration before
+    returning -- slower than necessary, never wrong. Accepted because
+    `--target local` is the dev-only guaranteed-deliverable path, never the
+    live-cockpit path (that is always `--target aircraft-layer`)."""
+
+    def __init__(self, winsound_api: _WinsoundLike | None = None) -> None:
+        self._winsound: _WinsoundLike = (
+            winsound_api if winsound_api is not None else _RealWinsound()
+        )
+        self._lock = threading.Lock()
+        self._events: set[threading.Event] = set()
+
+    def deliver(self, audio: bytes, urgent: bool) -> None:
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-play-")
+        os.close(fd)
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(audio)
+
+            done = threading.Event()
+            with self._lock:
+                self._events.add(done)
+            try:
+                try:
+                    self._winsound.play_async(tmp_path)
+                except RuntimeError as exc:
+                    raise AudioDeliveryError(str(exc)) from exc
+                duration = _wav_duration_s(tmp_path)
+                wait_s = (
+                    duration + _WIN_PLAYBACK_MARGIN_S
+                    if duration is not None
+                    else _WIN_PLAYBACK_FALLBACK_S
+                )
+                done.wait(timeout=wait_s)
+            finally:
+                with self._lock:
+                    self._events.discard(done)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                logger.debug("could not remove temp file %s", tmp_path, exc_info=True)
+
+    def interrupt(self) -> None:
+        """Purge whatever `winsound` is currently playing (if anything --
+        a clean no-op otherwise, same posture as `LocalPlaybackSink.
+        interrupt`) and release every in-flight `deliver()` call's wait
+        immediately instead of letting it sit out its own duration."""
+        try:
+            self._winsound.purge()
+        except RuntimeError:
+            logger.debug("winsound purge failed (not on Windows?)", exc_info=True)
+            return
+        with self._lock:
+            events = list(self._events)
+        for event in events:
+            event.set()
+
+
+def make_local_sink() -> LocalPlaybackSink | _WinsoundLocalSink:
+    """Platform-dispatching factory for the `--target local` `AudioSink`
+    (plan Decision 2/6) -- `afplay` on macOS/Linux, `winsound` on Windows,
+    exactly as `aircraft-layer/src/collector/audio_sender.py` already does
+    for `WavPlayer`. `__main__.py` calls this instead of hardcoding either
+    class so sink selection stays automatic, not a new `--target` value."""
+    if sys.platform == "win32":
+        return _WinsoundLocalSink()
+    return LocalPlaybackSink()
