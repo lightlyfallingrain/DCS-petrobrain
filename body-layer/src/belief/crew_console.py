@@ -2462,27 +2462,33 @@ class CrewConsole:
         is the exact wording every other target-keyed command already
         uses for the same missing input (`_handle_step`'s own check).
 
-        **The mark itself is deferred when the channel is modeled busy**
-        (Stage 6, `plans/voice-latency-instrumentation/plan.md`), not only
-        its spoken acknowledgement -- unlike every other command in this
-        family, the readback *is* the only record of "current information"
-        here (`mark_target_fn`'s own text carries no position), so what
-        actually needs to reflect the later tick's belief is the mark
-        write itself: `_mark_target_fn`/`mission_memory.marks.mark_target`
-        reads the contact's position **at the `now_sim` they are called
-        with**, so deferring the call (not just rendering stale text around
-        an already-made one) is what "current information, not old" means
-        for this command specifically."""
+        **The write happens here, unconditionally, at command time** --
+        `mark_target_fn(contact_id, now_sim)` records the contact's
+        believed position *now*, which is what "mark target" means when
+        the pilot says it (review, `plans/voice-latency-instrumentation/
+        review.md`, Required Fix 1: an earlier revision deferred this call
+        itself alongside the readback, so `drain_pending_positional_
+        replies` dropping a pending entry on `self.refused` or a mission
+        reset silently discarded a mark the pilot had asked for, with no
+        error and no trace in `--mission-memory` or anywhere else). Only
+        the *spoken* acknowledgement is deferred through `_speak_or_defer`,
+        exactly like every other command in this family -- the write
+        already happened and cannot be lost by a later refusal or reset;
+        at worst its echo goes unspoken. The returned text carries no
+        position (`"mark N set on <contact_id>"`), so there is nothing to
+        re-render against a later tick's belief; the deferred closure just
+        replays the fixed text."""
         if self.mark_target_fn is None:
             return ["no mission memory configured"]
-        mark_target_fn = self.mark_target_fn
         target_task = self._active_attack_target_task()
         if target_task is None or target_task.contact_id is None:
             return ["no target selected"]
         contact_id = target_task.contact_id
 
+        text = self.mark_target_fn(contact_id, now_sim)
+
         def _render(render_now_sim: float) -> list[str]:
-            return [mark_target_fn(contact_id, render_now_sim)]
+            return [text]
 
         return self._speak_or_defer(now_sim, correlation_id, _render)
 

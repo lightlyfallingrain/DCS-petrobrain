@@ -118,10 +118,10 @@ class AudioAdapterClient:
         `plans/inbound-speech/plan.md` Stage 3), returning every pending
         transcript as a list of dicts (`transcript_queue.TranscriptEvent.
         to_dict`, i.e. `{"transcript", "confidence", "token", "match_ratio",
-        "verb_anchored", "ambiguous", "t_wall"}`), oldest first. Returns
-        `[]` when nothing is pending -- see the module docstring for why
-        this is `[]`, not `None`. Raises `AudioAdapterError` on any
-        transport/parse failure, same as `push_speech`."""
+        "verb_anchored", "ambiguous", "t_wall", "slots", "correlation_id"}`),
+        oldest first. Returns `[]` when nothing is pending -- see the module
+        docstring for why this is `[]`, not `None`. Raises `AudioAdapterError`
+        on any transport/parse failure, same as `push_speech`."""
         url = f"{self.base_url}/transcripts/poll"
         try:
             with urllib.request.urlopen(url, timeout=self.timeout_s) as response:

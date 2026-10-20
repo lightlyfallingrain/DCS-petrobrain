@@ -263,3 +263,53 @@ occupancy; all are back to testing what they were written to test:
   a rapid string of corrections from the pilot (several `select target`s in quick succession) will
   now visibly queue their readbacks rather than talking over each other or racing, which is a
   cockpit-observable behaviour change worth the user's attention on first flight.
+
+### Review Required Fix 1 — `mark_target`'s deferred write could be lost (addressed)
+
+`plans/voice-latency-instrumentation/review.md`'s Required Fix 1, confirmed by the reviewer running
+it: `_handle_mark_target` deferred the *call* to `mark_target_fn(contact_id, render_now_sim)` itself
+via `_speak_or_defer`, treating the mission-memory write as part of the readback. A pending entry
+dropped by `drain_pending_positional_replies` on `self.refused` or a mission reset therefore dropped
+the write along with the echo — silently, with no error and nothing in `--mission-memory` or any
+other sink.
+
+**Decision (orchestrator, from the pilot's perspective):** a mark the pilot asked for must never be
+lost. `mark_target_fn(contact_id, now_sim)` is now called unconditionally at command time, the same
+moment every other command in this family performs its unconditional side effect (resolving a
+target, registering a task) — recording the contact's believed position at the instant the pilot
+said "mark target," which is what that command means. Only the returned readback text (which carries
+no position — `"mark N set on <contact_id>"`) is deferred through `_speak_or_defer`; the deferred
+closure just replays the already-computed string rather than re-deriving anything. This removes the
+special case entirely: `mark_target` is no longer the one command whose pending entry *is* the
+action, so a dropped entry can only ever drop a spoken echo, exactly like `select_target`/`step`/
+`follow`/`watch_nearest`/`report*`. `_PendingPositionalReply`'s own class docstring already described
+"writing a mission-memory mark" as one of the immediate, unconditional side effects every deferred
+command performs before deferring — that was the intended invariant all along; `_handle_mark_target`
+simply hadn't honoured it.
+
+Updated `_handle_mark_target`'s docstring to state the new reasoning and point at this fix. Left
+`_PendingPositionalReply`'s class docstring and `drain_pending_positional_replies`'s own docstring
+unchanged — both already describe the behaviour this fix now actually delivers.
+
+**Tests added** (`body-layer/tests/test_crew_console_mission_memory.py`), each confirmed by a
+mutation check (temporarily restored the old deferred-call code, confirmed the new test goes red for
+the stated reason, restored the fix, confirmed the file's sha256 matches pre-mutation):
+- `test_mark_target_writes_immediately_even_while_the_channel_is_busy` — the write happens at command
+  time even with the channel busy; only the readback is pending; draining later replays the
+  already-computed text without calling the write function again.
+- `test_mark_target_write_survives_refusal_dropping_the_pending_readback` — setting `console.refused`
+  before draining drops the pending readback but the write (recorded via the fake closure's call log)
+  already happened and is untouched.
+- `test_mark_target_write_survives_a_mission_reset_dropping_the_pending_readback` — same, reached via
+  `reset_for_new_mission()` instead of refusal.
+
+**Optional refinement also applied:** `body-layer/src/belief/audio_client.py`'s `get_transcripts()`
+docstring was still listing the pre-`slots`/`correlation_id` seven-field `TranscriptEvent` shape;
+updated to the real nine-field shape (`transcript_queue.TranscriptEvent.to_dict`, confirmed by
+reading that method directly).
+
+**Checks (body-layer only, this file's touched set):**
+- `ruff format --check`: pass (156 files already formatted)
+- `ruff check`: pass
+- `mypy src` (run `cd body-layer && .venv/bin/mypy src`): pass, 68 source files
+- `pytest tests -q`: pass — 2267 passed, 4 xfailed (2264 + 3 new tests; no flake hit this run)
