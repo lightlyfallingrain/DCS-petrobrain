@@ -246,4 +246,8 @@ User, verbatim:
 > usefull actually. Instead we could just replace names (that are often foreign and tell me nothing
 > and take time to say) with "village" or "city"
 
-Not yet explored.
+**What exists:** the name comes from `body-layer/src/belief/enrichment.py` (`"near {name}
+({distance}m)"`, `"inside {name}"`). Unnamed settlements already read as "a built-up area" or "an
+unnamed settlement". world-model has a size word for some places but not all: OSM points carry
+`place=city|town|village` as `subtype`, OSM settlement polygons carry `area_m2`, and DCS
+`towns.lua` entries carry neither. Not yet explored with the user.
