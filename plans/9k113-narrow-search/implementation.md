@@ -256,3 +256,84 @@ two runs -- `test_connection_reporter_says_disconnected_once_then_connected_once
 `test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure` -- both from the
 task's own known-flake list, both pass alone on rerun, neither touches `optic_policy.py` or this
 change's call paths).
+
+---
+
+### F4 follow-up: the wide sweep's far edge is wide's own reach, not the old shared near-band edge
+
+Source: `docs/acceptance/2026-10-20-sortie-feedback.md`, "F4 -- wide sweep band" (user: *"it makes
+sense to use it up to where it can bring information, be it detection or classification. At greater
+distances it cannot, narrow can."*). This supersedes Notable Discovery 3 above: the wide leg had
+been sharing `[SIGHT_SEARCH_NEAR_M, SIGHT_SEARCH_MID_M]` (2.3-5.6 km) with `narrow_near`, i.e. wide's
+far edge was binoculars' own boundary rather than wide's own.
+
+**Fix, as flagged in Notable Discovery 3**: confined to `logger.py`'s `sight_wide_search=` call's
+`far_m` argument, which now reads a new derived constant, `_SIGHT_WIDE_SEARCH_FAR_M`, instead of
+`SIGHT_SEARCH_MID_M`.
+
+**No new tunable.** Per the task's own preference, this is derived from existing calibration rather
+than guessed: `SIGHT_SEARCH_NEAR_M` is already the reference vehicle's (T-72, 7 m) unaided presence
+reach, and `SIGHT_SEARCH_FAR_M`'s own comment already establishes the pattern of scaling that same
+base by an optic's `presence_range_mult` to get that optic's own presence reach for the same vehicle
+(`2333 * 5.81` for narrow). This applies the identical scaling to `SIGHT_WIDE_OPTIC`'s own
+multiplier: `SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult = 2_333.0 * 3.55 =
+8_282.15 m` (**~8.28 km**), clamped by `min()` against `PLAYER_BUBBLE_RADIUS_M` (10 km, the tighter
+of the two caps that could apply -- `SIGHT_WIDE_OPTIC.range_cap_m` is the looser 20 km). The clamp
+does not bind today (8.28 km < 10 km) but is applied anyway since a retuned `SIGHT_SEARCH_NEAR_M`
+could push the derived value past it. No `tuning.py` declaration, no `defaults.toml` regeneration --
+the value is a pure function of an already-tunable constant plus fixed optic calibration, not an
+independent judgement call.
+
+**"The farther of detection and classification reach" needs no separate class-threshold
+computation.** `tier_ranges`' chained `min()`s make a class threshold never exceed its own optic's
+presence threshold, structurally, for any object profile or optic (`class_threshold_m = min(
+presence_threshold_m, ...)`), so the presence reach alone already is the larger of the two --
+verified in `TestSightWideSearchFarM::test_presence_reach_is_already_the_farther_of_presence_and_
+class` rather than assumed.
+
+**Files changed this round**: `body-layer/src/logger.py` (the new `_SIGHT_WIDE_SEARCH_FAR_M`
+constant beside `_SEARCH_BAND_M`; the `sight_wide_search=` call's `far_m` argument; the adjoining
+comment pruned of its now-stale "wide orientation pass over the near band" wording per the
+"prune the comment you are standing next to" rule -- 1 comment block updated, same file);
+`body-layer/tests/test_logger.py` (new tests, below); this file.
+
+**Tests added** (`TestSightWideSearchFarM`, `tests/test_logger.py`):
+- `test_matches_the_reference_vehicles_presence_reach_through_wide` -- the constant equals
+  `SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult`.
+- `test_reaches_further_than_the_old_shared_near_band_boundary` -- greater than `SIGHT_SEARCH_MID_M`.
+- `test_stays_inside_the_player_bubble` -- less than `PLAYER_BUBBLE_RADIUS_M` (the clamp's own
+  headroom today).
+- `test_presence_reach_is_already_the_farther_of_presence_and_class` -- falsifies the derivation's
+  own structural claim directly against `tier_ranges`/`profile_for("T-72")`, rather than assuming it.
+- `test_wide_sweep_reaches_a_shallower_elevation_than_the_old_boundary` -- `_sight_in_regard_sweep`
+  itself produces a shallower (further-reaching) elevation with the new far edge than with the old
+  one, same near edge and altitude. Its own docstring flags that this does **not** prove `run_once`
+  passes the new constant at its call site -- that is the next test's job.
+- `test_run_once_passes_the_wide_legs_own_far_edge` -- the one test that actually pins the call-site
+  wiring: monkeypatches `logger._sight_in_regard_sweep` to spy on the `far_m` passed for the
+  `optic=SIGHT_WIDE_OPTIC` call inside a real `ConsolePerceptionRunner.run_once()`, and asserts it
+  is `_SIGHT_WIDE_SEARCH_FAR_M`. Needs no `SIGHTING`-dwell state set up: `sight_wide_search` is
+  computed fresh every poll regardless of sight phase, mirroring `search`'s own unconditional
+  computation (both are plumbed into `decide_optic(...)` unconditionally even when nothing reads
+  them that poll), so a default runner's very first poll already exercises the call.
+
+**Mutation-checked**, not merely written (`shasum` before/after, restored by overwrite rather than by
+eye): reverted the `sight_wide_search=` call's `far_m` argument from `_SIGHT_WIDE_SEARCH_FAR_M` back
+to `SIGHT_SEARCH_MID_M` (the pre-fix code) and reran `TestSightWideSearchFarM` -- exactly one test
+went red, `test_run_once_passes_the_wide_legs_own_far_edge`, for exactly the stated reason
+(`assert [5647.0] == [8282.15]`); the other five stayed green, confirming they test the constant and
+the sweep function in isolation rather than the call site. The first attempt at this class (before
+the wiring test existed) was itself a near-miss worth recording: four of the five constant/function
+tests all passed against the *reverted* call site too, which is exactly the "test passes for the
+wrong reason" trap -- none of them actually exercised `run_once`, so none could have caught the
+one-line regression the task was about. Restored by overwrite from a saved copy, `shasum`-verified
+identical to the pre-mutation file.
+
+**Checks (this round)**: `ruff format --check src tests`: pass. `ruff check src tests`: pass.
+`cd body-layer && .venv/bin/mypy src`: pass, no issues in 68 source files. `pytest tests -q`: 2280
+passed, 4 xfailed, 0 failed, no flakes observed this run (none of the task's known-flake tests
+needed a rerun).
+
+**Derived wide band edge: ~8.28 km** (`8_282.15` m exactly, for the reference vehicle), up from the
+old shared 5.6 km -- inside the 10 km player bubble, so it is wide's genuine reach rather than a
+value the bubble cuts short.

@@ -42,6 +42,7 @@ from belief.mission_phase import (
 )
 from belief.tasks import TaskStore
 from logger import (
+    _SIGHT_WIDE_SEARCH_FAR_M,
     DEFAULT_SPEECH_LOG_PATH,
     LOOK_DIRECTION_FOV_HALF_DEG,
     ConsolePerceptionRunner,
@@ -1217,6 +1218,118 @@ class TestSightInRegardSweep:
         )
         azimuths = [azimuth for azimuth, _ in pattern]
         assert all(-60.0 <= azimuth <= -30.0 for azimuth in azimuths)
+
+
+class TestSightWideSearchFarM:
+    """`_SIGHT_WIDE_SEARCH_FAR_M` -- `docs/acceptance/2026-10-20-sortie-
+    feedback.md` F4: the wide sweep's far edge is wide's own useful reach,
+    not `SIGHT_SEARCH_MID_M` (binoculars' own boundary, which the near
+    band and the wide leg used to share)."""
+
+    def test_matches_the_reference_vehicles_presence_reach_through_wide(
+        self,
+    ) -> None:
+        from belief.optic_policy import SIGHT_SEARCH_NEAR_M
+
+        expected = SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult
+        assert _SIGHT_WIDE_SEARCH_FAR_M == pytest.approx(expected)
+
+    def test_reaches_further_than_the_old_shared_near_band_boundary(
+        self,
+    ) -> None:
+        from belief.optic_policy import SIGHT_SEARCH_MID_M
+
+        assert _SIGHT_WIDE_SEARCH_FAR_M > SIGHT_SEARCH_MID_M
+
+    def test_stays_inside_the_player_bubble(self) -> None:
+        assert _SIGHT_WIDE_SEARCH_FAR_M < association.PLAYER_BUBBLE_RADIUS_M
+
+    def test_presence_reach_is_already_the_farther_of_presence_and_class(
+        self,
+    ) -> None:
+        """Falsifies the derivation's own claim rather than assuming it:
+        `tier_ranges`' chained `min()`s make a class threshold never
+        exceed its own optic's presence threshold, for the reference
+        vehicle and `SIGHT_WIDE_OPTIC` this constant is built from -- so
+        taking the presence reach alone already is "the farther of
+        detection and classification reach"."""
+        from perception.object_model import (
+            apparent_extent_m,
+            distinctiveness_of,
+            profile_for,
+        )
+        from perception.visibility import tier_ranges
+
+        profile = profile_for("T-72")
+        extent = apparent_extent_m(profile, None)
+        distinctiveness = distinctiveness_of(profile)
+        presence_m, class_m, _type_m = tier_ranges(
+            presence_size_m=profile.size_m,
+            recognition_extent_m=extent,
+            optic=SIGHT_WIDE_OPTIC,
+            distinctiveness=distinctiveness,
+        )
+        assert class_m <= presence_m
+
+    def test_wide_sweep_reaches_a_shallower_elevation_than_the_old_boundary(
+        self,
+    ) -> None:
+        """`_sight_in_regard_sweep` itself, not the call site: with the
+        production far edge it produces a shallower (less negative, i.e.
+        further-reaching) elevation than it would with the old shared
+        `SIGHT_SEARCH_MID_M` boundary, for the same near edge and
+        altitude. Does **not** prove `run_once` actually passes this far
+        edge -- see `test_run_once_passes_the_wide_legs_own_far_edge`
+        below for that."""
+        from belief.optic_policy import SIGHT_SEARCH_MID_M, SIGHT_SEARCH_NEAR_M
+
+        old_pattern = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            _ownship_for_search(),
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=SIGHT_SEARCH_MID_M,
+        )
+        new_pattern = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            _ownship_for_search(),
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+        )
+        assert new_pattern[0][1] > old_pattern[0][1]
+
+    def test_run_once_passes_the_wide_legs_own_far_edge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pins the call-site wiring itself: `run_once`'s own `decide_
+        optic(...)` call is made with `far_m=_SIGHT_WIDE_SEARCH_FAR_M` for
+        the `optic=SIGHT_WIDE_OPTIC` leg, not `SIGHT_SEARCH_MID_M` (the old
+        shared boundary) -- the one line `docs/acceptance/
+        2026-10-20-sortie-feedback.md` F4 asked to change. Computed fresh
+        every poll regardless of sight phase (the same posture `search`'s
+        own unconditional computation already has), so no `SIGHTING`
+        dwell needs to be set up to observe it -- a default runner's very
+        first poll already makes the call."""
+        real_sweep = logger_module._sight_in_regard_sweep
+        captured_far_m: list[float] = []
+
+        def spy(
+            *args: object, optic: object, far_m: float, **kwargs: object
+        ) -> list[tuple[float, float]]:
+            if optic is SIGHT_WIDE_OPTIC:
+                captured_far_m.append(far_m)
+            return real_sweep(*args, optic=optic, far_m=far_m, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(logger_module, "_sight_in_regard_sweep", spy)
+
+        runner = ConsolePerceptionRunner(
+            aircraft_client=FakeAircraftClient(_telemetry_dict()),  # type: ignore[arg-type]
+            sources=[],
+        )
+        runner.run_once()
+
+        assert captured_far_m == [_SIGHT_WIDE_SEARCH_FAR_M]
 
 
 class TestSightOutOfRegardSweep:

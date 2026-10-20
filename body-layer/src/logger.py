@@ -658,17 +658,17 @@ class ConsolePerceptionRunner:
             ),
             # `plans/9k113-narrow-search/plan.md` Stage 3 -- the sight's own
             # active search cycle, computed fresh every poll the same way
-            # `search` above already is: a brief wide orientation pass over
-            # the near band, then narrow over that same near band, then
-            # narrow over the far band, then (Stage 2) a binocular
-            # excursion for whatever a commanded sector left outside the
-            # sight's own field of regard.
+            # `search` above already is: a brief wide orientation pass out
+            # to wide's own useful reach (`_SIGHT_WIDE_SEARCH_FAR_M`), then
+            # narrow over the near band, then narrow over the far band,
+            # then (Stage 2) a binocular excursion for whatever a commanded
+            # sector left outside the sight's own field of regard.
             sight_wide_search=_sight_in_regard_sweep(
                 self.scan_plan,
                 ownship,
                 optic=SIGHT_WIDE_OPTIC,
                 near_m=SIGHT_SEARCH_NEAR_M,
-                far_m=SIGHT_SEARCH_MID_M,
+                far_m=_SIGHT_WIDE_SEARCH_FAR_M,
             ),
             sight_narrow_near_search=_sight_in_regard_sweep(
                 self.scan_plan,
@@ -970,6 +970,42 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
 #: anyway. Stated as a constant rather than computed per contact because a
 #: search has no contact yet -- that is what it is looking for.
 _SEARCH_BAND_M: tuple[float, float] = (2_333.0, 5_647.0)
+
+#: Wide's own far edge for its idle-search leg -- not `SIGHT_SEARCH_MID_M`
+#: (binoculars' own reach), but the range beyond which wide itself can
+#: bring neither detection nor classification information
+#: (`docs/acceptance/2026-10-20-sortie-feedback.md`, "F4 -- wide sweep
+#: band": *"use it up to where it can bring information, be it detection
+#: or classification. At greater distances it cannot, narrow can."*).
+#:
+#: **Derived, not a new tunable**: `SIGHT_SEARCH_NEAR_M` is already the
+#: reference vehicle's unaided presence reach, and `SIGHT_SEARCH_FAR_M`'s
+#: own comment already establishes the pattern of scaling that same base
+#: by an optic's `presence_range_mult` to get *that* optic's presence
+#: reach for the same vehicle (`2333 * 5.81` for narrow) -- this applies
+#: the identical scaling to `SIGHT_WIDE_OPTIC`'s own multiplier
+#: (`2333 * 3.55 ~= 8282 m`), so it moves automatically if `SIGHT_SEARCH_
+#: NEAR_M` is ever retuned, rather than drifting out of step with it.
+#:
+#: **This is also "the farther of detection and classification reach"
+#: without computing a class threshold separately**: `tier_ranges`' own
+#: chained `min()`s (`perception.visibility.tier_ranges`) make a class
+#: threshold never exceed its own optic's presence threshold, for any
+#: object profile -- so the presence reach computed here already *is* the
+#: larger of the two, and a direct class-reach computation alongside it
+#: would only ever reproduce the smaller number.
+#:
+#: Clamped to `PLAYER_BUBBLE_RADIUS_M` (10 km) -- the tighter of the two
+#: caps that could apply, `SIGHT_WIDE_OPTIC.range_cap_m` being the looser
+#: 20 km -- since nothing beyond the bubble is ever admitted as a
+#: candidate regardless of what any optic could resolve. At ~8.28 km for
+#: the reference vehicle this sits inside the bubble today and the clamp
+#: does not bind, but a retuned `SIGHT_SEARCH_NEAR_M` could push it past
+#: that boundary.
+_SIGHT_WIDE_SEARCH_FAR_M: float = min(
+    SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult,
+    PLAYER_BUBBLE_RADIUS_M,
+)
 
 
 def _search_sweep(
