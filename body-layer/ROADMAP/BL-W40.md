@@ -2,7 +2,7 @@
 
 - [x] **Spoken callouts say "near a village" / "in the town" / "near a road" / "near a river"
   instead of a settlement/water body's proper name plus a bracketed distance figure.**
-  #status/done #needs-flight
+  #status/done #needs-flight **Merged to `main` 2026-10-20 (`83bf80bc`)**, `feature/landmark-words-no-names`.
 
   **User, verbatim** (`docs/acceptance/2026-10-20-sortie-feedback.md`, F7): *"I get call outs that
   refer to settlement by it's name. While correct, I notice that's not very usefull actually.
