@@ -173,3 +173,14 @@ User, verbatim:
      The close, obvious shooter is exactly the one that cannot trigger the call.
 - **SAM launches are not reported by design yet**: `LAUNCH_SMOKE` (`BL-B74`) is named in
   `perception/emitters.py` but not built.
+
+### F6 — follow-up (user, 2026-10-20)
+
+> Should fire aimed at you be noticed wherever he's looking -> no. current behaviour correct in
+> that way.
+>
+> I flew a little bit more (probably same log files), commanded observ off and scan left.
+> Petrovich should definetely see the unit firing at me
+
+So reason 1 (gaze gating) is **correct behaviour**, by the user's decision. The later stretch —
+`observ off`, `scan left`, shooter on the left — is the case that must produce "taking fire".
