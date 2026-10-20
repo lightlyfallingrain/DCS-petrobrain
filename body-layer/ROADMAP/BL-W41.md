@@ -19,8 +19,9 @@
   — measure first, revisit only if a real timeline shows the channel-modeled-clear case dominates
   ("measure first"); `--latency-log` records failed STT/synthesis attempts too ("yes").
 
-  **Not yet merged.** The user asked for this to land after `feature/9k113-narrow-search` merges
-  first; this DoD pass is the gate, not the merge.
+  **Merged to `main` 2026-10-20 (`9a5da6a4`)**, after `feature/9k113-narrow-search`. Stays
+  `#status/in-progress` until flown: `#needs-flight` is the open part. `feature/async-speech`
+  (F8, plan only) builds on this branch.
 
   **DoD mechanical checks, all three touched subprojects (audio-adapter, aircraft-layer,
   body-layer — the only ones this diff touches, confirmed from `git diff` against the branch's
