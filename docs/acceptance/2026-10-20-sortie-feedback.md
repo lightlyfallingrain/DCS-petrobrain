@@ -156,4 +156,20 @@ User, verbatim:
 > I can see tracers and SAM launches, but no report. Scan left (to enemy dircetion) commanded.
 > (most recent logs)
 
-Not yet investigated.
+**Investigated** (run `20261020-165724`, the live collector, and `dcs.log`):
+
+- DCS → collector works: `dcs.log` shows 147 Hook polls carrying shots in that run, and the live
+  collector's `/firing/latest` held `Ground-1-3` (Leopard-2A5) `targets_ownship: true` and
+  `Vulcan-3` firing — ~1.0 km at ~9:30 o'clock and ~1.3 km at ~8 o'clock.
+- Body-layer never turned them into "taking fire", for two independent reasons:
+  1. **The shooters were outside his current gaze.** Of ~470 detection rows for each shooter,
+     ~390 were rejected at the `gaze` gate (looking at 11–1 o'clock, often through `sight_narrow`,
+     which has no peripheral vision). The emitter bypass skips only range/size and forest; gaze,
+     cockpit mask, optic FOV and terrain are never bypassed (`perception/visibility.py`).
+  2. **Even when he did see a shooter, "taking fire" is only possible if he could not have seen it
+     without the muzzle flash.** `naked_eye_source.py` sets `targets_ownship` only when
+     `result.emitter_kind is not None`, i.e. when the emitter *bypass was needed*. A tank in plain
+     view at 1 km is an ordinary admission, so it becomes a plain contact and never "taking fire".
+     The close, obvious shooter is exactly the one that cannot trigger the call.
+- **SAM launches are not reported by design yet**: `LAUNCH_SMOKE` (`BL-B74`) is named in
+  `perception/emitters.py` but not built.
