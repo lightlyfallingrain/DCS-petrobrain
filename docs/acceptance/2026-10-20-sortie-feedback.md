@@ -75,3 +75,17 @@ User, verbatim:
 > allows detection and classification at distance.
 
 Not yet explored. Card item A8 (9K113 sight).
+
+**What the logs and code say** (detection traces on the Windows clone, samples per optic):
+
+| run | sight_wide | sight_narrow |
+|---|---|---|
+| 160126 | 82034 | 2458 (~3 %) |
+| 163625 | 16858 | **0** |
+
+`belief/optic_policy.py` (the `observ on` branch): **wide is the sight's idle/search state;
+narrow is used only for a *look* at a contact already detected** that passes `is_worth_a_look`
+and the field-of-regard filter. Narrow is never used to search. So the contacts only narrow
+could detect — the far ones — can never cause narrow to be selected, because nothing selects
+narrow until something is already detected: a chicken-and-egg against exactly the use the user
+describes (*"what allows detection and classification at distance"*).
