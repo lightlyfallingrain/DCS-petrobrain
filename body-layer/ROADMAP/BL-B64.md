@@ -162,8 +162,8 @@
 
   ---
 
-  **Follow-on, 2026-10-20: `feature/9k113-narrow-search` merged, DoD PASS
-  (`plans/9k113-narrow-search/dod-check.md`).** #needs-flight
+  **Follow-on: `feature/9k113-narrow-search` merged to `main` 2026-10-21 as `ceb3ba81`, DoD PASS
+  (batch 1 at `1147dacc`, batch 2 at `9f4b9610`; `plans/9k113-narrow-search/dod-check.md`).** #needs-flight
 
   Closed two defects the 2026-10-19 sortie found in this entry's own shipped perception (sortie
   feedback F4/F5, `docs/acceptance/2026-10-20-sortie-feedback.md`): the idle sight had no real

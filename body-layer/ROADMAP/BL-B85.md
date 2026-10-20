@@ -10,6 +10,9 @@
   `sight_search_leg` never advanced past its initial `"wide"` for the whole run — full starvation
   of the new active search cycle (`plans/9k113-narrow-search/plan.md` Stage 3).** #status/in-progress
 
+  **Merged to `main` 2026-10-21 as `ceb3ba81`** (`feature/9k113-narrow-search`, DoD PASS batch 2 at
+  `9f4b9610`); stays `[~]` until flown — see the closing paragraph below.
+
   **Built on `feature/9k113-narrow-search`, not left as backlog** — the user overruled Reviewer/
   Security's non-blocking disposition: *"BL-B85 is required for 9K113, we can't just indefinately
   look at one thing. Needs a timer value or the like that forces moving on"*
