@@ -37,4 +37,7 @@ Windows, the co-located `--target aircraft-layer` path, outage/recovery lines, l
 
 ## Results
 
-(to be filled from the user's report)
+**Block 1 (Mac), 2026-10-20 — PASS.** User, verbatim: *"piper - works on mac, very good audio,
+me happy"*. Not yet reported: the live pytest (0 skipped?), end-to-end latency, outage block 4.
+
+Blocks 2–5 (Windows, co-located, outage, latency): open.
