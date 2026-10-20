@@ -73,6 +73,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_BURNING,
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+    PROVENANCE_EMITTER_FIRING_VISIBLE,
 )
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -2195,6 +2196,49 @@ def test_route_event_contact_firing_seen_targeting_ownship_says_taking_fire(
     # Never a range, and never attribution.
     assert "kilomet" not in speech.text.lower()
     assert "we got it" not in speech.text.lower()
+
+
+def test_route_event_contact_firing_seen_visible_firing_at_others_says_type_and_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/taking-fire-visible-shooter/debug.md` (second half, F6
+    follow-up) -- the accepted wording for a unit admitted *without* the
+    emitter bypass: unlike the bypass-needed "something firing... far"
+    case just above, the type and range are both known and both spoken,
+    via `_contact_report_text`'s ordinary line with `"firing"` appended in
+    place of the (suppressed) motion clause. The exact range figure is
+    deliberately not asserted here -- `_enrichment_context`'s faked
+    `project_terrain_aware` (an identity stub, no real world-model DB)
+    collapses the believed position onto ownship's own, the same
+    fixture-driven "very close" quirk `test_route_event_contact_detected_
+    includes_clock_range_when_enriched` above already works around with a
+    loose `startswith`/`in` check rather than the literal text."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _firing_observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                provenance=PROVENANCE_EMITTER_FIRING_VISIBLE,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    firing_event = next(e for e in store.events if e.kind == CONTACT_FIRING_SEEN)
+
+    speech = route_event(
+        store, firing_event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text.startswith("BMP-2, ")
+    assert "o'clock" in speech.text
+    assert speech.text.endswith(", firing.")
+    # Never the muzzle-flash-only wording, and never "taking fire" (not
+    # targeting ownship).
+    assert "far" not in speech.text.lower()
+    assert "taking fire" not in speech.text.lower()
 
 
 def test_route_event_contact_firing_seen_omits_range() -> None:

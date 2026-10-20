@@ -12,6 +12,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_BURNING,
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+    PROVENANCE_EMITTER_FIRING_VISIBLE,
 )
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -137,15 +138,19 @@ def test_percept_of_carries_live_los_clear_through_unchanged() -> None:
 
 
 def test_percept_of_maps_both_firing_provenance_values_to_firing_kind() -> None:
-    """`plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- both of
-    `naked_eye_source.py`'s `FIRING` provenance values resolve to the same
-    `EmitterKind`; which one it was crosses separately via
-    `targets_ownship`."""
+    """`plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- despite the
+    name (predating `plans/taking-fire-visible-shooter/debug.md`'s second
+    half), this now covers all **three** of `naked_eye_source.py`'s
+    `FIRING` provenance values: they all resolve to the same `EmitterKind`;
+    which one it was crosses separately via `targets_ownship`/
+    `firing_visible`."""
     not_targeting = _observation(provenance=PROVENANCE_EMITTER_FIRING)
     targeting = _observation(provenance=PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP)
+    visible = _observation(provenance=PROVENANCE_EMITTER_FIRING_VISIBLE)
 
     assert percept_of(not_targeting).emitter_kind == EmitterKind.FIRING.value
     assert percept_of(targeting).emitter_kind == EmitterKind.FIRING.value
+    assert percept_of(visible).emitter_kind == EmitterKind.FIRING.value
 
 
 def test_percept_of_maps_targets_ownship_provenance_to_true() -> None:
@@ -167,3 +172,26 @@ def test_percept_of_maps_every_other_provenance_to_targets_ownship_false() -> No
 
     assert percept_of(burning).targets_ownship is False
     assert percept_of(ordinary).targets_ownship is False
+
+
+def test_percept_of_maps_visible_firing_provenance_to_firing_visible_true() -> None:
+    """`plans/taking-fire-visible-shooter/debug.md` (second half) --
+    `_TARGETS_OWNSHIP_PROVENANCE`'s sibling mapping."""
+    observation = _observation(provenance=PROVENANCE_EMITTER_FIRING_VISIBLE)
+
+    assert percept_of(observation).firing_visible is True
+
+
+def test_percept_of_maps_every_other_provenance_to_firing_visible_false() -> None:
+    """Including the other two `FIRING` provenance values -- `firing_
+    visible` is `True` only for the specific "admitted without the bypass"
+    case, not for "is firing" in general."""
+    targets_ownship = _observation(provenance=PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP)
+    bypass_needed = _observation(provenance=PROVENANCE_EMITTER_FIRING)
+    burning = _observation(provenance=PROVENANCE_EMITTER_BURNING)
+    ordinary = _observation()
+
+    assert percept_of(targets_ownship).firing_visible is False
+    assert percept_of(bypass_needed).firing_visible is False
+    assert percept_of(burning).firing_visible is False
+    assert percept_of(ordinary).firing_visible is False

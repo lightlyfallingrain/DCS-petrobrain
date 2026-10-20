@@ -46,3 +46,25 @@
   Related: `[[BL-B72]]` (the shared emitter bypass and the burning emitter), `[[BL-B74]]` (the SAM
   half, which shares this entry's channel), `[[AC-B8]]` (the channel itself), `[[BL-2]]` (what
   decays afterwards).
+
+  **A live sortie exercised the `#needs-flight` cockpit-judgement question above and found a real
+  defect, not a pass.** `docs/acceptance/2026-10-20-sortie-feedback.md` F6/F6-follow-up, fixed on
+  `fix/taking-fire-visible-shooter` (DoD-passed, not yet flown): a Leopard-2A5 at 1,073 m firing at
+  ownship, admitted
+  as an ordinary ungated contact (no emitter bypass needed to see it — the opposite of the
+  bypass-needed case this entry's own fixture coverage exercised), never produced "taking fire" at
+  all. Root cause: `targets_ownship_by_object_id` and the provenance fold both read the
+  `targets_ownship`/firing facts only when `VisibilityResult.emitter_kind is not None` — i.e. only
+  when the bypass had actually fired — discarding the fact for the easiest-to-see shooters.
+  Same-shaped gap for the "firing at others" wording, fixed in the same branch's second half
+  (`PROVENANCE_EMITTER_FIRING_VISIBLE`): a visible unit firing at something other than ownship was
+  reported as an ordinary contact instead of "…, firing." Full account:
+  `plans/taking-fire-visible-shooter/{debug,implementation,review,review-2}.md`. Classification
+  tier is unaffected by either fix (asserted in tests); `visibility.py`/`emitters.py`/`gaze.py` are
+  untouched.
+
+  **`#needs-flight` carries forward, narrower than before.** This sortie closed the "does the
+  bypass-needed wording read right" half implicitly (it was the visible/no-bypass half that broke);
+  what is still outstanding is this *fix* itself (not yet flown) plus the two questions this entry
+  already carried: whether `S_EVENT_SHOOTING_START` retriggers mid-burst, and whether a multi-unit
+  firing section's clustering looks sane in the moment. All three can likely clear on one sortie.

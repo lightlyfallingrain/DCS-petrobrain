@@ -52,6 +52,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_BURNING,
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
+    PROVENANCE_EMITTER_FIRING_VISIBLE,
 )
 from perception.source import (
     Observation,
@@ -77,15 +78,18 @@ from perception.source import (
 #: docstring).
 _EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
     PROVENANCE_EMITTER_BURNING: EmitterKind.BURNING.value,
-    # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- both of
-    # `naked_eye_source.py`'s `FIRING` provenance values map to the same
-    # `EmitterKind`, since `Percept.emitter_kind` only ever needs to answer
-    # "which kind", not "and was it aimed at us" -- that second bit crosses
-    # through its own closed mapping, `_TARGETS_OWNSHIP_PROVENANCE` below,
-    # for the same reason this one exists: a free-form string must not
-    # cross this boundary on its own say-so.
+    # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`), extended by
+    # `plans/taking-fire-visible-shooter/debug.md`'s second half -- all
+    # three of `naked_eye_source.py`'s `FIRING` provenance values map to
+    # the same `EmitterKind`, since `Percept.emitter_kind` only ever needs
+    # to answer "which kind", not "aimed at us" or "already visible
+    # unaided" -- those two further bits cross through their own closed
+    # mappings, `_TARGETS_OWNSHIP_PROVENANCE`/`_VISIBLE_FIRING_PROVENANCE`
+    # below, for the same reason this one exists: a free-form string must
+    # not cross this boundary on its own say-so.
     PROVENANCE_EMITTER_FIRING: EmitterKind.FIRING.value,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: EmitterKind.FIRING.value,
+    PROVENANCE_EMITTER_FIRING_VISIBLE: EmitterKind.FIRING.value,
 }
 
 #: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the one
@@ -97,6 +101,18 @@ _EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
 #: several values) -- membership is the whole answer.
 _TARGETS_OWNSHIP_PROVENANCE: frozenset[str] = frozenset(
     {PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP}
+)
+
+#: `plans/taking-fire-visible-shooter/debug.md` (second half, F6 follow-up
+#: "visible unit firing at others") -- `_TARGETS_OWNSHIP_PROVENANCE`'s
+#: direct sibling: the one `PROVENANCE_*` value whose presence means "this
+#: is a firing report, and the unit was admitted without the emitter
+#: bypass, so its classification is real and should be spoken" rather than
+#: the bypass-needed, presence-only "something firing... far" case. Same
+#: `frozenset`-membership shape, same reason: `Percept.firing_visible`
+#: must not be a passthrough of the free-form `provenance` string itself.
+_VISIBLE_FIRING_PROVENANCE: frozenset[str] = frozenset(
+    {PROVENANCE_EMITTER_FIRING_VISIBLE}
 )
 
 
@@ -186,7 +202,18 @@ class Percept:
     meaningful alongside `emitter_kind == EmitterKind.FIRING.value`;
     `False` is the default and is also what every other `emitter_kind`
     (including `BURNING`, which carries no notion of a target at all)
-    resolves to."""
+    resolves to.
+
+    `firing_visible` (`plans/taking-fire-visible-shooter/debug.md`, second
+    half, F6 follow-up) is `targets_ownship`'s sibling, through its own
+    closed mapping (`_VISIBLE_FIRING_PROVENANCE`): `True` means this firing
+    report was admitted *without* the emitter bypass, so the classification
+    it carries is real (whatever tier the ordinary admission earned) and
+    should be spoken, rather than the bypass-needed case's presence-only
+    "something firing... far". Mutually exclusive with `targets_ownship` by
+    construction (`naked_eye_source._build_observation`'s fold resolves
+    `targets_ownship` first), but not enforced as an invariant here --
+    both default to `False`, same as every other `emitter_kind`."""
 
     t_sim: float
     source: str
@@ -204,6 +231,7 @@ class Percept:
     relative_direction: RelativeDirection | None = None
     emitter_kind: str | None = None
     targets_ownship: bool = False
+    firing_visible: bool = False
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -229,4 +257,5 @@ def percept_of(observation: Observation) -> Percept:
         relative_direction=observation.relative_direction,
         emitter_kind=_EMITTER_KIND_BY_PROVENANCE.get(observation.provenance),
         targets_ownship=observation.provenance in _TARGETS_OWNSHIP_PROVENANCE,
+        firing_visible=observation.provenance in _VISIBLE_FIRING_PROVENANCE,
     )
