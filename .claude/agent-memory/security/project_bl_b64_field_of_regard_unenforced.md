@@ -1,6 +1,6 @@
 ---
 name: bl-b64-field-of-regard-unenforced
-description: 9K113 sight (BL-B64) added field-of-regard data (regard_azimuth_half_deg etc.) to Optic but never enforced it as a selection bound -- required fix, caught by direct execution not reading
+description: 9K113 sight (BL-B64) added field-of-regard data (regard_azimuth_half_deg etc.) to Optic but never enforced it as a selection bound -- required fix, caught by direct execution not reading. Recurred 2026-10-20 on a new producer (search_pattern/idle search legs) that was elevation-unaware, past the first fix's own scope
 metadata:
   type: project
 ---
@@ -39,3 +39,32 @@ it is *set* — a field that is only ever tested with `is not None` is very like
 feature flag, not as the bound its docstring claims it is.
 
 Full report: `plans/9k113-sight/security.md`, written 2026-10-15, verdict NEEDS FIXES.
+
+**Recurred once, on a new producer, 2026-10-20 (`plans/9k113-narrow-search/security-review.md`,
+Required Fix).** The follow-up above fixed `look_sweep` (the sweep around an already-chosen look
+target) by filtering through `within_field_of_regard` — azimuth *and* elevation, since
+`within_field_of_regard` checks both. That looked like it closed the whole class. It did not: the
+9k113-narrow-search feature added a second producer of sight-optic aim, `logger.
+_sight_in_regard_sweep` (the idle search cycle's wide/narrow legs), built on `search_pattern` —
+a much older function, written for `BINOCULAR_OPTIC`, which has no field of regard in elevation at
+all. `search_pattern` caps azimuth (`max_half_width_deg`) but was never given an elevation clamp,
+because it never needed one before. The new caller hands it `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`
+— optics that *do* have `regard_elevation_down_deg=-15.0` — and `search_pattern`'s own geometry
+(elevation derived from `atan2(altitude_agl_m, range_m)`, unbounded below) commands elevations past
+that limit at any ownship altitude above ~625 m AGL for this branch's own near-band edge (2333 m) —
+an ordinary cruise/orbit altitude, not a stress case. This became the real detection-gate boresight
+(`Gaze.center_elevation_deg` → `within_optic_fov`), not a cosmetic value.
+
+**Why the "closed" fix didn't generalise, and the sharper form of the original lesson**: the 2026-
+10-15 follow-up's own widened audit ("what else produces or mutates a committed aim after the
+target is validated") was run *at that time*, over the functions that existed *at that time*. It
+could not see a producer that did not exist yet. **The lesson is not "audit every producer once" —
+it is "a new producer of a bounded-optic's aim is a new instance of the question, not covered by a
+closed finding."** Grepping for the deferral language again after this feature would not have
+found it either, because nothing in `search_pattern` or its new caller says "deferred" or
+"unenforced" — the gap is a silent omission (a function never asked to clamp a bound it didn't use
+to need), not a documented one. The only thing that would have caught it ahead of time: when a new
+caller hands an existing, elevation-unaware sweep function an optic that *does* have an elevation
+field of regard, check that function's elevation output against the bound explicitly, the same way
+you would check a brand-new function — "this function was already reviewed for this risk class"
+is a claim about its *old* callers, not its new one.
