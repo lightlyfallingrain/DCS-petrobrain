@@ -112,3 +112,78 @@ confirm both are load-bearing, not decorative. Not independently re-read line-by
 `audio-adapter/src/local_playback.py`'s no-op parameter threading (low-risk, dev-only path per its
 own docstring) and the `CLAUDE.md` doc additions (read for accuracy of claims, not proofread for
 prose).
+
+---
+
+## Re-review — Required Fix 1 commit `4ac44e29`
+
+Re-reviewed `4ac44e29d1feb997bc29b7b2cf32d2f44b0c70f6` (parent `4d5ecbdc`, this review's own prior
+commit), which addresses Required Fix 1 above. Checked out detached (the branch tip is held in
+another worktree); tree was clean before and after.
+
+**The fix removes the special case rather than picking either of the two recommended options.**
+`_handle_mark_target` now calls `self.mark_target_fn(contact_id, now_sim)` unconditionally at
+command time — before `_speak_or_defer` is ever reached — and only the resulting (position-free)
+readback string is deferred; the deferred closure replays the already-computed text rather than
+re-deriving anything. This matches every other Stage 6 handler's shape exactly
+(`select_target`/`step`/`follow`/`watch_nearest`*/`report`*: resolve-and-act unconditionally, defer
+only the *speaking*), so `mark_target` is no longer the one command whose pending entry *is* the
+action. Confirmed by reading all six handlers directly (`_handle_watch_nearest` ~2029,
+`_handle_follow` ~2200, `_handle_select_target` ~2361, `_handle_mark_target` ~2455, `_handle_step`
+~2542, `_handle_report` ~3072): every one performs its side effect (if any) before calling
+`_speak_or_defer`; `_handle_report` has no side effect to make unconditional, by its own docstring's
+correct reasoning ("a pure read... there is nothing *to* make unconditional").
+
+**Verified the "drop echo, never action" property holds for every Stage 6 command, not just
+`mark_target`.** `drain_pending_positional_replies` (refusal) and `reset_for_new_mission`
+(`_pending_positional_replies` absent from the `__init__` "survives" list, confirmed by reading that
+method) both only ever discard entries in `_pending_positional_replies`, and every entry in that
+list is now, for every handler, a closure over an already-executed side effect plus text to speak —
+there is no handler left whose closure performs the write itself. `_PendingPositionalReply`'s own
+class docstring already stated "writing a mission-memory mark" as one of the immediate,
+unconditional side effects — correctly unchanged, since this fix makes the code match that
+docstring rather than the other way round.
+
+**Mutation check, done myself, not re-trusted from `implementation.md`'s claim:** restored the old
+deferred-call code (`mark_target_fn = self.mark_target_fn` captured before the early-returns, the
+call moved inside `_render`), ran `tests/test_crew_console_mission_memory.py` — all three new tests
+failed for the stated reason (`calls == []` instead of `[("CONTACT_7", 3.0)]`, i.e. the write never
+ran because it was waiting on the deferred closure that refusal/reset drops before it fires).
+Restored the fix; `sha256sum src/belief/crew_console.py` matched pre-mutation exactly; `git status
+--porcelain` clean throughout.
+
+**Checks, run myself in this worktree** (`.venv` resolved from the main checkout's
+`body-layer/.venv/bin/`, cwd inside this worktree's `body-layer/`):
+- `ruff format --check src tests`: pass, 156 files already formatted
+- `ruff check src tests`: pass
+- `cd body-layer && mypy src`: pass, 68 source files
+- `pytest tests -q`: 2267 passed, 4 xfailed on a clean run; two separate reruns each hit exactly one
+  of the flagged pre-existing flakes (`test_connection_reporter_announces_the_first_connection`,
+  `test_connection_reporter_says_disconnected_once_then_connected_once`,
+  `test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure`), each passing in
+  isolation on immediate retry — consistent with the known timing flakes named in this task, not a
+  regression from this commit (`git diff HEAD^ HEAD` touches none of `logger.py`'s connection-
+  reporter or mission-start-reset code paths).
+
+**Optional refinement** (`audio_client.py` docstring): confirmed against
+`audio-adapter/src/transcript_queue.py`'s actual `TranscriptEvent.to_dict` — nine fields exactly as
+the new docstring states (`transcript`, `confidence`, `token`, `match_ratio`, `verb_anchored`,
+`ambiguous`, `t_wall`, `slots`, `correlation_id`). Accurate. (Note, not blocking: `audio-adapter/
+CLAUDE.md`'s own "Commands" section still quotes the old seven-field shape in its `GET
+/transcripts/poll` description — pre-existing staleness this commit's diff doesn't touch, since only
+`body-layer/src/belief/audio_client.py` was in scope for the optional refinement.)
+
+No new required fixes. No scope drift — the diff is exactly the four files `implementation.md`
+describes, all previously-staged/committed.
+
+### Verdict
+
+APPROVE
+
+### Review Confidence
+
+Full read of the fix, all six Stage 6 handlers (to verify the pattern generalizes, not just that
+`mark_target` individually looks right), `drain_pending_positional_replies`, `reset_for_new_
+mission`, and `_PendingPositionalReply`'s docstring. Mutation-tested the fix myself rather than
+trusting `implementation.md`'s account of its own mutation check. Ran all four body-layer checks
+myself in this worktree.
