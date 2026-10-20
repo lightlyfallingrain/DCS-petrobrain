@@ -49,7 +49,7 @@
 
   **A live sortie exercised the `#needs-flight` cockpit-judgement question above and found a real
   defect, not a pass.** `docs/acceptance/2026-10-20-sortie-feedback.md` F6/F6-follow-up, fixed on
-  `fix/taking-fire-visible-shooter` (DoD-passed, not yet flown): a Leopard-2A5 at 1,073 m firing at
+  `fix/taking-fire-visible-shooter` (DoD-passed, **merged to `main` 2026-10-20, `45dd91f9`**, not yet flown): a Leopard-2A5 at 1,073 m firing at
   ownship, admitted
   as an ordinary ungated contact (no emitter bypass needed to see it — the opposite of the
   bypass-needed case this entry's own fixture coverage exercised), never produced "taking fire" at
