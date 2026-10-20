@@ -34,7 +34,15 @@ is more friction than block-splitting plus field regexes.
 
 **Caveat, not yet resolved**: debrief.log is DCS's own end-of-mission recorder, a *separate*
 implementation from the live `world.addEventHandler` channel this project's Hook scripts actually
-subscribe to at runtime. The two are not guaranteed to agree event-for-event — see
-[[project_emitter_tracker_watchdog_staleness]] for a case where that gap is the likely explanation
-for an otherwise-puzzling live reading. Use debrief.log to establish what the *engine* did; it does
-not by itself prove what the live Hook *received*.
+subscribe to at runtime. The two are not guaranteed to agree event-for-event. Use debrief.log to
+establish what the *engine* did; it does not by itself prove what the live Hook *received*.
+
+**Mission-attribution pitfall, learned the hard way same session**: *DCS writes `debrief.log` only
+when a mission ends.* An existing `debrief.log` whose mtime looks like it falls inside a currently
+running sortie's time window is very likely from the **previous** run of the same mission file, not
+the live one — a mission restarted seconds apart reuses the same scenario/unit roster/sim-time
+pattern, which makes the coincidence easy to miss. This session first mis-attributed a `debrief.log`
+to the sortie actually in progress (matching mtime, matching theatre, matching unit names) and built
+a whole timing argument on it before the coordinator caught it — cross-check the sortie's own start
+timestamp (a body-layer log stamp, or `dcs.log`'s `onSimulationStart`) against `debrief.log`'s mtime
+*before* treating it as evidence about a specific in-progress sortie, not after.

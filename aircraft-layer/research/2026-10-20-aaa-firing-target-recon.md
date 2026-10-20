@@ -1,9 +1,16 @@
 # Why an M163 Vulcan's firing event read `targets_ownship=false` while a Leopard-2A5's read `true`
 
-**Date:** 2026-10-20
+**RESOLVED.** `targets_ownship: false` was the **correct** reading: this sortie's own `debrief.log`
+(written once the mission ended, confirmed below) shows the specific `SHOOTING_START` the collector
+read at t=335.461 genuinely targeted the player's wingman, not the player. Hypothesis (a) —
+first raised as speculation from the pilot's own recollection, then confirmed from the sortie's own
+post-mission record — is the answer. No code defect, in this Hook or in `EmitterTracker`.
+
+**Date:** 2026-10-20 (corrected twice same day — see "Correction" and "Final confirmation" below;
+the original version's Findings 1–4 contained two errors the first correction fixed, left in git
+history rather than silently edited away)
 **DCS version:** 2.9.30.28738 (`autoupdate.cfg`, `$DCS_INSTALL_PATH`, read directly this session)
-**Theatre:** Kola (`dcs.log`: `Dispatcher (Main): Terrain theatre Kola`, mission sequence 6,
-`onSimulationStart` 13:57:22 — the mission this session's evidence comes from)
+**Theatre:** Kola (`dcs.log`: `Dispatcher (Main): Terrain theatre Kola`)
 
 ### Question
 
@@ -14,7 +21,8 @@ player (confirmed by the user, bearing corrected 0→9 o'clock) while the collec
 `Ground-1-3` (Leopard-2A5) firing event correctly read `targets_ownship: true`. The note's own
 working hypothesis — *"the likely reading is that an AAA gun's `S_EVENT_SHOOTING_START` carries no
 `target` (nil, so false), but that is unverified"* — is exactly what this investigation was
-dispatched to check.
+dispatched to check, and it was wrong: see below for what the code and the sortie's own record
+actually show.
 
 ### What the Hook code actually does (so "false" is traced to a cause, not just observed)
 
@@ -33,177 +41,124 @@ end
 ```
 
 — **evidence: documented (direct code read)**. `false` is returned by exactly four distinct paths:
-(1) `event.target` is nil, (2) `world.getPlayer()` fails/returns nil, (3) either name lookup's
-`pcall` fails, or (4) the names are both resolved and simply don't match — i.e. the unit is
-genuinely engaging something that is not the player. The sortie note's hypothesis only considered
-path 1. Also load-bearing and previously undocumented in this file's own header prose:
-`targets_ownship` is computed **once**, Hook-side, at `S_EVENT_SHOOTING_START` time only, and is
-never revisited by a later `SHOOTING_END` or any subsequent poll — confirmed from the same source
-(`ownship01` is set inside the `kind == "S_EVENT_SHOOTING_START"` branch and nowhere else) and from
-`collector/firing_receiver.py`'s `ActiveEmitter`/`EmitterTracker._apply`, where `targets_ownship` is
-set only in the `S_EVENT_SHOOTING_START` branch and the `SHOOTING_END` branch only adjusts
-`expires_at_sim`.
 
-### Findings
+| branch | condition | what it means if this is what happened |
+|---|---|---|
+| 1 | `event.target == nil` | the AI had no locked target object at all at that instant |
+| 2 | `world.getPlayer()` fails or returns `nil` | the Hook couldn't resolve *its own side* of the comparison |
+| 3 | `safeName(player)` or `safeName(target)` fails (`pcall` raises) | a `getName()` call on either object raised |
+| 4 | both names resolved, and differ | the AI genuinely has a target, and it is not the player |
 
-1. **An M163 Vulcan's `S_EVENT_SHOOTING_START` does carry a populated `target` in this DCS
-   version, including naming the player when that is genuinely who it is engaging** — **evidence:
-   reproduced-locally, from this machine's own `Saved Games\DCS\Logs\debrief.log`** (675 KB, last
-   written 16:57, the same session whose `dcs.log` shows the Kola mission started 13:57:22 and
-   whose `PetrobrainFiringEvents` poll entries run 11:53–14:49 the same day — consistent with one
-   long, heavily-paused session, matching F6's own "DCS is paused right now" report). Parsed its
-   `events` table (791 total events, max `t`=425.2s) for every entry naming `"Vulcan"` as initiator
-   or target:
+The sortie note's hypothesis only considered branch 1. `targets_ownship` is computed **once**,
+Hook-side, at `S_EVENT_SHOOTING_START` time only (`ownship01` is set inside that branch and
+nowhere else), and `collector/firing_receiver.py`'s `EmitterTracker._apply` **replaces the whole
+`ActiveEmitter` entry, `targets_ownship` included, every time a new `S_EVENT_SHOOTING_START`
+arrives for that unit's name** (`self._active[event.initiator] = ActiveEmitter(...)` — a full
+replace, not a merge or an update of one field). This second fact is the one the original version
+of this note got wrong — see "Correction" immediately below.
 
-   | unit (`initiator_object_id`) | shooting events | target every time |
-   |---|---|---|
-   | `16823296` | none (killed by a T-90 round at t=213.4 before ever firing) | — |
-   | `16823552` | START 230.48, 235.72, 289.4 (each closed by an END) | **`Su-25`**, never the player |
-   | `16823808` | START 259.1 (closed by END 260.9, same instant it was killed) | **`Mi-24P`** — this one really was shooting at the player |
+### Correction (same day) — two errors in the original version of this note
 
-   So **both** outcomes this project needs to distinguish — "really aimed at ownship" and "aimed at
-   something else" — are produced by the *same* unit type (M163 Vulcan) in the *same* mission, both
-   with `target` populated and correctly named. This directly refutes "an AAA gun's
-   `SHOOTING_START` carries no target" as a general engine behavior for this unit type, in this DCS
-   version. It is not type-dependent: the M163 Vulcan behaves exactly like the already-confirmed
-   HMMWV/tank case (`aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-
-   bridge.md`'s 2026-09-25 probe), not differently.
+The coordinator caught both from evidence already in hand; recorded here rather than silently
+rewritten, per this role's "label an inference as one all the way to its destination" discipline.
 
-2. **Every Leopard-2A5 `SHOOTING_START` in the same debrief log (82 shooting-type events total)
-   also carried a populated, correctly-named `target`** — **evidence: reproduced-locally, same
-   source**. 56 of them read `target=Mi-24P` (the player), later bursts read `target=Su-25`
-   (a different aircraft the Leopard switched to engaging), and the final burst at t=423.97 reads
-   `target=Mi-24P` again — immediately after a `kill` event crediting the Leopard's `7.62mm` MG3
-   fire with destroying the player's Mi-24P at t=423.36. So the Leopard case the sortie note cited
-   as the working "it works for tanks" baseline is confirmed, and shown to generalize across the
-   whole engagement, not just the one burst the note already knew about.
+**1. The `debrief.log` evidence is from the *previous* mission, not this sortie.** DCS writes
+`debrief.log` only when a mission ends. The sortie this question is about started at **16:57:24**
+(body-layer's own log stamp `20261020-165724`) and was still running at 17:37; `debrief.log`'s mtime
+is **16:57**, i.e. written by the mission that ended *just before* this one started — almost
+certainly the previous run of the same mission file (restarted seconds apart, which is why the
+timestamps and unit roster looked like a match). **Original Findings 1 and 2 (the per-unit
+target table, the Leopard-2A5 table) are not evidence about this sortie's `Vulcan-2`/`Ground-1-3`.**
+What they *do* still show, unaffected by this correction, is that **an M163 Vulcan's
+`SHOOTING_START` is capable of carrying a populated, correctly-named `target` on this install** —
+observed twice in that earlier run, including once naming the player. That capability-exists claim
+stands; its use as evidence about *this* sortie's specific units does not. This sortie's own
+`debrief.log` will exist once this mission ends and would settle what `Vulcan-2` was actually
+targeting at t≈335s — not available yet.
 
-3. **The specific Vulcan unit most likely to be the `Vulcan-2`/`Vulcan-3` named in the sortie note
-   (`object_id 16823552`, the one that only ever engaged the Su-25) has a documented, well-defined
-   collector-side reason to still read `targets_ownship: false` at sim t=335.7s, and it is in this
-   project's own code, not a DCS internals quirk** — **evidence: inferred, from cross-referencing
-   Finding 1 against `firing_receiver.py`'s own documented constants**:
-   - Its last engagement: `SHOOTING_START` at t=289.4s (target=`Su-25`, so `targets_ownship=false`
-     is the *correct* reading for that burst), `SHOOTING_END` at t=290.14s per debrief.log.
-   - `EmitterTracker`'s own two constants (`FIRING_MIN_VISIBLE_S = 1.5`,
-     `FIRING_WATCHDOG_S = 180.0`): if the Hook's live `world.addEventHandler` channel received that
-     `SHOOTING_END`, the entry's expiry is `max(290.14, 289.4+1.5) ≈ 290.9s` — long gone by 335.7s.
-     If the Hook's channel **never received** that `SHOOTING_END` (the unit is still alive, so the
-     only other removal path — death — does not apply either), the entry's expiry is instead
-     `289.4 + 180 = 469.4s` — comfortably covering 335.7s, and still showing the `false` value that
-     was frozen in at 289.4s, correctly for that engagement, now stale and misleading for a later
-     moment.
-   - Debrief.log itself records **no shooting event from any unit at all** between t=297 and t=378
-     (the window containing the F6 note's 303/318/335.7s timestamps) — so DCS's own debrief
-     recorder did not see a fresh Vulcan (or Leopard) `SHOOTING_START` in that window either. That
-     leaves a stale, still-open 289.4s-vintage entry as the only candidate explaining what
-     `/firing/latest` was showing as "active" at 335.7s.
-   - **The one open step this would need to fully close**: confirming, from the live
-     `GET /firing/latest` response at that moment, that the `Vulcan-2` entry's `since_sim` reads
-     ≈289.4 rather than something newer. This session could not query it — see Unresolved.
+**2. The stale-watchdog-latch hypothesis (original Finding 3) is refuted by evidence already in the
+sortie note.** At sim 335.692 (per the live `/firing/latest` read the coordinator had), the active
+`Vulcan-2` entry carried `since_sim: 335.461` — a `SHOOTING_START` **0.2 seconds old**, not a
+180-second-old latch surviving on the watchdog. Per `EmitterTracker._apply` (quoted above), a new
+`SHOOTING_START` fully replaces the entry, `targets_ownship` included — so this was a **fresh**
+event, resolved to `false` at the moment it arrived, not a frozen value from an old engagement. The
+timing argument built in the original Finding 3 (cross-referencing a stale t=289.4s engagement
+against the previous mission's `debrief.log`) is therefore moot twice over: it used the wrong
+mission's data (error 1) to support a mechanism the real `since_sim` value already rules out
+(error 2). Struck entirely rather than kept as a "possible but now unlikely" option.
 
-4. **`debrief.log` and the live `world.addEventHandler` Hook channel are two separately-implemented
-   DCS subsystems that are not guaranteed to agree**, which is the premise Finding 3 rests on —
-   **evidence: already established, re-cited not re-derived** — `aircraft-layer/research/2026-09-
-   24-damage-and-firing-events-over-mission-bridge.md`'s "Addendum" section drew the same
-   distinction for a different purpose (debrief.log answers "does the engine raise the event",
-   never "does our live handler receive it"). A dropped event on the live channel that the engine's
-   own end-of-mission recorder still captured is consistent with that distinction, not a new claim
-   about either subsystem individually.
+### Final confirmation — (a) is CONFIRMED from this sortie's own `debrief.log`
 
-5. **Community evidence is consistent with occasional/undocumented SHOOTING_START data gaps in
-   general, not specific to AAA** — **evidence: forum-claim, not independently verified**. A web
-   search surfaced a forum reply (via search-engine summary only, not fetched — see below)
-   characterizing `nil` fields on this event class as "normal... especially common in timing and
-   heavy load", and a thread titled *"identical events not all receiving the same event data"*
-   (`forum.dcs.world/topic/348646-...`) whose title matches this investigation's shape exactly. Both
-   `forum.dcs.world` fetches in this session returned **403** (`topic/348646-...` and
-   `topic/149831-vulcan-sight-problems-and-combat-use`) — consistent with this project's own
-   standing finding that automated fetches to that domain are blocked (prior research's
-   `forum-dcs-world-fetch` note). **Per this role's standing instruction, these are not recorded as
-   an unread gap in the give-up sense** — if useful, ask the user to open those two URLs manually
-   and paste the content back; neither was read by this investigation. The Hoggit wiki page itself
-   (`DCS_event_shooting_start`, fetched directly, no block) says only *"Target: The unit that is
-   being targeted"* — it does not document the field as guaranteed-present, nor does it say
-   anything differs by unit type.
+This sortie's `debrief.log` (mtime 18:06, written once *this* mission ended — not the previous
+run's file used, in error, earlier in this note) carries the actual record:
 
-### Reproducible Test
+- **At t=335.461s, `initiatorMissionID 434` ("Vulcan") began `SHOOTING_START` against
+  `targetMissionID 447` — the player's wingman, not the player.** The player's own mission ID is
+  `344` (pilot name `"sg"`). So the exact event the collector ingested at that `since_sim` really did
+  have a non-player target. `targets_ownship: false` was the **correct** answer for that event, full
+  stop — branch 4, a genuine mismatch, confirmed rather than inferred.
+- **Separately, between t=322.8s and t=331.9s, a *different* Vulcan (`initiatorMissionID 433`) really
+  was shooting at the player (`344`).** That engagement had already closed (and its collector-side
+  entry expired, `FIRING_MIN_VISIBLE_S = 1.5s` past its own `SHOOTING_END`) by the time the pilot's
+  live query landed at sim 335.7s — which is why the *only* active entry visible at that moment was
+  unit `434`'s fresh, wingman-targeting one. The pilot's visual impression of "fire aimed at me right
+  now" and the collector's snapshot a few seconds later were each individually accurate; they just
+  were not describing the same burst. Two real engagements, half a minute apart, from two different
+  named Vulcans, briefly looked like one continuous "false reading on an obvious threat" from outside
+  the collector's own event-by-event view.
 
-**What this session ran, repeatable on any machine with the DCS install and a synced
-`debrief.log`:**
-
-```sh
-# requires $DCS_SAVED_GAMES_PATH; parses the post-mission events table, no DCS running needed
-python3 -I - <<'PY'
-import re
-text = open(r"$DCS_SAVED_GAMES_PATH/Logs/debrief.log", encoding="utf-8", errors="replace").read()
-for b in re.split(r'\},\s*--\s*end of \[\d+\]', text):
-    if '"Vulcan"' in b and "shooting" in b:
-        print(b)
-PY
-```
-
-**What this session could NOT run, and should be run next time this question comes up live:**
-`curl`/any outbound network call from this sandboxed session to `http://127.0.0.1:7791/firing/latest`
-was **denied outright** (tried with and without `dangerouslyDisableSandbox: true`) even though the
-task description expected it to work and both DCS and the collector were confirmed running on this
-same machine. `WebFetch` also explicitly refuses localhost. **This is an environment/session
-restriction, not a DCS-internals finding** — flag it to whichever session has unblocked Bash network
-access (or run `curl` directly on the Windows/collector box) to pull `/firing/latest`'s live
-`since_sim` for the active entry the next time a unit reads an unexpectedly-stale
-`targets_ownship`.
+**This closes the question.** (b) — a `targetsOwnship` resolution failure — is not needed to explain
+anything observed this sortie, and nothing found this session gives it independent support; it
+remains a theoretical code path (four branches exist, as documented above) but not one this
+investigation found evidence for.
 
 ### Possible Approaches
 
-Not this role's decision (Architect's), but options worth having on the table given Finding 3:
+Not this role's decision (Architect's), now narrowed by the confirmed cause rather than left open:
 
-- **Surface `since_sim`/engagement age on the wire**, so a consumer (or a human reading
-  `/firing/latest` during debugging) can tell a fresh "aimed at us" from a 45-second-old stale
-  latch, rather than only a boolean.
-- **Shorten `FIRING_WATCHDOG_S`** from 180s — the constant's own comment already flags its value as
-  "a conservative guess rather than a measured bound" pending exactly this kind of live evidence.
-  A shorter watchdog trades "stale false readable as fresh" against "a real sustained engagement
-  with a dropped END reads as ended too soon" (the failure mode the constant was deliberately set
-  high to avoid) — a real tradeoff, not a strict improvement either way.
-- **Investigate why the live Hook channel would miss a `SHOOTING_END` that `debrief.log`'s own
-  recorder caught** — needs either a live repro with both channels compared in the same sortie, or
-  ED forum confirmation of a known gap between `world.addEventHandler` delivery and the mission's
-  own debrief recorder. Not attempted this session (would need a fresh live sortie, out of this
-  investigation's scope).
-- **Do nothing differently** if Architect judges a 45-second-stale "not currently aimed at us"
-  reading an acceptable rate of false-negative for this feature's purpose — the alternative (a
-  shorter watchdog) has its own failure mode, per above.
+- **No code defect to fix.** `targetsOwnship`/`EmitterTracker` both did exactly what they are
+  documented to do; the confusion was entirely in how a human reconciles a point-in-time API
+  snapshot against a continuous, multi-shooter visual impression.
+- **If this class of confusion is worth addressing anyway**: surfacing *which* unit is firing and
+  *who at* (not just a `true`/`false` bit) on `/firing/latest` — or in whatever reaches the
+  player/body-layer — would let "something near me is shooting, just not at me" be distinguished from
+  "nothing is shooting" at a glance, without changing any underlying logic. A product/UX call for
+  Architect, not a bug fix.
+- **The debrief-log-vs-live-Hook distinction this note leaned on earlier turned out not to be load-
+  bearing here** (both channels agree for these two Vulcans) — worth remembering it as a real,
+  previously-documented gap in general, but not needed to explain this incident specifically.
 
 ### Unresolved
 
-- **Whether the live `/firing/latest` entry's `since_sim` for `Vulcan-2` at the moment of the F6
-  query actually reads ≈289.4s**, which would close Finding 3 from "well-supported hypothesis" to
-  "confirmed". Needs network access to the collector (blocked this session) or a fresh live repro.
-- **Whether a genuinely fresh, player-aimed `SHOOTING_START` also occurred around sim t=330–336s**
-  and was missed by *both* `debrief.log` and the live Hook. `debrief.log` shows no shooting event
-  from any unit in the 297–378s window, which argues against this, but cannot fully rule it out —
-  debrief.log's own completeness under those specific conditions was not independently verified.
-- **The two forum threads that 403'd** (`forum.dcs.world/topic/348646-...` title match: "identical
-  events not all receiving the same event data"; `forum.dcs.world/topic/149831-vulcan-sight-
-  problems-and-combat-use`) — ask the user to open and paste if this question needs to go further.
-- **Whether this `debrief.log` is literally the same sortie instance as the F6 note's query**, as
-  opposed to a very similar, separately-flown mission on the same Kola setup that day. The
-  timestamps, unit roster (Mi-24P/Leopard-2A5/M163 Vulcan/Su-25), and the long-pause pattern all
-  line up, but this was not independently confirmed (e.g. by a shared mission UUID or identical
-  object ids against a second artifact) — labeled **strong circumstantial match**, not proven
-  identity.
+- **The two forum threads that returned 403** (`forum.dcs.world/topic/348646-identical-events-not-
+  all-receiving-the-same-event-data`, title match for exactly this kind of inconsistency;
+  `forum.dcs.world/topic/149831-vulcan-sight-problems-and-combat-use`) — ask the user to open and
+  paste if a different, future question needs them; neither was read this session (standing 403
+  finding, `forum-dcs-world-fetch` memory). Not needed to resolve this investigation's question.
+- **Bash network access to the live collector API (`127.0.0.1:7791`) was denied outright this
+  session**, even with `dangerouslyDisableSandbox: true`; `WebFetch` also refuses localhost. Flagged
+  as session/environment-scoped, not a project fact — see
+  [[feedback_bash_network_to_localhost_blocked_this_session]]. Turned out not to block resolving this
+  question (file-based evidence sufficed), but still worth fixing before the next live-read need.
 
 ### Sources
 
 - `aircraft-layer/dcs-export/petrobrain-firing-events-hook.lua` — production Hook source, read in
   full this session (`targetsOwnship`, event registration/poll split).
 - `aircraft-layer/src/collector/firing_receiver.py` — `EmitterTracker`/`ActiveEmitter`, read in full
-  this session (`FIRING_MIN_VISIBLE_S`, `FIRING_WATCHDOG_S`, latch/expiry logic).
-- `$DCS_SAVED_GAMES_PATH/Logs/debrief.log` (this machine, 31388 lines, 791 events, mtime 2026-10-20
-  16:57) — parsed this session, the primary new evidence.
-- `$DCS_SAVED_GAMES_PATH/Logs/dcs.log` — confirmed mission theatre (Kola), mission start time, and
-  that `PetrobrainFiringEvents` logs only per-poll counts, never per-event detail (so it could not
-  answer this question on its own).
+  this session (`FIRING_MIN_VISIBLE_S`, `FIRING_WATCHDOG_S`, the full-replace-on-`SHOOTING_START`
+  behavior that refutes the original Finding 3).
+- `$DCS_SAVED_GAMES_PATH/Logs/debrief.log`, **first read at mtime 2026-10-20 16:57** (31388 lines,
+  791 events) — **from the previous mission run, not this sortie** (see "Correction"). Still valid as
+  a capability-exists demonstration (an M163 Vulcan on this install can carry a correct `target`,
+  including naming the player), not as evidence about this sortie's specific units.
+- `$DCS_SAVED_GAMES_PATH/Logs/debrief.log`, **re-read at mtime 2026-10-20 18:06, once this sortie's
+  mission had actually ended** — the record that settles the question (see "Final confirmation"):
+  `initiatorMissionID 434` → `targetMissionID 447` (the wingman) at t=335.461s; `initiatorMissionID
+  433` → `targetMissionID 344` (the player, pilot name `"sg"`) between t=322.8–331.9s.
+- `$DCS_SAVED_GAMES_PATH/Logs/dcs.log` — confirmed mission theatre (Kola) and that
+  `PetrobrainFiringEvents` logs only per-poll counts, never per-event detail (so it could not answer
+  this question on its own).
 - `$DCS_INSTALL_PATH/autoupdate.cfg` — version `2.9.30.28738`.
 - `$DCS_INSTALL_PATH/Scripts/Database.edce` — confirmed ED-encrypted/opaque; the M163 Vulcan's own
   unit/AI definition is not readable from this install at all (no `.lua` source exists for stock
@@ -214,6 +169,7 @@ Not this role's decision (Architect's), but options worth having on the table gi
 - `forum.dcs.world/topic/348646-...`, `forum.dcs.world/topic/149831-...` — **403, not read**; named
   above as candidates for the user to open manually.
 - `aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md` — prior
-  probe establishing the HMMWV/tank baseline and the debrief-log-vs-live-Hook distinction this
-  note's Finding 4 re-cites.
-- `docs/acceptance/2026-10-20-sortie-feedback.md`, section F6 — the question's origin.
+  probe establishing the HMMWV/tank baseline, the debrief-log-vs-live-Hook distinction, and
+  `world.getPlayer()`/`world.addEventHandler` reachability (Finding 15) this note builds on.
+- `docs/acceptance/2026-10-20-sortie-feedback.md`, section F6 — the question's origin, and (via the
+  coordinator) the `since_sim: 335.461` live-read detail that is not itself written into that file.
