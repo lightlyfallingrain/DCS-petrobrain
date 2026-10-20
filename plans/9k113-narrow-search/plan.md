@@ -47,6 +47,30 @@
 > this plan's scope — and the finding is carried into Risks with a recommendation to file it as its
 > own backlog item.
 
+> **Amendment 2 (user, 2026-10-20) — overrides the body below wherever they disagree.** Source:
+> `docs/acceptance/2026-10-20-sortie-feedback.md`, "F4/F5 — second amendment round" and
+> "F4/F5 — 'as needed' settled".
+>
+> 1. **Fix the existing binocular search's sector centre too.** `_search_sweep`'s
+>    `SCANNING`-at-home caller passes the commanded sector's centre (user: *"fix the binocular
+>    search sector."*). That reverses the "deliberately left exactly as it is" note above. Any
+>    existing test pinning the dead-ahead sweep is pinning the defect and must be rewritten. Say
+>    so in `implementation.md`.
+> 2. **Narrow searches both bands, near first** (option A, approved). The search cycle is: a brief
+>    **wide** orientation sweep, then **narrow over the near band (2.3–5.6 km)**, then **narrow over
+>    the far band (5.6–13.6 km)**, then the binocular excursion for any out-of-regard remainder.
+>    Wide is only for orientation and close range. User: *"there are many situations where scan
+>    beyond 5.6 km is much less useful than 2.3-5.6 ... Should use narrow also inside 5.6 km as
+>    needed"*. Stage 3's "wide (near) → narrow (far)" leg split is replaced by this. Keep the band
+>    edges as the existing tunables.
+> 3. **Attack-run guidance up-cap (binoculars → sight-wide) is NOT built now.** It waits for
+>    `BL-B66` (real slew time), so the preference and its quick-look exception land together.
+>    Drop Stage 4's second part, and leave a pointer to `BL-B66` in Risks.
+> 4. **Default search width with nothing commanded is the full ±60° regard** (recommended, not
+>    objected to).
+> 5. Deferred and out of scope: terrain-driven depth `BL-B84`, weather (`BL-B22`'s "Detection under
+>    real world conditions"), objective area `BL-B83`.
+
 ### Goal
 
 With `observ on`, make the 9K113 actually search with both its settings instead of only inspecting
