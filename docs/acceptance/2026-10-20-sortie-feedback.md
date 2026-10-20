@@ -275,3 +275,10 @@ report or be reported as firing:
 So a visible unit that is firing is reported as firing, whoever it is firing at. Because he can
 see it, its type is spoken at the tier he already has; only the unseen, muzzle-flash-only case
 stays "something firing, X o'clock" (direction only).
+
+**Follow-up (user):** *"it may have been aiming at my wingman"*. That fits reading (a): the Hook
+correctly resolved `Vulcan-2` as not targeting ownship. Under the "visible unit firing at others
+→ report" decision, it should still have been reported as firing once he could see it (2.1 km,
+9 o'clock, inside the commanded left scan). That case is being built on
+`fix/taking-fire-visible-shooter`. This sortie's `debrief.log` (written at mission end) can confirm
+the target.
