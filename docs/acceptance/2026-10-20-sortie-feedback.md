@@ -251,3 +251,27 @@ User, verbatim:
 unnamed settlement". world-model has a size word for some places but not all: OSM points carry
 `place=city|town|village` as `subtype`, OSM settlement polygons carry `area_m2`, and DCS
 `towns.lua` entries carry neither. Not yet explored with the user.
+
+### F7 — settled (user, 2026-10-20)
+
+Asked: (1) village/town/city or fewer, (2) keep the bracketed distance, (3) keep names anywhere,
+(4) other named landmarks.
+
+> 1 - village and town are enough
+> 2 - drop
+> 3 - mission memory
+> 4 - use no name, just landmark feature like road, river etc
+
+So in speech: "near a village" / "in the town", "near a road", "near a river" — no proper names
+and no bracketed distance. Names are kept in mission memory (post-flight).
+
+### F6 — visible unit firing at others (user, 2026-10-20)
+
+Asked whether a unit he can see anyway, firing at someone else, should be an ordinary contact
+report or be reported as firing:
+
+> someone shooting is important, especially if they are close -> report
+
+So a visible unit that is firing is reported as firing, whoever it is firing at. Because he can
+see it, its type is spoken at the tier he already has; only the unseen, muzzle-flash-only case
+stays "something firing, X o'clock" (direction only).
