@@ -42,9 +42,10 @@ from belief.speech import (
     _format_range_km,
     _group_composition_clause,
     _is_air_defence,
+    _landmark_speech_text,
     _plural_unit_type_display,
     _respell_for_tts,
-    _round_enrichment_fragment,
+    _strip_trailing_distance,
     _unit_type_display,
     group_membership_state,
     render_attack_run_off,
@@ -83,6 +84,7 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 class _FakeInfo:
     name: str | None = None
     subtype: str | None = None
+    area_m2: float | None = None
     distance_m: float = 100.0
     provenance: str = "osm"
     confidence: str = "high"
@@ -1304,7 +1306,11 @@ def test_route_event_contact_detected_includes_clock_range_when_enriched(
     assert speech is not None
     assert speech.text.startswith("BMP-2, ")
     assert "o'clock" in speech.text
-    assert "Jableh" in speech.text
+    # landmark-words-no-names (F7 settled): the settlement name never
+    # reaches speech -- `_enrichment_context`'s "Jableh" fixture carries no
+    # subtype/area_m2, so `_settlement_size_word` defaults to "village".
+    assert "near a village" in speech.text
+    assert "Jableh" not in speech.text
 
 
 def test_render_contact_report_includes_semantic_fragment_when_enriched(
@@ -1315,7 +1321,8 @@ def test_render_contact_report_includes_semantic_fragment_when_enriched(
         store, contact_id, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
     )
     assert speech is not None
-    assert "Jableh" in speech.text
+    assert "near a village" in speech.text
+    assert "Jableh" not in speech.text
 
 
 def test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic(
@@ -1524,20 +1531,96 @@ def test_format_range_km_says_very_close_under_half_a_kilometre() -> None:
     assert _format_range_km(500.0) == "0.5 kilometres"
 
 
-def test_round_enrichment_fragment_rounds_trailing_distance() -> None:
-    assert (
-        _round_enrichment_fragment("near a road (439m)") == "near a road (~400 metres)"
-    )
-    # 450m sits exactly on a 100m rounding boundary; Python's round()
-    # (ties to even) resolves it to 400, pinned for the same reason as
-    # the range boundary case above.
-    assert (
-        _round_enrichment_fragment("near a road (450m)") == "near a road (~400 metres)"
-    )
+def test_strip_trailing_distance_drops_the_parenthetical() -> None:
+    assert _strip_trailing_distance("near a road (439m)") == "near a road"
 
 
-def test_round_enrichment_fragment_passes_through_text_without_distance() -> None:
-    assert _round_enrichment_fragment("inside Anapa") == "inside Anapa"
+def test_strip_trailing_distance_passes_through_text_without_distance() -> None:
+    assert _strip_trailing_distance("inside Anapa") == "inside Anapa"
+
+
+# --- landmark-words-no-names: _landmark_speech_text ------------------------
+#
+# `docs/acceptance/2026-10-20-sortie-feedback.md` F7 settled: "near a
+# village" / "in the town" / "near a road" / "near a river" -- no proper
+# names, no bracketed distance figure.
+
+
+def test_landmark_speech_text_settlement_near() -> None:
+    fact = {
+        "text": "near Jableh (250m)",
+        "confidence": 0.9,
+        "feature_id": "settlement:village:Jableh",
+    }
+    assert _landmark_speech_text(fact) == "near a village"
+
+
+def test_landmark_speech_text_settlement_on() -> None:
+    fact = {
+        "text": "on Jableh",
+        "confidence": 0.9,
+        "feature_id": "settlement:town:Jableh",
+    }
+    assert _landmark_speech_text(fact) == "on a town"
+
+
+def test_landmark_speech_text_inside_settlement_speaks_in_the_word() -> None:
+    """The user's own "in the town" example -- `inside_settlement` always
+    speaks this shape, never "inside a town"."""
+    fact = {
+        "text": "inside Jableh",
+        "confidence": 0.9,
+        "feature_id": "inside_settlement:town:Jableh",
+    }
+    assert _landmark_speech_text(fact) == "in the town"
+
+
+def test_landmark_speech_text_road() -> None:
+    fact = {
+        "text": "near a road (50m)",
+        "confidence": 0.9,
+        "feature_id": "road:unnamed",
+    }
+    assert _landmark_speech_text(fact) == "near a road"
+
+
+def test_landmark_speech_text_water() -> None:
+    fact = {
+        "text": "near the Orontes (700m)",
+        "confidence": 0.9,
+        "feature_id": "water:a river:Orontes",
+    }
+    assert _landmark_speech_text(fact) == "near a river"
+
+
+def test_landmark_speech_text_ridge_valley_unchanged() -> None:
+    """Ridge/valley facts never carried a name or a distance figure --
+    `text` passes through untouched."""
+    fact = {"text": "on a ridge", "confidence": 0.9, "feature_id": "ridge:300"}
+    assert _landmark_speech_text(fact) == "on a ridge"
+
+
+def test_landmark_speech_text_landcover_unchanged() -> None:
+    fact = {"text": "in forest", "confidence": 0.9, "feature_id": "landcover:forest"}
+    assert _landmark_speech_text(fact) == "in forest"
+
+
+def test_landmark_speech_text_coastline_drops_distance_only() -> None:
+    fact = {
+        "text": "near the coast (300m)",
+        "confidence": 0.9,
+        "feature_id": "coastline",
+    }
+    assert _landmark_speech_text(fact) == "near the coast"
+
+
+def test_landmark_speech_text_no_feature_id_falls_back_to_stripping_distance() -> None:
+    """The one behaviour the superseded `_round_enrichment_fragment` is
+    still owed to a caller with no `feature_id` -- confirms the two
+    pre-existing `_contact_report_text` tests below (which hand in exactly
+    this shape) still pass unmodified."""
+    fact = {"text": "near a road (50m)", "confidence": 0.9}
+    assert _landmark_speech_text(fact) == "near a road"
 
 
 def test_route_event_attention_changed_has_no_template_and_is_not_acknowledged() -> (

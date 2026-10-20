@@ -168,6 +168,7 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 class _FakeInfo:
     name: str | None = None
     subtype: str | None = None
+    area_m2: float | None = None
     distance_m: float = 100.0
     provenance: str = "osm"
     confidence: str = "high"
@@ -1795,9 +1796,7 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
 
     # Contact-report wording (unit type, clock, range), no spoken id -- the
     # player named no contact, so the readback has to say which one it was.
-    assert lines == [
-        "Watching T-72, 12 o'clock, 0.5 kilometres near Jableh (~200 metres)."
-    ]
+    assert lines == ["Watching T-72, 12 o'clock, 0.5 kilometres near a village."]
     assert near_contact.id not in lines[0]
     assert near_contact.attention == "watch"
 

@@ -33,7 +33,12 @@ expose the underlying `StoredFeature.id` at all -- `describe_position`
 never threads it through. The fallback string is therefore always used
 here, built from each fact's kind plus whatever naming information that
 kind's info dataclass does carry (name, or a distance bucket for the
-nameless ridge/valley lines) -- not a numeric database id.
+nameless ridge/valley lines) -- not a numeric database id. **Three kinds
+(`settlement`, `inside_settlement`, `water`) carry an extra middle segment**
+since `landmark-words-no-names` -- the name-free generic word `speech.py`
+needs, computed unconditionally rather than only when a name is absent --
+so the fallback string's shape is 2 or 3 colon-separated segments
+depending on kind, not always 1.
 
 **osm-landcover-optimization (Design D7)**: `semantic_facts_for` gains
 subtype-aware wording for unnamed settlements/water (world-model's
@@ -88,6 +93,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Final
 
+import tuning
 from belief.association_over_time import implied_position
 from belief.contacts import Contact, ContactStore
 from belief.decay import position_confidence
@@ -397,6 +403,47 @@ def _unnamed_settlement_label(subtype: str | None) -> str:
     return "an unnamed settlement"
 
 
+#: `landmark-words-no-names` (F7 settled, `docs/acceptance/
+#: 2026-10-20-sortie-feedback.md`): the area, in m^2, below which a
+#: subtype-less/`"built_up"` settlement polygon reads as "a village" rather
+#: than "a town" in speech -- the only size evidence available when
+#: `world-model`'s `SettlementInfo.subtype` isn't one of the named
+#: `city`/`town`/`village` place values. 1 km^2, first guess: no real
+#: village/town area distribution has been measured against the store yet.
+#: Tune by flying, same status as `NEAR_FACT_RADIUS_M`/
+#: `TERRAIN_QUALIFIER_MAX_M` above.
+BUILT_UP_VILLAGE_MAX_AREA_M2: Final[float] = tuning.real(
+    "belief.enrichment.BUILT_UP_VILLAGE_MAX_AREA_M2",
+    1_000_000.0,
+    lo=100_000.0,
+    hi=5_000_000.0,
+    status="judgement",
+)
+
+
+def _settlement_size_word(subtype: str | None, area_m2: float | None) -> str:
+    """F7's "village and town are enough" (city folds into town): the one
+    size word speech ever says for a settlement, independent of whether it
+    is named. `subtype` answers directly for the three place values OSM
+    gives a name a `place=*` tag; everything else (`"built_up"`, or an
+    unrecognised/missing subtype -- the DCS `towns.lua` case the plan's
+    "What already exists" section found does not actually reach this
+    function in practice) falls back to `area_m2` against
+    `BUILT_UP_VILLAGE_MAX_AREA_M2`, and with no area evidence at all
+    defaults to "village" -- the smaller claim is the safer one to make,
+    same posture as this module's other absent-data degradations
+    (`_unnamed_settlement_label`, `_within_near_radius`)."""
+    if subtype == "village":
+        return "village"
+    if subtype in ("town", "city"):
+        return "town"
+    if area_m2 is not None and area_m2 < BUILT_UP_VILLAGE_MAX_AREA_M2:
+        return "village"
+    if area_m2 is not None:
+        return "town"
+    return "village"
+
+
 def _unnamed_water_label(subtype: str | None) -> str:
     """D7: "near a river|lake|reservoir (Nm)" from `subtype` for unnamed
     water; the pre-D7 generic "water" wording is the fallback for a
@@ -432,12 +479,13 @@ def semantic_facts_for(
         name = displayable_name(settlement.name) or _unnamed_settlement_label(
             settlement.subtype
         )
+        size_word = _settlement_size_word(settlement.subtype, settlement.area_m2)
         facts.append(
             SemanticFact(
                 text=_proximity_text(name, settlement.distance_m),
                 confidence=_combined_confidence(settlement.confidence, position_conf),
                 provenance=settlement.provenance,
-                feature_id=f"settlement:{settlement.name or 'unnamed'}",
+                feature_id=f"settlement:{size_word}:{settlement.name or 'unnamed'}",
             )
         )
 
@@ -446,12 +494,13 @@ def semantic_facts_for(
         name = displayable_name(inside.name) or _unnamed_settlement_label(
             inside.subtype
         )
+        size_word = _settlement_size_word(inside.subtype, inside.area_m2)
         facts.append(
             SemanticFact(
                 text=f"inside {name}",
                 confidence=_combined_confidence(inside.confidence, position_conf),
                 provenance=inside.provenance,
-                feature_id=f"inside_settlement:{inside.name or 'unnamed'}",
+                feature_id=f"inside_settlement:{size_word}:{inside.name or 'unnamed'}",
             )
         )
 
@@ -475,7 +524,10 @@ def semantic_facts_for(
                 text=_proximity_text(name, water.distance_m),
                 confidence=_combined_confidence(water.confidence, position_conf),
                 provenance=water.provenance,
-                feature_id=f"water:{water.name or 'unnamed'}",
+                feature_id=(
+                    f"water:{_unnamed_water_label(water.subtype)}:"
+                    f"{water.name or 'unnamed'}"
+                ),
             )
         )
 

@@ -17,6 +17,7 @@ from belief import enrichment
 from belief.association_over_time import implied_position, percept_position_uncertainty
 from belief.contacts import ContactStore
 from belief.enrichment import (
+    BUILT_UP_VILLAGE_MAX_AREA_M2,
     NEAR_FACT_RADIUS_M,
     TERRAIN_DOMINANCE_FACTOR,
     TERRAIN_QUALIFIER_MAX_M,
@@ -24,6 +25,7 @@ from belief.enrichment import (
     WorldEnrichmentCache,
     _dominant_terrain_kind_from_distances,
     _proximity_text,
+    _settlement_size_word,
     _within_near_radius,
     displayable_name,
     motion_when_seen,
@@ -80,6 +82,7 @@ def _observation(
 class _FakeInfo:
     name: str | None = None
     subtype: str | None = None
+    area_m2: float | None = None
     distance_m: float = 100.0
     provenance: str = "osm"
     confidence: str = "high"
@@ -222,7 +225,9 @@ def test_semantic_facts_for_unnamed_settlement_uses_placeholder_text(
     )[0]
 
     assert "unnamed" in fact.text
-    assert fact.feature_id == "settlement:unnamed"
+    # No subtype/area_m2 evidence at all -- `_settlement_size_word` defaults
+    # to the smaller claim ("village").
+    assert fact.feature_id == "settlement:village:unnamed"
 
 
 # --- D7: subtype-aware unnamed wording -----------------------------------
@@ -288,6 +293,57 @@ def test_semantic_facts_for_unnamed_water_unknown_subtype_falls_back(
     )[0]
 
     assert fact.text == "near water (400m)"
+
+
+# --- landmark-words-no-names: _settlement_size_word -----------------------
+
+
+def test_settlement_size_word_village_subtype() -> None:
+    assert _settlement_size_word("village", area_m2=None) == "village"
+
+
+def test_settlement_size_word_town_subtype() -> None:
+    assert _settlement_size_word("town", area_m2=None) == "town"
+
+
+def test_settlement_size_word_city_subtype_folds_to_town() -> None:
+    """F7 settled: "village and town are enough" -- city folds into town."""
+    assert _settlement_size_word("city", area_m2=None) == "town"
+
+
+def test_settlement_size_word_built_up_below_threshold_is_village() -> None:
+    assert (
+        _settlement_size_word("built_up", area_m2=BUILT_UP_VILLAGE_MAX_AREA_M2 - 1.0)
+        == "village"
+    )
+
+
+def test_settlement_size_word_built_up_at_threshold_is_town() -> None:
+    """The threshold comparison is a strict `<`, so the boundary value
+    itself falls on the town side."""
+    assert (
+        _settlement_size_word("built_up", area_m2=BUILT_UP_VILLAGE_MAX_AREA_M2)
+        == "town"
+    )
+
+
+def test_settlement_size_word_built_up_above_threshold_is_town() -> None:
+    assert (
+        _settlement_size_word("built_up", area_m2=BUILT_UP_VILLAGE_MAX_AREA_M2 + 1.0)
+        == "town"
+    )
+
+
+def test_settlement_size_word_built_up_no_area_defaults_to_village() -> None:
+    """No size evidence at all -- the smaller claim is the safer one."""
+    assert _settlement_size_word("built_up", area_m2=None) == "village"
+
+
+def test_settlement_size_word_unrecognised_subtype_uses_area() -> None:
+    assert (
+        _settlement_size_word(None, area_m2=BUILT_UP_VILLAGE_MAX_AREA_M2 + 1.0)
+        == "town"
+    )
 
 
 # --- D7: landcover fact ---------------------------------------------------

@@ -36,6 +36,7 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 class _FakeInfo:
     name: str | None = None
     subtype: str | None = None
+    area_m2: float | None = None
     distance_m: float = 100.0
     provenance: str = "osm"
     confidence: str = "high"
