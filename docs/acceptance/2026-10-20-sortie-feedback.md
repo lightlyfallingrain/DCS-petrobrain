@@ -195,3 +195,175 @@ also have been admitted more often in 318–334 s cannot be settled from the tra
 the gaze hour and the true bearing but not the body-relative azimuth, and heading samples are
 sparse. Ownship turned from about 244° to 193° in that window, which moves a target at 185° true
 from about 10 o'clock to 12, out of the left scan.
+
+## F4/F5 — plan amendments (user, 2026-10-20)
+
+Against the first plan (`plans/9k113-narrow-search/plan.md`, three simplifications flagged):
+
+> 1 - "Scan left" gets no narrow at all -> yes, split as suggested.
+> 2 - I'd have it sweep narrow along the flight direction. -> yes, exactly, wide and narrow. Note
+> that wide is ~binocular level, but stabilized and better at low light. So, if OBSERV is ON, and
+> looking at there 9K113 can, prefer wide over binoculars. Binoculars are good for quick look
+> because 9K113 slew takes time.
+> 3 - use 9K113 for that band as well. That is often the ATGM attack range.
+>
+> BL-B74 -> later, leave
+
+1. A commanded sector straddling ±60° is split: the sight (narrow) searches the in-regard part,
+   eyes/binoculars the rest.
+2. With no commanded sector, the sight searches along the flight direction, wide and narrow.
+   **New rule:** with OBSERV on and the direction within the sight's regard, prefer sight-wide over
+   binoculars (wide ≈ binocular magnification, but stabilised and better in low light);
+   binoculars remain for a quick look, because slewing the 9K113 takes time.
+3. The 2.3–5.6 km band is searched with the 9K113 too — *"often the ATGM attack range"*.
+
+`BL-B74` (SAM launch smoke) stays in the backlog.
+
+## F6 — live check while paused (user, 2026-10-20)
+
+> regarding incoming fire, DCS is paused right now and I see incoming tracer fire at 0 o'clock.
+
+Collector at that moment (sim 335.7 s): the only active firer was `Vulcan-2`,
+`targets_ownship: false`, at 2.1 km and ~9 o'clock (true bearing 89°, ownship heading 187°). So
+nothing the Hook reported matches tracers at 12 o'clock aimed at ownship. Either the shooter at 12
+emits no `S_EVENT_SHOOTING_START` / `S_EVENT_SHOT` the Hook sees, or its event's `target` does not
+name the player. The Hook resolves `targets_ownship` by comparing `event.target`'s name with the
+player's, and for a nil target it answers false. Open.
+
+**Correction (user):** *"0 o'clock -> 9 o'clock. that was my typo"*. So the tracers came from about
+9 o'clock, and they match `Vulcan-2` (2.1 km, ~9 o'clock, firing). The collector had it as
+**`targets_ownship: false`** while it was visibly firing at ownship. That is a third cause, in
+the aircraft-layer Hook rather than body-layer. A tank (`Ground-1-3`) earlier resolved to `true`,
+so the name comparison works in general. The likely reading is that an AAA gun's
+`S_EVENT_SHOOTING_START` carries no `target` (nil, so false), but that is unverified: it is a
+DCS-internals question for an investigator.
+
+## F7 — settlement names in callouts are not useful
+
+User, verbatim:
+
+> I get call outs that refer to settlement by it's name. While correct, I notice that's not very
+> usefull actually. Instead we could just replace names (that are often foreign and tell me nothing
+> and take time to say) with "village" or "city"
+
+**What exists:** the name comes from `body-layer/src/belief/enrichment.py` (`"near {name}
+({distance}m)"`, `"inside {name}"`). Unnamed settlements already read as "a built-up area" or "an
+unnamed settlement". world-model has a size word for some places but not all: OSM points carry
+`place=city|town|village` as `subtype`, OSM settlement polygons carry `area_m2`, and DCS
+`towns.lua` entries carry neither. Not yet explored with the user.
+
+### F7 — settled (user, 2026-10-20)
+
+Asked: (1) village/town/city or fewer, (2) keep the bracketed distance, (3) keep names anywhere,
+(4) other named landmarks.
+
+> 1 - village and town are enough
+> 2 - drop
+> 3 - mission memory
+> 4 - use no name, just landmark feature like road, river etc
+
+So in speech: "near a village" / "in the town", "near a road", "near a river" — no proper names
+and no bracketed distance. Names are kept in mission memory (post-flight).
+
+### F6 — visible unit firing at others (user, 2026-10-20)
+
+Asked whether a unit he can see anyway, firing at someone else, should be an ordinary contact
+report or be reported as firing:
+
+> someone shooting is important, especially if they are close -> report
+
+So a visible unit that is firing is reported as firing, whoever it is firing at. Because he can
+see it, its type is spoken at the tier he already has; only the unseen, muzzle-flash-only case
+stays "something firing, X o'clock" (direction only).
+
+**Follow-up (user):** *"it may have been aiming at my wingman"*. That fits reading (a): the Hook
+correctly resolved `Vulcan-2` as not targeting ownship. Under the "visible unit firing at others
+→ report" decision, it should still have been reported as firing once he could see it (2.1 km,
+9 o'clock, inside the commanded left scan). That case is being built on
+`fix/taking-fire-visible-shooter`. This sortie's `debrief.log` (written at mission end) can confirm
+the target.
+
+**Confirmed from this sortie's `debrief.log`** (written 18:06 at mission end): at sim 335.461 the
+Vulcan with mission ID 434 (`Vulcan-2`, matching the collector's `since_sim`) started shooting at
+**Mi-24P mission ID 447, the wingman**. The player is mission ID 344, pilot name "sg". So
+`targets_ownship: false` was correct, and the Hook is not at fault. Between 322 and 333 s a
+different Vulcan (433) was shooting at the player, and a Leopard-2A5 (368) at 344 s.
+
+## F4/F5 — second amendment round (user, 2026-10-20)
+
+Against the amended plan (wide 2.3–5.6 km, narrow 5.6–13.6 km, binoculars beyond ±60°), and the
+finding that today's binocular search for left/right/full sweeps around dead ahead:
+
+> * fix the binocular search sector.
+> * 9K113: there are many situations where scan beyond 5.6 km is much less useful than 2.3-5.6.
+>   Various reasons why LOS can be blocked, weather, etc. Should use narrow also indide 5.6 km
+>   _as needed_
+> * wait for BL-B66
+
+1. Fix the existing binocular search's sector centre too (not only the new sight call sites).
+2. Narrow is not confined to beyond 5.6 km — it is used inside 5.6 km "as needed". What "as
+   needed" keys on is being explored.
+3. Attack-run guidance's sight-wide-over-binoculars preference waits for `BL-B66` (slew time), so
+   the preference and its quick-look exception land together.
+
+Default search width with nothing commanded — full ±60° regard — was recommended and not objected
+to; proceeding with it.
+
+### F4/F5 — "as needed" settled (user, 2026-10-20)
+
+Options offered: A — narrow sweeps both bands, near first, wide only to orient; B — terrain-aware
+(concentrate near when a ridge closes the far band); C — weather-aware.
+
+> approved. There's already item about taking waether into account, link C with that.
+> B would be a natural consequence of angles. Wherever the 9K113 happens to be pointing, if terrain
+> blocks there's no LOS. However if there's something nearside on that terrain it can be seen. B
+> can be left till later.
+
+A is built now. C is linked to the existing weather/light/vegetation item (`BL-B22`'s "Detection
+under real world conditions" section). B is deferred: perception already handles it per look
+(no LOS behind terrain, nearside visible). What is deferred is only the search pattern adapting
+its depth to terrain.
+
+## F4 — narrow looks (user, 2026-10-20)
+
+Implementation found that sight *looks* always resolve to wide: "worth a look" is decided from
+naked-eye/binocular thresholds, so a contact beyond binocular classification range is never worth
+a sight look, and narrow never classifies.
+
+> The narrow thing. Fix it, otherwise the whole point of narrow is missed.
+
+## F1 — latency settled (user, 2026-10-20, next flight)
+
+> 1 - responsiveness is much better when whisped (and audio adapter) run on mac -> this settles it,
+> I'll prioritize whisper (=audio adapter) and brain to run on mac. They must not be dependent on
+> mac, but I'll mostly use them on Mac.
+
+## F8 — "set target" acknowledged late and as an attack run
+
+User, verbatim:
+
+> * Me: "set target, armor, 12 o'clock"
+> * several seonds pass, I make U-turn to stay safe
+> * Petrovich acknowledges target Leopard 2 at 12 o'clock.
+>    * but this is several seconds late. I've already U-turned, there's nothing at 12 o'clock now.
+>    * Petrovich acknowledges attack run. This should not happen, this was selectling target, not
+>      attack run.
+
+Not yet explored.
+
+### F8 — explored (user, 2026-10-20)
+
+Asked: (1) were the exact words "Attack run, …" or "Attack run off"? (2) should a late readback
+give current or original position? Also offered a speech log with queued/spoken timestamps.
+
+> 1 - nope.
+> 2 - current inforamtion, not old. Though the real problem here is the many second delay
+> Yes and timestamps. Could also add latency measurements and logs
+
+1. The exact "attack run" wording isn't remembered, so that part is unresolved until the
+   instrumentation shows what was spoken.
+2. A readback reflects **current** information at the moment it is spoken, not when the command
+   was handled. But the real problem is the multi-second delay.
+3. Build: per-utterance timestamps (queued, spoken) plus end-to-end latency measurement and logs
+   across the voice chain (PTT release → STT → body-layer → speech queue → TTS → playback), so the
+   delay can be located.
