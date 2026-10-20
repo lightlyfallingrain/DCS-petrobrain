@@ -147,3 +147,85 @@ objective body-layer/src` finds only a comment. The Mission Interpreter's waypoi
    direction. Filed as a backlog item.
 3. **Wide vs narrow share**: narrow carries the search; wide is brief — orientation (where to
    point narrow) or close range.
+
+## F6 — A12: no "taking fire" for obvious gunfire and SAM launches at ownship
+
+User, verbatim:
+
+> A12 did get a report or two of "someone firing", but no reports of obvious gunfire at ownship.
+> I can see tracers and SAM launches, but no report. Scan left (to enemy dircetion) commanded.
+> (most recent logs)
+
+**Investigated** (run `20261020-165724`, the live collector, and `dcs.log`):
+
+- DCS → collector works: `dcs.log` shows 147 Hook polls carrying shots in that run, and the live
+  collector's `/firing/latest` held `Ground-1-3` (Leopard-2A5) `targets_ownship: true` and
+  `Vulcan-3` firing — ~1.0 km at ~9:30 o'clock and ~1.3 km at ~8 o'clock.
+- Body-layer never turned them into "taking fire", for two independent reasons:
+  1. **The shooters were outside his current gaze.** Of ~470 detection rows for each shooter,
+     ~390 were rejected at the `gaze` gate (looking at 11–1 o'clock, often through `sight_narrow`,
+     which has no peripheral vision). The emitter bypass skips only range/size and forest; gaze,
+     cockpit mask, optic FOV and terrain are never bypassed (`perception/visibility.py`).
+  2. **Even when he did see a shooter, "taking fire" is only possible if he could not have seen it
+     without the muzzle flash.** `naked_eye_source.py` sets `targets_ownship` only when
+     `result.emitter_kind is not None`, i.e. when the emitter *bypass was needed*. A tank in plain
+     view at 1 km is an ordinary admission, so it becomes a plain contact and never "taking fire".
+     The close, obvious shooter is exactly the one that cannot trigger the call.
+- **SAM launches are not reported by design yet**: `LAUNCH_SMOKE` (`BL-B74`) is named in
+  `perception/emitters.py` but not built.
+
+### F6 — follow-up (user, 2026-10-20)
+
+> Should fire aimed at you be noticed wherever he's looking -> no. current behaviour correct in
+> that way.
+>
+> I flew a little bit more (probably same log files), commanded observ off and scan left.
+> Petrovich should definetely see the unit firing at me
+
+So reason 1 (gaze gating) is **correct behaviour**, by the user's decision. The later stretch —
+`observ off`, `scan left`, shooter on the left — is the case that must produce "taking fire".
+
+**What the logs show for that stretch** (`observ on` → `observ off` at sim 303 s, `scan left` at
+318 s; logs end at 334 s): the gaze cycled 9/10/11 o'clock with the naked eye and binoculars, as
+commanded. `Ground-1-3` (the Leopard firing at ownship) was **admitted once**, at 303 s and 1,073 m,
+as an ordinary contact (`CONTACT_14`, presence tier). **It was never a firing contact**, because a
+shooter at 1 km is visible without its muzzle flash, so the emitter bypass was never needed and
+`targets_ownship` stayed false (reason 2 above). That is the defect to fix. Whether it should
+also have been admitted more often in 318–334 s cannot be settled from the trace: the rows record
+the gaze hour and the true bearing but not the body-relative azimuth, and heading samples are
+sparse. Ownship turned from about 244° to 193° in that window, which moves a target at 185° true
+from about 10 o'clock to 12, out of the left scan.
+
+## F4/F5 — plan amendments (user, 2026-10-20)
+
+Against the first plan (`plans/9k113-narrow-search/plan.md`, three simplifications flagged):
+
+> 1 - "Scan left" gets no narrow at all -> yes, split as suggested.
+> 2 - I'd have it sweep narrow along the flight direction. -> yes, exactly, wide and narrow. Note
+> that wide is ~binocular level, but stabilized and better at low light. So, if OBSERV is ON, and
+> looking at there 9K113 can, prefer wide over binoculars. Binoculars are good for quick look
+> because 9K113 slew takes time.
+> 3 - use 9K113 for that band as well. That is often the ATGM attack range.
+>
+> BL-B74 -> later, leave
+
+1. A commanded sector straddling ±60° is split: the sight (narrow) searches the in-regard part,
+   eyes/binoculars the rest.
+2. With no commanded sector, the sight searches along the flight direction, wide and narrow.
+   **New rule:** with OBSERV on and the direction within the sight's regard, prefer sight-wide over
+   binoculars (wide ≈ binocular magnification, but stabilised and better in low light);
+   binoculars remain for a quick look, because slewing the 9K113 takes time.
+3. The 2.3–5.6 km band is searched with the 9K113 too — *"often the ATGM attack range"*.
+
+`BL-B74` (SAM launch smoke) stays in the backlog.
+
+## F6 — live check while paused (user, 2026-10-20)
+
+> regarding incoming fire, DCS is paused right now and I see incoming tracer fire at 0 o'clock.
+
+Collector at that moment (sim 335.7 s): the only active firer was `Vulcan-2`,
+`targets_ownship: false`, at 2.1 km and ~9 o'clock (true bearing 89°, ownship heading 187°). So
+nothing the Hook reported matches tracers at 12 o'clock aimed at ownship. Either the shooter at 12
+emits no `S_EVENT_SHOOTING_START` / `S_EVENT_SHOT` the Hook sees, or its event's `target` does not
+name the player. The Hook resolves `targets_ownship` by comparing `event.target`'s name with the
+player's, and for a nil target it answers false. Open.
