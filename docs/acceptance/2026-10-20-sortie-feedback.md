@@ -195,3 +195,37 @@ also have been admitted more often in 318–334 s cannot be settled from the tra
 the gaze hour and the true bearing but not the body-relative azimuth, and heading samples are
 sparse. Ownship turned from about 244° to 193° in that window, which moves a target at 185° true
 from about 10 o'clock to 12, out of the left scan.
+
+## F4/F5 — plan amendments (user, 2026-10-20)
+
+Against the first plan (`plans/9k113-narrow-search/plan.md`, three simplifications flagged):
+
+> 1 - "Scan left" gets no narrow at all -> yes, split as suggested.
+> 2 - I'd have it sweep narrow along the flight direction. -> yes, exactly, wide and narrow. Note
+> that wide is ~binocular level, but stabilized and better at low light. So, if OBSERV is ON, and
+> looking at there 9K113 can, prefer wide over binoculars. Binoculars are good for quick look
+> because 9K113 slew takes time.
+> 3 - use 9K113 for that band as well. That is often the ATGM attack range.
+>
+> BL-B74 -> later, leave
+
+1. A commanded sector straddling ±60° is split: the sight (narrow) searches the in-regard part,
+   eyes/binoculars the rest.
+2. With no commanded sector, the sight searches along the flight direction, wide and narrow.
+   **New rule:** with OBSERV on and the direction within the sight's regard, prefer sight-wide over
+   binoculars (wide ≈ binocular magnification, but stabilised and better in low light);
+   binoculars remain for a quick look, because slewing the 9K113 takes time.
+3. The 2.3–5.6 km band is searched with the 9K113 too — *"often the ATGM attack range"*.
+
+`BL-B74` (SAM launch smoke) stays in the backlog.
+
+## F6 — live check while paused (user, 2026-10-20)
+
+> regarding incoming fire, DCS is paused right now and I see incoming tracer fire at 0 o'clock.
+
+Collector at that moment (sim 335.7 s): the only active firer was `Vulcan-2`,
+`targets_ownship: false`, at 2.1 km and ~9 o'clock (true bearing 89°, ownship heading 187°). So
+nothing the Hook reported matches tracers at 12 o'clock aimed at ownship. Either the shooter at 12
+emits no `S_EVENT_SHOOTING_START` / `S_EVENT_SHOT` the Hook sees, or its event's `target` does not
+name the player. The Hook resolves `targets_ownship` by comparing `event.target`'s name with the
+player's, and for a nil target it answers false. Open.
