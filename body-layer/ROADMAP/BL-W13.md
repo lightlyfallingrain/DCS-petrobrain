@@ -46,7 +46,7 @@
   **Audio-adapter half**: `silence`/`"be quiet"`/`"shut up"` wired into
   `vocabulary.VOICE_ONLY_TOKENS`/`PHRASES`. Bare `"quiet"` was dropped from the candidate set —
   measured, not guessed — at a 0.889 `difflib` ratio from the ordinary word `"quite"`, enough to
-  false-anchor `"quite a nice day for flying today"` as a command (see NOTES.md). **Not wired:
+  false-anchor `"quite a nice day for flying today"` as a command (see `notes/model-selection-and-local-llm-serving-brain-layer-br-1.md`). **Not wired:
   no DCS F10 radio-menu button** — that enumeration lives in aircraft-layer's Hook script;
   `handle_command` already dispatches the token generically, so only a Hook-side menu entry
   (or audio-adapter's vocabulary, now done) is needed to reach it. Voice is the only route today.

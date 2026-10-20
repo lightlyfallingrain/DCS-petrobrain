@@ -1,6 +1,6 @@
 ---
 name: notes-harvest
-description: Extract insight candidates from plan files and flag potential duplicates against NOTES.md
+description: Extract insight candidates from plan files and flag potential duplicates against the notes/ topic files
 type: user-invocable
 ---
 
@@ -8,7 +8,7 @@ Usage: `/notes-harvest <feature-name>`
 
 Example: `/notes-harvest star-rendering`
 
-Reads all files in `plans/<feature>/` and extracts candidates from sections known to contain non-obvious findings: "Notable Discoveries" (implementation.md), "Hypothesis" / "Evidence" / "Fix Applied" (debug.md), "Required Fixes" (review.md). Checks each against existing NOTES.md entries to flag likely duplicates.
+Reads all files in `plans/<feature>/` and extracts candidates from sections known to contain non-obvious findings: "Notable Discoveries" (implementation.md), "Hypothesis" / "Evidence" / "Fix Applied" (debug.md), "Required Fixes" (review.md). Checks each against the existing topic files under `notes/` to flag likely duplicates, naming the file a duplicate sits in. (`NOTES.md` is a pointer since 2026-10-19 — the insights live in `notes/`, indexed by `notes/notes-index.md`.)
 
 The DoD agent reads this output and decides which candidates to add — the script does the extraction, the LLM makes the judgment.
 
@@ -28,7 +28,8 @@ if [ ! -d "$PLAN_DIR" ]; then
   exit 1
 fi
 
-NOTES="NOTES.md"
+NOTES_DIR="notes"
+NOTES_INDEX="$NOTES_DIR/notes-index.md"
 
 echo "# Notes Harvest: $FEATURE"
 echo ""
@@ -39,10 +40,14 @@ check_duplicate() {
   local text="$1"
   local lower
   lower=$(echo "$text" | tr '[:upper:]' '[:lower:]')
-  if [ ! -f "$NOTES" ]; then echo "no"; return; fi
+  if [ ! -d "$NOTES_DIR" ]; then echo "no"; return; fi
   WORDS=$(echo "$lower" | tr ' ' '\n' | grep -v "^.\{0,3\}$" | head -5 | tr '\n' ' ' | xargs)
-  if [ -n "$WORDS" ] && grep -qi "$WORDS" "$NOTES" 2>/dev/null; then
-    echo "possible duplicate"
+  local hit=""
+  if [ -n "$WORDS" ]; then
+    hit=$(grep -li -- "$WORDS" "$NOTES_DIR"/*.md 2>/dev/null | grep -v -- "$NOTES_INDEX" | head -1)
+  fi
+  if [ -n "$hit" ]; then
+    echo "possible duplicate (\`$hit\`)"
   else
     echo "no"
   fi
@@ -82,18 +87,19 @@ fi
 
 echo ""
 
-# Current NOTES.md preview
-if [ -f "$NOTES" ]; then
-  echo "## Current NOTES.md (last 20 entries)"
+# Topic files a new insight can go into
+if [ -f "$NOTES_INDEX" ]; then
+  echo "## Topic files (from $NOTES_INDEX)"
   echo '```'
-  grep "^-" "$NOTES" | tail -20
+  grep '^- \[\[' "$NOTES_INDEX"
   echo '```'
 else
-  echo "## NOTES.md does not exist yet — will be created"
+  echo "## $NOTES_INDEX does not exist — read docs/DOC_CONVENTIONS.md, \"Split notes\", before creating anything"
 fi
 
 echo ""
 echo "---"
-echo "DoD agent: review the table above. Add non-duplicate, non-obvious insights to NOTES.md."
+echo "DoD agent: review the table above. Append each non-duplicate, non-obvious insight to the notes/ topic file it fits;"
+echo "if none fits, create notes/<topic>.md and add it to $NOTES_INDEX. Never write to NOTES.md (a pointer)."
 echo "Skip: anything already in code comments, CLAUDE.md, or marked 'possible duplicate'."
 ```

@@ -34,7 +34,7 @@
      single large-residual jump before it reaches fusion. **This distinction — the user's own
      one-line diagnosis ("position uncertainty needs a gate, cannot be further than detection
      range") named the reachable path; the orchestrator's own ill-conditioning hypothesis, though
-     real, did not** — see `NOTES.md`.
+     real, did not** — see `notes/debugging-and-root-cause-diagnosis.md`.
   3. **A scale-relative determinant floor** (`Covariance2D.inverse()`'s `_MIN_DETERMINANT_RATIO`,
      replacing an absolute `1e-9`) — found by Reviewer, not planned: the absolute floor was
      calibrated for covariance-scale determinants but silently corrupted the fused *mean* (not

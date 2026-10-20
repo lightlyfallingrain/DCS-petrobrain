@@ -1,0 +1,3 @@
+# External Binaries & CLI Utilities
+
+- **macOS `say` command silently falls back to default voice on unknown `--voice` argument.** Unlike typical CLI tools that error on invalid arguments, `say -v "Nonexistent Voice Name" "text"` exits 0 and produces audio in the system default voice, not an error. Do not rely on voice-name validation via the CLI — invalid voices must be caught in code or accept silent fallback behavior. Confirmed live during BL-10 implementation (2026-09-17). Implication: any voice-selection feature must either (a) validate against `say -v '?'` output before invoking `say`, or (b) accept that an invalid voice name degrades silently to default.

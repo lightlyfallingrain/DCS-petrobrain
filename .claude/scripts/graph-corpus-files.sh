@@ -35,9 +35,14 @@ ACTIVE_PLAN="${GRAPH_ACTIVE_PLAN:-plans/inbound-speech}"
 
 {
     # Root governance documents
-    for f in CLAUDE.md AGENTS.md ROADMAP.md NOTES.md; do
+    for f in CLAUDE.md AGENTS.md ROADMAP.md; do
         [ -f "$f" ] && printf '%s\n' "$f"
     done
+
+    # Harvested insights: one file per topic plus the index. NOTES.md itself is
+    # a pointer since 2026-10-19 and is left out, as the split ROADMAP.md
+    # pointers are -- the insights moved, the redirect stub carries none.
+    find notes -name '*.md' 2>/dev/null
 
     # Concept and process documentation, excluding generated status pages
     find docs -name '*.md' -not -path 'docs/status/*' 2>/dev/null

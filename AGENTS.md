@@ -25,7 +25,7 @@ structural instead. Full account: `docs/AGENT_WORKTREE_PROTOCOL.md`.
    |---|---|
    | the role's report (`review.md`, `dod-check.md`, `plan.md`) | worktree |
    | **agent-memory files** (`.claude/agent-memory/<role>/…`) | worktree |
-   | **`NOTES.md` harvest** (Definition of Done) | worktree |
+   | **`notes/` harvest** (Definition of Done) | worktree |
    | research notes, roadmap and `todo/` edits | worktree |
 
    All of it is invisible outside that worktree, and `git worktree remove --force` destroys anything
@@ -253,7 +253,7 @@ listed seven).
 4. **Debugger** — bugs, regressions, unexpected behavior. Reproduce → isolate → fix → verify.
 5. **Performance Reviewer** — runtime cost risk on hot paths / data-intensive changes.
 6. **Security** — plan review (after Architect) and deep analysis (after Reviewer, before DoD); on-demand full audits.
-7. **Definition of Done** — final gate: checks pass, acceptance testing with user, harvest NOTES.md.
+7. **Definition of Done** — final gate: checks pass, acceptance testing with user, harvest insights into `notes/`.
 8. **Investigator** — this project's own role, not from the template: reconnaissance on unverified
    DCS internals before a plan depends on them. Sits *before* Architect's plan is finalized, not in
    the Implementer→Reviewer→DoD chain. Writes dated findings to the relevant module's `research/`;
