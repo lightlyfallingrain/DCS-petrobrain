@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import pytest
 
@@ -24,7 +24,7 @@ from belief.classification import (
 )
 from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
-from belief.enrichment import EnrichmentContext
+from belief.enrichment import EnrichmentContext, semantic_facts_for
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
@@ -42,9 +42,10 @@ from belief.speech import (
     _format_range_km,
     _group_composition_clause,
     _is_air_defence,
+    _landmark_speech_text,
     _plural_unit_type_display,
     _respell_for_tts,
-    _round_enrichment_fragment,
+    _strip_trailing_distance,
     _unit_type_display,
     group_membership_state,
     render_attack_run_off,
@@ -68,6 +69,7 @@ from belief.speech import (
 )
 from belief.tools import describe_contact
 from belief.utterance import ReferenceCandidate
+from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import (
     PROVENANCE_EMITTER_BURNING,
@@ -84,6 +86,7 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 class _FakeInfo:
     name: str | None = None
     subtype: str | None = None
+    area_m2: float | None = None
     distance_m: float = 100.0
     provenance: str = "osm"
     confidence: str = "high"
@@ -105,16 +108,28 @@ def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
     return OwnshipState(t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0)
 
 
-def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
+def _enrichment_context(
+    monkeypatch: pytest.MonkeyPatch, description: _FakeDescription | None = None
+) -> EnrichmentContext:
     """BL-3 enrichment wired against fakes -- mirrors `test_console.py`'s
     own `_enrichment_context` fixture (same fake shapes, same monkeypatch
     targets) since this module has no shared test-fixture module to import
-    it from (per this project's per-test-file fixture convention)."""
+    it from (per this project's per-test-file fixture convention).
+
+    `description`, when given, replaces the default "Jableh" settlement
+    fixture -- lets an end-to-end test (`landmark-words-no-names` review's
+    water/`inside_settlement` cases) reuse the same `project_terrain_aware`/
+    `divides_between` stubs with a different `describe_position` result,
+    rather than duplicating this whole setup per fact kind."""
     monkeypatch.setattr(
         enrichment_module,
         "describe_position",
-        lambda conn, theatre, x, z: _FakeDescription(
-            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        lambda conn, theatre, x, z: (
+            description
+            if description is not None
+            else _FakeDescription(
+                nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+            )
         ),
     )
     monkeypatch.setattr(
@@ -1305,7 +1320,11 @@ def test_route_event_contact_detected_includes_clock_range_when_enriched(
     assert speech is not None
     assert speech.text.startswith("BMP-2, ")
     assert "o'clock" in speech.text
-    assert "Jableh" in speech.text
+    # landmark-words-no-names (F7 settled): the settlement name never
+    # reaches speech -- `_enrichment_context`'s "Jableh" fixture carries no
+    # subtype/area_m2, so `_settlement_size_word` defaults to "village".
+    assert "near a village" in speech.text
+    assert "Jableh" not in speech.text
 
 
 def test_render_contact_report_includes_semantic_fragment_when_enriched(
@@ -1316,7 +1335,8 @@ def test_render_contact_report_includes_semantic_fragment_when_enriched(
         store, contact_id, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
     )
     assert speech is not None
-    assert "Jableh" in speech.text
+    assert "near a village" in speech.text
+    assert "Jableh" not in speech.text
 
 
 def test_render_contact_report_end_to_end_terrain_qualifier_replaces_semantic(
@@ -1525,22 +1545,190 @@ def test_format_range_km_says_very_close_under_half_a_kilometre() -> None:
     assert _format_range_km(500.0) == "0.5 kilometres"
 
 
-def test_round_enrichment_fragment_rounds_trailing_distance() -> None:
-    assert (
-        _round_enrichment_fragment("near a road (439m)")
-        == "near a road (about 400 metres)"
-    )
-    # 450m sits exactly on a 100m rounding boundary; Python's round()
-    # (ties to even) resolves it to 400, pinned for the same reason as
-    # the range boundary case above.
-    assert (
-        _round_enrichment_fragment("near a road (450m)")
-        == "near a road (about 400 metres)"
-    )
+def test_strip_trailing_distance_drops_the_parenthetical() -> None:
+    assert _strip_trailing_distance("near a road (439m)") == "near a road"
 
 
-def test_round_enrichment_fragment_passes_through_text_without_distance() -> None:
-    assert _round_enrichment_fragment("inside Anapa") == "inside Anapa"
+def test_strip_trailing_distance_passes_through_text_without_distance() -> None:
+    assert _strip_trailing_distance("inside Anapa") == "inside Anapa"
+
+
+# --- landmark-words-no-names: _landmark_speech_text ------------------------
+#
+# `docs/acceptance/2026-10-20-sortie-feedback.md` F7 settled: "near a
+# village" / "in the town" / "near a road" / "near a river" -- no proper
+# names, no bracketed distance figure.
+
+
+def test_landmark_speech_text_settlement_near() -> None:
+    fact = {
+        "text": "near Jableh (250m)",
+        "confidence": 0.9,
+        "feature_id": "settlement:village:Jableh",
+    }
+    assert _landmark_speech_text(fact) == "near a village"
+
+
+def test_landmark_speech_text_settlement_on() -> None:
+    fact = {
+        "text": "on Jableh",
+        "confidence": 0.9,
+        "feature_id": "settlement:town:Jableh",
+    }
+    assert _landmark_speech_text(fact) == "on a town"
+
+
+def test_landmark_speech_text_inside_settlement_speaks_in_the_word() -> None:
+    """The user's own "in the town" example -- `inside_settlement` always
+    speaks this shape, never "inside a town"."""
+    fact = {
+        "text": "inside Jableh",
+        "confidence": 0.9,
+        "feature_id": "inside_settlement:town:Jableh",
+    }
+    assert _landmark_speech_text(fact) == "in the town"
+
+
+def test_landmark_speech_text_road() -> None:
+    fact = {
+        "text": "near a road (50m)",
+        "confidence": 0.9,
+        "feature_id": "road:unnamed",
+    }
+    assert _landmark_speech_text(fact) == "near a road"
+
+
+def test_landmark_speech_text_water() -> None:
+    fact = {
+        "text": "near the Orontes (700m)",
+        "confidence": 0.9,
+        "feature_id": "water:a river:Orontes",
+    }
+    assert _landmark_speech_text(fact) == "near a river"
+
+
+def test_landmark_speech_text_ridge_valley_unchanged() -> None:
+    """Ridge/valley facts never carried a name or a distance figure --
+    `text` passes through untouched."""
+    fact = {"text": "on a ridge", "confidence": 0.9, "feature_id": "ridge:300"}
+    assert _landmark_speech_text(fact) == "on a ridge"
+
+
+def test_landmark_speech_text_landcover_unchanged() -> None:
+    fact = {"text": "in forest", "confidence": 0.9, "feature_id": "landcover:forest"}
+    assert _landmark_speech_text(fact) == "in forest"
+
+
+def test_landmark_speech_text_coastline_drops_distance_only() -> None:
+    fact = {
+        "text": "near the coast (300m)",
+        "confidence": 0.9,
+        "feature_id": "coastline",
+    }
+    assert _landmark_speech_text(fact) == "near the coast"
+
+
+def test_landmark_speech_text_no_feature_id_falls_back_to_stripping_distance() -> None:
+    """The one behaviour the superseded `_round_enrichment_fragment` is
+    still owed to a caller with no `feature_id` -- confirms the two
+    pre-existing `_contact_report_text` tests below (which hand in exactly
+    this shape) still pass unmodified."""
+    fact = {"text": "near a road (50m)", "confidence": 0.9}
+    assert _landmark_speech_text(fact) == "near a road"
+
+
+# --- Required fixes from `plans/landmark-words-no-names/review.md`:
+# end-to-end coverage through the real `semantic_facts_for` producer,
+# for the two fact kinds the hand-built `_landmark_speech_text` unit tests
+# above assume the `feature_id` shape of rather than derive it. Each of the
+# three tests below is mutation-checked (see the implementation note):
+# swapping the `feature_id` segment order in `enrichment.py`'s construction
+# for the kind under test makes the test fail, by making the spoken word
+# the proper name instead of the generic one.
+
+
+def test_render_contact_report_end_to_end_named_water_speaks_generic_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required Fix 1: a named water body, through the real
+    `semantic_facts_for` -> `_contact_report_text` chain -- not a
+    hand-built `feature_id` string like `test_landmark_speech_text_water`
+    above. Mutation-checked: swapping the two segments in `enrichment.py`'s
+    water `feature_id` construction (name before label, instead of label
+    before name) makes `_landmark_speech_text` read the settlement's own
+    name as the "word" and speak it instead of "a river"."""
+    store, contact_id = _store_with_one_contact()
+    description = _FakeDescription(
+        nearest_water=_FakeInfo(name="Orontes", subtype="river", distance_m=150.0)
+    )
+    context = _enrichment_context(monkeypatch, description)
+
+    speech = render_contact_report(store, contact_id, now_sim=0.0, enrichment=context)
+
+    assert speech is not None
+    assert "near a river" in speech.text
+    assert "Orontes" not in speech.text
+
+
+def test_render_contact_report_end_to_end_inside_settlement_speaks_generic_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required Fix 2: a position inside a named settlement, through the
+    same real chain -- `test_landmark_speech_text_inside_settlement_
+    speaks_in_the_word` above hand-builds its `feature_id` and would not
+    catch a producer-side regression. Mutation-checked the same way as
+    Fix 1, against `enrichment.py`'s `inside_settlement` `feature_id`
+    construction."""
+    store, contact_id = _store_with_one_contact()
+    description = _FakeDescription(
+        inside_settlement=_FakeInfo(name="Jableh", subtype="town")
+    )
+    context = _enrichment_context(monkeypatch, description)
+
+    speech = render_contact_report(store, contact_id, now_sim=0.0, enrichment=context)
+
+    assert speech is not None
+    assert "in the town" in speech.text
+    assert "Jableh" not in speech.text
+
+
+def test_render_engage_readback_with_semantic_fact_speaks_landmark_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required Fix 3: `render_engage_readback`'s semantic/landmark branch
+    had zero test coverage before or after `landmark-words-no-names` -- no
+    test in this module ever called it with a non-empty `facts["semantic"]`
+    list. Built from the real `semantic_facts_for` producer, the same as
+    Fix 1/2 above, so a `feature_id` segment-order mutation there breaks
+    this test too; separately, reverting the call site back to raw
+    `best['text']` (the exact regression F7 removes) also breaks it, since
+    `text` here still carries the name and the distance figure."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(
+                name="Jableh", subtype="village", distance_m=250.0
+            )
+        ),
+    )
+    semantic = [
+        asdict(fact)
+        for fact in semantic_facts_for(
+            _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+        )
+    ]
+    facts: dict[str, object] = {
+        "classification": {"value": "OP_ARMORED", "level": "class"},
+        "relative_now": {"clock_position": 2, "range_m": 1500.0},
+        "semantic": semantic,
+    }
+
+    speech = render_engage_readback(facts)
+
+    assert speech.text == "Attack run, armor, 2 o'clock, 1.5 kilometres near a village."
+    assert "Jableh" not in speech.text
+    assert "250" not in speech.text
 
 
 def test_route_event_attention_changed_has_no_template_and_is_not_acknowledged() -> (

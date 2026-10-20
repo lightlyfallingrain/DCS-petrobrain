@@ -486,7 +486,17 @@ The entries are in the order they were written, which is roughly perception → 
   fields"/"on barren ground") whenever `inside_landcover` is non-`None` and its class isn't
   `"built_up"` (already covered by `inside_settlement`), and a coast fact ("over the sea, off the
   coast (Nm)" or "near the coast (Nm)") within the new `COAST_FACT_RADIUS_M` (5000m) or whenever
-  `nearest_coastline.side == "sea"`.
+  `nearest_coastline.side == "sea"`. **`landmark-words-no-names` (F7 settled, 2026-10-20):**
+  `settlement`/`inside_settlement`/`water` facts now carry a generic landmark word
+  ("village"/"town", `_settlement_size_word`; "a river"/"a lake"/"a reservoir"/"water") as an
+  unconditional middle segment of `feature_id` (`f"settlement:{size_word}:{name}"`, etc.) — not
+  only in the name-absent branch as before — so `belief.speech` can speak it without ever reading
+  the proper name. `_settlement_size_word` falls back from `SettlementInfo.subtype` to the new
+  `SettlementInfo.area_m2` (world-model, surfaced from the same `area_m2` tag
+  `_preferred_settlement` already reads) against `BUILT_UP_VILLAGE_MAX_AREA_M2` (1 km², tunable)
+  only when `subtype` isn't one of the three named place values, defaulting to "village" with no
+  size evidence at all. `SemanticFact.text` itself is unchanged — `belief.console`/mission memory
+  still read the full name.
 - `src/belief/classification.py` (BL-2.6, `plans/classification-refinement/plan.md` Stages 1-2) —
   the classification specificity lattice: `SpecificityLevel` (`UNKNOWN`/`PRESENCE`/`CLASS`/`TYPE`,
   a total order 0-3) over a shallow tree of *values* (a `TYPE` value's parent is its `CLASS`
@@ -759,11 +769,16 @@ The entries are in the order they were written, which is roughly perception → 
   `"unit at {clock} o'clock, {range} km is {unit type}."` (range clause omitted when unenriched),
   built from the contact's *current* `facts["classification"]` via `_unit_type_display` — not the
   raw `event.classification` enum string as before. Range is rounded to the nearest 0.5 km with no
-  trailing `.0` (`_format_range_km`); a semantic fragment's embedded trailing distance (e.g. `"near
-  a road (439m)"`) is separately rounded to the nearest 100 m with a `~` prefix
-  (`_round_enrichment_fragment`, a display-only regex post-process — `enrichment.py`'s
-  `SemanticFact.text` itself is untouched and stays shared with the unaffected `belief.console`
-  debug path). A real coalition implementation should eventually *infer* coalition from unit-type
+  trailing `.0` (`_format_range_km`). **`landmark-words-no-names` (F7 settled,
+  `docs/acceptance/2026-10-20-sortie-feedback.md`, 2026-10-20):** a semantic fragment's name and
+  embedded trailing distance (e.g. `"near a road (439m)"`) are both dropped for speech —
+  `_landmark_speech_text` replaces a proper name with the feature's own generic landmark word
+  ("a village"/"in the town"/"a road"/"a river", read off `SemanticFact.feature_id`'s `kind:`
+  segment) and strips the distance parenthetical entirely rather than rounding it, superseding the
+  earlier `_round_enrichment_fragment` (which only rounded the figure and never touched the name).
+  `enrichment.py`'s `SemanticFact.text`/`feature_id` themselves are untouched and stay shared with
+  the unaffected `belief.console` debug path and mission memory, which both keep the full name. A
+  real coalition implementation should eventually *infer* coalition from unit-type
   vocabulary + which side's terrain the contact sits in, not ground truth (`ROADMAP.md` backlog,
   deferred, unaffected by the token's removal here). Unit type reads the classification lattice's
   level+value (`_unit_type_display`/`_OP_CLASS_DISPLAY`, all lowercase): `"ground"`/`"contact"` at

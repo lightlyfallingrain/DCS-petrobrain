@@ -100,14 +100,18 @@ omitted entirely (not "unknown") when `relative_now` is absent -- no
 enrichment supplied, same absent-not-null convention `tools.py` itself uses.
 Range is rounded to the nearest 0.5 km with no trailing `.0` (`_format_
 range_km`, e.g. `5.0 -> "5"`, `1.5 -> "1.5"`). The semantic fragment is the
-highest-confidence `belief.enrichment.SemanticFact.text` among
-`facts["semantic"]`, mirroring `belief.console.format_event_for_overlay`'s
-own selection (`max(..., key=lambda fact: fact["confidence"])`); omitted
-when `facts["semantic"]` is absent/empty; its embedded trailing distance
-(e.g. `"near a road (439m)"`) is rounded to the nearest 100 m with an
-"about" prefix (`_round_enrichment_fragment`, regex-based -- `SemanticFact.text`
-itself, in `enrichment.py`, is untouched and shared with the unaffected
-console/debug path).
+highest-confidence `belief.enrichment.SemanticFact` among `facts["semantic"]`,
+mirroring `belief.console.format_event_for_overlay`'s own selection
+(`max(..., key=lambda fact: fact["confidence"])`); omitted when
+`facts["semantic"]` is absent/empty. **`landmark-words-no-names` (F7
+settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the fragment is
+rendered through `_landmark_speech_text`, which replaces a proper name with
+the feature's own generic landmark word ("a village"/"in the town"/"a
+road"/"a river") and drops the distance figure entirely, never rounds it**
+-- `SemanticFact.text`/`feature_id` themselves, in `enrichment.py`, are
+untouched and still carry the full name for the unaffected console/debug/
+mission-memory paths; this is a display-only post-process scoped to this
+module.
 
 **No coalition token.** The original `"UNKNOWN"` placeholder prefix (deferred
 IFF/coalition inference -- no perception channel exists, and reading
@@ -159,10 +163,11 @@ narration settled decision 4 warns against).
 
 **Contact report fine tuning -- the cheap `speech.py` items (`ROADMAP.md`,
 opened 2026-09-18, this pass 2026-09-19).** Units are spelled out for TTS
-(`_format_range_km` now returns `"5 kilometres"`, not `"5 km"`; the
-enrichment-distance parenthetical `_round_enrichment_fragment` rounds now
-reads `"(about 400 metres)"`, not `"(~400m)"` -- shorthand is not read correctly;
-the `~` itself was later spelled out too, since Piper reads it as "tilde").
+(`_format_range_km` now returns `"5 kilometres"`, not `"5 km"`). The
+enrichment-distance parenthetical this item also spelled out
+(`"(~400 metres)"`, not `"(~400m)"`) is superseded by `landmark-words-
+no-names` (F7 settled, 2026-10-20): the figure is dropped entirely now,
+never rounded or spelled -- see `_landmark_speech_text` below.
 British "kilometres"/"metres" was kept rather than switched to American
 spelling, matching this file's own pre-existing usage (this docstring's
 "eleven o'clock, two kilometres" worked example, `tools.py`'s own
@@ -187,9 +192,8 @@ out rather than added on faith; the table's one populated entry, the
 that produced the live "read as one blended token" finding. See
 `enrichment.py`'s own docstring for the matching `belief/enrichment.py`
 items -- the `NEAR_FACT_RADIUS_M`-gated "on {label}"/"next to {label}"
-short-range wording, which `_round_enrichment_fragment` above now also has
-to pass through unchanged (no distance figure at all, by construction, so
-its regex simply does not match)."""
+short-range wording, which `_landmark_speech_text` below passes through
+unchanged just the same (no distance figure at all, by construction)."""
 
 from __future__ import annotations
 
@@ -528,7 +532,7 @@ def render_engage_readback(facts: dict[str, object]) -> OutgoingSpeech:
         semantic = facts.get("semantic")
         if isinstance(semantic, list) and semantic:
             best = max(semantic, key=lambda fact: fact["confidence"])
-            text = f"{text[:-1]} {_round_enrichment_fragment(best['text'])}."
+            text = f"{text[:-1]} {_landmark_speech_text(best)}."
     return OutgoingSpeech(text=text, template="attack_run")
 
 
@@ -1545,8 +1549,14 @@ _OP_CLASS_DISPLAY_PLURAL: Final[dict[str, str]] = {
 
 #: Matches a `belief.enrichment.SemanticFact.text` fragment's trailing
 #: distance parenthetical (e.g. the `"(439m)"` in `"near a road (439m)"`).
-#: See `_round_enrichment_fragment`.
-_ENRICHMENT_DISTANCE_RE: Final = re.compile(r"\((\d+)m\)$")
+#: See `_landmark_speech_text`/`_strip_trailing_distance`.
+_TRAILING_DISTANCE_RE: Final = re.compile(r"\((\d+)m\)$")
+
+#: `_landmark_speech_text`'s leading-preposition vocabulary -- `_proximity_
+#: text`'s own `"on "`/`"next to "`/`"near "` plus `"inside "` (the
+#: unconditional `f"inside {name}"` shape `semantic_facts_for`'s
+#: `inside_settlement` branch always produces).
+_LANDMARK_PREPOSITIONS: Final[tuple[str, ...]] = ("on ", "next to ", "near ", "inside ")
 
 #: Per-token TTS respelling (2026-09-19 roadmap item, "Contact report fine
 #: tuning" -- cheap items). A table, not a blanket rule, because a blanket
@@ -1864,21 +1874,97 @@ def _compass_word(heading_deg: float) -> str:
     return _COMPASS_WORDS[nearest]
 
 
-def _round_enrichment_fragment(text: str) -> str:
-    """Round a `SemanticFact.text` fragment's trailing `"(NNNm)"` distance to
-    the nearest 100 m, prefixed with "about" and spelled out for TTS
-    (`"near a road (439m)"` -> `"near a road (about 400 metres)"`). Text with no
-    trailing distance parenthetical (e.g. `"inside Anapa"`, or `enrichment.
-    py`'s new `"on {label}"`/`"next to {label}"` proximity phrasing, which
-    carries no distance figure at all) passes through unchanged.
-    `SemanticFact.text` itself (`enrichment.py`) is not touched -- this is a
-    display-only post-process scoped to this module, see module docstring's
-    "No coalition token"/"Contact report format" notes."""
-    match = _ENRICHMENT_DISTANCE_RE.search(text)
+def _strip_trailing_distance(text: str) -> str:
+    """Drop a `SemanticFact.text` fragment's trailing `"(NNNm)"` distance
+    parenthetical entirely (`"near a road (439m)"` -> `"near a road"`) --
+    `landmark-words-no-names` (F7 settled: "drop" the bracketed distance,
+    not round it, superseding the earlier `_round_enrichment_fragment`,
+    which spelled it out instead). Text with no trailing distance
+    parenthetical passes through unchanged."""
+    match = _TRAILING_DISTANCE_RE.search(text)
     if match is None:
         return text
-    rounded = round(int(match.group(1)) / 100.0) * 100
-    return f"{text[: match.start()]}(about {rounded} metres)"
+    return text[: match.start()].rstrip()
+
+
+def _landmark_preposition(text: str) -> str:
+    """The leading preposition off a `SemanticFact.text` fragment
+    (`_LANDMARK_PREPOSITIONS`), defaulting to `"near "` for any fact whose
+    `text` starts with none of them -- defensive: a hand-built fact dict in
+    a test, or any future fact shape."""
+    for preposition in _LANDMARK_PREPOSITIONS:
+        if text.startswith(preposition):
+            return preposition
+    return "near "
+
+
+def _landmark_speech_text(fact: dict[str, object]) -> str:
+    """The name-free, distance-free spoken landmark phrase for one
+    `belief.enrichment.SemanticFact` dict -- `landmark-words-no-names` (F7
+    settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): "near a
+    village" / "in the town" / "near a road" / "near a river", no proper
+    names and no bracketed distance figure, anywhere speech renders a
+    semantic fact. Supersedes `_round_enrichment_fragment` entirely, not
+    just its distance handling -- that function only rounded the figure
+    this one drops; it never touched the name. `SemanticFact.text`/
+    `feature_id` themselves (`enrichment.py`) are untouched, so the
+    console/debug and mission-memory paths that read them directly keep
+    the full name (see this module's own docstring, "Contact report
+    format").
+
+    `feature_id`'s leading `kind:` segment (`enrichment.py`'s own encoding,
+    see that module's docstring note on `SemanticFact.feature_id`) picks
+    the wording:
+
+    - `settlement`/`inside_settlement`: the size word is `feature_id`'s
+      middle segment (`"village"`/`"town"`, `enrichment._settlement_
+      size_word`). `inside_settlement` always speaks `"in the {word}"` --
+      the user's own "in the town" example -- regardless of `text`'s own
+      leading preposition (which stays `"inside "` there, the debug/
+      mission-memory vocabulary, never the spoken one). `settlement`
+      speaks `"{preposition}a {word}"`, `preposition` read off `text`
+      itself (`_proximity_text`'s `"on "`/`"next to "`/`"near "`).
+    - `road`: `"{preposition}a road"` -- `road.subtype`/`road.name` are
+      always `None` in the current store (see `enrichment.py`'s own "What
+      already exists" note), so no name-replacement logic is needed here.
+    - `water`: `"{preposition}{word}"`, `word` being `feature_id`'s middle
+      segment (`enrichment._unnamed_water_label`'s own output, already "a
+      river"/"a lake"/"a reservoir"/"water").
+    - `ridge`/`valley`/`landcover`: `text` unchanged -- these kinds never
+      carried a name or a distance figure to begin with.
+    - `coastline`: `text` with its trailing distance parenthetical
+      stripped (`_strip_trailing_distance`) -- the wording itself ("near
+      the coast"/"over the sea, off the coast") is already generic, so no
+      word substitution is needed.
+    - no `feature_id` at all, or an unrecognised kind (a hand-built fact
+      dict, e.g. a test's bare `{"text": ..., "confidence": ...}`): strip
+      only a trailing `"(...)"` distance parenthetical and return that --
+      the one behaviour `_round_enrichment_fragment` is still owed to a
+      caller that hands in a fact with no `feature_id` (see the two
+      pre-existing `_contact_report_text` tests that do exactly this)."""
+    text = fact["text"]
+    assert isinstance(text, str)
+    feature_id = fact.get("feature_id")
+    if not isinstance(feature_id, str):
+        return _strip_trailing_distance(text)
+
+    kind, _, rest = feature_id.partition(":")
+    if kind in ("ridge", "valley", "landcover"):
+        return text
+    if kind == "coastline":
+        return _strip_trailing_distance(text)
+
+    preposition = _landmark_preposition(text)
+    word = rest.split(":", 1)[0]
+    if kind == "inside_settlement":
+        return f"in the {word}"
+    if kind == "settlement":
+        return f"{preposition}a {word}"
+    if kind == "road":
+        return f"{preposition}a road"
+    if kind == "water":
+        return f"{preposition}{word}"
+    return _strip_trailing_distance(text)
 
 
 def _contact_report_text(
@@ -1974,7 +2060,7 @@ def _contact_report_text(
         semantic = facts.get("semantic")
         if isinstance(semantic, list) and semantic:
             best = max(semantic, key=lambda fact: fact["confidence"])
-            text += f" {_round_enrichment_fragment(best['text'])}"
+            text += f" {_landmark_speech_text(best)}"
     if event_clause is not None:
         text += f", {event_clause}"
     else:

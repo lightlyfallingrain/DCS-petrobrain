@@ -195,3 +195,83 @@ also have been admitted more often in 318–334 s cannot be settled from the tra
 the gaze hour and the true bearing but not the body-relative azimuth, and heading samples are
 sparse. Ownship turned from about 244° to 193° in that window, which moves a target at 185° true
 from about 10 o'clock to 12, out of the left scan.
+
+## F4/F5 — plan amendments (user, 2026-10-20)
+
+Against the first plan (`plans/9k113-narrow-search/plan.md`, three simplifications flagged):
+
+> 1 - "Scan left" gets no narrow at all -> yes, split as suggested.
+> 2 - I'd have it sweep narrow along the flight direction. -> yes, exactly, wide and narrow. Note
+> that wide is ~binocular level, but stabilized and better at low light. So, if OBSERV is ON, and
+> looking at there 9K113 can, prefer wide over binoculars. Binoculars are good for quick look
+> because 9K113 slew takes time.
+> 3 - use 9K113 for that band as well. That is often the ATGM attack range.
+>
+> BL-B74 -> later, leave
+
+1. A commanded sector straddling ±60° is split: the sight (narrow) searches the in-regard part,
+   eyes/binoculars the rest.
+2. With no commanded sector, the sight searches along the flight direction, wide and narrow.
+   **New rule:** with OBSERV on and the direction within the sight's regard, prefer sight-wide over
+   binoculars (wide ≈ binocular magnification, but stabilised and better in low light);
+   binoculars remain for a quick look, because slewing the 9K113 takes time.
+3. The 2.3–5.6 km band is searched with the 9K113 too — *"often the ATGM attack range"*.
+
+`BL-B74` (SAM launch smoke) stays in the backlog.
+
+## F6 — live check while paused (user, 2026-10-20)
+
+> regarding incoming fire, DCS is paused right now and I see incoming tracer fire at 0 o'clock.
+
+Collector at that moment (sim 335.7 s): the only active firer was `Vulcan-2`,
+`targets_ownship: false`, at 2.1 km and ~9 o'clock (true bearing 89°, ownship heading 187°). So
+nothing the Hook reported matches tracers at 12 o'clock aimed at ownship. Either the shooter at 12
+emits no `S_EVENT_SHOOTING_START` / `S_EVENT_SHOT` the Hook sees, or its event's `target` does not
+name the player. The Hook resolves `targets_ownship` by comparing `event.target`'s name with the
+player's, and for a nil target it answers false. Open.
+
+**Correction (user):** *"0 o'clock -> 9 o'clock. that was my typo"*. So the tracers came from about
+9 o'clock, and they match `Vulcan-2` (2.1 km, ~9 o'clock, firing). The collector had it as
+**`targets_ownship: false`** while it was visibly firing at ownship. That is a third cause, in
+the aircraft-layer Hook rather than body-layer. A tank (`Ground-1-3`) earlier resolved to `true`,
+so the name comparison works in general. The likely reading is that an AAA gun's
+`S_EVENT_SHOOTING_START` carries no `target` (nil, so false), but that is unverified: it is a
+DCS-internals question for an investigator.
+
+## F7 — settlement names in callouts are not useful
+
+User, verbatim:
+
+> I get call outs that refer to settlement by it's name. While correct, I notice that's not very
+> usefull actually. Instead we could just replace names (that are often foreign and tell me nothing
+> and take time to say) with "village" or "city"
+
+**What exists:** the name comes from `body-layer/src/belief/enrichment.py` (`"near {name}
+({distance}m)"`, `"inside {name}"`). Unnamed settlements already read as "a built-up area" or "an
+unnamed settlement". world-model has a size word for some places but not all: OSM points carry
+`place=city|town|village` as `subtype`, OSM settlement polygons carry `area_m2`, and DCS
+`towns.lua` entries carry neither. Not yet explored with the user.
+
+### F7 — settled (user, 2026-10-20)
+
+Asked: (1) village/town/city or fewer, (2) keep the bracketed distance, (3) keep names anywhere,
+(4) other named landmarks.
+
+> 1 - village and town are enough
+> 2 - drop
+> 3 - mission memory
+> 4 - use no name, just landmark feature like road, river etc
+
+So in speech: "near a village" / "in the town", "near a road", "near a river" — no proper names
+and no bracketed distance. Names are kept in mission memory (post-flight).
+
+### F6 — visible unit firing at others (user, 2026-10-20)
+
+Asked whether a unit he can see anyway, firing at someone else, should be an ordinary contact
+report or be reported as firing:
+
+> someone shooting is important, especially if they are close -> report
+
+So a visible unit that is firing is reported as firing, whoever it is firing at. Because he can
+see it, its type is spoken at the tier he already has; only the unseen, muzzle-flash-only case
+stays "something firing, X o'clock" (direction only).

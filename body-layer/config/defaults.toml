@@ -58,6 +58,12 @@ LOST_THRESHOLD_S = 120.0
 # source: belief/decay.py:POSITION_HALF_LIFE_S
 POSITION_HALF_LIFE_S = 30.0
 
+[belief.enrichment]
+# landmark-words-no-names` (F7 settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the area, in m^2, below which a subtype-less/`"built_up"` settlement polygon reads as "a village" rather than "a town" in speech -- the only size evidence available when `world-model`'s `SettlementInfo.subtype` isn't one of the named `city`/`town`/`village` place values.
+# status: judgement | range: 100000.0 .. 5000000.0
+# source: belief/enrichment.py:BUILT_UP_VILLAGE_MAX_AREA_M2
+BUILT_UP_VILLAGE_MAX_AREA_M2 = 1000000.0
+
 [belief.optic_policy]
 # BL-B71's de-escalation-only hysteresis band (plan §7's "a ladder that thrashes at the boundary would be worse than one that never de-escalates at all") -- a *fraction* of the lower rung's own presence threshold, not a fixed metre band, because the ladder's rungs are 2.42x apart (`presence_range_mult`), so a fixed band would be enormous at the naked-eye rung and negligible at the sight's, and `GUIDANCE_OPTIC_MIN_INTERVAL_S` must exceed the time this band buys (~10 s of closing at 0.25) or a fly-past re-crosses it early, so the two are retuned together.
 # status: agreed-guess | range: 0.05 .. 0.9
