@@ -398,3 +398,15 @@ Beyond that reach only narrow brings information.
 
 Fix F2 (a transmission starting "Petrovich" routes to the brain) once `feature/9k113-narrow-search`
 has merged. That unblocks card item A14.
+
+## F4 — BL-B85 is required, not backlog (user, 2026-10-20)
+
+Reviewer and security filed `BL-B85` as non-blocking: a contact whose classification never
+advances is re-granted sight looks indefinitely and starves the search cycle.
+
+> BL-B85 is required for 9K113, we can't just indefinately look at one thing. Needs a timer value
+> or the like that forces moving on.
+
+So it is built into `feature/9k113-narrow-search` before merge. A contact that has had its sight
+time without progressing has to give way to the search (and to other contacts) for a while: a
+tunable time bound, not an open-ended re-grant.
