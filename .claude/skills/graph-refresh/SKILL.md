@@ -81,11 +81,20 @@ $PY -c "
 from pathlib import Path
 from graphify.cache import check_semantic_cache
 files=[l.strip() for l in Path('graphify-out/.corpus.txt').read_text().splitlines() if l.strip()]
-n,e,h,unc = check_semantic_cache(files)
+spec=str(Path('~/.claude/skills/graphify/references/extraction-spec.md').expanduser())
+n,e,h,unc = check_semantic_cache(files, root='.', prompt_file=spec)
 print(f'{len(files)-len(unc)} cached, {len(unc)} need extraction')
 Path('graphify-out/.uncached.txt').write_text('\n'.join(unc))
 "
 ```
+
+**Pass `root` and `prompt_file`; never call `check_semantic_cache(files)` bare.** Cache entries are
+stamped with the extraction prompt that produced them (`/graphify` passes the same spec path at read
+and at save), so a bare call looks under the wrong key and reports cached files as needing
+extraction. Measured: **383 vs. 105** uncached on one corpus, and **383 vs. 0** on the same 520-file
+corpus right after a rebuild (2026-10-19) — the bare figure does not move when the cache is current,
+so it cannot tell you anything. Run this from the repo root; `root='.'` is what keys the
+repo-relative paths in `.corpus.txt`.
 
 If nothing needs extraction, skip to **Finish**. Otherwise run `/graphify` — it reads the cache,
 extracts only the uncached files, and rebuilds. Dispatch extraction subagents with
