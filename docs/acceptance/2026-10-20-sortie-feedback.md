@@ -229,3 +229,11 @@ nothing the Hook reported matches tracers at 12 o'clock aimed at ownship. Either
 emits no `S_EVENT_SHOOTING_START` / `S_EVENT_SHOT` the Hook sees, or its event's `target` does not
 name the player. The Hook resolves `targets_ownship` by comparing `event.target`'s name with the
 player's, and for a nil target it answers false. Open.
+
+**Correction (user):** *"0 o'clock -> 9 o'clock. that was my typo"*. So the tracers came from about
+9 o'clock, and they match `Vulcan-2` (2.1 km, ~9 o'clock, firing). The collector had it as
+**`targets_ownship: false`** while it was visibly firing at ownship. That is a third cause, in
+the aircraft-layer Hook rather than body-layer. A tank (`Ground-1-3`) earlier resolved to `true`,
+so the name comparison works in general. The likely reading is that an AAA gun's
+`S_EVENT_SHOOTING_START` carries no `target` (nil, so false), but that is unverified: it is a
+DCS-internals question for an investigator.
