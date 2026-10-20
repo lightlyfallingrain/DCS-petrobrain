@@ -654,3 +654,168 @@ of the commit message. Confirmed `GLASSING`'s two relevant call sites by `grep`,
 docstrings. Ran `ruff format --check`, `ruff check`, `mypy --strict`, and the full `pytest` suite
 (2323 passed, 4 xfailed, 0 failed, no flakes this run) on this exact commit tip from inside
 `body-layer/`.
+
+## Review — F5 boresight + BL-B85 refinement
+
+Reviewed two commits on `feature/9k113-narrow-search`, tip `9cba4943fdca82e69335b1f605b5b9c9b32689ff`:
+`49f92738` (F5, boresight-relative regard) and `9cba4943` (the "Review — BL-B85" required fix above,
+plus the suggested cross-key assertion). Against `docs/acceptance/2026-10-20-sortie-feedback.md` F5
+("boresight-relative limits: explore answers", "sequencing"), `plans/9k113-narrow-search/
+implementation.md`'s F5 and BL-B85 sections, this file's own "Review — BL-B85", and
+`body-layer/ROADMAP/BL-B85.md`/`BL-B86.md`.
+
+### F5 — frame correctness: verified independently, not read off the docstring
+
+**Derived the sign convention by hand, not trusted from the comment.** `perception.geometry.
+body_relative_direction`'s own docstring documents a three-step yaw→pitch→bank removal;
+`perception.source.OwnshipState`'s docstring states the sign convention (`pitch_deg` positive =
+nose up). Worked the algebra for `heading_relative_to_body_relative` symbolically: substituting its
+own yaw re-application into `body_relative_direction`'s yaw-removal step cancels exactly for *any*
+heading (not just the tested cases) — `forward0 = forward`, `right0 = right`, `up0 = up` — confirming
+the claimed "yaw cancels exactly" property as a general identity, not a coincidence of the chosen test
+numbers. Then hand-computed the user's own worked example independently: a 1000 m AGL target at
+2333 m range (level-flight depression −23.2°) with 10° nose-down pitch gives −13.2° by the same
+rotation matrix — matches `test_geometry.py`'s committed figure exactly, derived before looking at the
+test, not fitted to it. Nose-up (−10° → −20°) and the bank-30 case checked the same way.
+
+**Mutated `heading_relative_to_body_relative`'s internal `pitch_deg` to a hardcoded `0.0` myself**
+(not re-running the implementer's own mutation, a fresh one on this commit's source) — 5 tests go red
+(`test_geometry.py`'s two pitch tests, `test_logger.py`'s three `TestSightInRegardSweepBoresightRelative`
+tests), matching the implementation note's claimed count. Restored, `sha1sum`-verified byte-identical
+to the pre-mutation file.
+
+**Consumer consistency, checked by grep, not assumed from the file list:**
+- `grep -rn "look_target_for("` — one real caller (`logger._look_targets`), passing `ownship.
+  pitch_deg`/`ownship.bank_deg` correctly; the rest are test call sites exercising the new keyword
+  arguments.
+- `_sight_in_regard_sweep`/`_sight_out_of_regard_sweep`/`_search_sweep` (binoculars) all route through
+  the one shared `_to_body_relative_steps` helper; `_sight_in_regard_sweep` converts **before**
+  filtering through `within_field_of_regard`, so the gate and the committed aim are the same numbers.
+  Binoculars (`_search_sweep`) convert too, even though they have no regard to filter against — the
+  binocular gaze consumer is therefore also body-relative, closing the "gaze and aim frame for
+  binoculars" question the dispatch brief raised.
+- `belief.attack_run.py` was never affected by this bug at all — it already called
+  `alignment_direction`/`body_relative_direction` directly (`grep` confirms), never the old
+  heading-relative hand derivation `look_target_for`/`search_pattern` used. `sight_can_still_improve`
+  only reads `target.range_m`/`current_level`, never azimuth/elevation, so it is unaffected by
+  construction.
+- `grep -rn "true_bearing.*-.*heading\|heading_true_deg -"` across `src/` turns up exactly one
+  remaining heading-relative derivation outside this fix's reach: `eyesight_view.py`'s
+  `relative_bearing_deg` (the debug cockpit-view renderer, a display concern, not a regard/aim
+  decision) and `logger.py`'s own `absolute_center - heading_true_deg` (building a *heading-relative*
+  commanded-sector centre that is deliberately fed into `search_pattern` *before* the new conversion —
+  this is the documented architecture, not a missed site: raw steps are heading-relative by design,
+  and the one shared helper converts them once). Neither is a second, inconsistent frame reaching
+  `within_field_of_regard`.
+
+Frame correctness is solid, and more thoroughly checked than the diff alone would show — this is not
+a rubber stamp of the implementer's own account.
+
+### BL-B85 required fix: verified correct by mutation, independently reproduced
+
+Re-ran `test_a_progressing_contact_is_relooked_near_the_pre_bl_b85_cadence` after reverting
+`_start_glance_away`'s conditional commit back to an unconditional one (my own mutation, on this
+commit's source): fails with a measured **94 s** gap, matching the exact pre-fix figure the review's
+prior round measured and the one this fix's own commit message cites. Restored, `sha1sum`-verified
+byte-identical. The required fix is real and does what it claims for the single-contact case.
+
+`current_level_by_id`/`targets` wiring checked: `_decide_sighting` now threads `targets` (the same
+live `LookTarget` list `decide()` is called with, recomputed fresh every poll by `logger._look_targets`
+from current belief) into `_start_glance_away`, so "current level" really is the level at the instant
+the dwell boundary fires, not a stale snapshot. A contact absent from `targets` (dropped out of
+candidacy mid-look) falls back to `look_start_level`, correctly treated as "no evidence of progress,
+commit" — same as the stalled case, matching Fix B1's own precedent for a genuine interruption.
+`pending_attempted_at_range_m`/`pending_attempted_at_level` are unconditionally cleared to `{}` in the
+return `replace(...)` regardless of which branch fires, so a dropped mark is genuinely gone, not
+silently retained — checked by reading the full function body, not just the diff hunk.
+
+### Required Fixes
+
+- **The new `OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S` assert is an uncaught, unprotected
+  bare `assert` — a single in-bounds tuning override crashes the whole process at import, which the
+  project's own tuning policy says must never happen.** Reproduced directly, not inferred: with only
+  `belief.optic_policy.SIGHT_STALL_COOLDOWN_S = 40.0` in a `PETROBRAIN_TUNING` file — one key,
+  comfortably inside its own declared `lo=30.0, hi=400.0` bounds, no second key touched —
+  `import belief.optic_policy` raises `AssertionError` and the process never starts. The commit
+  message and the comment above the assert call this "the same pattern `belief/decay.py` uses," but
+  that is only half true: `decay.py`'s bare `assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` is safe
+  **only** because `tuning.py`'s `_check_scan_decay_coupling` runs first, rejects whichever override
+  would violate the invariant, and falls back both keys to their code defaults before the assert ever
+  sees a bad combination — `tuning.py`'s own docstring: *"a bare `assert`... [is] a disguised refusal
+  to start, exactly the thing Decision 4 REVISED exists to prevent."* `_check_scan_decay_coupling`'s
+  `_COUPLED_KEYS` is hardwired to exactly the three `decay.py` keys and is explicitly documented as
+  *"Not a general mechanism... nothing generalises this to a second coupling without writing a second
+  named check."* No equivalent check exists for `OPTIC_RETRY_INTERVAL_S`/`SIGHT_STALL_COOLDOWN_S`, so
+  the new assert reintroduces the exact anti-pattern the `decay.py` precedent was built to eliminate,
+  for a new pair of keys, with zero protection. This also isn't a narrow cross-key edge case requiring
+  two overrides at once (the shape the prior review's Optional Refinement anticipated) — because
+  `OPTIC_RETRY_INTERVAL_S` defaults to 64 s, roughly half of `SIGHT_STALL_COOLDOWN_S`'s own declared
+  **single-key** range (30–400) is already unsafe to tune into alone, at every other constant left at
+  its code default. Directly violates `body-layer/CLAUDE.md`'s "Tuning" section ("A bad value warns
+  and continues on the code default — it never refuses to start") and `tuning.py`'s own Decision 4
+  REVISED ("There is no case in this module that raises past accessor/`validate_against_defaults()`
+  call time"). **Fix**: either extend `tuning.py` with an analogous named cross-key check (mirroring
+  `_check_scan_decay_coupling`) for this pair, wired into `SIGHT_STALL_COOLDOWN_S`'s (and, if needed,
+  `FOCUS_DWELL_S`'s) accessor call so a violating override is rejected and falls back to defaults
+  before the bare assert runs — or otherwise ensure a bad tuning combination warns and falls back
+  rather than crashing the process, per policy. No test in the suite currently exercises this path at
+  all (`grep` of `test_tuning*.py`/`test_optic_policy.py` for this key pair finds nothing), so the gap
+  shipped with zero coverage.
+
+- **The prior review's required fix explicitly asked that the "realistic case" re-measurement be
+  captured "as a committed test (not a one-off narrative number)"; this round shipped only prose
+  numbers in `BL-B85.md`/`implementation.md`, with no test asserting them.** The implementer's own
+  note in `implementation.md` says this was deliberate ("a standalone measurement, not added as a
+  second committed test"), narrowing scope against the review's explicit wording. Attempted an
+  independent reproduction (same one-step `wide`/`narrow_near`/`narrow_far` legs, three contacts at
+  50/80/120 m, each advancing one classification tier "the poll after their own look ends," 900 s):
+  the look-start count per contact matched the claim (2 each), but the overall busy fraction (10.4%
+  measured vs. 19.4% claimed) and the time each contact reaches `type` (97/262/427 s measured vs.
+  130/163/196 s claimed) did not — plausibly because "the poll after the look ends" is ambiguous
+  enough (which exact event counts as "the look ending," and how late a tier-bump may land relative to
+  the `_start_glance_away` commit/drop comparison it is meant to influence) that an independent
+  attempt and the implementer's own uncommitted script resolved it differently. This is not offered as
+  proof the shipped figures are wrong — it's exactly the situation a committed, deterministic test
+  exists to prevent: right now neither I nor a future reader can mechanically confirm `BL-B85.md`'s
+  "realistic case" numbers describe what the current code actually does. **Fix**: commit the
+  realistic-case scenario as an actual test (as the prior review asked), so the figures in `BL-B85.md`
+  are reproducible and protected against regression, not a narrative that two independent attempts
+  already disagree on.
+
+### Optional Refinements
+
+- The new assert's own comment ("the same residual-coupling shape `belief.decay.py`'s own asserts
+  guard") reads as claiming parity with `decay.py`'s protection level, which is the "X, so Y" pattern
+  reviewer memory warns about — the shape is the same, the protection is not. Worth a one-line
+  correction once the Required Fix above is resolved, so the comment doesn't mislead the next reader
+  the way it did this one. (Optional — folds naturally into whichever fix is chosen above.)
+
+### Verdict
+CHANGES REQUIRED
+
+`49f92738`'s frame-correctness fix is solid — independently re-derived, mutation-verified on fresh
+mutations (not just re-running the implementer's own), and consistently wired through every real
+consumer. `9cba4943`'s core fix (the progressing-contact throttle) is also solid, independently
+mutation-verified. What is not solid is the new import-time assert: it is reachable by a single,
+realistic, in-bounds tuning value and crashes the whole process, which is a direct policy violation,
+not a style nit — this needs to be closed before merge. The missing committed test for the
+realistic-case numbers is the second, lower-severity gap; both are cheap relative to the risk they
+leave open.
+
+### Review Confidence
+Full read of both commits' diffs (`geometry.py`, `logger.py`, `optic_policy.py`,
+`test_geometry.py`, `test_logger.py`, `test_optic_policy.py`, `BL-B85.md`, `BL-B86.md`,
+`implementation.md`'s two appended sections). Verified the frame-correctness algebra by hand
+(general cancellation identity, not just the tested case) before reading the tests, then confirmed
+the tests agree. Ran fresh mutations on this exact commit tip (not re-running or trusting the
+implementer's own two mutation claims) for both the geometry conversion and the BL-B85 commit/drop
+logic; both restored and `sha1sum`-verified byte-identical afterward. Reproduced the tuning-crash
+finding directly by running `import belief.optic_policy` under a constructed `PETROBRAIN_TUNING`
+file, not inferred from reading `tuning.py`. Attempted an independent reproduction of the
+"realistic case" numbers and flagged the discrepancy rather than silently accepting the narrative
+figures; this is new evidence this review produced, not a restatement of `implementation.md`. Ran
+`ruff format --check`, `ruff check`, `mypy --strict` (from `cd body-layer`), and the full `pytest`
+suite (2340 passed, 4 xfailed, 1 failed on first run — `test_log_live_los_coverage_summary_logs_
+zero_over_evaluated_when_healthy`, a named known flake, passed alone on rerun) on commit
+`9cba4943fdca82e69335b1f605b5b9c9b32689ff` from inside `body-layer/`. `tools/generate_defaults.py`
+confirmed `config/defaults.toml` already current.
