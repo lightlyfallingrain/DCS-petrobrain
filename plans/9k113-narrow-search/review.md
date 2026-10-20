@@ -385,3 +385,133 @@ trust. Verified the "derived constants are never keys" exclusion against
 myself (one test red for the stated reason, five green, file restored and confirmed via empty
 `git diff`). Ran `ruff format --check`, `ruff check`, `mypy --strict`, the full `pytest` suite, and
 `generate_defaults.py` on this exact commit tip.
+
+---
+
+## Review — security fix
+
+Reviewed `bb6364b0` (parent `8b656499`, `feature/9k113-narrow-search`, detached). This is the
+Security-requested fix for Part 2 Required Fix 1 of `plans/9k113-narrow-search/security-review.md`
+("NEEDS FIXES" — `_sight_in_regard_sweep` never enforced the sight's own elevation field of
+regard). Re-entering the loop per `AGENTS.md` — this is the Reviewer pass on that fix, before DoD.
+
+### Fix verified correct, by direct calculation and by mutation — not only by reading
+
+- **The claimed defect is real and reproduced exactly.** `search_pattern`'s elevation
+  (`atan2(altitude_agl_m, range_m)`) is unbounded below and was never checked against
+  `regard_elevation_down_deg`. Ran the unfixed formula myself: at 1000 m AGL the near edge
+  (`SIGHT_SEARCH_NEAR_M=2333`) gives `-23.2°`, 8.2° past the `-15°` limit — matches the security
+  review's table and the implementer's own figure to four decimal places.
+- **The fix is the right choke point.** `_sight_in_regard_sweep` is the one producer every caller
+  of the three in-regard legs (`run_once`'s `sight_wide_search=`/`sight_narrow_near_search=`/
+  `sight_narrow_far_search=`) reads from, confirmed by grep — no other call site builds these
+  sequences. Filtering there, not at the consumer, matches this project's own standing rule
+  (`.claude/agent-memory/implementer/feedback_declared_bound_check_at_selection_not_at_consumer.md`)
+  and the precedent `look_sweep` already set for the chosen-target path.
+- **Mutation reproduced myself, not taken on the implementer's word.** Reverted
+  `return [step for step in steps if within_field_of_regard(optic, step[0], step[1])]` to
+  `return steps`, reran `TestSightInRegardSweepElevation`: 3 of 6 red
+  (`test_wide_leg_at_1000m_agl_stays_within_regard`,
+  `test_narrow_near_leg_at_1000m_agl_stays_within_regard`, and the `1000.0` parametrization of
+  `test_a_multi_poll_cycle_never_commits_an_out_of_regard_aim`), failing with
+  `look_elevation_deg=-23.20155444616394` on `SIGHT_WIDE_OPTIC`'s `-54.5°` azimuth step — the
+  review's own `-23.2°` figure, exact. Restored by `git checkout -- src/logger.py`;
+  `sha1sum` before/after identical (`e384a0316174cbb7c5e82d476d0734d59b775dd1`).
+- **Every path that can hand out a sight optic now stays in regard, enumerated directly (not
+  trusted from the plan), at 1000 m and 2000 m AGL, for both a free scan and a commanded `left`
+  split:** `_idle_sight_search`'s three legs (fixed here), `_idle_sight_rest`'s hold-last-position
+  fallback (already validated or `(0,0)`, unaffected), the `home_phase is SIGHTING` hold-last-aim
+  path (same argument), and `_decide_sighting`'s `look_sweep` chosen-target path (pre-existing
+  `BL-B64` fix, `regard_optic=SIGHT_WIDE_OPTIC`). All four paths checked by direct call, not read
+  alone — every generated `(azimuth, elevation)` satisfied `within_field_of_regard` for its own
+  optic at both altitudes and both scan shapes, and the `left` split's azimuths landed correctly
+  inside `(-60°, 30°)`'s own sub-span.
+- **Leg-fallback composition checked by driving `decide()`, not inferred.** At 2000 m AGL,
+  `narrow_near` filters to fully empty (confirmed: `nn == []`) while `wide`/`narrow_far` do not.
+  Ran 40 polls through `decide()`: the cycle visits `wide` for 9 polls, correctly skips the empty
+  `narrow_near` leg entirely, visits `narrow_far` for 16, returns to `wide` — every committed aim
+  stayed within regard throughout, no stall, no repeated leg, no exception.
+- **Binoculars genuinely have no regard, confirmed at the data, not the docstring.**
+  `BINOCULAR_OPTIC.regard_azimuth_half_deg`/`regard_elevation_up_deg`/`regard_elevation_down_deg`
+  are all `None` (checked the live object, not just its declaration) — `within_field_of_regard`'s
+  `None`-means-unrestricted branch makes it a true no-op there, so `_sight_out_of_regard_sweep`
+  correctly needs no equivalent filter.
+
+### New finding from this re-review: filed as `BL-B86`, not a required fix
+
+Checking "does an emptied leg cause a busy loop, a stuck search cycle, or a sight that never
+searches at high altitude" surfaced a real, previously-unmeasured consequence of this (correct)
+fix: for a **free scan or a commanded `ahead` scan**, `wide`/`narrow_near` empty out by
+**2333 m AGL**, and `narrow_far` — the longest-reaching leg — empties out between **3630 and
+4000 m AGL** (its own far edge's depression first passes `-15°` at
+`13556 * tan(15°) ≈ 3630 m`). Above that altitude, **all four** search sequences
+(`sight_wide_search`/`sight_narrow_near_search`/`sight_narrow_far_search`/
+`sight_out_of_regard_search`) are simultaneously empty for those two sectors specifically, because
+`_sight_out_of_regard_sweep` returns `[]` by construction whenever there is no commanded sector or
+the commanded sector has no out-of-regard remainder (`ahead`'s span sits fully inside the regard,
+per `_split_sector_by_regard`'s own worked example) — so there is nothing left for the idle cycle
+to step through.
+
+**Verified safe, not just plausible:** `_idle_sight_search`'s `first_nonempty_leg` loop is bounded
+(`len(_SEARCH_LEG_ORDER)` iterations, never longer) and falls to `_idle_sight_rest` on exhaustion,
+which holds the last (already-validated) aim or `(0.0, 0.0)` — both always in regard. Ran `decide()`
+20 polls at 5000 m AGL with all four sequences empty: stable, no exception, every decision within
+regard — it degrades to "the sight stops searching and holds a fixed aim," never to a crash, a
+busy loop, or an out-of-regard commit.
+
+**Not true of every commanded sector** — `left`/`right`/`full` each produce a genuine out-of-regard
+binocular remainder by construction, so they keep searching via binoculars (no regard limit) even
+at 5000 m AGL; confirmed by direct measurement, not assumed from the `free`/`ahead` case.
+
+This is the correct, honest downstream consequence of "reject, not clamp," not a bug the fix
+introduced carelessly — above this altitude there genuinely is no elevation within the search band
+(2333–13556 m) the mount can still reach, for a sector with no binocular fallback. It is not a
+required fix for this patch: no invariant is violated, the degradation is graceful, and ~4 km AGL
+is an unusual sustained altitude for this airframe's role. Filed as **`BL-B86`**
+(`body-layer/ROADMAP/BL-B86.md`, indexed in `body-layer/ROADMAP/body-layer-backlog.md`) rather than
+blocking on it, the same disposition the original security review gave `BL-B85`.
+
+One documentation gap worth closing, though not blocking: `implementation.md`'s "what the pilot
+will notice" note describes only the near-edge band dropping out (true at 1000 m AGL) and does not
+mention that the *entire* idle sweep for `free`/`ahead` goes static above ~3.6–4 km AGL — a reader
+relying on that note alone would underestimate the effect's reach. Noted as an Optional
+Refinement below rather than a required fix, since `BL-B86` itself now carries the full account.
+
+### Checks run (this fix, on `bb6364b0` directly)
+
+- `ruff format --check src tests`: pass (155 files already formatted).
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues in 68 source files.
+- `pytest tests -q`: 2286 passed, 4 xfailed, 0 failed — no flakes this run; none of the task's
+  named known-flake tests needed a rerun.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- Update `implementation.md`'s "what the pilot will notice" note to mention the full-stop case
+  above ~3.6–4 km AGL for `free`/`ahead` scans, not only the near-edge-band-drops-out case at
+  1000 m AGL — or simply point at `BL-B86`, which now carries the complete account. (Optional.)
+- `BL-B86` itself (filed, not blocking) — whether the idle fallback should eventually do something
+  better than hold a fixed aim once every leg is empty (e.g. park at the `-15°` down-regard
+  boundary, or give `free`/`ahead` a synthesized out-of-regard remainder the way `left`/`right`/
+  `full` already have) is a design question for Architect/the user, not this review. (Optional,
+  tracked separately.)
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read of this commit's diff (`logger.py`, `test_logger.py`, `implementation.md`). Reproduced
+the defect calculation independently against `perception/optics.py`'s live `SIGHT_WIDE_OPTIC`/
+`SIGHT_NARROW_OPTIC`/`BINOCULAR_OPTIC` objects and `belief/optic_policy.py`'s `search_pattern`,
+rather than taking the stated figures on trust. Reproduced the mutation myself (filter removed,
+3/6 tests red for the stated reason, file restored and `sha1sum`-verified byte-identical). Directly
+enumerated and exercised every code path that can hand out a sight optic, at 1000 m/2000 m AGL and
+for both a free scan and a commanded `left` split, rather than trusting the plan's own path list.
+Drove `decide()` through real multi-poll cycles at 2000 m and 5000 m AGL to check leg-fallback
+composition and the all-legs-empty case directly, which surfaced `BL-B86` above. Ran
+`ruff format --check`, `ruff check`, `mypy --strict`, and the full `pytest` suite on this exact
+commit tip.

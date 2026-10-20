@@ -124,6 +124,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B83]] — idle 9K113 searches the mission objective area when in range (deferred: no objective datum at runtime)
 - [[BL-B84]] — 9K113 search depth adapts to terrain (deferred; perception already handles LOS per look)
 - [[BL-B85]] — a contact stuck at `presence` forever can fully starve the sight's search cycle
+- [[BL-B86]] — above ~3.6–4 km AGL the sight's idle search cycle goes fully idle (free/ahead scan)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
