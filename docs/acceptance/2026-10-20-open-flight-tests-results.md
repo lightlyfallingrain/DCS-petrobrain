@@ -36,6 +36,23 @@ The card's P2 has audio-adapter on the Mac with `say`. This flight ran the
 audio-adapter on Windows with Piper (AA-6, `feature/audio-adapter-os-independent`)
 and whisper.cpp `b5454` (`whisper-bin-x64.zip`, v1.9.5) for STT; brain on the Mac.
 
+## Later results (same day)
+
+User, verbatim:
+
+> A15 - ok, pass.
+> A14 - cannot test, free speech from brain not implemented
+> A16 - ok, pass
+
+| ID | card item | result |
+|---|---|---|
+| A15 | callouts about unseen contacts (BL-W6) | pass |
+| A14 | the brain, in his own words (BR-1, BR-B1) | **not testable**: "Petrovich, …" gets "say again" (sortie feedback F2, the wake word anchors as a command verb), so free speech never reaches the brain |
+| A16 | FARP landing (BL-B82, BL-B81) | pass |
+
+A8 (9K113) and A12 (gun fire) produced sortie feedback F4–F6, now being built
+(`feature/9k113-narrow-search`; `fix/taking-fire-visible-shooter` merged).
+
 ## Still open
 
-A6–A9, A12, A14–A16, A18, B, C, L — testing continues.
+A6, A7, A9, A18, B, C, L.
