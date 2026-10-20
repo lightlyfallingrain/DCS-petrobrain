@@ -66,3 +66,12 @@ User, verbatim:
 Unambiguous, fix given by the user — no exploration needed. Source is
 `body-layer/src/belief/speech.py` `_round_enrichment_fragment` (`"(~400 metres)"`); `say`
 silently skipped the tilde, Piper reads it.
+
+## F4 — with OBSERV ON only the 9K113 wide setting is used, never narrow
+
+User, verbatim:
+
+> with OBSERV ON, 9K113 wide is used, but I have not seen narrow. Narrow is important, it's what
+> allows detection and classification at distance.
+
+Not yet explored. Card item A8 (9K113 sight).
