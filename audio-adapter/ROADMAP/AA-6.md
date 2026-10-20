@@ -35,6 +35,14 @@
   stays `[~]`, not `[x]`, until Stage 4 runs. Acceptance checklist for Stage 4:
   `plans/audio-adapter-os-independent/dod-check.md`.
 
+  **Stage 4 PASS on both machines (user, 2026-10-20)**: Mac — *"works on mac, very good audio"*,
+  live pytest 0 skipped, outage/recovery lines once each, warm latency *"practically
+  instantanous"*; Windows — *"Piper Windows test done. Pass. works very well."* (reported as one
+  overall pass, blocks not itemised). Results: `docs/acceptance/2026-10-20-aa6-stage4-piper.md`.
+  The server's own per-request `TTS synthesis failed` WARNING still repeats during an outage — left
+  as is by user decision (*"leave as is, not important"*). `audio-adapter/RUN.md` rewritten for
+  Piper. Ready to merge.
+
   **Process note**: this batch's Security **plan** review (the Architect→Implementer gate, distinct
   from the deep-analysis pass above) never ran in sequence — found and closed retroactively at DoD.
   Second occurrence of this exact gap (`.claude/agent-memory/dod/

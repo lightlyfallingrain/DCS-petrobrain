@@ -67,7 +67,8 @@ def main() -> None:
         default="local",
         help=(
             "delivery target for synthesized audio -- 'local' (default) "
-            "plays via afplay on this machine, no other subproject needed; "
+            "plays on this machine (afplay on macOS, winsound on Windows), no "
+            "other subproject needed; "
             "'aircraft-layer' POSTs the WAV to a running aircraft-layer "
             "collector's /audio/play (requires --aircraft-layer-url)"
         ),
