@@ -323,3 +323,71 @@ A is built now. C is linked to the existing weather/light/vegetation item (`BL-B
 under real world conditions" section). B is deferred: perception already handles it per look
 (no LOS behind terrain, nearside visible). What is deferred is only the search pattern adapting
 its depth to terrain.
+
+## F4 — narrow looks (user, 2026-10-20)
+
+Implementation found that sight *looks* always resolve to wide: "worth a look" is decided from
+naked-eye/binocular thresholds, so a contact beyond binocular classification range is never worth
+a sight look, and narrow never classifies.
+
+> The narrow thing. Fix it, otherwise the whole point of narrow is missed.
+
+## F1 — latency settled (user, 2026-10-20, next flight)
+
+> 1 - responsiveness is much better when whisped (and audio adapter) run on mac -> this settles it,
+> I'll prioritize whisper (=audio adapter) and brain to run on mac. They must not be dependent on
+> mac, but I'll mostly use them on Mac.
+
+## F8 — "set target" acknowledged late and as an attack run
+
+User, verbatim:
+
+> * Me: "set target, armor, 12 o'clock"
+> * several seonds pass, I make U-turn to stay safe
+> * Petrovich acknowledges target Leopard 2 at 12 o'clock.
+>    * but this is several seconds late. I've already U-turned, there's nothing at 12 o'clock now.
+>    * Petrovich acknowledges attack run. This should not happen, this was selectling target, not
+>      attack run.
+
+Not yet explored.
+
+### F8 — explored (user, 2026-10-20)
+
+Asked: (1) were the exact words "Attack run, …" or "Attack run off"? (2) should a late readback
+give current or original position? Also offered a speech log with queued/spoken timestamps.
+
+> 1 - nope.
+> 2 - current inforamtion, not old. Though the real problem here is the many second delay
+> Yes and timestamps. Could also add latency measurements and logs
+
+1. The exact "attack run" wording isn't remembered, so that part is unresolved until the
+   instrumentation shows what was spoken.
+2. A readback reflects **current** information at the moment it is spoken, not when the command
+   was handled. But the real problem is the multi-second delay.
+3. Build: per-utterance timestamps (queued, spoken) plus end-to-end latency measurement and logs
+   across the voice chain (PTT release → STT → body-layer → speech queue → TTS → playback), so the
+   delay can be located.
+
+### F8 — plan decisions (user, 2026-10-20)
+
+On `plans/voice-latency-instrumentation/plan.md`'s four decisions: (1) re-render the current
+position in `select_target` only or in every positional readback; (2) log the command token, or
+thread the full template; (3) add a playback-start feedback seam now; (4) log failed STT/TTS
+attempts.
+
+> 1 - all of them
+> 2 - cheap
+> 3 - measure first
+> 4 - yes
+
+### F4 — wide sweep band (user, 2026-10-20)
+
+Asked whether wide should orient over the same 2.3–5.6 km band as the first narrow pass, or over
+the whole 2.3–13.6 km:
+
+> wide sweep -> it makes sense to use it up to where it can bring information, be it detection or
+> classification. At greater distances it cannot, narrow can.
+
+So the wide sweep's far edge is wide's own useful reach (the farther of its detection and
+classification reach, from the existing optic calibration), not the 5.6 km binocular boundary.
+Beyond that reach only narrow brings information.
