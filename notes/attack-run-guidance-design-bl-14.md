@@ -111,3 +111,15 @@
   that usually tracks it. When a review names a specific field as *the* fix, treat the name as the
   reviewer's best guess at the requirement, not the requirement itself, and check whether the
   defect's own English description is broader than the named target.
+- **A two-sided window's lower bound exists for a specific reason, and copying its shape into a
+  new context that lacks that reason silently over-excludes.** `improvement_window_m`'s lower
+  bound excludes a close target because the *naked eye* resolves the same tier "for free" on its
+  next dwell, making a binocular look at it wasted — a competing-instrument argument.
+  `9k113-narrow-search` needed the equivalent gate for an active sight look (`sight_can_still_
+  improve`) and the natural-looking shape was to mirror that window, using `SIGHT_WIDE_OPTIC`'s
+  own threshold as the new lower bound. That would have been wrong: while `SIGHTING`, nothing
+  dwells in parallel to resolve a close contact for free — the sight *is* the active instrument —
+  so there is no competing instrument to defer to, and the mirrored lower bound would have
+  incorrectly excluded close, genuinely-worth-a-look targets. Caught by the review asking *why*
+  the existing window's lower bound exists before reusing its shape, not by checking whether the
+  new predicate "looked like" the old one.

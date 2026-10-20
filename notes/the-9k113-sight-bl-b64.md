@@ -64,3 +64,25 @@
   recur whenever new code needs that correlation *outside* a normal admission -- and note that any
   such cache, being admitted-only, cannot see a cluster split whose child was rejected that poll
   (`plans/bl-b76-tripwire/implementation.md`).
+- **A helper written for an optic with no field-of-regard limit can have an elevation gap that is
+  a true no-op for every existing caller, and stays invisible until a *new* caller gives it an
+  optic that is actually regard-bound.** `belief.optic_policy.search_pattern`'s elevation
+  (`atan2(altitude_agl_m, range_m)`) was never checked against `regard_elevation_down_deg` —
+  harmless for its original caller (`BINOCULAR_OPTIC`, which has no field of regard at all), and
+  still harmless for the plan's own azimuth-only framing of the fix. `9k113-narrow-search`'s idle
+  search cycle became the function's first caller for a regard-bound sight optic, at an ordinary
+  cruise altitude (>~625 m AGL, not an edge case) — a third occurrence of the exact field-of-regard
+  enforcement gap this entry's first bullet already names, missed by the plan, the implementer and
+  two Reviewer passes, caught only by Security's deep analysis. When a plan reuses an existing
+  helper for a new optic/caller, ask explicitly which of the helper's own silent assumptions were
+  true only because of the *old* caller's properties — "no field of regard" is one such property,
+  and it does not transfer.
+- **An invariant test built with empty/default inputs and a realistic-geometry test that checks
+  only one axis can sit side by side for an entire review cycle without ever covering the
+  combination that matters.** The existing `within_field_of_regard` idle-aim tests passed no real
+  `sight_*_search` sequences at all, so they exercised the trivial hold-last-position fallback, not
+  `search_pattern`; the tests that *did* drive real geometry checked azimuth sub-spans only, never
+  elevation. Neither test was wrong on its own terms, and together they still missed the gap above.
+  When adding a new producer to an existing invariant test, drive it with the real sequence-builder
+  the production call site uses, not a synthetic or empty stand-in, and check every axis the bound
+  has, not just the one the existing tests already cover.
