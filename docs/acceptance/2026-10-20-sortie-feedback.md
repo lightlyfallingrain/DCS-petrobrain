@@ -105,3 +105,31 @@ sight's magnification along that gaze: detections through a 9K113 at 90° off th
 mount cannot point. The ±60° field-of-regard filter guards only the choice of *look target*, not
 this idle path. The idle aim is the same question as F4 ("where does the sight point when
 nothing is detected yet"), so the two should be designed together.
+
+## F4/F5 — exploration answers (user, 2026-10-20)
+
+> "How would a real operator search with it? …" -> yes. use wide to orient and quick scan, narrow
+> to look more closely and detect greater range.
+>
+> "What decides where narrow points when nothing has been detected yet? …" -> all of those.
+> Priority: 1 commanded scan sector. Mission objective area if wihtin range, flight direction as
+> normal default.
+>
+> "Should narrow also take over the close looks, as it does now? Or would wide be enough for
+> contacts that are near?" -> use least capable optic that suffices.
+
+Read together with the 2026-10-15 direction (§4 *"wide to find → narrow to classify → wide again
+for surroundings"*, §8 *"wide↔narrow should use similar logic to naked eye and binocular usage"*,
+§9 the sight is the baseline and the naked eye the brief interruption), this is consistent with it
+and adds three things the build lacks:
+
+1. **Narrow searches**, not only inspects: sweeps at distance are narrow; wide is for orienting
+   and a quick scan.
+2. **Where the idle sight points**, in priority order: commanded scan sector → mission objective
+   area if within range → flight direction (default). Always inside the ±60° regard (F5).
+3. **Looks use the least capable optic that suffices** — eye < binoculars < sight wide < sight
+   narrow — rather than always narrow.
+
+Known gap against (2): body-layer has **no mission objective area at runtime** — `grep -i
+objective body-layer/src` finds only a comment. The Mission Interpreter's waypoints reach
+`mission_phase` (BL-7), which is inert in flight.
