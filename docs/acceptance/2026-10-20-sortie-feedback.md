@@ -89,3 +89,11 @@ and the field-of-regard filter. Narrow is never used to search. So the contacts 
 could detect — the far ones — can never cause narrow to be selected, because nothing selects
 narrow until something is already detected: a chicken-and-egg against exactly the use the user
 describes (*"what allows detection and classification at distance"*).
+
+## F5 — 9K113 wide pointed at -90°, outside its ±60° limit
+
+User, verbatim:
+
+> just a moment ago, 9K113 wide, but centre=-90 deg +/- 15 deg. 9K113 limit is +-60 deg.
+
+Not yet investigated.
