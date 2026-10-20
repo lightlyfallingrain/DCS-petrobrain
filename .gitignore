@@ -56,3 +56,5 @@ __pycache__/
 # that cannot be redistributed. Put any further DCS-shipped manual, mission or
 # asset in this directory and it is ignored by the same rule.
 docs/concept/mi-24_info/*.pdf
+
+
