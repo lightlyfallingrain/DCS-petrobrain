@@ -44,17 +44,24 @@ class AircraftLayerClient:
         self._base_url = base_url
         self._timeout_s = timeout_s
 
-    def play_audio(self, audio: bytes, urgent: bool) -> None:
+    def play_audio(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         """`POST /audio/play` with `{"audio_b64": <base64 WAV>, "urgent":
-        bool}`. Raises `AircraftLayerError` on any failure (network error,
-        non-2xx, invalid JSON) -- this call never swallows, matching
+        bool}`, plus an optional `correlation_id`
+        (`plans/voice-latency-instrumentation/plan.md` Stage 4) so the
+        aircraft-layer collector's own playback log can be joined back to
+        this utterance. Raises `AircraftLayerError` on any failure (network
+        error, non-2xx, invalid JSON) -- this call never swallows, matching
         `body-layer/src/aircraft_client.py`'s `push_text_line`'s
         raise-on-failure posture for its one write call."""
         url = f"{self._base_url}{_AUDIO_PLAY_PATH}"
-        body = {
+        body: dict[str, object] = {
             "audio_b64": base64.b64encode(audio).decode("ascii"),
             "urgent": urgent,
         }
+        if correlation_id is not None:
+            body["correlation_id"] = correlation_id
         data = json.dumps(body).encode("utf-8")
         request = urllib.request.Request(
             url,
@@ -94,9 +101,11 @@ class AircraftLayerAudioSink:
     def __init__(self, base_url: str, timeout_s: float = _DEFAULT_TIMEOUT_S) -> None:
         self._client = AircraftLayerClient(base_url, timeout_s=timeout_s)
 
-    def deliver(self, audio: bytes, urgent: bool) -> None:
+    def deliver(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         try:
-            self._client.play_audio(audio, urgent)
+            self._client.play_audio(audio, urgent, correlation_id)
         except AircraftLayerError as exc:
             raise AudioDeliveryError(str(exc)) from exc
 

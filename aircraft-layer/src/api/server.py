@@ -250,6 +250,15 @@ _LOOK_DIRECTION_HOUR_MAX = 11
 _LOOK_DIRECTION_FOV_MIN_DEG = 5
 _LOOK_DIRECTION_FOV_MAX_DEG = 180
 
+#: `/audio/play`'s optional `correlation_id` field (`plans/
+#: voice-latency-instrumentation/plan.md` Stage 4) -- the capture side
+#: mints a fixed ~12-char id, so a generous cap costs nothing and forecloses
+#: an attacker-controlled LAN peer growing this process's own playback log
+#: without bound (same reasoning, same value, as audio-adapter's own copy
+#: of this constant in `server.py` -- duplicated rather than imported,
+#: module independence).
+_MAX_CORRELATION_ID_LEN = 128
+
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
     sample = cache.latest()
@@ -588,11 +597,27 @@ def _make_handler(
                 self._respond_json(400, {"error": "'urgent' must be a boolean"})
                 return
 
+            correlation_id = data.get("correlation_id")
+            if correlation_id is not None and (
+                not isinstance(correlation_id, str)
+                or len(correlation_id) > _MAX_CORRELATION_ID_LEN
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'correlation_id' must be a string of at most "
+                            f"{_MAX_CORRELATION_ID_LEN} characters"
+                        )
+                    },
+                )
+                return
+
             # Never raises -- see AudioPlaybackSender.play_audio's own
             # docstring and plan Decision 5 (this is /text/push's
             # never-raises posture, not /command/petrovich_search's
             # propagate-500 one).
-            audio_sender.play_audio(audio, urgent)
+            audio_sender.play_audio(audio, urgent, correlation_id)
             self._respond_json(200, {"ok": True})
 
         def _handle_audio_stop(self) -> None:

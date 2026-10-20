@@ -43,7 +43,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
+from latency_log import LatencyLogWriter
 from local_playback import make_local_sink
 from server import DEFAULT_HOST, DEFAULT_PORT, AudioSink, TTSAdapterServer
 from stt_engine import DEFAULT_WHISPER_BINARY, WhisperCliEngine
@@ -118,6 +120,18 @@ def main() -> None:
         action="store_true",
         help="log every request at DEBUG level",
     )
+    parser.add_argument(
+        "--latency-log",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per /speak and /transcribe attempt "
+            "(synthesis/delivery/recognition/match durations, correlation "
+            "id, outcome -- including failures) -- joined with the capture "
+            "process's own --latency-log and body-layer's logs by "
+            "tools/join_voice_latency.py. Omitted (default): a true no-op."
+        ),
+    )
     args = parser.parse_args()
 
     if args.target == "aircraft-layer" and args.aircraft_layer_url is None:
@@ -148,8 +162,17 @@ def main() -> None:
         else None
     )
 
+    latency_log = (
+        LatencyLogWriter(args.latency_log) if args.latency_log is not None else None
+    )
+
     server = TTSAdapterServer(
-        engine, sink, host=args.host, port=args.port, stt_engine=stt_engine
+        engine,
+        sink,
+        host=args.host,
+        port=args.port,
+        stt_engine=stt_engine,
+        latency_log=latency_log,
     )
     server.open()
     logger.info(

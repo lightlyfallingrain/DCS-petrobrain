@@ -198,7 +198,14 @@ class LocalPlaybackSink:
         self._spawn = spawn
         self._tracker = _InFlightTracker()
 
-    def deliver(self, audio: bytes, urgent: bool) -> None:
+    def deliver(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
+        """`correlation_id` is accepted for `AudioSink` protocol parity
+        (`plans/voice-latency-instrumentation/plan.md`) and unused here --
+        this dev-only local target has no cross-process log for it to
+        anchor; `AircraftLayerAudioSink` is the implementation that
+        actually forwards it."""
         fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-play-")
         os.close(fd)
         try:
@@ -393,7 +400,11 @@ class _WinsoundLocalSink:
         self._lock = threading.Lock()
         self._events: set[threading.Event] = set()
 
-    def deliver(self, audio: bytes, urgent: bool) -> None:
+    def deliver(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
+        """`correlation_id` is accepted for `AudioSink` protocol parity and
+        unused here -- see `LocalPlaybackSink.deliver`'s identical note."""
         fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-play-")
         os.close(fd)
         try:

@@ -61,6 +61,14 @@ class TranscriptEvent:
     ambiguous: bool
     t_wall: float
     slots: dict[str, int | str] | None = None
+    #: The capture-side correlation id (`plans/voice-latency-instrumentation/
+    #: plan.md` Stage 2), carried through from `POST /transcribe`'s own
+    #: optional body field when the capture process supplied one. `None`
+    #: for a clip posted with no id (an older capture process, or a direct
+    #: `curl`) -- joining on `None` is meaningless, so the reducer
+    #: (`tools/join_voice_latency.py`) simply has nothing to join that row
+    #: against, not an error.
+    correlation_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +80,7 @@ class TranscriptEvent:
             "ambiguous": self.ambiguous,
             "t_wall": self.t_wall,
             "slots": self.slots,
+            "correlation_id": self.correlation_id,
         }
 
 

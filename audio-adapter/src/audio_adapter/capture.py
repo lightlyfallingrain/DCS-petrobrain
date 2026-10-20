@@ -39,6 +39,7 @@ import argparse
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from audio_capture import (
     DEFAULT_MAX_CLIP_S,
@@ -51,6 +52,7 @@ from audio_capture import (
     sox_available,
 )
 from capture_loop import CaptureLoop
+from latency_log import LatencyLogWriter
 from ptt_source import (
     DEFAULT_DCS_POLL_HZ,
     DcsPTT,
@@ -134,6 +136,18 @@ def _build_parser() -> argparse.ArgumentParser:
             f"{DEFAULT_DCS_POLL_HZ:g} Hz for dcs (an HTTP round trip to a collector "
             f"sharing a box with DCS), {DEFAULT_LOCAL_POLL_HZ:g} Hz for key/joystick "
             "(a local read, no network hop)"
+        ),
+    )
+    parser.add_argument(
+        "--latency-log",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per clip (correlation id, PTT-release "
+            "timestamp, post-to-adapter duration, outcome) -- joined with "
+            "body-layer's own logs by tools/join_voice_latency.py. "
+            "Omitted (default): a true no-op, same posture as every other "
+            "--*-log flag in this project."
         ),
     )
     return parser
@@ -227,13 +241,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     poll_hz = _resolve_poll_hz(args.ptt, args.poll_hz)
     interval = 1.0 / poll_hz if poll_hz > 0 else 0.0
+    latency_log = (
+        LatencyLogWriter(args.latency_log) if args.latency_log is not None else None
+    )
 
     try:
         if key_ptt is not None:
             with key_ptt:
-                _run(loop, interval)
+                _run(loop, interval, latency_log)
         else:
-            _run(loop, interval)
+            _run(loop, interval, latency_log)
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
@@ -248,7 +265,9 @@ def main(argv: list[str] | None = None) -> int:
 _PTT_RETRY_S = 1.0
 
 
-def _run(loop: CaptureLoop, interval: float) -> None:
+def _run(
+    loop: CaptureLoop, interval: float, latency_log: LatencyLogWriter | None = None
+) -> None:
     """Poll until interrupted, surviving a talk control that stops
     answering.
 
@@ -259,7 +278,12 @@ def _run(loop: CaptureLoop, interval: float) -> None:
     traceback they could not act on mid-flight. The right handling is here
     rather than in the loop: report it, drop any in-flight clip, and keep
     trying. The loop keeps its loud failure; the process keeps running.
-    """
+
+    `latency_log` (`--latency-log`, `plans/voice-latency-instrumentation/
+    plan.md` Stage 1) is `None` by default -- a true no-op. When set, every
+    `sent`/`dropped`/`error` event (every outcome `CaptureLoop` attaches a
+    `correlation_id` to -- see that class's docstring) becomes one row,
+    `stage: "capture"`."""
     complaining = False
     while True:
         try:
@@ -288,6 +312,17 @@ def _run(loop: CaptureLoop, interval: float) -> None:
                 print(f"  dropped: {event.detail}")
             else:
                 print(f"  ERROR: {event.detail}", file=sys.stderr)
+            if latency_log is not None and event.correlation_id is not None:
+                latency_log.write(
+                    {
+                        "stage": "capture",
+                        "correlation_id": event.correlation_id,
+                        "t_ptt_release_wall": event.t_ptt_release_wall,
+                        "clip_duration_s": event.clip_duration_s,
+                        "post_duration_s": event.post_duration_s,
+                        "outcome": event.kind,
+                    }
+                )
         time.sleep(interval)
 
 

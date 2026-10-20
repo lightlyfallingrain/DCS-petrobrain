@@ -102,6 +102,7 @@ Position belief, voice, watch/report and the brain seam:
 - [[BL-W33]] — Binocular optic — Stages 1 through 3b
 - [[BL-W34]] — Voice command completeness — Stages 1 through 5
 - [[BL-W35]] — Watch reporting — Stages 1 through 5
+- [[BL-W41]] — Voice latency instrumentation + positional readback freshness
 - [[BL-W8]] — Position-belief-runaway fix
 - [[BL-W7]] — Binocular optic, voice command completeness, and precise position belief — sortie closure
 - [[BL-W9]] — 2026-09-25 crew-behaviour sortie card

@@ -61,14 +61,21 @@ class AudioAdapterClient:
     base_url: str
     timeout_s: float = _DEFAULT_TIMEOUT_S
 
-    def push_speech(self, text: str, urgent: bool) -> None:
-        """`POST /speak` with `{"text": text, "urgent": urgent}`. Raises
-        `AudioAdapterError` on any failure -- see the module docstring for
-        why this call, unlike a swallow-internally design, does not catch
-        its own failure."""
+    def push_speech(
+        self, text: str, urgent: bool, correlation_id: str | None = None
+    ) -> None:
+        """`POST /speak` with `{"text": text, "urgent": urgent}`, plus an
+        optional `correlation_id` (`plans/voice-latency-instrumentation/
+        plan.md` Stage 3) so audio-adapter's own `--latency-log` can be
+        joined back to this utterance. Raises `AudioAdapterError` on any
+        failure -- see the module docstring for why this call, unlike a
+        swallow-internally design, does not catch its own failure."""
         url = f"{self.base_url}/speak"
         text = _TILDE_RE.sub("about ", text)
-        data = json.dumps({"text": text, "urgent": urgent}).encode("utf-8")
+        body: dict[str, object] = {"text": text, "urgent": urgent}
+        if correlation_id is not None:
+            body["correlation_id"] = correlation_id
+        data = json.dumps(body).encode("utf-8")
         request = urllib.request.Request(
             url,
             data=data,
@@ -111,10 +118,10 @@ class AudioAdapterClient:
         `plans/inbound-speech/plan.md` Stage 3), returning every pending
         transcript as a list of dicts (`transcript_queue.TranscriptEvent.
         to_dict`, i.e. `{"transcript", "confidence", "token", "match_ratio",
-        "verb_anchored", "ambiguous", "t_wall"}`), oldest first. Returns
-        `[]` when nothing is pending -- see the module docstring for why
-        this is `[]`, not `None`. Raises `AudioAdapterError` on any
-        transport/parse failure, same as `push_speech`."""
+        "verb_anchored", "ambiguous", "t_wall", "slots", "correlation_id"}`),
+        oldest first. Returns `[]` when nothing is pending -- see the module
+        docstring for why this is `[]`, not `None`. Raises `AudioAdapterError`
+        on any transport/parse failure, same as `push_speech`."""
         url = f"{self.base_url}/transcripts/poll"
         try:
             with urllib.request.urlopen(url, timeout=self.timeout_s) as response:
