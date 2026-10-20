@@ -184,3 +184,14 @@ User, verbatim:
 
 So reason 1 (gaze gating) is **correct behaviour**, by the user's decision. The later stretch —
 `observ off`, `scan left`, shooter on the left — is the case that must produce "taking fire".
+
+**What the logs show for that stretch** (`observ on` → `observ off` at sim 303 s, `scan left` at
+318 s; logs end at 334 s): the gaze cycled 9/10/11 o'clock with the naked eye and binoculars, as
+commanded. `Ground-1-3` (the Leopard firing at ownship) was **admitted once**, at 303 s and 1,073 m,
+as an ordinary contact (`CONTACT_14`, presence tier). **It was never a firing contact**, because a
+shooter at 1 km is visible without its muzzle flash, so the emitter bypass was never needed and
+`targets_ownship` stayed false (reason 2 above). That is the defect to fix. Whether it should
+also have been admitted more often in 318–334 s cannot be settled from the trace: the rows record
+the gaze hour and the true bearing but not the body-relative azimuth, and heading samples are
+sparse. Ownship turned from about 244° to 193° in that window, which moves a target at 185° true
+from about 10 o'clock to 12, out of the left scan.
