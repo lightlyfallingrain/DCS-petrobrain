@@ -1796,7 +1796,7 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     # Contact-report wording (unit type, clock, range), no spoken id -- the
     # player named no contact, so the readback has to say which one it was.
     assert lines == [
-        "Watching T-72, 12 o'clock, 0.5 kilometres near Jableh (~200 metres)."
+        "Watching T-72, 12 o'clock, 0.5 kilometres near Jableh (about 200 metres)."
     ]
     assert near_contact.id not in lines[0]
     assert near_contact.attention == "watch"
@@ -3351,7 +3351,7 @@ def test_report_all_speaks_a_known_contact(monkeypatch: pytest.MonkeyPatch) -> N
     **The expected text changed with BL-13 Stage 3** (`plans/
     crew-query-path/plan.md` Decision C, user decision 13): the answer is
     a summary, not a per-contact enumeration. It used to read
-    `"BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."` -- note
+    `"BMP-2, 3 o'clock, 1 kilometre near Jableh (about 200 metres)."` -- note
     what the summary drops and why. The type name goes because the summary
     speaks the *class* bucket (`parent_class_of`), the enrichment
     parenthetical goes because a pointer does not need a landmark to aim

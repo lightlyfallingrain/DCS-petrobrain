@@ -1526,13 +1526,15 @@ def test_format_range_km_says_very_close_under_half_a_kilometre() -> None:
 
 def test_round_enrichment_fragment_rounds_trailing_distance() -> None:
     assert (
-        _round_enrichment_fragment("near a road (439m)") == "near a road (~400 metres)"
+        _round_enrichment_fragment("near a road (439m)")
+        == "near a road (about 400 metres)"
     )
     # 450m sits exactly on a 100m rounding boundary; Python's round()
     # (ties to even) resolves it to 400, pinned for the same reason as
     # the range boundary case above.
     assert (
-        _round_enrichment_fragment("near a road (450m)") == "near a road (~400 metres)"
+        _round_enrichment_fragment("near a road (450m)")
+        == "near a road (about 400 metres)"
     )
 
 
