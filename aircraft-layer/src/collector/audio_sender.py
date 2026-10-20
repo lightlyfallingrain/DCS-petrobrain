@@ -81,6 +81,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 import wave
 from array import array
 from collections.abc import Callable
@@ -106,9 +107,17 @@ def _always_open() -> Spu8GateState:
     return Spu8GateState(gate_open=True, volume=1.0)
 
 
+#: One queued line: the temp `.wav` path plus the correlation id it carries
+#: (`plans/voice-latency-instrumentation/plan.md` Stage 4), `None` when
+#: the caller supplied none -- pre-dating this plan, or a non-instrumented
+#: caller. The queue held bare paths before this plan; widened to a tuple
+#: so the worker thread can still log enqueue/playback-start/
+#: playback-finish against the right id once a line reaches the front.
+_QueueItem = tuple[str, str | None]
+
 #: Sentinel put on the queue by `close()` to unblock the worker thread's
 #: blocking `queue.get()` call.
-_SENTINEL: str | None = None
+_SENTINEL: _QueueItem | None = None
 
 
 class WavPlayer(Protocol):
@@ -310,7 +319,9 @@ class AudioPlaybackSender:
     ) -> None:
         self._player: WavPlayer = player if player is not None else _WinsoundPlayer()
         self._gate_state = gate_state
-        self._queue: queue.Queue[str | None] = queue.Queue(maxsize=_MAX_QUEUE_LEN)
+        self._queue: queue.Queue[_QueueItem | None] = queue.Queue(
+            maxsize=_MAX_QUEUE_LEN
+        )
         self._worker: threading.Thread | None = None
 
     def open(self) -> None:
@@ -323,7 +334,9 @@ class AudioPlaybackSender:
             self._worker.join(timeout=5)
             self._worker = None
 
-    def play_audio(self, audio: bytes, urgent: bool) -> None:
+    def play_audio(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         """Write `audio` (WAV bytes) to a temp file and enqueue it for
         playback. `urgent=True` clears any currently-queued routine lines
         and interrupts in-flight playback before this file is enqueued
@@ -332,7 +345,16 @@ class AudioPlaybackSender:
         temp file is logged and the line is dropped, matching
         `TextOverlaySender.send_line`'s never-raises posture (plan
         Decision 5 -- playback is best-effort, display-equivalent output,
-        not a verifiable command)."""
+        not a verifiable command).
+
+        `correlation_id` (`plans/voice-latency-instrumentation/plan.md`
+        Stage 4) is this process's one piece of the voice chain with no
+        prior observability at all -- carried onto the queued item so the
+        worker thread (`_run`) can log the true enqueue/playback-start/
+        playback-finish instants against it. Logged here, at enqueue,
+        rather than left for the worker: enqueue happens on the HTTP
+        handler thread, and a line this plan's reducer joins on should show
+        when it actually arrived, not only when it was dequeued."""
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="aircraft-layer-audio-")
         os.close(fd)
         try:
@@ -346,9 +368,15 @@ class AudioPlaybackSender:
         if urgent:
             self.interrupt()
 
-        self._enqueue(path)
+        if correlation_id is not None:
+            logger.info(
+                "audio enqueue correlation_id=%s t_wall=%f",
+                correlation_id,
+                time.time(),
+            )
+        self._enqueue(path, correlation_id)
 
-    def _enqueue(self, path: str) -> None:
+    def _enqueue(self, path: str, correlation_id: str | None = None) -> None:
         """Put `path` on the playback queue, dropping the **oldest** queued
         (not-yet-playing) file if the queue is already at `_MAX_QUEUE_LEN`
         -- a stale queued callout is worth less than a fresh one, and the
@@ -362,19 +390,19 @@ class AudioPlaybackSender:
         and its reasoning."""
         while True:
             try:
-                self._queue.put_nowait(path)
+                self._queue.put_nowait((path, correlation_id))
                 return
             except queue.Full:
                 try:
-                    stale_path = self._queue.get_nowait()
+                    stale_item = self._queue.get_nowait()
                 except queue.Empty:
                     continue
                 logger.warning(
                     "audio queue full (%d) -- dropping oldest queued line",
                     _MAX_QUEUE_LEN,
                 )
-                if stale_path is not None:
-                    self._cleanup(stale_path)
+                if stale_item is not None:
+                    self._cleanup(stale_item[0])
 
     def interrupt(self) -> None:
         """Stop whatever is currently playing and drop everything queued,
@@ -397,11 +425,11 @@ class AudioPlaybackSender:
         let queued lines still eventually play")."""
         while True:
             try:
-                stale_path = self._queue.get_nowait()
+                stale_item = self._queue.get_nowait()
             except queue.Empty:
                 break
-            if stale_path is not None:
-                self._cleanup(stale_path)
+            if stale_item is not None:
+                self._cleanup(stale_item[0])
 
     def _interrupt_playback(self) -> None:
         """Stops whatever is currently playing (plan Decision 4). Kept as
@@ -415,9 +443,10 @@ class AudioPlaybackSender:
 
     def _run(self) -> None:
         while True:
-            path = self._queue.get()
-            if path is None:
+            item = self._queue.get()
+            if item is None:
                 return
+            path, correlation_id = item
 
             # SPU-8 gate/volume, consulted once per item, right here --
             # "next-utterance granularity" per the plan: whatever is
@@ -445,6 +474,18 @@ class AudioPlaybackSender:
                     path,
                     exc_info=True,
                 )
+            # The true playback-start instant (`plans/
+            # voice-latency-instrumentation/plan.md` Stage 4) -- dequeued,
+            # gate/volume already resolved, right before the blocking
+            # `play()` call. This is the one piece of the whole voice chain
+            # with no prior observability at all; everything upstream
+            # already has *some* log, however thin.
+            if correlation_id is not None:
+                logger.info(
+                    "audio playback-start correlation_id=%s t_wall=%f",
+                    correlation_id,
+                    time.time(),
+                )
             try:
                 self._player.play(path)
             except Exception:
@@ -452,6 +493,12 @@ class AudioPlaybackSender:
                     "playback failed for %s (continuing)", path, exc_info=True
                 )
             finally:
+                if correlation_id is not None:
+                    logger.info(
+                        "audio playback-finish correlation_id=%s t_wall=%f",
+                        correlation_id,
+                        time.time(),
+                    )
                 self._cleanup(path)
 
     def _cleanup(self, path: str) -> None:

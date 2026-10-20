@@ -95,6 +95,16 @@ def test_push_speech_speaks_tilde_as_about(
     assert received[0]["text"] == "Fuel for about 20 minutes, road about 800 metres."
 
 
+def test_push_speech_includes_correlation_id_when_given(
+    server_and_received: tuple[HTTPServer, list[dict[str, object]]],
+) -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 3."""
+    httpd, received = server_and_received
+    client = AudioAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
+    client.push_speech("Contact.", urgent=False, correlation_id="corr-bl-1")
+    assert received[0]["correlation_id"] == "corr-bl-1"
+
+
 def test_push_speech_unreachable_host_raises() -> None:
     client = AudioAdapterClient("http://127.0.0.1:1", timeout_s=1.0)
     with pytest.raises(AudioAdapterError):

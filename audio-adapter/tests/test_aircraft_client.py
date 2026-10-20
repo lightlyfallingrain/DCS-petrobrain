@@ -109,3 +109,31 @@ def test_audio_sink_deliver_succeeds_against_real_server(
     assert len(received) == 1
     assert base64.b64decode(str(received[0]["audio_b64"])) == b"SINK-BYTES"
     assert received[0]["urgent"] is True
+
+
+def test_play_audio_omits_correlation_id_when_none(
+    server_and_received: tuple[HTTPServer, list[dict[str, object]]],
+) -> None:
+    httpd, received = server_and_received
+    client = AircraftLayerClient(f"http://127.0.0.1:{httpd.server_port}")
+    client.play_audio(b"X", urgent=False)
+    assert "correlation_id" not in received[0]
+
+
+def test_play_audio_includes_correlation_id_when_given(
+    server_and_received: tuple[HTTPServer, list[dict[str, object]]],
+) -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 4."""
+    httpd, received = server_and_received
+    client = AircraftLayerClient(f"http://127.0.0.1:{httpd.server_port}")
+    client.play_audio(b"X", urgent=False, correlation_id="corr-xyz")
+    assert received[0]["correlation_id"] == "corr-xyz"
+
+
+def test_audio_sink_deliver_threads_correlation_id(
+    server_and_received: tuple[HTTPServer, list[dict[str, object]]],
+) -> None:
+    httpd, received = server_and_received
+    sink = AircraftLayerAudioSink(f"http://127.0.0.1:{httpd.server_port}")
+    sink.deliver(b"SINK-BYTES", True, "corr-sink")
+    assert received[0]["correlation_id"] == "corr-sink"

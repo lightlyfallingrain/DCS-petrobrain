@@ -15,6 +15,7 @@ The loop itself never imports sox, winmm or `urllib`.
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -34,9 +35,16 @@ class Recorder(Protocol):
 
 
 class ClipSink(Protocol):
-    """Where an accepted clip goes. `TranscribeClient.transcribe` fits."""
+    """Where an accepted clip goes. `TranscribeClient.transcribe` fits.
 
-    def __call__(self, wav: bytes) -> None: ...
+    Widened (`plans/voice-latency-instrumentation/plan.md` Stage 1) to also
+    carry the correlation id minted for this clip and the PTT-release
+    wall-clock stamp, so the whole round trip can be joined back to one
+    utterance across every process it crosses."""
+
+    def __call__(
+        self, wav: bytes, correlation_id: str, t_ptt_release_wall: float
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -46,10 +54,25 @@ class CaptureEvent:
     The loop reports rather than prints, so the tests can assert on what
     happened without capturing stdout, and so a future caller (a GUI, a
     log file) is not forced through a console.
+
+    `correlation_id`/`t_ptt_release_wall`/`post_duration_s`/`clip_duration_s`
+    (`plans/voice-latency-instrumentation/plan.md` Stage 1) are set for
+    every event this loop produces on a PTT release (`sent`/`dropped`/
+    `error` alike -- the id is minted before the gate even runs, so a
+    dropped or failed clip is just as traceable as a sent one);
+    `post_duration_s` is only ever set for `sent` (the only outcome that
+    actually calls `sink`). `None` for `press`, which has no clip yet.
+    `audio_adapter.capture`'s entrypoint is what turns these into a
+    `--latency-log` row -- this class only carries the numbers, it does
+    not write anywhere.
     """
 
     kind: str  # "press" | "sent" | "dropped" | "error"
     detail: str = ""
+    correlation_id: str | None = None
+    t_ptt_release_wall: float | None = None
+    post_duration_s: float | None = None
+    clip_duration_s: float | None = None
 
 
 class CaptureLoop:
@@ -150,6 +173,12 @@ class CaptureLoop:
             return []
 
         if not down and self._recording:
+            # Minted here, before the tail sleep and before the gate even
+            # runs (`plans/voice-latency-instrumentation/plan.md` Stage 1)
+            # -- so a clip the gate drops or that fails to send is just as
+            # traceable in `--latency-log` as one that reaches the adapter.
+            correlation_id = uuid.uuid4().hex[:12]
+            t_ptt_release_wall = time.time()
             # The tail runs before the stop, inside the loop's own tick,
             # so nothing else can start a new clip during it.
             self._sleep(self._tail_s)
@@ -158,20 +187,56 @@ class CaptureLoop:
             try:
                 clip = self._recorder.stop()
             except Exception as exc:  # noqa: BLE001 -- see class docstring
-                return [CaptureEvent("error", f"capture failed: {exc}")]
+                return [
+                    CaptureEvent(
+                        "error",
+                        f"capture failed: {exc}",
+                        correlation_id=correlation_id,
+                        t_ptt_release_wall=t_ptt_release_wall,
+                    )
+                ]
             if self._discard_if is not None and self._discard_if():
                 return [
-                    CaptureEvent("dropped", "full press -- not addressed to the crew")
+                    CaptureEvent(
+                        "dropped",
+                        "full press -- not addressed to the crew",
+                        correlation_id=correlation_id,
+                        t_ptt_release_wall=t_ptt_release_wall,
+                    )
                 ]
             verdict = self._gate.assess(clip)
             if not verdict.accepted:
-                return [CaptureEvent("dropped", verdict.reason or "rejected")]
+                return [
+                    CaptureEvent(
+                        "dropped",
+                        verdict.reason or "rejected",
+                        correlation_id=correlation_id,
+                        t_ptt_release_wall=t_ptt_release_wall,
+                    )
+                ]
+            post_start = self._monotonic()
             try:
-                self._sink(clip.wav)
+                self._sink(clip.wav, correlation_id, t_ptt_release_wall)
             except Exception as exc:  # noqa: BLE001 -- see class docstring
-                return [CaptureEvent("error", f"send failed: {exc}")]
+                return [
+                    CaptureEvent(
+                        "error",
+                        f"send failed: {exc}",
+                        correlation_id=correlation_id,
+                        t_ptt_release_wall=t_ptt_release_wall,
+                        post_duration_s=self._monotonic() - post_start,
+                        clip_duration_s=clip.duration_s,
+                    )
+                ]
             events.append(
-                CaptureEvent("sent", f"{clip.duration_s:.2f}s, peak {clip.peak:.2f}")
+                CaptureEvent(
+                    "sent",
+                    f"{clip.duration_s:.2f}s, peak {clip.peak:.2f}",
+                    correlation_id=correlation_id,
+                    t_ptt_release_wall=t_ptt_release_wall,
+                    post_duration_s=self._monotonic() - post_start,
+                    clip_duration_s=clip.duration_s,
+                )
             )
 
         return events

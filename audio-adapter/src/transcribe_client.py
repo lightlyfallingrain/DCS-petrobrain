@@ -47,15 +47,28 @@ class TranscribeClient:
         self._base_url = base_url
         self._timeout_s = timeout_s
 
-    def transcribe(self, wav: bytes) -> None:
-        """`POST /transcribe` with `{"wav_b64": <base64 WAV>}`.
+    def transcribe(
+        self,
+        wav: bytes,
+        correlation_id: str | None = None,
+        t_ptt_release_wall: float | None = None,
+    ) -> None:
+        """`POST /transcribe` with `{"wav_b64": <base64 WAV>}`, plus the two
+        optional latency-instrumentation fields (`plans/
+        voice-latency-instrumentation/plan.md` Stage 1) when the caller
+        supplies them -- `capture_loop.CaptureLoop`'s own `ClipSink` contract,
+        widened the same way.
 
         Returns nothing on success: the endpoint answers `{"ok": true}`
         and the recognised text lands in the adapter's transcript queue
         for body-layer to poll. Raises `TranscribeError` on any failure.
         """
         url = f"{self._base_url}{_TRANSCRIBE_PATH}"
-        body = {"wav_b64": base64.b64encode(wav).decode("ascii")}
+        body: dict[str, object] = {"wav_b64": base64.b64encode(wav).decode("ascii")}
+        if correlation_id is not None:
+            body["correlation_id"] = correlation_id
+        if t_ptt_release_wall is not None:
+            body["t_ptt_release_wall"] = t_ptt_release_wall
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode("utf-8"),

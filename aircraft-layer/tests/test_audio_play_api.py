@@ -25,10 +25,12 @@ class _RecordingAudioPlaybackSender(AudioPlaybackSender):
 
     def __init__(self) -> None:
         super().__init__()
-        self.played: list[tuple[bytes, bool]] = []
+        self.played: list[tuple[bytes, bool, str | None]] = []
 
-    def play_audio(self, audio: bytes, urgent: bool) -> None:
-        self.played.append((audio, urgent))
+    def play_audio(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
+        self.played.append((audio, urgent, correlation_id))
 
 
 @pytest.fixture
@@ -71,7 +73,7 @@ def test_audio_play_valid_forwards_to_sender(
     )
     assert status == 200
     assert body == {"ok": True}
-    assert sender.played == [(b"FAKE-WAV-BYTES", False)]
+    assert sender.played == [(b"FAKE-WAV-BYTES", False, None)]
 
 
 def test_audio_play_urgent_flag_threads_through(
@@ -85,7 +87,7 @@ def test_audio_play_urgent_flag_threads_through(
         server, "/audio/play", {"audio_b64": audio_b64, "urgent": True}
     )
     assert status == 200
-    assert sender.played == [(b"URGENT-WAV", True)]
+    assert sender.played == [(b"URGENT-WAV", True, None)]
 
 
 def test_audio_play_urgent_defaults_to_false(
@@ -97,7 +99,57 @@ def test_audio_play_urgent_defaults_to_false(
     audio_b64 = base64.b64encode(b"DEFAULT-URGENT").decode("ascii")
     status, _body = _post(server, "/audio/play", {"audio_b64": audio_b64})
     assert status == 200
-    assert sender.played == [(b"DEFAULT-URGENT", False)]
+    assert sender.played == [(b"DEFAULT-URGENT", False, None)]
+
+
+def test_audio_play_correlation_id_threads_through(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingAudioPlaybackSender
+    ],
+) -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 4."""
+    server, sender = running_server_with_sender
+    audio_b64 = base64.b64encode(b"CORR-WAV").decode("ascii")
+    status, _body = _post(
+        server,
+        "/audio/play",
+        {"audio_b64": audio_b64, "urgent": False, "correlation_id": "abc123"},
+    )
+    assert status == 200
+    assert sender.played == [(b"CORR-WAV", False, "abc123")]
+
+
+def test_audio_play_non_string_correlation_id_returns_400(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingAudioPlaybackSender
+    ],
+) -> None:
+    server, sender = running_server_with_sender
+    audio_b64 = base64.b64encode(b"X").decode("ascii")
+    status, _body = _post(
+        server, "/audio/play", {"audio_b64": audio_b64, "correlation_id": 123}
+    )
+    assert status == 400
+    assert sender.played == []
+
+
+def test_audio_play_oversized_correlation_id_returns_400(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingAudioPlaybackSender
+    ],
+) -> None:
+    """The capture side mints a fixed ~12-char id; this caps what the
+    handler accepts from any caller (security plan review's "Findings
+    carried forward, not filed")."""
+    server, sender = running_server_with_sender
+    audio_b64 = base64.b64encode(b"X").decode("ascii")
+    status, _body = _post(
+        server,
+        "/audio/play",
+        {"audio_b64": audio_b64, "correlation_id": "x" * 129},
+    )
+    assert status == 400
+    assert sender.played == []
 
 
 def test_audio_play_missing_audio_field_returns_400(

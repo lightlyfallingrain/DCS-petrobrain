@@ -132,10 +132,14 @@ dispatch left and calls `crew_console.drain_attack_run(...)`
 Decision 1 -- a guidance line wins the tick by being drained first), then
 `crew_console.drain_events(runner.last_t_sim)` so newly ticked lifecycle
 events get spoken through `belief.speech.route_event`, the same hook point
-`--console --overlay` uses for its own mirroring, and (`plans/brain-layer/
-plan.md`) `crew_console.drain_brain(runner.last_t_sim)` right after it, so
-whatever the brain has decided since the last poll gets drained,
-revalidated against current belief (D4), and spoken. **Mutually exclusive
+`--console --overlay` uses for its own mirroring, then (`plans/
+voice-latency-instrumentation/plan.md` Stage 6) `crew_console.
+drain_pending_positional_replies(runner.last_t_sim)` so any positional
+readback deferred while the channel was modeled busy gets spoken once it
+clears, and (`plans/brain-layer/plan.md`) `crew_console.drain_brain(runner.
+last_t_sim)` right after it, so whatever the brain has decided since the
+last poll gets drained, revalidated against current belief (D4), and
+spoken. **Mutually exclusive
 with `--console` only** (`--overlay` is valid alongside either) -- running
 the debug console and the crew session against the same `ContactStore`
 concurrently is not a validated interaction. `--brain-client http|debug|
@@ -1300,7 +1304,18 @@ def _render_eyesight_frame(
 
 def _speech_log_sink(
     writer: BeliefTruthLogWriter, runner: ConsolePerceptionRunner
-) -> Callable[[str, bool, dict[str, object] | None], None]:
+) -> Callable[
+    [
+        str,
+        bool,
+        dict[str, object] | None,
+        str | None,
+        float | None,
+        float | None,
+        float | None,
+    ],
+    None,
+]:
     """Build `CrewConsole.speech_log_sink` -- every spoken line becomes a
     `kind: "speech"` row in the belief-truth log, carrying the gaze and
     optic **as they are at the moment of speech**.
@@ -1328,10 +1343,22 @@ def _speech_log_sink(
     (`last_ownship_state` still unset), the same "nothing to report yet"
     case `_render_eyesight_frame` already guards against -- never a
     fabricated `0.0`, which would read as "level, unbanked" rather than
-    "unknown"."""
+    "unknown".
+
+    `correlation_id`/`push_sent_wall`/`push_acked_wall`/`push_duration_s`
+    (Stage 3, `plans/voice-latency-instrumentation/plan.md`) are `_print`'s
+    own four latest arguments, carried straight through to `write_speech`'s
+    identically-named fields -- this function only relays them, the
+    measurement happens in `_print` itself."""
 
     def sink(
-        line: str, urgent: bool, attack_run_fields: dict[str, object] | None
+        line: str,
+        urgent: bool,
+        attack_run_fields: dict[str, object] | None,
+        correlation_id: str | None,
+        push_sent_wall: float | None,
+        push_acked_wall: float | None,
+        push_duration_s: float | None,
     ) -> None:
         now_sim = runner.last_t_sim
         if now_sim is None:
@@ -1366,6 +1393,10 @@ def _speech_log_sink(
             attack_run_elevation_deg=(
                 elevation_deg if isinstance(elevation_deg, float) else None
             ),
+            correlation_id=correlation_id,
+            push_sent_wall=push_sent_wall,
+            push_acked_wall=push_acked_wall,
+            push_duration_s=push_duration_s,
         )
 
     return sink
@@ -2478,7 +2509,12 @@ def _poll_transcripts(
     dispatch path in this loop already uses. `slots` (`plans/
     watch-reporting/plan.md` Decision 2b-i, replacing the earlier
     single-purpose `bearing_degrees` field) is threaded straight through,
-    `None` allowed -- populated only for tokens that take a parsed slot."""
+    `None` allowed -- populated only for tokens that take a parsed slot.
+
+    `correlation_id` (`plans/voice-latency-instrumentation/plan.md` Stage 3)
+    is the ninth field `TranscriptEvent.to_dict` now carries -- threaded
+    through the same way, `None` allowed (an older capture process, or a
+    direct `curl`, never supplied one)."""
     try:
         transcripts = audio_client.get_transcripts()
     except AudioAdapterError:
@@ -2492,6 +2528,7 @@ def _poll_transcripts(
         verb_anchored = item.get("verb_anchored")
         ambiguous = item.get("ambiguous")
         slots_raw = item.get("slots")
+        correlation_id_raw = item.get("correlation_id")
         if not isinstance(transcript, str):
             continue
         if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
@@ -2503,6 +2540,8 @@ def _poll_transcripts(
         if not isinstance(verb_anchored, bool):
             continue
         if not isinstance(ambiguous, bool):
+            continue
+        if correlation_id_raw is not None and not isinstance(correlation_id_raw, str):
             continue
         slots: dict[str, int | str] | None = None
         if slots_raw is not None:
@@ -2521,6 +2560,7 @@ def _poll_transcripts(
             ambiguous,
             now_sim,
             slots=slots,
+            correlation_id=correlation_id_raw,
         )
 
 
@@ -2839,6 +2879,12 @@ def _run_crew_text_poll_loop(
                         fired_on_tracker,
                     )
                     crew_console.drain_events(runner.last_t_sim)
+                    # `plans/voice-latency-instrumentation/plan.md` Stage 6
+                    # -- speaks any positional readback deferred because the
+                    # channel was modeled busy at command time, once it has
+                    # cleared. Same per-poll hook point as `drain_events`/
+                    # `drain_brain`.
+                    crew_console.drain_pending_positional_replies(runner.last_t_sim)
                     # `plans/brain-layer/plan.md` D2 -- drains whatever
                     # `brain_client.poll_replies()` has decided since the
                     # last poll. A true no-op for NullBrainClient and

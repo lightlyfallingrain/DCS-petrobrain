@@ -93,6 +93,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Final, Literal, TextIO
@@ -612,6 +613,33 @@ class ReportScope:
     facts: list[dict[str, object]]
     direction_label: str | None
     rear_hemisphere: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingPositionalReply:
+    """One positional readback deferred because the channel was modeled
+    busy at command time (Stage 6, `plans/voice-latency-instrumentation/
+    plan.md`) -- the F8 2026-10-20 sortie's "several seconds pass... but
+    this is several seconds late" finding, extended per the user's own
+    "all of them" to every command whose readback states current belief
+    about a position: `select_target`, `mark_target`, `step`, `follow`,
+    `watch_nearest`/`watch_nearest_air_defence`, and the `report` family.
+
+    `render` is a closure built by the handler that deferred it, over
+    whatever that handler alone knows how to re-derive (a contact id already
+    resolved and acted on, a report's own clock/sector/descriptor/relative/
+    band, a mark function) -- so this class and
+    `CrewConsole.drain_pending_positional_replies` need not know the shape
+    of any one command's readback, only that calling `render(now_sim)` at a
+    later tick reproduces it against *that* tick's belief, never the
+    original command's. Every command's own **immediate, unconditional**
+    side effects (resolving a target, registering a task, writing a mission-
+    memory mark) already happened at command time, exactly as before --
+    only the *speaking* of the readback is deferred."""
+
+    correlation_id: str | None
+    queued_since_sim: float
+    render: Callable[[float], list[str]]
 
 
 #: `descriptor_verdict`'s three outcomes. Named rather than booleans
@@ -1151,7 +1179,30 @@ class CrewConsole:
     #: triaged from the log instead of recalled. `drain_attack_run` is the
     #: only caller that ever supplies it, and always for a single-line
     #: `_print` call -- see that method's own call site.
-    speech_log_sink: Callable[[str, bool, dict[str, object] | None], None] | None = None
+    #:
+    #: **Four more parameters (Stage 3, `plans/voice-latency-instrumentation/
+    #: plan.md`)** -- `correlation_id` (the command/transcript that
+    #: produced this line, `None` for F10/typed dispatch and every line
+    #: with no voice origin) and the `push_speech` call's own
+    #: `time.monotonic()` bracket (`push_sent_wall`/`push_acked_wall`/
+    #: `push_duration_s`, all `None` when nothing was pushed to
+    #: `speech_client` at all) -- `_print` is what measures these, this
+    #: callback only carries them to `write_speech`.
+    speech_log_sink: (
+        Callable[
+            [
+                str,
+                bool,
+                dict[str, object] | None,
+                str | None,
+                float | None,
+                float | None,
+                float | None,
+            ],
+            None,
+        ]
+        | None
+    ) = None
     #: `plans/callout-scheduling/plan.md` -- the speech-time scheduler
     #: `drain_events` delegates to. One scheduler per `CrewConsole`
     #: (per-session occupancy state), mirroring every other optional-sink
@@ -1199,6 +1250,16 @@ class CrewConsole:
     #: spoken for -- so it fires **once** per question, not once per poll
     #: while the question remains outstanding.
     _stand_by_spoken_for: set[str] = field(default_factory=set, repr=False)
+    #: Stage 6, `plans/voice-latency-instrumentation/plan.md` -- positional
+    #: readbacks deferred because the channel was modeled busy at command
+    #: time, drained once per poll by `drain_pending_positional_replies`.
+    #: Not in `reset_for_new_mission`'s "survives" list, so a mission
+    #: restart resets it to `[]` for free (`__init__`'s default applies) --
+    #: a deferred readback from a mission that just ended has nothing left
+    #: to be current about.
+    _pending_positional_replies: list[_PendingPositionalReply] = field(
+        default_factory=list, repr=False
+    )
     #: Set by `_handle_silence` while `silence` is in effect; cleared the
     #: moment any *other* command reaches `handle_command` or `_act`
     #: (`plans/silence-command/plan.md`, user direction 2026-10-04:
@@ -1290,7 +1351,9 @@ class CrewConsole:
             silenced=self.silenced,
         )
 
-    def _refusal_response(self, now_sim: float) -> list[str] | None:
+    def _refusal_response(
+        self, now_sim: float, correlation_id: str | None = None
+    ) -> list[str] | None:
         """`BL-15` Stage 3's loud-refusal mode. `None` while `self.refused`
         is `False` -- the overwhelmingly common case -- so every caller's
         own dispatch logic runs unchanged; a non-`None` result is the
@@ -1313,7 +1376,7 @@ class CrewConsole:
         if not self.refused:
             return None
         lines = [WORLD_MODEL_NOT_LOADED_REFUSAL]
-        self._print(lines, now_sim)
+        self._print(lines, now_sim, correlation_id=correlation_id)
         return lines
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
@@ -1383,6 +1446,75 @@ class CrewConsole:
         # injected `UrgentCall`, routed through `handle_line`'s
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
         self._print(spoken, now_sim, bypass_gate=False)
+        return spoken
+
+    def _speak_or_defer(
+        self,
+        now_sim: float,
+        correlation_id: str | None,
+        render: Callable[[float], list[str]],
+    ) -> list[str]:
+        """Speak `render(now_sim)` now if the channel is modeled clear;
+        otherwise defer it to `drain_pending_positional_replies`, to be
+        re-rendered at *that* later tick's own `now_sim` (Stage 6, `plans/
+        voice-latency-instrumentation/plan.md`) -- the one piece shared by
+        every positional readback (`select_target`, `mark_target`, `step`,
+        `follow`, `watch_nearest`/`watch_nearest_air_defence`, the `report`
+        family), so each only has to say *how* to re-render itself, never
+        *whether* to.
+
+        Returns `render`'s own lines when spoken now (the caller's existing
+        `_print` call, via `handle_command`'s tail, is what actually speaks
+        them -- this method only decides timing), or `[]` when deferred --
+        indistinguishable, from `handle_command`'s own perspective, from any
+        other command whose readback happens to be empty."""
+        if now_sim >= self.scheduler.busy_until_sim:
+            return render(now_sim)
+        self._pending_positional_replies.append(
+            _PendingPositionalReply(
+                correlation_id=correlation_id,
+                queued_since_sim=now_sim,
+                render=render,
+            )
+        )
+        return []
+
+    def drain_pending_positional_replies(self, now_sim: float) -> list[str]:
+        """Speaks every deferred positional readback whose queueing
+        command's channel-busy delay has now cleared (Stage 6, `plans/
+        voice-latency-instrumentation/plan.md`) -- the F8 2026-10-20
+        sortie's finding (*"current information, not old. Though the real
+        problem here is the many second delay"*). Called once per poll from
+        `logger.py`, alongside `drain_events`/`drain_brain`.
+
+        Entries are checked in queued order, and a spoken entry's own
+        `_print` call can itself re-claim the channel (`note_reply`) --
+        checked fresh on every iteration, not cached from the top of this
+        method, so a later entry in the same poll correctly finds the
+        channel busy again and keeps waiting rather than being spoken out
+        of turn. No attempt is made to force every pending entry out in one
+        poll regardless of occupancy; that would defeat the mechanism this
+        method exists to serve.
+
+        **`BL-15` Stage 3's same posture as `drain_events`/`drain_brain`:
+        no proactive speech while `self.refused`** -- every currently
+        pending entry is dropped rather than held, since a readback about a
+        world model that was just unloaded would be speech about nothing
+        this console can still vouch for; a mission (re)start would have
+        reset this list anyway."""
+        if self.refused:
+            self._pending_positional_replies = []
+            return []
+        still_pending: list[_PendingPositionalReply] = []
+        spoken: list[str] = []
+        for entry in self._pending_positional_replies:
+            if now_sim < self.scheduler.busy_until_sim:
+                still_pending.append(entry)
+                continue
+            lines = entry.render(now_sim)
+            self._print(lines, now_sim, correlation_id=entry.correlation_id)
+            spoken.extend(lines)
+        self._pending_positional_replies = still_pending
         return spoken
 
     def drain_brain(self, now_sim: float) -> list[str]:
@@ -1571,6 +1703,7 @@ class CrewConsole:
         token: str,
         now_sim: float,
         slots: dict[str, int | str] | None = None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """Dispatches one player-issued command token -- originally F10
         radio-menu selections only (`plans/f10-crew-commands/plan.md`),
@@ -1593,14 +1726,22 @@ class CrewConsole:
         silently swallowed -- the failure mode this milestone exists to fix
         was silence: a recognised token reaching this method and doing
         nothing was indistinguishable, from the cockpit, from not having
-        been heard at all."""
+        been heard at all.
+
+        `correlation_id` (Stage 3, `plans/voice-latency-instrumentation/
+        plan.md`) identifies which recognised transcript produced this
+        dispatch -- `None` for F10/typed-console dispatch and a committed
+        confirm-band answer alike, unchanged behaviour. Threaded to every
+        positional-readback handler (Stage 6) so a readback deferred
+        because the channel was modeled busy can still be joined back to
+        the command that asked for it once it is actually spoken."""
         # `BL-15` Stage 3: checked first, before anything else this method
         # does -- while refused, nothing is dispatched, nothing counts
         # as a command for `commands_handled`/silence-ending purposes,
         # and no per-dispatch state (`last_command_target_contact_id`/
         # `attack_run_transition`/`observ_transition`) is touched. The
         # pilot gets exactly the fixed line and nothing else happens.
-        refusal = self._refusal_response(now_sim)
+        refusal = self._refusal_response(now_sim, correlation_id=correlation_id)
         if refusal is not None:
             return refusal
         self._note_player_command()
@@ -1639,7 +1780,7 @@ class CrewConsole:
         # command was heard fine, it just cannot be done right now.
         if self.on_ground and token in _LOOK_COMMAND_TOKENS:
             lines = [render_unable("ON_GROUND").text]
-            self._print(lines, now_sim)
+            self._print(lines, now_sim, correlation_id=correlation_id)
             return lines
         bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
         if not isinstance(bearing_degrees, int):
@@ -1672,17 +1813,21 @@ class CrewConsole:
                 sector_label=f"{_CLOCK_REPORT_LABELS[clock]} o'clock",
             )
         elif token == "watch_nearest":
-            lines = self._handle_watch_nearest(now_sim)
+            lines = self._handle_watch_nearest(now_sim, correlation_id=correlation_id)
         elif token == "watch_nearest_air_defence":
-            lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
+            lines = self._handle_watch_nearest(
+                now_sim, air_defence_only=True, correlation_id=correlation_id
+            )
         elif token == "follow":
-            lines = self._handle_follow(now_sim, slots)
+            lines = self._handle_follow(now_sim, slots, correlation_id=correlation_id)
         elif token == "select_target":
-            lines = self._handle_select_target(now_sim, slots)
+            lines = self._handle_select_target(
+                now_sim, slots, correlation_id=correlation_id
+            )
         elif token == "drop_target":
             lines = self._handle_drop_target()
         elif token == "step":
-            lines = self._handle_step(now_sim, slots)
+            lines = self._handle_step(now_sim, slots, correlation_id=correlation_id)
         elif token == "engage":
             lines = self._handle_engage(now_sim, slots)
         elif token == "disengage":
@@ -1690,7 +1835,7 @@ class CrewConsole:
         elif token == "mark_here":
             lines = self._handle_mark_here(now_sim)
         elif token == "mark_target":
-            lines = self._handle_mark_target(now_sim)
+            lines = self._handle_mark_target(now_sim, correlation_id=correlation_id)
         elif token == "observ_on":
             lines = self._handle_observ_on()
         elif token == "observ_off":
@@ -1708,20 +1853,32 @@ class CrewConsole:
             self._handle_stop_talking()
             return []
         elif token == "report_all":
-            lines = self._handle_report(now_sim)
+            lines = self._handle_report(now_sim, correlation_id=correlation_id)
         elif token in _CLOCK_REPORT_TOKENS:
-            lines = self._handle_report(now_sim, clock=_CLOCK_REPORT_TOKENS[token])
+            lines = self._handle_report(
+                now_sim,
+                clock=_CLOCK_REPORT_TOKENS[token],
+                correlation_id=correlation_id,
+            )
         elif token in _BEARING_REPORT_TOKENS:
-            lines = self._handle_report(now_sim, sector=_BEARING_REPORT_TOKENS[token])
+            lines = self._handle_report(
+                now_sim,
+                sector=_BEARING_REPORT_TOKENS[token],
+                correlation_id=correlation_id,
+            )
         elif token == "report_bearing_deg":
             if bearing_degrees is None:
                 lines = ["say again -- no bearing heard"]
             else:
                 lines = self._handle_report(
-                    now_sim, sector=_nearest_sector(bearing_degrees)
+                    now_sim,
+                    sector=_nearest_sector(bearing_degrees),
+                    correlation_id=correlation_id,
                 )
         elif token == "report":
-            lines = self._handle_slotted_report(now_sim, slots)
+            lines = self._handle_slotted_report(
+                now_sim, slots, correlation_id=correlation_id
+            )
         elif token == "radio_check":
             lines = self._handle_radio_check()
         elif token == "greeting":
@@ -1729,7 +1886,7 @@ class CrewConsole:
         else:
             logger.warning("no dispatch behaviour for command token %r", token)
             return []
-        self._print(lines, now_sim)
+        self._print(lines, now_sim, correlation_id=correlation_id)
         return lines
 
     def _believed_air_defence(self, facts: dict[str, object]) -> bool:
@@ -1870,7 +2027,11 @@ class CrewConsole:
         return found, marked
 
     def _handle_watch_nearest(
-        self, now_sim: float, *, air_defence_only: bool = False
+        self,
+        now_sim: float,
+        *,
+        air_defence_only: bool = False,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """The F10 "Watch -> Nearest" and "Watch -> Nearest Air Defence"
         items. The two differ only in the selection predicate; everything
@@ -1894,7 +2055,14 @@ class CrewConsole:
         watched, once, if it has more than one** (`_mark_watched_with_
         group`, sortie 2026-10-05 debrief, Item 3) -- the readback then
         names the group case distinctly (`render_watch_group_readback`)
-        rather than the single-contact one."""
+        rather than the single-contact one.
+
+        **The readback is deferred, not the selection** (Stage 6, `plans/
+        voice-latency-instrumentation/plan.md`): `contact_id` is resolved
+        and marked watched immediately and unconditionally, exactly as
+        before; only the *speaking* of the readback waits for the channel
+        if it is modeled busy, and is then re-rendered against belief at
+        that later tick -- see `CrewConsole._speak_or_defer`."""
         contact_id = self._nearest_contact_id(
             now_sim,
             predicate=self._believed_air_defence if air_defence_only else None,
@@ -1911,9 +2079,18 @@ class CrewConsole:
         )
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
-        if marked > 1:
-            return [render_watch_group_readback(marked).text]
-        return [render_watch_nearest_readback(result["facts"]).text]
+
+        def _render(render_now_sim: float) -> list[str]:
+            if marked > 1:
+                return [render_watch_group_readback(marked).text]
+            redone = describe_contact(
+                self.store, contact_id, render_now_sim, enrichment=self.enrichment
+            )
+            if redone is None:
+                return [render_lost_contact().text]
+            return [render_watch_nearest_readback(redone["facts"]).text]
+
+        return self._speak_or_defer(now_sim, correlation_id, _render)
 
     def _descriptor_score(self, descriptor: str, facts: dict[str, object]) -> float:
         """The descriptor term of `_resolve_follow_target`'s score --
@@ -2021,7 +2198,10 @@ class CrewConsole:
         return contact_id, []
 
     def _handle_follow(
-        self, now_sim: float, slots: dict[str, int | str] | None
+        self,
+        now_sim: float,
+        slots: dict[str, int | str] | None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`follow [<descriptor>] [<clock> o'clock] [<n> km]` -- resolves
         via `_resolve_follow_target` and, on a win, watches exactly the
@@ -2033,7 +2213,11 @@ class CrewConsole:
         Item 3), with the identical readback shape
         (`render_watch_nearest_readback`/`render_watch_group_readback`) --
         the player named no id either way, so the two commands describe
-        their winner identically."""
+        their winner identically.
+
+        **The readback is deferred, not the resolution** (Stage 6, `plans/
+        voice-latency-instrumentation/plan.md`) -- see `_handle_watch_
+        nearest`'s identical note."""
         descriptor = slots.get("descriptor") if slots is not None else None
         clock = slots.get("clock") if slots is not None else None
         range_km = slots.get("range_km") if slots is not None else None
@@ -2066,9 +2250,18 @@ class CrewConsole:
         )
         if not found or result is None:
             return [f"no such contact: {contact_id}"]
-        if marked > 1:
-            return [render_watch_group_readback(marked).text]
-        return [render_watch_nearest_readback(result["facts"]).text]
+
+        def _render(render_now_sim: float) -> list[str]:
+            if marked > 1:
+                return [render_watch_group_readback(marked).text]
+            redone = describe_contact(
+                self.store, contact_id, render_now_sim, enrichment=self.enrichment
+            )
+            if redone is None:
+                return [render_lost_contact().text]
+            return [render_watch_nearest_readback(redone["facts"]).text]
+
+        return self._speak_or_defer(now_sim, correlation_id, _render)
 
     def _resolve_attack_target(
         self,
@@ -2166,7 +2359,10 @@ class CrewConsole:
         return descriptor, clock, sector, relative, band
 
     def _handle_select_target(
-        self, now_sim: float, slots: dict[str, int | str] | None
+        self,
+        now_sim: float,
+        slots: dict[str, int | str] | None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`select|set target <what> <where>` (`plans/attack-run/plan.md`
         Decision 14) -- resolves via `_resolve_attack_target`, then sets
@@ -2178,7 +2374,14 @@ class CrewConsole:
         itself reaches `"priority"` -- its group-mates get the same static
         tag a plain `watch` already gives a group, never overridden back to
         `"watch"` on the target itself, which is why this does not simply
-        call `_mark_watched_with_group`)."""
+        call `_mark_watched_with_group`).
+
+        **The readback is deferred, not the selection** (Stage 6, `plans/
+        voice-latency-instrumentation/plan.md` -- the F8 2026-10-20 sortie
+        finding this stage exists to fix): resolving the target and
+        registering the task above are unconditional, exactly as before;
+        only the *speaking* of the readback waits for a modeled-busy
+        channel and is then re-rendered against belief at that later tick."""
         descriptor, clock, sector, relative, band = self._parse_target_slots(slots)
         if (
             descriptor is None
@@ -2219,7 +2422,16 @@ class CrewConsole:
         )
         if result is None:
             return [f"no such contact: {contact_id}"]
-        return [render_target_readback(result["facts"]).text]
+
+        def _render(render_now_sim: float) -> list[str]:
+            redone = describe_contact(
+                self.store, contact_id, render_now_sim, enrichment=self.enrichment
+            )
+            if redone is None:
+                return [render_lost_contact().text]
+            return [render_target_readback(redone["facts"]).text]
+
+        return self._speak_or_defer(now_sim, correlation_id, _render)
 
     def _handle_drop_target(self) -> list[str]:
         """`drop target` (`plans/attack-run/plan.md` Decision 2) -- ends
@@ -2240,19 +2452,39 @@ class CrewConsole:
             return ["no mission memory configured"]
         return [self.mark_here_fn(now_sim)]
 
-    def _handle_mark_target(self, now_sim: float) -> list[str]:
+    def _handle_mark_target(
+        self, now_sim: float, correlation_id: str | None = None
+    ) -> list[str]:
         """`mark target` (`plans/bl8-mission-memory/plan.md` Decision 6) --
         mark the currently selected attack-run target's believed position,
         reusing `select_target`'s own notion of "the current target"
         (`_active_attack_target_task`). The "no target selected" failure
         is the exact wording every other target-keyed command already
-        uses for the same missing input (`_handle_step`'s own check)."""
+        uses for the same missing input (`_handle_step`'s own check).
+
+        **The mark itself is deferred when the channel is modeled busy**
+        (Stage 6, `plans/voice-latency-instrumentation/plan.md`), not only
+        its spoken acknowledgement -- unlike every other command in this
+        family, the readback *is* the only record of "current information"
+        here (`mark_target_fn`'s own text carries no position), so what
+        actually needs to reflect the later tick's belief is the mark
+        write itself: `_mark_target_fn`/`mission_memory.marks.mark_target`
+        reads the contact's position **at the `now_sim` they are called
+        with**, so deferring the call (not just rendering stale text around
+        an already-made one) is what "current information, not old" means
+        for this command specifically."""
         if self.mark_target_fn is None:
             return ["no mission memory configured"]
+        mark_target_fn = self.mark_target_fn
         target_task = self._active_attack_target_task()
         if target_task is None or target_task.contact_id is None:
             return ["no target selected"]
-        return [self.mark_target_fn(target_task.contact_id, now_sim)]
+        contact_id = target_task.contact_id
+
+        def _render(render_now_sim: float) -> list[str]:
+            return [mark_target_fn(contact_id, render_now_sim)]
+
+        return self._speak_or_defer(now_sim, correlation_id, _render)
 
     def _active_attack_target_task(self) -> PendingIntent | None:
         """The currently active `attack_target` task, or `None` -- shared
@@ -2302,7 +2534,10 @@ class CrewConsole:
         return candidates
 
     def _handle_step(
-        self, now_sim: float, slots: dict[str, int | str] | None
+        self,
+        now_sim: float,
+        slots: dict[str, int | str] | None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`step [<count>] left/right/near/far` (`plans/attack-run/
         plan.md` Decision 6) -- re-orders the current attack-run target's
@@ -2411,7 +2646,20 @@ class CrewConsole:
         )
         if result is None:
             return [f"no such contact: {next_id}"]
-        return [render_target_readback(result["facts"]).text]
+
+        # Deferred, not the re-ordering above (Stage 6, `plans/
+        # voice-latency-instrumentation/plan.md`) -- `next_id` is already
+        # fixed; only its readback waits for the channel and is re-rendered
+        # against belief at that later tick.
+        def _render(render_now_sim: float) -> list[str]:
+            redone = describe_contact(
+                self.store, next_id, render_now_sim, enrichment=self.enrichment
+            )
+            if redone is None:
+                return [render_lost_contact().text]
+            return [render_target_readback(redone["facts"]).text]
+
+        return self._speak_or_defer(now_sim, correlation_id, _render)
 
     def _handle_engage(
         self, now_sim: float, slots: dict[str, int | str] | None
@@ -2721,7 +2969,10 @@ class CrewConsole:
         return [render_scan_readback(sector_label).text]
 
     def _handle_slotted_report(
-        self, now_sim: float, slots: dict[str, int | str] | None
+        self,
+        now_sim: float,
+        slots: dict[str, int | str] | None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`report|describe [<what>] [<where>] [<how far>]` -- the slotted
         crew query's one dispatch branch (`plans/crew-query-path/plan.md`
@@ -2781,6 +3032,7 @@ class CrewConsole:
             descriptor=descriptor,
             relative=relative,
             band=band,
+            correlation_id=correlation_id,
         )
 
     def _handle_radio_check(self) -> list[str]:
@@ -2820,6 +3072,7 @@ class CrewConsole:
         descriptor: str | None = None,
         relative: RelativeSector | None = None,
         band: str | None = None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`report_all`/`report_clock_<p>`/`report_bearing_<compass>`/
         `report_bearing_deg` (the last reduced to `sector` by
@@ -2900,54 +3153,76 @@ class CrewConsole:
         the push path, so a pushed callout and a pulled "report" describe
         one group identically. Contacts with no group still go through the
         pre-existing `group_facts`/`render_group_report` report-space
-        bucketing."""
+        bucketing.
+
+        **Deferred as a whole, not merely re-rendered** (Stage 6, `plans/
+        voice-latency-instrumentation/plan.md`): unlike the target-keyed
+        commands above, a report resolves nothing at command time to hold
+        onto -- it is a pure read, so there is nothing *to* make
+        unconditional-and-immediate the way a selection is. When the
+        channel is modeled busy, the whole scope-and-render below simply
+        runs again at the later tick's own `now_sim`, via
+        `_speak_or_defer`."""
         if self.enrichment is None:
             return ["no world-model connection configured"]
 
-        scope = self._report_scope(
-            now_sim,
-            clock=clock,
-            sector=sector,
-            descriptor=descriptor,
-            relative=relative,
-            band=band,
-        )
-        facts_list = scope.facts
+        def _render(render_now_sim: float) -> list[str]:
+            # `self.enrichment` is re-checked here, not only above: this
+            # closure may run on a later poll than the one that validated
+            # it, and `--crew-text`'s own loud-refusal mode (`BL-15` Stage
+            # 3) can null it out in between -- `_report_scope`'s own
+            # `assert self.enrichment is not None` would otherwise fire on
+            # a state this method's caller never actually saw.
+            if self.enrichment is None:
+                return ["no world-model connection configured"]
+            scope = self._report_scope(
+                render_now_sim,
+                clock=clock,
+                sector=sector,
+                descriptor=descriptor,
+                relative=relative,
+                band=band,
+            )
+            facts_list = scope.facts
 
-        if not facts_list:
-            if scope.rear_hemisphere:
-                assert scope.direction_label is not None
-                return [render_no_view(scope.direction_label).text]
-            return [render_clear(scope.direction_label).text]
+            if not facts_list:
+                if scope.rear_hemisphere:
+                    assert scope.direction_label is not None
+                    return [render_no_view(scope.direction_label).text]
+                return [render_clear(scope.direction_label).text]
 
-        # Decision C: the answer is one summary utterance, not the
-        # per-group enumeration -- *"B. I can also look myself, so a
-        # summary is good, I then know where and what to look for."*
-        #
-        # **`_render_report_lines` and `render_report`/`REPORT_MAX_GROUPS`
-        # stay in place, unused by this path, deliberately** (that plan's
-        # Decision C): if the summary reads too thin in the air,
-        # reverting is this one call site, and that has to stay true
-        # until the user has flown it. Do not delete them.
-        #
-        # **But a revert is not free, and this is the comment a reverter
-        # reads first, so it says so here**: swapping back to
-        # `_render_report_lines` reintroduces the group-roster leak that
-        # Stage 3 closed -- a *filtered* query whose scope catches one
-        # member of a cohered group speaks that group's out-of-scope
-        # members too, because `render_group_full_disclosure` names the
-        # full roster by design. `_render_report_lines`' own docstring has
-        # the measurement (`report two o'clock near` answering *"Armor,
-        # truck and infantry"* for a 1/3/7 km group). So reverting is one
-        # call site **and** either accepting that leak or filtering the
-        # roster; it is not one line on its own.
-        return [
-            render_report_summary(
-                facts_list,
-                band_label=self._band_label_for(facts_list, band),
-                stale_window_s=OBSERVED_WINDOW_S,
-            ).text
-        ]
+            # Decision C: the answer is one summary utterance, not the
+            # per-group enumeration -- *"B. I can also look myself, so a
+            # summary is good, I then know where and what to look for."*
+            #
+            # **`_render_report_lines` and `render_report`/
+            # `REPORT_MAX_GROUPS` stay in place, unused by this path,
+            # deliberately** (that plan's Decision C): if the summary reads
+            # too thin in the air, reverting is this one call site, and
+            # that has to stay true until the user has flown it. Do not
+            # delete them.
+            #
+            # **But a revert is not free, and this is the comment a
+            # reverter reads first, so it says so here**: swapping back to
+            # `_render_report_lines` reintroduces the group-roster leak
+            # that Stage 3 closed -- a *filtered* query whose scope catches
+            # one member of a cohered group speaks that group's
+            # out-of-scope members too, because
+            # `render_group_full_disclosure` names the full roster by
+            # design. `_render_report_lines`' own docstring has the
+            # measurement (`report two o'clock near` answering *"Armor,
+            # truck and infantry"* for a 1/3/7 km group). So reverting is
+            # one call site **and** either accepting that leak or filtering
+            # the roster; it is not one line on its own.
+            return [
+                render_report_summary(
+                    facts_list,
+                    band_label=self._band_label_for(facts_list, band),
+                    stale_window_s=OBSERVED_WINDOW_S,
+                ).text
+            ]
+
+        return self._speak_or_defer(now_sim, correlation_id, _render)
 
     def _band_label_for(
         self, facts_list: list[dict[str, object]], band: str | None
@@ -3396,6 +3671,7 @@ class CrewConsole:
         ambiguous: bool,
         now_sim: float,
         slots: dict[str, int | str] | None = None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
         point -- a sibling of `handle_line`/`handle_command`, per the
@@ -3435,13 +3711,20 @@ class CrewConsole:
         Petrovich answered "Unable, no such command." That wording tells
         the pilot his *command* was rejected, when in fact his *answer*
         was late -- a materially wrong readback, and the reason this
-        branch exists rather than leaving the fallthrough alone."""
+        branch exists rather than leaving the fallthrough alone.
+
+        `correlation_id` (Stage 3, `plans/voice-latency-instrumentation/
+        plan.md`) is the capture-side id for this transcript, if the
+        recognised clip carried one -- threaded into `_log_transcript`'s
+        row and on to `_act_on_voice_decision`/`handle_command` so a
+        dispatched command's own readback (and any deferred positional one,
+        Stage 6) can be joined back to this utterance."""
         # `BL-15` Stage 3: checked before any of the confirm-band/
         # late-answer/classify logic below -- while refused, a pending
         # confirmation (if any) is left exactly as it was rather than
         # being resolved by this transcript, since the pilot's spoken
         # words during a system error are not being acted on at all.
-        refusal = self._refusal_response(now_sim)
+        refusal = self._refusal_response(now_sim, correlation_id=correlation_id)
         if refusal is not None:
             return refusal
         if self._pending_confirmation is not None:
@@ -3463,7 +3746,10 @@ class CrewConsole:
                         )
                     assert pending.token is not None
                     return self.handle_command(
-                        pending.token, now_sim, slots=pending.slots
+                        pending.token,
+                        now_sim,
+                        slots=pending.slots,
+                        correlation_id=correlation_id,
                     )
                 if answer == "negative":
                     return []
@@ -3493,7 +3779,7 @@ class CrewConsole:
             ):
                 self._confirmation_expired_sim = None
                 lines = [render_say_again().text]
-                self._print(lines, now_sim)
+                self._print(lines, now_sim, correlation_id=correlation_id)
                 return lines
 
         decision = classify_response(
@@ -3509,8 +3795,11 @@ class CrewConsole:
             now_sim=now_sim,
             disposition=decision.disposition,
             acted_token=decision.token,
+            correlation_id=correlation_id,
         )
-        return self._act_on_voice_decision(decision, transcript, now_sim, slots)
+        return self._act_on_voice_decision(
+            decision, transcript, now_sim, slots, correlation_id=correlation_id
+        )
 
     def _log_transcript(self, **row: object) -> None:
         """Write one row to `transcript_log`, if configured.
@@ -3530,16 +3819,24 @@ class CrewConsole:
         transcript: str,
         now_sim: float,
         slots: dict[str, int | str] | None = None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         if decision.disposition == "fallthrough":
             # `handle_line` re-strips/re-checks the `!`-prefixed harness
             # commands, which a real transcript never begins with -- safe
             # to route straight through it rather than duplicating
-            # `_handle_utterance` + `_print` here.
+            # `_handle_utterance` + `_print` here. `handle_line` takes no
+            # `correlation_id` (plan Stage 3: "F10/typed-console dispatch
+            # paths pass no correlation id, unchanged behaviour") -- the
+            # brain-layer free-text path this disposition is heading
+            # towards gets its own instrumentation pass once it exists
+            # (plan "Second-Order Effect"), not folded in here.
             return self.handle_line(transcript, now_sim)
         if decision.disposition == "act":
             assert decision.token is not None
-            return self.handle_command(decision.token, now_sim, slots=slots)
+            return self.handle_command(
+                decision.token, now_sim, slots=slots, correlation_id=correlation_id
+            )
         if decision.disposition == "confirm":
             assert decision.token is not None
             description = _describe_token_for_confirm(decision.token, slots)
@@ -3555,7 +3852,7 @@ class CrewConsole:
             lines = [render_confirm_request(description).text]
         else:  # "say_again"
             lines = [render_say_again().text]
-        self._print(lines, now_sim)
+        self._print(lines, now_sim, correlation_id=correlation_id)
         return lines
 
     def _parse_follow_slots_for_harness(
@@ -3763,6 +4060,7 @@ class CrewConsole:
         now_sim: float,
         bypass_gate: bool = False,
         attack_run_fields: dict[str, object] | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Prints each line to `output` (unchanged) and, when
         `overlay_client`/`speech_client` are configured, pushes the same
@@ -3826,20 +4124,23 @@ class CrewConsole:
         `attack_run_fields` (Stage 5, `plans/attack-run/plan.md`) is
         threaded straight through to `speech_log_sink` for every line in
         this call -- meaningful only for `drain_attack_run`'s own
-        always-one-line call, `None` for every other caller."""
+        always-one-line call, `None` for every other caller.
+
+        `correlation_id` (Stage 3, `plans/voice-latency-instrumentation/
+        plan.md`) identifies which command/transcript produced this line --
+        `None` for F10/typed dispatch and every push-lane line (callouts,
+        attack-run guidance), which have no voice origin to correlate
+        against. The `speech_client.push_speech` call below is wrapped in
+        its own `time.monotonic()` bracket regardless of whether
+        `correlation_id` is set, since the duration is useful on its own;
+        `push_sent_wall`/`push_acked_wall` are ordinary wall-clock, kept for
+        ordering/context only (this process and audio-adapter are not
+        assumed to share a clock) -- `push_duration_s`, derived from the
+        monotonic bracket, is the trustworthy number. All three stay `None`
+        when nothing was pushed (`speech_client` unset, or `self.silenced`)."""
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
-            if self.speech_log_sink is not None:
-                try:
-                    self.speech_log_sink(line, bypass_gate, attack_run_fields)
-                except Exception:
-                    # Deliberately broad: a debug log must never be the reason
-                    # Petrovich stops talking.
-                    logger.warning(
-                        "speech log sink failed for crew-text line (continuing)",
-                        exc_info=True,
-                    )
             if self.overlay_client is not None:
                 overlay_line = (
                     f"{_URGENT_OVERLAY_PREFIX}{line}" if bypass_gate else line
@@ -3851,12 +4152,39 @@ class CrewConsole:
                         "overlay push failed for crew-text line (continuing)",
                         exc_info=True,
                     )
+            push_sent_wall: float | None = None
+            push_acked_wall: float | None = None
+            push_duration_s: float | None = None
             if self.speech_client is not None and not self.silenced:
+                push_sent_wall = time.time()
+                t0 = time.monotonic()
                 try:
-                    self.speech_client.push_speech(line, urgent=bypass_gate)
+                    self.speech_client.push_speech(
+                        line, urgent=bypass_gate, correlation_id=correlation_id
+                    )
                 except AudioAdapterError:
                     logger.warning(
                         "speech push failed for crew-text line (continuing)",
+                        exc_info=True,
+                    )
+                push_duration_s = time.monotonic() - t0
+                push_acked_wall = time.time()
+            if self.speech_log_sink is not None:
+                try:
+                    self.speech_log_sink(
+                        line,
+                        bypass_gate,
+                        attack_run_fields,
+                        correlation_id,
+                        push_sent_wall,
+                        push_acked_wall,
+                        push_duration_s,
+                    )
+                except Exception:
+                    # Deliberately broad: a debug log must never be the reason
+                    # Petrovich stops talking.
+                    logger.warning(
+                        "speech log sink failed for crew-text line (continuing)",
                         exc_info=True,
                     )
             if bypass_gate:

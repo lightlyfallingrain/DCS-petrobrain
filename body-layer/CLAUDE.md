@@ -178,6 +178,21 @@ additive posture as `--detection-trace`. Unbuffered, unlike the detection trace 
 handful of rows per sortie, and the row most worth having is the one immediately before something
 went wrong, which a buffer would still be holding when the process was killed to investigate.
 
+**Voice-latency instrumentation (`plans/voice-latency-instrumentation/plan.md`).** A per-utterance
+`correlation_id`, minted by `audio-adapter`'s capture process at PTT release, now rides the whole
+chain: `--speech-log` rows and `--belief-truth-log`'s `kind: "speech"` rows both gain it, plus
+`push_sent_wall`/`push_acked_wall`/`push_duration_s` on the latter (`CrewConsole._print`'s own
+`time.monotonic()` bracket around `push_speech`). **Every positional readback is deferred, not
+just spoken immediately, when `CalloutScheduler.busy_until_sim` is modeled busy** — `select_target`,
+`mark_target`, `step`, `follow`, `watch_nearest`/`watch_nearest_air_defence`, and the whole `report`
+family: the command's own immediate, unconditional side effects (resolving a target, registering a
+task) are unchanged, only the readback's *speaking* waits, and is re-rendered against current
+belief at the later tick it is actually spoken (`CrewConsole._speak_or_defer`/
+`drain_pending_positional_replies`, polled once per poll alongside `drain_events`/`drain_brain`).
+Reduce `--latency-log` (audio-adapter, both its capture and server processes) together with
+`--speech-log`/`--belief-truth-log` with `tools/join_voice_latency.py` for the joined per-utterance
+timeline — see that script's own module docstring for how to read one.
+
 Add `--detection-trace PATH` alongside `--console` or `--crew-text` (BL-9, `plans/
 bl9-debug-visualization/plan.md`) to write a per-poll, per-object naked-eye visibility-gate trace
 (JSONL) to `PATH` — the answer to "why did Petrovich not see that" after a flight: which of
@@ -418,4 +433,5 @@ Surfaces and transports:
 - `src/run_log_paths.py` — per-run log filenames (`BL-11` Stage 5). The three JSONL logs roll per run rather than appending across sorties, so **the path passed on the command line is not the path written** — see `RUN.md`.
 - `src/replay.py` — the BL-0 replay harness; drives any `PerceptionSource` over recorded ownship states.
 - `tools/summarize_detection_trace.py`, `tools/speak_samples.py` — post-flight reducer and a dev acceptance aid, not tests.
+- `tools/join_voice_latency.py` (`plans/voice-latency-instrumentation/plan.md` Stage 5) — joins `--latency-log`/`--speech-log`/`--belief-truth-log` files by `correlation_id` into one ordered timeline per utterance; the actual "locate the delay" deliverable. Not a test; see its own module docstring for how to read a timeline.
 - `tests/fixtures/` — committed synthetic fixtures; see `## Testing` on why they are not gitignored.
