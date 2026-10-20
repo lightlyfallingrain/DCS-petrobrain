@@ -195,9 +195,216 @@ gets a real, nonzero slew duration, and should be built then rather than guessed
 already stated in `plan.md`'s Second-order effect and reiterated in this report's `BL-B64` note).
 No downstream assumption is invalidated — `BL-B67` (the ATGM run) is unaffected.
 
-## Note on merge
+## Note on merge (batch 1)
 
 Per the dispatch, this report stops at DoD PASS and does **not** merge — "Don't merge." The branch
 is `feature/9k113-narrow-search`, this report's tip is `1147dacce7ba97e16c0618f1e9b6ea04db2c8046`,
 and the roadmap/notes/memory edits above are committed on top of it on this same detached HEAD (see
 final commit sha in the handback message).
+
+---
+
+# Batch 2 — 2026-10-20/21, tip `9f4b96103134602a060e0d2642cbfbda778bad2b`
+
+**Scoped to tip `9f4b96103134602a060e0d2642cbfbda778bad2b`.** This verdict describes that commit
+only; if the branch has moved since, re-run. Batch 1 (above) already got DoD PASS at `1147dacc`.
+This batch is everything on the branch's own first-parent history between `1147dacc` and
+`9f4b9610` — confirmed by `git log --first-parent --no-merges 1147dacc..9f4b9610`: F5 boresight-
+relative regard check (`49f92738`), the `BL-B85` review required fix (`9cba4943`), Review CHANGES
+REQUIRED (`effbd933`) → fix (`135e2414`: import-crash floor, `BL-B85` realistic-case test) →
+re-review APPROVE (`8cb3c527`), Performance review batch 2 (`2f3c2627`), Security deep analysis
+batch 2 (`9f4b9610`, APPROVED). Two merge commits in this range (`cce0b57a`, `88ac4200`) pull in
+unrelated, already-DoD-passed work from `main` (`landmark-words-no-names`,
+`taking-fire-visible-shooter`, `voice-latency-instrumentation`, `audio-adapter-os-independent`) —
+confirmed none of those touch `body-layer/src`/`body-layer/tests`/`plans/9k113-narrow-search/`
+(the same scoping the Reviewer and Security passes for this batch already established and this
+report independently re-confirmed via `git diff --name-only`), so they are out of scope for this
+batch's own DoD and are not re-verified here (they carry their own DoD reports).
+
+**Verdict: PASS.**
+
+## Code Quality
+
+Single subproject touched by this batch's own commits: `body-layer/` (plus
+`plans/9k113-narrow-search/`, `.claude/agent-memory/`, `body-layer/ROADMAP/`,
+`docs/acceptance/`, `notes/` — none of them a subproject with its own commands). Confirmed by
+`git log --first-parent --no-merges 1147dacc..9f4b9610` and `git show --stat` on each of those
+commits individually (the two bookkeeping-only `BL-B89` commits in the range touch only
+`body-layer/ROADMAP/` and `docs/acceptance/`, no source).
+
+Re-ran every check myself, from inside this worktree, using the main checkout's `body-layer/.venv`
+binaries with `cwd` set inside this worktree's `body-layer/` (the documented pattern for an
+isolated worktree with no `.venv` of its own,
+`.claude/agent-memory/implementer/feedback_worktree_no_venv.md`):
+
+| Check | Command | Result |
+|---|---|---|
+| Format | `python -m ruff format --check src tests` | PASS — 156 files already formatted |
+| Lint | `python -m ruff check src tests` | PASS — all checks passed |
+| Type check (strict) | `cd body-layer && python -m mypy src` | PASS — no issues in 68 source files |
+| Tests | `python -m pytest tests -q` | **2360 passed, 4 xfailed, 0 failed — clean on first run, no flakes** |
+| `defaults.toml` staleness | `python tools/generate_defaults.py` | PASS — up to date; `git status --porcelain` empty after |
+
+No debug output, `print(`, `TODO`/`FIXME`/`XXX`, bare `except:`/`except Exception`, or
+`pdb`/`breakpoint` found in this batch's own diff (`git diff --first-parent 1147dacc..9f4b9610 --
+body-layer/src`, read in full while reviewing scope above). `git status --porcelain` is empty at
+this tip before any of this report's own edits.
+
+**Tuning**: `SIGHT_STALL_COOLDOWN_S` (new this batch, `BL-B85`) is declared via `tuning.real` with
+`lo=30.0, hi=400.0` and a `#:` comment; checked the **rendered** `config/defaults.toml` directly
+(`body-layer/config/defaults.toml:108-111`) — the full first-sentence comment, bounds line, and
+value are intact, no truncation. `_EFFECTIVE_SIGHT_STALL_COOLDOWN_S` (the import-crash fix) is
+correctly excluded from `tuning.*`/`defaults.toml` — its RHS is a derived expression over one
+already-tunable constant and one already-derived constant, failing the inclusion test's
+free-parameter criterion by construction, consistent with this same file's own `_SIGHT_WIDE_
+SEARCH_FAR_M` precedent from batch 1.
+
+## Scope & Correctness
+
+- **Matches the plan, as amended by the sortie feedback this batch responds to.** F5's second round
+  (`docs/acceptance/2026-10-20-sortie-feedback.md`, "the 9K113 vertical limits are boresight-
+  relative") is the user's own correction of batch 1's shipped fix, not new scope invented by this
+  batch — batch 1's elevation check was real and correct at zero pitch/bank, and this batch extends
+  it to the general case the user actually described. `BL-B85`'s required fix (the progressing-look
+  commit rule) is Review's own required fix on code this feature itself shipped in batch 1, not
+  scope drift.
+- **No unplanned scope added silently.** The one thing beyond the immediate fix requests —
+  `_EFFECTIVE_SIGHT_STALL_COOLDOWN_S` replacing a bare assert — is Review's own required fix
+  (Required Fix 1, "Review — F5 boresight + BL-B85 refinement"), not an invented addition; disclosed
+  in `implementation.md`'s "Required fixes round 2" section.
+- **The re-entry loop was followed correctly.** Every required fix in this batch (Review's two
+  fixes from "Review — F5 boresight + BL-B85 refinement," Security's — none this batch, Part 2 was
+  already closed in batch 1) went Implementer → Reviewer-on-the-fix before Performance/Security's
+  own batch-2 passes ran, confirmed by `review.md`'s own re-review section dated after `135e2414`
+  and by the commit graph (`135e2414` → `8929f824`/review-memory commit → `8cb3c527` re-review
+  APPROVE → `2f3c2627` perf → `9f4b9610` security, in that order).
+- **Performance review asked for no change this batch** — verdict is APPROVED — MONITOR with every
+  finding disposed as "none"/"MONITOR, not NOW"; no re-entry needed, confirmed by reading
+  `performance-review.md`'s "Batch 2" section in full (no "Action: NOW" or fix request anywhere in
+  it).
+- **No CLAUDE.md invariants violated.** No-omniscience re-checked directly by Security's batch-2
+  deep analysis ("every new function's inputs trace to belief/commanded state, never ground truth")
+  and independently by this report: `heading_relative_to_body_relative`'s only new inputs are
+  `ownship.pitch_deg`/`ownship.bank_deg` (ownship's own telemetry, not a contact field) and
+  `target.current_level` (belief-derived, via `_look_targets`). Code owns truth / models interpret:
+  unaffected. Single-player scope: unaffected, no multiplayer surface touched.
+- **All new/modified files staged.** `git status --porcelain` empty at tip `9f4b9610`, before this
+  report's own additions.
+
+## Testing
+
+- Core logic covered: F5's frame conversion (`test_geometry.py`'s pitch/nose-up/bank cases,
+  independently re-derived algebraically by the Reviewer before being checked against the tests,
+  not fitted to them), the three `TestSightInRegardSweepBoresightRelative` tests in `test_logger.py`
+  driving the real production sweep builders, and `BL-B85`'s progressing-look fix
+  (`test_a_progressing_contact_is_relooked_near_the_pre_bl_b85_cadence`) plus its realistic-case
+  scenario now a committed test
+  (`test_three_progressing_contacts_all_reach_type_and_search_resumes`,
+  `TestSightStallCooldown`) rather than a narrative figure — this directly satisfies the prior
+  review round's explicit "as a committed test, not a one-off narrative number" requirement, and
+  the committed test is what resolved two independently-reproduced, disagreeing sets of prose
+  numbers (10.4%/97/262/427s vs. 19.4%/130/163/196s) to one.
+- **Tests are meaningful, not decorative.** Every behaviour-critical change this batch was verified
+  by mutation at least once by the Reviewer, independently of the implementer's own claimed
+  mutations: the frame-conversion's `pitch_deg` hardcoded to `0.0` (5 tests red, matching the
+  implementer's claimed count exactly); the old unconditional commit restored in
+  `_start_glance_away` (94 s reproduced exactly); the bare assert restored verbatim (import-time
+  `AssertionError` reproduced under a constructed `PETROBRAIN_TUNING` file); `max`→`min` swapped in
+  the floor expression (caught by the committed test's own behavioural assertion, not just a
+  snapshot). This is "the test fails for the stated reason when the fix is absent," not "the test
+  passes."
+- **No existing tests broken.** `TestSightLookOptic`'s stale "narrow is unreachable" docstring claim
+  (already corrected in batch 1) and `BL-B85.md`'s stale ~175 s/71.5% narrative figure (this batch)
+  are both the kind of claim this review explicitly checked does not survive uncorrected — confirmed
+  removed by reading the current file, not the diff hunk alone.
+
+## Documentation
+
+- **Reviewer findings addressed.** Both required fixes from "Review — F5 boresight + BL-B85
+  refinement" (the import-time-crash assert, the missing committed test) — re-reviewed, APPROVE,
+  verified by this report's own fresh reading of the re-review's mutation evidence rather than
+  taken on trust.
+- **Non-obvious behaviour explained.** `BL-B86.md`'s own 2026-10-20 addendum (added by this batch's
+  own security-adjacent work, read and confirmed by this report) already states that its altitude
+  figures are level-flight-only and move with attitude once F5's frame fix lands — the roadmap
+  entry was kept honest about its own figures' scope *before* this report touched it, which this
+  report independently verified rather than assumed.
+
+## Security
+
+- `plans/9k113-narrow-search/security-review.md` **"Deep analysis — batch 2" (scope: `git diff
+  5e917840..8cb3c527 -- body-layer/src`, restricted to this feature's own first-parent commits):
+  APPROVED, no required fixes.** One finding (the never-pruned `attempted_at_level`/
+  `pending_attempted_at_level` dicts) disposed as "not filed, intentionally" with reasoning given
+  in the review itself (bounded by per-mission reset, single-player non-adversarial context) —
+  read and agree with that reasoning rather than taking the disposition on trust; it is the same
+  shape as the pre-existing, previously-accepted `attempted_at_range_m`/`attempted_at_time_sim`
+  dicts, not a new growth mechanism.
+- Performance: `plans/9k113-narrow-search/performance-review.md` **"Batch 2": APPROVED — MONITOR.**
+  Worst measured per-poll cost (495.8 µs, commanded `full` at altitude with pitch/bank) is
+  0.0496% of the 1.0 Hz poll budget — three orders of magnitude under budget.
+
+## Acceptance boundary — what these fixtures structurally cannot reach (batch 2, additive to
+batch 1's own boundary above)
+
+1. **Whether the boresight-relative correction *feels* right in a real climb/dive/bank, not just
+   algebraically right.** The fixtures prove the rotation is the correct general identity and that
+   it is wired through every real producer — they cannot show whether a pilot flying a steep bank
+   near the sight's ±60° azimuth limit perceives the sight's reach changing the way the physics now
+   says it should, which is exactly the shape of thing F5 itself was: a defect visible only in a
+   real cockpit, not a fixture.
+2. **Whether `SIGHT_STALL_COOLDOWN_S = 132.0 s` is the right default once flown.** `BL-B85.md`
+   itself says this explicitly — "a judgement on whether 132.0 s is the right default... is not
+   something a synthetic 600 s reproduction can validate by itself." This batch's own committed
+   realistic-case test confirms the *mechanism* behaves as intended; it cannot confirm the
+   *constant* is well-tuned for an actual sortie's contact tempo.
+
+**None of this blocks the merge.** Same outstanding sortie as batch 1 — card A8,
+`docs/acceptance/2026-10-20-open-flight-tests-results.md` — not a second card; this batch corrects
+the mechanism the same flight will exercise.
+
+## Unblock-condition check (accepted debt), batch 2
+
+No new accepted-debt item with a stated executable unblock condition was added this batch.
+`#needs-flight` on `BL-B64` is unchanged (same sortie, card A8, already checked in batch 1's own
+unblock-condition section above — re-confirmed here rather than re-derived: still names a sortie,
+not a command, and this report is not the one flying it). `BL-B86`'s own open design question
+(whether the idle fallback should do better than hold a fixed aim) names no executable command
+either — it is a decision for Architect/the user, per the review's own disposition, unchanged by
+this batch.
+
+## Roadmap / bookkeeping (batch 2, this report's own additions)
+
+- `body-layer/ROADMAP/BL-B64.md` — appended a "Batch 2" addendum under the existing follow-on
+  section: what F5's second round fixed and why batch 1's fix was insufficient, the `BL-B85`
+  required-follow-up, the self-corrected import-crash defect, and an explicit note that
+  `#needs-flight` is unchanged (same sortie, not a new one).
+- Root `ROADMAP.md`'s Body Layer row — appended one sentence to the existing `9k113-narrow-search`
+  entry (addition to an existing row, not a new one, per root `CLAUDE.md`'s enumeration rule).
+- `body-layer/ROADMAP/BL-B85.md` — already current as of this batch's own commits (the realistic-
+  case paragraph was rewritten by the implementer/reviewer loop itself, not left for DoD to fix);
+  confirmed by reading it, no edit needed from this report.
+- `notes/the-9k113-sight-bl-b64.md` — appended two bullets: a bound check can be present and tested
+  and still wrong if evaluated in the wrong reference frame (the F5 second-round lesson), and a fix
+  for a pathological case can silently throttle the healthy case too, which only a committed test
+  (not a narrative figure) can settle (the `BL-B85` refinement lesson). No new topic file needed.
+- `.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md` — updated from
+  "third occurrence" to "fourth occurrence," adding this batch's variant (checked, but in the wrong
+  frame — a different failure shape from the first three's "never checked at all," same root cause
+  one level up). Process signal restated for `BL-B66`.
+
+## Milestone-completion question (batch 2)
+
+**Does this change what the next milestone should be, or invalidate a downstream assumption?**
+No change beyond what batch 1 already recorded: `BL-B66` still inherits `sight_search_leg` as new
+surface its real slew model must reckon with, and still inherits the Stage 4 Part B deferral. This
+batch's own addition to that inheritance: `BL-B66` also inherits a sight whose field-of-regard
+check is now correctly boresight-relative, which it must preserve (not regress to ground-anchored)
+once real slew dynamics are added. No downstream assumption invalidated.
+
+## Note on merge (batch 2)
+
+Per the dispatch, this report does **not** merge — the main loop will. Branch
+`feature/9k113-narrow-search`, this report's tip `9f4b96103134602a060e0d2642cbfbda778bad2b`, and
+the roadmap/notes/memory edits above are committed on top of it inside this worktree (see commit
+sha and file list in the handback message).

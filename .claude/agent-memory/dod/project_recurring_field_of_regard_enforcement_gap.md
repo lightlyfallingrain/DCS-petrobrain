@@ -1,11 +1,12 @@
 ---
 name: recurring-field-of-regard-enforcement-gap
-description: Third occurrence of "a function/path that commits a sight aim does not check it against the optic's own field-of-regard bound" on the same 9K113 sight subsystem -- a process signal, not just a code-review catch.
+description: Fourth occurrence of a field-of-regard enforcement defect on the same 9K113 sight subsystem -- the first three were "never checked at all," the fourth was "checked, but in the wrong reference frame." A process signal, not just a code-review catch.
 metadata:
   type: project
 ---
 
-**Occurrence count, same subsystem, same shape, three separate times:**
+**Occurrence count, same subsystem, same general shape, four separate times -- the first three
+"never checked," the fourth "checked, wrong frame":**
 
 1. `BL-B64` original build (`plans/9k113-sight/security.md`): `_decide_sighting`'s look-target
    selection never checked the chosen azimuth/elevation against `Optic.regard_*` at all --
@@ -26,24 +27,37 @@ metadata:
    reasoned about regard in azimuth terms only, never asked the elevation question for a newly
    regard-bound optic calling a function written for an optic with no field of regard at all),
    by the implementer, and by two Reviewer passes; caught only by Security's deep analysis.
+4. Same feature, same branch, the very next round (`9k113-narrow-search`'s F5 fix, `49f92738`,
+   `plans/9k113-narrow-search/security-review.md`'s "batch 2" deep analysis): occurrence 3's own
+   fix -- correct on *whether* the bound was checked -- computed the elevation being checked from
+   ground-anchored range/altitude geometry, which is only correct at wings-level, nose-level
+   flight. The user's own correction (sortie feedback F5, 2026-10-20) named the actual
+   requirement: the ±60°/+20°/−15° limits are *boresight*-relative, mechanical rotation limits
+   around the aircraft's own axes, not ground-relative. A different failure shape from 1-3 (the
+   check existed and had a passing test) but the same root cause one level up: nobody asked, for a
+   bound expressed in the airframe's own frame, "is the value being checked against it actually in
+   that frame too."
 
 **Why review keeps missing it, each time, for a different proximate reason**: pass 1 verified the
 consumer and never the selection; pass 2 verified the azimuth side and never asked whether
-elevation needed the identical question; the common thread underneath all three is that **nothing
-in this project's checklist asks, for a regard-bound optic, "does every new producer of a
-committed aim get checked against the *same* bound the last one did, on *every* axis the bound
-has"** -- each occurrence is locally reasonable and the gap is only visible one level up, as a
-category, not inside any single diff.
+elevation needed the identical question; pass 3 verified the elevation side but never asked
+whether its *inputs* were in the bound's own frame; the common thread underneath all four is that
+**nothing in this project's checklist asks, for a regard-bound optic, "does every new producer of
+a committed aim get checked against the *same* bound the last one did, on *every* axis the bound
+has, in the bound's own reference frame"** -- each occurrence is locally reasonable and the gap is
+only visible one level up, as a category, not inside any single diff.
 
-**Process signal**: this is the third time a Security deep-analysis pass (not Reviewer, not
-Architect) is what actually closes this category on this one subsystem. Worth surfacing to the
-Architect/plan stage specifically for *any future 9K113 work* (`BL-B66`'s real slew model is the
-next entry that will touch this) and arguably for the general case: a plan or Security's own plan
-review should ask explicitly, whenever a plan reuses or extends a function serving an optic/path
-that has a field-of-regard (or any mechanical bound) constraint, "which axes does this bound have,
-and does the new caller/producer get checked on all of them" -- rather than relying on a deep
-Mode-2 pass after implementation to find it a third time.
+**Process signal**: this is the fourth time this category has shipped past a plan and at least one
+review pass on this one subsystem, the third time Security's deep analysis is what actually closed
+it (occurrence 4 was closed by the same Mode-2 pass that had just closed occurrence 3, in the very
+next round). Worth surfacing to the Architect/plan stage specifically for *any future 9K113 work*
+(`BL-B66`'s real slew model is the next entry that will touch this) and arguably for the general
+case: a plan or Security's own plan review should ask explicitly, whenever a plan reuses or
+extends a function serving an optic/path that has a field-of-regard (or any mechanical bound)
+constraint, "which axes does this bound have, is the new caller/producer checked on all of them,
+and is the value being checked actually expressed in the bound's own frame" -- rather than relying
+on a deep Mode-2 pass after implementation to find it a fourth time.
 
 See also `.claude/agent-memory/implementer/feedback_declared_bound_check_at_selection_not_at_consumer.md`
 (the mechanism-level fix pattern: reject not clamp, fix at the producer/choke point) and
-`notes/the-9k113-sight-bl-b64.md` (the user-facing harvested version of occurrences 1-2).
+`notes/the-9k113-sight-bl-b64.md` (the user-facing harvested version of all four occurrences).

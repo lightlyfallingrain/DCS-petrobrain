@@ -211,3 +211,45 @@
   static — the correct, disclosed consequence of the elevation fix above, not a defect it
   introduced).
 
+  ---
+
+  **Batch 2, same branch, 2026-10-20/21 — DoD PASS at `9f4b9610`.** Closes F5 properly, not just
+  partway: the elevation fix above (batch 1) checked the idle search cycle's elevation against the
+  sight's own `-15°` down-regard limit, but computed that elevation from ground-anchored
+  range/altitude geometry — correct only at wings-level, nose-level flight. User correction, same
+  sortie feedback doc, second round (*"it is not about distance, but angles relative to
+  boresight... the limits are the mechanical rotation limits around aircraft axis"*): the
+  ±60°/+20°/−15° limits are boresight-relative. Fixed with a shared body-frame conversion
+  (`perception.geometry.heading_relative_to_body_relative`, reusing `body_relative_direction`'s
+  existing rotation) applied before the regard check on every sight/binocular aim producer —
+  verified algebraically (yaw cancels exactly, a general identity not fitted to the test cases) and
+  by mutation.
+
+  Also in this batch: the `BL-B85` stall-cooldown fix's own required follow-up — the first version
+  committed *every* pending mark on the scheduled dwell boundary, including a contact whose
+  classification was genuinely advancing (re-look cadence measured at ~94 s instead of the
+  pre-`BL-B85` ~33 s); fixed so a progressing look is dropped, not committed, the same treatment a
+  genuine interruption already gets. The realistic-case figures in `[[BL-B85]]`'s own entry are now
+  a committed, deterministic test, not a narrative number — two independent prose reproductions of
+  the prior round's figures disagreed with each other, which only a committed test could resolve.
+
+  One self-inflicted, self-corrected defect in this batch, not shipped: a bare
+  `assert OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S` added alongside the stall-cooldown fix
+  crashed the whole process at import on a single, realistic, in-bounds tuning override — caught by
+  Reviewer, replaced with a derived floor (`_EFFECTIVE_SIGHT_STALL_COOLDOWN_S = max(...)`) before
+  this batch's own tip.
+
+  Full account: `plans/9k113-narrow-search/implementation.md`'s "F5", "BL-B85 required fix", and
+  "Required fixes round 2" sections; `plans/9k113-narrow-search/review.md`'s "Review — F5 boresight
+  + BL-B85 refinement" and the two re-reviews after it; `plans/9k113-narrow-search/security-review.md`'s
+  "Deep analysis — batch 2" (APPROVED, no required fixes). Mechanical checks (format/lint/mypy
+  --strict/tests, this subproject) re-run clean by DoD at the merge tip, no flakes.
+
+  `#needs-flight` unchanged — same outstanding sortie (card A8), not a new one; this batch
+  corrects the mechanism the acceptance test will fly, it does not add a second acceptance item.
+  A process note worth carrying into `[[BL-B66]]`: this is the **fourth** occurrence of a
+  field-of-regard enforcement defect on this one subsystem (the first three were "never checked at
+  all"; this one was "checked, in the wrong frame") — see
+  `.claude/agent-memory/dod/project_recurring_field_of_regard_enforcement_gap.md` and
+  `notes/the-9k113-sight-bl-b64.md`.
+
