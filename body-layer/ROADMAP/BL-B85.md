@@ -78,27 +78,38 @@
   no second contact needed. A fairness redesign among many candidates does not, by itself, bound
   how long any one candidate may be re-selected if it never stops qualifying.
 
-  **Realistic case, for contrast — re-measured against the current code** (the required-fix round
-  above; the ~175 s/71.5% figures this paragraph used to carry were measured *before* that fix, on a
-  version of the code where `_start_glance_away` never committed anything for `SIGHTING` at all, so
-  they described a different mechanism and are superseded, not merely stale — `plans/
-  9k113-narrow-search/review.md`'s "Review — BL-B85" flagged exactly this and asked for a re-run).
-  Three contacts (50/80/120 m, T-72, presence) each bumped a tier the poll after their own look
-  ends (what the real classification pipeline is built to do), driven through `decide()` over
-  900 s with the same one-step `wide`/`narrow_near`/`narrow_far` toy search legs the committed
-  stuck-case test above uses (not the real multi-step `search_pattern`-built sequences the original
-  900 s reproduction used, so leg-transition counts are not comparable across the two and are not
-  cited here): all three reach `type` and exit candidacy by t=196 s (CONTACT_1 at 130 s, CONTACT_2
-  at 163 s, CONTACT_3 at 196 s), each needing only two look-starts to get there (no progressing look
+  **Realistic case, for contrast — now a committed test, not a narrative number**
+  (`test_three_progressing_contacts_all_reach_type_and_search_resumes`,
+  `tests/test_optic_policy.py`'s `TestSightStallCooldown` — `plans/9k113-narrow-search/review.md`'s
+  "Review — F5 boresight + BL-B85 refinement" required this: the prior round shipped only prose
+  figures with no test asserting them, and two independent reproductions of that prose disagreed
+  (10.4% busy/exits at 97/262/427 s vs. this paragraph's own 19.4%/130/163/196 s), which a narrative
+  number cannot resolve and a committed test can). Three contacts (50/80/120 m, T-72, presence) each
+  bumped a tier the poll immediately after their own look stops being the active look (in practice
+  the scheduled `SIGHT_MAX_DWELL_S` dwell boundary, for a target close enough that
+  `sight_can_still_improve` never excludes it below `type`) — **"the poll after the look ends" is
+  itself the ambiguity the two prior reproductions tripped on, so the test's own docstring pins the
+  exact convention used**, driven through `decide()` over 900 s with the same one-step
+  `wide`/`narrow_near`/`narrow_far` toy search legs the committed stuck-case test above uses (not the
+  real multi-step `search_pattern`-built sequences the original 900 s reproduction used, so
+  leg-transition counts are not comparable across the two and are not cited here). Under that
+  convention: all three reach `type` and exit candidacy by t=195 s (CONTACT_1 at 129 s, CONTACT_2 at
+  162 s, CONTACT_3 at 195 s), each needing exactly two look-starts to get there (no progressing look
   is ever throttled by the retry/cooldown mechanism, by construction of the required fix above).
-  Overall busy fraction across the full 900 s is 19.4% (175/900 polls) — *lower* than the original
-  71.5%-idle figure, i.e. search gets *more* of its time back under the fixed code, not less — every
+  Overall busy fraction across the full 900 s is 19.4% (175/900 polls) — *lower* than the pessimistic
+  case's 88%, i.e. search gets the large majority of its time back under the fixed code — every
   search leg (`wide`/`narrow_near`/`narrow_far`) visited, and the search cycle runs with no contact
-  left to glass for the remaining 704 s. The pessimistic case above requires classification to stall
-  indefinitely despite repeated close-range looks, which should not happen if the belief layer is
-  behaving — but nothing currently bounds how long a look may be re-granted to a contact that never
-  advances, and this is the first feature to make that absence of a bound visible as a full search
-  stall rather than a merely-delayed `GLASSING` dwell.
+  left to glass for the remaining 705 s. **These figures match the implementer's own prior prose
+  almost exactly** (130/163/196 s, 19.4% — off by a uniform 1 s, the only difference being whether
+  the exit instant is recorded at the commit poll itself or the poll after) **and do not match the
+  reviewer's independent 97/262/427 s/10.4% figures** — a fresh, independent reproduction built for
+  this report reproduces the 129/162/195 s/19.4% numbers exactly, so the reviewer's own script most
+  likely used a different (and non-equivalent) "look ended" trigger or bump timing, not a defect in
+  the code; the code's actual behaviour is what this committed test now pins. The pessimistic case
+  above requires classification to stall indefinitely despite repeated close-range looks, which
+  should not happen if the belief layer is behaving — but nothing currently bounds how long a look
+  may be re-granted to a contact that never advances, and this is the first feature to make that
+  absence of a bound visible as a full search stall rather than a merely-delayed `GLASSING` dwell.
 
   **Settled and built** (user, 2026-10-20, F4 above) — a time bound, not a count of looks: handled
   by `SIGHT_STALL_COOLDOWN_S` above rather than an N-looks counter, consistent with the existing

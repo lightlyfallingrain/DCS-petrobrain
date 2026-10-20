@@ -727,3 +727,100 @@ itself so this is a plain module-level assert, not a tunable.
 4 xfailed, 0 failed -- no rerun needed, none of the task's known-flake tests failed this run.
 `tools/generate_defaults.py` (no `--write`): `config/defaults.toml` already current (the new assert
 is not a tunable, so no regeneration was expected or needed).
+
+### Required fixes round 2 (`plans/9k113-narrow-search/review.md`'s "Review -- F5 boresight +
+BL-B85 refinement")
+
+**Fix 1 -- removed the import-time crash.** The prior round's `assert OPTIC_RETRY_INTERVAL_S <
+SIGHT_STALL_COOLDOWN_S` was an unprotected bare `assert`, reachable by a single, realistic,
+in-bounds `SIGHT_STALL_COOLDOWN_S` override (e.g. 40.0, inside its own declared `lo=30.0,
+hi=400.0`), and crashed the whole process at import -- a direct violation of `body-layer/
+CLAUDE.md`'s "Tuning" policy ("a bad value warns and continues on the code default -- it never
+refuses to start"). Per the orchestrator's decision (simplest and safe, no new `tuning.py`
+`_check_*_coupling`): deleted the assert and replaced it with
+`_EFFECTIVE_SIGHT_STALL_COOLDOWN_S = max(SIGHT_STALL_COOLDOWN_S, OPTIC_RETRY_INTERVAL_S)`, a
+module-level derived constant, and repointed `_decide_sighting`'s one `stall_cooldown_s=` call site
+(confirmed by `grep` to be the only one) at it instead of the raw tunable. A stalled contact's
+cooldown can now never resolve *shorter* than the ordinary retry interval, whatever either constant
+is tuned to -- the inversion is made harmless rather than merely detected.
+
+**No startup warning emitted on an inversion, and said so rather than left silent.** The only
+once-only startup-warning mechanism this codebase has for a cross-key tuning problem is
+`tuning.py`'s `_check_scan_decay_coupling` -- a named check wired into its own `RejectedEntry`/
+`AppliedEntry` registry, not a standalone print-once helper, and the orchestrator's brief explicitly
+asked not to build a second instance of that machinery for this pair. There is also less to warn
+about here than for `decay.py`'s own coupling: that one silently *rejects an override back to its
+default*, which is worth announcing; this one silently *widens an override to a safe value*, which
+is the intended behaviour, not a rejection.
+
+**Test**: `test_an_inverting_override_imports_cleanly_and_floors_to_the_retry_interval`
+(`tests/test_optic_policy.py`'s `TestSightStallCooldown`) -- subprocess, not an in-process reimport
+(constants bind at import, and this test file's own earlier imports have already bound
+`belief.optic_policy`'s constants against whatever `PETROBRAIN_TUNING` was at collection time, same
+reasoning as `test_tuning.py`'s `test_a_real_constant_resolves_an_override_in_a_fresh_process`).
+Asserts the process imports with `check=True` (a regression here is an uncaught `AssertionError` at
+import, which `subprocess.run` turns into a `CalledProcessError`), that
+`_EFFECTIVE_SIGHT_STALL_COOLDOWN_S` resolves to the floor (64.0 s, not the 40.0 s override), and
+behaviourally that a stalled contact stays ineligible at 45 s (past the raw override, short of the
+floor) and becomes eligible again only at 65 s (past the floor). **Verified by mutation, twice, on
+this exact source, restored and `sha256sum`-verified byte-identical both times**: (1) reverting to
+the old bare `assert` plus the raw constant at the call site reproduces the exact import-time crash
+(`CalledProcessError`); (2) swapping the floor's `max(...)` for `min(...)` (computing 40.0 instead
+of 64.0) is caught by the behavioural assertions, not just the value check. **Known gap, said
+rather than silently accepted**: the test's behavioural assertions call `is_worth_a_look` directly
+with the imported `_EFFECTIVE_SIGHT_STALL_COOLDOWN_S`, not through `_decide_sighting`/`decide()` --
+a regression that reverted *only* the one production call site back to the raw constant (leaving
+the module-level floor computation intact) would not be caught by this test. I attempted an
+end-to-end version through `decide()` and hit an orthogonal conflation: a single-shot `decide()`
+call at `now_sim=45`/`65` against a state with `phase_started_sim=0.0` trips `SIGHT_MAX_DWELL_S`'s
+*whole-dwell* scheduled-break check before ever reaching the candidate filter, so it measures the
+wrong timer. Reproducing the real call site faithfully needs a stepped loop (`step_s=1.0` through
+the full dwell/glance-away cycle, as the other `TestSightStallCooldown` tests already do), which
+felt like the wrong size of addition for closing a one-line wiring gap; confirmed instead by `grep`
+that `stall_cooldown_s=` has exactly one call site in the file and that it now reads
+`_EFFECTIVE_SIGHT_STALL_COOLDOWN_S`.
+
+**Fix 2 -- committed the "realistic case" as an actual test**, closing the review's second required
+fix (the prior round shipped only prose numbers). New test:
+`test_three_progressing_contacts_all_reach_type_and_search_resumes`
+(`tests/test_optic_policy.py`'s `TestSightStallCooldown`). Three contacts (50/80/120 m, T-72,
+presence) driven through `decide()` over 900 simulated seconds, each advancing one classification
+tier the instant its own look stops being `state.look_contact_id` for any reason -- the exact
+convention is spelled out in the test's own docstring, because **"the poll after the look ends" is
+itself the ambiguity** the review flagged as the likely cause of the two prior reproductions'
+disagreement.
+
+**Measured, independently, in a fresh standalone script before writing the test** (not derived from
+either prior figure): look-starts 2/2/2 (presence->class, class->type, no progressing look ever
+throttled); `type` reached at t=129/162/195 s; busy 175/900 polls (19.4%); every search leg visited;
+remaining 705 s free for search. **This matches the implementer's own prior prose
+(130/163/196 s, 19.4%) almost exactly -- off by a uniform 1 s, consistent with a difference in
+exactly which poll is recorded as "the exit instant" (the commit poll itself vs. the poll after) --
+and does not match the reviewer's independent 97/262/427 s/10.4% figures.** Since an independent,
+freshly-written reproduction (this one) lands on the implementer's numbers rather than the
+reviewer's, the implementer's figures describe what the current code actually does; the reviewer's
+own script most likely used a different, non-equivalent "look ended" trigger or bump-timing
+convention, not a defect this round needs to fix. `BL-B85.md`'s "Realistic case" paragraph is
+updated to cite the committed test and these exact figures (129/162/195 s, 175/900, remaining
+705 s) rather than the superseded 130/163/196/704 prose.
+
+**Verified by mutation, on this exact source, restored and `sha256sum`-verified byte-identical**:
+removing `is_worth_a_look`'s level-match guard (making every retry unconditionally use
+`stall_cooldown_s` instead of only when the contact's level is unchanged) changes the measured exit
+times to 195/228/261 s, caught by the committed test's exact equality assertions. Reverting
+`_start_glance_away`'s conditional commit (the required-fix-round-1 guard) does **not** change this
+test's outcome, because this scenario's level bumps happen strictly *after* each look ends, never
+*during* one -- so the guard's own condition (current level vs. look-start level, compared at the
+moment the dwell boundary fires) never actually differs in this test, by construction. That guard
+is already covered by the pre-existing
+`test_a_progressing_contact_is_relooked_near_the_pre_bl_b85_cadence`, which changes level *mid-look*
+specifically to exercise it; this new test is deliberately a different scenario (progress between
+looks, not during one) and does not duplicate that coverage.
+
+**Checks (this round)**: `ruff format --check src tests`: pass (one file reformatted by `ruff
+format` itself before the check, a single `_target(...)` call reflowed across lines -- not a
+manual edit). `ruff check src tests`: pass. `cd body-layer && mypy src`: pass, no issues in 68
+source files. `pytest tests -q`: 2360 passed, 4 xfailed, 0 failed -- no rerun needed, no flake from
+the task's known-flake list triggered this run. `tools/generate_defaults.py` (no `--write`):
+`config/defaults.toml` already current (no tunable changed this round -- the assert removal and its
+replacement are both plain module-level code, not `tuning.*` declarations).

@@ -9,8 +9,11 @@ identical and the reason the policy takes `LookTarget`s rather than
 from __future__ import annotations
 
 import math
+import subprocess
+import sys
 from collections.abc import Sequence
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -2684,6 +2687,108 @@ class TestSightStallCooldown:
             f"a 600 s run, not abandoned forever: {look_starts}"
         )
 
+    def test_three_progressing_contacts_all_reach_type_and_search_resumes(
+        self,
+    ) -> None:
+        """The "realistic case" `plans/9k113-narrow-search/review.md`'s
+        "Review -- F5 boresight + BL-B85 refinement" required as a committed
+        test rather than a one-off narrative number -- `BL-B85.md`'s own
+        "Realistic case" paragraph must describe what this test measures,
+        not a figure nobody can re-derive.
+
+        **"The poll after its look ends" is ambiguous -- the review's own
+        words -- so the exact convention used here is**: a contact's level
+        advances one tier (`presence -> class -> type`) the instant its own
+        look stops being `state.look_contact_id` for any reason (the
+        scheduled `SIGHT_MAX_DWELL_S` dwell boundary, in practice, for a
+        target close enough that `sight_can_still_improve` never excludes
+        it below `type`) -- i.e. the bumped level is what the *next* poll's
+        `targets` carries, never the poll that ended the look itself. Two
+        independent reproductions of this exact scenario disagreed in the
+        prior review round (10.4% busy/exits at 97/262/427 s vs. this
+        module's own 19.4%/130/163/196 s) -- this test pins the real
+        code's own answer under one precise, reproducible convention, so
+        there is no second narrative to disagree with."""
+        contacts = (
+            ("CONTACT_1", 0.0, 50.0),
+            ("CONTACT_2", 40.0, 80.0),
+            ("CONTACT_3", -40.0, 120.0),
+        )
+        level_after = {"presence": "class", "class": "type", "type": "type"}
+        levels = {contact_id: "presence" for contact_id, _az, _range_m in contacts}
+        reached_type_at_sim: dict[str, float] = {}
+        look_starts: dict[str, int] = {
+            contact_id: 0 for contact_id, _az, _range_m in contacts
+        }
+
+        state = self._sighting_state()
+        busy_polls = 0
+        total_polls = 0
+        legs_seen: set[str] = set()
+        now_sim = 0.0
+        step_s = 1.0
+        duration_s = 900.0
+        while now_sim < duration_s:
+            targets = [
+                _target(
+                    contact_id,
+                    azimuth_deg=azimuth_deg,
+                    range_m=range_m,
+                    current_level=levels[contact_id],
+                )
+                for contact_id, azimuth_deg, range_m in contacts
+            ]
+            previous_look_contact_id = state.look_contact_id
+            state, _decision = self._decide(state, now_sim, targets)
+            total_polls += 1
+            legs_seen.add(state.sight_search_leg)
+            if state.look_contact_id is not None:
+                busy_polls += 1
+                if state.look_started_sim == now_sim:
+                    look_starts[state.look_contact_id] += 1
+
+            # The look that was active just ended this poll (for any
+            # reason) -- advance that contact's level one tier, to take
+            # effect from the *next* poll's `targets` onward.
+            if (
+                previous_look_contact_id is not None
+                and state.look_contact_id != previous_look_contact_id
+            ):
+                old_level = levels[previous_look_contact_id]
+                new_level = level_after[old_level]
+                if new_level != old_level:
+                    levels[previous_look_contact_id] = new_level
+                    if new_level == "type":
+                        reached_type_at_sim[previous_look_contact_id] = now_sim
+
+            now_sim += step_s
+
+        busy_fraction = busy_polls / total_polls
+        assert look_starts == {
+            "CONTACT_1": 2,
+            "CONTACT_2": 2,
+            "CONTACT_3": 2,
+        }, (
+            "each contact needs exactly two completed looks to reach "
+            f"type (presence->class, class->type); measured {look_starts}"
+        )
+        assert reached_type_at_sim == {
+            "CONTACT_1": 129.0,
+            "CONTACT_2": 162.0,
+            "CONTACT_3": 195.0,
+        }, (
+            "exact, reproducible exit times under this test's bump "
+            f"convention; measured {reached_type_at_sim}"
+        )
+        assert busy_polls == 175 and total_polls == 900, (
+            f"measured busy_polls={busy_polls}, total_polls={total_polls} "
+            f"({busy_fraction:.1%}); expected 175/900 (19.4%)"
+        )
+        assert legs_seen == {"wide", "narrow_near", "narrow_far"}, (
+            "every search leg should be visited once all three contacts "
+            f"have exited candidacy; only saw {legs_seen}"
+        )
+
     def test_a_progressing_contact_is_relooked_near_the_pre_bl_b85_cadence(
         self,
     ) -> None:
@@ -2740,6 +2845,87 @@ class TestSightStallCooldown:
             "expected the re-look gap to stay close to the pre-BL-B85 "
             f"cadence of {pre_bl_b85_cadence_s:.0f} s, measured "
             f"{second_look_gap_s:.0f} s"
+        )
+
+    def test_an_inverting_override_imports_cleanly_and_floors_to_the_retry_interval(
+        self, tmp_path: Path
+    ) -> None:
+        """`plans/9k113-narrow-search/review.md`'s "Review -- F5 boresight +
+        BL-B85 refinement" required fix: the old bare `assert
+        OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S` at import time
+        crashed the whole process on a single, realistic, in-bounds
+        override -- `SIGHT_STALL_COOLDOWN_S = 40.0` sits comfortably inside
+        its own declared `lo=30.0, hi=400.0` and still inverts the pair
+        against the default `OPTIC_RETRY_INTERVAL_S` of 64.0. Fresh process,
+        not an in-process reimport, for the same reason `test_tuning.py`'s
+        `test_a_real_constant_resolves_an_override_in_a_fresh_process` is:
+        `belief.optic_policy` has already bound its constants by the time
+        this test file's own imports ran.
+
+        Behavioural, not just a value check: a stalled contact must become
+        eligible again at the *floored* 64.0 s (the ordinary retry
+        interval), not at the overridden 40.0 s -- using the raw override
+        would silently reintroduce the throttle gap `SIGHT_STALL_COOLDOWN_S`
+        exists to close."""
+        tuning_file = tmp_path / "tuning.toml"
+        tuning_file.write_text(
+            "[belief.optic_policy]\nSIGHT_STALL_COOLDOWN_S = 40.0\n",
+            encoding="utf-8",
+        )
+        body_layer_src = Path(__file__).resolve().parent.parent / "src"
+        world_model_src = (
+            Path(__file__).resolve().parent.parent.parent / "world-model" / "src"
+        )
+        env = {
+            "PETROBRAIN_TUNING": str(tuning_file),
+            "PYTHONPATH": f"{body_layer_src}:{world_model_src}",
+            "PATH": "/usr/bin:/bin",
+        }
+        script = (
+            "from belief.optic_policy import (\n"
+            "    OPTIC_RETRY_INTERVAL_S,\n"
+            "    SIGHT_STALL_COOLDOWN_S,\n"
+            "    LookTarget,\n"
+            "    OpticState,\n"
+            "    _EFFECTIVE_SIGHT_STALL_COOLDOWN_S,\n"
+            "    is_worth_a_look,\n"
+            "    sight_can_still_improve,\n"
+            ")\n"
+            "assert SIGHT_STALL_COOLDOWN_S == 40.0, SIGHT_STALL_COOLDOWN_S\n"
+            "assert OPTIC_RETRY_INTERVAL_S == 64.0, OPTIC_RETRY_INTERVAL_S\n"
+            "assert _EFFECTIVE_SIGHT_STALL_COOLDOWN_S == OPTIC_RETRY_INTERVAL_S, (\n"
+            "    _EFFECTIVE_SIGHT_STALL_COOLDOWN_S\n"
+            ")\n"
+            "state = OpticState(\n"
+            "    attempted_at_range_m={'CONTACT_1': 80.0},\n"
+            "    attempted_at_time_sim={'CONTACT_1': 0.0},\n"
+            "    attempted_at_level={'CONTACT_1': 'presence'},\n"
+            ")\n"
+            "stalled_target = LookTarget(\n"
+            "    contact_id='CONTACT_1', azimuth_deg=0.0, elevation_deg=0.0,\n"
+            "    range_m=80.0, object_type='T-72', current_level='presence',\n"
+            ")\n"
+            "assert not is_worth_a_look(\n"
+            "    stalled_target, state, now_sim=45.0,\n"
+            "    can_improve=sight_can_still_improve,\n"
+            "    stall_cooldown_s=_EFFECTIVE_SIGHT_STALL_COOLDOWN_S,\n"
+            "), 'must not use the raw 40.0 s override as the real cooldown'\n"
+            "assert is_worth_a_look(\n"
+            "    stalled_target, state, now_sim=65.0,\n"
+            "    can_improve=sight_can_still_improve,\n"
+            "    stall_cooldown_s=_EFFECTIVE_SIGHT_STALL_COOLDOWN_S,\n"
+            "), 'must become eligible again once the floored 64.0 s elapses'\n"
+        )
+        # `check=True` is the point: this call must not raise -- the bug
+        # being fixed here is an uncaught `AssertionError` at import, which
+        # `subprocess.run` surfaces as a non-zero exit and this would turn
+        # into a `CalledProcessError`.
+        subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
         )
 
 

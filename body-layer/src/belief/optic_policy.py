@@ -241,15 +241,30 @@ SIGHT_STALL_COOLDOWN_S: Final[float] = tuning.real(
 # is not itself a `tuning.real` (it is derived at import from
 # `FOCUS_DWELL_S`/`SCAN_PLAN`, both independently tunable), so nothing in
 # either constant's own `lo`/`hi` bounds catches a retuning that pushes
-# `OPTIC_RETRY_INTERVAL_S` above `SIGHT_STALL_COOLDOWN_S`'s low end --
-# `plans/9k113-narrow-search/review.md`'s "Review -- BL-B85" flagged this as
-# the same residual-coupling shape `belief.decay.py`'s own asserts guard
-# (`body-layer/CLAUDE.md`'s "Tuning"). A stalled contact would then get the
-# *shorter* of the two waits, inverting the intended relationship silently.
-assert OPTIC_RETRY_INTERVAL_S < SIGHT_STALL_COOLDOWN_S, (
-    "OPTIC_RETRY_INTERVAL_S must stay below SIGHT_STALL_COOLDOWN_S or a "
-    "stalled contact's cooldown would resolve to the shorter, non-stalled "
-    "interval instead of the longer one meant to throttle it"
+# `OPTIC_RETRY_INTERVAL_S` above `SIGHT_STALL_COOLDOWN_S`'s low end.
+# `plans/9k113-narrow-search/review.md`'s "Review -- F5 boresight + BL-B85
+# refinement" found this coupling was previously guarded by a bare
+# `assert` here -- reachable by a single, realistic, in-bounds
+# `SIGHT_STALL_COOLDOWN_S` override (e.g. 40.0, comfortably inside its own
+# declared `lo=30.0, hi=400.0`) -- which crashed the whole process at
+# import, violating this project's own tuning policy ("a bad value warns
+# and continues on the code default -- it never refuses to start",
+# `body-layer/CLAUDE.md`'s "Tuning"). Floor the effective cooldown instead
+# of asserting the inversion can't happen: a stalled contact then never
+# waits *less* than the ordinary retry interval, whatever either constant
+# is tuned to. No startup warning on an inversion, deliberately: the only
+# once-only startup-warning mechanism this module has is `tuning.py`'s
+# `_check_scan_decay_coupling`, a named check wired into its own registry
+# of `RejectedEntry`/`AppliedEntry` state -- there is no standalone
+# print-once helper to reuse without building a second instance of that
+# same machinery, which this fix was explicitly asked not to do for this
+# pair. The floor also makes a warning less necessary than it would be
+# for `decay.py`'s own coupling: there, a bad combination is silently
+# *rejected back to defaults*, which is worth announcing; here, a bad
+# combination is silently *widened to a safe value*, which is its own
+# intended behaviour, not a rejection.
+_EFFECTIVE_SIGHT_STALL_COOLDOWN_S: Final[float] = max(
+    SIGHT_STALL_COOLDOWN_S, OPTIC_RETRY_INTERVAL_S
 )
 
 #: The widest sector a binocular *search* will sweep (user: *"cap binocular
@@ -2031,7 +2046,7 @@ def _decide_sighting(
             state,
             now_sim,
             can_improve=sight_can_still_improve,
-            stall_cooldown_s=SIGHT_STALL_COOLDOWN_S,
+            stall_cooldown_s=_EFFECTIVE_SIGHT_STALL_COOLDOWN_S,
         )
         and within_field_of_regard(
             SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg
