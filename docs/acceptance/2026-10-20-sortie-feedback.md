@@ -30,3 +30,25 @@ Not yet explored. Note the card's own "Read once" section says the opposite shou
 *"To reach the brain, start without a command word … or begin with `Petrovich, …`."* So this
 is either a defect against built behaviour or the card over-claimed — to be established
 before anything is designed.
+
+**Established from the speech log** (`body-layer/logs/dcs-speech-20261020-162158.jsonl` on the
+Windows clone): it is a defect against the design, not an unbuilt feature.
+
+```
+"Petrovich, where is mark one?"  verb_anchored=true  token=null  -> say_again
+"Petrovich, where are we?"       verb_anchored=true  token=null  -> say_again
+```
+
+The design (`audio-adapter/src/vocabulary.py`, `ROUTING_TOKENS` comment) says a transmission
+beginning with `wake_petrovich` *"is free speech for the brain layer"*. But
+`command_matcher.VERB_ANCHOR_WORDS` is derived from the first word of every phrasing, and
+`wake_petrovich`'s phrasings are `"petrovich"` / `"hey petrovich"` — so the wake word itself
+counts as a command verb. `voice_commands.classify_response` then sees "anchored, no command
+matched" and answers "say again", which is the rule for a fumbled command. Only speech with
+**no** anchor at all falls through to the brain. The wake word therefore does the opposite of
+its job. Related, not the same: `BL-B52` (wake word strips a report's slots), `AA-B4` (anchor on
+sentence position — the same log also anchors `"Eta-Chron."` and `"Check it."`).
+
+Separately, earlier the same day body-layer on Windows logged `background brain reply poll
+failed (retrying)` / connection refused — the brain is on the Mac, so even correctly routed
+speech would have reached nothing unless body-layer's brain URL points at the Mac.
