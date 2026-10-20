@@ -121,6 +121,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B80]] — the 9K113 slew loop: pointing the sight on the player axis (split from [[BL-B66]])
 - [[BL-B81]] — radio check: an ordinary command whose answer proves intercom and Petrobrain are up
 - [[BL-B82]] — no scanning before takeoff, replacing the on-ground silence default
+- [[BL-B83]] — idle 9K113 searches the mission objective area when in range (deferred: no objective datum at runtime)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
