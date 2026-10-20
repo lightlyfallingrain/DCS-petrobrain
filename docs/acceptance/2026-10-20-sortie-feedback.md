@@ -147,3 +147,13 @@ objective body-layer/src` finds only a comment. The Mission Interpreter's waypoi
    direction. Filed as a backlog item.
 3. **Wide vs narrow share**: narrow carries the search; wide is brief — orientation (where to
    point narrow) or close range.
+
+## F6 — A12: no "taking fire" for obvious gunfire and SAM launches at ownship
+
+User, verbatim:
+
+> A12 did get a report or two of "someone firing", but no reports of obvious gunfire at ownship.
+> I can see tracers and SAM launches, but no report. Scan left (to enemy dircetion) commanded.
+> (most recent logs)
+
+Not yet investigated.
