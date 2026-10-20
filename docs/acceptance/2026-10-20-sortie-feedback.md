@@ -367,3 +367,27 @@ give current or original position? Also offered a speech log with queued/spoken 
 3. Build: per-utterance timestamps (queued, spoken) plus end-to-end latency measurement and logs
    across the voice chain (PTT release → STT → body-layer → speech queue → TTS → playback), so the
    delay can be located.
+
+### F8 — plan decisions (user, 2026-10-20)
+
+On `plans/voice-latency-instrumentation/plan.md`'s four decisions: (1) re-render the current
+position in `select_target` only or in every positional readback; (2) log the command token, or
+thread the full template; (3) add a playback-start feedback seam now; (4) log failed STT/TTS
+attempts.
+
+> 1 - all of them
+> 2 - cheap
+> 3 - measure first
+> 4 - yes
+
+### F4 — wide sweep band (user, 2026-10-20)
+
+Asked whether wide should orient over the same 2.3–5.6 km band as the first narrow pass, or over
+the whole 2.3–13.6 km:
+
+> wide sweep -> it makes sense to use it up to where it can bring information, be it detection or
+> classification. At greater distances it cannot, narrow can.
+
+So the wide sweep's far edge is wide's own useful reach (the farther of its detection and
+classification reach, from the existing optic calibration), not the 5.6 km binocular boundary.
+Beyond that reach only narrow brings information.
