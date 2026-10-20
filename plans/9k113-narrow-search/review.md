@@ -819,3 +819,126 @@ suite (2340 passed, 4 xfailed, 1 failed on first run — `test_log_live_los_cove
 zero_over_evaluated_when_healthy`, a named known flake, passed alone on rerun) on commit
 `9cba4943fdca82e69335b1f605b5b9c9b32689ff` from inside `body-layer/`. `tools/generate_defaults.py`
 confirmed `config/defaults.toml` already current.
+
+---
+
+### Re-review — required-fix commit `135e2414` (parent `8929f824`)
+
+Checked out detached at `135e24146eaf629d70a41a8222a880f83ac3f0cd` in an isolated worktree (clean
+tree, `HEAD` confirmed a strict ancestor of the tip before checkout, confirmed detached-at-tip and
+clean again after). Reviewed `optic_policy.py`'s and `test_optic_policy.py`'s diffs against this
+commit's own message, `implementation.md`'s appended "Required fixes round 2" section, `BL-B85.md`'s
+rewritten "Realistic case" paragraph, and both required fixes from "Review — F5 boresight + BL-B85
+refinement" above.
+
+**Fix 1 — import-time crash, fixed by floor rather than assert, verified by two fresh mutations on
+this exact source, not re-running the implementer's own.**
+
+- `_EFFECTIVE_SIGHT_STALL_COOLDOWN_S: Final[float] = max(SIGHT_STALL_COOLDOWN_S,
+  OPTIC_RETRY_INTERVAL_S)` is the sole replacement for the old bare assert; `grep` confirms
+  `_decide_sighting`'s one `stall_cooldown_s=` call site (`:2049`) is the only production reader
+  and now points at it, not the raw tunable.
+- **Mutation 1 — restored the old bare assert verbatim** (`assert OPTIC_RETRY_INTERVAL_S <
+  SIGHT_STALL_COOLDOWN_S` plus `_EFFECTIVE_SIGHT_STALL_COOLDOWN_S = SIGHT_STALL_COOLDOWN_S`), ran
+  `import belief.optic_policy` under a constructed `PETROBRAIN_TUNING` file setting only
+  `SIGHT_STALL_COOLDOWN_S = 40.0` — a single, in-bounds (`lo=30.0, hi=400.0`) key. Reproduced the
+  exact `AssertionError` at import the commit message describes. Restored,
+  `sha256sum`-verified byte-identical.
+- **Mutation 2 — swapped `max` for `min` in the real floor expression** (same 40.0 override),
+  re-ran the committed `test_an_inverting_override_imports_cleanly_and_floors_to_the_retry_interval`
+  directly (not hand-rolled): it fails, because its own in-process assertion
+  (`_EFFECTIVE_SIGHT_STALL_COOLDOWN_S == OPTIC_RETRY_INTERVAL_S`) inside the spawned subprocess now
+  reads `40.0 != 64.0` and raises, which `subprocess.run(..., check=True)` turns into the expected
+  `CalledProcessError`. Confirms the test's behavioural assertions are load-bearing against the
+  specific defect class (a correct-looking but wrong-direction combinator), not just a value
+  snapshot. Restored, `sha256sum`-verified byte-identical, `git status --porcelain` empty.
+- **The floor is correctly excluded from `tuning.*`/`defaults.toml`**, consistent with this file's
+  own "Review — F4 follow-up" precedent for `_SIGHT_WIDE_SEARCH_FAR_M`: its RHS is an expression
+  over one real tunable and one already-derived constant, so it fails the inclusion test's
+  free-parameter criterion by construction — a bare module constant is correct, not merely
+  convenient. `tools/generate_defaults.py` (no `--write`) confirms `defaults.toml` unchanged and
+  still current; the rendered `SIGHT_STALL_COOLDOWN_S` entry itself (`defaults.toml:108-111`) is
+  untouched and still clean — first sentence intact, no markup corruption, matching the prior
+  round's own verification.
+
+**Missing startup warning — acceptable, for the stated reason, which I independently confirmed
+rather than took on trust.** Checked `tuning.py`'s actual warning plumbing: `render_startup_block`
+(printed at every `logger.py` startup, not gated behind `--print-tuning`) only ever reports entries
+written into `Resolution.applied`/`.rejected`, and the only code path that writes a *cross-key*
+entry there is the named `_check_scan_decay_coupling`, hardwired to exactly the three `decay.py`
+keys (`_COUPLED_KEYS`) — there genuinely is no general-purpose "warn once" primitive sitting beside
+it that this fix could call without first building a second instance of that same
+registry-wired machinery, confirming the implementer's claim rather than assuming it. Given also
+that the orchestrator's brief explicitly asked for no new `tuning.py` check for this pair, and that
+a floor is a *widen-to-safe* outcome rather than a *silent rejection* (the asymmetry the comment and
+`implementation.md` both give as the reason less warning is owed here than `decay.py`'s own
+coupling gets) — this is a reasonable, correctly-reasoned scope line, not a gap the Implementer
+should have closed unilaterally. One real, minor cost worth naming rather than leaving implicit:
+`--print-tuning` will show an in-bounds `SIGHT_STALL_COOLDOWN_S = 40.0` with nothing on screen
+indicating the sight actually uses 64.0 s — but this is the status quo for every derived constant in
+this module (`OPTIC_RETRY_INTERVAL_S` and `_SIGHT_WIDE_SEARCH_FAR_M` are no more visible there),
+not a regression this fix introduces, so it is not a new finding.
+
+**Fix 2 — the realistic-case figures, reconciled, not merely accepted.** Ran the committed
+`test_three_progressing_contacts_all_reach_type_and_search_resumes` directly on this commit's
+source: passes, asserting exactly `look_starts == {2, 2, 2}`, `reached_type_at_sim ==
+{129.0, 162.0, 195.0}`, `busy_polls == 175`, `total_polls == 900`, and all three search legs
+visited. Because this is a deterministic, pure-Python simulation over real production code
+(`decide()` itself, via `self._decide`, not a stub or a mock — confirmed by reading `TestSightStall
+Cooldown`'s shared `_decide` helper) with no randomness anywhere in the path, a second correct
+implementation of the *same* convention cannot land on different numbers — so my own prior round's
+97/262/427 s/10.4% figures and this round's 129/162/195 s/19.4% are evidence of two different,
+non-equivalent conventions for "the poll after the look ends," not two different measurements of
+one fact. I no longer have my prior round's uncommitted script to diff against (it was never
+saved, by design — that absence is exactly the defect this required fix closes), so I cannot name
+its specific bug line-for-line; what I can and did confirm is that the current, *unambiguous*
+convention — spelled out verbatim in the new test's own docstring ("the bumped level is what the
+*next* poll's `targets` carries, never the poll that ended the look itself") — reproduces the
+implementer's figures exactly when run fresh, and that this convention is a reasonable, realistic
+reading of how a real classification pipeline would surface a completed dwell (next cycle, not the
+same one). Given a concrete, deterministic, passing test now exists and pins one convention
+unambiguously, there is no longer a second narrative to disagree with — this satisfies the prior
+review's "Fix: ... as a committed test (not a one-off narrative number)" requirement.
+`BL-B85.md`'s "Realistic case" paragraph is updated to cite the test and these exact figures, names
+both my prior figures and the reconciliation, and does not leave the stale ~175 s/71.5% number
+standing anywhere.
+
+**Checks, this subproject (`body-layer/`) only, on `135e2414` directly:**
+- `ruff format --check src tests`: pass (156 files already formatted).
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues in 68 source files.
+- `pytest tests -q`: 2360 passed, 4 xfailed, 0 failed — no rerun needed; none of the task's named
+  known-flake tests (`test_connection_reporter_*`, `test_log_live_los_coverage_summary_*`,
+  `test_mission_start_reset.py`'s connection tests) failed or were even exercised into failure this
+  run.
+- `tools/generate_defaults.py` (no `--write`): `config/defaults.toml` confirmed up to date; `git
+  status --porcelain` empty after the run.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- None new this round. The prior round's optional note (the assert's own comment overclaiming
+  parity with `decay.py`'s protection level) is now moot — the comment was rewritten along with the
+  fix itself and no longer makes that claim; confirmed by reading the current comment block in
+  full, not just the hunk.
+
+### Re-review Verdict
+APPROVE
+
+### Re-review Confidence
+Full read of this commit's diff (`BL-B85.md`, `optic_policy.py`, `test_optic_policy.py`,
+`implementation.md`). Verified by mutation, both required fixes, with fresh mutations constructed
+for this re-review (not re-running the implementer's own two claimed mutations): the restored bare
+assert (reproduces the exact import-time crash), a `max`→`min` swap in the real floor expression
+(caught by the committed test's own behavioural assertions, run unmodified), and ran the committed
+realistic-case test directly to resolve the open figure discrepancy from the prior round rather
+than taking either side's numbers on trust. Independently traced `tuning.py`'s actual warning
+plumbing (`render_startup_block`, `Resolution.applied`/`.rejected`, `_check_scan_decay_coupling`'s
+hardwired `_COUPLED_KEYS`) to confirm the "no reusable print-once helper" claim rather than
+accepting it as asserted. Ran `ruff format --check`, `ruff check`, `mypy --strict`, the full
+`pytest` suite, and `tools/generate_defaults.py` on this exact commit tip from inside `body-layer/`.
+File restored and `sha256sum`-verified byte-identical after each mutation; `git status --porcelain`
+empty throughout and at hand-off.
