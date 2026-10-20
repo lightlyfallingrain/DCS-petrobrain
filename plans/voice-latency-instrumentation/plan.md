@@ -1,3 +1,15 @@
+> **Decisions (user, 2026-10-20) — these override the body wherever they disagree.** Source:
+> `docs/acceptance/2026-10-20-sortie-feedback.md`, "F8 — plan decisions".
+>
+> 1. **Stage 6 covers every readback that speaks a position**, not only `select_target`
+>    (`mark_target`, `step`, `follow`, `report*` and any other positional readback). User:
+>    *"all of them"*.
+> 2. **Log the dispatched command token** as the cheap substitute for `OutgoingSpeech.template`.
+>    Do not thread the full template through the handlers.
+> 3. **No playback-start feedback seam now.** Measure first; revisit only if the joined
+>    timelines show the channel-modelled-clear case dominates.
+> 4. **`--latency-log` records failed STT and synthesis attempts too.**
+
 ### Goal
 
 Instrument the whole voice round trip (PTT release -> heard playback) with a shared
