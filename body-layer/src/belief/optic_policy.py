@@ -44,7 +44,7 @@ import tuning
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.position_belief import PositionEstimate
 from perception.gaze import SCAN_CYCLE_PERIOD_S
-from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.geometry import GeoPosition, body_relative_direction, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 
 #: How many sigma of a contact's own `PositionEstimate.bearing_uncertainty_
@@ -2583,13 +2583,27 @@ def look_target_for(
     current_level: str,
     position: PositionEstimate | None = None,
     watched: bool = False,
+    pitch_deg: float = 0.0,
+    bank_deg: float = 0.0,
 ) -> LookTarget:
     """Build a `LookTarget` from a contact's believed position.
 
     Lives here rather than in the caller so the azimuth/elevation
     convention is stated once: body-relative azimuth (0 dead ahead,
     positive clockwise) and elevation positive up, the same frame
-    `within_optic_fov` tests in.
+    `within_optic_fov` tests in -- via `body_relative_direction`, the same
+    conversion `perception.visibility.check_visibility` uses, rather than a
+    second derivation of it (F5, `docs/acceptance/
+    2026-10-20-sortie-feedback.md`: a look target's azimuth/elevation must
+    rotate with pitch and bank exactly as a live detection's does, or the
+    sight's field-of-regard check it is tested against means two different
+    things depending on which path produced the number it is testing).
+
+    `pitch_deg`/`bank_deg` both default to `0.0` -- a true no-op for every
+    pre-existing call site, mirroring `perception.source.OwnshipState`'s
+    own default convention. `logger._look_targets` is the one caller with
+    a real ownship to hand, and passes `ownship.pitch_deg`/`ownship.
+    bank_deg`.
 
     `position` (`plans/precise-position-belief/plan.md` Stage 5, `Contact.
     position` -- the fused `belief.position_belief.PositionEstimate`) is
@@ -2605,11 +2619,16 @@ def look_target_for(
     `LookTarget`'s own default untouched, for any caller with no
     `PositionEstimate` to hand.
     """
-    true_bearing = bearing_deg(observer, target_position)
     slant_m = range_m(observer, target_position)
-    azimuth = (true_bearing - heading_true_deg + 540.0) % 360.0 - 180.0
-    height_delta = target_position.alt_m - observer.alt_m
-    elevation = math.degrees(math.asin(max(-1.0, min(1.0, height_delta / slant_m))))
+    body_direction = body_relative_direction(
+        observer,
+        target_position,
+        heading_true_deg=heading_true_deg,
+        pitch_deg=pitch_deg,
+        bank_deg=bank_deg,
+    )
+    azimuth = body_direction.azimuth_deg
+    elevation = body_direction.elevation_deg
     kwargs: dict[str, float] = {}
     if position is not None:
         kwargs["bearing_uncertainty_deg"] = (

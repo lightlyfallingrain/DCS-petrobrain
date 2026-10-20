@@ -542,3 +542,125 @@ which one is conceptually "supposed" to fire first) is still there for any futur
 one of these events as meaning something the other doesn't. Not a cited constant-coupling in the
 tuning-bounds sense (nothing here is a `lo`/`hi` violation), so it would not be caught by the
 cross-key coupling check `tuning.py`'s docstring warns about -- flagging it here instead.
+
+### F5: the regard check is boresight-relative (pitch/bank), not altitude-only
+
+`docs/acceptance/2026-10-20-sortie-feedback.md` F5, settled *"OK"* for sequencing on 2026-10-20: the
+9K113's `regard_*` limits (`optics.py`'s `regard_azimuth_half_deg=60.0`/`regard_elevation_up_deg=
+20.0`/`regard_elevation_down_deg=-15.0`) are relative to the airframe's own boresight, not to the
+ground -- *"nose low position at high altitude would allow a near scan... it is not about distance,
+but angles relative to boresight"*; *"the limits are the mechanical rotation limits around aircraft
+axis. When aircraft rotates, so do the coordinate axis."* `_sight_in_regard_sweep`'s elevation fix
+(`bb6364b0`) rejected steps correctly against `within_field_of_regard`, but `search_pattern`'s own
+steps are heading/horizon-relative, computed from `atan2(altitude_agl_m, range_m)` alone -- level-
+flight geometry with no notion of pitch or bank -- so the regard filter was testing a ground-
+anchored number as if it were a body-relative one. Built as one commit, on the detached HEAD, per
+the dispatch brief's sequencing instruction ("gets a simple boresight-relative limit check... then
+merges once DoD passes").
+
+**Fix, kept deliberately simple per the user's own instruction** (*"let's not build anything too
+fancy yet, since the effectors will anyhow be a priority soon and then DCS will limit the 9K113 to
+its actual limits"*): no slew model, no new tunables, no `OpticState` change. One new pure function,
+`perception.geometry.heading_relative_to_body_relative`, reusing `body_relative_direction` (the same
+conversion `perception.visibility.check_visibility` already uses for live detections) rather than
+re-deriving its pitch/bank rotation a second time -- it builds a unit-range synthetic target from
+the heading-relative `(azimuth, elevation)` pair, rotates it back out to world coordinates with the
+same `heading_true_deg` that will be handed to `body_relative_direction`, so the yaw cancels exactly
+and only the pitch/bank rotation `body_relative_direction` already implements is left to apply.
+Verified algebraically (the inverse-yaw construction is the exact matrix inverse of `body_relative_
+direction`'s own step 1) and by an explicit heading-invariance test (`test_heading_relative_to_body_
+relative_cancels_heading_exactly`, non-zero pitch/bank, two different headings, identical result).
+
+`logger.py`'s three sweep generators (`_search_sweep`, `_sight_in_regard_sweep`,
+`_sight_out_of_regard_sweep`) each now convert `search_pattern`'s raw steps through a shared
+`_to_body_relative_steps(steps, ownship)` helper before returning them -- `_sight_in_regard_sweep`
+converts *before* filtering through `within_field_of_regard`, so the gate and the aim it ultimately
+commits are now the same body-relative numbers; `_search_sweep`/`_sight_out_of_regard_sweep` have no
+regard filter to fix (binoculars are not bounded), but convert anyway so the binocular aim frame
+agrees with every other optic's, per the brief: *"Binoculars have no regard, so the conversion
+matters there only for pointing the right way."*
+
+**`look_target_for` had the identical bug, for real contacts, not just search steps -- found while
+confirming the brief's "if not, fix the same way" clause, not assumed from the function's own
+docstring.** Its docstring already claimed "body-relative azimuth... the same frame `within_optic_
+fov` tests in," but the body computed `azimuth = true_bearing - heading_true_deg` and `elevation =
+asin(height_delta / slant_m)` -- heading-relative and level-flight-only, exactly `search_pattern`'s
+own defect, just hiding behind a docstring that asserted the opposite of what the code did. Since
+`_decide_sighting`'s candidate filter (`within_field_of_regard(SIGHT_WIDE_OPTIC, target.azimuth_deg,
+target.elevation_deg)`) reads this value directly, a real contact's regard eligibility was wrong by
+exactly the same pitch/bank error as a search step's, silently, since `bb6364b0`. Fixed by replacing
+the manual azimuth/elevation derivation with a `body_relative_direction` call (dropping the now-
+unused `bearing_deg` import) and adding keyword-only `pitch_deg`/`bank_deg` parameters, both
+defaulting to `0.0` -- a true no-op for every pre-existing call site (five in `tests/test_optic_
+policy.py`), mirroring `OwnshipState`'s own default convention. `logger._look_targets` is the one
+caller with a real ownship to hand, and now passes `ownship.pitch_deg`/`ownship.bank_deg`.
+Mathematically equivalent to the old formula at `pitch_deg=bank_deg=0.0` (verified: `asin(height_
+delta/slant_m) == atan2(height_delta, horizontal_range)` for a non-negative horizontal range, which
+is exactly what `body_relative_direction`'s own elevation reduces to when pitch/bank are both zero),
+so every pre-existing `look_target_for` test still passes unchanged.
+
+**Reacquire after nose-down, and the BL-B85 stall cooldown -- checked, not just asserted.** A
+contact rejected as a candidate because pitch currently puts it out of regard is never selected, so
+it is never written into `pending_attempted_at_range_m`/`attempted_at_level` -- a look that never
+started cannot have "ended," and `SIGHT_STALL_COOLDOWN_S` only ever reads those dicts
+(`is_worth_a_look`'s own `attempted_at is None` branch returns `True` unconditionally). Since every
+`sight_*_search` sequence and every `LookTarget` is recomputed fresh from the current `ownship` every
+poll (`logger.run_once`'s own per-poll wiring, unchanged by this fix), a leg or a contact that empties
+out under one attitude is re-evaluated under the next poll's attitude with no carried state at all --
+reacquisition is a consequence of the existing per-poll-recompute architecture, not new code. Pinned
+by two tests (`TestFieldOfRegardEnforcement`): a target held out of regard for ten consecutive polls
+is never marked attempted in any of the three dicts, and the same target is picked on the very next
+poll once its elevation moves back inside the envelope -- no cooldown, because nothing was ever
+recorded to cool down from.
+
+**Files Changed**
+
+- `body-layer/src/perception/geometry.py` -- new `heading_relative_to_body_relative`.
+- `body-layer/src/logger.py` -- new `_to_body_relative_steps`; `_search_sweep`/`_sight_in_regard_
+  sweep`/`_sight_out_of_regard_sweep` each convert through it; `_sight_in_regard_sweep`'s and
+  `_sight_out_of_regard_sweep`'s docstrings rewritten -- the old "~625 m AGL" figure was a
+  level-flight-only artifact of the altitude-only model this fix replaces, so it is now stated as
+  a boresight-relative claim with no altitude number attached (the number itself now lives, dated,
+  in `BL-B86.md`, alongside the note below that it was never a general threshold).
+- `body-layer/src/belief/optic_policy.py` -- `look_target_for` gains `pitch_deg`/`bank_deg` (both
+  default `0.0`); now calls `body_relative_direction` instead of deriving azimuth/elevation by hand;
+  `bearing_deg` import dropped (no longer used anywhere in this file).
+- `body-layer/ROADMAP/BL-B86.md` -- dated note: its measured altitude figures are level-flight-only;
+  the "idle search goes fully static" window moves with pitch, not with AGL alone.
+
+**Tests Added**
+
+- `test_geometry.py`: five tests on `heading_relative_to_body_relative` -- identity at zero attitude,
+  heading-invariance (non-zero pitch/bank, two headings), nose-down reducing a 1000 m AGL/2333 m
+  depression from −23.2° to −13.2°, nose-up pushing a −10° step to −20°, and a bank-30 test
+  reproducing `body_relative_direction`'s own azimuth/elevation bank-mixing numbers through the new
+  function.
+- `test_logger.py` (`TestSightInRegardSweepBoresightRelative`): the same nose-down/nose-up/bank
+  scenarios through the real production call chain (`search_pattern` + `_to_body_relative_steps` +
+  `within_field_of_regard`), a level-flight-is-a-true-no-op pin, an end-to-end `_sight_in_regard_
+  sweep` comparative test (more in-regard steps with nose down than level, same near/far edges), and
+  one `_search_sweep`/one `_sight_out_of_regard_sweep` test confirming a banked aim differs from a
+  level one.
+- `test_optic_policy.py` (`TestLookTargetGeometry`): `test_elevation_accounts_for_pitch` (reproduces
+  `test_geometry.py`'s own pitched-nose-is-dead-ahead case through `look_target_for`) and `test_
+  elevation_and_azimuth_account_for_bank` (reproduces its bank-rotates-elevation-into-azimuth case).
+- `test_optic_policy.py` (`TestFieldOfRegardEnforcement`): `test_a_target_repeatedly_out_of_regard_
+  is_never_marked_attempted` and `test_the_same_target_is_picked_immediately_once_back_in_regard` --
+  the reacquire-after-nose-down/BL-B85 interaction above.
+
+**Mutation-checked, both sites, by hand (not via a mutation-testing tool)**: temporarily hard-coded
+`pitch_deg=0.0` inside `heading_relative_to_body_relative`'s own call to `body_relative_direction`
+-- five tests went red (the two nose-up/nose-down `test_geometry.py` tests and three `test_logger.py`
+tests downstream of them), restored, confirmed by `shasum` before/after. Separately hard-coded
+`pitch_deg=0.0, bank_deg=0.0` inside `look_target_for`'s own call -- both of its new tests went red,
+restored, confirmed by `shasum` before/after. Full suite green both before and after each restore.
+
+**Checks**: `ruff format --check src tests`: pass. `ruff check src tests`: pass. `cd body-layer &&
+mypy src`: pass, no issues in 68 source files. `pytest tests -q`: 2339 passed, 4 xfailed, 0 failed,
+no rerun needed (none of the three named flaky tests failed in this run).
+
+**Notable discovery**: `look_target_for`'s own docstring already claimed "body-relative azimuth,"
+which is exactly why this was not caught by reading the docstring alone during earlier rounds --
+the comment said the output already had the property this round adds. The dispatch brief's own
+"confirm, don't assume" instruction for `LookTarget` is what caught it; a plain read of the
+docstring would have reported it as already correct.

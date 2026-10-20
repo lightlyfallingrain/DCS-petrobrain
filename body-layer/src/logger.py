@@ -194,7 +194,7 @@ import threading
 import time
 import urllib.error
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, TextIO
@@ -267,7 +267,12 @@ from perception.gaze import (
     gaze_at,
     legs_within_wedge,
 )
-from perception.geometry import GeoPosition, alignment_direction, open_world_model
+from perception.geometry import (
+    GeoPosition,
+    alignment_direction,
+    heading_relative_to_body_relative,
+    open_world_model,
+)
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import (
@@ -952,6 +957,8 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
             observer=observer,
             target_position=contact.last_position,
             heading_true_deg=ownship.heading_true_deg,
+            pitch_deg=ownship.pitch_deg,
+            bank_deg=ownship.bank_deg,
             object_type=contact.last_class_raw,
             current_level=contact.classification.level.name.lower(),
             position=contact.position,
@@ -1009,6 +1016,32 @@ _SIGHT_WIDE_SEARCH_FAR_M: float = min(
 )
 
 
+def _to_body_relative_steps(
+    steps: Sequence[tuple[float, float]], ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """Rotate `search_pattern`'s ground-anchored (heading-relative azimuth,
+    horizon-relative depression) steps into true body-relative directions,
+    using the current pitch and bank -- F5 (`docs/acceptance/
+    2026-10-20-sortie-feedback.md`): the 9K113's mechanical limits rotate
+    with the airframe, not with the ground, so a step generated from
+    altitude/range alone must be rotated into the airframe frame before it
+    is tested against `within_field_of_regard` or used as a look aim.
+    Shared by every sweep generator below (`_search_sweep`/`_sight_in_
+    regard_sweep`/`_sight_out_of_regard_sweep`) so the one conversion lives
+    in one place."""
+    body_steps: list[tuple[float, float]] = []
+    for azimuth_deg, elevation_deg in steps:
+        direction = heading_relative_to_body_relative(
+            azimuth_deg,
+            elevation_deg,
+            heading_true_deg=ownship.heading_true_deg,
+            pitch_deg=ownship.pitch_deg,
+            bank_deg=ownship.bank_deg,
+        )
+        body_steps.append((direction.azimuth_deg, direction.elevation_deg))
+    return body_steps
+
+
 def _search_sweep(
     scan_plan: ScanPlan, ownship: OwnshipState
 ) -> list[tuple[float, float]]:
@@ -1039,7 +1072,14 @@ def _search_sweep(
     unpacked from `SECTOR_WEDGE_DEG`, so a commanded `left`/`right`/`full`
     scan swept around 0 deg (dead ahead) regardless of which sector was
     actually commanded -- harmless only for `ahead`, whose own centre
-    happens to be 0."""
+    happens to be 0.
+
+    **Rotated into body-relative before being returned** (F5): `search_
+    pattern`'s own steps are heading/horizon-relative (level-flight
+    geometry), but a binocular aim is a body-relative direction like any
+    other (`perception.gaze.Gaze.center_azimuth_deg`'s own convention), so
+    pitch and bank have to be applied before this leaves the function --
+    `_to_body_relative_steps`'s own docstring has the conversion."""
     if scan_plan.commanded_sector is None:
         return []
     center_deg, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
@@ -1047,7 +1087,7 @@ def _search_sweep(
     fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
     if fov_full_width_deg <= 0.0:
         return []
-    return search_pattern(
+    steps = search_pattern(
         center_azimuth_deg=center_deg,
         sector_half_width_deg=half_width_deg,
         near_m=near_m,
@@ -1055,6 +1095,7 @@ def _search_sweep(
         altitude_agl_m=max(ownship.alt_agl_m, 0.0),
         fov_full_width_deg=fov_full_width_deg,
     )
+    return _to_body_relative_steps(steps, ownship)
 
 
 def _split_sector_by_regard(
@@ -1131,21 +1172,29 @@ def _sight_in_regard_sweep(
     default sector the sight can actually reach -- `plans/
     9k113-narrow-search/plan.md` Stage 3.
 
-    **Filtered through `within_field_of_regard` (security required fix,
-    `plans/9k113-narrow-search/security-review.md`).** `search_pattern`'s
-    azimuth is already kept inside `regard` by construction
-    (`max_half_width_deg=regard` below), but its elevation is pure
-    range/altitude geometry (`atan2(altitude_agl_m, range_m)`, unbounded
-    below) with no awareness of this optic's own `regard_elevation_down_
-    deg` -- at this feature's own shared near edge (`SIGHT_SEARCH_NEAR_M`)
-    that geometry commands past the sight's -15 deg down limit at any
-    ownship altitude above ~625 m AGL, an ordinary cruise/orbit altitude.
-    Rejecting (not clamping) the offending steps here is the same choice
-    `look_sweep` already makes for the sight's look-sweep path -- a step
-    the mount cannot physically reach is dropped, not pointed at the
-    envelope edge and attributed to ground that was never validated. A
-    leg that filters down to empty is handled by the existing leg-advance/
-    `_idle_sight_rest` fallback, which needs no change for this."""
+    **Rotated into body-relative, then filtered through `within_field_of_
+    regard`** (security required fix, `plans/9k113-narrow-search/
+    security-review.md`, sharpened by F5 `docs/acceptance/
+    2026-10-20-sortie-feedback.md`). `search_pattern`'s azimuth is already
+    kept inside `regard` by construction (`max_half_width_deg=regard`
+    below), but its elevation is pure range/altitude geometry
+    (`atan2(altitude_agl_m, range_m)`, unbounded below) with no awareness
+    of pitch, bank, or this optic's own `regard_elevation_down_deg` --
+    the mount's actual limit is relative to the airframe's boresight, not
+    to the ground (*"nose low position at high altitude would allow a
+    near scan... it is not about distance, but angles relative to
+    boresight"*), so a step generated from altitude alone has to be
+    rotated into the body frame (`_to_body_relative_steps`) before the
+    regard check means anything. Rejecting (not clamping) the offending
+    steps here is the same choice `look_sweep` already makes for the
+    sight's look-sweep path -- a step the mount cannot physically reach is
+    dropped, not pointed at the envelope edge and attributed to ground
+    that was never validated. A leg that filters down to empty is handled
+    by the existing leg-advance/`_idle_sight_rest` fallback, which needs
+    no change for this, and is recomputed fresh every poll from the
+    current attitude -- so a leg emptied by a transient nose-up attitude
+    is reachable again (`BL-B86.md`) the moment the nose comes back down,
+    with no extra state to reset."""
     regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
     center_deg, half_width_deg = _commanded_or_default_sector(scan_plan, regard)
     in_span, _ = _split_sector_by_regard(center_deg, half_width_deg, regard)
@@ -1164,7 +1213,10 @@ def _sight_in_regard_sweep(
         fov_full_width_deg=fov_full_width_deg,
         max_half_width_deg=regard,
     )
-    return [step for step in steps if within_field_of_regard(optic, step[0], step[1])]
+    body_steps = _to_body_relative_steps(steps, ownship)
+    return [
+        step for step in body_steps if within_field_of_regard(optic, step[0], step[1])
+    ]
 
 
 def _sight_out_of_regard_sweep(
@@ -1177,7 +1229,13 @@ def _sight_out_of_regard_sweep(
     plan.md` Stage 3; `full`'s two out-spans are concatenated into one
     list -- `OpticPhase.SEARCHING`'s own dispatch just steps through
     whatever sequence it is given, so two remainder pieces need no new
-    state, only a longer list."""
+    state, only a longer list.
+
+    **Rotated into body-relative before being returned** (F5), same as
+    `_sight_in_regard_sweep`'s own aim -- binoculars have no field of
+    regard to filter against, but the binocular aim frame still has to
+    agree with every other optic's, or a step generated here would point
+    at the wrong patch of ground whenever the aircraft is not level."""
     if scan_plan.commanded_sector is None:
         return []
     regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
@@ -1201,7 +1259,7 @@ def _sight_out_of_regard_sweep(
                 fov_full_width_deg=fov_full_width_deg,
             )
         )
-    return steps
+    return _to_body_relative_steps(steps, ownship)
 
 
 def _apply_active_gaze(

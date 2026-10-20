@@ -47,3 +47,18 @@
   at `(0.0, 0.0)`, or widening `free`/`ahead`'s synthesized sector so it too gets an out-of-regard
   binocular remainder the way `left`/`right`/`full` already do. Not explored with the user yet —
   do before Architect, per `AGENTS.md`'s "Explore Before Deciding," if this is picked up.
+
+  **2026-10-20 — the altitude figures above are level-flight-only, not a general threshold.**
+  `feature/9k113-narrow-search`'s F5 fix (`docs/acceptance/2026-10-20-sortie-feedback.md`) made
+  `_sight_in_regard_sweep`'s regard check pitch/bank-relative, per the user's own correction: *"It
+  is not about distance, but angles relative to boresight."* Every depression figure measured
+  above (2333 m, 3630–4000 m) was computed with pitch/bank both zero, so they are still correct —
+  but only at wings-level, nose-level flight. Nose-down raises the altitude at which `narrow_far`
+  empties out (a 10° nose-down attitude recovers roughly the geometry a ~1700 m-lower, level-flight
+  altitude would have — `tan(15°+10°) / tan(15°) ≈ 1.76×` the reachable depression-driven range at a
+  fixed AGL, worked the other way as AGL); nose-up lowers it the same way. So **BL-B86's "idle
+  search goes fully static" window moves with attitude, not with AGL alone** — a free/ahead idle
+  search at nominally-empty altitude is not stuck if the nose is down, and can go static markedly
+  below 3.6 km if the nose is up. This does not change BL-B86's own fix (still open, still the same
+  needed decision) — it only means a future fix sized against "the ~4 km band" should be sized
+  against boresight depression, not AGL.

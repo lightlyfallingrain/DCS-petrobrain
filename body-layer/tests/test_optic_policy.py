@@ -8,6 +8,7 @@ identical and the reason the policy takes `LookTarget`s rather than
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -577,6 +578,73 @@ class TestLookTargetGeometry:
         )
 
         assert target.azimuth_deg == -90.0
+
+    def test_elevation_accounts_for_pitch(self) -> None:
+        """F5 (`docs/acceptance/2026-10-20-sortie-feedback.md`): a look
+        target's own elevation must rotate with pitch exactly as a live
+        detection's does (`perception.visibility.check_visibility`'s own
+        `body_relative_direction` call), or the sight's field-of-regard
+        check means two different things depending on whether it is
+        testing a believed contact or a search-pattern step. A target
+        exactly along a 20-degree-nose-up aircraft's own boresight must
+        read as elevation 0, the same case `test_geometry.py`'s
+        `test_body_relative_direction_target_along_pitched_nose_is_dead_
+        ahead` pins at the lower level."""
+        from belief.optic_policy import look_target_for
+        from perception.geometry import GeoPosition
+
+        horizontal_range = 1_000.0
+        pitch_deg = 20.0
+        target = look_target_for(
+            "CONTACT_1",
+            observer=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+            target_position=GeoPosition(
+                x=horizontal_range,
+                z=0.0,
+                alt_m=horizontal_range * math.tan(math.radians(pitch_deg)),
+            ),
+            heading_true_deg=0.0,
+            pitch_deg=pitch_deg,
+            object_type="T-72",
+            current_level="presence",
+        )
+
+        assert target.azimuth_deg == pytest.approx(0.0)
+        assert target.elevation_deg == pytest.approx(0.0, abs=1e-6)
+
+    def test_elevation_and_azimuth_account_for_bank(self) -> None:
+        """A target dead below the aircraft reads as elevation -90 when
+        wings-level, but rolled 90 degrees right it reads as straight out
+        the right side -- `test_geometry.py`'s own bank test, reproduced
+        here through `look_target_for` to confirm it is not bypassed by a
+        second, un-rotated derivation."""
+        from belief.optic_policy import look_target_for
+        from perception.geometry import GeoPosition
+
+        observer = GeoPosition(x=0.0, z=0.0, alt_m=1_000.0)
+        target_position = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+        level = look_target_for(
+            "CONTACT_1",
+            observer=observer,
+            target_position=target_position,
+            heading_true_deg=0.0,
+            object_type="T-72",
+            current_level="presence",
+        )
+        banked_right = look_target_for(
+            "CONTACT_1",
+            observer=observer,
+            target_position=target_position,
+            heading_true_deg=0.0,
+            bank_deg=90.0,
+            object_type="T-72",
+            current_level="presence",
+        )
+
+        assert level.elevation_deg == pytest.approx(-90.0)
+        assert banked_right.azimuth_deg == pytest.approx(90.0)
+        assert banked_right.elevation_deg == pytest.approx(0.0, abs=1e-6)
 
     def test_no_position_estimate_keeps_the_fixed_default_sweep(self) -> None:
         """`plans/precise-position-belief/plan.md` Stage 5: omitting
@@ -2158,6 +2226,62 @@ class TestFieldOfRegardEnforcement:
         assert state.phase is OpticPhase.GLASSING
         assert decision.optic is BINOCULAR_OPTIC
         assert state.look_contact_id == "CONTACT_1"
+
+    def test_a_target_repeatedly_out_of_regard_is_never_marked_attempted(
+        self,
+    ) -> None:
+        """F5's own reacquire requirement: a contact rejected as a *candidate*
+        (pitch has put it out of regard this poll) is never selected, so it
+        is never written into `pending_attempted_at_range_m`/`attempted_at_
+        level` -- a look that never started cannot have "ended", and
+        `SIGHT_STALL_COOLDOWN_S` only ever reads those dicts. Run several
+        polls with the target held out of regard throughout: it must never
+        once be recorded."""
+        state = self._sighting_state()
+        target = _target(elevation_deg=-16.0)  # just past the -15 deg down limit
+        for poll_index in range(10):
+            state, decision = decide(
+                state,
+                now_sim=float(poll_index),
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[target],
+                steady=True,
+            )
+            assert state.look_contact_id is None
+            assert target.contact_id not in state.pending_attempted_at_range_m
+            assert target.contact_id not in state.attempted_at_range_m
+            assert target.contact_id not in state.attempted_at_level
+        assert decision.optic is SIGHT_WIDE_OPTIC
+
+    def test_the_same_target_is_picked_immediately_once_back_in_regard(
+        self,
+    ) -> None:
+        """The other half: once the same contact is back in regard (the
+        nose came down), it is picked on the very next poll -- nothing
+        carried over from the out-of-regard polls holds it out, because
+        nothing was ever recorded for it (the test above)."""
+        state = self._sighting_state()
+        out_of_regard = _target(elevation_deg=-16.0)
+        for poll_index in range(3):
+            state, _ = decide(
+                state,
+                now_sim=float(poll_index),
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[out_of_regard],
+                steady=True,
+            )
+        assert state.look_contact_id is None
+
+        back_in_regard = _target(elevation_deg=-10.0)
+        state, decision = decide(
+            state,
+            now_sim=3.0,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[back_in_regard],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_WIDE_OPTIC
 
 
 class TestIdleAimInvariant:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import pathlib
 import sqlite3
 import sys
@@ -64,6 +65,7 @@ from logger import (
     _sight_out_of_regard_sweep,
     _speech_log_sink,
     _split_sector_by_regard,
+    _to_body_relative_steps,
     _warn_live_los_coverage_gap_once,
     format_observation_line,
     main,
@@ -1108,9 +1110,18 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
 # (plans/9k113-narrow-search/plan.md) ---------------------------------------
 
 
-def _ownship_for_search(*, alt_agl_m: float = 120.0) -> OwnshipState:
+def _ownship_for_search(
+    *, alt_agl_m: float = 120.0, pitch_deg: float = 0.0, bank_deg: float = 0.0
+) -> OwnshipState:
     return OwnshipState(
-        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
+        t_sim=0.0,
+        x=0.0,
+        z=0.0,
+        alt_m=500.0,
+        heading_true_deg=0.0,
+        pitch_deg=pitch_deg,
+        bank_deg=bank_deg,
+        alt_agl_m=alt_agl_m,
     )
 
 
@@ -1371,6 +1382,181 @@ class TestSightInRegardSweepElevation:
             # `TestSearchCycle` in test_optic_policy.py already uses, for
             # the same float-drift reason its own docstring gives.
             now_sim += 1.0
+
+
+class TestSightInRegardSweepBoresightRelative:
+    """F5 (`docs/acceptance/2026-10-20-sortie-feedback.md`): the 9K113's
+    `regard_*` limits are relative to the airframe's own boresight, not to
+    the ground -- *"nose low position at high altitude would allow a near
+    scan... it is not about distance, but angles relative to boresight."*
+    `TestSightInRegardSweepElevation` above pins the *level-flight* case
+    (an altitude threshold); these pin that the same geometry is actually
+    pitch/bank-dependent, not altitude-dependent, which is the defect F5
+    reports against `bb6364b0`'s elevation fix."""
+
+    def test_nose_down_brings_the_1000m_near_band_back_into_regard(self) -> None:
+        """The exact case `TestSightInRegardSweepElevation` pins as
+        out-of-regard at level flight (-23.2 deg, 8.2 deg past the -15 deg
+        down limit) -- 10 deg of nose-down pitch is enough to bring it back
+        inside, the user's own worked example."""
+        from belief.optic_policy import SIGHT_SEARCH_NEAR_M, search_pattern
+        from perception.optics import within_field_of_regard
+
+        fov_full_width_deg = (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+        # `sector_half_width_deg=1.0` is well under half the optic's own
+        # field of view, so `search_pattern`'s own step-centring collapses
+        # to a single azimuth-0 step (`_step_centres_deg`'s `steps_across
+        # == 1` branch) -- and `near_m`/`far_m` one metre apart collapses
+        # its elevation bands to one too, so this is a single, exactly-
+        # known `(0.0, depression)` step, not an average over several.
+        raw_steps = search_pattern(
+            center_azimuth_deg=0.0,
+            sector_half_width_deg=1.0,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=SIGHT_SEARCH_NEAR_M + 1.0,
+            altitude_agl_m=1000.0,
+            fov_full_width_deg=fov_full_width_deg,
+        )
+        assert raw_steps == [(0.0, pytest.approx(-23.2, abs=0.1))]
+
+        level = _to_body_relative_steps(
+            raw_steps, _ownship_for_search(alt_agl_m=1000.0)
+        )
+        nose_down = _to_body_relative_steps(
+            raw_steps, _ownship_for_search(alt_agl_m=1000.0, pitch_deg=-10.0)
+        )
+
+        assert not within_field_of_regard(SIGHT_WIDE_OPTIC, *level[0])
+        assert within_field_of_regard(SIGHT_WIDE_OPTIC, *nose_down[0])
+        assert nose_down[0][1] == pytest.approx(-13.2, abs=0.1)
+
+    def test_nose_up_pushes_a_near_step_out_of_regard_at_low_altitude(self) -> None:
+        """The other half of the same F5 example -- *"Nose high at low alt
+        would limit near scan"*: a step well inside the down limit at level
+        flight (-10 deg, comfortably clear of the -15 deg boundary) is
+        pushed past it by 10 deg of nose-up pitch alone, altitude
+        unchanged. Synthetic `near_m` (not `SIGHT_SEARCH_NEAR_M`) -- chosen
+        only to land the level-flight depression at a clean -10 deg so the
+        boundary crossing is unambiguous; the production near edge is
+        shallow enough at 120 m AGL that no plausible pitch pushes it out,
+        which is exactly why this is a synthetic case, not a repeat of the
+        production one."""
+        from belief.optic_policy import search_pattern
+        from perception.optics import within_field_of_regard
+
+        alt_agl_m = 120.0
+        near_m = alt_agl_m / math.tan(math.radians(10.0))  # -10 deg depression, level
+        fov_full_width_deg = (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+        raw_steps = search_pattern(
+            center_azimuth_deg=0.0,
+            sector_half_width_deg=1.0,
+            near_m=near_m,
+            far_m=near_m + 1.0,
+            altitude_agl_m=alt_agl_m,
+            fov_full_width_deg=fov_full_width_deg,
+        )
+        assert raw_steps == [(0.0, pytest.approx(-10.0, abs=0.05))]
+
+        level = _to_body_relative_steps(
+            raw_steps, _ownship_for_search(alt_agl_m=alt_agl_m)
+        )
+        nose_up = _to_body_relative_steps(
+            raw_steps, _ownship_for_search(alt_agl_m=alt_agl_m, pitch_deg=10.0)
+        )
+
+        assert within_field_of_regard(SIGHT_WIDE_OPTIC, *level[0])
+        assert not within_field_of_regard(SIGHT_WIDE_OPTIC, *nose_up[0])
+        assert nose_up[0][1] == pytest.approx(-20.0, abs=0.05)
+
+    def test_bank_rotates_an_out_of_regard_step_back_into_regard(self) -> None:
+        """A step 2 deg past the down limit at wings-level (-17 deg, azimuth
+        0) is carried by 30 deg of bank into a direction that is both
+        shallower and off to one side -- (az~8.7, el~-14.7) -- demonstrating
+        that the limit check moves with the airframe's roll axis, not just
+        its pitch axis."""
+        from perception.optics import within_field_of_regard
+
+        raw_steps = [(0.0, -17.0)]
+        level = _to_body_relative_steps(raw_steps, _ownship_for_search())
+        banked = _to_body_relative_steps(raw_steps, _ownship_for_search(bank_deg=30.0))
+
+        assert not within_field_of_regard(SIGHT_WIDE_OPTIC, *level[0])
+        assert within_field_of_regard(SIGHT_WIDE_OPTIC, *banked[0])
+        assert banked[0][0] == pytest.approx(8.69, abs=0.05)
+        assert banked[0][1] == pytest.approx(-14.67, abs=0.05)
+
+    def test_level_flight_is_unchanged_by_the_conversion(self) -> None:
+        """Pitch/bank both `0.0` (`_ownship_for_search`'s own default) must
+        reproduce `search_pattern`'s raw output exactly -- the conversion
+        introduced by this fix is a true no-op at wings-level, unbanked
+        flight, which is what every pre-existing test in this module (all
+        written before F5) already assumed."""
+        from belief.optic_policy import SIGHT_SEARCH_NEAR_M, search_pattern
+
+        fov_full_width_deg = (SIGHT_WIDE_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+        raw_steps = search_pattern(
+            center_azimuth_deg=0.0,
+            sector_half_width_deg=60.0,
+            near_m=SIGHT_SEARCH_NEAR_M,
+            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+            altitude_agl_m=120.0,
+            fov_full_width_deg=fov_full_width_deg,
+            max_half_width_deg=60.0,
+        )
+        converted = _to_body_relative_steps(
+            raw_steps, _ownship_for_search(alt_agl_m=120.0)
+        )
+        for (raw_az, raw_el), (conv_az, conv_el) in zip(
+            raw_steps, converted, strict=True
+        ):
+            assert conv_az == pytest.approx(raw_az, abs=1e-6)
+            assert conv_el == pytest.approx(raw_el, abs=1e-6)
+
+    def test_sight_in_regard_sweep_itself_recovers_the_near_band_when_nose_down(
+        self,
+    ) -> None:
+        """End-to-end through the real call site, not just the shared
+        conversion helper: `_sight_in_regard_sweep`'s own near-band leg
+        (`SIGHT_SEARCH_NEAR_M`..`_SIGHT_WIDE_SEARCH_FAR_M`, the same `wide`
+        leg `run_once` builds) gains at least one more in-regard step with
+        10 deg of nose-down pitch at 1000 m AGL than it has at level
+        flight -- the comparative form of the same claim the pure-geometry
+        test above pins exactly."""
+        level = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            _ownship_for_search(alt_agl_m=1000.0),
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=2_333.0,
+            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+        )
+        nose_down = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            _ownship_for_search(alt_agl_m=1000.0, pitch_deg=-10.0),
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=2_333.0,
+            far_m=_SIGHT_WIDE_SEARCH_FAR_M,
+        )
+        assert len(nose_down) > len(level)
+
+    def test_search_sweep_binocular_aim_is_also_rotated(self) -> None:
+        """`_search_sweep` (the binocular search band) has no field of
+        regard to filter against, but its aim still has to agree with every
+        other optic's body-relative convention -- F5's own "binoculars have
+        no regard, so the conversion matters there only for pointing the
+        right way." A banked aircraft's binocular sweep must differ from
+        its level-flight one."""
+        plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+        level = _search_sweep(plan, _ownship_for_search())
+        banked = _search_sweep(plan, _ownship_for_search(bank_deg=30.0))
+        assert level != banked
+
+    def test_sight_out_of_regard_sweep_aim_is_also_rotated(self) -> None:
+        """Same claim as `_search_sweep` above, for the commanded-sector
+        remainder a narrow sight can't reach (`_sight_out_of_regard_sweep`)."""
+        plan = ScanPlan(commanded_sector="full", command_t_sim=0.0)
+        level = _sight_out_of_regard_sweep(plan, _ownship_for_search())
+        banked = _sight_out_of_regard_sweep(plan, _ownship_for_search(bank_deg=30.0))
+        assert level != banked
 
 
 class TestSightWideSearchFarM:
