@@ -288,6 +288,45 @@ def test_poll_replies_never_blocks_or_raises_when_the_server_is_unreachable() ->
     assert elapsed < 0.2
 
 
+def test_unreachable_brain_logs_one_line_without_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Connection refused is an expected state (brain-layer not started
+    yet), so the retry warning carries no traceback -- one spewed every
+    `_POLL_RETRY_BACKOFF_S` buried everything else in the terminal."""
+    # Bound but never listening: connect is refused at once, unlike a bare
+    # port number, which some sandboxes time out on instead.
+    with (
+        socket.socket() as closed_port,
+        caplog.at_level("WARNING", logger="belief.brain_client"),
+    ):
+        closed_port.bind(("127.0.0.1", 0))
+        port = closed_port.getsockname()[1]
+        BrainLayerClient(base_url=f"http://127.0.0.1:{port}").poll_replies()
+        deadline = time.monotonic() + 2.0
+        while not caplog.records and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert caplog.records
+    record = caplog.records[0]
+    assert record.getMessage() == "background brain reply poll failed (retrying)"
+    assert not record.exc_info
+
+
+def test_invalid_reply_still_logs_a_traceback(
+    fake_server: _FakeBrainServer, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Not a connection loss -- a defect on one side or the other -- so
+    the traceback stays."""
+    fake_server.replies = {"not": "a list"}  # type: ignore[assignment]
+    with caplog.at_level("WARNING", logger="belief.brain_client"):
+        BrainLayerClient(base_url=fake_server.base_url).poll_replies()
+        deadline = time.monotonic() + 2.0
+        while not caplog.records and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert caplog.records
+    assert caplog.records[0].exc_info is not None
+
+
 def test_poll_replies_tick_rate_unaffected_by_a_wedged_server() -> None:
     """The exact failure mode the performance review measured: a
     TCP-accepted server that never answers `/replies/poll` used to cost

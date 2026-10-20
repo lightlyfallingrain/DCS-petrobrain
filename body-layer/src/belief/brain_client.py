@@ -292,13 +292,23 @@ class BrainLayerClient:
         `_poll_buffer`. A failed round (unreachable or wedged) is logged
         and retried after `_POLL_RETRY_BACKOFF_S` -- this thread is the
         only place `BrainLayerError` is ever raised or caught in this
-        client."""
+        client.
+
+        **An unreachable brain logs the one line, no traceback** -- the
+        same split as `logger._is_connection_loss`: a `URLError`/`OSError`
+        underneath means brain-layer is not answering (not started yet,
+        or on another box that is down), and a stack trace per retry
+        says nothing the line does not. Anything else (invalid JSON, a
+        non-list reply) is a defect and keeps its traceback."""
         while True:
             try:
                 replies = self._poll_once()
-            except BrainLayerError:
+            except BrainLayerError as exc:
                 logger.warning(
-                    "background brain reply poll failed (retrying)", exc_info=True
+                    "background brain reply poll failed (retrying)",
+                    exc_info=not isinstance(
+                        exc.__cause__, (urllib.error.URLError, OSError)
+                    ),
                 )
                 time.sleep(_POLL_RETRY_BACKOFF_S)
                 continue
