@@ -46,6 +46,7 @@ and link form it follows. The index carries links and titles only; status lives 
   - [[AA-4.7]] — Press-to-readback latency
   - [[AA-4.8]] — Stage 6 — live sortie acceptance
 - [[AA-5]] — `silence` command phrase wiring
+- [[AA-6]] — OS-independent audio adapter (Piper TTS on Mac and Windows) — **in progress**
 
 ## Live acceptance debt
 

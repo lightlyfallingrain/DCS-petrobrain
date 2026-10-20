@@ -4,9 +4,12 @@ Subproject instructions for the Audio Adapter. Augments root `CLAUDE.md` — rea
 overall Petrobrain architecture; this file adds stack/testing/structure specifics that apply only
 within `audio-adapter/`.
 
-See `plans/tts-voice-output/plan.md` for the full design rationale (Decisions 1-8) and
-`research/2026-09-17-tts-audio-transport-recon.md` for the DCS-SR-ExternalAudio/`winsound`/`say`
-recon this plan was built against.
+See `plans/tts-voice-output/plan.md` for the outbound-TTS design rationale this subproject was
+originally built against (Decisions 1-8) and `research/2026-09-17-tts-audio-transport-recon.md`
+for the DCS-SR-ExternalAudio/`winsound`/`say` recon it was built against. **`say` is gone**: see
+`plans/audio-adapter-os-independent/plan.md` (`AA-6`) for why/how Piper replaced it on both OSes,
+and `research/2026-10-19-piper-cross-platform-recon.md` (incl. its two 2026-10-20 addenda) for the
+Piper-specific recon that plan was built against.
 
 **Renamed from `srs-adapter` on 2026-09-20.** DCS-SRS was dropped as a planned dependency for
 outbound audio — Slice 1 already posts synthesized WAV to the aircraft-layer collector, which
@@ -88,16 +91,24 @@ run on a machine with no model on it.
   were available while writing Stage 1 — both are written from each tool's public documented
   surface; `tools/stt_bench.py` run against real binaries is what validates or corrects them. See
   `stt_engine.py`'s module docstring before debugging a real run that behaves unexpectedly.
-- **The TTS engine is an external binary, never a package dependency** (plan Decision 2):
-  `tts_engine.MacSayEngine` shells out to macOS's `say` CLI (`say -v <voice> -o <tmp>.wav
-  --data-format=LEI16@22050 <text>`), the same "external binary, not a package" rule
-  `--target local`'s `afplay` call follows. `TTSEngine` is a small `Protocol` (`synthesize(text)
-  -> bytes`) so a future `WindowsSapiEngine` can drop in beside it with no HTTP-layer change —
-  Windows SAPI latency is unmeasured as of this writing, so the Mac-`say` default is not assumed
-  permanent.
-- **`say`'s unknown-voice behavior**: silently falls back to the system default voice rather than
-  erroring (confirmed live, not assumed) — do not rely on an invalid `--voice` value being caught
-  as a synthesis failure.
+- **The TTS engine is Piper on both OSes, talked to over HTTP** (`plans/
+  audio-adapter-os-independent/plan.md` Decision 1): `tts_engine.PiperEngine` is a pure stdlib
+  `urllib`/`json` HTTP client for Piper's own long-lived `piper.http_server` process, started
+  independently by `run-scripts/run-piper-mac.sh`/`run-piper-windows.sh` — this subproject never
+  spawns, supervises, or health-checks it. `TTSEngine` is a small `Protocol` (`synthesize(text) ->
+  bytes`), unchanged by the swap. **No standalone Piper binary works on the Mac** (the archived
+  macOS arm64 release is an x86_64 binary, `research/2026-10-19-piper-cross-platform-recon.md`'s
+  2026-10-20 addendum) — Piper is `piper-tts` installed in a venv of its own, pinned to an
+  interpreter `onnxruntime` ships wheels for (measured: `python3.12` on the Mac). This relaxes the
+  "external binary, not a package" rule from "binary" to "external interpreter + package," same
+  posture, different packaging — `audio-adapter`'s own code stays stdlib-only either way.
+  `MacSayEngine` (macOS `say`) is removed entirely, not kept behind a flag — Piper runs on both
+  OSes with the same voice and the same behaviour.
+- **Piper outage announcement** (Decision 3's amendment): `PiperEngine` tracks a `healthy`/`down`
+  state and logs one `WARNING` line on the first synthesis failure after a success (or ever), DEBUG
+  for subsequent failures in the same outage, and one `WARNING` recovery line on the first success
+  after an outage — otherwise a mid-sortie Piper death leaves Petrovich silent for the rest of the
+  sortie with nothing saying why. See `tts_engine.py`'s own docstring for the full mechanism.
 - Formatter/linter: `ruff format` / `ruff check`.
 - Test runner: `pytest`.
 - **Failure posture mirrors `/text/push`'s swallow-and-continue shape, not
@@ -125,16 +136,27 @@ which is the shape to match.
 
 Run a single test: `pytest audio-adapter/tests/test_file.py::test_name -q`.
 
-**Running the server** (`src/__main__.py`'s `main()`): `src` isn't installed as a package, same
-non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector and `body-layer`'s logger.
-From `cd audio-adapter`:
+**Piper must be started first, separately, on every target** (`plans/
+audio-adapter-os-independent/plan.md` Decision 1) — `run-scripts/run-piper-mac.sh` /
+`run-piper-windows.sh` start `piper.http_server` from Piper's own venv, bound to
+`127.0.0.1:7800`. This process is never spawned or supervised by `audio_adapter` itself; without
+it running, every `/speak` call fails (`503`) regardless of `--target`, including `--target
+local` — Piper's HTTP server is a dependency of synthesis itself, not of the aircraft-layer
+delivery path.
+
+**Running the server** (`src/audio_adapter/__main__.py`'s `main()`): `src` isn't installed as a
+package, same non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector and
+`body-layer`'s logger. From `cd audio-adapter`, with Piper already running:
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m audio_adapter
 ```
 
-(Or `source .venv/bin/activate` first, then `python -m audio_adapter`.) Hear a spoken line with no
-other subproject running (`--target local` is the default):
+(Or `source .venv/bin/activate` first, then `python -m audio_adapter`.) `--piper-url` (default
+`http://127.0.0.1:7800`) and `--piper-voice` (default `en_GB-northern_english_male-medium`) rarely
+need overriding — pass them only if Piper is bound elsewhere or you want a different voice model
+already present in its `--data-dir`. Hear a spoken line with no other subproject running
+(`--target local` is the default):
 
 ```sh
 curl -X POST http://127.0.0.1:7795/speak -d '{"text": "Watching Charlie one seven.", "urgent": false}'
@@ -183,10 +205,20 @@ consume.
 
 ## Testing
 
+- `tests/test_tts_engine.py` (`plans/audio-adapter-os-independent/plan.md` Decision 6) —
+  `PiperEngine` against a real loopback `http.server.HTTPServer` double, mirroring
+  `test_aircraft_client.py`'s "real socket, not a double" posture (POSTs `{"text", "voice"}`,
+  non-200/connection-refused/empty-body all raise `TTSSynthesisError`), plus the outage-
+  announcement state machine (first failure logs `WARNING`, subsequent failures `DEBUG`, first
+  recovery logs `WARNING`). No live Piper needed for this class, cross-platform by construction.
+  **Plus one skip-gated live test**, `AUDIO_ADAPTER_PIPER_URL`-gated, mirroring
+  `test_stt_engine.py`'s env-var convention below — exercises a real running `piper.http_server`
+  end to end for a developer who has one up.
 - `tests/test_stt_engine.py` — `WhisperCliEngine` against the **real** `whisper-cli` binary and a
   committed short WAV fixture (`tests/fixtures/sample.wav`), following `test_tts_engine.py`'s
-  real-binary posture — but unlike `say`, whisper.cpp is not guaranteed present on every dev
-  machine, so that test class is `pytest.mark.skipif`-gated on `AUDIO_ADAPTER_WHISPER_BINARY`/
+  former real-binary posture (`test_tts_engine.py` itself moved to a loopback double once `say`
+  was replaced by Piper's HTTP server, see above) — whisper.cpp is not guaranteed present on every
+  dev machine, so that test class is `pytest.mark.skipif`-gated on `AUDIO_ADAPTER_WHISPER_BINARY`/
   `AUDIO_ADAPTER_WHISPER_MODEL` env vars and skips cleanly (not a failure) when unset/absent — it is
   skipped in this repo's own dev environment as of authorship. A removed Windows engine's
   platform-gated behaviour (unavailable off Windows) is tested directly; its real `powershell.exe`
@@ -198,10 +230,6 @@ consume.
   families, verb-anchor rejection, the separation check on a measured genuine tie, legal/illegal
   bearing outcomes, and the derived `VERB_ANCHOR_WORDS`' coverage of alternate spellings
   (`"never mind"`, `"hey petrovich"`) that a hand-copied verb list would have missed.
-- `tests/test_tts_engine.py` — exercises `MacSayEngine` against the **real** `say` binary, not a
-  mock (mirroring `aircraft-layer/tests/test_text_sender.py`'s "real socket, not a double"
-  posture) — this project's development machine is a Mac (root `CLAUDE.md` compute-topology
-  note), so `say` is always present where this test class runs.
 - `tests/test_server.py` — `POST /speak` against a real `TTSAdapterServer` with recording
   `TTSEngine`/`AudioSink` doubles, direct structural copy of
   `aircraft-layer/tests/test_text_push_api.py`'s pattern (valid speak, urgent-flag threading,
@@ -238,18 +266,28 @@ consume.
   nothing", on Windows, in flight**; and the transcribe client against a real loopback server, the
   same posture `test_aircraft_client.py` uses. `SoxRecorder` against a real microphone is not
   automated — there is no device in CI and nothing to assert about what it heard.
-- `tests/test_local_playback.py` (Stage 3 follow-up) — `_InFlightTracker` directly (no threads, no
+- `tests/test_local_playback.py` (Stage 3 follow-up; extended `plans/
+  audio-adapter-os-independent/plan.md` Decision 2/6) — `_InFlightTracker` directly (no threads, no
   subprocess: `start`/`interrupt`/`finish` called by hand to reproduce the exact interleaving that
   broke the first version of this fix — a second `interrupt()` against a second in-flight process
   landing before the first process's own `finish()` runs) plus `LocalPlaybackSink` against a fake
   `_PlaybackProcess` double (success, genuine non-zero exit → `AudioDeliveryError`, missing binary
   → `AudioDeliveryError`, an interrupted `deliver()` completing cleanly instead of raising, and two
-  concurrent `deliver()` calls each surviving their own interrupt).
+  concurrent `deliver()` calls each surviving their own interrupt). `_WinsoundLocalSink` (the
+  Windows sink) is tested the same way, against a fake `_WinsoundLike` double injected via its own
+  `winsound_api` constructor param — no real `winsound` call, no real Windows machine, mirroring
+  `ptt_source.py`'s fake-`winmm` precedent: `play_async`/`purge` recorded, `interrupt()` releasing
+  one or two in-flight waits without raising, a `play_async` failure raising `AudioDeliveryError`,
+  and the real off-Windows `_RealWinsound` stand-in (raises `RuntimeError`) exercised directly.
+  `make_local_sink`'s platform dispatch is tested by monkeypatching `sys.platform`.
 
 ## Structure
 
-- `src/tts_engine.py` — `TTSEngine` protocol + `MacSayEngine`, the one synthesis implementation
-  this slice ships.
+- `src/tts_engine.py` — `TTSEngine` protocol + `PiperEngine` (`plans/
+  audio-adapter-os-independent/plan.md`), the one synthesis implementation this subproject ships —
+  a pure stdlib HTTP client for Piper's own independently-started `piper.http_server`, plus the
+  outage-announcement `healthy`/`down` state machine (Decision 3's amendment). `MacSayEngine`
+  (macOS `say`) was removed entirely when this landed.
 - `src/server.py` — `TTSAdapterServer`, the `POST /speak` HTTP server, plus (Slice 3 Stage 3)
   `POST /transcribe`/`GET /transcripts/poll` and (Stage 3 follow-up) `POST /stop`. Target-agnostic
   for outbound: always synthesizes via a `TTSEngine`, then calls one `AudioSink.deliver` — never
@@ -282,18 +320,22 @@ consume.
   already has — not an import of that module, since `audio-adapter` must stand alone per root
   `CLAUDE.md`'s module-independence rule.
 - `src/audio_adapter/__main__.py` — CLI entrypoint (`python -m audio_adapter`;
-  `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--voice`/`--debug`,
-  plus (Slice 3 Stage 3) `--whisper-binary`/`--whisper-model`). Lives in its own `audio_adapter/`
-  package (unlike the flat top-level modules below) purely so `python -m audio_adapter` works —
-  `tts_engine.py`/`server.py`/`aircraft_client.py`/`local_playback.py` stay flat top-level modules
-  on `src`'s `pythonpath`, imported directly by both this entrypoint and the test suite.
-  `--whisper-model` (no default — omitted means no recogniser configured, a true no-op) wires a
-  `WhisperCliEngine` using Stage 1's settled config, `vocabulary.to_prompt()` biasing and never
-  `--grammar`.
-- `src/local_playback.py` (Stage 3 follow-up, extracted from `__main__.py`, review 2026-09-20) —
-  `LocalPlaybackSink`, the `--target local` `AudioSink` implementation (`afplay` on a temp WAV
-  file, run via `Popen` rather than the blocking `subprocess.run` this class started with —
-  `interrupt()` needs a live reference to the in-flight process to `kill()` it), plus
+  `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--piper-url`/
+  `--piper-voice`/`--debug`, plus (Slice 3 Stage 3) `--whisper-binary`/`--whisper-model`).
+  `--piper-voice` replaces the old macOS-only `--voice` (`plans/audio-adapter-os-independent/
+  plan.md` Decision 4) — Piper's `"voice"` is a model filename sent on every `/synthesize`
+  request, not a system voice list, so it has no equivalent meaning. Lives in its own
+  `audio_adapter/` package (unlike the flat top-level modules below) purely so
+  `python -m audio_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py`/
+  `local_playback.py` stay flat top-level modules on `src`'s `pythonpath`, imported directly by
+  both this entrypoint and the test suite. `--whisper-model` (no default — omitted means no
+  recogniser configured, a true no-op) wires a `WhisperCliEngine` using Stage 1's settled config,
+  `vocabulary.to_prompt()` biasing and never `--grammar`.
+- `src/local_playback.py` (Stage 3 follow-up, extracted from `__main__.py`, review 2026-09-20;
+  gained the Windows sink `plans/audio-adapter-os-independent/plan.md` Decision 2/6) —
+  `LocalPlaybackSink`, the macOS/Linux `--target local` `AudioSink` implementation (`afplay` on a
+  temp WAV file, run via `Popen` rather than the blocking `subprocess.run` this class started with
+  — `interrupt()` needs a live reference to the in-flight process to `kill()` it), plus
   `_InFlightTracker`: the interrupted-vs-failed bookkeeping `deliver()` needs, since killing
   `afplay` leaves a non-zero return code indistinguishable from a genuine crash. Tracks every
   interrupted process **by identity** (`id(process)`, in a `set`) rather than in a single slot —
@@ -302,7 +344,18 @@ consume.
   entry before its own `deliver()` had read it, making a genuine kill misread as a real failure and
   500 the in-flight `/speak` call). `LocalPlaybackSink.__init__` takes an injectable `spawn`
   callable (default: real `Popen`) specifically so tests can drive this logic with a fake
-  `_PlaybackProcess`, no real `afplay` involved.
+  `_PlaybackProcess`, no real `afplay` involved. **`_WinsoundLocalSink`** is the Windows
+  counterpart, a hand-synced copy of `aircraft-layer`'s `_WinsoundPlayer` pattern (module
+  independence forbids importing it) — no `_InFlightTracker` equivalent needed, since
+  `winsound.PlaySound` has no subprocess exit code to disambiguate a deliberate stop from a real
+  failure, just an `Event.wait()` that either times out or is released early by `interrupt()`.
+  Injectable `_WinsoundLike` (`play_async`/`purge`), real on Windows, `RuntimeError`-raising
+  elsewhere — same static `sys.platform == "win32"` guard `audio_sender.py`'s `_WinsoundPlayer`
+  uses, for the same `mypy --strict` reason. **Known, accepted limitation**: `winsound`'s single
+  global sound slot means a second overlapping `deliver()` silently cuts off the first on Windows,
+  unlike `afplay`'s independent processes — accepted because `--target local` is the dev-only
+  path, never the live-cockpit path. `make_local_sink()` is the platform-dispatching factory
+  `__main__.py` calls instead of hardcoding either sink.
 - `src/ptt_source.py` (Slice 3 Stage 4) — `PTTSource` protocol (`is_down() -> bool`) plus the
   `winmm.dll` binding (`JOYCAPSW`/`JOYINFOEX`, `enumerate_devices`, `read_button_mask`) and two
   implementations: `JoystickPTT` and `KeyTogglePTT`. `tools/probe_joystick.py` imports this same
