@@ -350,3 +350,20 @@ User, verbatim:
 >      attack run.
 
 Not yet explored.
+
+### F8 — explored (user, 2026-10-20)
+
+Asked: (1) were the exact words "Attack run, …" or "Attack run off"? (2) should a late readback
+give current or original position? Also offered a speech log with queued/spoken timestamps.
+
+> 1 - nope.
+> 2 - current inforamtion, not old. Though the real problem here is the many second delay
+> Yes and timestamps. Could also add latency measurements and logs
+
+1. The exact "attack run" wording isn't remembered, so that part is unresolved until the
+   instrumentation shows what was spoken.
+2. A readback reflects **current** information at the moment it is spoken, not when the command
+   was handled. But the real problem is the multi-second delay.
+3. Build: per-utterance timestamps (queued, spoken) plus end-to-end latency measurement and logs
+   across the voice chain (PTT release → STT → body-layer → speech queue → TTS → playback), so the
+   delay can be located.
