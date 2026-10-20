@@ -288,3 +288,23 @@ Vulcan with mission ID 434 (`Vulcan-2`, matching the collector's `since_sim`) st
 **Mi-24P mission ID 447, the wingman**. The player is mission ID 344, pilot name "sg". So
 `targets_ownship: false` was correct, and the Hook is not at fault. Between 322 and 333 s a
 different Vulcan (433) was shooting at the player, and a Leopard-2A5 (368) at 344 s.
+
+## F4/F5 — second amendment round (user, 2026-10-20)
+
+Against the amended plan (wide 2.3–5.6 km, narrow 5.6–13.6 km, binoculars beyond ±60°), and the
+finding that today's binocular search for left/right/full sweeps around dead ahead:
+
+> * fix the binocular search sector.
+> * 9K113: there are many situations where scan beyond 5.6 km is much less useful than 2.3-5.6.
+>   Various reasons why LOS can be blocked, weather, etc. Should use narrow also indide 5.6 km
+>   _as needed_
+> * wait for BL-B66
+
+1. Fix the existing binocular search's sector centre too (not only the new sight call sites).
+2. Narrow is not confined to beyond 5.6 km — it is used inside 5.6 km "as needed". What "as
+   needed" keys on is being explored.
+3. Attack-run guidance's sight-wide-over-binoculars preference waits for `BL-B66` (slew time), so
+   the preference and its quick-look exception land together.
+
+Default search width with nothing commanded — full ±60° regard — was recommended and not objected
+to; proceeding with it.
