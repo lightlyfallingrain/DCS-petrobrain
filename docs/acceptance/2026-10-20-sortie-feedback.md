@@ -492,3 +492,17 @@ Read:
 `feature/9k113-narrow-search` gets a simple boresight-relative limit check (pitch and bank, reusing
 the body-relative conversion; a look cut off by pitching up resumes when the nose comes down), then
 merges once DoD passes. The scanning procedure is `BL-B89`, the next item, with a plan and a mock.
+
+### BL-B89 — how the pilot says where to point (user, 2026-10-20)
+
+Asked how the pilot tells Petrovich where to point the sight in the "when I know where to point it"
+mode:
+
+> "When I know where to point it" -> with current imlementation, it'll have to be a clock hand and
+> maybe distance.
+> Could also be bearing and optional distance.
+> Landmarks, waypoints, player set marks - yes, absolutely, once we get them in reliably. Not quite
+> there yet.
+
+For now: an o'clock or a compass bearing, with an optional distance. Landmarks, waypoints and
+player-set marks come later, once those are reliable.

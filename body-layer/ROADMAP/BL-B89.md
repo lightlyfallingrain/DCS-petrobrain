@@ -21,5 +21,6 @@
 
   Mostly a re-sequencing of pieces that already exist: S-sweeps, least-capable-optic looks
   (`sight_look_optic`), the stall cooldown (`[[BL-B85]]`), range-crossing re-look rules, and the
-  glance-away. Open question for the explore: how the pilot tells Petrovich where to point in the
-  "known place" mode.
+  glance-away. **Pointing (user, 2026-10-20):** o'clock or compass bearing, with an optional
+  distance, for now. Landmarks, waypoints and player-set marks come later: *"yes, absolutely, once
+  we get them in reliably. Not quite there yet."*
