@@ -1,12 +1,41 @@
 ---
 name: 9k113-search-and-choose-look-scaling
-description: Measured cost of the 9K113 sight's per-poll search-cycle sweeps (negligible) and of choose_look's pre-existing O(n^2), now fed a wider candidate window by sight_can_still_improve
+description: Measured cost of the 9K113 sight's per-poll search-cycle sweeps (negligible, both pre- and post-boresight-rotation) and of choose_look's pre-existing O(n^2), now fed a wider candidate window by sight_can_still_improve
 metadata:
   type: project
 ---
 
-From the performance review of `feature/9k113-narrow-search` (`78aebc04..5e917840`,
-`plans/9k113-narrow-search/performance-review.md`).
+From the performance review of `feature/9k113-narrow-search`, two batches:
+`78aebc04..5e917840` and the feature's own non-merge commits `5e917840..8cb3c527`
+(`plans/9k113-narrow-search/performance-review.md`, "Batch 2" — two merge commits inside that
+range pull in unrelated `main` work and are excluded, confirmed by `git show --stat` on each
+non-merge commit that none of them touch `optic_policy.py`/`logger.py`/`perception/geometry.py`).
+
+**Batch 2 superseded the µs/poll figures below with ~10× higher ones — still negligible, but do
+not quote the Batch 1 numbers as current.** Batch 2 added a real vector rotation
+(`perception.geometry.body_relative_direction`, via the new `heading_relative_to_body_relative`)
+to every sweep step and every per-contact `look_target_for` call, replacing what was previously
+pure `atan2` arithmetic or a cheap `bearing_deg`+`asin` pair (F5, boresight-relative regard
+check — `docs/acceptance/2026-10-20-sortie-feedback.md`). Re-measured end-to-end, real production
+functions, `body-layer/.venv`:
+
+| what | Batch 1 (pre-rotation) | Batch 2 (post-rotation + regard filter) |
+|---|---|---|
+| sweep sequences, worst case | ~26.37 µs/poll | **495.8 µs/poll** (measured worst case across scenarios) |
+| `look_target_for`, per contact | not separately measured | 4.07-4.10 µs/contact (223.7 µs @ 55, 819.3 µs @ 200) |
+
+Both stay 2-3 orders of magnitude under the 1.0 Hz poll budget (worst case 0.0496 %). The order
+of cost is unchanged (linear in step count / contact count, both hard-bounded quantities); only
+the constant moved. If a future change adds *another* rotation or per-step cost on top of this
+one, re-measure rather than assuming headroom from the Batch 1 figures — the ceiling has already
+moved once.
+
+**BL-B85's `attempted_at_level`/`pending_attempted_at_level`** (Batch 2) extend
+`OpticState`'s per-contact dicts from three to five, same no-pruning pattern as
+[[project_optic_policy_dict_copy_cost]] — isolated 5-dict `dict(...)` copy cost measured at
+1.58/6.14/19.32 µs for 55/300/1000 contacts (roughly 2× the 3-dict figure, as expected). Same
+MONITOR disposition as the dicts it extends: memory growth, not per-poll CPU cost, is the actual
+long-run concern, and that is Security's territory.
 
 ## The four new per-poll search sweeps: non-issue, measured
 
