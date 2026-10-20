@@ -85,6 +85,16 @@ def test_push_speech_urgent_true(
     assert received[0]["urgent"] is True
 
 
+def test_push_speech_speaks_tilde_as_about(
+    server_and_received: tuple[HTTPServer, list[dict[str, object]]],
+) -> None:
+    """Piper reads "~800" as "tilde 800" (2026-10-20 sortie)."""
+    httpd, received = server_and_received
+    client = AudioAdapterClient(base_url=f"http://127.0.0.1:{httpd.server_port}")
+    client.push_speech("Fuel for ~ 20 minutes, road ~800 metres.", urgent=False)
+    assert received[0]["text"] == "Fuel for about 20 minutes, road about 800 metres."
+
+
 def test_push_speech_unreachable_host_raises() -> None:
     client = AudioAdapterClient("http://127.0.0.1:1", timeout_s=1.0)
     with pytest.raises(AudioAdapterError):

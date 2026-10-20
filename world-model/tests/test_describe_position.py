@@ -845,6 +845,9 @@ def test_describe_position_inside_settlement_prefers_named_over_unnamed(
 
     assert result.inside_settlement is not None
     assert result.inside_settlement.name == "Big Village"
+    # area_m2 (landmark-words-no-names) is surfaced from the same tag
+    # _preferred_settlement's own tie-break already reads.
+    assert result.inside_settlement.area_m2 == 6400.0
 
 
 def test_describe_position_nearest_coastline_side_both_sides(

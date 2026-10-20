@@ -391,3 +391,10 @@ the whole 2.3–13.6 km:
 So the wide sweep's far edge is wide's own useful reach (the farther of its detection and
 classification reach, from the existing optic calibration), not the 5.6 km binocular boundary.
 Beyond that reach only narrow brings information.
+
+### F2 — sequencing (user, 2026-10-20)
+
+> F2 - after 9K113 fixes are merged
+
+Fix F2 (a transmission starting "Petrovich" routes to the brain) once `feature/9k113-narrow-search`
+has merged. That unblocks card item A14.

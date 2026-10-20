@@ -191,7 +191,7 @@ design document.
 - **Do not introduce new abstractions** unless you can name a clear duplication they remove
 - **Do not expand scope silently** — if the request implies additional work, surface it explicitly
 - **Do not start tasks marked `[?]` in `todo/todo/`** (indexed by `todo/todo/todo-tasks.md`; `todo/todo.md` is a pointer) — flag them and ask for clarification
-- **Consult NOTES.md** mentally when reasoning about areas where prior issues have been recorded (framework quirks, performance pitfalls, known workarounds)
+- **Consult `notes/`** (index: `notes/notes-index.md`, one file per topic) when reasoning about areas where prior issues have been recorded (framework quirks, performance pitfalls, known workarounds)
 
 ---
 

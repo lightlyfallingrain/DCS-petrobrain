@@ -121,6 +121,7 @@ Group model, contact-report flood and the tick-cost/LOS workstream:
 - [[BL-11]] — Tick cost, and making silent degradation visible
 - [[BL-12]] — Group-level contact identity and continuity
 - [[BL-W39]] — `collapse(group, depth)` — the group tree, derived at read time
+- [[BL-W40]] — Landmark words, not proper names, in spoken callouts
 
 Ahead:
 

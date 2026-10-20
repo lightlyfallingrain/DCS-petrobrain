@@ -1,6 +1,6 @@
 ---
 name: integrity-audit
-description: Audit this project's Claude Code operating environment (CLAUDE.md files, AGENTS.md, docs/AGENT_ROLES.md, .claude/agents, .claude/skills, .claude/settings.json hooks, agent-memory, auto-memory, the roadmap/backlog/todo entry files, NOTES.md) as a whole system for contradiction, staleness, drift, and gaps. Diagnostic and advisory only — never edits config itself. Use when the user asks for a system/config/process integrity audit, or to check whether the Claude setup has drifted from how the project actually works.
+description: Audit this project's Claude Code operating environment (CLAUDE.md files, AGENTS.md, docs/AGENT_ROLES.md, .claude/agents, .claude/skills, .claude/settings.json hooks, agent-memory, auto-memory, the roadmap/backlog/todo entry files, the notes/ topic files) as a whole system for contradiction, staleness, drift, and gaps. Diagnostic and advisory only — never edits config itself. Use when the user asks for a system/config/process integrity audit, or to check whether the Claude setup has drifted from how the project actually works.
 ---
 
 # System Integrity Audit
@@ -25,7 +25,7 @@ point is catching drift since the last audit. Enumerate:
   scripts they invoke under `.claude/scripts/`
 - `.claude/agent-memory/**` (per-role memory) and the auto-memory dir for this project
   (`~/.claude/projects/<sanitized-cwd>/memory/`, indexed by its `MEMORY.md`)
-- `NOTES.md` and each subproject's own `NOTES.md`
+- `notes/` (one file per topic, indexed by `notes/notes-index.md`; root `NOTES.md` is a pointer) and any subproject's own notes
 - **The roadmap, backlog and todo sources — and resolve each path before reading it.** Seven of the
   ten source kinds named in this list are four-line pointers: every subproject's `ROADMAP.md`,
   `body-layer/BACKLOG.md`, `todo/todo.md` and `todo/backlog.md` carry

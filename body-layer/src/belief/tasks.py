@@ -93,7 +93,7 @@ command can reach it. It is written down because the honest statement is
 not "cannot happen".
 
 Two views of the same object silently drifting apart is a recurring failure
-mode in this codebase (see NOTES.md) -- the fallback above is a safety net,
+mode in this codebase (see notes/) -- the fallback above is a safety net,
 not the intended path, and must never be relied on to paper over an
 invariant violation."""
 

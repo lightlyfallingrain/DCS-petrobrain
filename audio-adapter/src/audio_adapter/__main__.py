@@ -1,18 +1,27 @@
 """Run the `audio-adapter` process: `POST /speak` -> TTS synthesis -> one of
-two delivery targets (`plans/tts-voice-output/plan.md` Decision 8).
+two delivery targets (`plans/audio-adapter-os-independent/plan.md`
+Decision 4/5).
 
-`--target local` (this stage's payoff, no other subproject required) plays
-the synthesized WAV directly on the Mac via `afplay` (an already-present
-macOS CLI, no new dependency -- the same "external binary, not a package"
-rule `tts_engine.MacSayEngine` follows for `say`). This is both the fastest
-way to iterate on voice/wording quality and the permanent guaranteed-
-deliverable local-dev path body-layer's `--speech-audio` flag needs to be
-testable without a live Windows/DCS session, per `body-layer/CLAUDE.md`'s
-"testable without a live DCS session" requirement.
+`--target local` (no other subproject required) plays the synthesized WAV
+directly on this machine -- `afplay` on macOS/Linux, `winsound` on Windows
+(`local_playback.make_local_sink`'s platform dispatch, Decision 2/6). This
+is both the fastest way to iterate on voice/wording quality and the
+permanent guaranteed-deliverable local-dev path body-layer's
+`--speech-audio` flag needs to be testable without a live Windows/DCS
+session, per `body-layer/CLAUDE.md`'s "testable without a live DCS session"
+requirement.
 
-`--target aircraft-layer` (wired once `aircraft_client.py` exists) instead
-POSTs the WAV to a running aircraft-layer collector's `POST /audio/play`,
-which plays it through `winsound` on the Windows box.
+`--target aircraft-layer` instead POSTs the WAV to a running aircraft-layer
+collector's `POST /audio/play`, which plays it through `winsound` on the
+Windows box -- the same `winsound` playback either way, this flag only
+decides which machine it plays on.
+
+Synthesis is always via `tts_engine.PiperEngine`, an HTTP client for
+Piper's own long-lived `piper.http_server` process (started separately by
+`run-scripts/run-piper-mac.sh`/`run-piper-windows.sh`, Decision 1/5) --
+never spawned, supervised, or health-checked by this process. `--piper-url`
+replaces nothing; `--piper-voice` replaces the old macOS-only `--voice`,
+which has no meaning for Piper's HTTP contract.
 
 **Inbound speech** (`plans/inbound-speech/plan.md` Stage 3): passing
 `--whisper-model` also wires a `WhisperCliEngine` into the server, enabling
@@ -24,9 +33,10 @@ detectable misses). Without `--whisper-model`, `POST /transcribe` answers
 `503` and `GET /transcripts/poll` always drains empty -- a true no-op,
 same posture as `--target aircraft-layer` requiring `--aircraft-layer-url`.
 
-Usage: python -m server [--host HOST] [--port PORT] [--target local]
-       [--voice VOICE] [--whisper-model PATH] [--whisper-binary NAME]
-   or: python -m server --target aircraft-layer --aircraft-layer-url URL
+Usage: python -m audio_adapter [--host HOST] [--port PORT] [--target local]
+       [--piper-url URL] [--piper-voice VOICE] [--whisper-model PATH]
+       [--whisper-binary NAME]
+   or: python -m audio_adapter --target aircraft-layer --aircraft-layer-url URL
 """
 
 from __future__ import annotations
@@ -34,10 +44,10 @@ from __future__ import annotations
 import argparse
 import logging
 
-from local_playback import LocalPlaybackSink
-from server import DEFAULT_HOST, DEFAULT_PORT, TTSAdapterServer
+from local_playback import make_local_sink
+from server import DEFAULT_HOST, DEFAULT_PORT, AudioSink, TTSAdapterServer
 from stt_engine import DEFAULT_WHISPER_BINARY, WhisperCliEngine
-from tts_engine import DEFAULT_VOICE, MacSayEngine
+from tts_engine import DEFAULT_PIPER_URL, DEFAULT_PIPER_VOICE, PiperEngine
 from vocabulary import to_prompt
 
 logger = logging.getLogger(__name__)
@@ -57,7 +67,8 @@ def main() -> None:
         default="local",
         help=(
             "delivery target for synthesized audio -- 'local' (default) "
-            "plays via afplay on this machine, no other subproject needed; "
+            "plays on this machine (afplay on macOS, winsound on Windows), no "
+            "other subproject needed; "
             "'aircraft-layer' POSTs the WAV to a running aircraft-layer "
             "collector's /audio/play (requires --aircraft-layer-url)"
         ),
@@ -71,9 +82,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--voice",
-        default=DEFAULT_VOICE,
-        help="macOS 'say' voice name (see 'say -v ?' for the installed list)",
+        "--piper-url",
+        default=DEFAULT_PIPER_URL,
+        help="Piper's piper.http_server base URL (started separately, see "
+        "run-scripts/run-piper-mac.sh / run-piper-windows.sh)",
+    )
+    parser.add_argument(
+        "--piper-voice",
+        default=DEFAULT_PIPER_VOICE,
+        help="Piper voice model name, sent as the 'voice' field on every "
+        "/synthesize request (e.g. en_GB-northern_english_male-medium)",
     )
     parser.add_argument(
         "--whisper-binary",
@@ -110,16 +128,15 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    engine = MacSayEngine(voice=args.voice)
+    engine = PiperEngine(base_url=args.piper_url, voice=args.piper_voice)
 
+    sink: AudioSink
     if args.target == "aircraft-layer":
         from aircraft_client import AircraftLayerAudioSink
 
-        sink: LocalPlaybackSink | AircraftLayerAudioSink = AircraftLayerAudioSink(
-            base_url=args.aircraft_layer_url
-        )
+        sink = AircraftLayerAudioSink(base_url=args.aircraft_layer_url)
     else:
-        sink = LocalPlaybackSink()
+        sink = make_local_sink()
 
     stt_engine = (
         WhisperCliEngine(
