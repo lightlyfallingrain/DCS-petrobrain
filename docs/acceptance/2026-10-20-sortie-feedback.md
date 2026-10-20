@@ -484,3 +484,11 @@ Read:
    from a quick position check.
 5. A second mode, pointing at a known place: slew there, wide to orient and detect, narrow to
    identify and range, then move between targets.
+
+### F5 — sequencing (user, 2026-10-20)
+
+> sequencing OK.
+
+`feature/9k113-narrow-search` gets a simple boresight-relative limit check (pitch and bank, reusing
+the body-relative conversion; a look cut off by pitching up resumes when the nose comes down), then
+merges once DoD passes. The scanning procedure is `BL-B89`, the next item, with a plan and a mock.
