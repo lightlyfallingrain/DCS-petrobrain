@@ -381,17 +381,19 @@ class Contact:
     events.burning_event_kind`'s comparison -- written only by
     `ContactStore.tick`, never by `record`.
 
-    `is_firing`/`firing_targets_ownship`/`last_emitted_firing`
-    (`plans/emitter-visibility/plan.md` Stage B, `BL-B73`) are `is_burning`/
-    `last_emitted_burning`'s direct siblings: `is_firing` is written
-    directly by `record`/`from_percept` from `percept.emitter_kind ==
-    EmitterKind.FIRING.value`, the same overwritten-not-folded posture;
-    `firing_targets_ownship` rides alongside it from `percept.
-    targets_ownship`, written only when `is_firing` is also being set this
-    look (so a stale `True` from an earlier firing look cannot survive
-    into a later, non-firing percept's targets_ownship read -- see
-    `record`'s own comment); `last_emitted_firing` is `last_emitted_
-    burning`'s twin, for `belief.events.firing_event_kind`'s comparison.
+    `is_firing`/`firing_targets_ownship`/`firing_visible`/
+    `last_emitted_firing` (`plans/emitter-visibility/plan.md` Stage B,
+    `BL-B73`, `firing_visible` added by `plans/taking-fire-visible-shooter/
+    plan.md`'s second half) are `is_burning`/`last_emitted_burning`'s direct
+    siblings: `is_firing` is written directly by `record`/`from_percept`
+    from `percept.emitter_kind == EmitterKind.FIRING.value`, the same
+    overwritten-not-folded posture; `firing_targets_ownship`/`firing_
+    visible` both ride alongside it from `percept.targets_ownship`/
+    `percept.firing_visible`, written only when `is_firing` is also being
+    set this look (so a stale `True` from an earlier firing look cannot
+    survive into a later, non-firing percept's read -- see `record`'s own
+    comment); `last_emitted_firing` is `last_emitted_burning`'s twin, for
+    `belief.events.firing_event_kind`'s comparison.
 
     `last_event_emitted_sim` is BL-4's per-contact-per-kind emission
     cooldown state (`belief.events.EVENT_COOLDOWN_S`): the `t_sim` at which
@@ -456,6 +458,10 @@ class Contact:
     #: `last_emitted_firing`.
     is_firing: bool = False
     firing_targets_ownship: bool = False
+    #: `plans/taking-fire-visible-shooter/plan.md` (second half) -- see the
+    #: class docstring's paragraph on `is_firing`/`firing_targets_ownship`/
+    #: `firing_visible`/`last_emitted_firing`.
+    firing_visible: bool = False
     last_emitted_firing: bool | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
     #: `plans/watch-reporting/plan.md` Decision 5's kilometre-crossing
@@ -711,6 +717,7 @@ class Contact:
         # be read mid-update.
         self.is_firing = percept.emitter_kind == EmitterKind.FIRING.value
         self.firing_targets_ownship = self.is_firing and percept.targets_ownship
+        self.firing_visible = self.is_firing and percept.firing_visible
         self.last_percept = percept
         self._extend_or_open_span(percept)
 
@@ -796,6 +803,13 @@ class Contact:
             firing_targets_ownship=(
                 percept.emitter_kind == EmitterKind.FIRING.value
                 and percept.targets_ownship
+            ),
+            # `plans/taking-fire-visible-shooter/plan.md` (second half) --
+            # `firing_targets_ownship`'s direct sibling, same founding-tick
+            # reasoning.
+            firing_visible=(
+                percept.emitter_kind == EmitterKind.FIRING.value
+                and percept.firing_visible
             ),
             last_percept=percept,
         )
@@ -1626,6 +1640,7 @@ class ContactStore:
                         t_sim=now_sim,
                         certainty=current_certainty,
                         targets_ownship=contact.firing_targets_ownship,
+                        firing_visible=contact.firing_visible,
                     )
                 )
                 contact.last_event_emitted_sim[CONTACT_FIRING_SEEN] = now_sim

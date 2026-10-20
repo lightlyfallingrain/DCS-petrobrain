@@ -3214,15 +3214,23 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         return f"Something burning, {clock} o'clock."
     if event.kind == CONTACT_FIRING_SEEN:
         # `plans/emitter-visibility/plan.md` Stage B -- the accepted
-        # wording (user decision 3), same bespoke-line reasoning as
-        # `CONTACT_BURNING_SEEN` just above: detection-only, no unit-type
-        # claim, no range (the accepted wording for the not-targeting-us
-        # case carries the literal word "far" instead of a figure --
-        # this is a `PRESENCE`-tier emitter-bypass admission, so a precise
-        # range would overclaim what was actually perceived). Silently
-        # says nothing when there is no current bearing to report, the
-        # same "do not invent a look that was not taken" reasoning
-        # `CONTACT_BURNING_SEEN` already follows.
+        # wording (user decision 3) for the bypass-needed case: detection-
+        # only, no unit-type claim, no range (the literal word "far"
+        # instead of a figure -- this is a `PRESENCE`-tier emitter-bypass
+        # admission, so a precise range would overclaim what was actually
+        # perceived). Silently says nothing when there is no current
+        # bearing to report, the same "do not invent a look that was not
+        # taken" reasoning `CONTACT_BURNING_SEEN` above follows.
+        #
+        # `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+        # follow-up "visible unit firing at others") adds a third wording,
+        # `event.firing_visible`: a unit admitted *without* the bypass is
+        # already carrying a real classification, so it is reported the
+        # ordinary way -- `_contact_report_text`'s ordinary unit-type/
+        # clock/range line -- with `"firing"` appended in place of the
+        # (suppressed) motion clause via `event_clause`, never alongside
+        # the muzzle-flash-only "something... far" wording, which stays
+        # reserved for the bypass-needed case.
         relative_now = result["facts"].get("relative_now")
         if relative_now is None:
             return None
@@ -3230,6 +3238,8 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         clock = relative_now["clock_position"]
         if event.targets_ownship:
             return f"Taking fire, {clock} o'clock."
+        if event.firing_visible:
+            return _contact_report_text(result["facts"], event_clause="firing")
         return f"Something firing, {clock} o'clock, far."
     if event.kind == CONTACT_ENGAGEMENT_CHANGED:
         # Decision 3's two wordings, taken from `docs/concept/

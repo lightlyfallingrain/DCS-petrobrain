@@ -164,8 +164,9 @@ CONTACT_ENGAGEMENT_CHANGED: Final[EventKind] = "CONTACT_ENGAGEMENT_CHANGED"
 #: either -- it rides `callout_priority`'s ordinary attention-based
 #: ordering unchanged.
 CONTACT_BURNING_SEEN: Final[EventKind] = "CONTACT_BURNING_SEEN"
-#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- a contact's
-#: `Observation.provenance` became one of `naked_eye_source.py`'s two
+#: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`), extended by
+#: `plans/taking-fire-visible-shooter/plan.md`'s second half -- a contact's
+#: `Observation.provenance` became one of `naked_eye_source.py`'s three
 #: `PROVENANCE_EMITTER_FIRING*` values (`belief.contacts.Contact.
 #: is_firing` went from not-firing to firing). **Also deliberately not
 #: routed through `belief.threat.envelope_for`**, for the identical reason
@@ -265,6 +266,15 @@ class Event:
     #: ever produces (`Percept.targets_ownship` is itself a plain `bool`,
     #: never `None`).
     targets_ownship: bool = False
+    #: `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+    #: follow-up)'s addition -- `targets_ownship`'s direct sibling, from
+    #: `Contact.firing_visible` at the moment the event fires. `True` means
+    #: this `CONTACT_FIRING_SEEN` was admitted without the emitter bypass
+    #: (the unit would have been visible anyway), so `belief.speech`
+    #: speaks its real classification rather than the bypass-needed
+    #: "something firing... far" wording. Same default-`False`, not-a-
+    #: tri-state reasoning as `targets_ownship`.
+    firing_visible: bool = False
 
 
 def lifecycle_event_kind(

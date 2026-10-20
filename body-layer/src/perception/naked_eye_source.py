@@ -417,17 +417,35 @@ PROVENANCE_EMITTER_BURNING: Final[str] = "world_objects/emitter_burning"
 #: unit firing at ownship from one firing at something else, and that
 #: distinction has to survive the `belief/` boundary the same closed-
 #: mapping way `PROVENANCE_EMITTER_BURNING` does (`belief.percept.Percept.
-#: targets_ownship`'s own docstring). A mixed-`targets_ownship` cluster
-#: (vanishingly unlikely -- `targets_ownship` is resolved per unit, not per
-#: cluster, so this only happens if two different firing units with
-#: different targets land in the same angular cluster) keeps the ordinary
-#: `PROVENANCE_EMITTER_FIRING` value, same "identical keeps, disagreement
-#: degrades" rule `_build_observation` already applies to emitter kind
-#: itself.
+#: targets_ownship`'s own docstring). This value is reserved for the
+#: bypass-needed case (`PROVENANCE_EMITTER_FIRING_VISIBLE` below is its
+#: sibling for the ordinary-admission case, `plans/
+#: taking-fire-visible-shooter/plan.md`). A mixed-`targets_ownship` cluster
+#: where every member still needed the bypass (vanishingly unlikely --
+#: `targets_ownship` is resolved per unit, not per cluster, so this only
+#: happens if two different firing units with different targets land in
+#: the same angular cluster) keeps this ordinary `PROVENANCE_EMITTER_FIRING`
+#: value, same "identical keeps, disagreement degrades" rule `_build_
+#: observation` already applies to emitter kind itself.
 PROVENANCE_EMITTER_FIRING: Final[str] = "world_objects/emitter_firing"
 PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: Final[str] = (
     "world_objects/emitter_firing_targets_ownship"
 )
+
+#: `plans/taking-fire-visible-shooter/plan.md` (second half, F6 follow-up
+#: "visible unit firing at others" -- `docs/acceptance/
+#: 2026-10-20-sortie-feedback.md`) -- a third `FIRING` provenance, for a
+#: unit that is firing at something other than ownship *and* was admitted
+#: without the emitter bypass (it would have been visible anyway). Unlike
+#: `PROVENANCE_EMITTER_FIRING` (reserved for the bypass-needed case, where
+#: the tier clamp forces presence-only and the accepted wording is
+#: "something firing... far" with no type spoken), this value is produced
+#: for an ordinary admission that happened to resolve a real tier, so the
+#: classification it carries is whatever that admission already earned --
+#: never raised by the emitter fact. `_build_observation`'s fold below
+#: distinguishes the two by whether `emitter_kind_by_object_id` carries a
+#: kind for that candidate (bypass fired) or not.
+PROVENANCE_EMITTER_FIRING_VISIBLE: Final[str] = "world_objects/emitter_firing_visible"
 
 #: `visibility.VisibilityResult.emitter_kind` (an `EmitterKind.value`
 #: string) -> the `PROVENANCE_EMITTER_*` constant it should produce, for
@@ -893,13 +911,34 @@ class NakedEyePerceptionSource:
         # the collector's own `targets_ownship` fact must carry through
         # regardless of whether a bypass fired. `_build_observation`'s
         # cluster fold (below) consults this independently of `emitter_
-        # kind_by_object_id`, so the "firing at others" wording -- which
-        # *is* still bypass-gated -- is unaffected by this change.
+        # kind_by_object_id`. The bypass-needed "firing at others" wording
+        # ("something firing... far", `PROVENANCE_EMITTER_FIRING`) is
+        # unaffected by this change -- it is `firing_by_object_id` below,
+        # not this dict, that extends the *visible* ("not bypass-needed")
+        # firing-at-others case (`plans/taking-fire-visible-shooter/
+        # plan.md`, F6 follow-up).
         targets_ownship_by_object_id: dict[int, bool] = {}
         for candidate, _result in visible:
             emitter = emitter_by_object_id.get(candidate.object_id)
             targets_ownship_by_object_id[candidate.object_id] = (
                 emitter is not None and emitter.targets_ownship
+            )
+
+        # `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+        # follow-up "visible unit firing at others") -- the collector's own
+        # `Emitter.kind is FIRING` fact, read the same bypass-independent
+        # way `targets_ownship_by_object_id` immediately above reads
+        # `targets_ownship`. `_build_observation`'s fold combines this with
+        # `emitter_kind_by_object_id` (is the bypass *not* needed for this
+        # candidate?) and `targets_ownship_by_object_id` (is it *not*
+        # targeting ownship -- that case is `PROVENANCE_EMITTER_FIRING_
+        # TARGETS_OWNSHIP`'s, resolved first) to decide whether a given
+        # member qualifies for `PROVENANCE_EMITTER_FIRING_VISIBLE`.
+        firing_by_object_id: dict[int, bool] = {}
+        for candidate, _result in visible:
+            emitter = emitter_by_object_id.get(candidate.object_id)
+            firing_by_object_id[candidate.object_id] = (
+                emitter is not None and emitter.kind == EmitterKind.FIRING
             )
 
         observations = self._build_observations(
@@ -911,6 +950,7 @@ class NakedEyePerceptionSource:
             live_los_clear_by_object_id,
             emitter_kind_by_object_id,
             targets_ownship_by_object_id,
+            firing_by_object_id,
         )
         if self.trace_sink is not None:
             for cluster, observation in zip(to_emit, observations):
@@ -935,6 +975,7 @@ class NakedEyePerceptionSource:
         live_los_clear_by_object_id: dict[int, bool | None],
         emitter_kind_by_object_id: dict[int, str | None],
         targets_ownship_by_object_id: dict[int, bool],
+        firing_by_object_id: dict[int, bool],
     ) -> list[Observation]:
         """One `Observation` per `clusters` entry, resolving majority-overlap
         continuity (module docstring point 6) across the *whole* batch before
@@ -992,6 +1033,7 @@ class NakedEyePerceptionSource:
                     live_los_clear_by_object_id,
                     emitter_kind_by_object_id,
                     targets_ownship_by_object_id,
+                    firing_by_object_id,
                     continues_observation_id,
                 )
             )
@@ -1145,6 +1187,7 @@ class NakedEyePerceptionSource:
         live_los_clear_by_object_id: dict[int, bool | None],
         emitter_kind_by_object_id: dict[int, str | None],
         targets_ownship_by_object_id: dict[int, bool],
+        firing_by_object_id: dict[int, bool],
         continues_observation_id: str | None,
     ) -> Observation:
         """One `Observation` for `cluster` -- `plans/group-contact-model/
@@ -1180,23 +1223,34 @@ class NakedEyePerceptionSource:
         only when every member's own DCS-driven verdict agrees it is.
 
         `provenance` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A,
-        extended Stage B, revised per `docs/acceptance/
-        2026-10-20-sortie-feedback.md` F6) is `PROVENANCE_EMITTER_FIRING_
-        TARGETS_OWNSHIP` whenever every member's `targets_ownship` agrees
-        and is `True` -- checked **first**, independently of `VisibilityResult.
-        emitter_kind`, because a shooter the perception gates admitted
-        without ever needing the emitter bypass still carries a real
-        `targets_ownship` fact and must still produce "taking fire". Only
-        once that is not the case does the plain kind-agreement rule
-        apply: a `PROVENANCE_EMITTER_*` value when every member's
-        `VisibilityResult.emitter_kind` agrees on the same non-`None`
-        kind, else the ordinary `PROVENANCE_VISIBILITY_FILTER_ONLY` --
-        `Cluster.classification_raw`'s own "identical keeps, disagreement
-        degrades" rule, generalised the same way `apparent_motion`/`live_
-        los_clear` above already are. This second rule is deliberately
-        unchanged from before this revision: it is what still reserves
-        `PROVENANCE_EMITTER_FIRING` ("something firing... far") for a
-        unit the bypass was actually needed for."""
+        extended Stage B, revised twice per `docs/acceptance/
+        2026-10-20-sortie-feedback.md` F6 and its follow-up) is resolved by
+        three checks in priority order, each the same "identical keeps,
+        disagreement degrades" rule `Cluster.classification_raw` already
+        applies, generalised the way `apparent_motion`/`live_los_clear`
+        above already are:
+
+        1. `PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP` whenever every
+           member's `targets_ownship` agrees and is `True` -- checked
+           first, independently of `VisibilityResult.emitter_kind`, because
+           a shooter the perception gates admitted without ever needing the
+           emitter bypass still carries a real `targets_ownship` fact and
+           must still produce "taking fire".
+        2. `PROVENANCE_EMITTER_FIRING_VISIBLE` whenever every member is (a)
+           currently firing, (b) was **not** emitter-bypass-admitted (it
+           would have been visible anyway), and (c) is not targeting
+           ownship (case 1's own territory) -- the F6 follow-up ("visible
+           unit firing at others" must still be reported as firing, at
+           whatever classification tier the ordinary admission already
+           earned, never raised by the emitter fact).
+        3. Otherwise, the plain kind-agreement rule: a `PROVENANCE_
+           EMITTER_*` value when every member's `VisibilityResult.
+           emitter_kind` agrees on the same non-`None` kind, else the
+           ordinary `PROVENANCE_VISIBILITY_FILTER_ONLY`. This is what
+           reserves `PROVENANCE_EMITTER_FIRING` ("something firing... far")
+           for a unit the bypass was actually needed for -- unreachable by
+           a cluster check 2 already claimed, since check 2's condition (b)
+           is exactly this branch's precondition negated."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -1270,9 +1324,29 @@ class NakedEyePerceptionSource:
             targets_ownship_by_object_id.get(member.object_id, False)
             for member in cluster.members
         }
+        # `plans/taking-fire-visible-shooter/plan.md` (second half, F6
+        # follow-up "visible unit firing at others") -- per-member "does
+        # this one qualify for the *visible* firing-at-others provenance"
+        # flag: currently firing (`firing_by_object_id`, bypass-
+        # independent) AND not emitter-bypass-admitted (`emitter_kind_by_
+        # object_id.get(...) is None` -- the bypass-needed case is check 3's
+        # territory, `PROVENANCE_EMITTER_FIRING`) AND not targeting ownship
+        # (case 1's own territory, resolved above). Unanimity across the
+        # cluster, same unmodified "identical keeps, disagreement degrades"
+        # rule as `member_targets_ownship` just above.
+        member_firing_visible = {
+            (
+                firing_by_object_id.get(member.object_id, False)
+                and emitter_kind_by_object_id.get(member.object_id) is None
+                and not targets_ownship_by_object_id.get(member.object_id, False)
+            )
+            for member in cluster.members
+        }
         provenance = PROVENANCE_VISIBILITY_FILTER_ONLY
         if member_targets_ownship == {True}:
             provenance = PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
+        elif member_firing_visible == {True}:
+            provenance = PROVENANCE_EMITTER_FIRING_VISIBLE
         elif len(member_emitter_kinds) == 1:
             (only_emitter_kind,) = member_emitter_kinds
             if only_emitter_kind == EmitterKind.FIRING.value:
