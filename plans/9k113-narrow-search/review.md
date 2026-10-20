@@ -260,3 +260,128 @@ ran two independent close-contact scenarios (pessimistic and realistic) over 900
 each to answer the search-starvation question empirically rather than by inspection alone; flagged
 the pessimistic case's full-starvation result as a disclosed, pre-existing-class risk rather than a
 blocker, with a recommended one-line note for `implementation.md` (optional, not required).
+
+---
+
+## Review — F4 follow-up
+
+Commit reviewed: `5e9178406c65d13b90097fd527851f4f300775ad` (parent `242cf8df`), on
+`feature/9k113-narrow-search`. Changes the wide sweep's idle-search far edge in
+`body-layer/src/logger.py` from `SIGHT_SEARCH_MID_M` (5.647 km, binoculars' own reach / the
+near-band boundary it used to share with `narrow_near`) to a new derived constant,
+`_SIGHT_WIDE_SEARCH_FAR_M` (≈8.282 km), per `docs/acceptance/2026-10-20-sortie-feedback.md` F4
+("wide sweep band" — user: *"use it up to where it can bring information, be it detection or
+classification. At greater distances it cannot, narrow can."*).
+
+### Derivation, checked independently
+
+`_SIGHT_WIDE_SEARCH_FAR_M = min(SIGHT_SEARCH_NEAR_M * SIGHT_WIDE_OPTIC.presence_range_mult,
+PLAYER_BUBBLE_RADIUS_M)`. Verified by direct computation against the live modules (not taken on the
+commit's word):
+
+- `SIGHT_SEARCH_NEAR_M` (2333.0) matches `tier_ranges(optic=UNAIDED_OPTIC, ...)`'s own presence
+  threshold for `profile_for("T-72")` (2333.33, rounded) — confirming the claim that it already *is*
+  the reference vehicle's unaided presence reach, not an unrelated number that happens to be nearby.
+- Computing wide's presence threshold directly via `tier_ranges(optic=SIGHT_WIDE_OPTIC, ...)` for
+  the same profile gives 8283.33 m, against the scaled derivation's 8282.15 m — a ~1.2 m (0.01%)
+  difference, entirely explained by `SIGHT_SEARCH_NEAR_M` being a rounded whole number rather than
+  the unrounded 2333.33. **This is the same rounding gap `SIGHT_SEARCH_FAR_M` (narrow's own analogous
+  constant) already carries** against its own direct computation (13556.67 vs. the declared
+  13556.0) — so the chosen base and the scaling pattern are not just plausible, they are the
+  identical precedent already in this file, applied consistently rather than invented fresh. Going
+  to `tier_ranges` directly would have been marginally more honest but not meaningfully more
+  correct, and would have required `logger.py` to import `profile_for`/`distinctiveness_of` plus a
+  reference vehicle choice, for a ~1 m difference that rounds away immediately — not a trade worth
+  making against the existing convention.
+- `class_threshold_m <= presence_threshold_m` is enforced structurally by `tier_ranges`'
+  chained `min()`s (`perception/visibility.py` lines 632–649) — confirmed by reading the
+  function, not assumed — so "the farther of detection and classification reach" is correctly
+  satisfied by the presence figure alone, as the comment and
+  `test_presence_reach_is_already_the_farther_of_presence_and_class` both claim.
+- The clamp's base (`PLAYER_BUBBLE_RADIUS_M = 10_000.0`, `perception/association.py`) is indeed the
+  tighter of the two possible caps; `SIGHT_WIDE_OPTIC.range_cap_m = 20_000.0` is looser and
+  irrelevant here. At today's defaults (8282.15 < 10000) the clamp does not bind, matching the
+  stated claim.
+- No ordering/coupling risk across the tunable range: `far_m = near_m * 3.55` (pre-clamp) is `>
+  near_m` for every `near_m` in `SIGHT_SEARCH_NEAR_M`'s declared `[1000, 4000]` bounds, and the
+  clamp only ever *reduces* an already-larger value toward 10000, which still exceeds `near_m`'s
+  own max (4000). So `_sight_in_regard_sweep`'s `far_m > near_m` precondition cannot be violated by
+  any legal retuning of `SIGHT_SEARCH_NEAR_M` alone. (Retuning `SIGHT_SEARCH_MID_M` independently
+  could put it above or below this new constant — optional note below.)
+
+### Tuning-mechanism compliance — verified, correctly excluded
+
+`_SIGHT_WIDE_SEARCH_FAR_M` is behaviour-affecting (it changes how far the sight's wide leg
+searches) but is correctly **not** a `tuning.real()` declaration. Checked against
+`plans/configurable-constants/plan.md`'s inclusion test: its RHS is an expression over
+`SIGHT_SEARCH_NEAR_M` (already a tunable) and two fixed values (an optic's own calibration
+multiplier, the player-bubble cap) — "**Derived constants are never keys** … Expose the inputs; the
+derivation is mechanism." It fails inclusion-test criterion 1 (free parameter: moving it
+independently would desynchronise it from the `SIGHT_SEARCH_NEAR_M` scaling it is defined by) by
+construction, so a bare module-level constant is the correct, not merely convenient, answer.
+Confirmed mechanically: `python tools/generate_defaults.py` reports `config/defaults.toml` up to
+date both before and after reading the diff — the new constant does not and should not appear
+there, and no `tuning.py`/`defaults.toml` diff exists in this commit (`git diff 242cf8df..5e91784
+-- src/tuning.py config/defaults.toml` is empty).
+
+### Wiring and mutation check — reproduced, not just read
+
+Re-ran the commit's own claimed mutation myself: reverted the `sight_wide_search=` call's `far_m`
+from `_SIGHT_WIDE_SEARCH_FAR_M` back to `SIGHT_SEARCH_MID_M` and re-ran `TestSightWideSearchFarM`.
+Exactly one test went red — `test_run_once_passes_the_wide_legs_own_far_edge`, `assert [5647.0] ==
+[8282.15]` — the other five stayed green, matching the commit message's claim precisely. Restored
+the file from a saved copy and confirmed an empty `git diff` afterward.
+
+Confirmed by reading the call site (`logger.py` ~658–682) that `sight_narrow_near_search`
+(`near_m=SIGHT_SEARCH_NEAR_M, far_m=SIGHT_SEARCH_MID_M`) and `sight_narrow_far_search`
+(`near_m=SIGHT_SEARCH_MID_M, far_m=SIGHT_SEARCH_FAR_M`) are byte-for-byte unchanged — only
+`sight_wide_search`'s `far_m` argument moved. The search cycle still runs wide → narrow_near →
+narrow_far → (Stage 2) binocular out-of-regard excursion, per `_sight_out_of_regard_sweep` and the
+surrounding `decide_optic(...)` call being otherwise untouched.
+
+### Comment prune
+
+The docstring-comment above the `sight_wide_search=` call was edited ("a brief wide orientation
+pass over the near band" → "...out to wide's own useful reach (`_SIGHT_WIDE_SEARCH_FAR_M`)"). No
+durable line (date, user quote, sourced measurement) was removed — this was stale descriptive prose
+about current behaviour, correctly updated to match the new behaviour. Not a `#:` block (confirmed:
+the generator's `_call_target` only recognizes `tuning.*` calls, and `_SIGHT_WIDE_SEARCH_FAR_M`'s
+own `#:` block sits above a `min(...)` expression, not a `tuning.*` call, so it is correctly never
+rendered into `defaults.toml`).
+
+### Checks run (this review, on `5e91784` directly)
+
+- `ruff format --check src tests`: pass (155 files already formatted).
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues in 68 source files.
+- `pytest tests -q`: 2280 passed, 4 xfailed, 0 failed — no flakes this run, none of the task's
+  known-flake tests needed a rerun.
+- `python tools/generate_defaults.py`: `config/defaults.toml` up to date (no `tuning.py` change in
+  this commit).
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- `_SIGHT_WIDE_SEARCH_FAR_M`'s own comment documents the residual coupling with
+  `SIGHT_SEARCH_NEAR_M` only implicitly (via the general note already in `optic_policy.py` about
+  `SIGHT_SEARCH_NEAR_M`/`MID_M`/`FAR_M` being independently tunable within their own bounds). It
+  does not mention that an independently-retuned `SIGHT_SEARCH_MID_M` could end up above or below
+  this new constant, changing how much of `narrow_near`'s band `wide` also covers. Not a correctness
+  issue — no invariant is violated, no crash, no assertion — purely a documentation completeness
+  point for whoever retunes `SIGHT_SEARCH_MID_M` later. (Optional.)
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read of this commit's diff (`logger.py`, `test_logger.py`, `implementation.md`). Verified the
+derivation by direct computation against `perception/optics.py`, `perception/visibility.py`,
+`belief/optic_policy.py`, and `perception/association.py` rather than taking the stated figures on
+trust. Verified the "derived constants are never keys" exclusion against
+`plans/configurable-constants/plan.md`'s own inclusion test. Reproduced the commit's mutation test
+myself (one test red for the stated reason, five green, file restored and confirmed via empty
+`git diff`). Ran `ruff format --check`, `ruff check`, `mypy --strict`, the full `pytest` suite, and
+`generate_defaults.py` on this exact commit tip.
