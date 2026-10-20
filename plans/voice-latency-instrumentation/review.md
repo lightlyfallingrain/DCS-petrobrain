@@ -187,3 +187,103 @@ Full read of the fix, all six Stage 6 handlers (to verify the pattern generalize
 mission`, and `_PendingPositionalReply`'s docstring. Mutation-tested the fix myself rather than
 trusting `implementation.md`'s account of its own mutation check. Ran all four body-layer checks
 myself in this worktree.
+
+---
+
+## Review — BL-B87/BL-B88
+
+Reviewed commit `fd41356844d2b721261d2f3ea3696509d333ad49` (parent `b6d548b1`, this review's own
+prior commit), which fixes both findings from `plans/voice-latency-instrumentation/
+security-review.md`'s deep analysis (filed as `BL-B87`/`BL-B88` after the plan's own prose numbers
+`BL-B85`/`BL-B86` were already taken on `feature/9k113-narrow-search`). Checked out detached (the
+branch name is held in another worktree); tree clean before and after, including after my own
+mutation testing below.
+
+**BL-B87 — `_pending_positional_replies` cap.** `_MAX_PENDING_POSITIONAL_REPLIES: Final[int] = 64`
+(module level, `crew_console.py`), enforced by a `pop(0)` in `_speak_or_defer` before the new entry
+is appended. Checked the mirrored precedent directly rather than trusting the commit message's
+claim: `audio-adapter/src/transcript_queue.py`'s `_MAX_QUEUE_LEN = 64` and `aircraft-layer/src/
+collector/cache.py`'s `F10CommandQueue`'s own `_MAX_QUEUE_LEN = 64` — same value, same drop-oldest
+semantics (`deque(maxlen=...)` there vs. an explicit `pop(0)` here, since this list isn't a
+`deque`already). Matches.
+
+**Drop-oldest can only ever lose a spoken echo, confirmed across every handler, not assumed from
+the docstring.** Read all six `_speak_or_defer` call sites (`_handle_select_target`,
+`_handle_mark_target`, `_handle_step`, `_handle_follow`, `_handle_watch_nearest`,
+`_handle_report`): in every one, the command's own side effect (target resolution, task
+registration, the mission-memory write `4ac44e29`'s earlier fix made unconditional) completes
+before `_speak_or_defer` is ever reached — there is no handler left whose closure performs a write,
+consistent with the Re-review above. A dropped entry therefore only discards a stale rendering of
+already-true state, never an unexecuted action, for every command that can reach this cap.
+
+**Warning rate-limiting and mission reset.** `_positional_reply_overflow_warned` gates the
+`logger.warning` to once; confirmed by mutation (below) that five separate drop events over the cap
+produce exactly one log record. It is correctly absent from `reset_for_new_mission`'s `__init__`
+pass-through list, so it resets to its dataclass default (`False`) on a mission restart — this isn't
+just asserted in the docstring, it's mechanically covered: `test_mission_start_reset.py`'s
+`test_crew_console_reset_preserves_declared_fields_and_resets_rest` enumerates *every*
+`dataclasses.fields(crew_console)` name not in the declared preserve-set and asserts it resets to a
+fresh instance's default — since `_positional_reply_overflow_warned` and `_pending_positional_
+replies` are both new fields not added to that preserve-set, this pre-existing generic test already
+catches a regression here without needing a bespoke one.
+
+**BL-B88 — `join_voice_latency.py` malformed-line handling.** `_iter_jsonl` wraps `json.loads` per
+line in `try/except json.JSONDecodeError`, records the `path:line_number` location in a
+module-level `_malformed_lines` list, warns on stderr, and continues. Checked the "never shifts or
+misjoins other rows" property structurally, not just via the one supplied test: `group_by_
+correlation_id` keys rows by the `correlation_id` *field value* read out of each parsed JSON object,
+never by list position or line number, and a skipped line is never appended to `records` at all —
+there is no index for a drop to shift, by construction, independent of which line in a file fails or
+how many do. `main()` resets `_malformed_lines` at entry (needed since it's module-level state a
+test suite's repeated `main()` calls would otherwise accumulate across runs) and reports the count
+in the closing summary line, appended after the pre-existing "N correlated utterance(s); N row(s)
+with no id." sentence so the three tests asserting that exact substring were correctly left
+unmodified.
+
+**Mutation-tested both fixes myself**, not re-trusted from `implementation.md`'s account:
+- BL-B87: removed the cap-check block from `_speak_or_defer`, reran
+  `test_pending_positional_replies_caps_and_drops_oldest_warning_logged_once` — failed on
+  `69 == 64` (unbounded growth, the exact property the fix makes true). Restored;
+  `sha256sum src/belief/crew_console.py` matched pre-mutation exactly.
+- BL-B88: removed the `try/except` from `_iter_jsonl`, reran `test_truncated_last_line_is_
+  skipped_and_all_other_rows_still_join` — failed with `json.decoder.JSONDecodeError: Unterminated
+  string...` propagating straight out of the call, exactly the crash the finding described (not an
+  assertion failure inside the test — the whole reducer aborts, which is the defect). Restored;
+  `sha256sum tools/join_voice_latency.py` matched pre-mutation exactly.
+
+**Tuning mechanism**: `_MAX_PENDING_POSITIONAL_REPLIES` is a bare module constant, not threaded
+through `tuning.py`. Correct as-is — it mirrors `TranscriptQueue`/`F10CommandQueue`'s own caps
+exactly, and neither of those siblings is tunable either (both are plain constants in subprojects
+`tuning.py` doesn't reach, and even within body-layer this is a defensive flood-protection bound, not
+a pilot-facing behaviour knob like the curated ~15 in `body-layer/CLAUDE.md`'s "Tuning" section). No
+rendered-`defaults.toml` check applies since nothing was added there.
+
+**Comment pruning**: nothing durable was removed. The only docstring edit (`reset_for_new_mission`'s
+field enumeration) extends an existing list to name the new field; no `#:` block was cut, no
+boundary case moved out of a comment into a test or vanished.
+
+**Checks, run myself in this worktree** (`.venv` resolved from the main checkout's
+`body-layer/.venv/bin/`, cwd inside this worktree's `body-layer/`):
+- `ruff format --check src tests tools`: pass, 163 files already formatted
+- `ruff check src tests tools`: pass
+- `cd body-layer && mypy src`: pass, 68 source files
+- `pytest tests -q`: 1 failed, 2268 passed, 4 xfailed on first run
+  (`test_connection_reporter_says_disconnected_once_then_connected_once`) — one of the three
+  flagged known timing flakes; reran that test alone in isolation, passed. No regression: `git diff
+  HEAD^ HEAD` touches neither `logger.py`'s connection-reporter code nor anything near it.
+- Both new tests confirmed passing individually, by name, in an unfiltered `-v` run.
+
+No scope drift — the diff is exactly the two source files, two test files, two ROADMAP entries, and
+the `implementation.md` append that the task described; nothing else touched.
+
+### Verdict
+
+APPROVE
+
+### Review Confidence
+
+Full read of both fixes, all six Stage 6 handler call sites (to verify the "drop-oldest can only
+lose an echo" property holds generally, not just for the one tested command), `reset_for_new_
+mission`'s preserve-set, and `group_by_correlation_id`'s join key (to verify no position-based
+misjoin risk exists structurally). Mutation-tested both fixes myself. Ran all four body-layer checks
+myself in this worktree, including a rerun of the one known-flaky test that failed on first pass.
