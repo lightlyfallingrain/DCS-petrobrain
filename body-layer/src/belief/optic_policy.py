@@ -34,7 +34,7 @@ deterministic for the same reason `gaze_at` does.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import pairwise
@@ -968,6 +968,40 @@ def sight_look_optic(target: LookTarget) -> Optic:
     return SIGHT_NARROW_OPTIC
 
 
+def sight_can_still_improve(target: LookTarget) -> bool:
+    """Whether the sight -- wide or narrow, whichever `sight_look_optic`
+    would pick -- could still raise `target`'s tier. The `SIGHTING`
+    counterpart of `can_still_improve`, which asks the same question of
+    the naked eye/binoculars pair; required fix from `plans/
+    9k113-narrow-search/review.md` ("the worth-a-look gate... is bound by
+    the naked-eye/binocular pair, not the sight's own reach").
+
+    **An upper-bound check against `SIGHT_NARROW_OPTIC`'s own class/type
+    threshold, with no lower bound -- deliberately not `improvement_
+    window_m`'s two-sided shape.** That function's lower bound exists
+    because the naked eye reaches the same tier "for free" on its next
+    dwell, making a binocular look below it wasted; while `SIGHTING`
+    nothing dwells in parallel to resolve a close contact for free (the
+    sight *is* the active instrument), so there is no equivalent
+    exclusion here. Using `SIGHT_WIDE_OPTIC`'s own threshold as a lower
+    bound would incorrectly exclude close targets that `sight_look_optic`
+    itself still resolves with wide.
+    """
+    if target.current_level == "type":
+        return False
+    profile = profile_for(target.object_type)
+    extent = apparent_extent_m(profile, None)
+    distinctiveness = distinctiveness_of(profile)
+    _, class_m, type_m = tier_ranges(
+        presence_size_m=profile.size_m,
+        recognition_extent_m=extent,
+        optic=SIGHT_NARROW_OPTIC,
+        distinctiveness=distinctiveness,
+    )
+    threshold_m = type_m if target.current_level == "class" else class_m
+    return target.range_m <= threshold_m
+
+
 #: The ladder `BL-B71`'s guidance override walks, ascending capability --
 #: `Optic.presence_range_mult` ascending *is* `fov_half_angle_deg`
 #: descending across the whole shipped table (`BL-B71.md`'s own
@@ -1117,7 +1151,11 @@ def can_still_improve(target: LookTarget) -> bool:
 
 
 def is_worth_a_look(
-    target: LookTarget, state: OpticState, now_sim: float = 0.0
+    target: LookTarget,
+    state: OpticState,
+    now_sim: float = 0.0,
+    *,
+    can_improve: Callable[[LookTarget], bool] = can_still_improve,
 ) -> bool:
     """Whether this contact would gain anything from a *new* look now.
 
@@ -1125,8 +1163,15 @@ def is_worth_a_look(
     supplied one keeps compiling and behaving identically -- `state.
     attempted_at_time_sim` is empty for those (no committed attempt has a
     time recorded), so the time-based branch below never fires for them
-    regardless of the default's value."""
-    if not can_still_improve(target):
+    regardless of the default's value.
+
+    `can_improve` defaults to `can_still_improve` (the naked-eye/binocular
+    window) -- a true no-op for every pre-existing caller. `_decide_
+    sighting`'s candidate filter passes `sight_can_still_improve` instead,
+    so a contact beyond binocular's own reach but still within the
+    sight's is admitted as a candidate (`plans/9k113-narrow-search/
+    review.md` required fix)."""
+    if not can_improve(target):
         return False
     if target.contact_id in state.pending_attempted_at_range_m:
         # A look already in progress is covering this contact right now --
@@ -1215,6 +1260,7 @@ def look_is_finished(
     *,
     started_sim: float | None = None,
     max_dwell_s: float = MAX_LOOK_S,
+    can_improve: Callable[[LookTarget], bool] = can_still_improve,
 ) -> bool:
     """Whether the current look has nothing left to give.
 
@@ -1247,6 +1293,17 @@ def look_is_finished(
     `phase_started_sim` tracks the *whole dwell* since entering the sight,
     not this one look's own clock (`OpticState.look_started_sim`'s own
     docstring).
+
+    `can_improve` defaults to `can_still_improve`, a true no-op for every
+    pre-existing caller. `_decide_sighting` passes `sight_can_still_
+    improve` instead -- it must, and not only at the candidate-admission
+    step (`is_worth_a_look`): if this function kept judging an in-progress
+    sight look against the eye/binocular window, a contact admitted only
+    because the sight can still reach it would read as already outside
+    that narrower window on the very next poll, ending the look one poll
+    after it started and committing `attempted_at_range_m` as if it had
+    actually resolved something -- silently reintroducing the gate defect
+    one poll later (`plans/9k113-narrow-search/review.md` required fix).
     """
     look_started_sim = (
         started_sim if started_sim is not None else state.phase_started_sim
@@ -1254,7 +1311,7 @@ def look_is_finished(
     if look_started_sim is None or now_sim - look_started_sim >= max_dwell_s:
         return True
     return not any(
-        _target_in_current_look(state, target) and can_still_improve(target)
+        _target_in_current_look(state, target) and can_improve(target)
         for target in targets
     )
 
@@ -1736,6 +1793,7 @@ def _decide_sighting(
         targets,
         started_sim=state.look_started_sim,
         max_dwell_s=SIGHT_MAX_DWELL_S,
+        can_improve=sight_can_still_improve,
     ):
         # The current look's own natural end (recognition succeeded,
         # nothing left to learn in its envelope) -- commit its pending
@@ -1811,7 +1869,7 @@ def _decide_sighting(
     worth_looking = [
         target
         for target in targets
-        if is_worth_a_look(target, state, now_sim)
+        if is_worth_a_look(target, state, now_sim, can_improve=sight_can_still_improve)
         and within_field_of_regard(
             SIGHT_WIDE_OPTIC, target.azimuth_deg, target.elevation_deg
         )

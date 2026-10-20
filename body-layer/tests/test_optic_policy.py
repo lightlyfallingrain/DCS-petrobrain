@@ -40,6 +40,7 @@ from belief.optic_policy import (
     least_capable_sufficient_optic,
     lower_binoculars,
     search_pattern,
+    sight_can_still_improve,
     sight_look_optic,
 )
 from perception.optics import (
@@ -1844,18 +1845,10 @@ class TestSightLookOptic:
     """`sight_look_optic` in isolation -- `plans/9k113-narrow-search/
     plan.md` Stage 4 Part A, "least capable optic that suffices". Direct
     unit tests of the function, not through `_decide_sighting`'s own
-    `is_worth_a_look` gate: that gate's trigger window (`improvement_
-    window_m`, built from the naked eye's and binoculars' own thresholds)
-    tops out below wide's own threshold for every tier on every object
-    this codebase profiles -- `class_range_mult`/`type_range_mult` are
-    always higher for wide than for binoculars (7.00 vs 3.50, 6.50 vs
-    3.00), so a target just inside the trigger window is also always
-    inside wide's own reach. A live `_decide_sighting` look therefore
-    never reaches `sight_look_optic`'s narrow branch today -- a real gap,
-    noted in `implementation.md`'s Notable Discoveries, and out of this
-    stage's own scope (it only reaches a *given* chosen target, not what
-    gates choosing one). These tests exercise the function on its own
-    terms."""
+    candidate gate (`is_worth_a_look`/`sight_can_still_improve`, `plans/
+    9k113-narrow-search/review.md`'s required fix) -- these exercise the
+    function on its own terms, independent of what admits a target as a
+    candidate in the first place."""
 
     def test_a_close_presence_target_uses_wide(self) -> None:
         target = LookTarget(
@@ -1895,6 +1888,103 @@ class TestSightLookOptic:
             current_level="class",
         )
         assert sight_look_optic(target) is SIGHT_WIDE_OPTIC
+
+
+class TestSightCanStillImprove:
+    """`sight_can_still_improve` in isolation -- the required fix from
+    `plans/9k113-narrow-search/review.md`: an upper-bound check against
+    `SIGHT_NARROW_OPTIC`'s own class/type threshold, with no lower bound."""
+
+    def test_a_presence_target_beyond_binoculars_own_reach_can_still_improve(
+        self,
+    ) -> None:
+        """5000 m is beyond `BINOCULAR_OPTIC`'s own class threshold
+        (1750 m for a T-72) but inside `SIGHT_NARROW_OPTIC`'s (6875 m) --
+        exactly the gap the review's required fix closes."""
+        target = _target(range_m=5_000.0)
+        assert sight_can_still_improve(target)
+
+    def test_a_target_beyond_narrows_own_reach_cannot(self) -> None:
+        target = _target(range_m=10_000.0)
+        assert not sight_can_still_improve(target)
+
+    def test_a_very_close_target_still_can_improve_no_lower_bound(self) -> None:
+        """Unlike `improvement_window_m`, there is no lower bound: nothing
+        dwells in parallel to resolve a close contact for free while
+        `SIGHTING`, so a target well inside wide's own reach is still a
+        valid sight candidate."""
+        target = _target(range_m=10.0)
+        assert sight_can_still_improve(target)
+
+    def test_an_already_identified_target_cannot(self) -> None:
+        target = _target(current_level="type")
+        assert not sight_can_still_improve(target)
+
+    def test_a_classed_target_is_judged_against_the_type_threshold(self) -> None:
+        target = _target(range_m=4_000.0, current_level="class")
+        assert not sight_can_still_improve(
+            target
+        )  # beyond narrow's own type_m (3750 m)
+        target = _target(range_m=3_000.0, current_level="class")
+        assert sight_can_still_improve(target)
+
+
+class TestFarSightCandidateIsAdmittedAndSurvives:
+    """The review's required test (`plans/9k113-narrow-search/review.md`):
+    a contact beyond binocular's own reach, but within the sight's, must
+    both (1) be picked for a sight look and (2) survive past the poll
+    that started it -- not be ended one poll later by `look_is_finished`
+    still judging it against the eye/binocular window."""
+
+    def _sighting_state(self, **overrides: object) -> OpticState:
+        base = OpticState(
+            phase=OpticPhase.SIGHTING,
+            phase_started_sim=0.0,
+            home_phase=OpticPhase.SIGHTING,
+        )
+        return replace(base, **overrides)  # type: ignore[arg-type]
+
+    def test_a_far_contact_is_picked_for_a_sight_look(self) -> None:
+        """5000 m: beyond `BINOCULAR_OPTIC`'s own 1750 m class threshold,
+        within `SIGHT_NARROW_OPTIC`'s 6875 m -- and beyond `SIGHT_WIDE_
+        OPTIC`'s own 3500 m, so `sight_look_optic` must pick narrow."""
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target(range_m=5_000.0)],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_NARROW_OPTIC
+        assert decision.look_azimuth_deg is not None
+
+    def test_the_look_survives_past_the_poll_that_started_it(self) -> None:
+        """The second poll must not find the look already finished --
+        before the fix, `look_is_finished` judged the in-progress look
+        against the eye/binocular window, found the target already past
+        it (it was only ever admitted by the sight's own wider window),
+        and ended the look one poll after it started."""
+        target = _target(range_m=5_000.0)
+        state, decision = decide(
+            self._sighting_state(),
+            now_sim=0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_NARROW_OPTIC
+
+        state, decision = decide(
+            state,
+            now_sim=1.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.look_contact_id == "CONTACT_1"
+        assert decision.optic is SIGHT_NARROW_OPTIC
 
 
 class TestFieldOfRegardEnforcement:

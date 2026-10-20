@@ -170,6 +170,15 @@ fresh tests cover both the fixed behaviour and the pre-existing `ahead`-is-unaff
    is a judgement call (which window should gate a *sight* look?) the plan does not make. Flagging
    for a follow-up backlog item. The function itself is correct and tested directly
    (`TestSightLookOptic`); the gap is in what currently calls it.
+
+   **Superseded 2026-10-20, by the review's required fix** (`plans/9k113-narrow-search/review.md`):
+   `_decide_sighting`'s candidate filter and its `look_is_finished` continuation check now both
+   take an injectable `can_improve` predicate, defaulting to `can_still_improve` (the eye/binocular
+   window, unchanged for every other caller) but overridden to the new `sight_can_still_improve`
+   (an upper-bound check against `SIGHT_NARROW_OPTIC`'s own class/type threshold, no lower bound)
+   at both of `_decide_sighting`'s call sites. A live sight look can now reach `SIGHT_NARROW_OPTIC`
+   -- see `TestNarrowReachableAtRange` in `test_optic_policy.py`, which asserts both that a far
+   target is picked and that the resulting look survives past the poll that started it.
 2. **`_split_sector_by_regard`'s out-of-regard clamping had a latent defect**, found by testing an
    edge case beyond the four named `RelativeSector`s (a span entirely outside the regard on one
    side, e.g. centre 90°, half-width 10°, regard 60°). The given formula fixed the out-span's near
@@ -192,3 +201,58 @@ fresh tests cover both the fixed behaviour and the pre-existing `ahead`-is-unaff
    band edges to place three legs against, and "keep the band edges as the existing tunables"
    rules out inventing a fourth. If this reading is wrong, the fix is confined to `logger.py`'s
    `sight_wide_search=_sight_in_regard_sweep(...)` call (one `near_m`/`far_m` pair).
+
+---
+
+### Required fix round (`plans/9k113-narrow-search/review.md`)
+
+The review's one required fix: the "worth a look" gate admitting a contact to `_decide_sighting`'s
+candidate list was bound to the naked-eye/binocular pair (`improvement_window_m`), not the sight's
+own reach, so a contact beyond binocular's own reach never became a sight candidate at all and
+narrow was never triggered live (Notable Discovery 1 above, now superseded).
+
+**Shape, as recommended by the review:**
+
+- `sight_can_still_improve(target) -> bool` (`optic_policy.py`, beside `sight_look_optic`) -- a
+  single upper-bound check against `SIGHT_NARROW_OPTIC`'s own class/type threshold, **no lower
+  bound** (unlike `improvement_window_m`'s two-sided window -- while `SIGHTING` nothing dwells in
+  parallel to resolve a close contact for free, so there is no equivalent exclusion).
+- `is_worth_a_look` and `look_is_finished` both gained an injectable `can_improve: Callable[
+  [LookTarget], bool] = can_still_improve` keyword, a true no-op for every pre-existing caller.
+- `_decide_sighting`'s **two** call sites both pass `can_improve=sight_can_still_improve`: the
+  candidate filter (`worth_looking`) and the `look_is_finished` continuation check. The second
+  call site is not optional -- without it, a newly-admitted far contact is picked on the poll it
+  starts and then found already outside the eye/binocular window on the very next poll, ending the
+  look (and committing `attempted_at_range_m` as if it had resolved something) one poll after it
+  began -- silently reintroducing the exact defect the fix closes. Confirmed by mutation: removing
+  either call site's threading independently (checksum-verified restore after each) makes the new
+  survival test (and, for the candidate-filter removal, the pick test too) fail for exactly that
+  reason.
+- `_decide_without_guidance`'s `SCANNING`-at-home call sites (the plain `is_worth_a_look`/`look_is_
+  finished` calls, untouched) are left exactly as they were -- the OBSERV-off path is provably
+  unchanged, since neither received the new keyword.
+
+**Files changed this round**: `body-layer/src/belief/optic_policy.py` (the predicate, the two
+keyword parameters, the two call sites); `body-layer/tests/test_optic_policy.py` (`TestSightCan
+StillImprove`, `TestFarSightCandidateIsAdmittedAndSurvives`, and `TestSightLookOptic`'s class
+docstring updated -- the "narrow is unreachable" claim it made is no longer true); this file
+(Notable Discovery 1 marked superseded above). No tunables added, no `defaults.toml` change.
+
+**Tests added**:
+- `TestSightCanStillImprove` -- the predicate in isolation: a target beyond binocular's own class
+  threshold but within narrow's can still improve; one beyond narrow's own reach cannot; no lower
+  bound (a very close target still can); an already-`type`-level target cannot; a `"class"`-level
+  target is judged against narrow's own type threshold, not class.
+- `TestFarSightCandidateIsAdmittedAndSurvives` -- the review's required test: a 5000 m T-72
+  presence-level target (beyond `BINOCULAR_OPTIC`'s 1750 m class threshold and `SIGHT_WIDE_OPTIC`'s
+  3500 m, within `SIGHT_NARROW_OPTIC`'s 6875 m) is picked for a sight look with `decision.optic is
+  SIGHT_NARROW_OPTIC`, and the look survives a second poll (`state.look_contact_id` unchanged)
+  rather than being ended by `look_is_finished` one poll after it started.
+
+**Checks (this round)**: `ruff format --check src tests`: pass (after one reformat of the two
+touched files). `ruff check src tests`: pass. `mypy src`: pass, no issues in 68 source files.
+`pytest tests -q`: 2273 passed, 4 xfailed, 0 failed (two separate flaky failures observed across
+two runs -- `test_connection_reporter_says_disconnected_once_then_connected_once` and
+`test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure` -- both from the
+task's own known-flake list, both pass alone on rerun, neither touches `optic_policy.py` or this
+change's call paths).
