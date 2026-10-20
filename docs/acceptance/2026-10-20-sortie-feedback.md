@@ -410,3 +410,17 @@ advances is re-granted sight looks indefinitely and starves the search cycle.
 So it is built into `feature/9k113-narrow-search` before merge. A contact that has had its sight
 time without progressing has to give way to the search (and to other contacts) for a while: a
 tunable time bound, not an open-ended re-grant.
+
+## F5 — the 9K113 vertical limits are boresight-relative (user, 2026-10-20)
+
+On the elevation-regard fix (sweep steps below −15° dropped, so the near band drops out above
+~625 m AGL), and BL-B86 (the whole free-scan search stops above ~3.6–4 km AGL):
+
+> 9K113 angular (vertical) limits
+>
+> * they are *boresight* relative. nose low position at high altitude would allow a near scan. Nose
+>   high at low alt would limit near scan. It is *not* about distance, but *angles relative to
+>   boresight*.
+
+The +20°/−15° (and ±60°) limits are relative to the aircraft's boresight, so pitch (and bank)
+matter. A distance/altitude rule is the wrong model.
