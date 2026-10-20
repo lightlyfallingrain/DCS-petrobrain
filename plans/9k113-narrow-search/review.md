@@ -150,3 +150,113 @@ two most behaviour-critical fixes: `_apply_guidance`'s fourth aim-safety path, a
 `_split_sector_by_regard`'s out-of-regard clamp. Did not mutate every test individually (the diff
 is large); spot-checked the rewritten range-sensitive tests against `sight_look_optic`'s actual
 thresholds rather than re-deriving each one by hand.
+
+---
+
+### Re-review — required-fix commit `33a5238a` (parent `4c815cb8`)
+
+Checked out detached at `33a5238af718a5c4076fc7c00a13fc3fae3ab189` in an isolated worktree (clean
+tree, confirmed before and after). Reviewed `optic_policy.py`'s and `test_optic_policy.py`'s diffs
+against this commit's own message, `implementation.md`'s appended "Required fix round" section, and
+the original review's required-fix spec above.
+
+**Shape matches the recommendation exactly.** `sight_can_still_improve` is the single upper-bound
+check against `SIGHT_NARROW_OPTIC`'s own class/type threshold, no lower bound, built the same way
+as `sight_look_optic` (`profile_for`/`apparent_extent_m`/`distinctiveness_of`/`tier_ranges`). `is_
+worth_a_look` and `look_is_finished` both gained the injectable `can_improve` keyword, defaulting
+to `can_still_improve` — a true no-op confirmed by inspection of the diff (every other caller is
+textually unchanged). `_decide_sighting`'s two call sites (the `worth_looking` filter and the
+`look_is_finished` continuation check) both pass `can_improve=sight_can_still_improve`; the
+`SCANNING`-at-home call sites (`:2045`'s `look_is_finished(state, now_sim, targets)` and `:2150`'s
+`is_worth_a_look(target, state, now_sim)`) carry no new keyword at all.
+
+**Mechanical checks, this subproject (`body-layer/`) only, on `33a5238a`:**
+- `ruff format --check src tests`: pass.
+- `ruff check src tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues in 68 source files.
+- `pytest tests -q`: 1 failure on first run —
+  `test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop` — on the task's own
+  known-flake list; passed alone on rerun (2.46 s). No other failures. `test_tuning_defaults_toml.py`
+  (the `defaults.toml` staleness gate): pass. No tunables touched this round, consistent with the
+  commit's own claim.
+
+**Verified by mutation myself, both call sites, independently** (restored each time; `git diff`
+empty after, confirmed):
+- Reverting the `look_is_finished` call at `:1796` (dropping `can_improve=sight_can_still_improve`)
+  leaves `test_a_far_contact_is_picked_for_a_sight_look` green but fails `test_the_look_survives_
+  past_the_poll_that_started_it` — `state.look_contact_id` goes to `None` on the second poll,
+  exactly the "ends one poll after it starts" defect the commit message describes.
+- Reverting the `is_worth_a_look` call at `:1872` (dropping the keyword there) fails **both**
+  tests — the far contact is never picked at all (`look_contact_id` stays `None` from the first
+  poll), confirming the candidate-filter call site is the one doing the actual admission.
+
+Both mutations reproduce exactly the two distinct failure modes the commit message and `plans/
+9k113-narrow-search/implementation.md` claim for them — not merely "a test goes red somewhere."
+
+**Far contact, regard, completion — reproduced directly**, not only via the shipped tests: a 5000 m
+T-72 presence target is picked (`decision.optic is SIGHT_NARROW_OPTIC`, as `sight_look_optic`
+requires beyond wide's 3500 m threshold) and the look survives at least one further poll. Confirmed
+with a standalone `decide()` call outside the test file as well as via the shipped `TestFarSight
+CandidateIsAdmittedAndSurvives`.
+
+**Close-contact / no-lower-bound question, exercised directly (not only read):**
+- A close contact (80 m, presence) under `SIGHTING` is picked for a look with `decision.optic is
+  SIGHT_WIDE_OPTIC` — confirmed by direct `decide()` call. Matches the user's "least capable optic
+  that suffices" and `sight_look_optic`'s own close-range branch; the no-lower-bound admission does
+  not misroute it to narrow.
+- **Search-cycle starvation, both directions tested with real `search_pattern`-built sequences for
+  all three legs (not empty placeholders) over 900 simulated seconds, three simultaneous close
+  contacts (50/80/120 m, T-72, presence) in regard:**
+  - *Pessimistic stress case* — contacts held at `presence` forever (classification never
+    advances, which does not reflect how the real belief layer behaves but isolates the gate's own
+    worst case): the sight is busy on a look for 792/900 polls (88%), idle/search-eligible for only
+    27/900 (3%), and `sight_search_leg` never advances past its initial `"wide"` for the whole run —
+    **the narrow search cycle is fully starved** in this scenario.
+  - *Realistic case* — each contact's belief level is bumped one tier (`presence → class → type`)
+    the poll after its look naturally completes, modelling what the real classification pipeline
+    does with a completed dwell (not modelled by `optic_policy` itself, which only decides where to
+    look): all three contacts reach `type` and permanently exit candidacy by ~t=175 s. From there
+    the search cycle runs freely — 644/900 polls (71.5%) idle/search-eligible overall, and `sight_
+    search_leg` cycles `wide → narrow_near → narrow_far → wide → …` repeatedly (33 leg transitions
+    across the run, each full cycle ~66 s) for the remaining ~725 s.
+
+  **Acceptable, for two reasons, neither of which is new to this fix:** (1) "identification takes
+  priority over search" is this module's own stated, pre-existing rule for the `SCANNING`-at-home
+  path too (`_decide_without_guidance`'s own docstring, unchanged by this commit) — extending it to
+  the sight is applying an existing precedent, not inventing a new one. (2) The pessimistic case
+  requires a contact that is looked at repeatedly at close range (well inside even the naked eye's
+  own classification reach) and never gains a tier — that is already a pre-existing systemic risk
+  for any stuck contact under the *old* gate too (a mid-range contact stuck at `presence` inside
+  the binocular window could starve `GLASSING` the same way before this fix shipped); the no-lower-
+  bound change widens *which* contacts can trigger it (now close ones too, previously excluded by
+  `can_still_improve`'s lower bound), it does not create the failure mode. Worth a one-line note in
+  `implementation.md` or a backlog item flagging that a contact which never gains a classification
+  tier despite repeated close-range looks will monopolise the sight — genuinely possible if the
+  belief layer's own classification logic stalls for some reason — but not a blocker: the realistic
+  case (classification does advance, which is what the belief layer is built to do) recovers search
+  within minutes and keeps it running the large majority of the time after.
+
+**OBSERV-off path, reproduced directly (not only read):** with `home_phase is SCANNING`, neither a
+close contact (80 m) nor a far one (5000 m) is picked for a look (`look_contact_id` stays `None`,
+`decision.optic` stays `unaided` for both) — identical to pre-fix behaviour, confirming the two
+untouched call sites really are untouched in effect, not only in source text.
+
+**Stale-claim corrections landed as required.** `implementation.md`'s Notable Discovery 1 is marked
+superseded with the fix's own shape; `TestSightLookOptic`'s class docstring no longer asserts the
+now-false "narrow is unreachable" claim.
+
+---
+
+### Re-review Verdict
+APPROVE
+
+### Re-review Confidence
+Full read of this commit's diff (`optic_policy.py`, `test_optic_policy.py`, `implementation.md`).
+Verified by mutation, both call sites independently, restored and confirmed via empty `git diff`.
+Ran the full `body-layer` check suite on this exact tip (one known timing flake, reproduced and
+cleared on rerun — unrelated to this change's call paths). Exercised the far-contact pick/survive
+path and the OBSERV-off path directly via `decide()`, outside the shipped tests. Constructed and
+ran two independent close-contact scenarios (pessimistic and realistic) over 900 simulated seconds
+each to answer the search-starvation question empirically rather than by inspection alone; flagged
+the pessimistic case's full-starvation result as a disclosed, pre-existing-class risk rather than a
+blocker, with a recommended one-line note for `implementation.md` (optional, not required).
