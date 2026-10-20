@@ -53,6 +53,11 @@ User, verbatim:
 A8 (9K113) and A12 (gun fire) produced sortie feedback F4–F6, now being built
 (`feature/9k113-narrow-search`; `fix/taking-fire-visible-shooter` merged).
 
+User: *"A18 - ok, pass"*.
+
+| A18 | wrong theatre, then back (BL-15) | pass |
+|---|---|---|
+
 ## Still open
 
-A6, A7, A9, A18, B, C, L.
+A6, A7, A9, B, C, L.
