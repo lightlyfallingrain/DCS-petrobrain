@@ -308,3 +308,18 @@ finding that today's binocular search for left/right/full sweeps around dead ahe
 
 Default search width with nothing commanded — full ±60° regard — was recommended and not objected
 to; proceeding with it.
+
+### F4/F5 — "as needed" settled (user, 2026-10-20)
+
+Options offered: A — narrow sweeps both bands, near first, wide only to orient; B — terrain-aware
+(concentrate near when a ridge closes the far band); C — weather-aware.
+
+> approved. There's already item about taking waether into account, link C with that.
+> B would be a natural consequence of angles. Wherever the 9K113 happens to be pointing, if terrain
+> blocks there's no LOS. However if there's something nearside on that terrain it can be seen. B
+> can be left till later.
+
+A is built now. C is linked to the existing weather/light/vegetation item (`BL-B22`'s "Detection
+under real world conditions" section). B is deferred: perception already handles it per look
+(no LOS behind terrain, nearside visible). What is deferred is only the search pattern adapting
+its depth to terrain.
