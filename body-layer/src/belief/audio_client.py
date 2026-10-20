@@ -30,12 +30,19 @@ place that decides to log-and-continue, not this client (same division
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
 _DEFAULT_TIMEOUT_S = 5.0
+
+#: A tilde before a figure is spoken as "about" -- Piper reads "~800" as
+#: "tilde 800" (2026-10-20 sortie, user: *"replace "~" with "about" in all
+#: speech"*). Applied here, at the one place speech leaves body-layer, so
+#: it also covers text no template controls, such as a brain reply.
+_TILDE_RE = re.compile(r"~\s*")
 
 
 class AudioAdapterError(RuntimeError):
@@ -60,6 +67,7 @@ class AudioAdapterClient:
         why this call, unlike a swallow-internally design, does not catch
         its own failure."""
         url = f"{self.base_url}/speak"
+        text = _TILDE_RE.sub("about ", text)
         data = json.dumps({"text": text, "urgent": urgent}).encode("utf-8")
         request = urllib.request.Request(
             url,

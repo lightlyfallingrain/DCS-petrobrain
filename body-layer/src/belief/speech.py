@@ -104,8 +104,8 @@ highest-confidence `belief.enrichment.SemanticFact.text` among
 `facts["semantic"]`, mirroring `belief.console.format_event_for_overlay`'s
 own selection (`max(..., key=lambda fact: fact["confidence"])`); omitted
 when `facts["semantic"]` is absent/empty; its embedded trailing distance
-(e.g. `"near a road (439m)"`) is rounded to the nearest 100 m with a `~`
-prefix (`_round_enrichment_fragment`, regex-based -- `SemanticFact.text`
+(e.g. `"near a road (439m)"`) is rounded to the nearest 100 m with an
+"about" prefix (`_round_enrichment_fragment`, regex-based -- `SemanticFact.text`
 itself, in `enrichment.py`, is untouched and shared with the unaffected
 console/debug path).
 
@@ -161,7 +161,8 @@ narration settled decision 4 warns against).
 opened 2026-09-18, this pass 2026-09-19).** Units are spelled out for TTS
 (`_format_range_km` now returns `"5 kilometres"`, not `"5 km"`; the
 enrichment-distance parenthetical `_round_enrichment_fragment` rounds now
-reads `"(~400 metres)"`, not `"(~400m)"` -- shorthand is not read correctly).
+reads `"(about 400 metres)"`, not `"(~400m)"` -- shorthand is not read correctly;
+the `~` itself was later spelled out too, since Piper reads it as "tilde").
 British "kilometres"/"metres" was kept rather than switched to American
 spelling, matching this file's own pre-existing usage (this docstring's
 "eleven o'clock, two kilometres" worked example, `tools.py`'s own
@@ -1865,8 +1866,8 @@ def _compass_word(heading_deg: float) -> str:
 
 def _round_enrichment_fragment(text: str) -> str:
     """Round a `SemanticFact.text` fragment's trailing `"(NNNm)"` distance to
-    the nearest 100 m, prefixed with `~` and spelled out for TTS
-    (`"near a road (439m)"` -> `"near a road (~400 metres)"`). Text with no
+    the nearest 100 m, prefixed with "about" and spelled out for TTS
+    (`"near a road (439m)"` -> `"near a road (about 400 metres)"`). Text with no
     trailing distance parenthetical (e.g. `"inside Anapa"`, or `enrichment.
     py`'s new `"on {label}"`/`"next to {label}"` proximity phrasing, which
     carries no distance figure at all) passes through unchanged.
@@ -1877,7 +1878,7 @@ def _round_enrichment_fragment(text: str) -> str:
     if match is None:
         return text
     rounded = round(int(match.group(1)) / 100.0) * 100
-    return f"{text[: match.start()]}(~{rounded} metres)"
+    return f"{text[: match.start()]}(about {rounded} metres)"
 
 
 def _contact_report_text(
