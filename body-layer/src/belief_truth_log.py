@@ -297,6 +297,10 @@ class BeliefTruthLogWriter:
         attack_run_tier: int | None = None,
         attack_run_azimuth_deg: float | None = None,
         attack_run_elevation_deg: float | None = None,
+        correlation_id: str | None = None,
+        push_sent_wall: float | None = None,
+        push_acked_wall: float | None = None,
+        push_duration_s: float | None = None,
     ) -> None:
         """Write one `kind: "speech"` row -- what Petrovich actually said,
         on the same timeline as the belief-versus-truth rows.
@@ -356,7 +360,19 @@ class BeliefTruthLogWriter:
         ownship state was unavailable) omits the corresponding field, the
         same absent-not-null convention `gaze_label`/`gaze_center_deg`/
         `optic_name` already follow -- a missing field means "not known",
-        never "zero"."""
+        never "zero".
+
+        `correlation_id`/`push_sent_wall`/`push_acked_wall`/`push_duration_s`
+        (`plans/voice-latency-instrumentation/plan.md` Stage 3) join this
+        row to the rest of one utterance's timeline across every process it
+        crosses (`tools/join_voice_latency.py`). `push_sent_wall`/
+        `push_acked_wall` are ordinary wall-clock, recorded for ordering/
+        context only -- `_print`'s own `time.monotonic()` bracket around
+        the `push_speech` call is what makes `push_duration_s` the
+        trustworthy number (see that method's docstring and the plan's
+        "What the investigation found" on cross-machine clocks). `None`
+        for every line that was never pushed to `speech_client` at all
+        (`silenced`, or no `speech_client` configured)."""
         row: dict[str, object] = {
             "kind": "speech",
             "t_sim": t_sim,
@@ -385,6 +401,14 @@ class BeliefTruthLogWriter:
             row["attack_run_azimuth_deg"] = attack_run_azimuth_deg
         if attack_run_elevation_deg is not None:
             row["attack_run_elevation_deg"] = attack_run_elevation_deg
+        if correlation_id is not None:
+            row["correlation_id"] = correlation_id
+        if push_sent_wall is not None:
+            row["push_sent_wall"] = push_sent_wall
+        if push_acked_wall is not None:
+            row["push_acked_wall"] = push_acked_wall
+        if push_duration_s is not None:
+            row["push_duration_s"] = push_duration_s
         if self._disabled:
             return
         try:

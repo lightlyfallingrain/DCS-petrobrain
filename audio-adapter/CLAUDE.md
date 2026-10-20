@@ -197,6 +197,16 @@ PYTHONPATH=src .venv/bin/python -m audio_adapter.capture \
 Run `PYTHONPATH=src python tools/probe_joystick.py` on the Windows box first to get the device id
 and button number — and remember it numbers buttons from 0 while DCS's binding UI numbers from 1.
 
+**Voice-latency instrumentation (`plans/voice-latency-instrumentation/plan.md`)**: both
+`python -m audio_adapter.capture` and `python -m audio_adapter` take `--latency-log PATH` (default
+off, a true no-op when absent). Capture mints a `correlation_id` at PTT release and threads it
+(plus the release timestamp) through `POST /transcribe`/`POST /speak`'s own optional body fields;
+the server times synthesis/delivery (`/speak`) and recognition/match (`/transcribe`) with
+`time.monotonic()` and writes one `--latency-log` row per attempt, including failures. Reduce one
+or more `--latency-log`/body-layer `--speech-log`/`--belief-truth-log` files with
+`body-layer/tools/join_voice_latency.py` for the joined per-utterance timeline — see that script's
+own module docstring for how to read one.
+
 `POST /transcribe`'s response is just `{"ok": true}` — the recognised text and match metadata land
 in the queue `GET /transcripts/poll` drains (`{"transcript", "confidence", "token", "match_ratio",
 "verb_anchored", "ambiguous", "t_wall"}` per entry, `[]` when nothing is pending), the same seven

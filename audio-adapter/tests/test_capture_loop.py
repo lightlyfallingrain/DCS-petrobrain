@@ -50,12 +50,20 @@ class FakeRecorder:
 class FakeSink:
     def __init__(self) -> None:
         self.sent: list[bytes] = []
+        #: `(correlation_id, t_ptt_release_wall)` for every call -- a
+        #: separate list rather than widening `sent`'s own tuples, so every
+        #: existing assertion on `sent == [...]` (bytes only) keeps working
+        #: unchanged.
+        self.correlation_ids: list[tuple[str, float]] = []
         self.error: Exception | None = None
 
-    def __call__(self, wav: bytes) -> None:
+    def __call__(
+        self, wav: bytes, correlation_id: str, t_ptt_release_wall: float
+    ) -> None:
         if self.error is not None:
             raise self.error
         self.sent.append(wav)
+        self.correlation_ids.append((correlation_id, t_ptt_release_wall))
 
 
 def build(
@@ -385,3 +393,58 @@ def test_an_ordinary_long_press_is_not_abandoned() -> None:
     assert loop.tick() == []
     ptt.down = False
     assert [event.kind for event in loop.tick()] == ["sent"]
+
+
+def test_sent_event_carries_correlation_id_and_durations() -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 1 -- a sent clip
+    is traceable: a correlation id, the PTT-release wall stamp, the clip's
+    own recorded duration, and the post-to-adapter call's own monotonic
+    duration."""
+    loop, ptt, _, sink, _ = build()
+    ptt.down = True
+    loop.tick()
+    ptt.down = False
+    events = loop.tick()
+    assert [event.kind for event in events] == ["sent"]
+    event = events[0]
+    assert event.correlation_id is not None
+    assert len(event.correlation_id) > 0
+    assert event.t_ptt_release_wall is not None
+    assert event.clip_duration_s == pytest.approx(1.2)
+    assert event.post_duration_s is not None
+    assert event.post_duration_s >= 0.0
+    # The sink itself received the same id/stamp this event carries.
+    assert len(sink.correlation_ids) == 1
+    sent_id, sent_wall = sink.correlation_ids[0]
+    assert sent_id == event.correlation_id
+    assert sent_wall == event.t_ptt_release_wall
+
+
+def test_dropped_and_error_events_still_carry_a_correlation_id() -> None:
+    """Minted before the gate even runs -- a clip the gate drops is just as
+    traceable in `--latency-log` as one that reaches the adapter."""
+    recorder = FakeRecorder(Clip(wav=b"x", duration_s=0.1, peak=0.5))
+    loop, ptt, _, _, _ = build(recorder=recorder)
+    ptt.down = True
+    loop.tick()
+    ptt.down = False
+    events = loop.tick()
+    assert [event.kind for event in events] == ["dropped"]
+    assert events[0].correlation_id is not None
+    assert events[0].t_ptt_release_wall is not None
+    assert events[0].post_duration_s is None
+
+
+def test_each_release_mints_a_distinct_correlation_id() -> None:
+    loop, ptt, _, sink, _ = build()
+    ptt.down = True
+    loop.tick()
+    ptt.down = False
+    loop.tick()
+    ptt.down = True
+    loop.tick()
+    ptt.down = False
+    loop.tick()
+    ids = [cid for cid, _wall in sink.correlation_ids]
+    assert len(ids) == 2
+    assert ids[0] != ids[1]

@@ -2129,6 +2129,10 @@ def test_speech_log_sink_forwards_attack_run_fields() -> None:
             "attack_run_azimuth_deg": -7.5,
             "attack_run_elevation_deg": 0.0,
         },
+        None,
+        None,
+        None,
+        None,
     )
 
     assert len(writer.calls) == 1
@@ -2146,7 +2150,7 @@ def test_speech_log_sink_omits_attack_run_fields_for_an_ordinary_line() -> None:
     runner.last_t_sim = 5.0
     sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
 
-    sink("Scanning right.", False, None)
+    sink("Scanning right.", False, None, None, None, None, None)
 
     assert len(writer.calls) == 1
     call = writer.calls[0]
@@ -2176,7 +2180,7 @@ def test_speech_log_sink_forwards_ownship_attitude() -> None:
     )
     sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
 
-    sink("Lined up, obstructed.", False, None)
+    sink("Lined up, obstructed.", False, None, None, None, None, None)
 
     assert len(writer.calls) == 1
     call = writer.calls[0]
@@ -2197,7 +2201,7 @@ def test_speech_log_sink_omits_ownship_attitude_before_first_poll() -> None:
     runner.last_t_sim = 5.0
     sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
 
-    sink("Scanning right.", False, None)
+    sink("Scanning right.", False, None, None, None, None, None)
 
     assert len(writer.calls) == 1
     call = writer.calls[0]
@@ -2205,6 +2209,40 @@ def test_speech_log_sink_omits_ownship_attitude_before_first_poll() -> None:
     assert call["ownship_bank_deg"] is None
     assert call["ownship_heading_true_deg"] is None
     assert call["ownship_alt_m"] is None
+
+
+def test_speech_log_sink_forwards_correlation_and_push_timing() -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 3 -- `_print`'s
+    own four latest arguments relayed straight through to `write_speech`."""
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 5.0
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Target, armour, 2 o'clock.", False, None, "corr-1", 100.0, 100.05, 0.05)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["correlation_id"] == "corr-1"
+    assert call["push_sent_wall"] == 100.0
+    assert call["push_acked_wall"] == 100.05
+    assert call["push_duration_s"] == 0.05
+
+
+def test_speech_log_sink_omits_correlation_and_push_timing_when_absent() -> None:
+    writer = _RecordingSpeechWriter()
+    runner = ConsolePerceptionRunner(aircraft_client=None)  # type: ignore[arg-type]
+    runner.last_t_sim = 5.0
+    sink = _speech_log_sink(writer, runner)  # type: ignore[arg-type]
+
+    sink("Scanning right.", False, None, None, None, None, None)
+
+    assert len(writer.calls) == 1
+    call = writer.calls[0]
+    assert call["correlation_id"] is None
+    assert call["push_sent_wall"] is None
+    assert call["push_acked_wall"] is None
+    assert call["push_duration_s"] is None
 
 
 def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
@@ -2616,6 +2654,10 @@ class _RecordingCrewConsole:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None, dict[str, int | str] | None]] = []
+        #: `correlation_id` for every call, in order -- kept separate from
+        #: `calls` so every existing assertion on that tuple (transcript/
+        #: token/slots only) keeps working unchanged.
+        self.correlation_ids: list[str | None] = []
 
     def handle_transcript(
         self,
@@ -2627,8 +2669,10 @@ class _RecordingCrewConsole:
         ambiguous: bool,
         now_sim: float,
         slots: dict[str, int | str] | None = None,
+        correlation_id: str | None = None,
     ) -> list[str]:
         self.calls.append((transcript, token, slots))
+        self.correlation_ids.append(correlation_id)
         return []
 
 
@@ -2657,6 +2701,48 @@ def test_poll_transcripts_threads_slots_into_handle_transcript() -> None:
     assert console.calls == [
         ("scan bearing three two zero", "scan_bearing_deg", {"bearing_degrees": 320})
     ]
+    assert console.correlation_ids == [None]
+
+
+def test_poll_transcripts_threads_correlation_id_into_handle_transcript() -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 3."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan left",
+                "confidence": 0.9,
+                "token": "scan_left",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "correlation_id": "corr-abc123",
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.correlation_ids == ["corr-abc123"]
+
+
+def test_poll_transcripts_skips_items_with_a_non_string_correlation_id() -> None:
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan left",
+                "confidence": 0.9,
+                "token": "scan_left",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "correlation_id": 123,  # wrong type, must be skipped
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
 
 
 def test_poll_transcripts_skips_items_with_slots_that_are_not_a_dict() -> None:

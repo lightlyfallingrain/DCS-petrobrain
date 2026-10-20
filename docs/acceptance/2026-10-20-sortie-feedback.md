@@ -399,6 +399,25 @@ Beyond that reach only narrow brings information.
 Fix F2 (a transmission starting "Petrovich" routes to the brain) once `feature/9k113-narrow-search`
 has merged. That unblocks card item A14.
 
+## F8 — speaking must be asynchronous; layers don't wait on each other (user, 2026-10-20)
+
+On the performance review's finding that body-layer's `push_speech` is a blocking HTTP call on the
+poll loop, so the whole loop waits while he speaks:
+
+> --> that is no good. Speaking must be asynchronous. Generally the different layers should not
+> need to wait on eachother, but work with asynchronous calls. Exceptions allowed with good
+> reasoning.
+>
+> Petrovich cannot speak two things at one time, he only has one mouth. But mouth is independent
+> of eyes and arms. He can look at things while speaking, can manipulate cockpit while speaking and
+> brain can reason about something while other parts (layers) do their own things.
+
+Standing direction, not only this fix:
+1. Speech is asynchronous. The poll loop (eyes), effectors (arms) and the brain never wait for the
+   mouth.
+2. One mouth: utterances are serialised, never spoken over each other.
+3. Generally, layers talk to each other asynchronously. A blocking cross-layer call needs a stated
+   reason.
 ## F4 — BL-B85 is required, not backlog (user, 2026-10-20)
 
 Reviewer and security filed `BL-B85` as non-blocking: a contact whose classification never

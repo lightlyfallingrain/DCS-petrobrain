@@ -567,3 +567,51 @@ def test_run_applies_volume_scaling_before_playback(tmp_path: Path) -> None:
         data = array("h")
         data.frombytes(r.readframes(r.getnframes()))
     assert list(data) == [500, -1000]
+
+
+def test_correlation_id_logs_enqueue_start_and_finish(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 4 -- this
+    process's one piece of the voice chain with no prior observability at
+    all. A line posted with no `correlation_id` (every pre-existing caller)
+    must log none of this, which `test_routine_lines_play_fifo_in_order`
+    already covers by never asserting these messages appear."""
+    player = _FakePlayer()
+    sender = AudioPlaybackSender(player=player)
+    sender.open()
+    with caplog.at_level("INFO", logger="collector.audio_sender"):
+        try:
+            sender.play_audio(b"CORR-WAV", urgent=False, correlation_id="corr-1")
+            assert _wait_until(lambda: len(player.played) == 1)
+        finally:
+            sender.close()
+
+    messages = [record.message for record in caplog.records]
+    assert any("audio enqueue correlation_id=corr-1" in message for message in messages)
+    assert any(
+        "audio playback-start correlation_id=corr-1" in message for message in messages
+    )
+    assert any(
+        "audio playback-finish correlation_id=corr-1" in message for message in messages
+    )
+
+
+def test_no_correlation_id_means_no_correlation_log_lines(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A clean negative: a line with no id must not produce any of the
+    three log lines above -- proves the gate, not just that the positive
+    case fires."""
+    player = _FakePlayer()
+    sender = AudioPlaybackSender(player=player)
+    sender.open()
+    with caplog.at_level("INFO", logger="collector.audio_sender"):
+        try:
+            sender.play_audio(b"NO-CORR", urgent=False)
+            assert _wait_until(lambda: len(player.played) == 1)
+        finally:
+            sender.close()
+
+    messages = [record.message for record in caplog.records]
+    assert not any("correlation_id" in message for message in messages)

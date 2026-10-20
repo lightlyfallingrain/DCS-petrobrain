@@ -84,7 +84,7 @@ def test_reroll_closes_the_old_belief_truth_writer_and_rewires_crew_console_sink
     # writer, not left pointing at the old (now-closed) one -- the trap this
     # function's own docstring names explicitly.
     assert crew_console.speech_log_sink is not None
-    crew_console.speech_log_sink("hello", False, None)
+    crew_console.speech_log_sink("hello", False, None, None, None, None, None)
     assert new_writer._path.read_text().strip() != ""
 
 

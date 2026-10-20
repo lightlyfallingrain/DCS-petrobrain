@@ -12,9 +12,11 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
+from latency_log import LatencyLogWriter
 from server import AudioDeliveryError, TTSAdapterServer
 from tts_engine import TTSSynthesisError
 
@@ -46,12 +48,19 @@ class _RecordingSink:
         self.should_fail = should_fail
         self.should_fail_interrupt = should_fail_interrupt
         self.delivered: list[tuple[bytes, bool]] = []
+        #: The `correlation_id` each `deliver` call received, in order --
+        #: kept separate from `delivered` so every existing assertion on
+        #: that list (bytes/urgent only) keeps working unchanged.
+        self.delivered_correlation_ids: list[str | None] = []
         self.interrupt_calls = 0
 
-    def deliver(self, audio: bytes, urgent: bool) -> None:
+    def deliver(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         if self.should_fail:
             raise AudioDeliveryError("delivery failed (test double)")
         self.delivered.append((audio, urgent))
+        self.delivered_correlation_ids.append(correlation_id)
 
     def interrupt(self) -> None:
         if self.should_fail_interrupt:
@@ -230,6 +239,166 @@ def test_speak_unknown_path_returns_404(
     server, _engine, _sink = running_server
     status, _body = _post(server, "/nonexistent", {})
     assert status == 404
+
+
+# -- correlation_id (plans/voice-latency-instrumentation/plan.md) ---------
+
+
+def test_speak_correlation_id_threads_through_to_sink(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, _engine, sink = running_server
+    status, _body = _post(
+        server,
+        "/speak",
+        {"text": "Contact.", "correlation_id": "corr-speak-1"},
+    )
+    assert status == 200
+    assert sink.delivered_correlation_ids == ["corr-speak-1"]
+
+
+def test_speak_without_correlation_id_passes_none(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, _engine, sink = running_server
+    status, _body = _post(server, "/speak", {"text": "Contact."})
+    assert status == 200
+    assert sink.delivered_correlation_ids == [None]
+
+
+def test_speak_non_string_correlation_id_returns_400(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    status, _body = _post(server, "/speak", {"text": "hello", "correlation_id": 123})
+    assert status == 400
+    assert engine.requested_text == []
+    assert sink.delivered == []
+
+
+def test_speak_oversized_correlation_id_returns_400(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    status, _body = _post(
+        server, "/speak", {"text": "hello", "correlation_id": "x" * 129}
+    )
+    assert status == 400
+    assert engine.requested_text == []
+    assert sink.delivered == []
+
+
+# -- --latency-log (plans/voice-latency-instrumentation/plan.md) ----------
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def test_speak_success_writes_latency_log_row(tmp_path: Path) -> None:
+    engine = _FakeEngine()
+    sink = _RecordingSink()
+    latency_path = tmp_path / "latency.jsonl"
+    server = TTSAdapterServer(
+        engine,
+        sink,
+        host="127.0.0.1",
+        port=0,
+        latency_log=LatencyLogWriter(latency_path),
+    )
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _body = _post(
+            server, "/speak", {"text": "hello", "correlation_id": "corr-log"}
+        )
+        assert status == 200
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+    rows = _read_jsonl(latency_path)
+    assert len(rows) == 1
+    assert rows[0]["stage"] == "speak"
+    assert rows[0]["correlation_id"] == "corr-log"
+    assert rows[0]["outcome"] == "ok"
+    assert isinstance(rows[0]["synth_duration_s"], float)
+    assert isinstance(rows[0]["deliver_duration_s"], float)
+
+
+def test_speak_synthesis_failure_still_writes_latency_log_row(tmp_path: Path) -> None:
+    """Decision 4 (user, 2026-10-20): `--latency-log` records failed
+    attempts too."""
+    engine = _FakeEngine(should_fail=True)
+    sink = _RecordingSink()
+    latency_path = tmp_path / "latency.jsonl"
+    server = TTSAdapterServer(
+        engine,
+        sink,
+        host="127.0.0.1",
+        port=0,
+        latency_log=LatencyLogWriter(latency_path),
+    )
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _body = _post(
+            server, "/speak", {"text": "hello", "correlation_id": "corr-fail"}
+        )
+        assert status == 503
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+    rows = _read_jsonl(latency_path)
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "synthesis_failed"
+    assert rows[0]["correlation_id"] == "corr-fail"
+    assert "deliver_duration_s" not in rows[0]
+
+
+def test_speak_delivery_failure_still_writes_latency_log_row(tmp_path: Path) -> None:
+    engine = _FakeEngine()
+    sink = _RecordingSink(should_fail=True)
+    latency_path = tmp_path / "latency.jsonl"
+    server = TTSAdapterServer(
+        engine,
+        sink,
+        host="127.0.0.1",
+        port=0,
+        latency_log=LatencyLogWriter(latency_path),
+    )
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _body = _post(
+            server, "/speak", {"text": "hello", "correlation_id": "corr-deliver-fail"}
+        )
+        assert status == 500
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+    rows = _read_jsonl(latency_path)
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "delivery_failed"
+    assert isinstance(rows[0]["synth_duration_s"], float)
+    assert isinstance(rows[0]["deliver_duration_s"], float)
+
+
+def test_speak_without_latency_log_configured_writes_nothing(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    """`latency_log=None` (the default) is a true no-op -- no file is ever
+    touched, not merely left empty."""
+    server, _engine, _sink = running_server
+    status, _body = _post(server, "/speak", {"text": "hello"})
+    assert status == 200
 
 
 # -- POST /stop (plans/inbound-speech/plan.md Stage 3 follow-up) ------------

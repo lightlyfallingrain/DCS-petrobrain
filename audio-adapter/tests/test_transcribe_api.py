@@ -14,9 +14,11 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
+from latency_log import LatencyLogWriter
 from server import TTSAdapterServer
 from stt_engine import STTRecognitionError, Transcript
 from transcript_queue import TranscriptQueue
@@ -28,7 +30,9 @@ class _FakeTTSEngine:
 
 
 class _NullSink:
-    def deliver(self, audio: bytes, urgent: bool) -> None:
+    def deliver(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         pass
 
 
@@ -151,6 +155,7 @@ def test_transcribe_then_poll_round_trips_a_matched_command(
     assert isinstance(event["confidence"], float)
     assert isinstance(event["t_wall"], float)
     assert event["slots"] is None
+    assert event["correlation_id"] is None
     # Never audio-shaped fields.
     assert set(event) == {
         "transcript",
@@ -161,6 +166,7 @@ def test_transcribe_then_poll_round_trips_a_matched_command(
         "ambiguous",
         "t_wall",
         "slots",
+        "correlation_id",
     }
 
 
@@ -332,6 +338,155 @@ def test_speak_still_works_alongside_transcribe(
     status, body = _post(server, "/speak", {"text": "hello", "urgent": False})
     assert status == 200
     assert body == {"ok": True}
+
+
+# -- correlation_id / t_ptt_release_wall (plans/voice-latency-instrumentation/
+# plan.md Stage 2) --------------------------------------------------------
+
+
+def test_transcribe_correlation_id_carries_through_to_poll(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, _engine = running_server_with_stt
+    status, _body = _post(
+        server,
+        "/transcribe",
+        {"wav_b64": _wav_b64(), "correlation_id": "corr-trans-1"},
+    )
+    assert status == 200
+    status, body = _get(server, "/transcripts/poll")
+    assert status == 200
+    assert isinstance(body, list)
+    assert body[0]["correlation_id"] == "corr-trans-1"
+
+
+def test_transcribe_non_string_correlation_id_returns_400(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    status, _body = _post(
+        server, "/transcribe", {"wav_b64": _wav_b64(), "correlation_id": 123}
+    )
+    assert status == 400
+    assert engine.requested_wav == []
+
+
+def test_transcribe_oversized_correlation_id_returns_400(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    status, _body = _post(
+        server,
+        "/transcribe",
+        {"wav_b64": _wav_b64(), "correlation_id": "x" * 129},
+    )
+    assert status == 400
+    assert engine.requested_wav == []
+
+
+def test_transcribe_non_numeric_t_ptt_release_wall_returns_400(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    status, _body = _post(
+        server,
+        "/transcribe",
+        {"wav_b64": _wav_b64(), "t_ptt_release_wall": "not-a-number"},
+    )
+    assert status == 400
+    assert engine.requested_wav == []
+
+
+def test_transcribe_t_ptt_release_wall_is_accepted(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    status, _body = _post(
+        server,
+        "/transcribe",
+        {"wav_b64": _wav_b64(), "t_ptt_release_wall": 1234.5},
+    )
+    assert status == 200
+    assert engine.requested_wav == [b"FAKE-CLIP-BYTES"]
+
+
+# -- --latency-log (plans/voice-latency-instrumentation/plan.md) ----------
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def test_transcribe_success_writes_latency_log_row(tmp_path: Path) -> None:
+    engine = _FakeSTTEngine()
+    latency_path = tmp_path / "latency.jsonl"
+    server = TTSAdapterServer(
+        _FakeTTSEngine(),
+        _NullSink(),
+        host="127.0.0.1",
+        port=0,
+        stt_engine=engine,
+        latency_log=LatencyLogWriter(latency_path),
+    )
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _body = _post(
+            server,
+            "/transcribe",
+            {"wav_b64": _wav_b64(), "correlation_id": "corr-trans-log"},
+        )
+        assert status == 200
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+    rows = _read_jsonl(latency_path)
+    assert len(rows) == 1
+    assert rows[0]["stage"] == "transcribe"
+    assert rows[0]["correlation_id"] == "corr-trans-log"
+    assert rows[0]["outcome"] == "ok"
+    assert isinstance(rows[0]["transcribe_duration_s"], float)
+    assert isinstance(rows[0]["match_duration_s"], float)
+
+
+def test_transcribe_recognition_failure_still_writes_latency_log_row(
+    tmp_path: Path,
+) -> None:
+    """Decision 4 (user, 2026-10-20): `--latency-log` records failed STT
+    attempts too."""
+    engine = _FakeSTTEngine(should_fail=True)
+    latency_path = tmp_path / "latency.jsonl"
+    server = TTSAdapterServer(
+        _FakeTTSEngine(),
+        _NullSink(),
+        host="127.0.0.1",
+        port=0,
+        stt_engine=engine,
+        latency_log=LatencyLogWriter(latency_path),
+    )
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _body = _post(
+            server,
+            "/transcribe",
+            {"wav_b64": _wav_b64(), "correlation_id": "corr-trans-fail"},
+        )
+        assert status == 503
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+    rows = _read_jsonl(latency_path)
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "recognition_failed"
+    assert rows[0]["correlation_id"] == "corr-trans-fail"
+    assert "match_duration_s" not in rows[0]
 
 
 # -- Content-Length guard (security review, 2026-09-26) --------------------

@@ -61,6 +61,7 @@ from typing import Any, Protocol, Self
 from urllib.parse import urlparse
 
 from command_matcher import match_transcript
+from latency_log import LatencyLogWriter
 from stt_engine import STTEngine, STTRecognitionError
 from transcript_queue import TranscriptEvent, TranscriptQueue
 from tts_engine import TTSEngine, TTSSynthesisError
@@ -78,6 +79,58 @@ _TRANSCRIBE_PATH = "/transcribe"
 _TRANSCRIPTS_POLL_PATH = "/transcripts/poll"
 _STOP_PATH = "/stop"
 
+#: The capture side mints a fixed ~12-char id (`uuid.uuid4().hex[:12]`,
+#: `capture_loop.CaptureLoop`) -- a generous cap on what this server
+#: accepts from any caller costs nothing and forecloses an attacker-
+#: controlled LAN peer growing `--latency-log`/`--speech-log` without
+#: bound (security plan review, `plans/voice-latency-instrumentation/
+#: plan.md`: low-probability/low-impact on this project's single-user LAN
+#: scope, but cheap to close outright).
+_MAX_CORRELATION_ID_LEN = 128
+
+
+def _validate_correlation_id(value: object) -> tuple[str | None, str | None]:
+    """`None` is always valid (no id supplied). A present value must be a
+    `str` of at most `_MAX_CORRELATION_ID_LEN` characters. Returns
+    `(correlation_id, error)` -- exactly one of the pair is `None`,
+    mirroring every other field validation in this module's handlers."""
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or len(value) > _MAX_CORRELATION_ID_LEN:
+        return None, (
+            "'correlation_id' must be a string of at most "
+            f"{_MAX_CORRELATION_ID_LEN} characters"
+        )
+    return value, None
+
+
+def _log_latency(
+    latency_log: LatencyLogWriter | None,
+    *,
+    stage: str,
+    correlation_id: str | None,
+    outcome: str,
+    **fields: float | None,
+) -> None:
+    """Writes one `--latency-log` row, if configured -- a true no-op
+    otherwise. `fields` are whichever extra numeric fields this call site
+    has -- the monotonic-derived timings (`synth_duration_s`/
+    `deliver_duration_s`/`transcribe_duration_s`/`match_duration_s`) and,
+    for `/transcribe`, the capture side's own `t_ptt_release_wall` (ordinary
+    wall-clock, cross-machine, context only -- see `latency_log.py`'s
+    module docstring on which fields the reducer trusts) -- passed straight
+    through so each call site names its own, rather than this helper
+    assuming a fixed shape across `/speak` and `/transcribe`."""
+    if latency_log is None:
+        return
+    row: dict[str, object] = {
+        "stage": stage,
+        "correlation_id": correlation_id,
+        "outcome": outcome,
+    }
+    row.update(fields)
+    latency_log.write(row)
+
 
 class AudioDeliveryError(RuntimeError):
     """Raised by an `AudioSink.deliver` implementation when it cannot
@@ -86,11 +139,22 @@ class AudioDeliveryError(RuntimeError):
 
 
 class AudioSink(Protocol):
-    def deliver(self, audio: bytes, urgent: bool) -> None:
+    def deliver(
+        self, audio: bytes, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         """Deliver synthesized WAV bytes to their destination. Raises
         `AudioDeliveryError` on failure -- this call itself never swallows
         anything; `_handle_speak` below is where the swallow-vs-fail
-        decision for the HTTP response is made (plan Decision 5)."""
+        decision for the HTTP response is made (plan Decision 5).
+
+        `correlation_id` (`plans/voice-latency-instrumentation/plan.md`
+        Stage 1-4) is accepted and forwarded by every implementation of
+        this protocol, purely for logging -- it never changes delivery
+        behaviour. `None` (the default) for every caller that has none to
+        give, which is every call site before this plan and every local-
+        target call site after it; only `AircraftLayerAudioSink` actually
+        has anywhere to send it (the aircraft-layer worker thread's own
+        enqueue/playback-start/playback-finish log lines)."""
         ...
 
     def interrupt(self) -> None:
@@ -110,6 +174,7 @@ def _make_handler(
     sink: AudioSink,
     stt_engine: STTEngine | None,
     transcript_queue: TranscriptQueue,
+    latency_log: LatencyLogWriter | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class SpeakRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -186,20 +251,59 @@ def _make_handler(
                 self._respond_json(400, {"error": "'urgent' must be a boolean"})
                 return
 
+            correlation_id, error = _validate_correlation_id(data.get("correlation_id"))
+            if error is not None:
+                self._respond_json(400, {"error": error})
+                return
+
+            synth_start = time.monotonic()
             try:
                 audio = engine.synthesize(text)
             except TTSSynthesisError as exc:
                 logger.warning("TTS synthesis failed for %r: %s", text, exc)
+                _log_latency(
+                    latency_log,
+                    stage="speak",
+                    correlation_id=correlation_id,
+                    outcome="synthesis_failed",
+                    synth_duration_s=time.monotonic() - synth_start,
+                )
                 self._respond_json(503, {"error": f"synthesis failed: {exc}"})
                 return
+            synth_duration_s = time.monotonic() - synth_start
 
+            deliver_start = time.monotonic()
             try:
-                sink.deliver(audio, urgent)
+                sink.deliver(audio, urgent, correlation_id)
             except AudioDeliveryError as exc:
                 logger.warning("audio delivery failed for %r: %s", text, exc)
+                _log_latency(
+                    latency_log,
+                    stage="speak",
+                    correlation_id=correlation_id,
+                    outcome="delivery_failed",
+                    synth_duration_s=synth_duration_s,
+                    deliver_duration_s=time.monotonic() - deliver_start,
+                )
                 self._respond_json(500, {"error": f"delivery failed: {exc}"})
                 return
 
+            # `deliver_duration_s` means "handed off to the sink" -- full
+            # playback time for `--target local` (`deliver()` blocks on
+            # `afplay`/`winsound` until the WAV finishes), but only an
+            # *enqueue* ack for `--target aircraft-layer` (`POST /audio/play`
+            # returns once the collector's queue has accepted the clip, not
+            # once it has actually played -- see `AircraftLayerAudioSink`
+            # and the aircraft-layer worker thread's own log lines for that
+            # path's true playback timing).
+            _log_latency(
+                latency_log,
+                stage="speak",
+                correlation_id=correlation_id,
+                outcome="ok",
+                synth_duration_s=synth_duration_s,
+                deliver_duration_s=time.monotonic() - deliver_start,
+            )
             self._respond_json(200, {"ok": True})
 
         def _handle_transcribe(self) -> None:
@@ -246,14 +350,40 @@ def _make_handler(
                 self._respond_json(400, {"error": "'wav_b64' decoded to no bytes"})
                 return
 
+            correlation_id, error = _validate_correlation_id(data.get("correlation_id"))
+            if error is not None:
+                self._respond_json(400, {"error": error})
+                return
+            t_ptt_release_wall = data.get("t_ptt_release_wall")
+            if t_ptt_release_wall is not None and (
+                not isinstance(t_ptt_release_wall, (int, float))
+                or isinstance(t_ptt_release_wall, bool)
+            ):
+                self._respond_json(
+                    400, {"error": "'t_ptt_release_wall' must be a number"}
+                )
+                return
+
+            transcribe_start = time.monotonic()
             try:
                 transcript = stt_engine.transcribe(wav)
             except STTRecognitionError as exc:
                 logger.warning("speech recognition failed: %s", exc)
+                _log_latency(
+                    latency_log,
+                    stage="transcribe",
+                    correlation_id=correlation_id,
+                    outcome="recognition_failed",
+                    transcribe_duration_s=time.monotonic() - transcribe_start,
+                )
                 self._respond_json(503, {"error": f"recognition failed: {exc}"})
                 return
+            transcribe_duration_s = time.monotonic() - transcribe_start
 
+            match_start = time.monotonic()
             match = match_transcript(transcript.text)
+            match_duration_s = time.monotonic() - match_start
+
             transcript_queue.push(
                 TranscriptEvent(
                     transcript=transcript.text,
@@ -264,7 +394,21 @@ def _make_handler(
                     ambiguous=match.ambiguous,
                     t_wall=time.time(),
                     slots=match.slots,
+                    correlation_id=correlation_id,
                 )
+            )
+            _log_latency(
+                latency_log,
+                stage="transcribe",
+                correlation_id=correlation_id,
+                outcome="ok",
+                transcribe_duration_s=transcribe_duration_s,
+                match_duration_s=match_duration_s,
+                t_ptt_release_wall=(
+                    float(t_ptt_release_wall)
+                    if t_ptt_release_wall is not None
+                    else None
+                ),
             )
             self._respond_json(200, {"ok": True})
 
@@ -317,6 +461,7 @@ class TTSAdapterServer:
         port: int = DEFAULT_PORT,
         stt_engine: STTEngine | None = None,
         transcript_queue: TranscriptQueue | None = None,
+        latency_log: LatencyLogWriter | None = None,
     ) -> None:
         self._engine = engine
         self._sink = sink
@@ -326,6 +471,10 @@ class TTSAdapterServer:
         self._transcript_queue = (
             transcript_queue if transcript_queue is not None else TranscriptQueue()
         )
+        #: `--latency-log` (`plans/voice-latency-instrumentation/plan.md`
+        #: Stage 2) -- `None` (the default) is a true no-op, same posture as
+        #: every other optional collaborator on this class.
+        self._latency_log = latency_log
         self._httpd: ThreadingHTTPServer | None = None
 
     def __enter__(self) -> Self:
@@ -352,7 +501,11 @@ class TTSAdapterServer:
         self._httpd = ThreadingHTTPServer(
             (self._host, self._port),
             _make_handler(
-                self._engine, self._sink, self._stt_engine, self._transcript_queue
+                self._engine,
+                self._sink,
+                self._stt_engine,
+                self._transcript_queue,
+                self._latency_log,
             ),
         )
         logger.info("audio-adapter listening on %s:%d", self._host, self.port)

@@ -30,6 +30,7 @@ from belief.classification import AIR_DEFENSE_OP_CLASSES, PRESENCE_CLASS
 from belief.contacts import Contact, ContactStore
 from belief.crew_console import (
     _GREETING_TIMES_OF_DAY,
+    _MAX_PENDING_POSITIONAL_REPLIES,
     _NOTHING_TO_STOP,
     DISPATCHED_COMMAND_TOKENS,
     NO_RETURN_VALUE_COMMAND_TOKENS,
@@ -100,13 +101,20 @@ class FakeSpeechClient:
 
     def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
         self.pushed: list[tuple[str, bool]] = []
+        #: `correlation_id` for every `push_speech` call, in order -- kept
+        #: separate from `pushed` so every existing assertion on that list
+        #: (text/urgent only) keeps working unchanged.
+        self.pushed_correlation_ids: list[str | None] = []
         self.stop_calls = 0
         self._fail_on = fail_on
 
-    def push_speech(self, text: str, urgent: bool) -> None:
+    def push_speech(
+        self, text: str, urgent: bool, correlation_id: str | None = None
+    ) -> None:
         if text in self._fail_on:
             raise AudioAdapterError("simulated push failure")
         self.pushed.append((text, urgent))
+        self.pushed_correlation_ids.append(correlation_id)
 
     def stop(self) -> None:
         if "Copy." in self._fail_on:
@@ -3297,15 +3305,25 @@ def test_dispatched_command_tokens_all_return_something(
     project claims to have wired must either speak something or be one of
     `NO_RETURN_VALUE_COMMAND_TOKENS`' documented, deliberate no-readback-
     via-return-value no-ops (`stop_talking`, `silence`) -- never the
-    silent `[]` that sent 20 of 41 recognised voice tokens nowhere."""
+    silent `[]` that sent 20 of 41 recognised voice tokens nowhere.
+
+    **Each token gets its own, well-separated `now_sim`** (`plans/
+    voice-latency-instrumentation/plan.md` Stage 6): a positional readback
+    now defers to `[]` when the channel is modeled busy, and a prior
+    token's own `note_reply` claims the channel for its estimated speech
+    duration -- calling every token at the same `now_sim` would make this
+    loop's own dispatch order, not a wiring gap, the reason a later token
+    returns `[]`. 100s apart is far longer than any line this class speaks
+    takes, so every call here sees a clear channel, exactly as a real
+    sortie's well-spaced commands would."""
     tasks = TaskStore()
     console = CrewConsole(
         store=ContactStore(),
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    for token in sorted(DISPATCHED_COMMAND_TOKENS):
-        lines = console.handle_command(token, now_sim=0.0)
+    for index, token in enumerate(sorted(DISPATCHED_COMMAND_TOKENS)):
+        lines = console.handle_command(token, now_sim=index * 100.0)
         if token in NO_RETURN_VALUE_COMMAND_TOKENS:
             assert lines == [], token
         else:
@@ -3861,7 +3879,14 @@ def test_slotted_report_clock_matches_the_legacy_clock_token(
     answers exactly what `report_clock_3` answers. Driven through
     `handle_command` twice on the same store so the two paths are compared
     against each other rather than against a transcribed string -- the
-    claim is equivalence, and a pinned string would only test one side."""
+    claim is equivalence, and a pinned string would only test one side.
+
+    `scheduler.busy_until_sim` is reset between the two calls (`plans/
+    voice-latency-instrumentation/plan.md` Stage 6): the first call's own
+    readback claims the channel for its estimated speech duration, which
+    would otherwise make the second call's own report defer to `[]` at the
+    same `now_sim` -- a dispatch-order artefact of this comparison, not
+    something either path's answer should depend on."""
     store = ContactStore()
     store.ingest(
         [_observation_at(obs_id="OBS_E", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0)],
@@ -3871,6 +3896,7 @@ def test_slotted_report_clock_matches_the_legacy_clock_token(
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     legacy = console.handle_command("report_clock_3", now_sim=0.0)
+    console.scheduler.busy_until_sim = 0.0
     slotted = console.handle_command("report", now_sim=0.0, slots={"clock": 3})
 
     assert slotted == legacy
@@ -3883,7 +3909,11 @@ def test_slotted_report_sector_matches_the_legacy_bearing_token(
     """The `sector` slot's half of the same claim, including the
     rear-hemisphere carve-out: `report south` with a north-facing ownship
     must refuse exactly as `report_bearing_s` does, never answer
-    "clear"."""
+    "clear".
+
+    `scheduler.busy_until_sim` is reset between calls -- see
+    `test_slotted_report_clock_matches_the_legacy_clock_token`'s identical
+    note."""
     console = CrewConsole(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
@@ -3891,6 +3921,7 @@ def test_slotted_report_sector_matches_the_legacy_bearing_token(
     assert console.handle_command("report", now_sim=0.0, slots={"sector": "north"}) == [
         "North, clear."
     ]
+    console.scheduler.busy_until_sim = 0.0
     assert console.handle_command("report", now_sim=0.0, slots={"sector": "south"}) == [
         "Can't see south."
     ]
@@ -3903,7 +3934,11 @@ def test_slotted_report_drops_an_unrecognised_slot_value_rather_than_refusing(
     assumed well-formed. A garbage `sector`, an out-of-hemisphere `clock`
     and a wrong-typed value each widen the answer instead of producing a
     refusal or an exception -- the same graceful degradation
-    `bearing_degrees` already has, and the honest failure for a *query*."""
+    `bearing_degrees` already has, and the honest failure for a *query*.
+
+    `scheduler.busy_until_sim` is reset before each iteration -- see
+    `test_slotted_report_clock_matches_the_legacy_clock_token`'s identical
+    note."""
     console = CrewConsole(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
@@ -3913,6 +3948,7 @@ def test_slotted_report_drops_an_unrecognised_slot_value_rather_than_refusing(
         {"clock": "three"},
         {"sector": 90},
     ):
+        console.scheduler.busy_until_sim = 0.0
         assert console.handle_command(
             "report", now_sim=0.0, slots=cast("dict[str, int | str]", slots)
         ) == ["Clear."], slots
@@ -4647,12 +4683,22 @@ def test_reselecting_a_different_target_via_select_target_cancels_the_stale_task
     fail with `active[0].contact_id == armor.id` (the stale task
     resolving as "the" target) rather than `truck.id`, and leaves `armor.
     attention == "priority"` instead of demoting to `"normal"` -- both
-    asserted below."""
+    asserted below.
+
+    `scheduler.busy_until_sim` is reset before the second command (`plans/
+    voice-latency-instrumentation/plan.md` Stage 6): one real second
+    between two corrections is well inside the first readback's own
+    estimated speech duration, which would otherwise defer the second
+    command's readback to `[]` -- a real, correct consequence of Stage 6
+    for a genuinely tight correction, but a different thing from what this
+    test is reproducing (task-cancellation semantics), so it is held
+    constant here rather than conflated."""
     _store, tasks, console, armor, truck = _store_with_armor_and_truck(monkeypatch)
 
     console.handle_command("select_target", now_sim=0.0, slots={"descriptor": "armor"})
     assert armor.attention == "priority"
 
+    console.scheduler.busy_until_sim = 0.0
     lines = console.handle_command(
         "select_target", now_sim=1.0, slots={"descriptor": "truck"}
     )
@@ -4673,6 +4719,107 @@ def test_reselecting_a_different_target_via_select_target_cancels_the_stale_task
     assert active_task is not None
     assert active_task.contact_id == truck.id
     assert "truck" in lines[0].lower()
+
+
+def test_select_target_readback_defers_while_the_channel_is_busy_then_drains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 6's actual deferred-then-drained path (`plans/
+    voice-latency-instrumentation/plan.md`), not merely the non-deferred
+    case every other positional-readback test exercises: the selection
+    itself (resolving the target, registering the task) is unconditional
+    and immediate even while the channel is busy, only the readback's
+    *speaking* waits for `drain_pending_positional_replies` to find the
+    channel clear."""
+    _store, _tasks, console, armor, _truck = _store_with_armor_and_truck(monkeypatch)
+    console.scheduler.busy_until_sim = 100.0
+
+    lines = console.handle_command(
+        "select_target", now_sim=0.0, slots={"descriptor": "armor"}
+    )
+
+    # Deferred: nothing spoken yet, but the selection already happened.
+    assert lines == []
+    assert armor.attention == "priority"
+    active_task = console._active_attack_target_task()
+    assert active_task is not None
+    assert active_task.contact_id == armor.id
+    assert len(console._pending_positional_replies) == 1
+
+    # Still busy: draining now must not speak it early.
+    spoken = console.drain_pending_positional_replies(now_sim=50.0)
+    assert spoken == []
+    assert len(console._pending_positional_replies) == 1
+
+    # Channel clears: the deferred readback is spoken, re-rendered against
+    # belief at this later tick rather than the original command's.
+    spoken = console.drain_pending_positional_replies(now_sim=100.0)
+    assert len(spoken) == 1
+    assert "armor" in spoken[0].lower()
+    assert console._pending_positional_replies == []
+
+
+def test_select_target_readback_falls_back_to_lost_contact_if_it_vanishes_before_speaking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the contact no longer resolves by the time the deferred readback
+    is drained, it must say so rather than silently dropping it or raising
+    (the plan's own "lost track of that contact" requirement)."""
+    store, _tasks, console, armor, _truck = _store_with_armor_and_truck(monkeypatch)
+    console.scheduler.busy_until_sim = 100.0
+
+    lines = console.handle_command(
+        "select_target", now_sim=0.0, slots={"descriptor": "armor"}
+    )
+    assert lines == []
+
+    # The contact vanishes entirely before the readback is ever spoken --
+    # simulated by clearing the store's own record of it (a merge that
+    # abandoned this id with no successor, same shape `drain_attack_run`'s
+    # own "contact no longer resolves" branch handles).
+    store._contacts.pop(armor.id)  # type: ignore[attr-defined]
+
+    spoken = console.drain_pending_positional_replies(now_sim=100.0)
+    assert spoken == ["Lost him."]
+
+
+def test_pending_positional_replies_caps_and_drops_oldest_warning_logged_once(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`BL-B87` (security deep analysis, `plans/voice-latency-instrumentation/
+    security-review.md`) -- `_pending_positional_replies` must not grow
+    unboundedly under a sustained flood of deferred readbacks, mirroring
+    `TranscriptQueue`/`F10CommandQueue`'s own drop-oldest cap. A dropped
+    entry loses only an already-stale spoken echo, never an action: each
+    `select_target` call below still resolves and registers its own task
+    unconditionally, regardless of whether its readback survives the cap.
+
+    Exceeds the cap by 5 (69 calls against a cap of 64) so the warning's
+    rate limiting is actually exercised, not just its first firing -- five
+    separate drop events occur, and only the *first* may log."""
+    _store, _tasks, console, _armor, _truck = _store_with_armor_and_truck(monkeypatch)
+    console.scheduler.busy_until_sim = 1e9  # always busy -- every call defers
+
+    total_calls = _MAX_PENDING_POSITIONAL_REPLIES + 5
+    with caplog.at_level("WARNING"):
+        for i in range(total_calls):
+            lines = console.handle_command(
+                "select_target", now_sim=float(i), slots={"descriptor": "armor"}
+            )
+            assert lines == []  # deferred every time, channel never clears
+
+    pending = console._pending_positional_replies
+    assert len(pending) == _MAX_PENDING_POSITIONAL_REPLIES
+    # Drop-oldest, not drop-newest: the five oldest entries (calls 0-4) are
+    # gone; the oldest survivor is call 5, the newest is the final call.
+    assert pending[0].queued_since_sim == 5.0
+    assert pending[-1].queued_since_sim == float(total_calls - 1)
+
+    overflow_warnings = [
+        r for r in caplog.records if "_pending_positional_replies" in r.message
+    ]
+    assert len(overflow_warnings) == 1
 
 
 def test_reselecting_a_different_target_via_engage_descriptor_cancels_the_stale_task(
@@ -5051,6 +5198,11 @@ def _target_left_right_fixture(
 def test_step_right_and_left_pick_neighbours_by_current_bearing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """`scheduler.busy_until_sim` is reset between the two `step` calls
+    (`plans/voice-latency-instrumentation/plan.md` Stage 6): one second
+    apart is well inside the first readback's own estimated speech
+    duration, which would otherwise defer the second call's readback to
+    `[]` -- not what this test is checking (the re-ordering itself)."""
     store, tasks, console, t_id, _l_id, r_id = _target_left_right_fixture(monkeypatch)
     target_task = next(task for task in tasks.tasks if task.kind == "attack_target")
     assert target_task.contact_id == t_id
@@ -5062,6 +5214,7 @@ def test_step_right_and_left_pick_neighbours_by_current_bearing(
     assert store.contact(t_id).attention == "watch"  # type: ignore[union-attr]
     assert lines and "armor" in lines[0].lower()
 
+    console.scheduler.busy_until_sim = 0.0
     lines = console.handle_command("step", now_sim=2.0, slots={"direction": "left"})
     assert target_task.contact_id == t_id
     assert store.contact(t_id).attention == "priority"  # type: ignore[union-attr]
@@ -6062,6 +6215,12 @@ def test_every_relative_sector_is_inside_the_cockpit_mask(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
     for relative in RELATIVE_SECTORS:
+        # Reset between iterations (`plans/voice-latency-instrumentation/
+        # plan.md` Stage 6): the previous relative's own readback would
+        # otherwise still be claiming the channel at the same `now_sim`,
+        # deferring this one to `[]` -- a loop-ordering artefact, not a
+        # mask question.
+        console.scheduler.busy_until_sim = 0.0
         lines = console.handle_command(
             "report", now_sim=0.0, slots={"relative": relative}
         )
@@ -6109,8 +6268,13 @@ def test_slotted_report_clock_filter_spans_one_hour_either_side(
     assert _in_scope(console, clock=1) == set()
     assert _in_scope(console, clock=12) == set()
     # Through the shipped legacy token too, since this is a change to its
-    # behaviour and not only to the new one's.
+    # behaviour and not only to the new one's. `scheduler.busy_until_sim`
+    # is reset between the two calls -- see
+    # `test_slotted_report_clock_matches_the_legacy_clock_token`'s
+    # identical note (`plans/voice-latency-instrumentation/plan.md`
+    # Stage 6).
     assert "armor" in console.handle_command("report_clock_2", now_sim=0.0)[0].lower()
+    console.scheduler.busy_until_sim = 0.0
     assert console.handle_command("report_clock_1", now_sim=0.0) == [
         "One o'clock, clear."
     ]
@@ -6262,7 +6426,11 @@ def test_slotted_report_band_label_follows_the_query_then_the_furthest(
     only contact in scope sits at 1 km. Unfiltered, it is bucketed from
     the **furthest** in-scope contact, never the nearest: the near edge
     would under-state where things are, which is the one direction a
-    pointer must not be wrong in."""
+    pointer must not be wrong in.
+
+    `scheduler.busy_until_sim` is reset between calls -- see
+    `test_slotted_report_clock_matches_the_legacy_clock_token`'s identical
+    note (`plans/voice-latency-instrumentation/plan.md` Stage 6)."""
     store = _three_banded_contacts()
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
@@ -6270,10 +6438,12 @@ def test_slotted_report_band_label_follows_the_query_then_the_furthest(
         "inside 2 kilometres"
         in console.handle_command("report", now_sim=0.0, slots={"band": "near"})[0]
     )
+    console.scheduler.busy_until_sim = 0.0
     assert (
         "beyond 5 kilometres"
         in console.handle_command("report", now_sim=0.0, slots={"band": "far"})[0]
     )
+    console.scheduler.busy_until_sim = 0.0
     # Unfiltered: the furthest contact is at 7 km, so the whole-scene
     # answer reaches beyond five, not "inside 2" from the nearest.
     assert "beyond 5 kilometres" in console.handle_command("report_all", now_sim=0.0)[0]
@@ -6304,7 +6474,13 @@ def test_slotted_report_freshness_window_is_the_decay_modules_own(
     Driven across the boundary rather than by reading the constant back:
     the same scene answers unqualified just inside the window and
     qualified just outside it. The window is read from `decay` to place
-    the two probes, never to assert the wording."""
+    the two probes, never to assert the wording.
+
+    `scheduler.busy_until_sim` is reset between the two calls -- see
+    `test_slotted_report_clock_matches_the_legacy_clock_token`'s identical
+    note (`plans/voice-latency-instrumentation/plan.md` Stage 6); the two
+    `now_sim` values are only 2s apart, well inside the first call's own
+    estimated speech duration."""
     store = ContactStore()
     store.ingest(
         [
@@ -6325,6 +6501,7 @@ def test_slotted_report_freshness_window_is_the_decay_modules_own(
     fresh = console.handle_command(
         "report", now_sim=OBSERVED_WINDOW_S - 1.0, slots={"clock": 2}
     )
+    console.scheduler.busy_until_sim = 0.0
     stale = console.handle_command(
         "report", now_sim=OBSERVED_WINDOW_S + 1.0, slots={"clock": 2}
     )

@@ -22,5 +22,6 @@ source ./petrobrain.env
 pushd ../brain-layer/ && PYTHONPATH=src .venv/bin/python -m brain_layer \
     --stub-delay-s 0 \
     --decider ollama \
+    --host 0.0.0.0 \
     $@
 popd

@@ -101,6 +101,21 @@ def test_non_2xx_raises(
         httpd.server_close()
 
 
+def test_transcribe_includes_correlation_fields_when_given(
+    server_and_received: tuple[HTTPServer, list[dict[str, object]]],
+) -> None:
+    """`plans/voice-latency-instrumentation/plan.md` Stage 1 -- both new
+    fields are optional and additive; given, they ride along in the same
+    body `test_transcribe_sends_nothing_else` shows is otherwise just
+    `wav_b64`."""
+    httpd, received = server_and_received
+    TranscribeClient(f"http://127.0.0.1:{httpd.server_port}").transcribe(
+        b"x", correlation_id="corr-abc", t_ptt_release_wall=1234.5
+    )
+    assert received[0]["correlation_id"] == "corr-abc"
+    assert received[0]["t_ptt_release_wall"] == 1234.5
+
+
 def test_unreachable_adapter_raises() -> None:
     client = TranscribeClient("http://127.0.0.1:1", timeout_s=0.5)
     with pytest.raises(TranscribeError, match="failed"):

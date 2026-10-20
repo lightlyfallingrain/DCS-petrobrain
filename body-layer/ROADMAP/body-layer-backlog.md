@@ -125,6 +125,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B84]] — 9K113 search depth adapts to terrain (deferred; perception already handles LOS per look)
 - [[BL-B85]] — a contact stuck at `presence` forever can fully starve the sight's search cycle
 - [[BL-B86]] — above ~3.6–4 km AGL the sight's idle search cycle goes fully idle (free/ahead scan)
+- [[BL-B87]] — `_pending_positional_replies` has no size bound, unlike every other queue in this codebase
+- [[BL-B88]] — `join_voice_latency.py` crashes whole on one malformed JSONL line
 - [[BL-B89]] — 9K113 scanning procedure: points of interest, not band sweeps (next after 9k113-narrow-search)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
