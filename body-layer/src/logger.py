@@ -222,6 +222,9 @@ from belief.mission_phase import (
 )
 from belief.optic_policy import (
     HANDS_BUSY_DURATION_S,
+    SIGHT_SEARCH_FAR_M,
+    SIGHT_SEARCH_MID_M,
+    SIGHT_SEARCH_NEAR_M,
     SIGHT_STEADY_RATE_LIMIT_DEG_S,
     LookTarget,
     OpticDecision,
@@ -267,7 +270,13 @@ from perception.gaze import (
 from perception.geometry import GeoPosition, alignment_direction, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
-from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
+from perception.optics import (
+    BINOCULAR_OPTIC,
+    SIGHT_NARROW_OPTIC,
+    SIGHT_WIDE_OPTIC,
+    UNAIDED_OPTIC,
+    Optic,
+)
 from perception.source import Observation, OwnshipState, PerceptionSource
 from run_log_paths import per_run_log_path
 from speech_log import SpeechLogWriter
@@ -647,6 +656,37 @@ class ConsolePerceptionRunner:
                 list(self.attitude_history),
                 rate_limit_deg_s=SIGHT_STEADY_RATE_LIMIT_DEG_S,
             ),
+            # `plans/9k113-narrow-search/plan.md` Stage 3 -- the sight's own
+            # active search cycle, computed fresh every poll the same way
+            # `search` above already is: a brief wide orientation pass over
+            # the near band, then narrow over that same near band, then
+            # narrow over the far band, then (Stage 2) a binocular
+            # excursion for whatever a commanded sector left outside the
+            # sight's own field of regard.
+            sight_wide_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_WIDE_OPTIC,
+                near_m=SIGHT_SEARCH_NEAR_M,
+                far_m=SIGHT_SEARCH_MID_M,
+            ),
+            sight_narrow_near_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_NARROW_OPTIC,
+                near_m=SIGHT_SEARCH_NEAR_M,
+                far_m=SIGHT_SEARCH_MID_M,
+            ),
+            sight_narrow_far_search=_sight_in_regard_sweep(
+                self.scan_plan,
+                ownship,
+                optic=SIGHT_NARROW_OPTIC,
+                near_m=SIGHT_SEARCH_MID_M,
+                far_m=SIGHT_SEARCH_FAR_M,
+            ),
+            sight_out_of_regard_search=_sight_out_of_regard_sweep(
+                self.scan_plan, ownship
+            ),
             # `BL-B71`: the attack run's own standing ladder request, from
             # the *previous* poll -- `drain_attack_run` (which recomputes
             # `AttackRunState.requested_optic` for *this* poll) runs later
@@ -954,21 +994,160 @@ def _search_sweep(
     to look up a half-width for -- and Stage 5's own scope is gaze, not
     binocular search; extending this to the new commanded-legs cases is
     left for a later stage if wanted.
-    """
+
+    **Swept around the commanded sector's own centre, not dead ahead**
+    (`plans/9k113-narrow-search/plan.md` amendment 2 -- user: *"fix the
+    binocular search sector"*). Before this fix, `search_pattern` had no
+    centre parameter at all and this function discarded the centre it
+    unpacked from `SECTOR_WEDGE_DEG`, so a commanded `left`/`right`/`full`
+    scan swept around 0 deg (dead ahead) regardless of which sector was
+    actually commanded -- harmless only for `ahead`, whose own centre
+    happens to be 0."""
     if scan_plan.commanded_sector is None:
         return []
-    _, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    center_deg, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
     near_m, far_m = _SEARCH_BAND_M
     fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
     if fov_full_width_deg <= 0.0:
         return []
     return search_pattern(
+        center_azimuth_deg=center_deg,
         sector_half_width_deg=half_width_deg,
         near_m=near_m,
         far_m=far_m,
         altitude_agl_m=max(ownship.alt_agl_m, 0.0),
         fov_full_width_deg=fov_full_width_deg,
     )
+
+
+def _split_sector_by_regard(
+    center_deg: float, half_width_deg: float, regard_half_deg: float
+) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
+    """Splits a sector's full span into its in-regard sub-span (a single
+    `(center, half_width)`, or `None` if the span and the regard do not
+    overlap at all -- never actually reached by any of the four named
+    `RelativeSector` values, every one of which straddles or contains
+    azimuth 0) and zero, one, or two out-of-regard sub-spans (two only
+    for `full`, whose span strictly contains the whole regard band) --
+    `plans/9k113-narrow-search/plan.md` Stage 2. Pure geometry, no
+    DCS/ownship dependency.
+
+    Worked against `SECTOR_WEDGE_DEG` and `regard_half_deg=60.0`: `ahead`
+    (0,30) -> in-span (0,30), no out-spans (fully inside). `left` (-60,30)
+    -> in-span (-45,15), one out-span (-75,15). `right` (60,30) -> in-span
+    (45,15), one out-span (75,15). `full` (0,90) -> in-span (0,60), two
+    out-spans, (-75,15) and (75,15).
+
+    **Each out-span is clamped to the original span's own far edge**
+    (`min(span_high, -regard_half_deg)` / `max(span_low, regard_half_deg)`)
+    -- not fixed at the regard boundary unconditionally -- so a span that
+    lies *entirely* outside the regard on one side (never reached by any
+    of the four named sectors, which all straddle or contain azimuth 0)
+    still returns its own true extent as the out-span, rather than one
+    stretched to include ground between the regard boundary and the span
+    that was never actually part of the sector."""
+    span_low, span_high = center_deg - half_width_deg, center_deg + half_width_deg
+    in_low, in_high = max(span_low, -regard_half_deg), min(span_high, regard_half_deg)
+    in_span = (
+        ((in_low + in_high) / 2.0, (in_high - in_low) / 2.0)
+        if in_low < in_high
+        else None
+    )
+    out_spans: list[tuple[float, float]] = []
+    if span_low < -regard_half_deg:
+        lo, hi = span_low, min(span_high, -regard_half_deg)
+        out_spans.append(((lo + hi) / 2.0, (hi - lo) / 2.0))
+    if span_high > regard_half_deg:
+        lo, hi = max(span_low, regard_half_deg), span_high
+        out_spans.append(((lo + hi) / 2.0, (hi - lo) / 2.0))
+    return in_span, out_spans
+
+
+def _commanded_or_default_sector(
+    scan_plan: ScanPlan, regard_half_deg: float
+) -> tuple[float, float]:
+    """The sector the sight's own search cycle should cover -- a commanded
+    sector at its own commanded width if one exists (never widened: `ahead`
+    stays 30 deg), else the sight's full field of regard centred on flight
+    direction (`docs/acceptance/2026-10-20-sortie-feedback.md`, F4/F5
+    "settled": "flight direction as normal default") -- there is no
+    commanded width to respect in the default case, and "a genuine physical
+    bound, not an invented UX cap" (the same reasoning `MAX_SEARCH_SECTOR_
+    HALF_WIDTH_DEG` is deliberately *not* applied here) applies identically.
+    Centre `0.0` is the same convention `_back_to_home`'s own dead-ahead
+    fallback uses."""
+    if scan_plan.commanded_sector is not None:
+        return SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    return 0.0, regard_half_deg
+
+
+def _sight_in_regard_sweep(
+    scan_plan: ScanPlan,
+    ownship: OwnshipState,
+    *,
+    optic: Optic,
+    near_m: float,
+    far_m: float,
+) -> list[tuple[float, float]]:
+    """One leg of the sight's own search cycle (wide, or either of
+    narrow's near/far bands) over whatever sub-span of the commanded-or-
+    default sector the sight can actually reach -- `plans/
+    9k113-narrow-search/plan.md` Stage 3."""
+    regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
+    center_deg, half_width_deg = _commanded_or_default_sector(scan_plan, regard)
+    in_span, _ = _split_sector_by_regard(center_deg, half_width_deg, regard)
+    if in_span is None:
+        return []
+    in_center_deg, in_half_width_deg = in_span
+    fov_full_width_deg = (optic.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    return search_pattern(
+        center_azimuth_deg=in_center_deg,
+        sector_half_width_deg=in_half_width_deg,
+        near_m=near_m,
+        far_m=far_m,
+        altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+        fov_full_width_deg=fov_full_width_deg,
+        max_half_width_deg=regard,
+    )
+
+
+def _sight_out_of_regard_sweep(
+    scan_plan: ScanPlan, ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """Binoculars, for the portion of a *commanded* sector the sight
+    cannot reach -- empty for the no-commanded-sector default (whose
+    synthesized sector is exactly the regard width, by construction, so
+    it never has an out-of-regard remainder). `plans/9k113-narrow-search/
+    plan.md` Stage 3; `full`'s two out-spans are concatenated into one
+    list -- `OpticPhase.SEARCHING`'s own dispatch just steps through
+    whatever sequence it is given, so two remainder pieces need no new
+    state, only a longer list."""
+    if scan_plan.commanded_sector is None:
+        return []
+    regard = SIGHT_WIDE_OPTIC.regard_azimuth_half_deg or 0.0
+    center_deg, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    _, out_spans = _split_sector_by_regard(center_deg, half_width_deg, regard)
+    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    near_m, far_m = (
+        _SEARCH_BAND_M  # unchanged binocular band -- Stage 3 only touches the sight's own
+    )
+    steps: list[tuple[float, float]] = []
+    for out_center_deg, out_half_width_deg in out_spans:
+        steps.extend(
+            search_pattern(
+                center_azimuth_deg=out_center_deg,
+                sector_half_width_deg=out_half_width_deg,
+                near_m=near_m,
+                far_m=far_m,
+                altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+                fov_full_width_deg=fov_full_width_deg,
+            )
+        )
+    return steps
 
 
 def _apply_active_gaze(

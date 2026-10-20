@@ -49,6 +49,7 @@ from logger import (
     _active_gaze,
     _apply_active_gaze,
     _build_sources,
+    _commanded_or_default_sector,
     _format_gaze_line,
     _log_live_los_coverage_summary,
     _poll_transcripts,
@@ -57,7 +58,11 @@ from logger import (
     _run_console_poll_loop,
     _run_console_repl,
     _run_crew_text_poll_loop,
+    _search_sweep,
+    _sight_in_regard_sweep,
+    _sight_out_of_regard_sweep,
     _speech_log_sink,
+    _split_sector_by_regard,
     _warn_live_los_coverage_gap_once,
     format_observation_line,
     main,
@@ -68,6 +73,7 @@ from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import NakedEyePerceptionSource
+from perception.optics import SIGHT_NARROW_OPTIC, SIGHT_WIDE_OPTIC
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 from store.writer import open_for_build
 
@@ -1094,6 +1100,153 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
         x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
     )
     assert projected.wedge_deg == (0.0, 30.0)
+
+
+# -- _search_sweep / _split_sector_by_regard / _commanded_or_default_sector
+# / _sight_in_regard_sweep / _sight_out_of_regard_sweep
+# (plans/9k113-narrow-search/plan.md) ---------------------------------------
+
+
+def _ownship_for_search(*, alt_agl_m: float = 120.0) -> OwnshipState:
+    return OwnshipState(
+        t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
+    )
+
+
+def test_search_sweep_is_empty_for_a_free_scan() -> None:
+    assert _search_sweep(FREE_SCAN_PLAN, _ownship_for_search()) == []
+
+
+def test_search_sweep_is_centred_on_the_commanded_sectors_own_centre() -> None:
+    """Amendment 2 -- the pre-existing defect this fixes: before it,
+    `search_pattern` had no centre parameter at all and this function
+    discarded the centre it unpacked, so `left`/`right`/`full` all swept
+    around 0 deg (dead ahead) regardless of which sector was commanded.
+    `left`'s own centre is -60 deg (`SECTOR_WEDGE_DEG`)."""
+    plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+    pattern = _search_sweep(plan, _ownship_for_search())
+    azimuths = [azimuth for azimuth, _ in pattern]
+    # Every step sits near -60 (the sector's own 15 deg half-width,
+    # `MAX_SEARCH_SECTOR_HALF_WIDTH_DEG`), never near 0 (dead ahead) --
+    # the defect this fix closes would have centred this sweep on 0.0.
+    assert all(-75.0 <= azimuth <= -45.0 for azimuth in azimuths)
+    assert all(azimuth < -10.0 for azimuth in azimuths)
+
+
+def test_search_sweep_ahead_is_unchanged_by_the_centre_fix() -> None:
+    """`ahead`'s own centre is 0 deg, so this is the one sector the
+    pre-existing defect was harmless for -- the fix is a true no-op here."""
+    plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+    pattern = _search_sweep(plan, _ownship_for_search())
+    azimuths = [azimuth for azimuth, _ in pattern]
+    assert all(-15.0 <= azimuth <= 15.0 for azimuth in azimuths)
+
+
+class TestSplitSectorByRegard:
+    """Pure geometry -- `plans/9k113-narrow-search/plan.md` Stage 2.
+    Worked against `SECTOR_WEDGE_DEG` and `regard_half_deg=60.0`, exactly
+    the plan's own worked example."""
+
+    def test_ahead_is_fully_inside_regard(self) -> None:
+        in_span, out_spans = _split_sector_by_regard(0.0, 30.0, 60.0)
+        assert in_span == (0.0, 30.0)
+        assert out_spans == []
+
+    def test_left_splits_into_one_in_span_and_one_out_span(self) -> None:
+        in_span, out_spans = _split_sector_by_regard(-60.0, 30.0, 60.0)
+        assert in_span == (-45.0, 15.0)
+        assert out_spans == [(-75.0, 15.0)]
+
+    def test_right_splits_into_one_in_span_and_one_out_span(self) -> None:
+        in_span, out_spans = _split_sector_by_regard(60.0, 30.0, 60.0)
+        assert in_span == (45.0, 15.0)
+        assert out_spans == [(75.0, 15.0)]
+
+    def test_full_splits_into_one_in_span_and_two_out_spans(self) -> None:
+        in_span, out_spans = _split_sector_by_regard(0.0, 90.0, 60.0)
+        assert in_span == (0.0, 60.0)
+        assert out_spans == [(-75.0, 15.0), (75.0, 15.0)]
+
+    def test_a_span_entirely_outside_regard_has_no_in_span(self) -> None:
+        in_span, out_spans = _split_sector_by_regard(90.0, 10.0, 60.0)
+        assert in_span is None
+        assert out_spans == [(90.0, 10.0)]
+
+
+class TestCommandedOrDefaultSector:
+    def test_a_commanded_sector_is_respected_at_its_own_width(self) -> None:
+        """`ahead`'s own 30 deg half-width is never widened to the sight's
+        full regard -- only the no-commanded-sector default does that."""
+        plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+        assert _commanded_or_default_sector(plan, 60.0) == (0.0, 30.0)
+
+    def test_no_commanded_sector_defaults_to_the_full_regard_ahead(self) -> None:
+        assert _commanded_or_default_sector(FREE_SCAN_PLAN, 60.0) == (0.0, 60.0)
+
+
+class TestSightInRegardSweep:
+    def test_default_sector_wide_sweep_spans_the_full_regard(self) -> None:
+        """With nothing commanded, the wide leg's own sweep reaches out to
+        the full +-60 deg regard -- requirement 2's "flight direction as
+        normal default", amendment 2's "default search width ... is the
+        full ±60° regard"."""
+        pattern = _sight_in_regard_sweep(
+            FREE_SCAN_PLAN,
+            _ownship_for_search(),
+            optic=SIGHT_WIDE_OPTIC,
+            near_m=2_333.0,
+            far_m=5_647.0,
+        )
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert min(azimuths) < -50.0
+        assert max(azimuths) > 50.0
+
+    def test_left_sector_sweep_is_confined_to_its_own_in_regard_sub_span(
+        self,
+    ) -> None:
+        """`left`'s in-regard sub-span is `(-45, 15)` (`TestSplitSectorByRegard`
+        above) -- every step stays within it, never reaching `left`'s own
+        full `(-60, 30)` span."""
+        plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+        pattern = _sight_in_regard_sweep(
+            plan,
+            _ownship_for_search(),
+            optic=SIGHT_NARROW_OPTIC,
+            near_m=5_647.0,
+            far_m=13_556.0,
+        )
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert all(-60.0 <= azimuth <= -30.0 for azimuth in azimuths)
+
+
+class TestSightOutOfRegardSweep:
+    def test_no_commanded_sector_never_has_an_out_of_regard_remainder(self) -> None:
+        """The synthesized default sector is exactly the regard width, by
+        construction -- it can never have anything left outside it."""
+        assert _sight_out_of_regard_sweep(FREE_SCAN_PLAN, _ownship_for_search()) == []
+
+    def test_ahead_never_has_an_out_of_regard_remainder(self) -> None:
+        """`ahead`'s own 30 deg span is fully inside the 60 deg regard."""
+        plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+        assert _sight_out_of_regard_sweep(plan, _ownship_for_search()) == []
+
+    def test_left_sweeps_the_one_out_of_regard_remainder(self) -> None:
+        """`left`'s out-of-regard sub-span is `(-75, 15)` -- every step
+        stays on that side, past the -60 deg regard boundary."""
+        plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+        pattern = _sight_out_of_regard_sweep(plan, _ownship_for_search())
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert azimuths
+        assert all(azimuth < -60.0 for azimuth in azimuths)
+
+    def test_full_sweeps_both_out_of_regard_remainders(self) -> None:
+        """`full`'s two remainder pieces, `(-75, 15)` and `(75, 15)` -- one
+        list, both sides of the regard boundary represented."""
+        plan = ScanPlan(commanded_sector="full", command_t_sim=0.0)
+        pattern = _sight_out_of_regard_sweep(plan, _ownship_for_search())
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert any(azimuth < -60.0 for azimuth in azimuths)
+        assert any(azimuth > 60.0 for azimuth in azimuths)
 
 
 # -- _active_gaze / _apply_active_gaze (slice 2B; ScanPlan generalisation
