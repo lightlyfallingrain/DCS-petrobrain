@@ -128,3 +128,64 @@ speech-side function).
   by inspection of `world-model/src/roadnet/rn4.py`'s docstring, unchanged by this plan.
 - No deviation from the plan's design beyond the two test-impact gaps above; implementation
   matches Stage 1/Stage 2 as written.
+
+### Review follow-up (Required Fixes, `plans/landmark-words-no-names/review.md`)
+
+Tests only — no production change. All three required fixes from the review addressed:
+
+- `test_speech.py::test_render_contact_report_end_to_end_named_water_speaks_generic_word` — a
+  named water body (`"Orontes"`, `subtype="river"`), through the real `semantic_facts_for` ->
+  `_contact_report_text` chain (not a hand-built `feature_id`). Asserts `"near a river"` present,
+  `"Orontes"` absent.
+- `test_speech.py::test_render_contact_report_end_to_end_inside_settlement_speaks_generic_word` —
+  same real chain, a position inside a named settlement (`"Jableh"`, `subtype="town"`). Asserts
+  `"in the town"` present, `"Jableh"` absent.
+- `test_speech.py::test_render_engage_readback_with_semantic_fact_speaks_landmark_word` —
+  `render_engage_readback` had zero test coverage of its semantic/landmark branch before or after
+  the feature. Built the `facts["semantic"]` list from the real `semantic_facts_for` producer
+  (`asdict`-ed `SemanticFact`s) rather than hand-building a `feature_id`, so this test is sensitive
+  to both a producer-side regression and a call-site regression at once.
+- `_enrichment_context(monkeypatch)` (the shared fixture) gained an optional `description`
+  parameter (default unchanged — the pre-existing "Jableh" settlement) so the water/
+  inside_settlement end-to-end tests could reuse its `project_terrain_aware`/`divides_between`
+  stubs rather than duplicating that setup.
+
+**Mutation-checked, all three, by actually introducing the bug, confirming red, then reverting and
+checksumming (`shasum`) `enrichment.py`/`speech.py` back to their original state — not restored by
+eye:**
+
+1. Swapped the water `feature_id` segment order in `enrichment.py` (name before label instead of
+   label before name) -> `test_..._named_water_...` failed with `"near Orontes."` in place of
+   `"near a river"` (the name leaking through, the exact regression this fix targets). Reverted;
+   `shasum` of `enrichment.py` matched the pre-mutation value.
+2. Swapped the `inside_settlement` `feature_id` segment order the same way ->
+   `test_..._inside_settlement_...` failed with `"in the Jableh."` in place of `"in the town"`.
+   Reverted; `shasum` matched.
+3. Reverted `render_engage_readback`'s call site from `_landmark_speech_text(best)` back to raw
+   `best['text']` -> `test_render_engage_readback_with_semantic_fact_speaks_landmark_word` failed,
+   producing `"near Jableh (250m)"` in place of `"near a village"` — the proper name and bracketed
+   distance leaking into the attack-run readback, i.e. exactly the behaviour F7 removes. Reverted;
+   `shasum` of `speech.py` matched.
+
+Each failure was for the stated reason (the name/distance reappearing in speech), not an unrelated
+error, confirming these tests actually exercise the mechanism rather than passing vacuously.
+
+**Checks** (`body-layer/`, venv at `/mnt/e/DCS-petrobrain/body-layer/.venv/bin/`):
+- `ruff format --check src tests`: pass (155 files already formatted)
+- `ruff check src tests`: pass (one `UP037` finding on the new optional-`description` parameter's
+  quoted forward-reference annotation, fixed by removing the quotes — `from __future__ import
+  annotations` plus `_FakeDescription` already being defined above its use made them unnecessary)
+- `mypy src` (run from inside `body-layer/`): pass (68 source files, no issues)
+- `pytest tests -q` (`PYTHONPATH=src:../world-model/src`): pass — 2259 passed, 4 xfailed (one more
+  than the prior implementation pass's 2256, for the three new tests). One full run hit the
+  documented `test_log_live_los_coverage_summary_logs_zero_over_evaluated_when_healthy` flake
+  (stray `BrainLayerError` traceback from an unrelated poll thread racing test teardown); reran it
+  and the two documented `test_logger.py`/`test_mission_start_reset.py` connection tests in
+  isolation (both pass), and a second full unfiltered run passed clean at 2259/4. All three new
+  tests confirmed by exact name (not `-k`) in unfiltered `-v` output.
+
+### Notable discoveries (this pass)
+
+- No production bug found — the three gaps were coverage-only, as the review concluded. All three
+  mutations produced the specific, correctly-attributed failure the review predicted, with no
+  surprises.

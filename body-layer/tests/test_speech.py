@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import pytest
 
@@ -24,7 +24,7 @@ from belief.classification import (
 )
 from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S
-from belief.enrichment import EnrichmentContext
+from belief.enrichment import EnrichmentContext, semantic_facts_for
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_BURNING_SEEN,
@@ -69,6 +69,7 @@ from belief.speech import (
 )
 from belief.tools import describe_contact
 from belief.utterance import ReferenceCandidate
+from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import (
     PROVENANCE_EMITTER_BURNING,
@@ -106,16 +107,28 @@ def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
     return OwnshipState(t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0)
 
 
-def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
+def _enrichment_context(
+    monkeypatch: pytest.MonkeyPatch, description: _FakeDescription | None = None
+) -> EnrichmentContext:
     """BL-3 enrichment wired against fakes -- mirrors `test_console.py`'s
     own `_enrichment_context` fixture (same fake shapes, same monkeypatch
     targets) since this module has no shared test-fixture module to import
-    it from (per this project's per-test-file fixture convention)."""
+    it from (per this project's per-test-file fixture convention).
+
+    `description`, when given, replaces the default "Jableh" settlement
+    fixture -- lets an end-to-end test (`landmark-words-no-names` review's
+    water/`inside_settlement` cases) reuse the same `project_terrain_aware`/
+    `divides_between` stubs with a different `describe_position` result,
+    rather than duplicating this whole setup per fact kind."""
     monkeypatch.setattr(
         enrichment_module,
         "describe_position",
-        lambda conn, theatre, x, z: _FakeDescription(
-            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        lambda conn, theatre, x, z: (
+            description
+            if description is not None
+            else _FakeDescription(
+                nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+            )
         ),
     )
     monkeypatch.setattr(
@@ -1621,6 +1634,100 @@ def test_landmark_speech_text_no_feature_id_falls_back_to_stripping_distance() -
     this shape) still pass unmodified."""
     fact = {"text": "near a road (50m)", "confidence": 0.9}
     assert _landmark_speech_text(fact) == "near a road"
+
+
+# --- Required fixes from `plans/landmark-words-no-names/review.md`:
+# end-to-end coverage through the real `semantic_facts_for` producer,
+# for the two fact kinds the hand-built `_landmark_speech_text` unit tests
+# above assume the `feature_id` shape of rather than derive it. Each of the
+# three tests below is mutation-checked (see the implementation note):
+# swapping the `feature_id` segment order in `enrichment.py`'s construction
+# for the kind under test makes the test fail, by making the spoken word
+# the proper name instead of the generic one.
+
+
+def test_render_contact_report_end_to_end_named_water_speaks_generic_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required Fix 1: a named water body, through the real
+    `semantic_facts_for` -> `_contact_report_text` chain -- not a
+    hand-built `feature_id` string like `test_landmark_speech_text_water`
+    above. Mutation-checked: swapping the two segments in `enrichment.py`'s
+    water `feature_id` construction (name before label, instead of label
+    before name) makes `_landmark_speech_text` read the settlement's own
+    name as the "word" and speak it instead of "a river"."""
+    store, contact_id = _store_with_one_contact()
+    description = _FakeDescription(
+        nearest_water=_FakeInfo(name="Orontes", subtype="river", distance_m=150.0)
+    )
+    context = _enrichment_context(monkeypatch, description)
+
+    speech = render_contact_report(store, contact_id, now_sim=0.0, enrichment=context)
+
+    assert speech is not None
+    assert "near a river" in speech.text
+    assert "Orontes" not in speech.text
+
+
+def test_render_contact_report_end_to_end_inside_settlement_speaks_generic_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required Fix 2: a position inside a named settlement, through the
+    same real chain -- `test_landmark_speech_text_inside_settlement_
+    speaks_in_the_word` above hand-builds its `feature_id` and would not
+    catch a producer-side regression. Mutation-checked the same way as
+    Fix 1, against `enrichment.py`'s `inside_settlement` `feature_id`
+    construction."""
+    store, contact_id = _store_with_one_contact()
+    description = _FakeDescription(
+        inside_settlement=_FakeInfo(name="Jableh", subtype="town")
+    )
+    context = _enrichment_context(monkeypatch, description)
+
+    speech = render_contact_report(store, contact_id, now_sim=0.0, enrichment=context)
+
+    assert speech is not None
+    assert "in the town" in speech.text
+    assert "Jableh" not in speech.text
+
+
+def test_render_engage_readback_with_semantic_fact_speaks_landmark_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required Fix 3: `render_engage_readback`'s semantic/landmark branch
+    had zero test coverage before or after `landmark-words-no-names` -- no
+    test in this module ever called it with a non-empty `facts["semantic"]`
+    list. Built from the real `semantic_facts_for` producer, the same as
+    Fix 1/2 above, so a `feature_id` segment-order mutation there breaks
+    this test too; separately, reverting the call site back to raw
+    `best['text']` (the exact regression F7 removes) also breaks it, since
+    `text` here still carries the name and the distance figure."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(
+                name="Jableh", subtype="village", distance_m=250.0
+            )
+        ),
+    )
+    semantic = [
+        asdict(fact)
+        for fact in semantic_facts_for(
+            _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+        )
+    ]
+    facts: dict[str, object] = {
+        "classification": {"value": "OP_ARMORED", "level": "class"},
+        "relative_now": {"clock_position": 2, "range_m": 1500.0},
+        "semantic": semantic,
+    }
+
+    speech = render_engage_readback(facts)
+
+    assert speech.text == "Attack run, armor, 2 o'clock, 1.5 kilometres near a village."
+    assert "Jableh" not in speech.text
+    assert "250" not in speech.text
 
 
 def test_route_event_attention_changed_has_no_template_and_is_not_acknowledged() -> (
