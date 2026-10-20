@@ -282,3 +282,9 @@ correctly resolved `Vulcan-2` as not targeting ownship. Under the "visible unit 
 9 o'clock, inside the commanded left scan). That case is being built on
 `fix/taking-fire-visible-shooter`. This sortie's `debrief.log` (written at mission end) can confirm
 the target.
+
+**Confirmed from this sortie's `debrief.log`** (written 18:06 at mission end): at sim 335.461 the
+Vulcan with mission ID 434 (`Vulcan-2`, matching the collector's `since_sim`) started shooting at
+**Mi-24P mission ID 447, the wingman**. The player is mission ID 344, pilot name "sg". So
+`targets_ownship: false` was correct, and the Hook is not at fault. Between 322 and 333 s a
+different Vulcan (433) was shooting at the player, and a Leopard-2A5 (368) at 344 s.
