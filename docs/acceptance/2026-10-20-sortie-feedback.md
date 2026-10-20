@@ -20,6 +20,10 @@ the Mac. Speech recognition had moved from the Mac to the Windows CPU the same d
 
 ## F1 — readback latency of several seconds
 
+**Clarified (user):** "readback" is PTT release to hearing his voice, and `radio check` felt as
+slow as the rest — *"yes. Will need to compare with mac"*. So the delay is in the shared
+recognise/route/speak chain, not in any one command's handling.
+
 Not yet explored. Open: which stretch of the chain the seconds are in (PTT release →
 whisper on the Windows CPU while DCS runs → transcript poll → match → Piper synthesis →
 playback), and whether it was this slow when recognition ran on the Mac.
@@ -52,3 +56,13 @@ sentence position — the same log also anchors `"Eta-Chron."` and `"Check it."`
 Separately, earlier the same day body-layer on Windows logged `background brain reply poll
 failed (retrying)` / connection refused — the brain is on the Mac, so even correctly routed
 speech would have reached nothing unless body-layer's brain URL points at the Mac.
+
+## F3 — Piper reads "~800 meters" as "tilde 800 meters"
+
+User, verbatim:
+
+> * Piper model reads "~800 meters" as "tilde 800 meters" -> replace"~" with "about" in all speech.
+
+Unambiguous, fix given by the user — no exploration needed. Source is
+`body-layer/src/belief/speech.py` `_round_enrichment_fragment` (`"(~400 metres)"`); `say`
+silently skipped the tilde, Piper reads it.
