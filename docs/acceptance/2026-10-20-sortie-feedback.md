@@ -133,3 +133,17 @@ and adds three things the build lacks:
 Known gap against (2): body-layer has **no mission objective area at runtime** — `grep -i
 objective body-layer/src` finds only a comment. The Mission Interpreter's waypoints reach
 `mission_phase` (BL-7), which is inert in flight.
+
+## F4/F5 — settled (user, 2026-10-20)
+
+> 2 - skip for now
+> 1 - eyes/binocular when beyond 9K113 limits. Leave 9K113 at last position.
+> 3 - yes, I'd use narrow much more, wide is for orientation to know where to point the narrow,
+> or for close distance
+
+1. **Commanded sector beyond ±60°**: that sector is scanned with eyes/binoculars; the sight stays
+   at its last position (not re-aimed to the regard edge).
+2. **Mission objective area**: skipped for now — aim priority is commanded sector → flight
+   direction. Filed as a backlog item.
+3. **Wide vs narrow share**: narrow carries the search; wide is brief — orientation (where to
+   point narrow) or close range.
