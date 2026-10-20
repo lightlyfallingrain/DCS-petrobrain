@@ -1765,6 +1765,76 @@ def test_a_unit_firing_at_ownship_sets_the_targets_ownship_provenance() -> None:
     assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
 
 
+def test_a_visible_unit_firing_at_ownship_sets_the_targets_ownship_provenance() -> None:
+    """`docs/acceptance/2026-10-20-sortie-feedback.md` F6 follow-up: a
+    shooter at 1,073 m (well inside the naked-eye `T-72B` hires threshold
+    of 250 m used by `test_a_unit_at_hires_threshold...` above, so no
+    bypass is needed at all) must still produce the `targets_ownship`
+    provenance once it is admitted and the collector says it targets
+    ownship -- the defect was that `targets_ownship_by_object_id` only
+    ever looked at `VisibilityResult.emitter_kind`, which stays `None` for
+    an ordinary, unaided admission. `classification_raw` is asserted at
+    its exact hires value (`"T-72B"`, not `object_model.DEFAULT_OP_CLASS`)
+    to prove the tier clamp the emitter *bypass* applies (`visibility.py`'s
+    "Emitter bypass" section) was correctly never reached -- this fix must
+    not raise or lower classification, only the provenance bit."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1", targets_ownship=True),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
+    assert observations[0].classification_raw == "T-72B"
+
+
+def test_a_visible_unit_firing_at_others_keeps_ordinary_provenance() -> None:
+    """The scope boundary of the fix above, made explicit: a visible
+    (no-bypass-needed) unit firing at something *other* than ownship does
+    **not** get `PROVENANCE_EMITTER_FIRING` -- that provenance is still
+    driven entirely by `VisibilityResult.emitter_kind`, which stays `None`
+    when the bypass was never needed. This is deliberately unchanged by
+    the `targets_ownship` fix above (`docs/acceptance/
+    2026-10-20-sortie-feedback.md` F6 only asks for the targets-ownship
+    case): the "something firing... far" wording remains reserved for a
+    unit that would otherwise have been invisible."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
+    source, _client = _source(
+        world_objects,
+        firing=_firing_active_map("unit_1", targets_ownship=False),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
+    assert observations[0].classification_raw == "T-72B"
+
+
+def test_a_visible_burning_unit_keeps_ordinary_provenance() -> None:
+    """The other emitter kind, same scope boundary: a burning unit well
+    inside its own ordinary presence range (no bypass needed) keeps the
+    ordinary provenance, not `PROVENANCE_EMITTER_BURNING` -- unaffected by
+    the `targets_ownship` fix above, since `BURNING` never carries a
+    `targets_ownship` bit (`Emitter.targets_ownship`'s own docstring)."""
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(world_objects, unit_velocity=unit_velocity)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
+    assert observations[0].classification_raw == "T-72B"
+
+
 def test_firing_wins_over_burning_for_the_same_unit() -> None:
     """The plan's "Co-moving Fields" precedence, exercised end to end:
     a unit both burning and firing resolves to the `FIRING` provenance."""

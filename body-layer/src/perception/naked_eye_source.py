@@ -879,21 +879,27 @@ class NakedEyePerceptionSource:
             candidate.object_id: result.emitter_kind for candidate, result in visible
         }
 
-        # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the
+        # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`), revised
+        # per `docs/acceptance/2026-10-20-sortie-feedback.md` F6: the
         # resolved `Emitter.targets_ownship` bit, same shape/timing as
-        # `emitter_kind_by_object_id` immediately above, gated the same
-        # way: only meaningful (and only ever `True`) when `result.
-        # emitter_kind is not None` -- an `Emitter` the bypass did not
-        # actually need (candidate cleared both gates unaided) must not
-        # contribute a stray `targets_ownship=True` to the cluster fold
-        # below.
+        # `emitter_kind_by_object_id` immediately above, but **not** gated
+        # on `result.emitter_kind is not None`. That gate meant "only when
+        # the bypass was needed" -- correct for the bypass's own tier
+        # clamp and for `emitter_kind_by_object_id` (which answers "which
+        # kind made the bypass fire"), wrong here: a shooter who is
+        # simply visible at ordinary range still reaches this point only
+        # if it is in `visible` (it already cleared gaze, cockpit mask,
+        # optic FOV, terrain LOS and forest -- see `check_visibility`), so
+        # the collector's own `targets_ownship` fact must carry through
+        # regardless of whether a bypass fired. `_build_observation`'s
+        # cluster fold (below) consults this independently of `emitter_
+        # kind_by_object_id`, so the "firing at others" wording -- which
+        # *is* still bypass-gated -- is unaffected by this change.
         targets_ownship_by_object_id: dict[int, bool] = {}
-        for candidate, result in visible:
+        for candidate, _result in visible:
             emitter = emitter_by_object_id.get(candidate.object_id)
             targets_ownship_by_object_id[candidate.object_id] = (
-                result.emitter_kind is not None
-                and emitter is not None
-                and emitter.targets_ownship
+                emitter is not None and emitter.targets_ownship
             )
 
         observations = self._build_observations(
@@ -1174,16 +1180,23 @@ class NakedEyePerceptionSource:
         only when every member's own DCS-driven verdict agrees it is.
 
         `provenance` (`plans/emitter-visibility/plan.md`, `BL-B72` Stage A,
-        extended Stage B) takes a `PROVENANCE_EMITTER_*` value only when
-        every member's `VisibilityResult.emitter_kind` agrees on the same
-        non-`None` kind -- a mixed cluster keeps the ordinary
-        `PROVENANCE_VISIBILITY_FILTER_ONLY`, following `Cluster.
-        classification_raw`'s own "identical keeps, disagreement degrades"
-        rule rather than a second one. When that kind is `FIRING`, the
-        **same rule applies one level deeper**: `PROVENANCE_EMITTER_
-        FIRING_TARGETS_OWNSHIP` only when every member's `targets_ownship`
-        also agrees (and is `True`); any disagreement, or a unanimous
-        `False`, falls back to the plain `PROVENANCE_EMITTER_FIRING`."""
+        extended Stage B, revised per `docs/acceptance/
+        2026-10-20-sortie-feedback.md` F6) is `PROVENANCE_EMITTER_FIRING_
+        TARGETS_OWNSHIP` whenever every member's `targets_ownship` agrees
+        and is `True` -- checked **first**, independently of `VisibilityResult.
+        emitter_kind`, because a shooter the perception gates admitted
+        without ever needing the emitter bypass still carries a real
+        `targets_ownship` fact and must still produce "taking fire". Only
+        once that is not the case does the plain kind-agreement rule
+        apply: a `PROVENANCE_EMITTER_*` value when every member's
+        `VisibilityResult.emitter_kind` agrees on the same non-`None`
+        kind, else the ordinary `PROVENANCE_VISIBILITY_FILTER_ONLY` --
+        `Cluster.classification_raw`'s own "identical keeps, disagreement
+        degrades" rule, generalised the same way `apparent_motion`/`live_
+        los_clear` above already are. This second rule is deliberately
+        unchanged from before this revision: it is what still reserves
+        `PROVENANCE_EMITTER_FIRING` ("something firing... far") for a
+        unit the bypass was actually needed for."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -1241,21 +1254,29 @@ class NakedEyePerceptionSource:
             emitter_kind_by_object_id.get(member.object_id)
             for member in cluster.members
         }
+        # `docs/acceptance/2026-10-20-sortie-feedback.md` F6: `targets_
+        # ownship` is checked **first, independently of `member_emitter_
+        # kinds`** -- that set only ever carries a kind when the bypass
+        # fired (`emitter_kind_by_object_id`'s own docstring above), so a
+        # shooter who was simply visible at ordinary range would never
+        # reach the `FIRING` branch below at all. `targets_ownship_by_
+        # object_id` (also fixed by this change, see its own docstring)
+        # is the one place the "taking fire" fact actually lives, so it
+        # must be read on its own footing. The ordinary kind-agreement
+        # rule (method docstring, "identical keeps, disagreement
+        # degrades") still applies to it: unanimous `True` across every
+        # member, nothing less.
+        member_targets_ownship = {
+            targets_ownship_by_object_id.get(member.object_id, False)
+            for member in cluster.members
+        }
         provenance = PROVENANCE_VISIBILITY_FILTER_ONLY
-        if len(member_emitter_kinds) == 1:
+        if member_targets_ownship == {True}:
+            provenance = PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
+        elif len(member_emitter_kinds) == 1:
             (only_emitter_kind,) = member_emitter_kinds
             if only_emitter_kind == EmitterKind.FIRING.value:
-                # One level deeper than the plain kind-agreement rule
-                # above (method docstring): `targets_ownship` must also
-                # agree, and be `True`, for the stronger provenance.
-                member_targets_ownship = {
-                    targets_ownship_by_object_id.get(member.object_id, False)
-                    for member in cluster.members
-                }
-                if member_targets_ownship == {True}:
-                    provenance = PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP
-                else:
-                    provenance = PROVENANCE_EMITTER_FIRING
+                provenance = PROVENANCE_EMITTER_FIRING
             elif only_emitter_kind is not None:
                 provenance = _PROVENANCE_BY_EMITTER_KIND.get(
                     only_emitter_kind, PROVENANCE_VISIBILITY_FILTER_ONLY
