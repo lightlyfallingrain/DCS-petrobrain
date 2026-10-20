@@ -1,6 +1,6 @@
-# BL-B86 — `join_voice_latency.py` crashes whole on one malformed JSONL line
+# BL-B88 — `join_voice_latency.py` crashes whole on one malformed JSONL line
 
-- [ ] **BL-B86 — `tools/join_voice_latency.py`'s `_iter_jsonl` has no handling for a malformed or
+- [ ] **BL-B88 — `tools/join_voice_latency.py`'s `_iter_jsonl` has no handling for a malformed or
   truncated JSONL line; one bad line aborts the entire reducer with an unhandled traceback.**
   Security deep analysis, `plans/voice-latency-instrumentation/security-review.md` (2026-10-20),
   confirmed by running it (not inferred): a two-line file with one valid row and one truncated

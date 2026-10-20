@@ -1,6 +1,6 @@
-# BL-B85 — `_pending_positional_replies` has no size bound
+# BL-B87 — `_pending_positional_replies` has no size bound
 
-- [ ] **BL-B85 — Stage 6's deferred-positional-readback list
+- [ ] **BL-B87 — Stage 6's deferred-positional-readback list
   (`CrewConsole._pending_positional_replies`, `plans/voice-latency-instrumentation/plan.md`) grows
   with no cap, unlike every other queue-shaped structure in this codebase.** Security deep analysis,
   `plans/voice-latency-instrumentation/security-review.md` (2026-10-20).

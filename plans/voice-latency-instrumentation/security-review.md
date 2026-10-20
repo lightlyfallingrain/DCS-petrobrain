@@ -77,7 +77,7 @@ implementer's word.
   calls `json.loads(line)` with no `try/except`. Reproduced directly (not inferred): a file with one
   well-formed row followed by one truncated row raises `json.decoder.JSONDecodeError` straight out
   of `main()`, losing every row from every file in the invocation, not just the bad line. No test in
-  this diff exercises this path. See **Finding 2** below — filed as `BL-B86`.
+  this diff exercises this path. See **Finding 2** below — filed as `BL-B88`.
 - **Stage 6 deferral unbounded growth: confirmed, not a false concern.** `_pending_positional_
   replies` has no size cap anywhere (`grep` for `_MAX_PENDING`/similar next to it: none), unlike
   `TranscriptQueue` (`_MAX_QUEUE_LEN = 64`, drop-oldest) and `aircraft-layer`'s `F10CommandQueue`,
@@ -88,7 +88,7 @@ implementer's word.
   forces more than one out per poll once the first re-claims the channel) — while up to 64 new
   transcript-driven dispatches can enter **per poll** (~1s) via the network-reachable `POST
   /transcribe` → `GET /transcripts/poll` path if every posted clip's recognised text happens to
-  match a positional-readback token. See **Finding 1** below — filed as `BL-B85`.
+  match a positional-readback token. See **Finding 1** below — filed as `BL-B87`.
 
 ### Code Findings
 
@@ -99,8 +99,8 @@ implementer's word.
 | `body-layer/src/logger.py` (`_poll_transcripts`) | new field validation | Non-string rejected before threading | None |
 | `audio-adapter/src/latency_log.py`, `body-layer/src/belief_truth_log.py` | JSONL serialization | `json.dumps` throughout; no log-structure injection | None |
 | `aircraft-layer/src/collector/audio_sender.py` (`_run`, enqueue/playback-start/playback-finish logging) | logging on a worker thread | Bare `logger.info`, matches this file's own pre-existing pattern; does not reintroduce the `frombytes()`-class defect from agent memory | None |
-| `body-layer/src/belief/crew_console.py` (`_pending_positional_replies`, `_speak_or_defer`, `drain_pending_positional_replies`) | unbounded in-memory queue | No cap, unlike every sibling queue in this codebase; network-reachable growth path via `/transcribe` | **Low-risk, filed: `BL-B85`** |
-| `body-layer/tools/join_voice_latency.py` (`_iter_jsonl`) | unguarded `json.loads` per line | Confirmed by execution: one malformed line aborts the whole reducer | **Low-risk, filed: `BL-B86`** |
+| `body-layer/src/belief/crew_console.py` (`_pending_positional_replies`, `_speak_or_defer`, `drain_pending_positional_replies`) | unbounded in-memory queue | No cap, unlike every sibling queue in this codebase; network-reachable growth path via `/transcribe` | **Low-risk, filed: `BL-B87`** |
+| `body-layer/tools/join_voice_latency.py` (`_iter_jsonl`) | unguarded `json.loads` per line | Confirmed by execution: one malformed line aborts the whole reducer | **Low-risk, filed: `BL-B88`** |
 
 ### Risk Communication
 
@@ -124,7 +124,7 @@ Options:
   (C) Fix now — I'll address it before continuing
   (D) Stop — do not proceed until this is resolved
 
-**Filed as `BL-B85`** (`body-layer/ROADMAP/BL-B85.md`) rather than defaulting to (A)/(B)/(C) myself
+**Filed as `BL-B87`** (`body-layer/ROADMAP/BL-B87.md`) rather than defaulting to (A)/(B)/(C) myself
 — the ID exists so the user's choice has somewhere to land; recommend (B) given this batch's own
 scope (instrumentation + one already-fixed correctness bug) and the low steady-state probability,
 but it is the user's call.
@@ -151,7 +151,7 @@ Options:
   (C) Fix now — I'll address it before continuing
   (D) Stop — do not proceed until this is resolved
 
-**Filed as `BL-B86`** (`body-layer/ROADMAP/BL-B86.md`). Recommend (C) if cheap — the fix is a
+**Filed as `BL-B88`** (`body-layer/ROADMAP/BL-B88.md`). Recommend (C) if cheap — the fix is a
 four-line `try/except` around one call — but filed either way rather than left in prose alone, per
 this role's own closing-step rule.
 
@@ -165,6 +165,6 @@ to break `/speak`/`/transcribe`/playback/the poll loop, and the plan review's on
 (`correlation_id`/`t_ptt_release_wall` validation) is correctly applied and tested on all three HTTP
 boundaries. Two low-risk findings (unbounded in-memory queue growth under sustained network-driven
 flooding; a reducer-tool robustness gap on malformed log lines) are real, confirmed by direct
-inspection/execution rather than inferred, and filed as `BL-B85`/`BL-B86` — neither is exploitable
+inspection/execution rather than inferred, and filed as `BL-B87`/`BL-B88` — neither is exploitable
 in the security sense, neither expands this project's accepted LAN-trust posture beyond precedent
 already set in this feature's own plan review, and neither blocks proceeding to DoD.
