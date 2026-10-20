@@ -96,4 +96,12 @@ User, verbatim:
 
 > just a moment ago, 9K113 wide, but centre=-90 deg +/- 15 deg. 9K113 limit is +-60 deg.
 
-Not yet investigated.
+**Cause, from the code — a real defect, not only a display one.** When `observ on` has nothing
+worth a closer look, `optic_policy` returns `OpticDecision(optic=SIGHT_WIDE_OPTIC)` with **no aim**;
+its comment says *"rest wide, pointed ahead"*. But `logger._apply_active_gaze` only overrides the
+scan plan when the decision carries an aim, so with none the sight's boresight falls back to the
+**head's o'clock scan cycle** — 9 o'clock is -90° ±15°, a clock hour. Perception then applies the
+sight's magnification along that gaze: detections through a 9K113 at 90° off the nose, where the
+mount cannot point. The ±60° field-of-regard filter guards only the choice of *look target*, not
+this idle path. The idle aim is the same question as F4 ("where does the sight point when
+nothing is detected yet"), so the two should be designed together.
