@@ -60,4 +60,8 @@ practically instantanous. Very good."*
 - Block 5 (latency) on the Mac: *"when warm practically instantanous"* — a clear improvement over
   `say`'s ~0.6–0.8 s. Not timed; the first-line-after-start (voice load) delay was not reported.
 
-Blocks 2–3 (Windows local, co-located) and the Windows half of 4–5: open.
+**Windows (blocks 2–5), 2026-10-20 — PASS.** User, verbatim: *"Piper Windows test done. Pass.
+works very well."* Reported as one overall pass; per-block detail (`/stop` cut-off, co-located
+line, outage lines, timed latency) not itemised.
+
+**Stage 4: PASS on both machines.**
