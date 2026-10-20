@@ -96,3 +96,73 @@ source, not assumed from the plan/implementation docs. Three findings confirmed 
 testing (introduce the bug, show the suite stays green, revert), not just by reading — per the
 "verify by mutation" standing practice. All subproject commands (ruff format/check, mypy --strict,
 pytest) run directly, including an isolated rerun of the two flaky tests that failed on a full run.
+
+---
+
+### Re-review
+
+Re-reviewed commit `4ea0fb64b52d6784b45df5778738771e8d8e038a` (tests only, plus a fixture
+extension, on top of the reviewed tip `67ea0ce2`) against the three Required Fixes above.
+
+**Diff**: `body-layer/tests/test_speech.py` (+119/-6) and
+`plans/landmark-words-no-names/implementation.md` (+61). No production file touched — confirmed by
+`git diff --stat` against `67ea0ce2`. The three new tests each build their semantic fact(s) from
+the real `semantic_facts_for` producer (water: `nearest_water=_FakeInfo(name="Orontes",
+subtype="river", ...)`; inside_settlement: `inside_settlement=_FakeInfo(name="Jableh",
+subtype="town")`; engage-readback: `asdict`-ed `SemanticFact`s from a real
+`semantic_facts_for(...)` call), not a hand-built `feature_id` string — exactly what the three
+Required Fixes asked for.
+
+**Each fix re-mutated and re-verified independently, not re-read from the implementation note:**
+
+1. Swapped the water `feature_id` segment order in `enrichment.py`
+   (`f"water:{water.name or 'unnamed'}:{_unnamed_water_label(water.subtype)}"` in place of the
+   correct label-then-name order). Full `test_speech.py`+`test_enrichment.py` run: exactly
+   `test_render_contact_report_end_to_end_named_water_speaks_generic_word` failed, with
+   `"near Orontes."` in place of `"near a river"` — the name leaking through, the precise defect
+   the fix targets. Reverted; `sha1sum enrichment.py` matched the pre-mutation value.
+2. Swapped the `inside_settlement` `feature_id` segment order the same way. Exactly
+   `test_render_contact_report_end_to_end_inside_settlement_speaks_generic_word` failed, with
+   `"in the Jableh."` in place of `"in the town"`. Reverted; hash matched.
+3. Reverted `render_engage_readback`'s call site from `_landmark_speech_text(best)` back to raw
+   `best['text']`. Exactly `test_render_engage_readback_with_semantic_fact_speaks_landmark_word`
+   failed, producing `"...near Jableh (250m)."` in place of `"...near a village."` — the proper
+   name and bracketed distance leaking into an attack-run readback, the exact regression F7
+   removes. Reverted; `sha1sum speech.py` matched.
+
+Each mutation caused exactly one new failure (confirmed by running the two affected test files in
+full, not `-k`-scoped), and no mutation was left in place after checking — hashes of both
+production files matched their pre-mutation values, and `git status --porcelain` showed nothing
+after all three.
+
+**`_enrichment_context`'s new `description` parameter**: grepped every call site in
+`test_speech.py` — all pre-existing ones pass no second argument, so the ternary falls to the
+unchanged default (`_FakeDescription(nearest_settlement=_FakeInfo(name="Jableh",
+distance_m=250.0))`), identical to the pre-change behaviour. Confirmed by the full run below
+showing no unrelated test changed outcome.
+
+**Checks, from `body-layer/` (venv `/mnt/e/DCS-petrobrain/body-layer/.venv/bin/`):**
+- `ruff format --check src tests`: pass (155 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (CWD `body-layer/`): pass, 68 source files, no issues
+- `pytest tests -q`: 2259 passed, 4 xfailed, zero failures on one full run; a prior full run hit
+  the documented `test_mission_start_reset.py` connection-test flake
+  (`test_check_for_new_mission_keeps_the_traceback_for_a_non_connection_failure`), reran in
+  isolation and passed cleanly — matches the stated known-flake class exactly, nothing new.
+- `world-model` untouched by this diff (confirmed by `git diff --stat` scope above); its own
+  checks were not re-run, consistent with "each touched subproject" in root `CLAUDE.md`'s
+  Verification section.
+
+All three Required Fixes from the original review are addressed, each independently confirmed by
+mutation (not by re-reading the implementer's own account of the mutation), with no production
+code change surviving the pass.
+
+### Re-review Verdict
+
+APPROVED
+
+### Re-review Confidence
+
+Full read of the diff; all three required fixes independently re-mutated and re-verified (not
+re-read from `implementation.md`'s account), including hash-confirmed reversion of both touched
+production files and a full-suite rerun of the known flake class.
