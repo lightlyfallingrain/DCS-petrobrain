@@ -237,3 +237,13 @@ the aircraft-layer Hook rather than body-layer. A tank (`Ground-1-3`) earlier re
 so the name comparison works in general. The likely reading is that an AAA gun's
 `S_EVENT_SHOOTING_START` carries no `target` (nil, so false), but that is unverified: it is a
 DCS-internals question for an investigator.
+
+## F7 — settlement names in callouts are not useful
+
+User, verbatim:
+
+> I get call outs that refer to settlement by it's name. While correct, I notice that's not very
+> usefull actually. Instead we could just replace names (that are often foreign and tell me nothing
+> and take time to say) with "village" or "city"
+
+Not yet explored.
