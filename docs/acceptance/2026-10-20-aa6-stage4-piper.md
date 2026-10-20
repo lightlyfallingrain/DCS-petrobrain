@@ -43,8 +43,20 @@ Stopped piper -> error line correctly, no stack trace as expected. Piper is fast
 practically instantanous. Very good."*
 
 - Live pytest against a real Piper: ran, 0 skipped — PASS.
-- Block 4 (outage) on the Mac: the WARNING line appears, no stack trace — PASS. The recovery line
-  (`Piper back …`) and the no-repeat second `/speak` were not mentioned.
+- Block 4 (outage) on the Mac: the WARNING line appears, no stack trace — PASS. Log pasted by the
+  user (*"This is good"*), 2026-10-20 11:39–11:40:
+
+  ```
+  11:40:00,694 WARNING Piper unreachable at http://127.0.0.1:7800 -- Petrovich is silent until it is back (start run-piper-*.sh): <urlopen error [Errno 61] Connection refused>
+  11:40:00,694 WARNING TTS synthesis failed for 'Tanks, two kilometres, moving east along the road.': Piper request to http://127.0.0.1:7800/synthesize failed: <urlopen error [Errno 61] Connection refused>
+  11:40:10,711 WARNING TTS synthesis failed for 'Tanks, two kilometres, moving east along the road.': Piper request to http://127.0.0.1:7800/synthesize failed: <urlopen error [Errno 61] Connection refused>
+  11:40:21,339 WARNING Piper back at http://127.0.0.1:7800 -- speech restored
+  ```
+
+  The outage line fires once and the recovery line once — as designed. **But the server's own
+  pre-existing per-call `TTS synthesis failed for '<text>'` WARNING still fires on every `/speak`**,
+  so during an outage each callout adds a line; Decision 3's "subsequent failures not re-logged
+  loudly" holds for `PiperEngine` only. Raised with the user, not yet decided.
 - Block 5 (latency) on the Mac: *"when warm practically instantanous"* — a clear improvement over
   `say`'s ~0.6–0.8 s. Not timed; the first-line-after-start (voice load) delay was not reported.
 
