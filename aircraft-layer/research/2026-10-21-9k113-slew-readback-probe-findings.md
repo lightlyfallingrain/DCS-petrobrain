@@ -143,6 +143,42 @@ while Petrovich was SEARCHING/TRACKING… he takes the sight back when the list 
 target selected."* That would make BL-B80 depend on ED's Petrovich being enabled, with our writes
 overriding his. Test: pointing probe run 2, AI Petrovich on, readback logged every second.
 
+## Pointing probe runs 2–3 — SOLVED: AI Petrovich on + re-assert every frame
+
+**Run 2** (AI Petrovich switched on late, single writes): 874/876 read 0 until he started scanning
+(t = 122), then tracked his forward scan at about ±17°. Our single writes were ignored.
+
+**Run 3** (AI Petrovich on before the first target, no scan; the target is re-sent every frame).
+**The readback matches every target exactly**, from the first 1 s sample, and holds for the full
+10 s:
+
+| target | written | 874 (az) | 876 (elev) |
+|---|---|---|---|
+| 20° L / R | ∓0.33333 | ∓0.14667 = ∓20.0° | 0 |
+| 40° L / R | ∓0.66667 | ∓0.29333 = ∓40.0° | 0 |
+| 60° L / R | ∓1.0 | ∓0.44000 = ∓60.0° | 0 |
+| elev +0.5 | 0.5 | 0 | **0.50000** |
+| elev −0.5 | −0.5 | 0 | **−0.37500** (gauge −1..0 → −0.75..0) |
+| 30° R, +0.25 | 0.5 / 0.25 | 0.22000 = 30.0° | 0.25000 |
+
+When the probe stopped re-asserting (after `PROBE DONE`), the sight went back to him: t = 154,
+−60° / −0.75, then near 0.
+
+### Settled
+
+1. **The pointing channel is the AI axis (3061/3060), a position target, exact.** Azimuth
+   `value = deg/60`, `arg_874 = value × 0.44`. Elevation `arg_876` = value for positive values,
+   `0.75 × value` for negative. Degrees for elevation are still unmeasured.
+2. **It requires DCS AI Petrovich to be ON.** With him off, the writes are inert *and* 874/876
+   read 0. That explains every failure today and the 2026-10-17 / 2026-09-11 disagreement.
+3. **It requires re-asserting every frame.** A single write is overwritten by him. Stopping the
+   assertion hands the sight back. This matches 2026-09-11.
+4. **The readback is trustworthy under those conditions**, so BL-B80 can close a check on it.
+   No rate loop is needed.
+5. Run 3 of the readback probe ("mark held") was gyro stabilisation (pilot: *"The 9K113 lock onto
+   where it is when OBSERV activates"*). Judge pointing by readback with AI Petrovich on, not by
+   the mark.
+
 ## What differs from 2026-10-17
 
 The 2026-10-17 slew run (`Export.probe-9k113-slew.lua`) wrote the **AI axis (3060/3061) first**,
