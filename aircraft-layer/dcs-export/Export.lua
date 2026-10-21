@@ -136,7 +136,12 @@ local socket = require("socket.core")
 -- additive only, but the version string still moves per this comment's
 -- own rule. Update aircraft-layer/src/collector/server.py's
 -- EXPECTED_EXPORT_VERSION in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-05"
+--
+-- Bumped again 2026-10-21 (plans/9k113-effectors/plan.md, BL-B66 Stage 1)
+-- for the new "cockpit_switch" inbound command op and the matching
+-- cockpit-switch state line (args 773/761/885/955/886/673, wire key
+-- "missl_pw") -- additive only, same reasoning.
+local EXPORT_SCRIPT_VERSION = "2026-10-21"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -173,6 +178,33 @@ local WHEEL_CENTER_BUTTON = 3015
 -- above that threshold since the release is only checked once per frame,
 -- not on a dedicated timer.
 local WHEEL_LONG_PRESS_S = 0.6
+
+-- 9K113 guidance-unit power-up / OBSERV / weapon-safety-bar switches
+-- (plans/9k113-effectors/plan.md, BL-B66 Stage 1). **Only the draw
+-- arguments are declared here, for the readback telemetry push below
+-- (push_cockpit_switch_state) -- the write side is the new generic
+-- "cockpit_switch" op (handle_cockpit_switch_command), which takes
+-- device/cmd/value straight off the wire with no allow-list (user
+-- direction 2026-10-21, see aircraft-layer/CLAUDE.md's "What this is").**
+-- `body-layer/src/belief/sight_effector.py` is the one module that knows
+-- these six switches' device/cmd numbers; this file deliberately does not
+-- duplicate them for the write path.
+--
+-- Confirmed live (aircraft-layer/research/2026-10-17-9k113-effector-and-
+-- slew-probe-findings.md) for 773/955/885/886/673. **761 (CPLR DISTR) is
+-- UNVERIFIED** -- corroborated by two independent readings
+-- (mi24p-command-surface.md's positional table and DCS-BIOS's own Mi-24P
+-- survey, aircraft-layer/research/2026-10-21-dcs-bios-mi24p-9k113-
+-- controls.md Q2), but which physical switch arg 761 actually is has not
+-- been confirmed by a live read-probe -- per the user's own "we can
+-- change the switch number easily" (explore-notes.md), a one-line fix if
+-- the acceptance sortie finds it wrong, not a blocker.
+local ARG_MISSL_PW = 773
+local ARG_CPLR_DISTR = 761 -- UNVERIFIED, see comment above
+local ARG_SIGHT_PW = 885
+local ARG_SCHO_PW = 955
+local ARG_OBSERVE = 886
+local ARG_WEAP_SAFE = 673
 
 -- Debug logging, gated so the branch is free when off. DCS internals here
 -- are heavily unverified (field shapes, module load behavior) and this
@@ -538,6 +570,79 @@ local function push_spu8_state(t)
     end
 end
 
+--: Below this, two readings of any of the six 9K113 switch args are the
+--: same reading -- same reasoning as SPU8_EPSILON above (the probe found
+--: a ~3-frame animation ramp on every one of these switches, same shape
+--: as the SPU-8 panel's own 377/664).
+local COCKPIT_SWITCH_EPSILON = 0.01
+
+local last_missl_pw_sent = nil
+local last_cplr_distr_sent = nil
+local last_sight_pw_sent = nil
+local last_scho_pw_sent = nil
+local last_observe_sent = nil
+local last_weap_safe_sent = nil
+
+-- Reads the six 9K113 switch args (see the ARG_* declarations above) and
+-- sends a line only when at least one has moved -- same "every frame,
+-- sent only on change" shape as push_spu8_state above. Wire key
+-- "missl_pw" (not "net1"/"ptt"/etc, so collector.server._handle_line can
+-- tell this line kind apart from every other one on this connection).
+local function push_cockpit_switch_state(t)
+    if client == nil then
+        return -- nothing to send to yet; the next change will be sent
+    end
+    local missl_pw = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_MISSL_PW)
+    end)
+    local cplr_distr = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_CPLR_DISTR)
+    end)
+    local sight_pw = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_PW)
+    end)
+    local scho_pw = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SCHO_PW)
+    end)
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local weap_safe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_WEAP_SAFE)
+    end)
+    if missl_pw == nil or cplr_distr == nil or sight_pw == nil
+        or scho_pw == nil or observe == nil or weap_safe == nil then
+        return -- no mainpanel device (briefing screen, wrong airframe)
+    end
+    if last_missl_pw_sent ~= nil
+        and math.abs(missl_pw - last_missl_pw_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(cplr_distr - last_cplr_distr_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(sight_pw - last_sight_pw_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(scho_pw - last_scho_pw_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(observe - last_observe_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(weap_safe - last_weap_safe_sent) < COCKPIT_SWITCH_EPSILON then
+        return
+    end
+    last_missl_pw_sent = missl_pw
+    last_cplr_distr_sent = cplr_distr
+    last_sight_pw_sent = sight_pw
+    last_scho_pw_sent = scho_pw
+    last_observe_sent = observe
+    last_weap_safe_sent = weap_safe
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"missl_pw":' .. string.format("%.3f", missl_pw)
+        .. ',"cplr_distr":' .. string.format("%.3f", cplr_distr)
+        .. ',"sight_pw":' .. string.format("%.3f", sight_pw)
+        .. ',"scho_pw":' .. string.format("%.3f", scho_pw)
+        .. ',"observe":' .. string.format("%.3f", observe)
+        .. ',"weap_safe":' .. string.format("%.3f", weap_safe) .. '}\n')
+    if not ok then
+        debug_log("cockpit-switch send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
+end
+
 -- SPU-8 device (GetDevice(55)) / command code for the co-pilot's ICS power
 -- switch -- confirmed live 2026-10-05: from the pilot seat,
 -- GetDevice(55):performClickableAction(3015, v) moved arg 664 0->1 and
@@ -609,6 +714,22 @@ local function extract_json_string_field(json_text, field_name)
     return json_text:match("\"" .. field_name .. "\"%s*:%s*\"([%w_]+)\"")
 end
 
+-- Same purpose-built extraction as extract_json_string_field above, for a
+-- bare (unquoted) JSON number field -- the "cockpit_switch" op's
+-- "device"/"cmd"/"value" fields (plans/9k113-effectors/plan.md, BL-B66
+-- Stage 1). Accepts an optional leading "-" and an optional fractional
+-- part; returns nil (via tonumber on a failed match) if the field is
+-- absent or not shaped like a number, which handle_cockpit_switch_command
+-- below treats as "ignore this command" the same way a nil mode already
+-- does for petrovich_search.
+local function extract_json_number_field(json_text, field_name)
+    local raw = json_text:match("\"" .. field_name .. "\"%s*:%s*(-?%d+%.?%d*)")
+    if raw == nil then
+        return nil
+    end
+    return tonumber(raw)
+end
+
 -- Pending long-press release deadline (DCS model-time seconds), or nil if
 -- no press is currently being held open. Set by handle_command below when
 -- a "forward" search is requested; consumed once per frame in
@@ -652,6 +773,43 @@ local function handle_petrovich_search_command(mode, t)
     end
 end
 
+-- Writes *any* clickable cockpit control the caller names
+-- (plans/9k113-effectors/plan.md, BL-B66 Stage 1) -- GetDevice(device):
+-- performClickableAction(cmd, value), no allow-list of which
+-- device/cmd pairs are accepted. **Deliberate, user direction 2026-10-21,
+-- overriding the security plan review's required fix**: "Allow any
+-- cockpit switch. That gives us much more freedom later and even now
+-- with experimenting. This is LAN only and switch behaviour is limited
+-- to DCS." See aircraft-layer/CLAUDE.md's "What this is" section for the
+-- full quote and the standing invariant this is a named departure from.
+-- Validated for *shape* only -- device/cmd must be integers, value a
+-- finite number -- never for *which* switch. Every write is debug-logged
+-- (flag-gated, this file's existing convention), so a stray/careless
+-- write is at least diagnosable after the fact even though it is not
+-- prevented.
+local function handle_cockpit_switch_command(device, cmd, value)
+    if device == nil or cmd == nil or value == nil then
+        debug_log("ignoring malformed cockpit_switch command (missing device/cmd/value)")
+        return
+    end
+    if device ~= math.floor(device) or cmd ~= math.floor(cmd) then
+        debug_log("ignoring cockpit_switch command with non-integer device/cmd: "
+            .. tostring(device) .. "/" .. tostring(cmd))
+        return
+    end
+    -- `value ~= value` is true only for NaN; math.huge/-math.huge are
+    -- Lua's only other non-finite float values.
+    if value ~= value or value == math.huge or value == -math.huge then
+        debug_log("ignoring cockpit_switch command with non-finite value: " .. tostring(value))
+        return
+    end
+    debug_log("cockpit_switch command received: device=" .. tostring(device)
+        .. " cmd=" .. tostring(cmd) .. " value=" .. tostring(value))
+    safe_call(function()
+        GetDevice(device):performClickableAction(cmd, value)
+    end)
+end
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame in LuaExportAfterNextFrame, *before* that
@@ -670,6 +828,11 @@ local function poll_command_socket(t)
         if op == "petrovich_search" then
             local mode = extract_json_string_field(data, "mode")
             handle_petrovich_search_command(mode, t)
+        elseif op == "cockpit_switch" then
+            local device = extract_json_number_field(data, "device")
+            local cmd = extract_json_number_field(data, "cmd")
+            local value = extract_json_number_field(data, "value")
+            handle_cockpit_switch_command(device, cmd, value)
         else
             debug_log("ignoring command with unknown op: " .. tostring(op))
         end
@@ -761,6 +924,9 @@ function LuaExportAfterNextFrame()
     -- plans/spu8-intercom/plan.md Stage 1: same "every frame, send only
     -- on change" reasoning as push_ptt_state immediately above.
     push_spu8_state(t)
+    -- plans/9k113-effectors/plan.md, BL-B66 Stage 1: same "every frame,
+    -- send only on change" reasoning as push_spu8_state immediately above.
+    push_cockpit_switch_state(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)

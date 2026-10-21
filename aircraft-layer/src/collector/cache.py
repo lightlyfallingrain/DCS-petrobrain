@@ -35,6 +35,10 @@ co-pilot ICS power, volume). Unlike every cache above, it also exposes
 `collector.audio_sender.AudioPlaybackSender`'s real wiring consults once
 per queued item, fail-safe-closed when no sample has arrived yet.
 
+`CockpitSwitchCache` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1) is the
+same "latest of one" shape again, for the 9K113 guidance-unit power-up/
+OBSERV/weapon-safety-bar switches (args 773/761/885/955/886/673).
+
 `MissionStartCache` (`plans/bl15-mission-start/plan.md`, BL-15 Stage 1) is
 the same "latest of one" shape again, for the mission-start signal: a
 single current fact body-layer polls for change (has `sequence` moved
@@ -51,6 +55,7 @@ from collections import deque
 from typing import NamedTuple
 
 from schema import (
+    CockpitSwitchState,
     F10CommandEvent,
     LineOfSightSnapshot,
     MissionStartEvent,
@@ -276,6 +281,28 @@ class MissionStartCache:
         """Return the most recently pushed event, or `None` if no
         `onSimulationStart` has fired yet this collector process's
         lifetime."""
+        return self._latest
+
+
+class CockpitSwitchCache:
+    """Holds the latest `CockpitSwitchState` sample (`plans/
+    9k113-effectors/plan.md`, BL-B66 Stage 1) -- the 9K113 guidance-unit
+    power-up/OBSERV/weapon-safety-bar switches (args 773/761/885/955/886/
+    673). Same "latest of one" shape as `Spu8Cache`, for the same
+    reason: these are switch *states*, not an event stream, and
+    `Export.lua` sends a line only when at least one has moved."""
+
+    def __init__(self) -> None:
+        self._latest: CockpitSwitchState | None = None
+
+    def push(self, sample: CockpitSwitchState) -> None:
+        """Record a newly-received sample as the current panel state."""
+        self._latest = sample
+
+    def latest(self) -> CockpitSwitchState | None:
+        """Return the most recently pushed sample, or `None` if no
+        cockpit-switch line has arrived yet this session (the normal
+        state at startup, same as `Spu8Cache.latest`)."""
         return self._latest
 
 

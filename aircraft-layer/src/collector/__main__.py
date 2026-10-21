@@ -65,6 +65,13 @@ is opened and run on its own background thread the same way as
 direction, feeding a `MissionStartCache` that `GET /mission_start/latest`
 reads.
 
+A `CockpitSwitchCache` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1) is
+constructed the same way as `spu8_cache` -- fed by `CollectorServer` from
+Export.lua's "missl_pw" lines, served by `GET /cockpit_switch/latest`. Its
+write side (`POST /command/cockpit_switch`) reuses `command_sender`
+(above), since both channels target `Export.lua`'s one inbound command
+listener.
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
@@ -86,6 +93,7 @@ from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
 from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
+    CockpitSwitchCache,
     F10CommandQueue,
     LineOfSightCache,
     MissionStartCache,
@@ -329,6 +337,12 @@ def main() -> None:
     audio_sender = AudioPlaybackSender(gate_state=spu8_cache.gate_state)
     audio_sender.open()
 
+    # Same shape as spu8_cache above -- the 9K113 cockpit-switch state
+    # feed (plans/9k113-effectors/plan.md, BL-B66 Stage 1). Reuses
+    # command_sender (above) to write, since both channels target
+    # Export.lua's one inbound command listener.
+    cockpit_switch_cache = CockpitSwitchCache()
+
     collector = CollectorServer(
         cache,
         world_objects_cache,
@@ -336,6 +350,7 @@ def main() -> None:
         petrovich_wheel_cache,
         ptt_cache=ptt_cache,
         spu8_cache=spu8_cache,
+        cockpit_switch_cache=cockpit_switch_cache,
         host=args.host,
         port=args.port,
     )
@@ -361,6 +376,7 @@ def main() -> None:
         look_direction_sender=look_direction_sender,
         emitter_tracker=emitter_tracker,
         mission_start_cache=mission_start_cache,
+        cockpit_switch_cache=cockpit_switch_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)

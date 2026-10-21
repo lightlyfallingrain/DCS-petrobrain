@@ -108,6 +108,48 @@ class CommandSender:
             )
             raise CommandSendError(f"failed to send command {mode!r}: {exc}") from exc
 
+    def send_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
+        """Send `{"op": "cockpit_switch", "device": device, "cmd": cmd,
+        "value": value}` to `Export.lua`'s command listener -- the generic
+        cockpit-write channel (`plans/9k113-effectors/plan.md`, BL-B66
+        Stage 1). Structurally identical to `send_command` above, same
+        `CommandSendError` posture (see the module docstring): a dropped
+        9K113 switch write is a real behavioral gap, not an opaque display
+        string to swallow.
+
+        **No validation happens here** -- same division of labour as
+        `LookDirectionSender.send_look_direction`'s own docstring:
+        `api.server`'s `POST /command/cockpit_switch` handler validates
+        shape (device/cmd integers, value finite) before this method is
+        ever called, and `Export.lua`'s own dispatch
+        (`handle_cockpit_switch_command`) validates a third time. There is
+        **no allow-list of which `(device, cmd)` pairs are accepted** at
+        any of those three layers -- user direction 2026-10-21, overriding
+        the security plan review's required fix; see `aircraft-layer/
+        CLAUDE.md`'s "What this is" section for the quote."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {"op": "cockpit_switch", "device": device, "cmd": cmd, "value": value}
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "cockpit-switch command send failed: device=%r cmd=%r value=%r",
+                device,
+                cmd,
+                value,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send cockpit switch device={device!r} cmd={cmd!r} "
+                f"value={value!r}: {exc}"
+            ) from exc
+
 
 #: Loopback only -- `petrobrain-line-of-sight-hook.lua`'s own inbound
 #: listener runs inside the same DCS process tree as the collector's UDP
