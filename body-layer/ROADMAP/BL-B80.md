@@ -30,6 +30,13 @@
   >   blind toggle could close it. Candidate: whether `list_indication(10)` (the wheel, already
   >   exported as `petrovich_wheel`) is empty while it is closed. Unverified. Also unverified:
   >   whether closing the overlay is the same thing as switching his AI off.
+  > - **Update, same day:** the wheel can't be the signal. User: *"Since we have to keep overlay
+  >   open, I'd rather hide the wheel, it's possible in DCS settings. We need some other way."*
+  >   **Proposed:** detect his AI from the pointing readback itself. If 874/876 stay 0 for ~0.5 s
+  >   while the target is non-zero, his AI is off: press `ShowMenu` once and recheck. Aim 0.5° off
+  >   a centre target, because centre reads 0 either way. The user confirmed: with the wheel hidden,
+  >   `ShowMenu` still toggles his AI (*"yes"*), and one press reliably flips it (*"yes"*). Still to
+  >   measure: how fast the readback obeys after he comes back on. Probe planned for 2026-10-22.
 
   **Why it is its own entry rather than a stage of `[[BL-B66]]`.** The switch half of `BL-B66` is
   unblocked and buildable today — all five writes measured working. This half is blocked on
