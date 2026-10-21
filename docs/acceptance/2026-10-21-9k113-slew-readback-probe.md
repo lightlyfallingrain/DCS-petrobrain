@@ -5,8 +5,7 @@
 **Flight for:** [[BL-B80]]
 <!-- doc-provenance:end -->
 
-**Branch to check out, in the repo root: `worktree-agent-a6e18907df102b52a`** (or wherever this
-lands after harvest — ask if unsure which branch carries it). Nothing of ours needs to be running:
+**Branch to check out, in the repo root: `probe/9k113-slew-readback`.** Nothing of ours needs to be running:
 reconnaissance, not a feature. The script is self-contained; the collector, body-layer and
 audio-adapter can all stay off.
 
@@ -39,14 +38,17 @@ measures it properly.
 2. Copy `aircraft-layer/dcs-export/Export.probe-9k113-slew-readback.lua` to
    `Saved Games\DCS\Scripts\Export.lua`.
 3. Delete any old `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_slew_readback.log`.
-4. Any Mi-24P mission, on the ground, **PILOT seat**. Cold or hot start both work.
+4. Any Mi-24P mission, on the ground. Cold or hot start both work.
 
 ## What to do
 
-1. **Sit in the pilot seat for the whole run.** Power the guidance unit and switch OBSERV on by
-   hand — the same setup flown on 2026-10-21 (`GUID.UNIT POWER`, arg 885; `OBSERV.`, arg 886).
-2. **Do nothing else.** The probe watches arg 886 and starts on its own, about 5 seconds after it
-   reads on. You do not need to touch the slew controls at any point — the script drives them.
+1. **Set up from the copilot seat**, because these are operator switches: MISSILE POWER,
+   CPLR DISTR, Sight Power, ЩО PWR, and wait out the warm-up. Switch **OBSERV on last**.
+2. **Switch to the pilot seat within 20 s.** The probe starts 20 s after OBSERV reads on and
+   slews from whichever seat you are in, so you must be in the pilot seat by then. Stay there for
+   the whole run.
+3. **Do nothing else.** You do not need to touch the slew controls at any point — the script
+   drives them.
 4. The sequence runs once, azimuth first then elevation: full deflection to the limits and back
    (both signs), then ±0.5/0.25/0.1/0.05/0.02, then one short pulse. Total runtime from OBSERV-on
    is about 2 minutes; add the 20 s start delay. The log marks `SEQUENCE START` / `SEQUENCE DONE`.

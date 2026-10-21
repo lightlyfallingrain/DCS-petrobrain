@@ -107,7 +107,9 @@ local CMD_PLAYER_ELEV = 3025   -- up/down, sign-inverted against arg 876
 -- How long OBSERV must read on, continuously, before the sequence starts --
 -- guards against a single noisy frame triggering early.
 local OBSERV_DEBOUNCE_S = 0.5
-local START_DELAY_S = 5.0
+-- Long enough to switch from the copilot seat (where the guidance-unit and
+-- OBSERV switches are) back to the pilot seat before the script slews.
+local START_DELAY_S = 20.0
 
 -- Full-deflection (+-1.0) steps run until the readback stops changing for
 -- this long, or this timeout, whichever comes first -- "reach the
