@@ -44,6 +44,24 @@
   body-layer only, needs no cockpit write, and belongs with `[[BL-B64]]`/`[[BL-B66]]`. This entry
   only makes the **real head follow** a pointing direction that is already correctly paced.
 
+  ## Field-of-regard limits: DCS enforces them once this lands
+
+  **User direction, 2026-10-21**, on DoD's finding that `9k113-narrow-search` was the fourth time
+  the simulated ±60°/+20°/−15° regard check shipped wrong (`notes/the-9k113-sight-bl-b64.md`):
+
+  > *"DCS will enforce it. I'd rather rely on the real limits than simulation of them. Simulation
+  > is just a temporary phase while the effectors are not build. Of course the logic behind where
+  > we want to point the sight must behave correctly."*
+
+  So the body-layer regard check in `belief/optic_policy.py` is a **stand-in** for the mechanical
+  limits, needed only while no real head moves. Once this loop drives the head, the head stops
+  where DCS stops it. What stays Petrovich's job is the **pointing intent** — choosing a sensible
+  direction to look. Do not invest in hardening the simulated enforcement further.
+
+  **Open for this entry's plan, not decided:** what becomes of the simulated check when the loop
+  lands — remove it, or keep only enough of it that the intent never asks for a direction the head
+  cannot reach (which would leave the loop chasing a target it can never hit).
+
   Related: `[[BL-B66]]` (the switch half, unblocked), `[[BL-B63]]` (hard dependency),
   `[[BL-B64]]` (perception, lands first), `[[BL-B67]]` (the ATGM run, which is built out of this
   loop and cannot exist without it).
