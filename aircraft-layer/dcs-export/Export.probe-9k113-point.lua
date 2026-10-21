@@ -107,6 +107,18 @@ local function set_command(cmd, value, label)
     return ok
 end
 
+-- Run 3: re-send the current target every frame. 2026-09-11 overrode DCS AI
+-- Petrovich "every frame" and he "resumes control the moment we stop
+-- asserting"; run 2's single writes were ignored while he scanned.
+local REASSERT_EVERY_FRAME = true
+
+local function point_quiet(az_deg, elev_value)
+    local dev = GetDevice(DEV_I9K113)
+    if dev == nil then return end
+    pcall(dev.SetCommand, dev, CMD_AI_AZ, az_deg / 60.0)
+    pcall(dev.SetCommand, dev, CMD_AI_ELEV, elev_value)
+end
+
 local function point(az_deg, elev_value, label)
     set_command(CMD_AI_AZ, az_deg / 60.0, label .. " az")
     set_command(CMD_AI_ELEV, elev_value, label .. " elev")
@@ -214,6 +226,11 @@ function LuaExportAfterNextFrame()
                 start_row(dt)
             end
             return
+        end
+
+        if phase == "RUNNING" and REASSERT_EVERY_FRAME then
+            local r = SCHEDULE[row_idx]
+            pcall(point_quiet, r[1], r[2])
         end
 
         if phase == "RUNNING" then
