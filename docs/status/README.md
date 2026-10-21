@@ -72,3 +72,14 @@ No dates, no assignees, no burndown. Single developer, and the useful questions 
 structural ("what gates what", "what is blocked on hardware") rather than schedule-shaped. If
 dates or assignees ever become genuinely needed, GitHub Projects does those better than this page
 ever will — that would be the moment to revisit, not before.
+
+## Command map
+
+`petrovich-commands.html` is the pilot's map of every deterministic voice command — a derived view
+of `audio-adapter/src/vocabulary.py`, under the same one rule: if they disagree, the page is wrong.
+Published at **https://claude.ai/artifact/SwxZFbng1xd7fss7dnGbUo**.
+
+Unlike the status page it is kept current automatically (user direction, 2026-10-21): the merge
+skill runs `.claude/scripts/command-map-check.py` on every merge, and a stale result triggers
+`/command-map`, which redraws, stamps and republishes. The check is mechanical — a vocabulary hash
+plus a token→card manifest embedded in the page — so a command missing from the map cannot pass.
