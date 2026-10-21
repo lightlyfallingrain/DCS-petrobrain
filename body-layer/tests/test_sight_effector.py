@@ -18,6 +18,7 @@ from belief.sight_effector import (
     GuidanceUnitState,
     advance_power_up,
     refresh_readback,
+    sight_azimuth_raw_to_deg,
     sight_ready,
     start_power_up,
     write_observ,
@@ -271,6 +272,37 @@ def test_refresh_readback_leaves_fields_unchanged_when_keys_are_missing() -> Non
     result = refresh_readback(state, {})
     assert result.observ_observed is True
     assert result.weapon_safety_observed is False
+
+
+def test_refresh_readback_sets_sight_position_raw_fields_from_the_latest_sample() -> (
+    None
+):
+    """Stage 4b -- args 874/876, raw, from an `Export.lua` new enough to
+    send them."""
+    state = GuidanceUnitState()
+    result = refresh_readback(state, {"sight_az": 0.16500, "sight_elev": -0.28125})
+    assert result.sight_az_raw == pytest.approx(0.16500)
+    assert result.sight_elev_raw == pytest.approx(-0.28125)
+
+
+def test_refresh_readback_leaves_sight_position_unchanged_when_absent() -> None:
+    """An `Export.lua` predating Stage 4b never sends `sight_az`/
+    `sight_elev` at all -- absence must not be read as "the sight reset to
+    zero", the same reasoning `refresh_readback`'s own docstring states."""
+    state = GuidanceUnitState(sight_az_raw=0.5, sight_elev_raw=-0.25)
+    result = refresh_readback(state, {"observe_on": True})
+    assert result.sight_az_raw == pytest.approx(0.5)
+    assert result.sight_elev_raw == pytest.approx(-0.25)
+
+
+def test_sight_azimuth_raw_to_deg_uses_the_confirmed_calibration() -> None:
+    """`arg_874 = (deg / 60) * 0.44`, inverted -- the live-measured
+    calibration (`aircraft-layer/research/2026-10-17-9k113-effector-and-
+    slew-probe-findings.md` finding 2). 0.16500 raw measured at a
+    commanded +22.5 deg."""
+    assert sight_azimuth_raw_to_deg(0.16500) == pytest.approx(22.5)
+    assert sight_azimuth_raw_to_deg(0.33000) == pytest.approx(45.0)
+    assert sight_azimuth_raw_to_deg(0.0) == pytest.approx(0.0)
 
 
 # --- single construction site (plan's "Construction-site check") -------

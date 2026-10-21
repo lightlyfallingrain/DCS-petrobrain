@@ -52,6 +52,42 @@ class TestCockpitSwitchState:
         assert sample.scho_pw == pytest.approx(0.0)
         assert sample.observe == pytest.approx(1.0)
         assert sample.weap_safe == pytest.approx(0.0)
+        assert sample.sight_az is None
+        assert sample.sight_elev is None
+
+    def test_parses_a_line_with_sight_position_readback(self) -> None:
+        """BL-B66 Stage 4b: args 874/876, wire keys `sight_az`/
+        `sight_elev` -- present and numeric is parsed."""
+        sample = CockpitSwitchState.from_json_line(
+            '{"t":11.423,"missl_pw":1.0,"cplr_distr":0.0,"sight_pw":1.0,'
+            '"scho_pw":0.0,"observe":1.0,"weap_safe":0.0,'
+            '"sight_az":0.16500,"sight_elev":-0.28125}',
+            received_wall_clock_s=99.0,
+        )
+        assert sample.sight_az == pytest.approx(0.16500)
+        assert sample.sight_elev == pytest.approx(-0.28125)
+
+    def test_a_present_but_non_numeric_sight_position_is_a_parse_error(
+        self,
+    ) -> None:
+        """Absent is `None` (the test above's sibling); present-but-wrong-
+        typed is still an error, same as any required field -- a value
+        that arrived malformed is not the same fact as one that never
+        arrived."""
+        with pytest.raises(CockpitSwitchParseError):
+            CockpitSwitchState.from_dict(
+                {
+                    "t": 1.0,
+                    "missl_pw": 1.0,
+                    "cplr_distr": 0.0,
+                    "sight_pw": 0.0,
+                    "scho_pw": 0.0,
+                    "observe": 0.0,
+                    "weap_safe": 0.0,
+                    "sight_az": "not a number",
+                },
+                received_wall_clock_s=2.0,
+            )
 
     def test_the_switches_threshold_at_half_not_equality(self) -> None:
         """All six animate through intermediate values for ~0.1s on a
@@ -169,6 +205,8 @@ class TestCockpitSwitchState:
             "scho_pw_on": False,
             "observe_on": True,
             "weapons_armed": False,
+            "sight_az": None,
+            "sight_elev": None,
         }
 
 
@@ -326,6 +364,8 @@ class TestCockpitSwitchLatestEndpoint:
             "scho_pw_on": False,
             "observe_on": True,
             "weapons_armed": False,
+            "sight_az": None,
+            "sight_elev": None,
         }
 
 

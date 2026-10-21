@@ -96,6 +96,25 @@ GUIDANCE_UNIT_SWITCH_DELAY_S: Final[float] = tuning.real(
     status="derived",
 )
 
+#: Raw-arg-874-to-degrees conversion, confirmed live on the sight's own
+#: position *readback* while the player axis (3025/3026) drove the head
+#: (`aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-
+#: findings.md` finding 2): `arg_874 = (deg / 60) * 0.44`, inverted here.
+#: **Azimuth only** -- arg 876 (elevation)'s degrees-per-unit is still
+#: unmeasured (a piecewise gauge), so there is no equivalent constant for
+#: it; `sight_trace_writer.py` carries 876 raw, unconverted. A measured
+#: fact, not a tunable (root `CLAUDE.md`'s "Behaviour-affecting constants
+#: are tunable" inclusion test): a different value here would not change
+#: anything Petrovich does, only how a debug log displays a number.
+_SIGHT_AZIMUTH_DEG_PER_RAW_UNIT: Final[float] = 60.0 / 0.44
+
+
+def sight_azimuth_raw_to_deg(raw: float) -> float:
+    """Converts a raw arg-874 reading to degrees -- the one confirmed
+    calibration, see `_SIGHT_AZIMUTH_DEG_PER_RAW_UNIT`'s own comment.
+    Azimuth only; there is no elevation equivalent."""
+    return raw * _SIGHT_AZIMUTH_DEG_PER_RAW_UNIT
+
 
 @dataclass(frozen=True, slots=True)
 class GuidanceUnitState:
@@ -129,7 +148,14 @@ class GuidanceUnitState:
     the cockpit's own telemetry readback (external) -- carried for
     `BL-B67` to read before trusting the sight is engaged or the safety
     bar is actually armed (plan §3/Co-moving Fields); **no consumer in
-    this entry reads either `*_observed` field**."""
+    this entry reads either `*_observed` field**.
+
+    `sight_az_raw`/`sight_elev_raw` (Stage 4b) are the sight head's own
+    actual-position readback -- raw args 874/876, refreshed by
+    `refresh_readback` the same poll as `observ_observed`/
+    `weapon_safety_observed`. `None` whenever no readback sample has
+    arrived yet (startup, or an `Export.lua` predating Stage 4b) --
+    `sight_trace_writer.SightTraceWriter` is this entry's own consumer."""
 
     takeoff_seen: bool = False
     power_up_stage: int = 0
@@ -140,6 +166,8 @@ class GuidanceUnitState:
     observ_observed: bool | None = None
     weapon_safety_commanded: Literal["armed", "safe"] | None = None
     weapon_safety_observed: bool | None = None
+    sight_az_raw: float | None = None
+    sight_elev_raw: float | None = None
 
 
 def sight_ready(state: GuidanceUnitState) -> bool:
@@ -257,11 +285,16 @@ def refresh_readback(
 
     `None` (no cockpit-switch sample received yet) leaves both fields
     unchanged -- absence of a reading is not evidence the reading is
-    `False`."""
+    `False`. Stage 4b: the same call also refreshes `sight_az_raw`/
+    `sight_elev_raw` (raw args 874/876) for the same "absence leaves the
+    prior value" reason -- an older `Export.lua` that never sends these two
+    optional fields must not be read as "the sight reset to zero"."""
     if cockpit_switch_latest is None:
         return state
     observe_on = cockpit_switch_latest.get("observe_on")
     weapons_armed = cockpit_switch_latest.get("weapons_armed")
+    sight_az_raw = cockpit_switch_latest.get("sight_az")
+    sight_elev_raw = cockpit_switch_latest.get("sight_elev")
     return replace(
         state,
         observ_observed=(
@@ -271,5 +304,17 @@ def refresh_readback(
             weapons_armed
             if isinstance(weapons_armed, bool)
             else state.weapon_safety_observed
+        ),
+        sight_az_raw=(
+            sight_az_raw
+            if isinstance(sight_az_raw, (int, float))
+            and not isinstance(sight_az_raw, bool)
+            else state.sight_az_raw
+        ),
+        sight_elev_raw=(
+            sight_elev_raw
+            if isinstance(sight_elev_raw, (int, float))
+            and not isinstance(sight_elev_raw, bool)
+            else state.sight_elev_raw
         ),
     )

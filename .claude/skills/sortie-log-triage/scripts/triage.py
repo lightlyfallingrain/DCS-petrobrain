@@ -28,6 +28,19 @@ from pathlib import Path
 DEFAULT_BELIEF = Path.home() / "dcs-belief-truth.jsonl"
 DEFAULT_TRACE = Path.home() / "dcs-detection-trace.jsonl"
 DEFAULT_SPEECH = Path.home() / "dcs-speech.jsonl"
+# `BL-B66` Stage 4b (`plans/9k113-effectors/plan.md`) -- the aircraft-layer
+# side's own per-frame log (`Export.lua`'s `push_slew_trace`, flag
+# `aircraft_layer_slew_debug.flag`), copied over from the Windows box's
+# `Saved Games\DCS\Logs\` the same way `aircraft_layer_debug.log` already
+# is for `dcs-log-recon`. Already one valid JSON object per line (no
+# timestamp prefix, unlike the general debug log), so the same `rows()`
+# reader below handles it unmodified.
+DEFAULT_SLEW = Path.home() / "aircraft_layer_slew_trace.log"
+# The body-layer-side companion (`--slew-trace`, one row per *poll* rather
+# than per frame): desired-vs-actual degrees, for a coarse cross-check
+# against the per-frame file above. No default-on filename exists (the
+# flag has no default path, unlike `--speech-log`) -- `None` skips it.
+DEFAULT_BODY_SLEW: Path | None = None
 
 
 def rows(path: Path, limit_bytes: int | None = None):
@@ -188,6 +201,105 @@ def trace_report(path: Path, cap: int | None) -> None:
             print(f"   {key:<10} n={len(v):<7} median {statistics.median(v):.0f} max {max(v)}")
 
 
+# Azimuth's confirmed raw-arg-874-to-degrees calibration (`aircraft-layer/
+# research/2026-10-17-9k113-effector-and-slew-probe-findings.md` finding
+# 2): `arg_874 = (deg / 60) * 0.44`, inverted. Elevation (876) has no
+# equivalent -- its gauge's degrees-per-unit is still unmeasured, so this
+# report leaves elevation in raw units and says so, rather than guessing.
+AZ_DEG_PER_RAW_UNIT = 60.0 / 0.44
+
+
+def slew_report(path: Path, cap: int | None) -> None:
+    h(f"SLEW TRACE (per-frame, aircraft-layer)  --  {path}")
+    data = list(rows(path, cap))
+    if not data:
+        print("no rows -- aircraft_layer_slew_debug.flag was probably not set, or "
+              "OBSERV was never switched on this sortie (the log only runs while it is)")
+        return
+
+    ts = [r["t"] for r in data if "t" in r]
+    lo, hi = min(ts), max(ts)
+    print(f"rows {len(data):,} | {fmt_span(lo, hi)}")
+
+    observ_on_rows = [r for r in data if (r.get("observe") or 0) >= 0.5]
+    print(f"rows with OBSERV on: {len(observ_on_rows):,} of {len(data):,} "
+          f"(the rest is the post-OBSERV-off tail the flag-gated writer keeps)")
+
+    # Smallest observed non-zero step -- the controller's deadband can
+    # never be finer than this (plan's own Risks & Unknowns on arg 876).
+    for key, label in (("az", "874 (azimuth)"), ("elev", "876 (elevation)")):
+        values = [r[key] for r in data if isinstance(r.get(key), (int, float))]
+        deltas = sorted(
+            abs(b - a) for a, b in zip(values, values[1:]) if abs(b - a) > 0
+        )
+        if deltas:
+            print(f"arg {label}: smallest observed non-zero step {deltas[0]:.5f} raw "
+                  f"(median of non-zero steps {statistics.median(deltas):.5f})")
+        else:
+            print(f"arg {label}: never moved in this log")
+
+    # Rate during a hand-slew: the longest run of consecutive samples where
+    # azimuth moved monotonically in one direction, converted to deg/s
+    # using the confirmed calibration above.
+    best_run: list[tuple[float, float]] = []
+    current: list[tuple[float, float]] = []
+    direction = 0
+    for r in data:
+        t, az = r.get("t"), r.get("az")
+        if not isinstance(t, (int, float)) or not isinstance(az, (int, float)):
+            continue
+        if current:
+            d = az - current[-1][1]
+            new_direction = (d > 0) - (d < 0)
+            if d == 0 or direction == 0 or new_direction == direction:
+                current.append((t, az))
+                if new_direction != 0:
+                    direction = new_direction
+                continue
+        if len(current) > len(best_run):
+            best_run = current
+        current = [(t, az)]
+        direction = 0
+    if len(current) > len(best_run):
+        best_run = current
+    if len(best_run) >= 2:
+        (t0, az0), (t1, az1) = best_run[0], best_run[-1]
+        dt = t1 - t0
+        if dt > 0:
+            rate_deg_s = abs(az1 - az0) * AZ_DEG_PER_RAW_UNIT / dt
+            print(f"longest monotonic azimuth run: {len(best_run)} samples over "
+                  f"{dt:.2f} s -> {rate_deg_s:.1f} deg/s "
+                  f"(device-spec expectation: up to 20 deg/s, h_axis_velocity)")
+
+    print("\nreadback lag: not computed -- slew_cmd_az/slew_cmd_el are always null in "
+          "this entry (nothing writes the player axis yet, BL-B80 is the slew loop "
+          "itself); there is no commanded-side timestamp in this file to lag against "
+          "until that entry fills those two fields.")
+
+
+def body_slew_report(path: Path, cap: int | None) -> None:
+    h(f"SLEW TRACE (per-poll, body-layer --slew-trace)  --  {path}")
+    data = list(rows(path, cap))
+    if not data:
+        print("no rows")
+        return
+
+    readback = sum(1 for r in data if r.get("actual_azimuth_source") == "readback")
+    model = sum(1 for r in data if r.get("actual_azimuth_source") == "model")
+    print(f"rows {len(data):,} | azimuth source: {readback:,} readback, {model:,} model "
+          f"(model-only means no 874/876 sample had reached body-layer yet this run)")
+
+    errors = [
+        abs(r["error_azimuth_deg"])
+        for r in data
+        if isinstance(r.get("error_azimuth_deg"), (int, float))
+    ]
+    if errors:
+        errors.sort()
+        print(f"|error_azimuth_deg|: median {statistics.median(errors):.2f} "
+              f"p90 {errors[int(0.9 * len(errors))]:.2f} max {errors[-1]:.2f}")
+
+
 def speech_report(path: Path, cap: int | None) -> None:
     h(f"SPEECH RECOGNITION  --  {path}")
     data = list(rows(path, cap))
@@ -212,6 +324,13 @@ def main() -> int:
     ap.add_argument("--belief", type=Path, default=DEFAULT_BELIEF)
     ap.add_argument("--trace", type=Path, default=DEFAULT_TRACE)
     ap.add_argument("--speech", type=Path, default=DEFAULT_SPEECH)
+    ap.add_argument("--slew", type=Path, default=DEFAULT_SLEW,
+                    help="the aircraft-layer per-frame slew log "
+                         "(aircraft_layer_slew_trace.log, BL-B66 Stage 4b) -- "
+                         "copied over from the Windows box's Saved Games\\DCS\\Logs\\")
+    ap.add_argument("--body-slew", type=Path, default=DEFAULT_BODY_SLEW,
+                    help="the body-layer per-poll --slew-trace file, a coarser "
+                         "cross-check -- no default path, since the flag has none")
     ap.add_argument("--no-snapshot", action="store_true",
                     help="read to end of file instead of to the size captured at start -- "
                          "only equivalent once the flight has ended")
@@ -223,8 +342,12 @@ def main() -> int:
         ("belief", args.belief, belief_report),
         ("trace", args.trace, trace_report),
         ("speech", args.speech, speech_report),
+        ("slew", args.slew, slew_report),
+        ("body-slew", args.body_slew, body_slew_report),
     ):
         if name == "trace" and args.skip_trace:
+            continue
+        if path is None:
             continue
         if not path.exists():
             print(f"[skip] {name}: {path} not found", file=sys.stderr)

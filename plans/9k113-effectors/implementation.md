@@ -276,3 +276,185 @@ first hitting it as a test-authoring mistake, not a product bug.
 - No `.venv` existed in this worktree (fresh worktree) — created with `python3.12 -m venv .venv`
   and `pyproj`/`numpy<2.5`/`pytest`/`ruff`/`mypy` installed per `body-layer/pyproject.toml`'s own
   declared dependencies.
+
+## Stage 4b — slew telemetry logging (`plans/9k113-effectors/plan.md`'s "Stage 4b" paragraph)
+
+User direction, 2026-10-21: *"Put logging in so that the slew loop can be adjusted based on data
+from logs. Actual vs desired angles especially, slew command values, etc."* Purpose: data to tune
+`[[BL-B80]]`'s rate loop from, plus the hand-slew segment on the Stage 5 acceptance sortie card.
+
+### aircraft-layer
+
+- `dcs-export/Export.lua` — args 874/876 (the sight's own actual-position readback) added to the
+  existing `push_cockpit_switch_state` line (change-epsilon, a finer `SIGHT_POS_EPSILON` than the
+  switches' own `COCKPIT_SWITCH_EPSILON` — the probe drove 874/876 in steps as small as 0.002).
+  A **second, independent debug flag** (`aircraft_layer_slew_debug.flag`, distinct from the
+  general `DEBUG` flag) gates a new per-**frame** local log (`push_slew_trace`,
+  `Logs\aircraft_layer_slew_trace.log`): sim time, raw 874/876, OBSERV (886), and a
+  `slew_cmd_az`/`slew_cmd_el` pair that is always `null` in this entry (nothing writes the player
+  slew axis yet — `[[BL-B80]]` fills that field rather than adding a new log format). Logged only
+  while OBSERV is on, plus a `SLEW_TRACE_TAIL_S` (5 s) tail after it goes off, so an idle sortie's
+  log stays empty; buffered (`SLEW_LOG_FLUSH_EVERY_N_LINES = 25`) rather than one flush per frame,
+  flushed on `LuaExportStop`. `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` bumped to
+  `"2026-10-21b"` (additive wire-format change, same-day `b` suffix per the project's existing
+  convention).
+- `src/schema/cockpit_switch.py` — `CockpitSwitchState.sight_az`/`sight_elev`, `float | None`,
+  **optional** unlike the six switch fields (an `Export.lua` predating Stage 4b never sends them;
+  absent must parse as "no reading yet", not a parse error). `from_dict` validates type only when
+  the key is present; `to_api_dict` always includes both.
+
+### body-layer
+
+- `src/belief/sight_effector.py` — `GuidanceUnitState.sight_az_raw`/`sight_elev_raw` (raw args
+  874/876, refreshed by `refresh_readback` the same call as `observ_observed`/
+  `weapon_safety_observed`, same absence-leaves-prior-value posture). New
+  `sight_azimuth_raw_to_deg`, the one confirmed raw-to-degrees calibration (`arg_874 = (deg/60) *
+  0.44`, inverted) — **azimuth only**; elevation's gauge is still unmeasured, so there is
+  deliberately no equivalent function for 876. A plain module constant (`_SIGHT_AZIMUTH_DEG_PER_
+  RAW_UNIT`), not a tuning key: it is a measured fact, and a different value would not change
+  anything Petrovich does, only how a debug log displays a number — same reasoning the plan already
+  applies to arg 761.
+- `src/sight_trace_writer.py` — **new.** `SightTraceWriter`, following `detection_trace_writer.py`'s
+  shape (buffer a few polls, flush periodically, disable-after-first-write-error) at a fraction of
+  the complexity (no ground-truth/belief join — just `OpticState` and `GuidanceUnitState`, both
+  already public and belief-side). One row per poll: desired az/el (`OpticState.look_azimuth_deg`/
+  `look_elevation_deg`), actual az/el with a `_source` field ("readback" when a raw 874 reading
+  exists and converts via the calibration above, "model" otherwise, `None` while no look is
+  commanded), the error, raw 874/876 (logged regardless of which actual value is used, "alongside
+  any degree conversion" per the plan — elevation's `_source` is always `"model"`, never
+  `"readback"`, since its conversion is unmeasured, but its raw reading is still carried so a
+  conversion can be derived later without a second sortie), OBSERV commanded/observed, and optic
+  mode (`OpticState.look_optic.name`, `None` outside an active look).
+- `src/logger.py` — `--slew-trace PATH` (requires `--crew-text`, same posture as the other per-run
+  logs this entry is scoped to): a sixth per-run log, with its own sibling resolver
+  (`_resolve_slew_trace_log_path`, mirroring `_resolve_group_trace_log_path`) rather than widening
+  `_per_run_log_paths`'s arity, same reasoning that function's own docstring already gives for
+  `--group-trace`/`--mission-memory`. `_reroll_run_logs` gained `slew_trace_writer`/`slew_trace_base`
+  parameters and now returns a 3-tuple (both existing call sites updated: `--console`'s passes
+  `None`/`None` and discards the third element). `_run_crew_text_poll_loop` builds the writer, calls
+  `write_poll` every poll a real ownship state exists — **after** the guidance-unit/OBSERV block has
+  had its turn to update `optic_state`/`guidance_unit_state` that same poll, never before, or the
+  row would log the previous poll's values under the current timestamp — and closes it in the
+  `finally:` block. `--console` never gets this flag: the takeoff/power-up/OBSERV wiring this writer
+  reads only runs on the crew-text loop.
+
+### Tuning
+
+None. Considered and rejected: `SIGHT_POS_EPSILON`/`SLEW_TRACE_TAIL_S`/`SLEW_LOG_FLUSH_EVERY_N_
+LINES` (Lua) and `DEFAULT_FLUSH_EVERY_N_POLLS` (`sight_trace_writer.py`) all affect what gets
+*logged*, never what Petrovich *does* — the inclusion test in root `CLAUDE.md`'s "Behaviour-
+affecting constants are tunable" excludes them, same category `DetectionTraceWriter.DEFAULT_
+FLUSH_EVERY_N_POLLS` already sits in. `_SIGHT_AZIMUTH_DEG_PER_RAW_UNIT` is a measured fact (a
+calibration), not a tunable, for the same reason arg 761 is a plain literal rather than a tuning
+key. Outside body-layer (`Export.lua`) there is no tuning loader at all, per root `CLAUDE.md`'s
+"Outside body-layer the loader does not exist yet."
+
+### `sortie-log-triage` skill
+
+- `.claude/skills/sortie-log-triage/scripts/triage.py` — two new report functions. `slew_report`
+  (`--slew PATH`, default `~/aircraft_layer_slew_trace.log`) reads the aircraft-layer per-frame log:
+  rows with OBSERV on, smallest observed non-zero step in 874/876 (a controller's deadband can never
+  be finer than this), and the rate (deg/s, azimuth only, converted via the same calibration) over
+  the longest monotonic azimuth run — the exact data the Stage 5 hand-slew segment exists to
+  produce. Explicitly reports "readback lag: not computed" rather than fabricating a number — there
+  is no commanded-side timestamp to lag against until `slew_cmd_az`/`slew_cmd_el` are non-null
+  (`[[BL-B80]]`). `body_slew_report` (`--body-slew PATH`, no default — the flag has none) reads
+  `--slew-trace`'s own per-poll file as a coarser cross-check (azimuth source counts,
+  `|error_azimuth_deg|` distribution).
+- `SKILL.md` — a "Slew" subsection under "What each section answers", and two notes: this skill now
+  reads one aircraft-layer file (a deliberate, stated exception to "this skill reads body-layer's
+  own three files, `dcs-log-recon` reads Export.lua's"), and `aircraft_layer_slew_trace.log` is
+  never stamped (it is outside `run_log_paths` entirely, a single accumulating file across every
+  sortie the flag was on for) while `--slew-trace`'s own file is.
+
+### Files Changed
+
+**aircraft-layer**
+- `dcs-export/Export.lua` — args 874/876 added to `push_cockpit_switch_state`; new
+  `aircraft_layer_slew_debug.flag`/`push_slew_trace`/`slew_log_flush`; version bump.
+- `src/schema/cockpit_switch.py` — `sight_az`/`sight_elev` fields, docstring.
+- `src/collector/server.py` — `EXPECTED_EXPORT_VERSION` bump + comment.
+- `tests/test_cockpit_switch.py` — two new parse tests; two existing `to_api_dict`/endpoint
+  assertions extended with the two new (always-`None`-in-these-tests) fields.
+- `CLAUDE.md` — Tech stack bullet extended for Stage 4b.
+
+**body-layer**
+- `src/belief/sight_effector.py` — `sight_az_raw`/`sight_elev_raw` fields, `refresh_readback`
+  extended, new `sight_azimuth_raw_to_deg`.
+- `src/sight_trace_writer.py` (new) — `SightTraceWriter`.
+- `src/logger.py` — `--slew-trace` CLI flag + validation, `_resolve_slew_trace_log_path`,
+  `_reroll_run_logs`'s widened signature/return, poll-loop wiring.
+- `tests/test_sight_effector.py` — new conversion/readback tests.
+- `tests/test_sight_trace_writer.py` (new) — field-selection, buffering, and failure-mode tests.
+- `tests/test_run_log_reroll.py` — updated the three existing unpacking call sites for the new
+  3-tuple return; one new reroll test for the slew-trace writer.
+- `tests/test_logger.py` — `FakeConsoleAircraftClient.cockpit_switch_state` (new, settable); one
+  new wiring-level test driving the real poll loop.
+- `CLAUDE.md` — `--slew-trace` documented alongside `--detection-trace`; added to the Decision-5
+  per-mission-reroll list.
+
+**Project**
+- `.claude/skills/sortie-log-triage/scripts/triage.py`, `SKILL.md` — slew sections.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_cockpit_switch.py::test_parses_a_line_with_sight_position_readback`,
+  `::test_a_present_but_non_numeric_sight_position_is_a_parse_error` — the optional-field parse
+  contract (present-and-numeric parses, absent is `None`, present-but-wrong-typed still errors).
+- `body-layer/tests/test_sight_effector.py::test_refresh_readback_sets_sight_position_raw_fields_
+  from_the_latest_sample`, `::test_refresh_readback_leaves_sight_position_unchanged_when_absent`,
+  `::test_sight_azimuth_raw_to_deg_uses_the_confirmed_calibration` — the new readback fields and
+  conversion function.
+- `body-layer/tests/test_sight_trace_writer.py` (10 tests) — every field-selection branch (readback
+  vs. model per axis, elevation never "readback", error computation, all-null while scanning, optic
+  mode, OBSERV passthrough), buffering (`_polls_since_flush` resets on the configured cadence), and
+  the write-failure-disables-after-one-report posture (`_FullDiskFile` double, same technique as
+  `test_detection_trace.py`'s own).
+- `body-layer/tests/test_run_log_reroll.py::test_reroll_closes_the_old_slew_trace_writer_and_opens_
+  a_new_one` — the open-handle-close-before-reassign shape, mirroring the existing detection-trace
+  reroll test.
+- `body-layer/tests/test_logger.py::test_slew_trace_is_written_from_the_real_poll_loop` — drives
+  OBSERV on, a sight-position readback arriving through the fake client, and OBSERV off, through the
+  real `_run_crew_text_poll_loop`; asserts on the rows actually written to disk (at least one row
+  before OBSERV is touched, `observ_commanded` both `True` and `False` across the run, the
+  readback-sourced row's converted azimuth degrees and both raw values). **Verified as a real
+  regression guard, not just green by construction**: disabled the `write_poll` call site with an
+  `and False` short-circuit, confirmed the test fails for the stated reason (`len(rows) >= 2`
+  against zero rows), restored the line, confirmed `shasum` on `logger.py` matches the pre-mutation
+  hash and the test passes again.
+
+### Checks
+
+**aircraft-layer/**
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass (26 source files)
+- `pytest`: pass (409 passed)
+- `luac5.1 -p Export.lua`: pass; bytecode global-leak scan (`luac5.1 -l -p` → `GETGLOBAL` scan):
+  clean, no new helper name leaks as a global.
+
+**body-layer/**
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass (70 source files)
+- `pytest`: pass (2401 passed, 4 xfailed)
+- `tools/generate_defaults.py` staleness test (`test_tuning_defaults_toml.py`): pass — no tunables
+  added this stage, `config/defaults.toml` untouched.
+
+### How to turn the logging on for the sortie
+
+Flags to set, in order:
+
+1. **On the Windows box**, create (any content, even empty)
+   `Saved Games\DCS\Scripts\aircraft_layer_slew_debug.flag` before launching DCS — checked once at
+   load, so a flag created after the mission starts needs a mission/DCS restart to take effect. This
+   enables the per-frame local log at `Saved Games\DCS\Logs\aircraft_layer_slew_trace.log`; it writes
+   nothing while OBSERV is off, so it is safe to leave on for the whole sortie.
+2. **On the Mac**, add `--slew-trace logs/dcs-slew-trace.jsonl` to the existing `logger.py` command
+   line (alongside `--crew-text`; omit on `--console`, which is rejected with a `parser.error`). The
+   actual filename written is stamped (`run_log_paths`), printed to stderr as the process starts.
+3. **Fly the Stage 5 card's hand-slew segment** (~2 minutes, full left/right and up/down, slow and
+   fast, with OBSERV on) — this is what both files above are collecting data for.
+4. **After landing**, copy `aircraft_layer_slew_trace.log` from the Windows box over to wherever
+   `python3 .claude/skills/sortie-log-triage/scripts/triage.py` is run from (default `~`, or pass
+   `--slew PATH`), and pass the stamped `--slew-trace` file as `--body-slew PATH`.

@@ -1,15 +1,16 @@
 ---
 name: sortie-log-triage
-description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth, dcs-detection-trace, dcs-speech (.jsonl). Resolve the filenames first: pre-BL-11-Stage-5 they are single files every sortie appended to, so the flight is a region; once stamped, glob for the newest and take all three from the same stamp. Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
+description: Post-flight triage over body-layer's three sortie logs -- dcs-belief-truth, dcs-detection-trace, dcs-speech (.jsonl) -- plus the 9K113 slew logs (aircraft_layer_slew_trace.log per-frame, --slew-trace per-poll, BL-B66 Stage 4b). Resolve the filenames first: pre-BL-11-Stage-5 they are single files every sortie appended to, so the flight is a region; once stamped, glob for the newest and take all three from the same stamp. Speech rate, contacts-vs-objects churn, objects carrying several contact ids, contact lifespans, gate-outcome histogram, cluster size by range, slew rate/granularity during a hand-slew. Use when the user brings back logs from a flight, instead of writing ad hoc python over them each time.
 type: user-invocable
 ---
 
 Triage one sortie's logs. Usage: `/sortie-log-triage`, or point it at specific files.
 
 ```sh
-python3 .claude/skills/sortie-log-triage/scripts/triage.py           # the three default paths
+python3 .claude/skills/sortie-log-triage/scripts/triage.py           # all default paths
 python3 .../triage.py --skip-trace                                   # fast pass, skips the GBs
 python3 .../triage.py --belief PATH --trace PATH --speech PATH
+python3 .../triage.py --slew PATH --body-slew PATH                   # the 9K113 slew logs, see below
 python3 .../triage.py --no-snapshot                                  # only after the flight ended
 ```
 
@@ -19,8 +20,12 @@ line-by-line, never loaded whole.
 ## This is not `dcs-log-recon`
 
 `dcs-log-recon` parses `aircraft_layer_debug.log` — Export.lua probe output from the DCS side.
-This skill reads the three JSONL files **body-layer** writes on the Mac side. Different files,
-different producers, no overlap.
+This skill is mostly the three JSONL files **body-layer** writes on the Mac side, plus one
+deliberate exception since `BL-B66` Stage 4b: `aircraft_layer_slew_trace.log` is Export.lua's own
+per-**frame** output, copied over from the Windows box the same way `dcs-log-recon`'s own file is
+— it exists here, not there, because its purpose is triage (rate/granularity/lag for tuning a
+controller), not DCS-internals recon, and the two skills would otherwise both need the per-frame
+slew-rate logic. `dcs-log-recon` remains the tool for everything else Export.lua logs to that file.
 
 ## Resolve the filenames — they may or may not carry a run stamp
 
@@ -44,6 +49,13 @@ ls -t ~/dcs-detection-trace*.jsonl logs/dcs-detection-trace*.jsonl 2>/dev/null |
 Note also that Stage 5 moves the files from `~` into `logs/`, so the directory changes with the
 name. The logger prints each resolved path to stderr as it starts, and **that line is the
 authoritative answer to "where did it go"** in either world.
+
+**`aircraft_layer_slew_trace.log` is never stamped** — it is `Export.lua`'s own file, outside
+`BL-11` Stage 5's `run_log_paths` mechanism entirely (that mechanism is body-layer's). It
+accumulates across every sortie the flag was left on for, the same single-accumulating-file shape
+the bare body-layer names above have pre-Stage-5 — if the user flew more than one sortie with the
+flag on, the file is a region, not the whole thing. `--slew-trace`'s own file **is** stamped (it
+goes through the same body-layer mechanism as the other three), so treat it like them.
 
 ### Once stamping is in force
 
@@ -106,6 +118,26 @@ ground-truth-plus-belief join):
 **Speech** (`dcs-speech-<stamp>.jsonl`): disposition counts, then every utterance heard and **not** acted
 on, with confidence and match ratio. That list is the single most useful one for recognition bugs,
 because an utterance matching no command is otherwise unobservable.
+
+**Slew** (`BL-B66` Stage 4b, `plans/9k113-effectors/plan.md`) -- two files, read independently:
+
+- `aircraft_layer_slew_trace.log` (default `--slew`, copied over from the Windows box's
+  `Saved Games\DCS\Logs\` the same way `dcs-log-recon`'s own `aircraft_layer_debug.log` is):
+  per-**frame**, flag-gated (`aircraft_layer_slew_debug.flag`), only while OBSERV is on. Already
+  one JSON object per line -- no timestamp prefix to strip, unlike the general debug log. Reports
+  rows with OBSERV on, the **smallest observed non-zero step** in args 874/876 (a controller's
+  deadband can never be finer than this), and the rate (deg/s) over the **longest monotonic
+  azimuth run** -- the data a hand-slew segment on the acceptance sortie exists to produce.
+  **Readback lag is not computed**: `slew_cmd_az`/`slew_cmd_el` are always `null` in this entry
+  (nothing writes the player axis yet -- `[[BL-B80]]` is the slew loop itself), so there is no
+  commanded-side timestamp to lag against until that entry fills those two fields. Elevation (876)
+  is reported in **raw units, never degrees** -- its gauge's degrees-per-unit is still unmeasured;
+  azimuth (874) does convert, via the one confirmed calibration (`arg_874 = (deg/60)*0.44`,
+  `aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md` finding 2).
+- `--slew-trace`'s own per-**poll** body-layer file (`--body-slew`, no default path -- the flag
+  itself has none): desired-vs-actual azimuth, whether the actual value came from a real readback
+  or body-layer's own model, and the resulting error. A coarse cross-check against the per-frame
+  file above, not a replacement for it -- body-layer's 1 Hz poll cannot see a slew in progress.
 
 ## What it deliberately does not do
 

@@ -21,6 +21,20 @@ values for ~0.1s on a flip (confirmed live,
 `aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-
 findings.md` finding 3), so a reader must threshold rather than test
 equality.
+
+**Two more, optional (BL-B66 Stage 4b, `EXPORT_SCRIPT_VERSION` "...21b")**:
+
+- arg 874 (`sight_az`) -- the sight head's actual azimuth position
+  readback, raw.
+- arg 876 (`sight_elev`) -- the sight head's actual elevation position
+  readback, raw. Its degrees-per-unit is unmeasured (piecewise gauge) --
+  this layer never converts it, raw only.
+
+`float | None`, defaulting to `None` when absent, **not** required like
+the six switch args above: a deployed `Export.lua` older than Stage 4b
+never sends them at all, and that must parse exactly as "no reading yet",
+the same absence the rest of this layer already treats as "no sample"
+rather than a parse error.
 """
 
 from __future__ import annotations
@@ -53,6 +67,10 @@ class CockpitSwitchState:
     scho_pw: float
     observe: float
     weap_safe: float
+    #: Raw args 874/876 -- see the module docstring's "Two more, optional"
+    #: section. `None` when the sending `Export.lua` predates Stage 4b.
+    sight_az: float | None = None
+    sight_elev: float | None = None
 
     @property
     def missl_pw_on(self) -> bool:
@@ -113,6 +131,23 @@ class CockpitSwitchState:
                 )
             values[field] = float(raw)
 
+        # Optional (Stage 4b): present-and-numeric is parsed; absent is
+        # `None`, never a parse error -- see the module docstring's "Two
+        # more, optional" section. A present-but-wrong-typed value *is*
+        # still an error, same as any required field above: a value that
+        # arrived malformed is not the same fact as one that never arrived.
+        optional_values: dict[str, float | None] = {}
+        for field in ("sight_az", "sight_elev"):
+            raw = data.get(field)
+            if raw is None:
+                optional_values[field] = None
+            elif isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise CockpitSwitchParseError(
+                    f"field {field!r} must be a number, got {type(raw).__name__}"
+                )
+            else:
+                optional_values[field] = float(raw)
+
         return CockpitSwitchState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -122,6 +157,8 @@ class CockpitSwitchState:
             scho_pw=values["scho_pw"],
             observe=values["observe"],
             weap_safe=values["weap_safe"],
+            sight_az=optional_values["sight_az"],
+            sight_elev=optional_values["sight_elev"],
         )
 
     @staticmethod
@@ -141,7 +178,8 @@ class CockpitSwitchState:
     def to_api_dict(self) -> dict[str, Any]:
         """What `GET /cockpit_switch/latest` answers with. The six raw
         values and the six decided booleans -- same "raw plus decided"
-        shape as `Spu8Sample.to_api_dict`."""
+        shape as `Spu8Sample.to_api_dict` -- plus `sight_az`/`sight_elev`
+        (`None` when the sending `Export.lua` predates Stage 4b)."""
         return {
             "t": self.dcs_model_time_s,
             "received_wall_clock_s": self.received_wall_clock_s,
@@ -157,4 +195,6 @@ class CockpitSwitchState:
             "scho_pw_on": self.scho_pw_on,
             "observe_on": self.observe_on,
             "weapons_armed": self.weapons_armed,
+            "sight_az": self.sight_az,
+            "sight_elev": self.sight_elev,
         }
