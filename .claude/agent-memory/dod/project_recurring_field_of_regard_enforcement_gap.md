@@ -58,6 +58,16 @@ constraint, "which axes does this bound have, is the new caller/producer checked
 and is the value being checked actually expressed in the bound's own frame" -- rather than relying
 on a deep Mode-2 pass after implementation to find it a fourth time.
 
+**User reframing, 2026-10-21 — read before re-raising the process signal above.** The user's
+answer to it: *"DCS will enforce it. I'd rather rely on the real limits than simulation of them.
+Simulation is just a temporary phase while the effectors are not build. Of course the logic behind
+where we want to point the sight must behave correctly."* So the simulated regard enforcement is
+temporary, retired by the real slew loop (`body-layer/ROADMAP/BL-B80.md`, "Field-of-regard
+limits"). **Do not recommend extra process or plan sections to harden it.** What still deserves
+scrutiny is the pointing-intent logic — that the direction chosen makes sense — not the stand-in
+for the mechanical stop. Follow-up the same day: once the loop lands, keep ±60° azimuth as an
+intent constraint; elevation likely dropped from intent ("difficult for a real operator to judge").
+
 See also `.claude/agent-memory/implementer/feedback_declared_bound_check_at_selection_not_at_consumer.md`
 (the mechanism-level fix pattern: reject not clamp, fix at the producer/choke point) and
 `notes/the-9k113-sight-bl-b64.md` (the user-facing harvested version of all four occurrences).
