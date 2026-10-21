@@ -1,9 +1,42 @@
-# BL-B80 — The 9K113 slew loop: pointing the sight on the player axis
+# BL-B80 — The 9K113 pointing loop: pointing the sight on the AI axis
 
-- [ ] **BL-B80 — Drive the sight head to a commanded bearing by closing a loop on the player slew
-  axis (3025/3026), which is rate-commanded.** #status/open Split out of `[[BL-B66]]` on
+- [~] **BL-B80 — Drive the sight head to Petrovich's modelled aim by closing a loop on the AI axis
+  (3060/3061), a position target that works only while DCS's own AI Petrovich is on and only while
+  re-asserted every frame.** #status/in-progress Split out of `[[BL-B66]]` on
   2026-10-17 by user direction (*"OK to split BL-B66, do not start working on it yet"*), after the
-  slew probe settled which channel exists.
+  slew probe settled which channel exists. **The channel changed from the player axis (3025/3026)
+  to the AI axis (3060/3061) after the 2026-10-21 probes — see the SUPERSEDED block immediately
+  below.** This heading used to still say "player axis"; it did not, and the body text already
+  carried the correction — fixed here by the 2026-10-22 DoD pass on Stages 1-3.
+
+  ## Status, 2026-10-22 — Stages 1-3 built, Stage 4 (live sortie) outstanding
+
+  `feature/9k113-sight-pointing` (tip `8b2967008f7654f41be52d2779cc430c5605c32d`) implements the
+  elevation calibration + carried-forward `home_phase` fix (Stage 1), the Export.lua per-frame
+  sight owner + `sight_target` wire op + AI-on/off detector (Stage 2), and the body-layer
+  write-through + readback-preferring `advance_sight_aim` (Stage 3) — `plans/9k113-sight-pointing/
+  plan.md`. DoD passed all mechanical checks (ruff/mypy --strict/pytest clean both subprojects,
+  `luac5.1 -p` clean) and confirmed both Reviewer required-fix rounds and all Security/Performance
+  verdicts are APPROVED. **Not yet merged to `main`** — Stage 4, the live sortie, has not flown.
+  Acceptance card: `docs/acceptance/2026-10-22-bl-b80-sight-pointing-sortie.md` (published artifact
+  linked from DoD's report). **Not tagged `#needs-flight`** — that tag is for a shipped, merged
+  change awaiting its sortie (`docs/TAGS.md`); this entry has not merged yet, so `#status/
+  in-progress` ([~]) is the correct state. Add `#needs-flight` only if this ever merges before
+  Stage 4 flies.
+
+  **What Stage 4 must still verify, not yet checked by anything automated:**
+  - The derived (not measured) elevation degree&harr;raw conversion, at the two mechanical stops
+    (+20&deg;/&minus;15&deg;).
+  - The gyro-alignment window (no spurious `ShowMenu`, no sight reports, for ~10s after OBSERV
+    on).
+  - No spurious `ShowMenu` in ordinary flight.
+  - `home_phase` following DCS's own automatic OBSERV-off, not only the spoken command.
+  - The overlay reopening after the pilot closes it by hand.
+
+  **This blocks `[[BL-B67]]` (the ATGM run)**, which needs a trustworthy pointing channel and the
+  verified elevation calibration as its guidance-accuracy baseline — per the plan's own
+  "Second-order effect" section, a Stage 4 correction to the elevation formula must land here
+  before `BL-B67` is planned, not after.
 
   > **SUPERSEDED 2026-10-21 — read this block first; the text below it predates the finding.**
   > Probes flown 2026-10-21 (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`,

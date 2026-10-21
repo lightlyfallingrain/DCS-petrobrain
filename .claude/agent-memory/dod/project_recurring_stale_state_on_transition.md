@@ -74,3 +74,31 @@ reflected in `docs/AGENT_ROLES.md`'s Architect section. **If this shape recurs a
 exists, the gap is the step not firing (Architect skipped it, or the trigger didn't match a real
 case), not that the rule is missing** -- check that before writing a fourth memory entry for the
 same category.
+
+**Third occurrence, 2026-10-22, `BL-B80` (`plans/9k113-sight-pointing/plan.md`) -- the step fired
+and still missed it.** This plan *did* carry a Co-moving Fields table (two state machines,
+`OpticState.phase`/`home_phase` and the Export.lua per-frame loop), so Architect's step 6a ran, not
+skipped. Reviewer still found a seventh instance of the shape:
+
+7. `GuidanceUnitState.sight_az_raw`/`sight_elev_raw` are set by `refresh_readback` on every numeric
+   sample and never cleared back to `None` -- so once any sight readback has ever arrived,
+   `perception/naked_eye_source.py`'s gaze-cone builder (which reads `OpticState.actual_aim_*_deg`
+   generically, for naked-eye and binocular perception, not only sight perception) keeps anchoring
+   to the literal 9K113 head position for the rest of the mission regardless of which optic is
+   actually in use -- defeating the plan's own gyro-alignment `BINOCULAR_OPTIC` cap everywhere, not
+   only during the window the cap was built for.
+
+**Why the existing table didn't catch it**: the table's own worked examples are fields *internal*
+to the phase/mode machine itself (`home_phase`, `observ_observed_since_sim`, the Export.lua
+per-frame timers) -- a field that is written by one subsystem but read *generically* by a third,
+unrelated consumer (naked-eye perception reading a field the sight subsystem owns) sits one hop
+outside what the table's framing asks the writer to enumerate. The category is the same (state that
+should reset/gate on a transition and doesn't), but the table as currently scoped prompts for
+"fields inside this state machine," not "fields this state machine writes that something *outside*
+it reads unconditionally."
+
+**Process signal for next retro**: consider widening step 6a's prompt from "which fields must track
+which transitions" to also ask "does anything outside this state machine read one of these fields
+unconditionally, and if so, does it need to gate on the same transition?" -- this is the third
+feature in this category and the first where the existing mitigation was in place and still didn't
+reach the actual instance.

@@ -114,3 +114,31 @@
   its own docstring — could settle which number was real. When a fix narrows or re-times a shared
   gate to handle a pathological input, the healthy-input re-measurement belongs in a committed test,
   not a one-off script's printed number, even when the fix is otherwise obviously correct.
+- **A readback value and the command value that produced it can share a physical quantity (degrees)
+  and formula on one half of their range while needing genuinely different formulas on the other
+  half, with nothing in the type system to tell them apart.** `BL-B80`'s elevation calibration has
+  one linear conversion for the readback argument (`arg_876 * 20.0`, both signs — a piecewise 0.75
+  gauge factor on the negative argument side exactly cancels the 20/15 degree-per-unit asymmetry)
+  and a genuinely different piecewise conversion for the command value sent via `SetCommand` (no
+  readback step happens on the way out, so nothing cancels). The first implementation applied the
+  readback formula's piecewise version by mistake and a unit test caught it immediately
+  (`sight_elevation_raw_to_deg(-0.75)` returned `-11.25`, not `-15.0`) — but only because that test
+  existed; both functions take and return a bare `float`, so a future call site swapping one for
+  the other would type-check and silently produce a wrong-but-plausible number. When a conversion
+  has a command direction and a readback direction, treat them as two formulas from the start
+  rather than assuming one is the other's algebraic inverse, and say in each function's docstring
+  which domain it is for.
+- **A per-optic perception cap can be defeated by a shared belief field that keeps the previous
+  optic's last real value instead of clearing when the optic that owns it stops being used.**
+  `BL-B80`'s gyro-alignment window caps `optic_decision.optic` to `BINOCULAR_OPTIC` specifically so
+  naked-eye/binocular perception does not read through the sight while it is unusable — but
+  `GuidanceUnitState.sight_az_raw`/`sight_elev_raw` (consumed generically by
+  `perception/naked_eye_source.py`'s gaze-cone builder, not only by sight perception) are set by
+  `refresh_readback` on every numeric sample and never cleared back to `None`, so once any sight
+  readback has ever arrived, naked-eye/binocular perception keeps reading the sight's literal head
+  position for the rest of the mission regardless of which optic is actually in use — defeating the
+  cap's purpose everywhere, not only during the alignment window it was built for. No test combined
+  a non-sight optic with a populated readback field, so the gap went unexercised rather than merely
+  untested-for. The general shape: a field two code paths share (one that owns writing it, several
+  that read it generically) must be gated at the read site on which path currently applies, not
+  assumed clear just because the writer's own caller thinks it is between uses.
