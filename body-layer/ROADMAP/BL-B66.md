@@ -271,6 +271,7 @@
   logging changed arguments while the user throws it by hand. See `plans/9k113-effectors/
   implementation.md` for the full per-stage account.
 
+  **Merged to `main` 2026-10-21 (`a877de9d`, `feature/9k113-effectors`).** Entry stays open until Stage 5 flies.
   **DoD-passed 2026-10-21 for Stages 1-4 + 4b, at `510084a3`.** `#needs-flight` — Stage 5 (the
   acceptance sortie) has not flown. Reviewer (two passes, the second covering the review-fix tests
   and Stage 4b), Performance Reviewer (APPROVED — MONITOR, the `push_cockpit_switch_state`
