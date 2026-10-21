@@ -37,7 +37,7 @@ This summary is not a substitute for the license text, which governs.
 
 ## Commercial licensing
 
-Contact Simon Götz through <https://github.com/lightlyfallingrain/DCS-petrobrain>.
+Contact Simon Götz at <simon.gotz@gmail.com>.
 
 ## Suggested attribution
 
