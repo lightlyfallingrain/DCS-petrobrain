@@ -153,3 +153,99 @@ sections, `logger.py`'s changed call sites, `aircraft_client.py`, `command_sende
 verification (grepped and spot-read, not read line-by-line in full) rather than for their own
 correctness — all currently pass and are not themselves in question. Plan/explore-notes/
 implementation/security-review docs read in full.
+
+---
+
+### Re-review (fixes)
+
+Reviewed the fix diff (`385c3b34..157b78b1`) against the five required fixes above, per
+`implementation.md`'s "Review fixes" section. Branch fast-forwarded cleanly from `9284cd34` to the
+named tip `157b78b1` (strict ancestor, clean tree).
+
+**Fix 1 — `Export.lua`'s `ai_off_since` accumulator (the one requiring most scrutiny, no automated
+test reaches this file).** Hand-traced the corrected control flow frame by frame:
+
+- Frame where the branch is first entered (`ai_off_since == nil`): sets `ai_off_since = t`, then
+  the inner timeout check is false (0 s elapsed) — correctly does not fire or reset.
+- Subsequent frames while still stuck: `ai_off_since` is left untouched (the unconditional "reset
+  either way" line is gone), so `(t - ai_off_since)` now genuinely grows frame over frame until it
+  crosses `AI_OFF_DETECT_TIMEOUT_S` (0.5 s) — this is the fix, confirmed by reading the diff and
+  the surrounding function (`Export.lua:1209-1241`).
+- Timeout fires: press issued, `ai_believed_on = false`, `ai_off_since` reset to `t` *inside* the
+  same inner `if`, immediately after the press — this restarts the window rather than leaving it
+  stuck at the original timestamp, which is what lets the re-press interval
+  (`AI_OFF_REPRESS_INTERVAL_S`, 2.5 s) work: the next timeout accumulates fresh from the press time,
+  and the repress gate (`last_showmenu_press_t`) independently prevents a second press before 2.5 s
+  regardless of the timeout's own state.
+- Recovery path (readback starts responding again): the `else` branch (`ai_off_since = nil`) is
+  unchanged and still correct — confirmed this branch was not touched by the fix and did not need
+  to be.
+- OBSERV falling-edge / mission-stop interplay: both reset blocks (`Export.lua:1148-1151`,
+  `1312-1315`) independently zero `ai_off_since`/`last_showmenu_press_t`/`ai_believed_on` to `nil`/
+  `false`, and `run_sight_pointing` is itself gated on OBSERV being on (`observ_on_since ~= nil`
+  before reaching the detector block) — the fix does not interact with either reset path, and
+  re-reading them confirms no stale `ai_off_since` can survive an OBSERV-off/mission-stop into the
+  next OBSERV-on. The `GYRO_ALIGNMENT_S` gate (`(t - observ_on_since) >= GYRO_ALIGNMENT_S`) around
+  the whole detector block is also untouched and still correctly prevents the detector from even
+  starting to accumulate during the gyro-alignment window — no interplay bug introduced.
+- Mechanically confirmed the fix introduces no new unresolved global: `luac5.1 -l -p` + the
+  `GETGLOBAL` scan on the post-fix `Export.lua` lists only genuine DCS/stdlib names (`GetDevice`,
+  `LoGet*`, `pcall`, `math`, etc.) — no own-helper (e.g. `safe_call`) appears, which would indicate
+  a local-before-declaration mistake introduced by the edit's reindentation.
+
+This fix is correct and complete. The implementer's own manual-trace verification in
+`implementation.md` matches independent re-derivation here.
+
+**Fix 2 — `logger.py`'s readback gating on the post-cap optic.** Confirmed `is_sight_tier` is
+computed from `optic_decision.optic` *after* the gyro-alignment cap (`replace(optic_decision,
+optic=BINOCULAR_OPTIC)`) has already run and been assigned back to `optic_decision` — the gating
+reads the same post-cap value `self.optic` is set from, not the pre-cap `decide_optic` output, so
+the cap and the gate cannot disagree. `sight_az_raw`/`sight_elev_raw` are passed as `None, None`
+whenever `optic_decision.optic` is not `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`, matching
+`advance_sight_aim`'s own documented pass-through fallback.
+
+**Verified by mutation, not just by reading the diff** (reviewer protocol): reverted the gating
+(restored the unconditional `sight_az_raw=self.guidance_unit_state.sight_az_raw` /
+`sight_elev_raw=self.guidance_unit_state.sight_elev_raw` call), reran
+`test_run_once_caps_a_sight_tier_optic_during_gyro_alignment` in isolation — it failed exactly as
+expected (`actual_aim_azimuth_deg == 68.18181818181819`, not `12.0`). Restored the fix, reran — the
+test passes clean. The guard is load-bearing, not a comment.
+
+**Fixes 3-5.** The new `run_once`-level integration test
+(`test_run_once_caps_a_sight_tier_optic_during_gyro_alignment`) matches the plan's Stage 1 test
+list wording exactly, exercises both the window-held and window-lifted cases, and — per the
+mutation check above — doubles correctly as fix 2's test. `Export.lua:1076`'s `GetDevice` call is
+now wrapped in `safe_call`, consistent with every other call site in the file. The stale docstring
+on `test_observ_off_command_stops_the_sight_through_the_real_poll_loop` is corrected to state its
+actual (narrower) scope accurately.
+
+**Checks (run independently, not taken from `implementation.md`):**
+- aircraft-layer: `ruff format --check` (pass, 71 files), `ruff check` (pass), `cd aircraft-layer
+  && .venv/bin/mypy src` (pass, 26 source files), `pytest` (459 passed, including
+  `test_dcs_export_lua_local_order.py` and `test_dcs_export_lua_syntax.py`), `luac5.1 -p
+  Export.lua` (pass), `GETGLOBAL` scan (clean).
+- body-layer: `ruff format --check` (pass, 160 files), `ruff check` (pass), `cd body-layer &&
+  .venv/bin/mypy src` (pass, 70 source files), `pytest` (2418 passed, 4 xfailed).
+
+**No new scope, no leftover debug/TODO code** in the fix diff (`Export.lua`, `logger.py`,
+`test_logger.py`, `implementation.md` — the only four files touched between the two tips).
+
+### Re-review Verdict
+
+APPROVED
+
+All five required fixes are correct, complete, and verified independently (including by mutation
+on the one fix a test now covers). The elevation-conversion derivation, tuning entry, security
+posture, and mechanical checks remain clean from the original review and were unaffected by this
+diff. Proceed to DoD. The live sortie (Stage 4) can now be flown against this tip — the AI-off
+detector's reactive `ShowMenu` press should actually fire within ~0.5 s of a genuine AI-off
+condition persisting past the gyro-alignment window, which was not true at the previously reviewed
+tip.
+
+### Re-review Confidence
+
+Full read of the fix diff (`Export.lua`, `logger.py`, `test_logger.py`,
+`implementation.md`). Independent hand-trace of the `Export.lua` detector's frame-by-frame
+behaviour (no automated coverage exists for that file). Independent mutation test of the
+`logger.py` gating fix. All four subprojects' mechanical checks (`ruff format --check`, `ruff
+check`, `mypy --strict`, `pytest`) run fresh rather than taken on faith from `implementation.md`.
