@@ -63,6 +63,9 @@ Built back to back as directed, on `feature/9k113-effectors`, fast-forwarded fro
   `VOICE_ONLY_TOKENS` and `PHRASES` (`"weapons armed"`/`"weapons safe"` only, per user direction —
   "weapons on/off" explicitly dropped). Not added to the F10 menu (voice is primary, the F10
   vocabulary is the legacy, non-growing one — checked per the task brief's instruction).
+  **The "weapons"/"tanks" `VERB_FLOOR` near-collision is accepted by the user, 2026-10-21:**
+  *"keep it, we'll test on the sortie. There's no good alternative either."* Stage 5 listens for
+  false triggers.
 
 ### Tuning
 
