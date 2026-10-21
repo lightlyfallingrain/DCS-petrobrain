@@ -273,7 +273,33 @@ about there).
   "Structure" section — this subproject's standing limitation, not new to this plan). Everything in
   Stage 2 is validated live only.
 
-## Decisions Requiring User Input
+## Coordinator amendments (2026-10-22) — these override the text above where they differ
+
+1. **Overlay OFF with OBSERV OFF was missing.** The user direction is explicit: *"Turn overlay OFF
+   with OBSERV OFF."* ShowMenu is a toggle and, with OBSERV off, the readback cannot say whether
+   DCS's AI is on. So Export.lua keeps `ai_believed_on`: true once the readback has obeyed a
+   non-trivial target after alignment, false after a detector press that has not yet been
+   confirmed by the readback obeying again. On the OBSERV falling edge, press ShowMenu once **only
+   if `ai_believed_on`**, then clear it. If unsure, do not press — a wrongly-left-on overlay is
+   harmless with the wheel hidden; a wrongly-pressed one turns DCS's AI on with nobody holding the
+   sight.
+2. **Decision 3 (proactive press) is settled by the same direction: reactive only.** The detector
+   runs from the moment the alignment window ends, so *"Turn AI overlay ON with OBSERV ON"* is met
+   within one timeout of the sight becoming usable. A blind proactive press would turn the AI
+   **off** whenever it was already on, because the press toggles.
+3. **A false detector fire corrects itself**, and the implementation must keep it that way: a press
+   while the AI was in fact on turns it off, the readback drops to 0, and after the re-press
+   interval the detector presses again. Never latch the detector off after N presses.
+4. **Elevation rate lives in Export.lua** (Stage 2's default, not the Risks section's alternative):
+   10°/s is 0.5 raw/s above centre (20°/unit) and 0.667 raw/s below (15°/unit). The rate is a mimic
+   of the slew, so the derived-formula risk on it is cosmetic.
+5. **Decisions 1 and 2 taken as recommended**: ship the derived elevation formula and verify it at
+   the two mechanical stops in Stage 4; ship placeholder detector timing (0.5 s timeout, 2.5 s
+   re-press) and retune from the 2026-10-22 latency probe.
+6. **Batching**: Stages 1–3 are one implementation batch (one performance and one security pass
+   after Stage 3); Stage 4 is the sortie.
+
+## Decisions Requiring User Input (answered — see amendments 2 and 5)
 
 - **Ship the derived elevation formula now, verified live in Stage 4, or hold Stage 1/3's elevation
   work until a dedicated calibration probe runs first?** Recommendation: ship and verify live — the
