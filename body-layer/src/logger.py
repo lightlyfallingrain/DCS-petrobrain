@@ -241,7 +241,11 @@ from belief.optic_policy import (
     search_pattern,
 )
 from belief.optic_policy import decide as decide_optic
-from belief.sight_effector import GuidanceUnitState
+from belief.sight_effector import (
+    GuidanceUnitState,
+    in_gyro_alignment,
+    write_sight_target,
+)
 from belief.sight_effector import advance_power_up as advance_guidance_unit_power_up
 from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
 from belief.sight_effector import sight_ready as guidance_unit_sight_ready
@@ -666,6 +670,30 @@ class ConsolePerceptionRunner:
                 self._last_look_direction = look_direction
             except AircraftLayerError:
                 logger.warning("look-direction push failed (continuing)", exc_info=True)
+        # `[[BL-B80]]` closes the carried-forward `BL-B66` gap: `home_
+        # phase` now follows the *observed* arg-886 edge rather than only
+        # the pilot's own "Observ on"/"off" command -- `crew_console.
+        # observ_transition`'s own drain block (`_run_crew_text_poll_
+        # loop`) still drives the cockpit write and the hands-busy
+        # suppression, which are about the pilot's hand moving to the
+        # switch, not the observed edge. `self.guidance_unit_state.
+        # observ_observed` here is the *previous* poll's readback
+        # (`refresh_cockpit_switch_readback` runs after `run_once` in the
+        # poll loop) -- the same one-poll lag `guidance_request` above
+        # already accepts. `None` (no readback yet, or an `Export.lua`
+        # predating this field) leaves `home_phase` untouched rather than
+        # forcing a phase from an unknown state.
+        observ_observed = self.guidance_unit_state.observ_observed
+        if (
+            observ_observed is True
+            and self.optic_state.home_phase is not OpticPhase.SIGHTING
+        ):
+            self.optic_state = replace(self.optic_state, home_phase=OpticPhase.SIGHTING)
+        elif (
+            observ_observed is False
+            and self.optic_state.home_phase is not OpticPhase.SCANNING
+        ):
+            self.optic_state = replace(self.optic_state, home_phase=OpticPhase.SCANNING)
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
@@ -729,6 +757,19 @@ class ConsolePerceptionRunner:
                 else None
             ),
         )
+        # `[[BL-B80]]`: Petrovich must not perceive through the sight
+        # while the real gyro is still re-aligning, even though `home_
+        # phase` is already `SIGHTING` (set above) -- capped to `BINOCULAR_
+        # OPTIC` immediately after `decide_optic` returns, before anything
+        # downstream reads `optic_decision.optic`, the same cap value
+        # `_apply_guidance` already uses for "home_phase is not SIGHTING".
+        # Re-derived fresh every poll (never cached), so the moment the
+        # window ends the very next poll's check simply passes.
+        if optic_decision.optic in (
+            SIGHT_WIDE_OPTIC,
+            SIGHT_NARROW_OPTIC,
+        ) and in_gyro_alignment(self.guidance_unit_state, ownship.t_sim):
+            optic_decision = replace(optic_decision, optic=BINOCULAR_OPTIC)
         self.optic = optic_decision.optic
         # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the
         # *previous* poll's own `t_sim` here (it is updated later in this
@@ -745,6 +786,11 @@ class ConsolePerceptionRunner:
             decision=optic_decision,
             optic_state=self.optic_state,
             dt_s=dt_s,
+            # `[[BL-B80]]`: the previous poll's own readback (same lag as
+            # `home_phase`'s derivation above) -- `advance_sight_aim`
+            # prefers it, per axis, over the pass-through model.
+            sight_az_raw=self.guidance_unit_state.sight_az_raw,
+            sight_elev_raw=self.guidance_unit_state.sight_elev_raw,
         )
         if updated_optic_state is not None:
             self.optic_state = updated_optic_state
@@ -1291,6 +1337,8 @@ def _apply_active_gaze(
     decision: OpticDecision | None = None,
     optic_state: OpticState | None = None,
     dt_s: float = 0.0,
+    sight_az_raw: float | None = None,
+    sight_elev_raw: float | None = None,
 ) -> OpticState | None:
     """Assigns the resolved scan plan and optic onto whichever `sources`
     entry is a `NakedEyePerceptionSource` -- a true no-op for every other
@@ -1325,7 +1373,12 @@ def _apply_active_gaze(
     (or `None` if nothing changed) is what the caller must persist back
     onto its own `optic_state` field, the same way `run_once` already
     persists `decide_optic`'s return value. `dt_s` is threaded through to
-    `advance_sight_aim` unused today -- see that function's own docstring."""
+    `advance_sight_aim` unused today -- see that function's own docstring.
+
+    `sight_az_raw`/`sight_elev_raw` (`[[BL-B80]]`) are threaded through to
+    `advance_sight_aim` the same way, so it can prefer a real readback
+    over the model per axis -- `None` for every pre-existing caller, a
+    true no-op (same as `dt_s` defaulting to `0.0`)."""
     resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
     optic = decision.optic if decision is not None else UNAIDED_OPTIC
     updated_state = optic_state
@@ -1346,12 +1399,15 @@ def _apply_active_gaze(
             decision.look_azimuth_deg,
             decision.look_elevation_deg,
             dt_s=dt_s,
+            sight_az_raw=sight_az_raw,
+            sight_elev_raw=sight_elev_raw,
         )
-        # `advance_sight_aim`'s perception-stage body is `return desired`,
-        # and both desired values are non-`None` on this branch (checked
-        # above) -- so `actual` cannot be `None` here. A future controller
-        # must preserve that: it never has a desired aim to converge
-        # toward without one to converge *from*.
+        # Both desired values are non-`None` on this branch (checked
+        # above), and `advance_sight_aim` falls back to `desired` on
+        # whichever axis has no readback -- so `actual` cannot be `None`
+        # here either way. A future rate-limited controller must preserve
+        # that: it never has a desired aim to converge toward without one
+        # to converge *from*.
         assert actual_azimuth_deg is not None
         assert actual_elevation_deg is not None
         if optic_state is not None:
@@ -3137,9 +3193,16 @@ def _run_crew_text_poll_loop(
                         # Advances the sequence (a true no-op before it
                         # has started or once it is complete) and
                         # refreshes the readback fields from the aircraft
-                        # layer's own cockpit-switch telemetry -- neither
-                        # consumed by this entry's own logic (plan §3),
-                        # carried forward for `BL-B67`.
+                        # layer's own cockpit-switch telemetry.
+                        # `weapon_safety_observed` is carried forward with
+                        # no consumer yet, for `BL-B67` (plan §3); `observ_
+                        # observed`/`sight_az_raw`/`sight_elev_raw` do have
+                        # consumers now (`[[BL-B80]]`'s `home_phase`
+                        # derivation and `advance_sight_aim`'s readback
+                        # preference, both read one poll lagged from here
+                        # -- see `run_once`'s own comments on that lag).
+                        # `runner.last_t_sim` stamps the gyro-alignment
+                        # window's own rising edge.
                         runner.guidance_unit_state = advance_guidance_unit_power_up(
                             runner.guidance_unit_state,
                             runner.last_t_sim,
@@ -3148,6 +3211,7 @@ def _run_crew_text_poll_loop(
                         runner.guidance_unit_state = refresh_cockpit_switch_readback(
                             runner.guidance_unit_state,
                             aircraft_client.get_cockpit_switch_state_latest(),
+                            runner.last_t_sim,
                         )
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
@@ -3196,15 +3260,21 @@ def _run_crew_text_poll_loop(
                         # `attack_run_state`). Entering OBSERV also starts
                         # the 1 s hand-movement suppression (direction §6);
                         # leaving it does too -- the pilot's hand is on the
-                        # switch either way. Only `home_phase` changes --
-                        # `decide`'s own dispatch (`_back_to_home`) is what
-                        # actually moves `phase` at the next boundary, so
-                        # this never expresses the illegal "jump straight
-                        # into SIGHTING" state the structural rule forbids.
+                        # switch either way.
+                        #
+                        # **`home_phase` itself no longer changes here**
+                        # (`[[BL-B80]]`, closing the carried-forward
+                        # `BL-B66` gap) -- `run_once` derives it every poll
+                        # from the *observed* arg-886 edge instead, so it
+                        # also follows DCS's own automatic OBSERV-off (a
+                        # hard manoeuvre) and not only this command. This
+                        # block still drives the cockpit write and the
+                        # hands-busy suppression, which are about the
+                        # pilot's hand moving to the switch, not the
+                        # observed edge.
                         if crew_console.observ_transition == "on":
                             runner.optic_state = replace(
                                 runner.optic_state,
-                                home_phase=OpticPhase.SIGHTING,
                                 hands_busy_until_sim=(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
@@ -3230,7 +3300,6 @@ def _run_crew_text_poll_loop(
                         elif crew_console.observ_transition == "off":
                             runner.optic_state = replace(
                                 runner.optic_state,
-                                home_phase=OpticPhase.SCANNING,
                                 hands_busy_until_sim=(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
@@ -3307,6 +3376,34 @@ def _run_crew_text_poll_loop(
                             # `decide_optic` above) deliberately is.
                             resolving_optic=runner.optic,
                         )
+                        # `[[BL-B80]]`: send the desired sight aim every
+                        # poll while `home_phase is SIGHTING` -- idle
+                        # included, since the `9k113-narrow-search`
+                        # follow-on already guarantees the idle sight
+                        # carries a real in-regard aim, so there is always
+                        # something valid to send (no special case
+                        # needed). Runs regardless of the gyro-alignment
+                        # cap in `run_once` -- that cap only affects
+                        # *perception*, never whether the head is told
+                        # where Petrovich eventually wants to look, and
+                        # the head should already be most of the way
+                        # there by the time alignment ends. A dropped
+                        # write degrades to "Export.lua keeps re-asserting
+                        # whatever target it last received" -- never
+                        # stops the poll loop.
+                        if runner.optic_state.home_phase is OpticPhase.SIGHTING:
+                            desired_az = runner.optic_state.look_azimuth_deg
+                            desired_elev = runner.optic_state.look_elevation_deg
+                            if desired_az is not None and desired_elev is not None:
+                                try:
+                                    write_sight_target(
+                                        aircraft_client, desired_az, desired_elev
+                                    )
+                                except AircraftLayerError:
+                                    logger.warning(
+                                        "sight-target write failed (continuing)",
+                                        exc_info=True,
+                                    )
                         # `BL-B66` Stage 4b: every poll a real ownship
                         # state exists (the same guard the guidance-unit/
                         # OBSERV block above this is nested under), after

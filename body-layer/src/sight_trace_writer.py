@@ -17,17 +17,13 @@ already public.
 (belief's own commanded aim); "actual" is the sight head's real position
 when a readback exists (`GuidanceUnitState.sight_az_raw`/
 `sight_elev_raw`, raw args 874/876), else `OpticState.actual_aim_azimuth_
-deg`/`actual_aim_elevation_deg`'s own *model* of the head (today a
-pass-through of desired -- `BL-B80` is what makes it diverge).**
-Azimuth's raw readback is additionally converted to degrees via the one
-confirmed calibration (`belief.sight_effector.sight_azimuth_raw_to_deg`);
-elevation's is not (its gauge's degrees-per-unit is still unmeasured, per
-that module's own comment) -- so `actual_elevation_source` is always
-`"model"`, never `"readback"`, and `raw_sight_elev` is logged purely so a
-conversion can be *derived* later without a second sortie, exactly the
-reasoning the plan's own Stage 4b paragraph states ("Raw arg values are
-logged alongside any degree conversion -- elevation's conversion is still
-unmeasured, so a derived number alone could not be re-derived later")."""
+deg`/`actual_aim_elevation_deg`'s own *model* of the head.** Both axes'
+raw readbacks are converted to degrees via `belief.sight_effector`'s
+`sight_azimuth_raw_to_deg`/`sight_elevation_raw_to_deg` -- as of
+`[[BL-B80]]`, elevation's conversion exists too (derived, not yet
+independently measured live -- see that module's own comment), so
+`actual_elevation_source` can read `"readback"` the same way azimuth's
+already could, once both the conversion and a raw sample exist."""
 
 from __future__ import annotations
 
@@ -38,7 +34,11 @@ from pathlib import Path
 from typing import TextIO
 
 from belief.optic_policy import OpticState
-from belief.sight_effector import GuidanceUnitState, sight_azimuth_raw_to_deg
+from belief.sight_effector import (
+    GuidanceUnitState,
+    sight_azimuth_raw_to_deg,
+    sight_elevation_raw_to_deg,
+)
 
 #: Same reasoning/value as `detection_trace_writer.DEFAULT_FLUSH_EVERY_N_
 #: POLLS` -- a few polls' worth of buffering, not "as rarely as possible".
@@ -136,12 +136,14 @@ def _row(
         actual_azimuth_deg = None
         actual_azimuth_source = None
 
-    # Elevation never reads "readback": 876's degrees-per-unit is
-    # unmeasured (module docstring) -- `raw_sight_elev` below is the only
-    # place that reading survives in this row.
+    # `[[BL-B80]]`: elevation now has a conversion too (derived, same
+    # "prefer readback, fall back to model" split azimuth already has).
     actual_elevation_deg: float | None
     actual_elevation_source: str | None
-    if optic_state.actual_aim_elevation_deg is not None:
+    if raw_el is not None:
+        actual_elevation_deg = sight_elevation_raw_to_deg(raw_el)
+        actual_elevation_source = "readback"
+    elif optic_state.actual_aim_elevation_deg is not None:
         actual_elevation_deg = optic_state.actual_aim_elevation_deg
         actual_elevation_source = "model"
     else:

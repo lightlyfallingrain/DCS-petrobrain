@@ -121,6 +121,11 @@ SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 # source: belief/sight_effector.py:GUIDANCE_UNIT_SWITCH_DELAY_S
 GUIDANCE_UNIT_SWITCH_DELAY_S = 1.0
 
+# How long the sight stays unusable after any observed OBSERV off->on transition, whoever caused it (player, DCS's own hard-manoeuvre auto-off, or our own write) -- the real 9K113 gyro's own re-alignment time.
+# status: measured | range: 5.0 .. 20.0
+# source: belief/sight_effector.py:GYRO_ALIGNMENT_S
+GYRO_ALIGNMENT_S = 10.0
+
 [mission_memory.admission]
 # How long, in seconds, a `fired_on` entry for one shooter suppresses a second entry from the same shooter -- the user's own "~2 min" (explore notes, Decision 5), stated there as a tunable.
 # status: judgement | range: 10.0 .. 900.0

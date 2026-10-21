@@ -69,13 +69,32 @@ class TestFieldSelection:
         assert row["actual_azimuth_deg"] == pytest.approx(7.5)
         assert row["raw_sight_az"] is None
 
-    def test_actual_elevation_is_always_model_source_never_readback(
+    def test_actual_elevation_prefers_readback_and_converts_to_degrees(
         self, tmp_path: Path
     ) -> None:
-        """Arg 876's degrees-per-unit is unmeasured -- even with a raw
-        readback present, elevation's `_source` stays `"model"`, and the
-        raw value is still logged separately so a conversion can be
-        derived later without a second sortie."""
+        """`[[BL-B80]]` adds elevation's conversion -- same "readback
+        wins when present" split azimuth already has. -0.28125 raw *
+        20.0 = -5.625 deg (`sight_elevation_raw_to_deg`'s one formula,
+        both signs)."""
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        optic_state = OpticState(
+            look_azimuth_deg=10.0,
+            look_elevation_deg=5.0,
+            actual_aim_azimuth_deg=10.0,
+            actual_aim_elevation_deg=5.0,  # model says "arrived"
+        )
+        guidance_unit_state = GuidanceUnitState(sight_elev_raw=-0.28125)
+        writer.write_poll(1.0, optic_state, guidance_unit_state)
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["actual_elevation_source"] == "readback"
+        assert row["actual_elevation_deg"] == pytest.approx(-5.625)
+        assert row["raw_sight_elev"] == pytest.approx(-0.28125)
+
+    def test_actual_elevation_falls_back_to_model_when_no_readback(
+        self, tmp_path: Path
+    ) -> None:
         writer = SightTraceWriter(tmp_path / "slew.jsonl")
         optic_state = OpticState(
             look_azimuth_deg=10.0,
@@ -83,14 +102,13 @@ class TestFieldSelection:
             actual_aim_azimuth_deg=10.0,
             actual_aim_elevation_deg=5.0,
         )
-        guidance_unit_state = GuidanceUnitState(sight_elev_raw=-0.28125)
-        writer.write_poll(1.0, optic_state, guidance_unit_state)
+        writer.write_poll(1.0, optic_state, GuidanceUnitState())
         writer.flush()
 
         row = _row(tmp_path / "slew.jsonl")
         assert row["actual_elevation_source"] == "model"
         assert row["actual_elevation_deg"] == pytest.approx(5.0)
-        assert row["raw_sight_elev"] == pytest.approx(-0.28125)
+        assert row["raw_sight_elev"] is None
 
     def test_error_is_desired_minus_actual(self, tmp_path: Path) -> None:
         writer = SightTraceWriter(tmp_path / "slew.jsonl")

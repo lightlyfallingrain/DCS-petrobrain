@@ -27,6 +27,15 @@ sequencing -- `write_observ`/`write_weapon_safety`. Both raise
 `AircraftLayerError` on a dropped write, the same posture
 `advance_power_up` degrades to "retry next poll" for -- see each
 function's own docstring.
+
+**`[[BL-B80]]` (`plans/9k113-sight-pointing/plan.md`) adds the real
+pointing channel**: azimuth/elevation degree<->raw conversions (the
+azimuth direction already existed; this adds its inverse plus both
+elevation directions), the gyro-alignment window (`GYRO_ALIGNMENT_S`,
+`observ_observed_since_sim`, `in_gyro_alignment`), and `write_sight_
+target` -- the once-per-poll aim-setter `logger.py` calls while `home_
+phase is SIGHTING`. The per-frame reassertion/rate-limiting itself lives
+in `Export.lua`, not here (that plan's "Architecture: who owns what").
 """
 
 from __future__ import annotations
@@ -116,6 +125,88 @@ def sight_azimuth_raw_to_deg(raw: float) -> float:
     return raw * _SIGHT_AZIMUTH_DEG_PER_RAW_UNIT
 
 
+def sight_azimuth_deg_to_raw(deg: float) -> float:
+    """The inverse of `sight_azimuth_raw_to_deg` -- the command-direction
+    conversion `[[BL-B80]]` needs to turn belief's desired aim into the
+    AI-axis command value Export.lua writes
+    (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-
+    findings.md` pointing-probe table: `value = deg/60`, confirmed
+    separately from the readback calibration this inverts)."""
+    return deg / _SIGHT_AZIMUTH_DEG_PER_RAW_UNIT
+
+
+#: Elevation's raw-arg-876-to-degrees conversion -- **derived, not
+#: independently measured** (`plans/9k113-sight-pointing/plan.md` Stage 1,
+#: its own named risk). Combines two already-sourced facts with no free
+#: parameter: the manual's physical limits (`optics.py`'s
+#: `regard_elevation_up_deg=20.0`/`regard_elevation_down_deg=-15.0`) and
+#: the measured piecewise gauge split between the *command* value written
+#: and the *readback* argument (`arg_876` = command for command >= 0,
+#: `0.75 * command` for command < 0 --
+#: `2026-10-21-9k113-slew-readback-probe-findings.md`'s pointing-probe
+#: table). The physical degree is proportional to the *command*, 20
+#: deg/unit above centre and 15 deg/unit below -- and since `arg_876`
+#: itself scales the negative side by 0.75, `elevation_deg = arg_876 *
+#: 20.0` turns out to fit **both** signs with the same single constant
+#: (command=+1 -> arg=+1.0 -> 20 deg directly; command=-1 -> arg=-0.75,
+#: and 20.0 * -0.75 = -15 deg, the 0.75/20/15 ratio cancelling exactly) --
+#: `sight_elevation_raw_to_deg` below is this one formula, not piecewise.
+#: **Verified live at the two mechanical stops only in the Stage 4
+#: acceptance sortie** -- until then this is the best account of sourced
+#: data, not a confirmed calibration.
+_SIGHT_ELEVATION_DEG_PER_RAW_UNIT: Final[float] = 20.0
+
+#: The *inverse* direction is piecewise, unlike the reading above --
+#: `write_sight_target` needs the raw **command** value to send (what
+#: `SetCommand(3060, ...)` takes), not the argument a readback would
+#: report, and the command<->degree relationship is the asymmetric
+#: 20/15 split directly (no 0.75 factor to cancel, because there is no
+#: readback step on the way out).
+_SIGHT_ELEVATION_DEG_PER_COMMAND_UNIT_UP: Final[float] = 20.0
+_SIGHT_ELEVATION_DEG_PER_COMMAND_UNIT_DOWN: Final[float] = 15.0
+
+
+def sight_elevation_raw_to_deg(raw: float) -> float:
+    """Converts a raw arg-876 *readback* to degrees -- the derived
+    calibration, see `_SIGHT_ELEVATION_DEG_PER_RAW_UNIT`'s own comment.
+    One formula, both signs. Unlike azimuth, not yet independently
+    confirmed live."""
+    return raw * _SIGHT_ELEVATION_DEG_PER_RAW_UNIT
+
+
+def sight_elevation_deg_to_raw(deg: float) -> float:
+    """Converts a desired degree to the raw **command** value
+    `write_sight_target` sends -- **not** the literal inverse of
+    `sight_elevation_raw_to_deg` (that operates on the readback argument,
+    this on the command value Export.lua's `SetCommand` takes; see
+    `_SIGHT_ELEVATION_DEG_PER_COMMAND_UNIT_UP`'s own comment for why the
+    two domains differ). Piecewise by sign, same derived calibration,
+    same "not yet independently confirmed" caveat."""
+    if deg >= 0:
+        return deg / _SIGHT_ELEVATION_DEG_PER_COMMAND_UNIT_UP
+    return deg / _SIGHT_ELEVATION_DEG_PER_COMMAND_UNIT_DOWN
+
+
+#: How long the sight stays unusable after any observed OBSERV off->on
+#: transition, whoever caused it (player, DCS's own hard-manoeuvre
+#: auto-off, or our own write) -- the real 9K113 gyro's own re-alignment
+#: time. A different value changes how long Petrovich waits before
+#: perceiving through the sight again and how long the AI-off detector
+#: must stay quiet, so this is tunable (root `CLAUDE.md`'s "Behaviour-
+#: affecting constants are tunable"). Sourced from `2026-09-11-SUMMARY-
+#: petrovich-control.md` ("every ON costs the ~10 s gyro alignment") and
+#: the fresh verbatim direction this plan responds to (`explore-notes.md`:
+#: "if anything sets OBSERV OFF...turning it back ON causes the ~10s gyro
+#: alignment delay every time").
+GYRO_ALIGNMENT_S: Final[float] = tuning.real(
+    "belief.sight_effector.GYRO_ALIGNMENT_S",
+    10.0,
+    lo=5.0,
+    hi=20.0,
+    status="measured",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class GuidanceUnitState:
     """The 9K113 guidance unit's own state, carried on
@@ -145,17 +236,27 @@ class GuidanceUnitState:
     `observ_commanded`/`observ_observed` and `weapon_safety_commanded`/
     `weapon_safety_observed` are the co-moving pairs the plan names:
     `*_commanded` is what Petrovich asked for (internal); `*_observed` is
-    the cockpit's own telemetry readback (external) -- carried for
-    `BL-B67` to read before trusting the sight is engaged or the safety
-    bar is actually armed (plan §3/Co-moving Fields); **no consumer in
-    this entry reads either `*_observed` field**.
+    the cockpit's own telemetry readback (external). `weapon_safety_
+    observed` is carried for `BL-B67` to read before trusting the safety
+    bar is actually armed (plan §3/Co-moving Fields) and has no consumer
+    yet. **`observ_observed` does have one as of `[[BL-B80]]`**:
+    `logger.py`'s poll loop derives `OpticState.home_phase` from it every
+    poll (the carried-forward BL-B66 gap -- home_phase must follow the
+    observed arg-886 edge, not only the pilot's own command), and
+    `observ_observed_since_sim` below marks the moment of its rising edge.
 
     `sight_az_raw`/`sight_elev_raw` (Stage 4b) are the sight head's own
     actual-position readback -- raw args 874/876, refreshed by
     `refresh_readback` the same poll as `observ_observed`/
     `weapon_safety_observed`. `None` whenever no readback sample has
     arrived yet (startup, or an `Export.lua` predating Stage 4b) --
-    `sight_trace_writer.SightTraceWriter` is this entry's own consumer."""
+    `sight_trace_writer.SightTraceWriter` is this entry's own consumer.
+
+    `observ_observed_since_sim` (`[[BL-B80]]`) is the sim time of the
+    most recent rising edge of `observ_observed`, set by `refresh_
+    readback` and cleared to `None` on the falling edge -- `None` until
+    the first sample ever arrives, or whenever OBSERV currently reads
+    off. `in_gyro_alignment` is the one reader."""
 
     takeoff_seen: bool = False
     power_up_stage: int = 0
@@ -164,6 +265,7 @@ class GuidanceUnitState:
     guidance_unit_ready_announced: bool = False
     observ_commanded: bool = False
     observ_observed: bool | None = None
+    observ_observed_since_sim: float | None = None
     weapon_safety_commanded: Literal["armed", "safe"] | None = None
     weapon_safety_observed: bool | None = None
     sight_az_raw: float | None = None
@@ -176,6 +278,20 @@ def sight_ready(state: GuidanceUnitState) -> bool:
     `state.sight_ready` (set `True` the moment the last power-up switch
     write is issued, zero real warm-up, per standing direction)."""
     return state.sight_ready
+
+
+def in_gyro_alignment(state: GuidanceUnitState, now_sim: float) -> bool:
+    """`True` while the sight is still re-aligning after the most recent
+    observed OBSERV off->on transition (`GYRO_ALIGNMENT_S` after
+    `state.observ_observed_since_sim`). `False` once that time has
+    elapsed, or if no rising edge has ever been observed this mission
+    (`observ_observed_since_sim is None`) -- a mission where OBSERV has
+    never been seen on is not "mid-alignment", it simply has nothing to
+    be aligning from."""
+    return (
+        state.observ_observed_since_sim is not None
+        and now_sim - state.observ_observed_since_sim < GYRO_ALIGNMENT_S
+    )
 
 
 def start_power_up(state: GuidanceUnitState, now_sim: float) -> GuidanceUnitState:
@@ -273,33 +389,73 @@ def write_weapon_safety(aircraft_client: AircraftLayerClient, armed: bool) -> No
     )
 
 
+def write_sight_target(
+    aircraft_client: AircraftLayerClient, azimuth_deg: float, elevation_deg: float
+) -> None:
+    """Sends the desired sight aim, in degrees, to `Export.lua`'s
+    per-frame sight owner (`[[BL-B80]]`, `plans/9k113-sight-pointing/
+    plan.md`'s "Architecture" section) -- converted here, at the one
+    module that knows the raw command units, then handed to
+    `AircraftLayerClient.write_sight_target` as `az_cmd`/`elev_cmd`.
+    Called once per poll by `logger.py` while `home_phase is SIGHTING`,
+    **not** rate-limited here -- Export.lua owns the per-frame rate limit
+    toward whatever target this call last sent (the plan's forced
+    "Export.lua becomes the per-frame sight owner" split, since nothing
+    this process does can reassert at frame rate). Raises
+    `AircraftLayerError` on a dropped write, same posture as
+    `write_observ`/`write_weapon_safety`."""
+    aircraft_client.write_sight_target(
+        sight_azimuth_deg_to_raw(azimuth_deg),
+        sight_elevation_deg_to_raw(elevation_deg),
+    )
+
+
 def refresh_readback(
-    state: GuidanceUnitState, cockpit_switch_latest: dict[str, Any] | None
+    state: GuidanceUnitState,
+    cockpit_switch_latest: dict[str, Any] | None,
+    now_sim: float | None = None,
 ) -> GuidanceUnitState:
     """Refreshes `observ_observed`/`weapon_safety_observed` from the
     aircraft layer's own cockpit-switch telemetry (`GET /cockpit_switch/
     latest`, `AircraftLayerClient.get_cockpit_switch_state_latest`).
-    **No consumer in this entry reads either field** -- this is carried
-    forward so `BL-B67` can read a real readback rather than rediscovering
-    that it needs one (plan §3/Co-moving Fields).
+    `weapon_safety_observed` is carried forward with no consumer yet, so
+    `BL-B67` can read a real readback rather than rediscovering that it
+    needs one (plan §3/Co-moving Fields); `observ_observed` does have a
+    consumer (`logger.py`'s `home_phase` derivation, `[[BL-B80]]`).
 
-    `None` (no cockpit-switch sample received yet) leaves both fields
+    `None` (no cockpit-switch sample received yet) leaves every field
     unchanged -- absence of a reading is not evidence the reading is
     `False`. Stage 4b: the same call also refreshes `sight_az_raw`/
     `sight_elev_raw` (raw args 874/876) for the same "absence leaves the
     prior value" reason -- an older `Export.lua` that never sends these two
-    optional fields must not be read as "the sight reset to zero"."""
+    optional fields must not be read as "the sight reset to zero".
+
+    **`now_sim` (`[[BL-B80]]`) stamps `observ_observed_since_sim` on the
+    rising edge of `observ_observed`** (comparing this call's new value
+    against `state.observ_observed`, the value *before* this `replace()`),
+    and clears it to `None` on the falling edge. Optional and defaulting
+    to `None` so every pre-existing caller (which has no gyro-alignment
+    window to track) keeps working unchanged -- a `None` `now_sim` simply
+    never stamps a rising edge, leaving `observ_observed_since_sim` at
+    whatever it already was."""
     if cockpit_switch_latest is None:
         return state
     observe_on = cockpit_switch_latest.get("observe_on")
     weapons_armed = cockpit_switch_latest.get("weapons_armed")
     sight_az_raw = cockpit_switch_latest.get("sight_az")
     sight_elev_raw = cockpit_switch_latest.get("sight_elev")
+    new_observ_observed = (
+        observe_on if isinstance(observe_on, bool) else state.observ_observed
+    )
+    observ_observed_since_sim = state.observ_observed_since_sim
+    if new_observ_observed is True and state.observ_observed is not True:
+        observ_observed_since_sim = now_sim
+    elif new_observ_observed is False:
+        observ_observed_since_sim = None
     return replace(
         state,
-        observ_observed=(
-            observe_on if isinstance(observe_on, bool) else state.observ_observed
-        ),
+        observ_observed=new_observ_observed,
+        observ_observed_since_sim=observ_observed_since_sim,
         weapon_safety_observed=(
             weapons_armed
             if isinstance(weapons_armed, bool)

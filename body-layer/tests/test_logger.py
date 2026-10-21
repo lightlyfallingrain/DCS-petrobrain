@@ -890,6 +890,9 @@ class FakeConsoleAircraftClient:
         #: directly between polls, the same way `mission_start_sequence`
         #: above is driven.
         self.cockpit_switch_state: dict[str, Any] | None = None
+        #: `[[BL-B80]]` (`plans/9k113-sight-pointing/plan.md`) -- every
+        #: `write_sight_target` call this fake has recorded, oldest first.
+        self.sight_target_writes: list[tuple[float, float]] = []
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -952,6 +955,11 @@ class FakeConsoleAircraftClient:
         # `BL-B66` -- recorded rather than a true no-op, so a test can
         # assert on the guidance-unit power-up sequence's actual writes.
         self.cockpit_switch_writes.append((device, cmd, value))
+
+    def write_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
+        # `[[BL-B80]]` -- recorded rather than a true no-op, same reason
+        # as `write_cockpit_switch` above.
+        self.sight_target_writes.append((az_cmd, elev_cmd))
 
 
 @pytest.fixture(autouse=True)
@@ -4931,7 +4939,9 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
     assert readback_rows[-1]["actual_azimuth_deg"] == pytest.approx(22.5)
     assert readback_rows[-1]["raw_sight_az"] == pytest.approx(0.16500)
     assert readback_rows[-1]["raw_sight_elev"] == pytest.approx(-0.28125)
-    # Elevation never claims "readback" -- 876's degrees-per-unit is
-    # unmeasured (`sight_trace_writer`'s own module docstring).
-    assert readback_rows[-1]["actual_elevation_source"] != "readback"
+    # `[[BL-B80]]`: elevation now has a conversion too (derived) -- -0.28125
+    # raw * 20.0 = -5.625 deg (`sight_elevation_raw_to_deg`'s one formula,
+    # both signs).
+    assert readback_rows[-1]["actual_elevation_source"] == "readback"
+    assert readback_rows[-1]["actual_elevation_deg"] == pytest.approx(-5.625)
     assert any(row["observ_commanded"] is False for row in rows)

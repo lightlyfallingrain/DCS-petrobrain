@@ -43,6 +43,7 @@ from typing import Final, Literal
 import tuning
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.position_belief import PositionEstimate
+from belief.sight_effector import sight_azimuth_raw_to_deg, sight_elevation_raw_to_deg
 from perception.gaze import SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition, body_relative_direction, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
@@ -714,6 +715,8 @@ def advance_sight_aim(
     desired_elevation_deg: float | None,
     *,
     dt_s: float,
+    sight_az_raw: float | None = None,
+    sight_elev_raw: float | None = None,
 ) -> tuple[float | None, float | None]:
     """Converge the sight's *actual* pointing direction toward belief's
     *desired* one, one poll at a time -- `plans/9k113-sight/plan.md` §15a,
@@ -722,20 +725,36 @@ def advance_sight_aim(
     actually uses (`logger._apply_active_gaze`), so a future controller
     replaces this function's body without moving that call site.
 
-    **Perception-stage body: a pure pass-through.** The sight is slewed by
-    a rate-commanded control loop in reality -- read where it is, command
-    a deflection, repeat (direction §12) -- but that loop belongs to the
-    effector stage (`[[BL-B66]]`), which has not landed. Until it does,
-    `actual := desired` instantly: *permanently* correct for the naked eye
-    and binoculars (a head turn is instant against a 1 Hz poll), a stated
-    placeholder for a sighted optic.
+    **`[[BL-B80]]` adds a real readback, per axis, independently**: when
+    `sight_az_raw`/`sight_elev_raw` (raw args 874/876) are given, each one
+    wins over the model for its own axis, converted via `sight_effector`'s
+    raw-to-degrees functions -- the same per-axis split
+    `sight_trace_writer.py` already documents and expects. **Model
+    fallback, per axis, otherwise: a pure pass-through**, `actual :=
+    desired` instantly -- *permanently* correct for the naked eye and
+    binoculars (a head turn is instant against a 1 Hz poll), and the
+    stated placeholder for a sighted optic whenever no readback has
+    arrived yet this mission (startup, or an `Export.lua` predating the
+    readback it needs).
 
-    `dt_s` is accepted and unused here -- reserved for the rate-limited
-    controller `[[BL-B66]]` adds, which needs it to bound how far `actual`
-    may move in one poll. Keeping it in the signature now, even though
-    this body ignores it, is what lets that controller drop in without
-    changing the call site or its callers."""
-    return desired_azimuth_deg, desired_elevation_deg
+    `actual_azimuth_deg`/`actual_elevation_deg` (the prior poll's own
+    `actual` aim) and `dt_s` are accepted and unused by both branches here
+    -- reserved for a genuinely rate-limited controller that bounds how
+    far `actual` may move in one poll rather than reading a readback or
+    jumping straight to `desired`. Keeping them in the signature now, even
+    though this body ignores them, is what lets that controller drop in
+    without changing the call site or its callers."""
+    actual_azimuth_deg = (
+        sight_azimuth_raw_to_deg(sight_az_raw)
+        if sight_az_raw is not None
+        else desired_azimuth_deg
+    )
+    actual_elevation_deg = (
+        sight_elevation_raw_to_deg(sight_elev_raw)
+        if sight_elev_raw is not None
+        else desired_elevation_deg
+    )
+    return actual_azimuth_deg, actual_elevation_deg
 
 
 def _step_centres_deg(half_width_deg: float, fov_full_width_deg: float) -> list[float]:

@@ -104,6 +104,15 @@ this client is a pure pass-through, same division of labour
 integers. `get_cockpit_switch_state_latest` is an ordinary `get_*` read
 (swallows nothing itself, `None` on an empty cache), mirroring
 `get_petrovich_wheel_latest`'s shape exactly.
+
+`write_sight_target` (`plans/9k113-sight-pointing/plan.md`, BL-B80) is a
+third, narrower write op on the same `POST /command/*` family -- a
+persistent target Export.lua rate-limits toward every frame, not a
+one-shot `cockpit_switch` write. Same raise-on-failure posture as
+`write_cockpit_switch`, same "no validation, this client is a pure
+pass-through" division -- `belief.sight_effector.write_sight_target` is
+the one caller above this client and the one place the degree<->raw
+conversion happens.
 """
 
 from __future__ import annotations
@@ -261,6 +270,19 @@ class AircraftLayerClient:
         self._post_json(
             "/command/cockpit_switch",
             {"device": device, "cmd": cmd, "value": value},
+        )
+
+    def write_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
+        """`POST /command/sight_target` -> sends the 9K113 sight's desired
+        aim, in the AI axis's own raw command units, to `Export.lua`'s
+        per-frame sight owner (`aircraft-layer/src/collector/command_
+        sender.py`'s `CommandSender.send_sight_target`,
+        `plans/9k113-sight-pointing/plan.md`, BL-B80). Raises
+        `AircraftLayerError` on any failure, mirroring `write_cockpit_
+        switch` -- see the module docstring for why."""
+        self._post_json(
+            "/command/sight_target",
+            {"az_cmd": az_cmd, "elev_cmd": elev_cmd},
         )
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
