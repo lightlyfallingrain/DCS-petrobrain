@@ -254,6 +254,23 @@
   disappears under the position-axis answer, along with the controller, the deflection/deadband
   tuning pair, the limit-cycle risk and the feedback half of the probe.
 
+  ## Implemented 2026-10-21 — Stages 1-4, on `feature/9k113-effectors`
+
+  **Architect's 2026-10-21 narrowed-scope revision** (`plans/9k113-effectors/plan.md`, text above
+  its own `---` divider — everything below that divider, including the two sections above this
+  one, predates the split and is kept for history only) built Stages 1-4: the generic
+  `cockpit_switch` cockpit-action channel (no allow-list, user direction); the four-switch
+  guidance-unit power-up, autonomous after takeoff, zero real warm-up, ending in one "Guidance
+  unit ready"; OBSERV on/off as a real cockpit write, gated on `sight_ready`; the weapons safety
+  bar (ARMED/SAFE, voice-only "weapons armed"/"weapons safe"). `advance_sight_aim` stays the
+  pass-through `[[BL-B80]]` keeps; the slew loop itself is entirely that entry's problem, not
+  this one's.
+
+  **Stage 5 (acceptance sortie) is still open** — this entry stays `#status/in-progress` until
+  that flies. 761 (`CPLR DISTR`) is built as planned but UNVERIFIED, confirmed on the sortie by
+  logging changed arguments while the user throws it by hand. See `plans/9k113-effectors/
+  implementation.md` for the full per-stage account.
+
   ## Second-order effect
 
   If built, this makes the cockpit-write channel a **general facility**: the SPU-8 and AI-wheel

@@ -878,6 +878,10 @@ class FakeConsoleAircraftClient:
         #: start_latest` event, `None` by default (matching every existing
         #: Stage 1/2 test, which never cared about theatre switching).
         self.mission_start_theatre: str | None = None
+        #: `BL-B66` (`plans/9k113-effectors/plan.md`) -- every
+        #: `write_cockpit_switch` call this fake has recorded, oldest
+        #: first.
+        self.cockpit_switch_writes: list[tuple[int, int, float]] = []
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -928,6 +932,17 @@ class FakeConsoleAircraftClient:
 
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return None
+
+    def get_cockpit_switch_state_latest(self) -> dict[str, Any] | None:
+        # `BL-B66` (`plans/9k113-effectors/plan.md`) -- no sample yet, the
+        # ordinary startup state, same "not an error" posture as every
+        # other `get_*` default on this fake.
+        return None
+
+    def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
+        # `BL-B66` -- recorded rather than a true no-op, so a test can
+        # assert on the guidance-unit power-up sequence's actual writes.
+        self.cockpit_switch_writes.append((device, cmd, value))
 
 
 @pytest.fixture(autouse=True)

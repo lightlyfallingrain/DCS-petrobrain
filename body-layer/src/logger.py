@@ -241,6 +241,13 @@ from belief.optic_policy import (
     search_pattern,
 )
 from belief.optic_policy import decide as decide_optic
+from belief.sight_effector import GuidanceUnitState
+from belief.sight_effector import advance_power_up as advance_guidance_unit_power_up
+from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
+from belief.sight_effector import sight_ready as guidance_unit_sight_ready
+from belief.sight_effector import start_power_up as start_guidance_unit_power_up
+from belief.sight_effector import write_observ as write_observ_switch
+from belief.sight_effector import write_weapon_safety as write_weapon_safety_switch
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
 from coordinates.projections import THEATRE_PROJECTIONS
@@ -471,6 +478,14 @@ class ConsolePerceptionRunner:
     #: apply instead; see that field's own docstring.
     attack_run_state: AttackRunState | None = None
 
+    #: The 9K113 guidance unit's own state (`BL-B66`, `plans/
+    #: 9k113-effectors/plan.md` Stages 2-4), carried the same way
+    #: `optic_state`/`attack_run_state` are -- replaced wholesale each
+    #: poll via `replace()`, never mutated. `belief.sight_effector` is the
+    #: one module that knows this state's device/arg/command numbers;
+    #: this field only carries the value between polls.
+    guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
+
     #: Recent `(t_sim, pitch, bank, heading)` samples, oldest first -- the
     #: steadiness gate's only input. Bounded because it is a *rate*
     #: estimate: a longer history would let a manoeuvre a minute ago still
@@ -527,7 +542,8 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
-        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
+        `guidance_unit_state`, `attitude_history`, `optic`,
+        `_last_look_direction`, `last_mission_
         start_sequence`) resets to its declared default.
 
         **`_last_look_direction` needs an explicit line, not just the
@@ -3067,10 +3083,63 @@ def _run_crew_text_poll_loop(
                     # current ground/air state rather than a one-shot
                     # latch from mission start.
                     if runner.last_ownship_state is not None:
+                        # `BL-B66` Stage 2 (`plans/9k113-effectors/
+                        # plan.md` §2): captured *before* `on_ground` is
+                        # reassigned below, so the comparison just after
+                        # sees the transition rather than the new value
+                        # twice.
+                        was_on_ground = crew_console.on_ground
                         crew_console.on_ground = (
                             runner.last_ownship_state.alt_agl_m
                             <= ON_GROUND_AGL_THRESHOLD_M
                         )
+                        # The power-up sequencer fires once on the rising
+                        # edge of "was on the ground, now is not" this
+                        # mission, reusing `on_ground`'s existing signal
+                        # rather than a new telemetry field.
+                        if (
+                            was_on_ground
+                            and not crew_console.on_ground
+                            and not runner.guidance_unit_state.takeoff_seen
+                        ):
+                            runner.guidance_unit_state = start_guidance_unit_power_up(
+                                runner.guidance_unit_state, runner.last_t_sim
+                            )
+                        # Advances the sequence (a true no-op before it
+                        # has started or once it is complete) and
+                        # refreshes the readback fields from the aircraft
+                        # layer's own cockpit-switch telemetry -- neither
+                        # consumed by this entry's own logic (plan §3),
+                        # carried forward for `BL-B67`.
+                        runner.guidance_unit_state = advance_guidance_unit_power_up(
+                            runner.guidance_unit_state,
+                            runner.last_t_sim,
+                            aircraft_client,
+                        )
+                        runner.guidance_unit_state = refresh_cockpit_switch_readback(
+                            runner.guidance_unit_state,
+                            aircraft_client.get_cockpit_switch_state_latest(),
+                        )
+                        is_sight_ready = guidance_unit_sight_ready(
+                            runner.guidance_unit_state
+                        )
+                        # Refreshed every poll, same as `on_ground` --
+                        # `_handle_observ_on` reads this to gate the
+                        # command (plan §3).
+                        crew_console.sight_ready = is_sight_ready
+                        if is_sight_ready:
+                            runner.guidance_unit_state = replace(
+                                runner.guidance_unit_state,
+                                guidance_unit_ready_announced=(
+                                    crew_console.drain_guidance_unit_ready(
+                                        runner.last_t_sim,
+                                        ready=True,
+                                        announced=(
+                                            runner.guidance_unit_state.guidance_unit_ready_announced
+                                        ),
+                                    )
+                                ),
+                            )
                         # `plans/attack-run/plan.md` Stage 5 -- apply
                         # whatever `engage`/`disengage` the previous
                         # poll's command dispatch left as a one-shot
@@ -3111,6 +3180,23 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
+                            # `BL-B66` Stage 3 -- the real cockpit write
+                            # (arg 886), issued exactly once per accepted
+                            # request. `_handle_observ_on` has already
+                            # gated this on `sight_ready` at command time
+                            # (plan §3), so reaching here means the
+                            # request was accepted.
+                            try:
+                                write_observ_switch(aircraft_client, on=True)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    observ_commanded=True,
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "OBSERV-on cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
                             crew_console.observ_transition = None
                         elif crew_console.observ_transition == "off":
                             runner.optic_state = replace(
@@ -3120,7 +3206,51 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
+                            try:
+                                write_observ_switch(aircraft_client, on=False)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    observ_commanded=False,
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "OBSERV-off cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
                             crew_console.observ_transition = None
+                        # `BL-B66` Stage 4 (plan §4/Co-moving Fields) --
+                        # the weapons safety bar (arg 673), one write, no
+                        # sequencing, same one-shot-signal shape as
+                        # `observ_transition` above. Set by
+                        # `_handle_weapons_armed`/`_handle_weapons_safe`
+                        # or by `_handle_engage`'s own existing "any
+                        # attack run start" trigger.
+                        if crew_console.weapon_safety_transition == "armed":
+                            try:
+                                write_weapon_safety_switch(aircraft_client, armed=True)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    weapon_safety_commanded="armed",
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "weapons-armed cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
+                            crew_console.weapon_safety_transition = None
+                        elif crew_console.weapon_safety_transition == "safe":
+                            try:
+                                write_weapon_safety_switch(aircraft_client, armed=False)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    weapon_safety_commanded="safe",
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "weapons-safe cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
+                            crew_console.weapon_safety_transition = None
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
                             runner.last_t_sim,

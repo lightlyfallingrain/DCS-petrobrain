@@ -88,6 +88,22 @@ still raises `AircraftLayerError` on a genuine transport/parse failure
 same as every other `get_*` on an unreachable endpoint). `naked_eye_
 source.py` resolves the per-`unit_name` join itself, same split of
 responsibility as the velocity and LOS feeds.
+
+`write_cockpit_switch`/`get_cockpit_switch_state_latest` (`plans/
+9k113-effectors/plan.md`, BL-B66 Stage 1) are this seam's write/read pair
+for the generic cockpit-switch channel. `write_cockpit_switch` follows
+`push_text_line`/`trigger_petrovich_search`'s raise-on-failure posture,
+not the `get_*` methods' swallow-and-return-`None` one -- a dropped
+cockpit-switch write is a real behavioral gap (a 9K113 power-up switch
+silently not thrown), not an opaque display string to swallow. It takes a
+raw `device`/`cmd`/`value` triple and performs **no validation and no
+allow-list check** of its own -- `belief.sight_effector` is the one
+module above this client that knows which device/cmd numbers mean what;
+this client is a pure pass-through, same division of labour
+`post_look_direction` already has for its own two already-validated
+integers. `get_cockpit_switch_state_latest` is an ordinary `get_*` read
+(swallows nothing itself, `None` on an empty cache), mirroring
+`get_petrovich_wheel_latest`'s shape exactly.
 """
 
 from __future__ import annotations
@@ -219,6 +235,33 @@ class AircraftLayerClient:
                 f"expected a JSON object from /firing/latest, got {type(result).__name__}"
             )
         return result
+
+    def get_cockpit_switch_state_latest(self) -> dict[str, Any] | None:
+        """`GET /cockpit_switch/latest` -> the most recent
+        `CockpitSwitchState` as a dict (see `aircraft-layer/src/schema/
+        cockpit_switch.py`'s `CockpitSwitchState.to_api_dict`), or `None`
+        if nothing has been received yet -- same "not an error" posture
+        as `get_line_of_sight_latest` (`plans/9k113-effectors/plan.md`,
+        BL-B66 Stage 1)."""
+        result = self._get_json("/cockpit_switch/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /cockpit_switch/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
+        """`POST /command/cockpit_switch` -> writes any clickable cockpit
+        control (`aircraft-layer/src/collector/command_sender.py`'s
+        `CommandSender.send_cockpit_switch`, BL-B66 Stage 1). Raises
+        `AircraftLayerError` on any failure, mirroring `push_text_line`/
+        `trigger_petrovich_search` -- see the module docstring for why."""
+        self._post_json(
+            "/command/cockpit_switch",
+            {"device": device, "cmd": cmd, "value": value},
+        )
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         """`POST /command/look_direction` -> pushes the currently-commanded

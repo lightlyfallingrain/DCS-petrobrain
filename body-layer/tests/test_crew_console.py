@@ -1729,9 +1729,13 @@ def test_look_command_on_ground_still_ends_silence() -> None:
 def test_non_look_command_on_ground_dispatches_normally() -> None:
     """`mark_here`/`observ_on`/etc are not in `_LOOK_COMMAND_TOKENS` -- on
     the ground they dispatch exactly as if airborne (they only read
-    existing belief or register a non-perception task)."""
+    existing belief or register a non-perception task). `sight_ready`
+    set so this exercises the on-ground path, not `BL-B66` Stage 3's
+    separate readiness gate (see `test_observ_on_signals_the_poll_loop_
+    and_speaks` for that one)."""
     console = CrewConsole(store=ContactStore())
     console.on_ground = True
+    console.sight_ready = True
 
     assert console.handle_command("observ_on", now_sim=0.0) == ["Observ on."]
 
@@ -5503,11 +5507,40 @@ def test_disengage_speaks_unconditionally_even_with_no_run_active() -> None:
 def test_observ_on_signals_the_poll_loop_and_speaks() -> None:
     """`BL-B64` Stage 2, direction §6 -- the same one-shot-signal shape
     `attack_run_transition` uses, since `OpticState.home_phase` lives on
-    `logger.ConsolePerceptionRunner`, not here."""
+    `logger.ConsolePerceptionRunner`, not here. `sight_ready` set so this
+    exercises the accepted path, not `BL-B66` Stage 3's readiness gate
+    (see `test_observ_on_refused_when_guidance_unit_not_ready` for that
+    one)."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.sight_ready = True
     lines = console.handle_command("observ_on", now_sim=0.0)
     assert lines == ["Observ on."]
     assert console.observ_transition == "on"
+
+
+def test_observ_on_refused_when_guidance_unit_not_ready() -> None:
+    """`BL-B66` Stage 3 (`plans/9k113-effectors/plan.md` §3, Decision 2)
+    -- gated synchronously, before `observ_transition` is ever set, so a
+    request that arrives before power-up completes is refused outright."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    assert console.sight_ready is False  # the safe default
+
+    lines = console.handle_command("observ_on", now_sim=0.0)
+
+    assert lines == ["Unable, guidance unit not ready."]
+    assert console.observ_transition is None
+
+
+def test_observ_off_needs_no_readiness() -> None:
+    """Plan §3: "OBSERV OFF needs no gating and no sequence" -- unlike
+    OBSERV ON, it dispatches regardless of `sight_ready`."""
+    console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    assert console.sight_ready is False
+
+    lines = console.handle_command("observ_off", now_sim=0.0)
+
+    assert lines == ["Observ off."]
+    assert console.observ_transition == "off"
 
 
 def test_observ_off_signals_the_poll_loop_and_speaks() -> None:
@@ -5523,6 +5556,7 @@ def test_observ_transition_is_reset_at_the_top_of_every_dispatch() -> None:
     has not yet consumed must not leak into an unrelated later command's
     evaluation."""
     console = CrewConsole(store=ContactStore(), tasks=TaskStore())
+    console.sight_ready = True
     console.handle_command("observ_on", now_sim=0.0)
     assert console.observ_transition == "on"
 

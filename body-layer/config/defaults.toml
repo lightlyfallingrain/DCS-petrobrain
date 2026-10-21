@@ -115,6 +115,12 @@ SIGHT_STALL_COOLDOWN_S = 132.0
 # source: belief/optic_policy.py:SIGHT_STEADY_RATE_LIMIT_DEG_S
 SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 
+[belief.sight_effector]
+# Minimum seconds between successive 9K113 guidance-unit power-up switch writes after takeoff -- too low risks writing the next switch while DCS is still animating the previous one; 1.0 s is the default, roughly the measured per-switch animation time plus margin.
+# status: derived | range: 0.5 .. 5.0
+# source: belief/sight_effector.py:GUIDANCE_UNIT_SWITCH_DELAY_S
+GUIDANCE_UNIT_SWITCH_DELAY_S = 1.0
+
 [mission_memory.admission]
 # How long, in seconds, a `fired_on` entry for one shooter suppresses a second entry from the same shooter -- the user's own "~2 min" (explore notes, Decision 5), stated there as a tunable.
 # status: judgement | range: 10.0 .. 900.0

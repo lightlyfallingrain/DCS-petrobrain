@@ -924,6 +924,12 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # no-return-value exemption.
         "observ_on",
         "observ_off",
+        # `BL-B66` Stage 4 -- "weapons armed"/"weapons safe".
+        # `_handle_weapons_armed`/`_handle_weapons_safe` always return a
+        # one-line readback unconditionally, so neither needs the
+        # no-return-value exemption.
+        "weapons_armed",
+        "weapons_safe",
         "cancel_task",
         "cancel_scan",
         "cancel_watch",
@@ -1133,6 +1139,15 @@ class CrewConsole:
     #: transition`, and consumed-and-cleared by the poll loop the moment
     #: it is applied.
     observ_transition: Literal["on", "off"] | None = None
+    #: "weapons armed"/"weapons safe", plus `_handle_engage`'s own
+    #: existing attack-run trigger (`BL-B66` Stage 4, `plans/
+    #: 9k113-effectors/plan.md` §4/Co-moving Fields) -- the same one-shot
+    #: signal shape `observ_transition` already has, for the same reason:
+    #: `GuidanceUnitState` lives on `logger.ConsolePerceptionRunner`, not
+    #: here. Reset to `None` at the top of every `handle_command`
+    #: dispatch, same convention as `observ_transition`, and
+    #: consumed-and-cleared by the poll loop the moment it is applied.
+    weapon_safety_transition: Literal["armed", "safe"] | None = None
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `overlay_client`/`speech_client`: `None` is a true no-op.
@@ -1332,6 +1347,19 @@ class CrewConsole:
     #: takes.
     on_ground: bool = field(default=True, repr=False)
 
+    #: `BL-B66` Stage 3 (`plans/9k113-effectors/plan.md` §3) -- refreshed
+    #: every poll (`logger.py`, the same place `on_ground`/`enrichment`
+    #: are refreshed) from `belief.sight_effector.sight_ready(runner.
+    #: guidance_unit_state)`. Read by `_handle_observ_on` to refuse an
+    #: OBSERV-on request with `render_unable("GUIDANCE_NOT_READY")` while
+    #: the guidance unit has not finished powering up -- perception/the
+    #: power-up sequencer itself is driven in `logger.py`, not here; this
+    #: field only decides what `_handle_observ_on` answers. Defaults to
+    #: `False` (not `on_ground`'s `True`): before the first poll resolves
+    #: this from real `GuidanceUnitState`, "not ready" is the safe
+    #: assumption to refuse OBSERV-on under.
+    sight_ready: bool = field(default=False, repr=False)
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1, `plans/bl15-mission-start/plan.md`). Re-invokes `__init__`
@@ -1351,7 +1379,8 @@ class CrewConsole:
         confirmation`, `_confirmation_expired_sim`, `_pending_escalations`,
         `_stand_by_spoken_for`, `commands_handled`, `last_command_target_
         contact_id`, `attack_run_transition`, `observ_transition`,
-        `on_ground`, `enrichment`, `refused`, `_positional_reply_overflow_
+        `weapon_safety_transition`, `on_ground`, `sight_ready`,
+        `enrichment`, `refused`, `_positional_reply_overflow_
         warned`) resets to its declared
         default -- see `refused`'s own field docstring for why resetting
         it here is correct even though a mission (re)start is exactly the
@@ -1470,6 +1499,28 @@ class CrewConsole:
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
         self._print(spoken, now_sim, bypass_gate=False)
         return spoken
+
+    def drain_guidance_unit_ready(
+        self, now_sim: float, *, ready: bool, announced: bool
+    ) -> bool:
+        """Speaks "Guidance unit ready." exactly once, the poll
+        `belief.sight_effector.sight_ready` first turns `True` (`BL-B66`
+        Stage 2, `plans/9k113-effectors/plan.md` explore-notes point 5:
+        "One callout: 'Guidance unit ready'. No per-switch narration.").
+
+        `GuidanceUnitState` lives on `logger.ConsolePerceptionRunner`, not
+        here -- the same division `attack_run_transition`'s own docstring
+        states for `AttackRunState`, applied the other direction: the
+        caller passes this method the two booleans it needs
+        (`ready`/`announced`) rather than this class holding or reaching
+        into that state itself. Returns the (possibly updated)
+        `guidance_unit_ready_announced` value for the caller to store
+        back onto `GuidanceUnitState` -- `True` once this call has spoken,
+        `announced` unchanged (never un-announced) otherwise."""
+        if announced or not ready:
+            return announced
+        self._print(["Guidance unit ready."], now_sim)
+        return True
 
     def _speak_or_defer(
         self,
@@ -1790,6 +1841,9 @@ class CrewConsole:
         # Same reset, same reason, for OBSERV (`observ_transition`'s own
         # docstring).
         self.observ_transition = None
+        # Same reset, same reason, for the weapons safety bar
+        # (`weapon_safety_transition`'s own docstring).
+        self.weapon_safety_transition = None
         if token == "silence":
             # Checked *before* the general `self.silenced = False` reset
             # below, and dispatched before it -- `_handle_silence` is the
@@ -1873,6 +1927,10 @@ class CrewConsole:
             lines = self._handle_observ_on()
         elif token == "observ_off":
             lines = self._handle_observ_off()
+        elif token == "weapons_armed":
+            lines = self._handle_weapons_armed()
+        elif token == "weapons_safe":
+            lines = self._handle_weapons_safe()
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         elif token == "cancel_scan":
@@ -2762,6 +2820,11 @@ class CrewConsole:
         if result is None:
             return [f"no such contact: {contact_id}"]
         self.attack_run_transition = "engage"
+        # `BL-B66` Stage 4 (plan §4/Co-moving Fields): "ARMED ... any
+        # attack run start" (procedures direction §4). Converges on the
+        # same field `_handle_weapons_armed` sets -- engaging while
+        # already armed is a harmless re-write, never a conflicting state.
+        self.weapon_safety_transition = "armed"
         return [render_engage_readback(result["facts"]).text]
 
     def _handle_disengage(self) -> list[str]:
@@ -2790,7 +2853,15 @@ class CrewConsole:
         its own next phase boundary, the structural rule that makes
         abandoning a scan mid-sweep to glass up (or sight up) an
         inexpressible state. Speaks unconditionally, same posture as
-        `_handle_disengage`."""
+        `_handle_disengage` -- **unless the guidance unit is not ready**
+        (`BL-B66` Stage 3, `plans/9k113-effectors/plan.md` §3): gated
+        synchronously here, before `observ_transition` is ever set, so a
+        request that arrives before power-up completes is refused outright
+        rather than accepted and silently never engaging -- see the
+        plan's §3 for why this is the moment to gate it, not a new branch
+        inside `decide()`."""
+        if not self.sight_ready:
+            return [render_unable("GUIDANCE_NOT_READY").text]
         self.observ_transition = "on"
         return ["Observ on."]
 
@@ -2800,9 +2871,34 @@ class CrewConsole:
         (`belief.optic_policy._force_observ_off`, direction §8) -- this
         handler is the pilot-commanded path only; the manoeuvre path never
         calls it. Speaks unconditionally, same posture as `_handle_
-        disengage`."""
+        disengage`. **No readiness gate** (plan §3: "OBSERV OFF needs no
+        gating and no sequence")."""
         self.observ_transition = "off"
         return ["Observ off."]
+
+    def _handle_weapons_armed(self) -> list[str]:
+        """ "weapons armed" -- `BL-B66` Stage 4 (`plans/9k113-effectors/
+        plan.md` §4/Co-moving Fields). Leaves `weapon_safety_transition`
+        for the poll loop (`logger.py`, which owns the real cockpit
+        write), the same one-shot-signal shape `observ_transition` already
+        has. Converges on the same field `_handle_engage` already sets --
+        an attack run started while already armed is a harmless re-write,
+        never a conflicting state. Speaks unconditionally, same posture as
+        `_handle_disengage`. **Deliberately the fixed phrase "weapons
+        armed", never "weapons on"** (user direction 2026-10-21: "weapons
+        armed/safe")."""
+        self.weapon_safety_transition = "armed"
+        return ["Weapons armed."]
+
+    def _handle_weapons_safe(self) -> list[str]:
+        """ "weapons safe" -- the pilot's own command to safe the weapons
+        safety bar (procedures direction §4: "set SAFE on -- pilot
+        command"). Nothing arms or safes itself on a timer or on egress --
+        this handler is the only path that sets `weapon_safety_transition
+        = "safe"`. Speaks unconditionally, same posture as `_handle_
+        weapons_armed`."""
+        self.weapon_safety_transition = "safe"
+        return ["Weapons safe."]
 
     def drain_attack_run(
         self,

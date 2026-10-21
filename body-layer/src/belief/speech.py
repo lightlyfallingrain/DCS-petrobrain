@@ -455,6 +455,12 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # the "unable" half of the project's "say again" vs "unable"
     # distinction, not "say again".
     "ON_GROUND": "Unable, on the ground.",
+    # `BL-B66` Stage 3 (`plans/9k113-effectors/plan.md` §3, Decision 2) --
+    # "Observ on" requested before the guidance-unit power-up sequence has
+    # finished. Heard and understood, not doable yet -- the "unable" half
+    # of the project's "say again" vs "unable" distinction, same shape as
+    # `ON_GROUND` above.
+    "GUIDANCE_NOT_READY": "Unable, guidance unit not ready.",
 }
 
 
