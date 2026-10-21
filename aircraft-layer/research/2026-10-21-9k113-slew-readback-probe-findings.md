@@ -38,3 +38,26 @@ excursion, then 0. Whether those bindings existed on 2026-10-17 is unknown.
 - If it still snaps to 0, the cause is elsewhere.
 
 The release spike having the same sign as the press is not explained by the hypothesis alone.
+
+## Run 2 — joystick disconnected: the hypothesis is FALSE
+
+Pilot, verbatim: *"the joystick bindings have been there all this time. I tried again,
+disconnected my joystick"*. The identical pattern returned: 3–7 non-zero frames per step, then 0
+while the command is still held. Spike sizes match run 1 (az ≈ 0.04 at full deflection, elev ≈
+0.11). So no bound axis was overriding the script. The bindings were also present on
+2026-10-17, when 874 *did* hold 0.165 / 0.33.
+
+## What differs from 2026-10-17
+
+The 2026-10-17 slew run (`Export.probe-9k113-slew.lua`) wrote the **AI axis (3060/3061) first**,
+five bearings plus twelve staircase steps, all inert, and **then** the player axis. Today's probe
+writes only the player axis. Two readings fit:
+
+- the AI-axis writes change the sight's state, e.g. release a position hold, after which the player
+  rate input integrates;
+- or something else differs between the two runs: the mission, the setup path, the seat.
+
+**Next: reproduce before explaining.** Re-fly the 2026-10-17 slew probe unchanged
+(`docs/acceptance/2026-10-17-9k113-slew-probe.md`). If 874 holds again, diff the two scripts'
+write sequences. The AI-axis prelude is the first suspect. If it does not hold, the difference is
+in the setup, not the script.
