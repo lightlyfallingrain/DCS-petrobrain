@@ -104,6 +104,8 @@ this role for the project's phase (e.g. no untrusted-input surface yet). That ex
 overrides the "use for" guidance below, except for user-requested on-demand full audits, which
 always run regardless of exemption.
 
+**Scope (user direction, 2026-10-21): computer and network security only** — code execution, access to the machine, what a LAN port scanner reaches, LLM prompt injection, dependency/framework vulnerabilities. Threat model: a malicious library or an infected LAN machine. Player-experience correctness (DCS limits, callouts, omniscience) is the Reviewer's; full text in `.claude/agents/security.md`, "Scope".
+
 Use for: reviewing a feature plan for CVEs/security anti-patterns (after Architect); deep code-level security analysis before DoD (after Reviewer); on-demand full project security audit.
 
 Responsibilities: extract new dependencies and check for known vulnerabilities; reason about the plan/diff like a white-hat hacker; run scripted scans (`security-grep`, `extract-feature-diff`, `extract-plan-deps`) and interpret output; classify findings block/warn/note.
