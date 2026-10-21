@@ -100,6 +100,30 @@ azimuth holds were scanned (+0.5, −0.5, +0.25).
 method**, although the AI-axis write visibly points and holds the sight. Something made 874 read
 on 2026-10-17 (same version, `Export.probe-9k113-slew.lua`) and it is not yet known what.
 
+## Run 5 — the 2026-10-17 slew probe, re-flown unchanged: does NOT reproduce
+
+`Export.probe-9k113-slew.lua`, unmodified, full run to `PROBE DONE` (23:08–23:11). Pilot,
+verbatim: *"My own slew from about T+3:15"*, in the 9K113 view. **874/876 read 0.00000 for
+everything**:
+
+- the five AI-axis bearings and five elevations;
+- both 0.002 staircases;
+- **all four player-axis holds**, which on 2026-10-17 gave 0.165 / 0.33 with the same script and
+  the same DCS version;
+- the hand slew (5 s heartbeats up to t = 204).
+
+The probe's summary prints `moved=true` for the two elevation holds. That is a false positive:
+`-0.00000` vs `0.00000` passes its change test. The values never left zero.
+
+**So the difference from 2026-10-17 is not in the script, the version, the argument numbers, the
+seat-switch timing or the joystick.** It is somewhere in the aircraft, mission or session state,
+and not yet identified. Candidates, all untested: whether ED's own Petrovich AI is enabled, the
+mission, ground vs air, the view the cockpit was rendered in.
+
+**Decision this hands to BL-B80:** the AI axis points and holds the sight (visually confirmed,
+run 3) but no position readback can be relied on. Build open-loop on the AI axis, with readback as
+an optional cross-check if the cause is ever found.
+
 ## What differs from 2026-10-17
 
 The 2026-10-17 slew run (`Export.probe-9k113-slew.lua`) wrote the **AI axis (3060/3061) first**,
