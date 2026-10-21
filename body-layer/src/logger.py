@@ -779,6 +779,15 @@ class ConsolePerceptionRunner:
         dt_s = ownship.t_sim - (
             self.last_t_sim if self.last_t_sim is not None else ownship.t_sim
         )
+        # `[[BL-B80]]` required fix: the readback is anchored to the 9K113
+        # head, so it must only reach perception while a sight-tier optic
+        # is actually in use -- gated on the post-cap `optic_decision.optic`
+        # (the cap above may have already demoted it to `BINOCULAR_OPTIC`
+        # for the gyro-alignment window). Passing it through unconditionally
+        # anchored naked-eye/binocular gaze to the sight head whenever any
+        # readback had ever arrived this mission, defeating the alignment
+        # cap's own purpose.
+        is_sight_tier = optic_decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
         updated_optic_state = _apply_active_gaze(
             self.sources,
             self.tasks,
@@ -788,9 +797,14 @@ class ConsolePerceptionRunner:
             dt_s=dt_s,
             # `[[BL-B80]]`: the previous poll's own readback (same lag as
             # `home_phase`'s derivation above) -- `advance_sight_aim`
-            # prefers it, per axis, over the pass-through model.
-            sight_az_raw=self.guidance_unit_state.sight_az_raw,
-            sight_elev_raw=self.guidance_unit_state.sight_elev_raw,
+            # prefers it, per axis, over the pass-through model -- but
+            # only while a sight-tier optic is actually resolved.
+            sight_az_raw=(
+                self.guidance_unit_state.sight_az_raw if is_sight_tier else None
+            ),
+            sight_elev_raw=(
+                self.guidance_unit_state.sight_elev_raw if is_sight_tier else None
+            ),
         )
         if updated_optic_state is not None:
             self.optic_state = updated_optic_state

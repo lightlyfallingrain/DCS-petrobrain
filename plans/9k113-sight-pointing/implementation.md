@@ -130,3 +130,57 @@ elevation rate split in Export.lua, placeholder detector timing (0.5 s / 2.5 s).
   system distinguishes "a command value" from "a readback argument" (both are bare `float`), so a
   future caller swapping one function for the other at a call site would silently produce a wrong
   but plausible-looking number. Not guarded in code; flagged here per that guidance.
+
+### Review fixes
+
+`plans/9k113-sight-pointing/review.md`'s five required fixes, all applied:
+
+1. **`Export.lua:1215-1239` — `ai_off_since` unconditional reset.** Removed the unconditional
+   "Reset either way" line; `ai_off_since` is now reset only inside the inner `if` block,
+   immediately after a `ShowMenu` press actually fires. Verified the fix is load-bearing by
+   manual trace (no automated test reaches this file): with the unconditional reset, `(t -
+   ai_off_since)` could never exceed one frame's `dt`; with it removed, `ai_off_since` holds the
+   original stuck-since timestamp until either the readback responds again (`else` branch,
+   clearing it to `nil`) or a press fires and restarts the window — the "never latch off" property
+   (re-press after `AI_OFF_REPRESS_INTERVAL_S` while still stuck) is preserved because a press
+   without a confirming readback leaves `ai_off_since` reset to `t`, so the next timeout starts
+   fresh rather than firing every frame.
+2. **`body-layer/src/logger.py:782-800` — gated `sight_az_raw`/`sight_elev_raw`** at the
+   `_apply_active_gaze` call site on `optic_decision.optic` (the post-cap value) being
+   `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`; `None, None` otherwise. Added
+   `test_run_once_caps_a_sight_tier_optic_during_gyro_alignment` (`test_logger.py`), which combines
+   a non-sight optic (the gyro-alignment cap) with a stale `sight_az_raw`/`sight_elev_raw` already
+   present in `guidance_unit_state` and asserts the gaze is not anchored to it — confirmed this
+   assertion fails against the pre-fix code (reverted the gating change, reran the test in
+   isolation: `runner.optic_state.actual_aim_azimuth_deg` was the readback's 68.18°, not the
+   desired 12°; restored and reran clean, `src/logger.py` sha unchanged from the fixed version
+   before/after the probe).
+3. **Added the missing `run_once`-level integration test** the plan's Stage 1 test list specified
+   — `test_run_once_caps_a_sight_tier_optic_during_gyro_alignment`, above. Monkeypatches
+   `logger.decide_optic` to force a sight-tier decision regardless of input (isolating the cap's
+   own logic from `decide`'s real dispatch, which has its own separate unit tests), drives one
+   poll inside the 10 s gyro-alignment window (asserts the cap holds) and one poll after it ends
+   (asserts the cap lifts and the optic becomes the sight-tier one `decide_optic` chose). Also
+   doubles as fix 2's test, per the review's own observation that this is "the natural place to
+   catch" it.
+4. **`Export.lua:1076` — wrapped `sight_point_quiet`'s `GetDevice(DEV_I9K113)`** in `safe_call`,
+   matching every other `GetDevice` call site's convention in this file.
+5. **`test_logger.py` (`test_observ_off_command_stops_the_sight_through_the_real_poll_loop`) —
+   corrected the stale docstring.** It no longer claims to reproduce the current `observ_
+   transition == "off"` drain block (which no longer sets `home_phase`); it now states explicitly
+   that it covers only the hands-busy-suppression/cockpit-write half, and that `home_phase` is
+   set directly in the test as a starting state for `decide`'s dispatch, not through any
+   reproduced drain logic.
+
+**Optional items**: left all three as-is, per the review's own "not blocking" verdict on each
+(the elevation-rate wrong-side-of-zero cosmetic case, the `NewType`-per-domain structural
+suggestion, and `AC-B11.md`'s endpoint-count housekeeping note) — none were trivially safe to fold
+in without their own small design decision, and the review did not ask for them.
+
+**Checks after the fixes** (same commands as above): aircraft-layer — `ruff format --check`
+(pass), `ruff check` (pass), `mypy --strict` (pass, 26 source files), `pytest` (459 passed,
+including `test_dcs_export_lua_local_order.py`), `luac5.1 -p Export.lua` (pass), the `GETGLOBAL`
+mechanical scan (clean — only stdlib/DCS globals). body-layer — `ruff format --check` (pass),
+`ruff check` (pass), `mypy --strict` (pass, 70 source files), `pytest` (2418 passed, 4 xfailed —
+one more passed than the pre-fix run, the new integration test; the previously-flaky
+`test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop` did not recur).

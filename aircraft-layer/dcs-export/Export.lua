@@ -1073,7 +1073,7 @@ local ai_believed_on = false
 -- already carries `deg/60`-style values, converted on the body-layer
 -- side) rather than degrees.
 local function sight_point_quiet(az_cmd, elev_cmd)
-    local dev = GetDevice(DEV_I9K113)
+    local dev = safe_call(function() return GetDevice(DEV_I9K113) end)
     if dev == nil then return end
     pcall(dev.SetCommand, dev, CMD_AI_AZ, az_cmd)
     pcall(dev.SetCommand, dev, CMD_AI_ELEV, elev_cmd)
@@ -1229,11 +1229,13 @@ local function run_sight_pointing(t)
                 debug_log("sight AI-off detector fired: pressed ShowMenu")
                 last_showmenu_press_t = t
                 ai_believed_on = false
+                -- Restart the window only on an actual press -- ai_off_since
+                -- holds the original stuck-since timestamp otherwise, so
+                -- (t - ai_off_since) keeps growing every frame until either
+                -- the readback responds again (the else branch below) or
+                -- the repress interval lets this branch fire again.
+                ai_off_since = t
             end
-            -- Reset either way -- fired or not, this frame's observation
-            -- restarts the window rather than every subsequent frame
-            -- re-triggering the same press.
-            ai_off_since = t
         else
             ai_off_since = nil
         end

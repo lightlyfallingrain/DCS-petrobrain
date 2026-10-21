@@ -2980,11 +2980,20 @@ def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
 def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None:
     """`BL-B64` Stage 2 review, Pass 2 required fix, exercised through the
     actual command -> drain -> decide sequence, not just `optic_policy`'s
-    own unit tests. Reproduces the exact `observ_transition == "off"` drain
-    block `logger.py`'s poll loop runs (same pattern
-    `test_a_player_command_lowers_the_binoculars` already uses for the
-    binocular case) -- the gap the review found was invisible precisely
-    because no existing test drove this path end to end."""
+    own unit tests (same pattern `test_a_player_command_lowers_the_
+    binoculars` already uses for the binocular case) -- the gap the review
+    found was invisible precisely because no existing test drove this path
+    end to end.
+
+    **Scope note (`[[BL-B80]]`):** the local snippet below reproduces only
+    the hands-busy-suppression/cockpit-write half of the old `observ_
+    transition == "off"` drain block, which is still what production code
+    does on that command. It does **not** cover `home_phase`, which
+    `[[BL-B80]]` moved out of this drain block entirely -- `home_phase` is
+    now derived every poll from the *observed* arg-886 edge in `run_once`,
+    not from this command. `optic_state.home_phase` is set directly below
+    rather than through any reproduced drain logic, purely so `decide`'s
+    phase dispatch has a starting state to suppress from."""
     from dataclasses import replace as _replace
 
     from belief.crew_console import CrewConsole
@@ -3044,6 +3053,80 @@ def test_observ_off_command_stops_the_sight_through_the_real_poll_loop() -> None
     assert optic_state.phase is OpticPhase.SCANNING
     assert optic_state.home_phase is OpticPhase.SCANNING
     assert optic_state.look_contact_id is None
+
+
+def test_run_once_caps_a_sight_tier_optic_during_gyro_alignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B80]]` plan Stage 1's own test list, required fix 3 of the
+    BL-B80 review: a `run_once`-level test that an OBSERV-on edge followed
+    immediately by a poll inside the gyro-alignment window never yields
+    `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`, even when `decide_optic` would
+    otherwise choose one -- and that the cap lifts the moment the window
+    ends, with no special-casing needed.
+
+    Also exercises required fix 2 in the same run: while the cap is
+    active, a stale sight-head readback already sitting in `guidance_
+    unit_state` (left over from a previous OBSERV-on, as it is for the
+    rest of a mission once any sample has ever arrived) must not leak
+    into the gaze/optic-state perception reads -- `advance_sight_aim`
+    must fall through to the pass-through model, not the readback's own
+    converted degrees, while a non-sight-tier optic is in force."""
+    import logger as logger_module
+    from belief.optic_policy import OpticDecision, OpticState
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+
+    # A rising OBSERV edge 2 s ago -- well inside the 10 s default
+    # `GYRO_ALIGNMENT_S` window -- plus a stale readback sitting from a
+    # previous OBSERV-on, converted (raw 0.5 -> ~68.18 deg) to a value
+    # nowhere near the 12.0/-3.0 `decide_optic` will ask to look at, so
+    # the test can tell whether the readback leaked through.
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True,
+        observ_observed_since_sim=sim_t - 2.0,
+        sight_az_raw=0.5,
+        sight_elev_raw=0.3,
+    )
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once()
+
+    # Inside the window: capped to BINOCULAR_OPTIC, never the sight-tier
+    # optic `decide_optic` chose.
+    from perception.optics import BINOCULAR_OPTIC
+
+    assert runner.optic is BINOCULAR_OPTIC
+    # Required fix 2: the stale readback must not have reached the gaze
+    # -- `actual_aim_azimuth_deg` is the pass-through model's `desired`
+    # (12.0), not the readback's converted ~68.18 deg.
+    assert runner.optic_state.actual_aim_azimuth_deg == pytest.approx(12.0)
+    assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
+
+    # The window ends: the very next poll's cap check simply passes, no
+    # special-casing needed.
+    sim_t += 10.5
+    telemetry["dcs_model_time_s"] = sim_t
+    runner.run_once()
+
+    assert runner.optic is SIGHT_WIDE_OPTIC
+    # Now that a sight-tier optic is actually in force, the readback is
+    # allowed through and anchors the gaze to the real head position.
+    assert runner.optic_state.actual_aim_azimuth_deg == pytest.approx(68.18, abs=0.01)
 
 
 # -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side
