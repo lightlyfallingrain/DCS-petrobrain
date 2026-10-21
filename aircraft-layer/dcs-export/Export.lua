@@ -348,56 +348,6 @@ local function fmt_num_or_null(v)
     return string.format("%.5f", v)
 end
 
--- How many seconds of logging to keep *after* OBSERV goes off -- long
--- enough to catch the tail of a slew that was still in progress at the
--- moment OBSERV was switched off, short enough that an idle sortie
--- (OBSERV never touched) never fills the file. Not a tuning constant
--- (root CLAUDE.md's "Behaviour-affecting constants are tunable"): it
--- changes what gets logged, never what Petrovich does.
-local SLEW_TRACE_TAIL_S = 5.0
-local slew_trace_observ_off_since = nil
-
--- Every frame, flag-gated: sim time, the sight's own actual-position
--- readback (874/876, raw), OBSERV (886), and the last slew command sent on
--- the player axis (3025/3026) -- always `nil` in this entry, since nothing
--- in this codebase writes that axis yet (BL-B80 is the slew loop
--- itself). The field exists now so BL-B80 only has to start assigning it,
--- never add a new log line format. Logged only while OBSERV is on (or
--- within SLEW_TRACE_TAIL_S of it going off) so an idle sortie's log stays
--- empty -- body-layer's own 1 Hz poll cannot see a slew at all, which is
--- the entire reason this runs here, every frame, rather than there.
-local function push_slew_trace(t)
-    if not SLEW_DEBUG then
-        return
-    end
-    local observe = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_OBSERVE)
-    end)
-    local observ_on = type(observe) == "number" and observe >= 0.5
-    if observ_on then
-        slew_trace_observ_off_since = nil
-    elseif slew_trace_observ_off_since == nil then
-        slew_trace_observ_off_since = t
-    end
-    if slew_trace_observ_off_since ~= nil
-        and (t - slew_trace_observ_off_since) > SLEW_TRACE_TAIL_S then
-        return
-    end
-    local az = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
-    end)
-    local elev = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
-    end)
-    slew_log_buffer[#slew_log_buffer + 1] = string.format(
-        '{"t":%.3f,"az":%s,"elev":%s,"observe":%s,"slew_cmd_az":null,"slew_cmd_el":null}\n',
-        t, fmt_num_or_null(az), fmt_num_or_null(elev), fmt_num_or_null(observe)
-    )
-    if #slew_log_buffer >= SLEW_LOG_FLUSH_EVERY_N_LINES then
-        slew_log_flush()
-    end
-end
-
 local client = nil
 local next_reconnect_attempt_t = 0
 
@@ -588,6 +538,62 @@ local function safe_call(fn)
         return nil, nil, nil
     end
     return a, b, c
+end
+
+-- How many seconds of logging to keep *after* OBSERV goes off -- long
+-- enough to catch the tail of a slew that was still in progress at the
+-- moment OBSERV was switched off, short enough that an idle sortie
+-- (OBSERV never touched) never fills the file. Not a tuning constant
+-- (root CLAUDE.md's "Behaviour-affecting constants are tunable"): it
+-- changes what gets logged, never what Petrovich does.
+local SLEW_TRACE_TAIL_S = 5.0
+local slew_trace_observ_off_since = nil
+
+-- Every frame, flag-gated: sim time, the sight's own actual-position
+-- readback (874/876, raw), OBSERV (886), and the last slew command sent on
+-- the player axis (3025/3026) -- always `nil` in this entry, since nothing
+-- in this codebase writes that axis yet (BL-B80 is the slew loop
+-- itself). The field exists now so BL-B80 only has to start assigning it,
+-- never add a new log line format. Logged only while OBSERV is on (or
+-- within SLEW_TRACE_TAIL_S of it going off) so an idle sortie's log stays
+-- empty -- body-layer's own 1 Hz poll cannot see a slew at all, which is
+-- the entire reason this runs here, every frame, rather than there.
+--
+-- **This must stay below `safe_call`**, for the reason push_ptt_state's
+-- comment gives: a `local` referenced above its declaration compiles as a
+-- global lookup, nil at call time, and the error aborted the rest of
+-- LuaExportAfterNextFrame -- all telemetry export -- whenever SLEW_DEBUG
+-- was on. Found on the first SLEW_DEBUG sortie, 2026-10-21.
+local function push_slew_trace(t)
+    if not SLEW_DEBUG then
+        return
+    end
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local observ_on = type(observe) == "number" and observe >= 0.5
+    if observ_on then
+        slew_trace_observ_off_since = nil
+    elseif slew_trace_observ_off_since == nil then
+        slew_trace_observ_off_since = t
+    end
+    if slew_trace_observ_off_since ~= nil
+        and (t - slew_trace_observ_off_since) > SLEW_TRACE_TAIL_S then
+        return
+    end
+    local az = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
+    end)
+    local elev = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
+    end)
+    slew_log_buffer[#slew_log_buffer + 1] = string.format(
+        '{"t":%.3f,"az":%s,"elev":%s,"observe":%s,"slew_cmd_az":null,"slew_cmd_el":null}\n',
+        t, fmt_num_or_null(az), fmt_num_or_null(elev), fmt_num_or_null(observe)
+    )
+    if #slew_log_buffer >= SLEW_LOG_FLUSH_EVERY_N_LINES then
+        slew_log_flush()
+    end
 end
 
 --: Reads the pilot's trigger and sends a line only when it has moved.

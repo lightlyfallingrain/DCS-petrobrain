@@ -421,6 +421,11 @@ local function k113_set_verified(label, cmd, value, arg, want)
     return ok
 end
 
+-- Forward-declared: stage_e_sight_slew below calls it, and a local used
+-- above its declaration compiles as a nil global (tests/test_dcs_export_lua_local_order.py).
+local stage_d_petrovich
+
+
 local function stage_e_sight_slew(t)
     if not caps.performClickableAction then return end
 
@@ -518,7 +523,7 @@ end
 -- OPT-IN. Commands Petrovich for real. `scan_rad_around_point = 2500` in
 -- HelperAI.lua suggests DesignateAttackPoint may make him scan a 2.5km radius
 -- around the designated point -- that is the BL-6 hypothesis under test.
-local function stage_d_petrovich()
+stage_d_petrovich = function()
     local f = io.open(FLAG_PATH, "r")
     if f == nil then
         log("--- stage D skipped (no probe_petrovich.flag) ---")
