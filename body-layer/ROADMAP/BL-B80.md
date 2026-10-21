@@ -36,6 +36,14 @@
     or lagged"* from *"the motion is stepped"*. The fix is per-frame logging of args 874/876 — a
     one-line change to `Export.probe-9k113-slew.lua`, not a new script.
 
+  **The extra probe run may come free, 2026-10-21.** `BL-B66` Stage 4b adds per-frame logging of
+  args 874/876 and a slot for the 3025/3026 command (user: *"Put logging in so that the slew loop
+  can be adjusted based on data from logs. Actual vs desired angles especially, slew command
+  values, etc."*), and the `BL-B66` sortie includes ~2 minutes of hand-slewing. If that log
+  separates quantised / lagged / stepped readback, the probe above is done. **This entry must fill
+  the command slot and add its loop internals** (deflection chosen, error, deadband in/out,
+  converged) to the body-layer sight trace, so the loop is tuned from logs, not guessed.
+
   ## What it is not
 
   **Not the slew *time* model.** §8's requirement — the sight takes time to move, so Petrovich

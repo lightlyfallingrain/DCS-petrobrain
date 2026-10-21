@@ -296,7 +296,32 @@ No change to `optic_policy.py`.
 **Stage 4 — the weapons safety bar.** ARMED on `_handle_engage` (existing) or the two new voice
 commands; SAFE on its own voice command; `weapon_safety_transition`; the vocabulary entries.
 
-**Stages 1–4 are built back to back** (Stage 2 needs Stage 1's channel to write through; Stage 3
+**Stage 4b — slew telemetry logging, for tuning `[[BL-B80]]`'s loop from data.** User direction,
+2026-10-21: *"Put logging in so that the slew loop can be adjusted based on data from logs. Actual
+vs desired angles especially, slew command values, etc."*
+
+- **`Export.lua`, every frame, flag-gated** (its own debug flag, off by default): sim time, args
+  **874/876** (actual sight azimuth/elevation, raw), OBSERV (886), and the **last slew command sent
+  on 3025/3026** — always `nil` in this entry, since nothing writes the slew axis yet; the field is
+  there so `BL-B80` fills it rather than adding a format. Per frame, because body-layer's 1 Hz poll
+  cannot see a slew: the open `BL-B80` question is whether the readback is quantised, lagged or
+  genuinely stepped, and only frame-rate samples separate those. Log only while OBSERV is on (or a
+  short tail after it goes off) so an idle sortie does not fill the file.
+- **body-layer, every poll: a sight trace `.jsonl`**, following `detection_trace_writer.py`'s
+  pattern and the BL-11 Stage 5 per-sortie filename stamp: desired az/el (`OpticState`), actual
+  az/el (readback when present, else the model's value, with a `source` field saying which), the
+  error, OBSERV commanded/observed, optic mode (wide/narrow). Same flag posture as the other
+  sortie traces.
+- Raw arg values are logged alongside any degree conversion — elevation's conversion is still
+  unmeasured, so a derived number alone could not be re-derived later.
+- **`sortie-log-triage` gets a slew section** (rate during a slew, smallest observed step, lag) —
+  skill edit, `.claude/skills/sortie-log-triage/`.
+
+**What this buys: the hand-slew segment on the Stage 5 card** (user: *"Yes"*). Two minutes of the
+pilot slewing the sight by hand while the frame log runs measures real rates, readback granularity
+and lag — which is the "one more probe run" `BL-B80` lists as a hard dependency, collected for free.
+
+**Stages 1–4 (and 4b) are built back to back** (Stage 2 needs Stage 1's channel to write through; Stage 3
 needs Stage 2's `sight_ready`; Stage 4 reuses Stage 1's same channel for one more arg) — **one
 performance-review pass and one security pass after Stage 4**, not one per stage, per the current
 cadence in root `CLAUDE.md`'s "Agents" section.
@@ -305,6 +330,8 @@ cadence in root `CLAUDE.md`'s "Agents" section.
 fly in one sortie: take off, confirm the four switches move and "Guidance unit ready" is heard;
 try "Observ on" before and after that callout (expect a refusal, then acceptance); say "Observ
 off"; say "weapons armed"/"engage" and "weapons safe", confirming arg 673's readback both ways.
+**Then ~2 minutes of hand-slewing the sight in OBSERV** (full left/right, up/down, slow and fast)
+with the slew frame log on — the data `BL-B80` needs (Stage 4b).
 No gyro-reset risk and no multi-minute wait — the zero-warm-up direction makes this an ordinary
 sortie, not the "~3 minutes per attempt" cost the pre-split entry carried.
 
