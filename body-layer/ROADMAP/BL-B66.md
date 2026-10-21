@@ -271,6 +271,18 @@
   logging changed arguments while the user throws it by hand. See `plans/9k113-effectors/
   implementation.md` for the full per-stage account.
 
+  **DoD-passed 2026-10-21 for Stages 1-4 + 4b, at `510084a3`.** `#needs-flight` — Stage 5 (the
+  acceptance sortie) has not flown. Reviewer (two passes, the second covering the review-fix tests
+  and Stage 4b), Performance Reviewer (APPROVED — MONITOR, the `push_cockpit_switch_state`
+  unconditional 8-reads-per-frame addition flagged for future attention, not now), and Security
+  (APPROVED, one low/low filed as `AC-B11`) all signed off; all three touched subprojects'
+  format/lint/mypy/test commands pass clean, independently re-run by DoD (not taken on report):
+  body-layer 2401 passed/4 xfailed, aircraft-layer 409 passed, audio-adapter 346 passed/2 skipped;
+  `luac5.1 -p`/`-l -p` global-leak scan on `Export.lua` clean. See
+  `plans/9k113-effectors/dod-check.md` for the full report and the Stage 5 sortie card draft.
+  **Do not mark this entry `[x]` until Stage 5 flies and the sortie's observations are recorded
+  here.**
+
   ## Second-order effect
 
   If built, this makes the cockpit-write channel a **general facility**: the SPU-8 and AI-wheel

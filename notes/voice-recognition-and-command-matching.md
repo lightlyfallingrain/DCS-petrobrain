@@ -22,4 +22,17 @@
   after a sortie reveals it — a few lines of arithmetic against already-known constants is far
   cheaper than a live-flight surprise (watch-reporting plan Decision 4d, 2026-09-24).
 
+- **A locked user-specified phrase can land exactly on a derived threshold's boundary, with no
+  override mechanism available to fix it.** `VERB_ANCHOR_WORDS` is strictly derived from the first
+  word of every phrase in `PHRASES` (by design, no hand-override list). Adding the user's locked
+  phrase "weapons armed"/"weapons safe" (BL-B66) made "weapons" a verb-anchor word, and
+  `difflib.SequenceMatcher(None, "tanks", "weapons").ratio() == 0.5` — exactly `VERB_FLOOR`, the
+  same boundary collision `vocabulary.py` already avoided once (dropping "attack" to avoid
+  colliding with "engage"), except this time the colliding word came from the user's own exact
+  wording and could not be swapped out. The phrase-sequence score still rejects the adversarial
+  sentence end to end (`token` stays `None`), so the cost is contained to one flag flipping on one
+  intermediate signal — but it is a real, measured cost, not a false alarm, and derivation rules
+  with no override escape hatch will eventually collide with a locked requirement that has nowhere
+  else to go (9k113-effectors implementation, 2026-10-21).
+
 - **A plan's internal contradiction sits at the seam between sections, not inside one.** Twice in the detection-cones slice-2 series (2B, 2C), the literal wording of an Implementation Plan step said one thing while an earlier "hard part" section in the *same document* had already established the opposite: 2B's step 9 called `FULL_GAZE` a no-op while hard part 3 (and the real 130° cockpit envelope) made that false for the 90–130° band; 2C's step 12 read as a static commanded wedge while hard parts 1 and 2a required a commanded sector to itself sub-cycle. Both were caught only because the implementer cross-referenced sections rather than executing the literal step — a single-section read of either plan would have shipped the contradiction. Lesson: a plan review (self- or Reviewer-driven) should explicitly check the Implementation Plan's steps against the earlier discussion sections' own stated constraints, not just against CLAUDE.md invariants — the defect class this project keeps finding lives in that gap, not in either section read alone.
