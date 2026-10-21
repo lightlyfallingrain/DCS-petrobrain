@@ -1,381 +1,427 @@
-# BL-B66 — The 9K113 sight, entry 2 of 3: effectors
+# BL-B66 — The 9K113 sight, entry 2 of 3: effectors (REVISED, 2026-10-21, narrowed scope)
 
-Architect pass, 2026-10-15. Entry 2 of 3 (`[[BL-B64]]` perception → **this entry, effectors** →
-`[[BL-B67]]` the ATGM run), by user direction §5.
+Architect revision pass. **Supersedes everything below the `---` divider at the end of this file**
+(the 2026-10-15 plan plus its 2026-10-17 probe addenda) — kept there only as history; do not plan
+against it. What changed and why is in git history (`feature/9k113-effectors`) and in
+`plans/9k113-effectors/explore-notes.md`, which is authoritative over this file where they could
+ever conflict.
 
-**Specification, in precedence order:** `docs/acceptance/2026-10-15-9k113-sight-direction.md`
-(§1, §5, §8, §12, §12a) outranks this plan; `docs/concept/9K113.md` is the user's own and is not
-edited. Reconnaissance: `body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md` and
-`aircraft-layer/research/mi24p-command-surface.md`.
+**Precedence:** `plans/9k113-effectors/explore-notes.md` (user's own words, 2026-10-21) >
+`docs/acceptance/2026-10-17-9k113-procedures-direction.md` > `body-layer/ROADMAP/BL-B66.md` >
+this plan's own text.
 
 ### Goal
 
-Make the real cockpit systems move: throw the 9K113's switch sequence, turn OBSERV into an actual
-cockpit mode rather than only a body-layer one, and make the physical sight head follow the aim
-Petrovich has already decided on — so that what the pilot sees in the cockpit matches what
-Petrovich believes he is looking through.
+Make the 9K113's guidance-unit power-up, OBSERV on/off, and the weapons safety bar into real
+cockpit writes instead of only body-layer bookkeeping — so the switches the pilot sees in the
+cockpit actually move, on Petrovich's own initiative where the user said they should, and the
+sight head (slewing, aiming) is explicitly **not** this entry's problem.
+
+### Scope, restated from the narrowing
+
+**In:** the cockpit-action channel (a new, general, reusable sequenced-switch-write facility);
+the four-switch guidance-unit power-up, autonomous after takeoff, ending in one callout; OBSERV
+on/off as a real cockpit write, gated on readiness; the weapons safety bar (ARMED/SAFE).
+**Out:** the slew loop, the slew-time model, pinpoint, the ATGM run, L166V POWER, gyro-topple
+modelling — all `BL-B80`/`BL-B67`'s. `advance_sight_aim` stays the pass-through `BL-B80.md`
+confirms it keeps.
 
 ---
 
-## 0. The finding that changes this entry, before anything else
+## 0. Transport: investigator findings in, Decision 1 stays the user's to make
 
-**The brief's central premise — that pointing the sight must be a closed rate loop, and that this
-makes `[[BL-B63]]`'s fast lane a hard correctness dependency — rests on a claim the repo already
-refutes. I am reporting it rather than planning around it, per my own role's rule on evidence
-arriving from outside the user's own words.**
+**The user independently asked whether [DCS-BIOS](https://github.com/DCS-Skunkworks/dcs-bios)
+should carry this channel instead of a new `Export.lua` op.** An `investigator` pass ran in
+parallel and has reported: `aircraft-layer/research/2026-10-21-dcs-bios-mi24p-9k113-controls.md`
+(on `feature/9k113-effectors` as commit `c5b3fa2d`). Treated as evidence, not instruction, per this
+role's standing rule — the findings below are facts to plan against, the recommendation is carried
+but the decision itself is left to the user (Decision 1).
 
-`aircraft-layer/research/mi24p-command-surface.md` §4.1.2 and its **CORRECTION of 2026-09-21**
-record a *live, five-point measurement*:
+**What it found, and why none of it changes Stages 2–5 below:**
 
-> **The AI axis (3060/3061) is a POSITION target, exactly linear**, measured at five points with
-> ratio `0.440000` in every case, settling inside 0.25 s and then holding flat. So pointing is a
-> **single write** — no closed loop.
->
-> The player axis (3025/3026) is NOT the same control — it accumulates/slews the way a human
-> holding a slew input expects. **Do not use it as an effector**, and do not assume one channel's
-> behaviour from the other; **that mistake cost two probe flights.**
+- **Every argument number this plan already commits to is independently corroborated.** 773, 885,
+  886, 955, 956, 673, 874, 876 all match DCS-BIOS's own Mi-24P module survey exactly — "none
+  disagree." **761 is corroborated too**: DCS-BIOS maps it as `OP_USR_PW`, device 16 (`ASP17`),
+  command 3015 — the same device family (ASP-17) the procedures-direction note's own physical-layout
+  reasoning already landed on, from a second, independent source. **Still "corroborated," not
+  "confirmed"**: DCS-BIOS's own description ("USR power") does not establish that `USR` means
+  coupler/distributor — the read-probe on the acceptance sortie (Risks & Unknowns) still settles it,
+  unchanged by this finding.
+- **The `READY`/`READNS.` lamp still has no known draw argument.** DCS-BIOS maps `SCHO READY` (960,
+  the *weapon* system's ready lamp, not the sight's), `SHTV READY` (917), and `L166B WORK`/`FAIL`
+  (868/869) — none of these is the sight's own post-warm-up readiness lamp. DCS-BIOS's own
+  exhaustive-looking coverage of minor tablo lights makes a genuine gap *less* likely than usual, but
+  does not prove one — the note's own recommended next step (a brute-force `get_argument_value` scan
+  across ~2000 args, diffed before/after a real warm-up) is out of this entry's scope (zero
+  real warm-up, by standing direction) and is not needed to ship Stages 2–5. **§3's readiness seam
+  keeps the slot regardless**: `sight_ready` reads one field of `GuidanceUnitState` that stays
+  `None`/unused until something — a future lamp-read attempt, real or DCS-BIOS-sourced — populates
+  it.
+- **DCS-BIOS cannot drive the player slew axis (3025/3026) at all** — no clickable control exists
+  for it in the Mi-24P module, and DCS-BIOS's command protocol only ever wraps named, pre-defined
+  controls, never a generic device/command/value passthrough. Out of this entry's scope (`BL-B80`'s
+  problem), but it rules out "adopt DCS-BIOS wholesale and get the slew loop for free" as a reason
+  to prefer it here.
+- **Recommendation carried from the investigator: reference-only, not a runtime dependency.**
+  GPL-3.0 licensing, a second install step for a public stranger-facing project, and a second
+  project's own patch-tracking cadence, for a switch set this project can already read and write
+  through its own Export.lua today — set against a cross-check value (confirming the eight arg
+  numbers above) that is already fully captured by *having asked the question once*, with no
+  install required. **This plan adopts that recommendation for Stage 1** (write the new
+  `Export.lua` op as planned) but Decision 1 restates it as the user's call, not a default silently
+  acted on.
 
-Three things follow, and none of them contradict a word the user wrote:
-
-1. **§12 is a true statement about the crewman, not about our command channel.** The copilot really
-   does slew with a rate-commanded joystick — `Devices_specs/9K113.lua` sets
-   `axis_use_velocity = true` for exactly that control. **§12 describes the human mechanism we are
-   modelling; it does not name which DCS command id Petrobrain writes**, and `BL-B66`'s own entry
-   already says so: *"which of those two axes this loop should drive is itself an open question for
-   this stage's plan rather than a settled choice."* Answering it is this plan's job, not a
-   re-opening of settled direction.
-2. **§12a's premise that the maximum rate is unknowable is also refuted by the repo**, and this is
-   my own "find N before accepting that N is unknown" rule firing. DCS's own device spec states it:
-   `h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`, `Slew_dead_zone = 0.003`,
-   `min_slew_velocity = rad(0.07)`. The user's conclusion — *"we do not need to know it"* — is
-   correct for the **player** channel, where DCS enforces the limit for us. But the number is not
-   unavailable, which means **a faithful slew time can be modelled on our side**, and that is what
-   unlocks the cheaper design below.
-3. **The player channel may not even work.** The same research note's unresolved gate 1: the 9K113
-   is its own mode with a `dedicated_viewport`, and *"the **player** slew axes may simply be ignored
-   outside that mode. Unverified, and it is the first thing to test."* Petrovich is not the player
-   and there is no viewport. **The brief's chosen channel is the one with an open feasibility
-   question against it; the channel it treats as a fallback is the one confirmed working.**
-
-**What this costs if we follow the brief as written:** a proportional controller with an empirical
-deflection law, a deadband floored by an unmeasured readout granularity, a limit-cycle risk against
-an unknown plant, a correctness-level dependency on an unbuilt milestone (`BL-B63`), and a
-feasibility probe that may come back negative — to reproduce, through an unverified channel, a slew
-profile DCS has already published the constants for.
-
-**Decision 1 below puts this to the user.** The plan is structured so that **Stages 1–2 are common
-to both answers** and the channel choice is isolated to Stage 3 behind one boundary, so this
-question does not block the entry starting.
-
-### 0a. Why §8 is still honoured either way — the slew model is ours, not DCS's
-
-§8's requirement is behavioural: *"the 9K113 via cockpit manipulation **takes time to move** so we
-cannot expect instant alignment with anything."* That is a statement about **what Petrovich
-believes he can see**, and it is satisfied inside `advance_sight_aim` — body-layer, no cockpit write
-involved — by rate-limiting `actual` toward `desired` at 20°/s azimuth and 10°/s elevation.
-
-So the slew *time* is delivered by Stage 1, testable immediately, with no probe, no fast lane and no
-cockpit write at all. The cockpit write then merely **follows** a pointing direction that is already
-correctly paced. Under the position-axis answer the sight's head traces our profile; under the
-rate-loop answer a controller makes it track the same profile. **§8 does not pick the channel.**
+**Why none of this blocks writing the plan or changes Stages 2–5's shape.** `sight_effector.py`
+(new, body-layer) is the one module that knows device/arg/command numbers; everything above it —
+`CrewConsole`, `logger.py`, `OpticState` — talks to it in terms of "write guidance-unit switch N
+to ON/OFF" and "is the sight ready", never in terms of `performClickableAction` or a wire format.
+Below `sight_effector.py`, `aircraft_client.AircraftLayerClient` is body-layer's existing HTTP
+boundary to aircraft-layer, and aircraft-layer's own API (`POST /command/cockpit_switch`, Stage 1)
+is a stable *contract* that would not change shape even if a future decision reversed Decision 1.
 
 ---
 
-## Effort/Value — re-read honestly, and it improved twice today
+## 1. What already exists, and what this entry reuses rather than invents
 
-**The brief is right that this entry lost its cheap half.** §1 removed the ASP-17 crosshair-hold use
-case outright (the mark follows the sight automatically — there is no action to build), which was
-one of the two non-ATGM justifications. What remains on the non-ATGM side is **pinpoint-on-request**
-alone, and that is thin: the pilot already gets the callout from `BL-B64`'s perception without any
-cockpit write.
+**Query results** (`gq.sh`, `memory-search.py`): nothing beyond what `explore-notes.md` and the
+2026-10-17 probe docs already record — no undiscovered prior plan on this ground, and the only
+memory hits were this role's own general process memories (verify brief status claims, find N
+before trusting it, do not reinvent the wheel), not project-specific prior art on cockpit switch
+sequencing.
 
-**But two things moved in this entry's favour since that assessment was written, and both are
-large:**
-
-- **Zero warm-up (user direction, this session): *"ignore until effectors built. Prepare code for
-  it, but use no warmup time."*** The entry's own "acceptance is unusually expensive" section —
-  ~3 minutes before anything is testable, a toppled gyro costing a full 3–4 minute reset — **no
-  longer applies.** That was the single biggest cost driver and it is gone by direction. Acceptance
-  is now an ordinary sortie.
-- **§0's finding, if Decision 1 goes the recommended way**, removes the controller, the empirical
-  tuning pair, the deadband, the limit-cycle risk and the `BL-B63` dependency. The slew becomes one
-  rate-limited interpolation we already know the constants for, plus one `SetCommand` per poll.
-
-**Verdict: the sequencing holds, and `BL-B67` does not need re-scoping.** This entry is genuinely
-cheaper than when it was filed, and its real value is not pinpoint-on-request — it is that
-**`BL-B67` cannot exist without it.** A SACLOS missile is guided by keeping the sight on the target
-for the whole 14–15 s of flight (research addendum: 345 m/s over 5 km); that *is* a cockpit-write
-loop. This entry builds the one mechanism the ATGM run is made of, which is why §5 puts it second
-rather than making it optional.
-
-**One scope caution.** If Decision 1 goes the brief's way, the honest effort/value read changes: the
-controller, its tuning and its probe are a materially bigger build for the same delivered behaviour,
-and I would then recommend narrowing this entry to Stages 1–2 plus warm-up/OBSERV writes, and
-filing the rate loop as its own entry gated on `BL-B63` — rather than letting one unverified channel
-hold up the whole sight.
+- **The cockpit-write pattern is the SPU-8 one** (`Export.lua` lines ~480–577): a single
+  `performClickableAction(cmd, value)` write, a change-epsilon telemetry readback
+  (`push_spu8_state`, `SPU8_EPSILON = 0.01`) sent only when a value actually moved. This entry's
+  switch states (0/1, animating over ~3 frames per the 2026-10-17 probe) are the same shape, one
+  tier simpler (no continuous knob).
+- **The inbound-command pattern is `poll_command_socket`** (`Export.lua` lines ~660–677,
+  `handle_petrovich_search_command`): a small `{"op": ..., ...}` JSON datagram over the existing
+  loopback UDP command socket, dispatched by `op`. Stage 1 adds one more `op` here, not a new
+  socket.
+- **The raise-on-failure HTTP write pattern is `trigger_petrovich_search`**
+  (`aircraft_client.py` lines ~260–269): a real cockpit effector write raises `AircraftLayerError`
+  on failure rather than being swallowed, unlike the opaque-display-string writes
+  (`push_text_line`). This entry's switch write is the same class of call — a dropped write is a
+  real behavioural gap — and follows that posture.
+- **The one-shot external-signal pattern is `attack_run_transition`/`observ_transition`**
+  (`crew_console.py`): a command handler sets a `Literal[...] | None` field for the poll loop
+  (`logger.py`) to apply once, because `CrewConsole` cannot reach `ConsolePerceptionRunner`'s state
+  directly. The weapons-safety-bar command uses the same shape (§4).
+- **`render_unable`/the "unable, `<reason>`" template dict already exists**
+  (`belief/speech.py`, `_UNABLE_TEMPLATES`, e.g. `"ON_GROUND": "Unable, on the ground."`) — the
+  refusal wording for OBSERV-before-ready (§3) is one more entry in that dict, not a new mechanism.
+- **The X-T26 tuning pattern** (`src/tuning.py` accessors, `config/defaults.toml` generation) is
+  reused for every new constant below — none of them are hand-rolled literals.
+- **`on_ground` on `CrewConsole`** (`logger.py` ~L3069–3073, refreshed every poll from
+  `runner.last_ownship_state.alt_agl_m`) is the existing takeoff-adjacent signal this entry reads
+  for the power-up trigger (§2), not a new telemetry field.
+- **`optic_policy.py` is untouched by this entry.** `OpticState`/`decide()` carry no cockpit
+  knowledge today and this plan keeps it that way — see §3's own note on why the readiness gate
+  belongs in `CrewConsole`, one layer up, not inside the phase-cycle state machine `BL-B64`/`BL-B71`
+  already hardened.
 
 ---
 
-### Affected Modules / Files
-
-**body-layer**
-
-- `src/belief/optic_policy.py` — `advance_sight_aim`'s body replaced (rate-limited convergence, from
-  `return desired`); new `SIGHT_SLEW_RATE_AZ_DEG_S` / `SIGHT_SLEW_RATE_EL_DEG_S` /
-  `SIGHT_AIM_DEADBAND_DEG` through `tuning.real`; `OpticState` gains the readiness and
-  observed-state fields named in the Co-moving Fields table.
-- `src/belief/sight_effector.py` — **new.** The one boundary this entry adds: translates
-  `OpticState`'s aim and mode into cockpit actions, and ingests the sight's observed state back.
-  Holds the switch *sequence* (ordering, device/arg) and the readiness seam. **No DCS knowledge
-  below this file; no body-layer belief above it.**
-- `src/logger.py` — the poll loop drives the effector beside the existing OBSERV dispatch
-  (~L1939–1962); `_apply_active_gaze`'s `advance_sight_aim` call site is **unchanged**.
-- `src/aircraft_client.py` — the new command op and the 9K113 state read.
-- `config/defaults.toml` — the new tunables, with sourced provenance comments.
+## Affected Modules / Files
 
 **aircraft-layer**
 
-- `dcs-export/Export.lua` — a new `op` on the existing `poll_command_socket` (which already
-  dispatches `petrovich_search` and already calls `performClickableAction` live); args **874/876/886**
-  pushed as telemetry on the change-epsilon pattern `push_spu8_state` established.
-- `src/collector/command_sender.py`, `src/api/server.py`, `src/schema/` — the op and the state
-  payload. **HTTP/JSON across the subproject boundary**, as aircraft-layer ↔ body-layer already does.
+- `dcs-export/Export.lua` — one new `op` (`"cockpit_switch"`) on `poll_command_socket`'s existing
+  dispatch, writing via `GetDevice(device):performClickableAction(cmd, value)` for **any**
+  `(device, cmd, value)` — validated for *shape* only (integers / a finite number), **no allow-list
+  of switches. User direction 2026-10-21, overriding the security plan review's required fix:**
+  *"Allow any cockpit switch. That gives us much more freedom later and even now with
+  experimenting. This is LAN only and switch behaviour is limited to DCS."* This is a deliberate,
+  stated departure from `aircraft-layer/CLAUDE.md`'s "no general-purpose remote-exec surface"
+  line, which is amended to name it; the command socket itself stays loopback-only and the HTTP
+  API is the LAN surface, as for every other write path. Every write is debug-logged. A new
+  `push_cockpit_switch_state` telemetry push (SPU-8's change-epsilon shape) for the six args this
+  entry cares about (773, 761, 885, 955, 886, 673). Flag-gated debug logging (`debug_log`, already
+  the file's own convention) on every write and every state-change push, from the first commit —
+  not bolted on after a failed sortie.
+- `src/collector/command_sender.py` — a `send_cockpit_switch(device, cmd, value)` method,
+  structurally identical to `CommandSender.send_command`, same `CommandSendError` posture.
+- `src/collector/cache.py` — a small cache for the six-arg switch-state snapshot, mirroring
+  `TelemetryCache`'s shape (most-recent-sample, not a queue — a switch's state is a level, not an
+  event).
+- `src/api/server.py` — `POST /command/cockpit_switch` (`{"device", "cmd", "value"}`, `400` on a
+  malformed body, `500`/raise on a send failure — `/command/petrovich_search`'s own posture) and
+  `GET /cockpit_switch/latest` (the six-arg snapshot, `None` on an empty cache — every other
+  `/latest` endpoint's posture).
+- `src/schema/` — a `CockpitSwitchState` record (six named floats) alongside the existing
+  per-channel schemas.
+
+**body-layer**
+
+- `src/aircraft_client.py` — `write_cockpit_switch(device, cmd, value)` (raises, mirrors
+  `trigger_petrovich_search`) and `get_cockpit_switch_state_latest()` (swallow-to-`None`, mirrors
+  every other `get_*`).
+- `src/belief/sight_effector.py` — **new.** The one boundary below which nothing above knows a
+  device/arg/command number. Holds:
+  - `GuidanceUnitState` (frozen dataclass, carried on `ConsolePerceptionRunner` the same way
+    `optic_state`/`attack_run_state` are): power-up progress, `sight_ready`, `observ_commanded`/
+    `observ_observed`, `weapon_safety_commanded`/`weapon_safety_observed`.
+  - The four-switch power-up sequencer (one write per `advance()` call, spaced by
+    `GUIDANCE_UNIT_SWITCH_DELAY_S`).
+  - `sight_ready(state) -> bool` — the readiness predicate, §0's named seam.
+  - `write_observ(on: bool)` / `write_weapon_safety(armed: bool)` — single writes, no sequencing.
+- `src/logger.py` — a `guidance_unit_state` field on `ConsolePerceptionRunner`, advanced once per
+  poll beside the existing `optic_state`/`attack_run_state` handling (same call site, ~L3085–3123);
+  `crew_console.sight_ready` refreshed every poll the same way `crew_console.on_ground` is
+  (~L3069–3073); a new one-shot `weapon_safety_transition` applied the same way `observ_transition`
+  is.
+- `src/belief/crew_console.py` — `_handle_observ_on` gated on `self.sight_ready`, returning
+  `render_unable("GUIDANCE_NOT_READY")` when not; new `_handle_weapons_armed`/`_handle_weapons_safe`
+  handlers setting `weapon_safety_transition`; `_handle_engage` (existing) also sets it to
+  `"armed"` alongside its existing `attack_run_transition = "engage"`.
+- `src/belief/speech.py` — one new `_UNABLE_TEMPLATES` entry, `"GUIDANCE_NOT_READY": "Unable,
+  guidance unit not ready."`
+- `src/tuning.py` / `config/defaults.toml` — `GUIDANCE_UNIT_SWITCH_DELAY_S` (default `1.0`, the
+  measured ~3-frame animation plus margin, `lo=0.5, hi=5.0`), and the takeoff-trigger threshold if
+  it needs its own constant beyond the existing `ON_GROUND_AGL_THRESHOLD_M` (see §2).
+
+**Cross-subproject (voice)**
+
+- `audio-adapter/src/vocabulary.py` — two new `VOICE_ONLY_TOKENS` entries, `weapons_armed`/
+  `weapons_safe`, with `PHRASES` entries ("weapons armed", "weapons safe" — user direction 2026-10-21; *"weapons
+  on/off"* dropped). **Not added to the F10 menu** — root `CLAUDE.md`/`vocabulary.py`'s own docstring: voice
+  is primary, the F10 vocabulary is the legacy, non-growing one (2026-09-19 direction). Checked,
+  per the task brief's instruction to check; the answer is "voice only, by existing precedent."
 
 **Docs / roadmap**
 
-- `body-layer/ROADMAP/BL-B66.md` — amended with §0's finding, the zero-warm-up direction and
-  Decision 1.
-- `body-layer/ROADMAP/BL-B63.md` — its "hard dependency of `BL-B66`" amendment is **conditional on
-  Decision 1** and must say so.
-- `plans/9k113-sight/plan.md` — §15c amended (Decision 5a below): the three constraints it recorded
-  for this entry are contingent on a channel choice it treated as settled.
+- `body-layer/ROADMAP/BL-B66.md` — amended with this plan's narrowed scope and Decision 1.
+- `body-layer/ROADMAP/BL-B65.md` — already closed/folded; no change needed.
 
 ---
 
-### Implementation Plan
+## 2. The takeoff trigger, and the "already on" / landing questions
 
-**Stage 1 — the sight takes time to move, and nothing touches the cockpit.**
-Replace `advance_sight_aim`'s pass-through with a rate-limited convergence: move `actual` toward
-`desired` by at most `rate * dt_s` per axis, 20°/s azimuth and 10°/s elevation, clamped to the
-field of regard already on the optic, and snap when inside the deadband. `dt_s` is already threaded
-in and unused, exactly for this. Per-optic by construction — the naked eye and binoculars have no
-field of regard and stay `actual := desired`. **Delivers §8 in full, is testable in the existing
-test suite, and is correct under either answer to Decision 1.**
+**Reuses `on_ground`'s existing signal** (`alt_agl_m <= ON_GROUND_AGL_THRESHOLD_M`), not a new
+telemetry field. The power-up sequencer fires once on the **rising edge** of "was on the ground,
+now is not" this mission — `GuidanceUnitState` carries a `takeoff_seen: bool` one-shot latch,
+reset by the existing mission-restart machinery (`_reset_mission_state`/`reset_for_new_mission`,
+same list every other per-mission field is already on).
 
-**Stage 2 — the cockpit-action channel and the switch sequence, with zero warm-up.**
-The new `op` on `Export.lua`'s listener, plus `sight_effector.py` holding the 11-switch **ordering**
-and its device/arg table. Readiness gets `BL-B64`'s own seam shape: a named predicate that today
-returns ready immediately, with one obvious place for a duration or a real lamp read to land.
-Flag-gated debug logging built in up front, not bolted on after a failed sortie.
+**Hot start / switches already on (explore-notes' open question 1): no special case.** Every
+switch write in this entry is `performClickableAction(cmd, 1)` — an absolute set, not a relative
+toggle (confirmed by the 2026-10-17 probe's own restore pass, which drove the same switches back
+to 0 cleanly). Re-asserting an already-ON switch is a no-op in the cockpit and costs one harmless
+write per switch. **Proposed answer, not re-opening a decision**: no hot-start detection needed.
 
-**Stage 3 — the sight head actually follows, and the channel is Decision 1's to pick.**
-Behind `sight_effector.py`, one of:
-- *(recommended)* **position actuator** — write Stage 1's already-paced `actual` to
-  `SetCommand(3061, az/60)` each poll. Confirmed live, needs no loop, no tuning, no fast lane.
-- *(brief's path)* **rate controller** — proportional deflection on 3025/3026 against the 874/876
-  readback, with the deadband floored by the probe's measured granularity. Needs `BL-B63`.
-
-Either way, **once 874/876 are read, they are authoritative for `actual_aim_*`** — see Invariants.
-
-**Stage 4 — acceptance sortie**, then pinpoint-on-request as the surviving non-ATGM use.
+**Landing (explore-notes' open question 2): proposed answer — do nothing.** Nothing in the user's
+procedure direction powers the unit down, and modelling a power-down is new scope with no stated
+behaviour to build against. `GuidanceUnitState` stays `READY` for the rest of the mission once
+reached; a second takeoff (touch-and-go) does not re-run the sequence (the latch is one-shot per
+mission, not per ground contact) — flagged as a choice, not a measured fact, in case a training
+mission with multiple landings makes this wrong in practice.
 
 ---
 
-### Co-moving Fields
+## 3. Readiness, OBSERV, and why `optic_policy.py` is not touched
 
-Step 6a's trigger fires: this entry adds **three layers over one concept** — the pilot's intent, what
-we have commanded into the cockpit, and what DCS reports back — where `BL-B64` had two. That is the
-exact shape of its `phase`/`home_phase` defect, one layer deeper, so the table is mandatory.
+**`sight_ready` gates the command, synchronously, in `CrewConsole._handle_observ_on` — before
+`observ_transition` is ever set.** This is deliberate and different from how `BL-B64`'s own
+`home_phase`/`observ_observed`-shaped hazard would suggest handling it: that hazard is about a
+*poll-lag* window between a command being accepted and the cockpit catching up. Gating the command
+itself, at the moment it is spoken, removes the one case that would matter to belief state (a
+`home_phase` that says SIGHTING while the sight was never going to engage at all) without adding
+any new branch to `decide()`. `optic_policy.py` keeps `BL-B64`/`BL-B71`'s hardened invariants
+exactly as they are.
 
-**The hazard in one sentence:** `home_phase` says Petrovich intends to use the sight, the cockpit
-switch may not be thrown yet, and the sight head may still be slewing — and perception must act on
-the *last* of those three, never the first.
+**What is *not* removed by that gating: `observ_commanded` vs `observ_observed` lag.** Once a
+command is accepted (`sight_ready` was `True`), the cockpit write for arg 886 still animates over
+~3 frames before the readback agrees — the same lag `BL-B64`'s own table named for a different
+field. No consumer reads `observ_observed` today (the 9K113 optic is deliberately deferred in
+`optics.py`; nothing in perception resolves against it), so this is a **recorded risk for `BL-B67`
+to inherit, not a defect to fix here**: whoever builds the ATGM run must read `observ_observed`
+before trusting the sight is actually engaged, never `home_phase`. Stated here so it is not
+rediscovered the way `BL-B64`'s own defect was.
+
+**OBSERV OFF needs no gating and no sequence** — confirmed by the user's own procedure direction
+(§2 of `docs/acceptance/2026-10-17-9k113-procedures-direction.md`): one write, DCS handles the
+rest. `_handle_observ_off` is unchanged.
+
+---
+
+## Co-moving Fields
+
+Step 6a's trigger fires: `GuidanceUnitState` and `OpticState.home_phase` both track "is the sight
+usable," one external (pilot command, telemetry) and one internal (sequencer, `decide()`), and
+they must not silently diverge the way `BL-B64`'s `phase`/`home_phase` did.
 
 | Field | Written by | Transition | Must hold true immediately after |
 |---|---|---|---|
-| `home_phase` | **external** (pilot "Observ on/off", `logger.py` ~L1947) | OBSERV on | `home_phase is SIGHTING`; `phase` **unchanged** (`decide`'s `_back_to_home` moves it at the next boundary — the illegal "jump straight into SIGHTING" stays illegal) |
-| `phase` | internal (`decide`) | OBSERV on | still the prior phase this poll; may become `SIGHTING` only once `observ_observed` is on **and** `sight_ready` is true |
-| `hands_busy_until_sim` | **external** (same site) | OBSERV on **or** off | `= now_sim + HANDS_BUSY_DURATION_S` on **both** edges — the hand is on the switch either way |
-| `observ_commanded` | internal (`sight_effector`) | OBSERV on | `True`; a cockpit write to arg 886 has been issued exactly once, not once per poll |
-| `observ_observed` | **external** (DCS telemetry, arg 886) | OBSERV on | **may still be `False`** — the write is in flight. **Every phase-dispatch branch must re-read this, not `home_phase`** |
-| `sight_ready` | internal (readiness seam) | OBSERV on | `True` today (zero warm-up by direction); the one place a duration or lamp read lands later |
-| `actual_aim_azimuth_deg` / `..._elevation_deg` | internal (`advance_sight_aim`), **then external** (arg 874/876 once read) | any aim change | strictly between the prior value and `desired`, never equal to `desired` while the error exceeds one poll's `rate * dt` |
-| `actual_aim_*` | as above | OBSERV **off** | `None` — and the *commanded* deflection/position must be released in the same transition, or the head keeps slewing after the mode is gone |
-| `look_contact_id` | internal (`decide`) | OBSERV off | `None`, cleared by `_back_to_home` |
-| `look_started_sim` | internal (`decide`) | OBSERV off | `None` |
+| `takeoff_seen` | internal (`sight_effector`, from `on_ground`'s rising edge) | takeoff detected | `True`; power-up sequence starts this same poll |
+| `power_up_stage` | internal (`sight_effector` sequencer) | each `GUIDANCE_UNIT_SWITCH_DELAY_S` tick while in progress | advances by exactly one switch; never skips a switch even if an earlier readback has not yet confirmed (zero-warmup direction: the *ordering* is structural, the *timing gates* are not) |
+| `sight_ready` | internal (`sight_effector`, derived) | last switch write issued | `True` (zero real warm-up); the one seam a lamp-read or a real duration lands in later, per §0 |
+| `guidance_unit_ready_announced` | internal (one-shot latch) | `sight_ready` becomes `True` | `True`; `"Guidance unit ready"` spoken exactly once, never once per poll |
+| `home_phase` | **external** (pilot "Observ on", `crew_console._handle_observ_on`) | OBSERV-on request | **if `sight_ready` was `False` at request time: unchanged, request refused with `render_unable("GUIDANCE_NOT_READY")`, `observ_transition` never set.** If `True`: `home_phase` set to `SIGHTING` next poll exactly as `BL-B64` already does — this entry adds no new branch inside `decide()` |
+| `observ_commanded` | internal (`sight_effector`) | OBSERV-on accepted | `True`; cockpit write for arg 886 issued exactly once |
+| `observ_observed` | **external** (aircraft telemetry, arg 886 readback) | OBSERV-on accepted | **may still be `False` for up to ~3 frames** — nothing in this entry reads it, but `BL-B67` must, per §3 |
+| `weapon_safety_commanded` | **external** (pilot "weapons armed"/"weapons safe") **or internal** (`_handle_engage`'s existing `attack_run_transition = "engage"` path) | either trigger | `ARMED`; both triggers converge on the same field, so an attack run started while already armed is a harmless re-write, never a conflicting state |
+| `weapon_safety_observed` | **external** (aircraft telemetry, arg 673 readback) | any `weapon_safety_commanded` change | lags the commanded value by the same ~3-frame animation; no consumer reads it in this entry (recorded for `BL-B67`, which fires a real missile and should not trust an unconfirmed safety bar) |
 
-**Two transitions that are easy to miss, and both are `BL-B64`'s defect recurring:**
-
-- **OBSERV off while the head is mid-slew.** `actual_aim_*` going `None` is not sufficient — the
-  *cockpit* is still being driven. The release must be part of the same transition, named here so it
-  cannot be left to a later branch.
-- **`home_phase is SIGHTING` while `observ_observed is False`.** This is the diverged pair, and it is
-  reachable on *every* OBSERV-on for at least one poll — not a rare case, the normal case. A branch
-  that reads `home_phase` to decide whether the sight is usable is wrong for that window, which is
-  precisely how a pilot's "Observ off" left the sight running for 30 s in `BL-B64`.
-
-**Construction rule, carried forward from `BL-B64`'s own docstring and its third instance of this
-defect:** every `decide` branch that builds a fresh `OpticState` rather than `replace`-ing one must
-carry all of these forward explicitly. A controller needs continuity across polls to converge at all.
+**Construction-site check, per step 6a's own rule — grepped, not narrated from the transition
+list**: `GuidanceUnitState(` has exactly one construction site in this plan's design
+(`ConsolePerceptionRunner`'s `field(default_factory=GuidanceUnitState)`, mission-reset's
+`reset_for_new_mission` re-running `__init__`) and the sequencer itself only ever calls `replace()`
+on it, never a fresh `GuidanceUnitState(...)` mid-sequence — there is no second construction site
+for the Implementer to introduce silently, unlike `OpticState`'s two (`BL-B71`'s own worked
+example). State this explicitly in the Implementer handoff as the thing to keep true, since the
+failure mode is adding a *second* construction site under time pressure (e.g. a "reset the
+sequence" helper that looks easier to write as `GuidanceUnitState(...)` than as `replace(state,
+...)`).
 
 ---
 
-### Invariants checked
+## Implementation Plan
 
-- **DCS is authoritative about the simulated world.** This is what settles the model-versus-readback
-  question on principle rather than taste: Stage 1's rate-limited `actual` is our *model* of the
-  head, and the moment args 874/876 are read, **the readback wins and the model becomes the fallback
-  for when it is absent**. Perception already reads `actual` and never `desired`
-  (`association.py:306`, `naked_eye_source.py:442`), so no call site moves.
-- **Never modify the DCS installation.** Writes are `SetCommand`/`performClickableAction` against a
-  running sim through the existing listener — runtime state, not files. Nothing in the tree is
-  touched.
-- **Code owns factual state.** Readiness is a predicate code evaluates; no model is asked whether
-  the sight is warm.
-- **Module independence.** aircraft-layer ↔ body-layer stays **HTTP/JSON**. No new in-process
-  cross-subproject import.
+**Stage 1 — the cockpit-action channel.** `Export.lua`'s `cockpit_switch` op (write) and
+`push_cockpit_switch_state` (readback telemetry, change-epsilon, the six args named above);
+aircraft-layer collector/API/schema; `aircraft_client.py`'s two new methods. Flag-gated debug
+logging from the first commit. Testable without live DCS the same way every other aircraft-layer
+write path is (`tests/test_api.py`'s real-server pattern) — live confirmation is the acceptance
+sortie, same posture as SPU-8/BL-6.
+
+**Stage 2 — the guidance-unit power-up.** `sight_effector.py`'s `GuidanceUnitState` and
+sequencer; the takeoff trigger (§2); `sight_ready`; the "Guidance unit ready" callout wired through
+`CrewConsole`'s existing per-poll drain. Testable against a fake `AircraftLayerClient` (no live
+DCS), same as every other body-layer effector test.
+
+**Stage 3 — OBSERV as a real cockpit write.** The readiness gate in `_handle_observ_on`
+(§3); `observ_commanded`/`observ_observed` fields; the `GUIDANCE_NOT_READY` refusal template.
+No change to `optic_policy.py`.
+
+**Stage 4 — the weapons safety bar.** ARMED on `_handle_engage` (existing) or the two new voice
+commands; SAFE on its own voice command; `weapon_safety_transition`; the vocabulary entries.
+
+**Stage 4b — slew telemetry logging, for tuning `[[BL-B80]]`'s loop from data.** User direction,
+2026-10-21: *"Put logging in so that the slew loop can be adjusted based on data from logs. Actual
+vs desired angles especially, slew command values, etc."*
+
+- **`Export.lua`, every frame, flag-gated** (its own debug flag, off by default): sim time, args
+  **874/876** (actual sight azimuth/elevation, raw), OBSERV (886), and the **last slew command sent
+  on 3025/3026** — always `nil` in this entry, since nothing writes the slew axis yet; the field is
+  there so `BL-B80` fills it rather than adding a format. Per frame, because body-layer's 1 Hz poll
+  cannot see a slew: the open `BL-B80` question is whether the readback is quantised, lagged or
+  genuinely stepped, and only frame-rate samples separate those. Log only while OBSERV is on (or a
+  short tail after it goes off) so an idle sortie does not fill the file.
+- **body-layer, every poll: a sight trace `.jsonl`**, following `detection_trace_writer.py`'s
+  pattern and the BL-11 Stage 5 per-sortie filename stamp: desired az/el (`OpticState`), actual
+  az/el (readback when present, else the model's value, with a `source` field saying which), the
+  error, OBSERV commanded/observed, optic mode (wide/narrow). Same flag posture as the other
+  sortie traces.
+- Raw arg values are logged alongside any degree conversion — elevation's conversion is still
+  unmeasured, so a derived number alone could not be re-derived later.
+- **`sortie-log-triage` gets a slew section** (rate during a slew, smallest observed step, lag) —
+  skill edit, `.claude/skills/sortie-log-triage/`.
+
+**What this buys: the hand-slew segment on the Stage 5 card** (user: *"Yes"*). Two minutes of the
+pilot slewing the sight by hand while the frame log runs measures real rates, readback granularity
+and lag — which is the "one more probe run" `BL-B80` lists as a hard dependency, collected for free.
+
+**Stages 1–4 (and 4b) are built back to back** (Stage 2 needs Stage 1's channel to write through; Stage 3
+needs Stage 2's `sight_ready`; Stage 4 reuses Stage 1's same channel for one more arg) — **one
+performance-review pass and one security pass after Stage 4**, not one per stage, per the current
+cadence in root `CLAUDE.md`'s "Agents" section.
+
+**Stage 5 — acceptance sortie, one flight.** A card naming the branch and a sequence the user can
+fly in one sortie: take off, confirm the four switches move and "Guidance unit ready" is heard;
+try "Observ on" before and after that callout (expect a refusal, then acceptance); say "Observ
+off"; say "weapons armed"/"engage" and "weapons safe", confirming arg 673's readback both ways.
+**Then ~2 minutes of hand-slewing the sight in OBSERV** (full left/right, up/down, slow and fast)
+with the slew frame log on — the data `BL-B80` needs (Stage 4b).
+No gyro-reset risk and no multi-minute wait — the zero-warm-up direction makes this an ordinary
+sortie, not the "~3 minutes per attempt" cost the pre-split entry carried.
+
+---
+
+## Invariants checked
+
+- **DCS is authoritative about the simulated world.** Readbacks (arg 886/673/the four power-up
+  args) are the source of truth for `*_observed` fields; `*_commanded` is a statement about what
+  Petrovich asked for, never substituted for what DCS reports.
+- **Never modify the DCS installation.** Every write is a runtime `performClickableAction` call
+  against a running sim through the existing listener — no file in the DCS tree is touched.
+- **Code owns factual state.** `sight_ready` is a predicate code evaluates against `GuidanceUnitState`;
+  no model is asked whether the sight is warm.
+- **Module independence.** aircraft-layer ↔ body-layer stays HTTP/JSON. §0's boundary is exactly
+  what keeps the DCS-BIOS-vs-Export.lua question from ever reaching body-layer's import graph.
 - **Single-player only.** No group/coalition scoping anywhere in this entry.
-- **No new abstraction without a named duplication removed.** `sight_effector.py` is the only new
-  boundary, and it earns its place by isolating Decision 1: without it, the channel choice leaks
-  into `logger.py` and `optic_policy.py` and cannot be changed after a sortie.
+- **No new abstraction without a named duplication removed.** `sight_effector.py` earns its place
+  the same way the 2026-10-15 plan argued for it: without it, device/arg numbers leak into
+  `crew_console.py` and `logger.py`, and a transport change (§0) would touch every call site instead
+  of one module.
 
 ---
 
-### Risks & Unknowns
+## Risks & Unknowns
 
-- **The warm-up argument numbers are positional and were probed on a different device set.** Every
-  one of 673/955/885/886/963 is cross-referenced from a 2026-09-11 probe (DCS 2.9.29.27278);
-  `performClickableAction` is proven live only on device 30 and device 55. An ED patch inserting a
-  table entry shifts them silently. **Regenerate against the installed tree before coding.** This is
-  the single largest risk in the series.
-- **`performClickableAction` on devices 6 and 7 is unproven.** Note the verbs are distinct: the sight
-  *axes* have no clickable element and use `SetCommand` (confirmed), while the warm-up *switches* do
-  and need `performClickableAction` (unconfirmed on these devices). A negative here blocks Stage 2's
-  switch sequence but **not** Stage 1 or Stage 3's position write.
-- **Elevation has no degree conversion.** Arg 876's gauge is piecewise (`-1→-0.75, 0→0, 1→1.0`) and
-  its limits in degrees are unmeasured. Azimuth is exactly linear and calibrated; **elevation
-  feedback is the weaker axis and the 10°/s model rate is the mitigation.**
-- **The player channel may be inert outside the sight's dedicated viewport** (unresolved gate 1). If
-  Decision 1 goes the brief's way, this is a feasibility risk on the critical path.
-- **Gimbal limits are from the English manual, not read live** — ±60° az, +20°/−15° el; the native
-  `initLimits` is not exposed to Lua. The field of regard must be enforced on our side.
-- **The gyro-topple failure mode is unmodelled** — an excessive-rate manoeuvre needs `GUID.UNIT POWER`
-  cycled. Out of scope by the zero-warm-up direction, but it exists in the aircraft and a sortie can
-  hit it.
-- **Per-poll write traffic.** Writing a position every poll is new cockpit traffic. Suppress writes
-  inside the deadband rather than sending unconditionally.
-
----
-
-### Second-order effect
-
-**Unblocks `BL-B67` and narrows it in a good way.** The SACLOS guidance this entry's mechanism
-becomes is the whole of the ATGM run's control problem, so `BL-B67` stays thin, as intended — its
-missile data is already in the research addendum and it adds the launch decision, not a new
-actuator. It also makes the cockpit-write channel the **first reusable** one (SPU-8 and the AI wheel
-are each one-off), which `[[BL-B65]]` inherits for free. And if Decision 1 goes the recommended way,
-it **removes a correctness-level dependency from `[[BL-B63]]`**, which returns that entry to being
-the optimisation it was filed as.
+- **The transport is still formally an open decision (§0, Decision 1)**, though the investigator's
+  findings now favour proceeding with Stage 1 as planned (own `Export.lua` op) — DCS-BIOS is
+  recommended as reference-only, cannot drive the slew axis anyway, and does not solve the READY
+  lamp. If the user nonetheless prefers DCS-BIOS as a runtime dependency, Stage 1 is the one stage
+  that changes shape — the HTTP contract (`POST /command/cockpit_switch`, `GET /cockpit_switch/
+  latest`) should still hold, but its aircraft-layer-side implementation would differ.
+- **761 (`CPLR DISTR`) is corroborated by two independent sources (physical layout, DCS-BIOS's own
+  device-16 mapping) but still not confirmed as to function** — built as planned, confirmed on the
+  acceptance sortie by logging changed arguments while the user throws it by hand, per the user's
+  own "one-line fix" framing, not a blocker.
+- **Argument numbers are positional.** All eight this plan commits to (773, 761, 885, 886, 955, 956,
+  673, 874, 876) were probed live 2026-10-17 and independently corroborated against DCS-BIOS's own
+  Mi-24P survey 2026-10-21 — two independent sources agreeing lowers this risk without eliminating
+  it. An ED patch inserting a table entry still shifts them silently; regenerate against the
+  installed tree (or re-diff against DCS-BIOS, which costs nothing and was exactly how this
+  session's corroboration was obtained) if a sortie disagrees with this plan's numbers.
+- **The `READY`/`READNS.` lamp has now failed two independent read attempts** (`list_indication`,
+  and DCS-BIOS's own exhaustive-looking survey) — treated as a standing seam, not a blocker, per
+  §0/§3; a real fix would need a brute-force `get_argument_value` scan across ~2000 args during a
+  real warm-up, out of scope while zero-warm-up direction stands.
+- **`weapon_safety_observed` lag is unread in this entry** — explicitly a risk `BL-B67` inherits,
+  named in §3 and the Co-moving Fields table so it is not rediscovered.
+- **One-shot-per-mission power-up latch may be wrong for a multi-landing training mission** — a
+  stated choice (§2), not a measured constraint; cheap to revisit if a sortie shows it wrong.
+- **Every phase-dispatch lesson from `BL-B64`/`BL-B71` is about `optic_policy.py` internals this
+  entry deliberately does not touch** — the risk that lesson warns about (a diverged pair read by
+  the wrong branch) cannot recur here because no branch in `decide()` reads any field this entry
+  adds. Flagging the absence explicitly so it is not assumed overlooked.
 
 ---
 
-### Decisions Requiring User Input
+## Second-order effect
 
-**1. Which DCS channel drives the sight head — and this is the one that matters.**
-*Recommendation: the **AI position axis (3060/3061)**.* It is confirmed live at five measured points
-with an exact linear law, settles in 0.25 s, needs no controller, no empirical tuning, no deadband
-calibration and no `BL-B63`; §8's slew time is delivered by Stage 1 on our side using DCS's own
-published 20°/10°per-second limits. The player rate axis is the faithful-looking choice but is the
-one the research explicitly says *"do not use as an effector"*, is unverified outside the sight's
-own viewport, and generalising between the two channels **already cost this project two probe
-flights**. The counter-argument deserves stating: the position axis is DCS-Petrovich's own channel,
-and this project exists to replace that behaviour — but we are borrowing its *actuator*, not its
-perception or its judgement, and the pacing stays ours.
-
-**2. If Decision 1 goes the brief's way, should the rate loop be its own entry?**
-*Recommendation: yes.* It would then carry a controller, a tuning pair, a probe with an open
-feasibility question and a dependency on an unbuilt milestone — too much to hold the switch sequence
-and the slew model hostage to. Stages 1–2 ship either way.
-
-**3. Does the readback become authoritative for `actual_aim_*` as soon as it is available?**
-*Recommendation: yes* — "DCS is authoritative about the simulated world" decides it, and I have
-planned on that basis. Flagged because it means our modelled slew is a fallback, not the truth, and
-a sortie may show the two disagreeing.
-
-**4. The warm-up timer — ANSWERED by direction, recorded not open.**
-> *"ignore until effectors built. Prepare code for it, but use no warmup time."*
-
-Zero duration, no ЩО `READY` lamp model, no 3–4 minute constant. The **ordering** of the 11 switches
-and their device/arg numbers are structural and stay (Stage 2); only the *elapsed-time* gates — the
-210 s program timer, the 3–4 min warm-up, the 10–15 s gyro alignment, the 2–8 s caging — are
-dropped. Readiness keeps `advance_sight_aim`'s own seam shape.
-
-**5. What OBSERV on/off means once the effectors are real.**
-*Recommendation: the command still returns immediately, and Petrovich acknowledges the **ask**, not
-the completion.* The existing 1 s `hands_busy` suppression already models the hand on the switch, and
-with zero warm-up there is no long sequence left to narrate — so *"Observ on"* is answered as it is
-today. What changes is only that a dispatch branch must wait on `observ_observed` before treating the
-sight as usable (see the Co-moving Fields table), which is invisible to the pilot. **If a real
-warm-up ever lands, this answer must be revisited** — a 3-minute silence after an acknowledgement
-would be the wrong behaviour, and that is the moment to add *"guidance unit ready"*.
+**Makes the cockpit-write channel the first reusable facility** (Stage 1's generic
+`cockpit_switch` op) — `BL-B80`'s eventual slew write and `BL-B67`'s ATGM-run writes (ARMED check,
+launch-station selector) inherit it rather than each growing their own `op`. **Narrows `BL-B67`'s
+own remaining work**: the guidance-unit power-up, OBSERV, and the safety bar are no longer open
+questions by the time that entry starts, and it inherits the `observ_observed`/
+`weapon_safety_observed` readback risk named above as something to check before firing, not
+discover mid-flight.
 
 ---
 
-## PROBE REPORTED, 2026-10-17 — §0 is withdrawn by measurement and Decision 1 inverts
+## Decisions — all answered 2026-10-21 (user)
 
-**Read this before §0 or Decision 1 below; both are superseded on their central claim.** Full
-record: `aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`.
-
-§0 argued that the AI axis is a working position target and the player axis is the unverified one,
-on a five-point live measurement from 2026-09-11. **Both halves measured false today**, in two
-runs, the second with the aircraft set up by hand and `OBSERV` confirmed on:
-
-| channel | commanded | result |
-|---|---|---|
-| AI 3061 / 3060 | 5 bearings + 12 staircase steps each | args 874/876 **never left 0.00000** |
-| player 3026 / 3025 | ±0.5 held ~3 s | **~45° azimuth, elevation the same shape, sign-inverted** |
-
-Every call returned `ok=true`, so only the argument readback separates them — and the player axis
-moved the head in the same run, same device, same `SetCommand` path, seconds after the AI axis did
-not.
-
-**So:** Decision 1 takes the player axis by elimination; the controller, deflection law, deadband
-and limit-cycle risk return; `BL-B63` is a hard dependency again, as direction §12 and `BL-B66`'s
-own entry had it. §0's "find N before accepting that N is unknown" reasoning was sound and its
-conclusion was still wrong, because the number it found described a channel that no longer answers.
-
-**This plan's scope caution is now in force rather than hypothetical** — narrow the entry to the
-switch sequence and `OBSERV` (both measured working today), and file the slew loop separately,
-gated on `BL-B63` and on one more probe run with per-frame slew logging.
+1. **Transport: own `Export.lua` op; DCS-BIOS reference-only.** *"yes"*.
+2. **Refusal wording: `"Unable, guidance unit not ready."`** *"ok"*.
+3. **Voice phrases: `"weapons armed"` / `"weapons safe"`** only. *"weapons armed/safe"*.
+4. **No switch allow-list on `cockpit_switch`** — overrides the security plan review's required
+   fix; see the Export.lua bullet under Affected Modules for the user's words.
 
 ---
 
-## Probe brief — for the user's Windows box
+---
 
-**Self-contained; needs a running DCS and cannot be done by any agent.** Everything below is one
-sortie's work. Target: the installed DCS version — record the build number, because every argument
-number here is **positional** and shifts if ED inserts a table entry.
+# Superseded text below (2026-10-15 plan + 2026-10-17 probe addenda)
 
-**Why it matters:** question 1 decides whether Stage 2's switch sequence is buildable at all;
-question 2 sizes a controller's deadband *only if* Decision 1 goes the brief's way; question 3 would
-let readiness be observed rather than assumed. **Question 4 is new and is the cheapest high-value
-item on the list** — it decides Decision 1 empirically.
+**Everything from here down predates the 2026-10-21 scope split and explore pass. Kept for
+history only — do not plan or implement against it.** It argued about which DCS channel should
+drive the sight head (AI position axis vs. player rate axis); that question moved to `BL-B80` in
+full, including the probe findings that answered it. The switch-sequence and OBSERV half it also
+covered has been rewritten above against the user's own procedures direction, which this text
+predates and in places contradicts (it still carries the recon table's 11-switch sequence and the
+3–4 minute/10–15 second timers that direction overrode).
 
-1. **Can `performClickableAction` move the warm-up switches?** Args **673, 955, 885, 886, 963** on
-   **`WEAP_SYS` (device 6)** and **`I9K113` (device 7)**. For each: issue the action, then read
-   `GetDevice(0):get_argument_value(<arg>)` back and report whether it changed, and whether the
-   associated lamp followed. *(Proven live today only on devices 30 and 55 — a different device set.)*
-2. **What is arg 874/876's read granularity?** Not merely "is it readable" — the **smallest
-   non-zero change observable** while the sight slews slowly, sampled as fast as the export loop
-   allows. A controller's deadband cannot be finer than this number, so it sizes the design.
-   Elevation (876) matters more than azimuth: its gauge is piecewise and its degree conversion is
-   still unmeasured.
-3. **Does `list_indication` read the `READY` lamp?** Index **8, `ccGunnersCPanel`** (owned by
-   `WEAP_SYS`, never tried), and the 9K113's own `list_indication(0)`. Report the full text dump,
-   not just a yes/no — a sibling string may carry it. *Low priority now that warm-up is zero; keep
-   it only if the sortie has room.*
-4. **Does the AI position axis still behave as measured, and does the player axis work at all?**
-   `GetDevice(7):SetCommand(3061, az/60)` at a few bearings — confirm it still settles in ~0.25 s
-   with `arg_874 = value * 0.44`. Then `SetCommand(3025/3026, ±0.5)` **while not in the sight's own
-   viewport** and report whether the head moves at all. This is the unresolved gate that decides
-   Decision 1 on evidence instead of judgement.
+See `git log --follow plans/9k113-effectors/plan.md` for the full prior text rather than
+reproducing it here.

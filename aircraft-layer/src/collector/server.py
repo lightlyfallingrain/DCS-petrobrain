@@ -19,10 +19,13 @@ Petrovich-indication line has a top-level `"indication"` key instead; a
 Petrovich-wheel line (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) has
 a top-level `"wheel"` key instead; a push-to-talk line has a top-level
 `"ptt"` key instead; a SPU-8 intercom-state line (`plans/spu8-intercom/
-plan.md` Stage 1) has a top-level `"net1"` key instead (see
+plan.md` Stage 1) has a top-level `"net1"` key instead; a 9K113
+cockpit-switch state line (`plans/9k113-effectors/plan.md`, BL-B66
+Stage 1) has a top-level `"missl_pw"` key instead (see
 `schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
 `schema.PetrovichIndicationSample`/`schema.PetrovichWheelSample`/
-`schema.PttSample`/`schema.Spu8Sample`). `_handle_line` distinguishes them
+`schema.PttSample`/`schema.Spu8Sample`/`schema.CockpitSwitchState`).
+`_handle_line` distinguishes them
 by that key's presence before parsing, rather than trying each parser in
 turn and falling back on failure -- a genuinely malformed line of any kind
 should be logged and dropped once, not misattributed to the wrong schema's
@@ -46,6 +49,7 @@ from types import TracebackType
 from typing import Self
 
 from collector.cache import (
+    CockpitSwitchCache,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
@@ -54,6 +58,8 @@ from collector.cache import (
     WorldObjectsCache,
 )
 from schema import (
+    CockpitSwitchParseError,
+    CockpitSwitchState,
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
     PetrovichWheelParseError,
@@ -83,7 +89,7 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-10-05"
+EXPECTED_EXPORT_VERSION = "2026-10-21b"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -100,6 +106,13 @@ EXPECTED_EXPORT_VERSION = "2026-10-05"
 #: reflects that this field cannot be trusted yet -- same "make the mismatch
 #: loud" reasoning as the paragraph above, not a claim that this specific
 #: change is unsafe to skip.
+#: Bumped again 2026-10-21 (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1)
+#: for the new cockpit-switch state feed (args 773/761/885/955/886/673,
+#: wire key "missl_pw") and the new `cockpit_switch` inbound command op --
+#: additive only, same reasoning as the two bumps above.
+#: Bumped again the same day (`"b"` suffix, BL-B66 Stage 4b) for two more
+#: fields on that same feed: args 874/876 (`sight_az`/`sight_elev`, the
+#: sight's own actual-position readback) -- additive only, same reasoning.
 #: Loopback-only by design -- Export.lua and the collector run on the same
 #: Windows box (plan decision 2); nothing outside this machine should be able
 #: to push telemetry samples.
@@ -132,6 +145,9 @@ class CollectorServer:
         # Same optional-cache reasoning as ptt_cache above: a collector
         # without a Spu8Cache simply drops "net1" lines.
         spu8_cache: Spu8Cache | None = None,
+        # Same optional-cache reasoning again: a collector without a
+        # CockpitSwitchCache simply drops "missl_pw" lines.
+        cockpit_switch_cache: CockpitSwitchCache | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
@@ -141,6 +157,7 @@ class CollectorServer:
         self._petrovich_wheel_cache = petrovich_wheel_cache
         self._ptt_cache = ptt_cache
         self._spu8_cache = spu8_cache
+        self._cockpit_switch_cache = cockpit_switch_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -369,6 +386,21 @@ class CollectorServer:
             logger.debug("parsed spu8 sample: %r", spu8_sample)
             if self._spu8_cache is not None:
                 self._spu8_cache.push(spu8_sample)
+            return
+
+        if "missl_pw" in data:
+            # Ahead of the telemetry fallthrough for the same reason the
+            # "ptt"/"net1" branches above are.
+            try:
+                cockpit_switch_sample = CockpitSwitchState.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except CockpitSwitchParseError:
+                logger.warning("dropping malformed cockpit-switch line: %r", line)
+                return
+            logger.debug("parsed cockpit-switch sample: %r", cockpit_switch_sample)
+            if self._cockpit_switch_cache is not None:
+                self._cockpit_switch_cache.push(cockpit_switch_sample)
             return
 
         try:

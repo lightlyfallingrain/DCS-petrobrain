@@ -19,6 +19,7 @@ from detection_trace_writer import DetectionTraceWriter
 from logger import ConsolePerceptionRunner, _reroll_run_logs, _speech_log_sink
 from mission_memory.entries import FiredOnPayload
 from mission_memory.store import MissionMemory
+from sight_trace_writer import SightTraceWriter
 
 
 def _runner() -> ConsolePerceptionRunner:
@@ -31,7 +32,7 @@ def test_reroll_closes_the_old_detection_trace_writer_and_opens_a_new_one(
     base = tmp_path / "trace.jsonl"
     old_writer = DetectionTraceWriter(base)
 
-    new_writer, _ = _reroll_run_logs(
+    new_writer, _, _ = _reroll_run_logs(
         _runner(),
         None,
         MissionMemory(),
@@ -62,7 +63,7 @@ def test_reroll_closes_the_old_belief_truth_writer_and_rewires_crew_console_sink
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     crew_console.speech_log_sink = _speech_log_sink(old_writer, runner)
 
-    _, new_writer = _reroll_run_logs(
+    _, new_writer, _ = _reroll_run_logs(
         runner,
         crew_console,
         MissionMemory(),
@@ -176,6 +177,38 @@ def test_reroll_rewires_mission_memory_sink(tmp_path: Path) -> None:
     assert "CONTACT_1" in rolled[0].read_text()
 
 
+def test_reroll_closes_the_old_slew_trace_writer_and_opens_a_new_one(
+    tmp_path: Path,
+) -> None:
+    """`BL-B66` Stage 4b -- same open-handle-close-before-reassign shape as
+    the detection-trace test above, same reason (`SightTraceWriter.
+    __init__` also opens its file eagerly)."""
+    base = tmp_path / "slew_trace.jsonl"
+    old_writer = SightTraceWriter(base)
+
+    _, _, new_writer = _reroll_run_logs(
+        _runner(),
+        None,
+        MissionMemory(),
+        trace_writer=None,
+        belief_truth_writer=None,
+        detection_trace_base=None,
+        belief_truth_log_base=None,
+        speech_log_base=None,
+        group_trace_base=None,
+        mission_memory_base=None,
+        slew_trace_writer=old_writer,
+        slew_trace_base=base,
+        when=1760000000.0,
+    )
+
+    assert new_writer is not None
+    assert new_writer is not old_writer
+    assert old_writer._file.closed
+    assert new_writer._path != old_writer._path
+    assert new_writer._path.exists()
+
+
 def test_reroll_is_a_no_op_for_a_log_that_was_never_enabled(tmp_path: Path) -> None:
     """`base is None` for every log here -- a reroll call where nothing was
     ever enabled must not create any file and must return the (both-None)
@@ -183,7 +216,7 @@ def test_reroll_is_a_no_op_for_a_log_that_was_never_enabled(tmp_path: Path) -> N
     runner = _runner()
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
 
-    trace_writer, belief_truth_writer = _reroll_run_logs(
+    trace_writer, belief_truth_writer, slew_trace_writer = _reroll_run_logs(
         runner,
         crew_console,
         MissionMemory(),
@@ -199,6 +232,7 @@ def test_reroll_is_a_no_op_for_a_log_that_was_never_enabled(tmp_path: Path) -> N
 
     assert trace_writer is None
     assert belief_truth_writer is None
+    assert slew_trace_writer is None
     assert crew_console.transcript_log is None
     assert runner.group_trace_sink is None
     assert list(tmp_path.iterdir()) == []

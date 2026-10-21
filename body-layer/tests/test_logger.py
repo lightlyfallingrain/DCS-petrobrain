@@ -41,6 +41,7 @@ from belief.mission_phase import (
     MissionPhaseTracker,
     MissionUnderstandingData,
 )
+from belief.sight_effector import GUIDANCE_UNIT_SWITCH_DELAY_S, GuidanceUnitState
 from belief.tasks import TaskStore
 from logger import (
     _SIGHT_WIDE_SEARCH_FAR_M,
@@ -878,6 +879,17 @@ class FakeConsoleAircraftClient:
         #: start_latest` event, `None` by default (matching every existing
         #: Stage 1/2 test, which never cared about theatre switching).
         self.mission_start_theatre: str | None = None
+        #: `BL-B66` (`plans/9k113-effectors/plan.md`) -- every
+        #: `write_cockpit_switch` call this fake has recorded, oldest
+        #: first.
+        self.cockpit_switch_writes: list[tuple[int, int, float]] = []
+        #: `BL-B66` Stage 4b -- `None` (the default) means no cockpit-
+        #: switch sample has arrived yet, matching `get_cockpit_switch_
+        #: state_latest`'s own pre-existing default. A test exercising the
+        #: sight-position readback (`sight_az`/`sight_elev`) sets this
+        #: directly between polls, the same way `mission_start_sequence`
+        #: above is driven.
+        self.cockpit_switch_state: dict[str, Any] | None = None
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -928,6 +940,18 @@ class FakeConsoleAircraftClient:
 
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return None
+
+    def get_cockpit_switch_state_latest(self) -> dict[str, Any] | None:
+        # `BL-B66` (`plans/9k113-effectors/plan.md`) -- `None` is the
+        # ordinary startup state, same "not an error" posture as every
+        # other `get_*` default on this fake; Stage 4b's tests drive
+        # `self.cockpit_switch_state` directly.
+        return self.cockpit_switch_state
+
+    def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
+        # `BL-B66` -- recorded rather than a true no-op, so a test can
+        # assert on the guidance-unit power-up sequence's actual writes.
+        self.cockpit_switch_writes.append((device, cmd, value))
 
 
 @pytest.fixture(autouse=True)
@@ -4479,3 +4503,435 @@ def test_live_los_coverage_gap_warning_is_visible_under_default_logging_config(
 
     stderr = capsys.readouterr().err
     assert "live LOS coverage gap" in stderr, stderr
+
+
+# -- `BL-B66` review required fix (`plans/9k113-effectors/review.md`) -- the
+# `_run_crew_text_poll_loop` wiring for the guidance-unit power-up (takeoff
+# detection -> sequencer advance -> `sight_ready` -> "Guidance unit ready"
+# spoken exactly once) and the OBSERV/weapons-safety cockpit write-through
+# had no test driving the *real* poll loop, only `belief.sight_effector`'s
+# own pure-function tests in isolation. Confirmed by the reviewer via
+# mutation: forcing the takeoff rising-edge `if` to `False`, and separately
+# removing the `announced` guard in `CrewConsole.drain_guidance_unit_ready`,
+# both left the full suite green. These tests drive `_run_crew_text_poll_
+# loop` on a real thread, same technique as `test_crew_text_poll_loop_
+# resets_belief_on_mission_restart` above, mutating the fake client's
+# telemetry between polls the way a real sortie's clock would. --------------
+
+
+def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_loop(
+    tmp_path: Path,
+) -> None:
+    """The full Stage 2 sequence, through the real loop: no write while
+    still on the ground; the four switches written in order on the
+    takeoff rising edge; `sight_ready` becomes `True` only after the
+    fourth; "Guidance unit ready." spoken exactly once across several
+    subsequent polls, not once per poll."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # on the ground (<= the 10 m threshold)
+    telemetry["dcs_model_time_s"] = 0.0
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.output = io.StringIO()
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None, "the first on-ground poll never landed"
+
+        # No power-up while still on the ground.
+        assert aircraft_client.cockpit_switch_writes == []
+        assert crew_console.sight_ready is False
+
+        # Takeoff: the rising edge.
+        telemetry["altitude_agl_m"] = 500.0
+        sim_t = 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+
+        deadline = time.monotonic() + 5.0
+        while (
+            len(aircraft_client.cockpit_switch_writes) < 4
+            and time.monotonic() < deadline
+        ):
+            # `sight_ready` must not flip true before the fourth switch is
+            # written -- checked every iteration a partial count is seen,
+            # not only at the end, so a sequencer that readied early would
+            # be caught even if the 4th write landed on the very next tick.
+            seen = len(aircraft_client.cockpit_switch_writes)
+            if 0 < seen < 4:
+                assert crew_console.sight_ready is False, (
+                    f"sight_ready went true after only {seen} of 4 switches"
+                )
+            # Each write is gated by `GUIDANCE_UNIT_SWITCH_DELAY_S` of *sim*
+            # time, not wall time -- advance the fake's own clock, or the
+            # sequence stalls after the first switch.
+            sim_t += GUIDANCE_UNIT_SWITCH_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+
+        assert aircraft_client.cockpit_switch_writes == [
+            (6, 3028, 1.0),
+            (16, 3015, 1.0),
+            (7, 3001, 1.0),
+            (6, 3030, 1.0),
+        ], aircraft_client.cockpit_switch_writes
+
+        # A few more polls, sim time still advancing -- "Guidance unit
+        # ready." must stay spoken exactly once, not once per poll
+        # (the reviewer's second mutation: removing the `announced` guard).
+        for _ in range(6):
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert crew_console.sight_ready is True
+    assert runner.guidance_unit_state.sight_ready is True
+    assert runner.guidance_unit_state.guidance_unit_ready_announced is True
+    assert isinstance(crew_console.output, io.StringIO)
+    spoken = crew_console.output.getvalue()
+    assert spoken.count("Guidance unit ready.") == 1, spoken
+
+
+def test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up(
+    tmp_path: Path,
+) -> None:
+    """Plan §2: `takeoff_seen` is a one-shot latch per mission -- a
+    touch-and-go (landing, then taking off again) must not re-run the
+    four-switch sequence. Starts from an already-ready `GuidanceUnitState`
+    (bypassing the full sequence, which the test above already covers) so
+    this test only has to drive the second edge."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # already airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.guidance_unit_state = GuidanceUnitState(
+        takeoff_seen=True,
+        power_up_stage=4,
+        sight_ready=True,
+        guidance_unit_ready_announced=True,
+    )
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # Land, then take off again.
+        telemetry["altitude_agl_m"] = 5.0
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while not crew_console.on_ground and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert crew_console.on_ground is True, "the landing was never observed"
+
+        telemetry["altitude_agl_m"] = 500.0
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while crew_console.on_ground and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert crew_console.on_ground is False, "the second takeoff was never observed"
+
+        # A few more polls to give a wrongly-re-armed sequencer a chance to
+        # write again.
+        for _ in range(5):
+            sim_t += GUIDANCE_UNIT_SWITCH_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == []
+    assert runner.guidance_unit_state.power_up_stage == 4
+
+
+def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
+    tmp_path: Path,
+) -> None:
+    """Stage 3/4: once `sight_ready`, "Observ on" writes arg 886 (device
+    7, cmd 3002, value 1.0); "weapons armed"/"weapons safe" write arg 673
+    (device 6, cmd 3020) -- all through the real `handle_command` ->
+    `_run_crew_text_poll_loop` drain path, not just the handler setting
+    the one-shot transition field. Also: "Observ on" *before* ready writes
+    nothing and is refused (the gate is synchronous in `_handle_observ_on`,
+    unit-tested in `test_crew_console.py`, but reproduced here against the
+    real loop so a future change to the gate's wiring is caught here too)."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    # On the ground, matching `CrewConsole.on_ground`'s own default
+    # (`True`) -- so the first poll is *not* a takeoff rising edge, and
+    # the power-up sequence genuinely has not started yet for the
+    # pre-ready OBSERV-on refusal below.
+    telemetry["altitude_agl_m"] = 5.0
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    # Not yet ready -- the pre-ready OBSERV-on refusal is checked against
+    # this state before the sequence is set up to complete.
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+        assert crew_console.sight_ready is False
+
+        # OBSERV on before ready: refused, no write.
+        lines = crew_console.handle_command("observ_on", now_sim=sim_t)
+        assert lines == ["Unable, guidance unit not ready."]
+        time.sleep(0.1)
+        assert aircraft_client.cockpit_switch_writes == []
+
+        # Make the guidance unit ready without re-running takeoff detection
+        # (already covered above) -- jump the state directly, same as the
+        # second-takeoff test.
+        runner.guidance_unit_state = GuidanceUnitState(
+            takeoff_seen=True,
+            power_up_stage=4,
+            sight_ready=True,
+            guidance_unit_ready_announced=True,
+        )
+        deadline = time.monotonic() + 5.0
+        while not crew_console.sight_ready and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert crew_console.sight_ready is True
+
+        lines = crew_console.handle_command("observ_on", now_sim=sim_t)
+        assert lines == ["Observ on."]
+        deadline = time.monotonic() + 5.0
+        while (
+            7,
+            3002,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (7, 3002, 1.0) in aircraft_client.cockpit_switch_writes
+
+        lines = crew_console.handle_command("weapons_armed", now_sim=sim_t)
+        assert lines == ["Weapons armed."]
+        deadline = time.monotonic() + 5.0
+        while (
+            6,
+            3020,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (6, 3020, 1.0) in aircraft_client.cockpit_switch_writes
+
+        lines = crew_console.handle_command("weapons_safe", now_sim=sim_t)
+        assert lines == ["Weapons safe."]
+        deadline = time.monotonic() + 5.0
+        while (
+            6,
+            3020,
+            0.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (6, 3020, 0.0) in aircraft_client.cockpit_switch_writes
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert runner.guidance_unit_state.observ_commanded is True
+    assert runner.guidance_unit_state.weapon_safety_commanded == "safe"
+
+
+def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
+    """`BL-B66` Stage 4b -- `--slew-trace` is wired through a real
+    `_run_crew_text_poll_loop` run, not only exercised against
+    `SightTraceWriter`/`sight_effector` in isolation (the wiring-gap
+    lesson from this branch's own review: a module's unit tests passing
+    does not mean the poll loop actually calls it). Drives OBSERV on, a
+    sight-position readback arriving via the fake's `cockpit_switch_state`,
+    and OBSERV off again -- then asserts on the rows actually written to
+    disk, in order."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # airborne; no takeoff edge to chase
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    # Already ready -- the power-up sequence itself is covered above.
+    runner.guidance_unit_state = GuidanceUnitState(
+        takeoff_seen=True,
+        power_up_stage=4,
+        sight_ready=True,
+        guidance_unit_ready_announced=True,
+    )
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    slew_trace_path = tmp_path / "slew.jsonl"
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={"slew_trace_path": slew_trace_path},
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+        # At least one row before OBSERV is ever touched -- Stage 4b's own
+        # "every poll, unconditionally" contract (unlike the Lua-side
+        # per-frame log, which is OBSERV-gated).
+        deadline = time.monotonic() + 5.0
+        while not slew_trace_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert slew_trace_path.exists(), "no row was ever written"
+
+        lines = crew_console.handle_command("observ_on", now_sim=sim_t)
+        assert lines == ["Observ on."]
+        deadline = time.monotonic() + 5.0
+        while (
+            7,
+            3002,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (7, 3002, 1.0) in aircraft_client.cockpit_switch_writes
+
+        # A sight-position readback arrives (as if from a hand-slew) --
+        # the next poll's row must carry it, converted to degrees, with
+        # `actual_azimuth_source == "readback"`.
+        aircraft_client.cockpit_switch_state = {
+            "t": sim_t,
+            "received_wall_clock_s": 0.0,
+            "observe_on": True,
+            "weapons_armed": False,
+            "sight_az": 0.16500,
+            "sight_elev": -0.28125,
+        }
+        deadline = time.monotonic() + 5.0
+        while (
+            runner.guidance_unit_state.sight_az_raw is None
+            and time.monotonic() < deadline
+        ):
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert runner.guidance_unit_state.sight_az_raw == pytest.approx(0.16500)
+        # One more poll so the readback this test just set actually lands
+        # in a written row (the write happens with that poll's own state,
+        # not retroactively).
+        sim_t += 0.5
+        telemetry["dcs_model_time_s"] = sim_t
+        time.sleep(0.1)
+
+        lines = crew_console.handle_command("observ_off", now_sim=sim_t)
+        assert lines == ["Observ off."]
+        deadline = time.monotonic() + 5.0
+        while (
+            7,
+            3002,
+            0.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (7, 3002, 0.0) in aircraft_client.cockpit_switch_writes
+        time.sleep(0.1)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    rows = [
+        json.loads(line)
+        for line in slew_trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) >= 2, "expected at least the pre- and post-readback rows"
+    assert any(row["observ_commanded"] is True for row in rows)
+    readback_rows = [row for row in rows if row["actual_azimuth_source"] == "readback"]
+    assert readback_rows, rows
+    assert readback_rows[-1]["actual_azimuth_deg"] == pytest.approx(22.5)
+    assert readback_rows[-1]["raw_sight_az"] == pytest.approx(0.16500)
+    assert readback_rows[-1]["raw_sight_elev"] == pytest.approx(-0.28125)
+    # Elevation never claims "readback" -- 876's degrees-per-unit is
+    # unmeasured (`sight_trace_writer`'s own module docstring).
+    assert readback_rows[-1]["actual_elevation_source"] != "readback"
+    assert any(row["observ_commanded"] is False for row in rows)

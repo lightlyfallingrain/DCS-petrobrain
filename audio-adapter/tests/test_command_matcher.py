@@ -826,6 +826,55 @@ class TestObservOnOff:
             assert result.token == expected, phrase
 
 
+# --- weapons_armed / weapons_safe: BL-B66, plans/9k113-effectors/plan.md §4 -
+
+
+class TestWeaponsArmedSafe:
+    """`weapons_armed`/`weapons_safe` -- the user's own exact words
+    (Decision 3), plain slot-free phrases, no F10 equivalent (same
+    posture `observ_on`/`observ_off` have)."""
+
+    def test_both_phrasings_resolve(self) -> None:
+        result = match_transcript("weapons armed")
+        assert result.token == "weapons_armed"
+        assert result.match_ratio == 1.0
+        assert result.verb_anchored is True
+        assert result.ambiguous is False
+        assert result.slots is None
+
+        result = match_transcript("weapons safe")
+        assert result.token == "weapons_safe"
+        assert result.match_ratio == 1.0
+        assert result.verb_anchored is True
+        assert result.ambiguous is False
+        assert result.slots is None
+
+    def test_weapons_is_a_measured_false_anchor_against_tanks(self) -> None:
+        """`vocabulary.py`'s own comment on this pair: unlike `engage`'s
+        "attack" rejection, "weapons" is admitted despite colliding with
+        the reviewer's adversarial sentence at exactly `VERB_FLOOR`
+        (`ratio("tanks", "weapons") == 0.5`). The phrase-sequence score --
+        the real defence -- still rejects the sentence end to end, which
+        is the only guarantee this module's design ever makes about a
+        false anchor."""
+        from command_matcher import VERB_FLOOR, _verb_anchor_ratio
+
+        assert _verb_anchor_ratio("tanks") == pytest.approx(VERB_FLOOR)
+
+        result = match_transcript("the tanks are on the ridge")
+        assert result.verb_anchored is True
+        assert result.token is None  # the phrase-sequence score still rejects it
+
+    def test_does_not_collide_with_any_existing_phrase(self) -> None:
+        for phrase, expected in (
+            ("weapons armed", "weapons_armed"),
+            ("weapons safe", "weapons_safe"),
+        ):
+            result = match_transcript(phrase)
+            assert result.ambiguous is False, phrase
+            assert result.token == expected, phrase
+
+
 # --- mark_here / mark_target: plans/bl8-mission-memory/plan.md Decision 6 -
 
 

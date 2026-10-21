@@ -240,7 +240,14 @@ def test_non_command_speech_enqueues_with_null_token(
         assert status == 200
         assert isinstance(body, list)
         assert body[0]["token"] is None
-        assert body[0]["verb_anchored"] is False
+        # `verb_anchored` is no longer asserted `False` here as of
+        # `BL-B66`'s "weapons armed"/"weapons safe" vocabulary addition
+        # (`vocabulary.py`'s own comment on the pair) -- "weapons" is a
+        # measured false anchor against "tanks" (`ratio == VERB_FLOOR`
+        # exactly), so this transcript now anchors, but the
+        # phrase-sequence score (the module's own "real defence") still
+        # rejects it: `token` stays `None`, which is this test's actual
+        # regression guard.
     finally:
         server.close()
         thread.join(timeout=5)

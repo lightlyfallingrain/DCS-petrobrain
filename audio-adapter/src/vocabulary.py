@@ -216,6 +216,39 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # tokens stay at the ordinary `ACT_FLOOR`.
         "observ_on",
         "observ_off",
+        # `weapons armed` / `weapons safe` (`BL-B66`, `plans/
+        # 9k113-effectors/plan.md` §4) -- the weapons safety switches bar,
+        # plain slot-free phrases, same posture as `observ_on`/
+        # `observ_off` above. **Deliberately "weapons armed"/"weapons
+        # safe" only** -- user direction 2026-10-21 dropped "weapons
+        # on"/"weapons off" (explore-notes.md point 7 had proposed
+        # "weapons off/safe" as the matching pair; the user's own final
+        # answer was "weapons armed/safe", not that). No F10 menu
+        # equivalent, same reasoning `observ_on`/`observ_off`'s own
+        # comment gives (voice is primary, the F10 vocabulary is the
+        # legacy, non-growing one) -- checked, per the task brief's own
+        # instruction to check.
+        #
+        # **Unlike `engage`'s own "attack" rejection above, "weapons" is
+        # added here despite measuring the identical collision** --
+        # `difflib.SequenceMatcher(None, "tanks", "weapons").ratio() ==
+        # 0.5`, exactly `command_matcher.VERB_FLOOR`, so the reviewer's
+        # own adversarial sentence ("the tanks are on the ridge") now
+        # false-anchors on "weapons" too. The difference from `engage`:
+        # that word had a real substitute (`engage`/`engage target`
+        # already cover the dispatched token); there is no substitute
+        # for "weapons armed"/"weapons safe" -- the user's own exact
+        # words, Decision 3. The phrase-sequence score (`_phrase_match_
+        # ratio`, this module's own docstring on why that is "the real
+        # defence") still rejects the sentence end to end -- `token`
+        # stays `None` -- this only flips the intermediate `verb_anchored`
+        # flag from `False` to `True` on that one adversarial case, which
+        # `test_transcribe_api.py::test_non_command_speech_enqueues_with_
+        # null_token` had to be updated to reflect (one assertion, not the
+        # test's own `token is None` outcome). Flagged for the user/
+        # reviewer rather than silently absorbed.
+        "weapons_armed",
+        "weapons_safe",
         # `mark here` / `mark target` (`plans/bl8-mission-memory/plan.md`
         # Decision 6) -- the commanded half of mission memory, reachable
         # by voice and by the brain tool only, deliberately no new F10
@@ -582,6 +615,12 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `VOICE_ONLY_TOKENS`' own comment on why that argues for the
     # *ordinary* `ACT_FLOOR`, not a stricter one.
     "observ_off": ("observ off", "observe off"),
+    # `weapons armed` / `weapons safe` (`BL-B66`) -- the weapons safety
+    # switches bar. One phrasing each, like `drop_target`/`radio_check` --
+    # these are the user's own exact words, with no recorded ambiguity to
+    # hedge against yet.
+    "weapons_armed": ("weapons armed",),
+    "weapons_safe": ("weapons safe",),
     # `mark here` -- writes ownship's current position (`plans/
     # bl8-mission-memory/plan.md` Decision 6). Plain, slot-free phrase,
     # matching `drop_target`'s own posture. "remember this location" is

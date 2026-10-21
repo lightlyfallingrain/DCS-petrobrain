@@ -241,6 +241,13 @@ from belief.optic_policy import (
     search_pattern,
 )
 from belief.optic_policy import decide as decide_optic
+from belief.sight_effector import GuidanceUnitState
+from belief.sight_effector import advance_power_up as advance_guidance_unit_power_up
+from belief.sight_effector import refresh_readback as refresh_cockpit_switch_readback
+from belief.sight_effector import sight_ready as guidance_unit_sight_ready
+from belief.sight_effector import start_power_up as start_guidance_unit_power_up
+from belief.sight_effector import write_observ as write_observ_switch
+from belief.sight_effector import write_weapon_safety as write_weapon_safety_switch
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
 from coordinates.projections import THEATRE_PROJECTIONS
@@ -289,6 +296,7 @@ from perception.optics import (
 )
 from perception.source import Observation, OwnshipState, PerceptionSource
 from run_log_paths import per_run_log_path
+from sight_trace_writer import SightTraceWriter
 from speech_log import SpeechLogWriter
 from store.reader import load_only_region
 from tuning import render_print_tuning, render_startup_block, validate_against_defaults
@@ -471,6 +479,14 @@ class ConsolePerceptionRunner:
     #: apply instead; see that field's own docstring.
     attack_run_state: AttackRunState | None = None
 
+    #: The 9K113 guidance unit's own state (`BL-B66`, `plans/
+    #: 9k113-effectors/plan.md` Stages 2-4), carried the same way
+    #: `optic_state`/`attack_run_state` are -- replaced wholesale each
+    #: poll via `replace()`, never mutated. `belief.sight_effector` is the
+    #: one module that knows this state's device/arg/command numbers;
+    #: this field only carries the value between polls.
+    guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
+
     #: Recent `(t_sim, pitch, bank, heading)` samples, oldest first -- the
     #: steadiness gate's only input. Bounded because it is a *rate*
     #: estimate: a longer history would let a manoeuvre a minute ago still
@@ -527,7 +543,8 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
-        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
+        `guidance_unit_state`, `attitude_history`, `optic`,
+        `_last_look_direction`, `last_mission_
         start_sequence`) resets to its declared default.
 
         **`_last_look_direction` needs an explicit line, not just the
@@ -2277,8 +2294,12 @@ def _reroll_run_logs(
     speech_log_base: Path | None,
     group_trace_base: Path | None,
     mission_memory_base: Path | None,
+    slew_trace_writer: SightTraceWriter | None = None,
+    slew_trace_base: Path | None = None,
     when: float | None = None,
-) -> tuple[DetectionTraceWriter | None, BeliefTruthLogWriter | None]:
+) -> tuple[
+    DetectionTraceWriter | None, BeliefTruthLogWriter | None, SightTraceWriter | None
+]:
     """`BL-15` Stage 1 user decision 5 ("per mission", not a marker line in
     whatever log happened to be open): called once from each poll loop,
     immediately after `_check_for_new_mission` reports it performed a
@@ -2338,6 +2359,11 @@ def _reroll_run_logs(
     a no-op" shape as `_reset_mission_state`'s own `crew_console`
     handling).
 
+    `slew_trace_writer`/`slew_trace_base` (`BL-B66` Stage 4b) are the same
+    "open file handle, close before replacing" shape `trace_writer` is --
+    `--console` passes neither (always `None`), the same reason it passes
+    no `speech_log_base`.
+
     A directory that has since become unwritable degrades that one log to
     "stop writing it for the rest of this mission" with a line on stderr
     -- mirrors `_per_run_log_paths`'s own startup-time degrade policy
@@ -2386,7 +2412,13 @@ def _reroll_run_logs(
     if new_mission_memory is not None:
         mission_memory.set_sink(MissionMemoryLogWriter(new_mission_memory).write)
 
-    return trace_writer, belief_truth_writer
+    new_slew_trace = _reroll_one(slew_trace_base, "slew-trace")
+    if new_slew_trace is not None:
+        if slew_trace_writer is not None:
+            slew_trace_writer.close()
+        slew_trace_writer = SightTraceWriter(new_slew_trace)
+
+    return trace_writer, belief_truth_writer, slew_trace_writer
 
 
 def _mark_here_fn(
@@ -2596,7 +2628,7 @@ def _run_console_poll_loop(
                     forest_occlusion=forest_occlusion,
                     fired_on_tracker=fired_on_tracker,
                 ):
-                    trace_writer, belief_truth_writer = _reroll_run_logs(
+                    trace_writer, belief_truth_writer, _ = _reroll_run_logs(
                         runner,
                         None,
                         mission_memory,
@@ -2878,6 +2910,8 @@ def _run_crew_text_poll_loop(
     speech_log_base: Path | None = None,
     group_trace_base: Path | None = None,
     mission_memory_base: Path | None = None,
+    slew_trace_path: Path | None = None,
+    slew_trace_base: Path | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -2909,7 +2943,11 @@ def _run_crew_text_poll_loop(
     (no `--console` twin, since `--console` has no `CrewConsole`/
     `transcript_log` to re-wire): the pre-stamp path for `--speech-log`,
     so a mission (re)start also re-rolls `crew_console.transcript_log` to
-    a fresh per-mission speech log."""
+    a fresh per-mission speech log. `slew_trace_path`/`slew_trace_base`
+    (`--slew-trace`, `BL-B66` Stage 4b) are the same "this loop's own
+    addition" shape as `speech_log_base` and for the same reason: the
+    takeoff/power-up/OBSERV wiring this writer reads only runs here, never
+    in `--console`."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
         DetectionTraceCollector()
@@ -2932,6 +2970,9 @@ def _run_crew_text_poll_loop(
     )
     if belief_truth_writer is not None:
         crew_console.speech_log_sink = _speech_log_sink(belief_truth_writer, runner)
+    slew_trace_writer = (
+        SightTraceWriter(slew_trace_path) if slew_trace_path is not None else None
+    )
     mission_memory = MissionMemory()
     if mission_memory_path is not None:
         mission_memory.set_sink(MissionMemoryLogWriter(mission_memory_path).write)
@@ -3014,17 +3055,21 @@ def _run_crew_text_poll_loop(
                     forest_occlusion=forest_occlusion,
                     fired_on_tracker=fired_on_tracker,
                 ):
-                    trace_writer, belief_truth_writer = _reroll_run_logs(
-                        runner,
-                        crew_console,
-                        mission_memory,
-                        trace_writer=trace_writer,
-                        belief_truth_writer=belief_truth_writer,
-                        detection_trace_base=detection_trace_base,
-                        belief_truth_log_base=belief_truth_log_base,
-                        speech_log_base=speech_log_base,
-                        group_trace_base=group_trace_base,
-                        mission_memory_base=mission_memory_base,
+                    trace_writer, belief_truth_writer, slew_trace_writer = (
+                        _reroll_run_logs(
+                            runner,
+                            crew_console,
+                            mission_memory,
+                            trace_writer=trace_writer,
+                            belief_truth_writer=belief_truth_writer,
+                            detection_trace_base=detection_trace_base,
+                            belief_truth_log_base=belief_truth_log_base,
+                            speech_log_base=speech_log_base,
+                            group_trace_base=group_trace_base,
+                            mission_memory_base=mission_memory_base,
+                            slew_trace_writer=slew_trace_writer,
+                            slew_trace_base=slew_trace_base,
+                        )
                     )
                 runner.run_once()
                 if trace_collector is not None:
@@ -3067,10 +3112,63 @@ def _run_crew_text_poll_loop(
                     # current ground/air state rather than a one-shot
                     # latch from mission start.
                     if runner.last_ownship_state is not None:
+                        # `BL-B66` Stage 2 (`plans/9k113-effectors/
+                        # plan.md` §2): captured *before* `on_ground` is
+                        # reassigned below, so the comparison just after
+                        # sees the transition rather than the new value
+                        # twice.
+                        was_on_ground = crew_console.on_ground
                         crew_console.on_ground = (
                             runner.last_ownship_state.alt_agl_m
                             <= ON_GROUND_AGL_THRESHOLD_M
                         )
+                        # The power-up sequencer fires once on the rising
+                        # edge of "was on the ground, now is not" this
+                        # mission, reusing `on_ground`'s existing signal
+                        # rather than a new telemetry field.
+                        if (
+                            was_on_ground
+                            and not crew_console.on_ground
+                            and not runner.guidance_unit_state.takeoff_seen
+                        ):
+                            runner.guidance_unit_state = start_guidance_unit_power_up(
+                                runner.guidance_unit_state, runner.last_t_sim
+                            )
+                        # Advances the sequence (a true no-op before it
+                        # has started or once it is complete) and
+                        # refreshes the readback fields from the aircraft
+                        # layer's own cockpit-switch telemetry -- neither
+                        # consumed by this entry's own logic (plan §3),
+                        # carried forward for `BL-B67`.
+                        runner.guidance_unit_state = advance_guidance_unit_power_up(
+                            runner.guidance_unit_state,
+                            runner.last_t_sim,
+                            aircraft_client,
+                        )
+                        runner.guidance_unit_state = refresh_cockpit_switch_readback(
+                            runner.guidance_unit_state,
+                            aircraft_client.get_cockpit_switch_state_latest(),
+                        )
+                        is_sight_ready = guidance_unit_sight_ready(
+                            runner.guidance_unit_state
+                        )
+                        # Refreshed every poll, same as `on_ground` --
+                        # `_handle_observ_on` reads this to gate the
+                        # command (plan §3).
+                        crew_console.sight_ready = is_sight_ready
+                        if is_sight_ready:
+                            runner.guidance_unit_state = replace(
+                                runner.guidance_unit_state,
+                                guidance_unit_ready_announced=(
+                                    crew_console.drain_guidance_unit_ready(
+                                        runner.last_t_sim,
+                                        ready=True,
+                                        announced=(
+                                            runner.guidance_unit_state.guidance_unit_ready_announced
+                                        ),
+                                    )
+                                ),
+                            )
                         # `plans/attack-run/plan.md` Stage 5 -- apply
                         # whatever `engage`/`disengage` the previous
                         # poll's command dispatch left as a one-shot
@@ -3111,6 +3209,23 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
+                            # `BL-B66` Stage 3 -- the real cockpit write
+                            # (arg 886), issued exactly once per accepted
+                            # request. `_handle_observ_on` has already
+                            # gated this on `sight_ready` at command time
+                            # (plan §3), so reaching here means the
+                            # request was accepted.
+                            try:
+                                write_observ_switch(aircraft_client, on=True)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    observ_commanded=True,
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "OBSERV-on cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
                             crew_console.observ_transition = None
                         elif crew_console.observ_transition == "off":
                             runner.optic_state = replace(
@@ -3120,7 +3235,51 @@ def _run_crew_text_poll_loop(
                                     runner.last_t_sim + HANDS_BUSY_DURATION_S
                                 ),
                             )
+                            try:
+                                write_observ_switch(aircraft_client, on=False)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    observ_commanded=False,
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "OBSERV-off cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
                             crew_console.observ_transition = None
+                        # `BL-B66` Stage 4 (plan §4/Co-moving Fields) --
+                        # the weapons safety bar (arg 673), one write, no
+                        # sequencing, same one-shot-signal shape as
+                        # `observ_transition` above. Set by
+                        # `_handle_weapons_armed`/`_handle_weapons_safe`
+                        # or by `_handle_engage`'s own existing "any
+                        # attack run start" trigger.
+                        if crew_console.weapon_safety_transition == "armed":
+                            try:
+                                write_weapon_safety_switch(aircraft_client, armed=True)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    weapon_safety_commanded="armed",
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "weapons-armed cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
+                            crew_console.weapon_safety_transition = None
+                        elif crew_console.weapon_safety_transition == "safe":
+                            try:
+                                write_weapon_safety_switch(aircraft_client, armed=False)
+                                runner.guidance_unit_state = replace(
+                                    runner.guidance_unit_state,
+                                    weapon_safety_commanded="safe",
+                                )
+                            except AircraftLayerError:
+                                logger.warning(
+                                    "weapons-safe cockpit write failed (continuing)",
+                                    exc_info=True,
+                                )
+                            crew_console.weapon_safety_transition = None
                         runner.attack_run_state = crew_console.drain_attack_run(
                             runner.attack_run_state,
                             runner.last_t_sim,
@@ -3148,6 +3307,19 @@ def _run_crew_text_poll_loop(
                             # `decide_optic` above) deliberately is.
                             resolving_optic=runner.optic,
                         )
+                        # `BL-B66` Stage 4b: every poll a real ownship
+                        # state exists (the same guard the guidance-unit/
+                        # OBSERV block above this is nested under), after
+                        # that block has had its turn to update `optic_
+                        # state`/`guidance_unit_state` this poll -- never
+                        # before, or the row would log last poll's values
+                        # under this poll's timestamp.
+                        if slew_trace_writer is not None:
+                            slew_trace_writer.write_poll(
+                                runner.last_t_sim,
+                                runner.optic_state,
+                                runner.guidance_unit_state,
+                            )
                     # BL-8: after `run_once()` has settled this poll's
                     # belief, before `drain_events` -- Decision 3's
                     # ordering (a mark's seq exists before anything that
@@ -3250,6 +3422,8 @@ def _run_crew_text_poll_loop(
             trace_writer.close()
         if belief_truth_writer is not None:
             belief_truth_writer.close()
+        if slew_trace_writer is not None:
+            slew_trace_writer.close()
         world_model_conn.close()
 
 
@@ -3529,6 +3703,33 @@ def _resolve_mission_memory_log_path(
     except _RESOLVE_FAILURES as exc:
         print(
             f"mission-memory: could not create log directory {reported_parent} "
+            f"({exc}); continuing without this log",
+            file=sys.stderr,
+        )
+        return None
+    return stamped
+
+
+def _resolve_slew_trace_log_path(
+    slew_trace_path: Path | None, when: float | None = None
+) -> Path | None:
+    """`_resolve_group_trace_log_path`'s own sibling for `--slew-trace`
+    (`BL-B66` Stage 4b) -- same reasoning, same reproduced-rather-than-
+    shared policy body, same "its own `time.time()` call" divergence. See
+    that function's docstring for why this is a sibling rather than a
+    parameter on `_per_run_log_paths`."""
+    if slew_trace_path is None:
+        return None
+    stamp_at = time.time() if when is None else when
+    reported_parent = slew_trace_path.parent
+    try:
+        expanded = slew_trace_path.expanduser()
+        reported_parent = expanded.parent
+        stamped = per_run_log_path(expanded, stamp_at)
+        stamped.parent.mkdir(parents=True, exist_ok=True)
+    except _RESOLVE_FAILURES as exc:
+        print(
+            f"slew-trace: could not create log directory {reported_parent} "
             f"({exc}); continuing without this log",
             file=sys.stderr,
         )
@@ -3845,6 +4046,22 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--slew-trace",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per poll to this path -- desired vs. "
+            "actual sight aim (azimuth/elevation), the readback source "
+            "('readback' or 'model'), the error, OBSERV commanded/"
+            "observed, and optic mode -- BL-B66 Stage 4b, plans/"
+            "9k113-effectors/plan.md. Data for BL-B80's rate-loop "
+            "tuning; reduce with .claude/skills/sortie-log-triage. Only "
+            "meaningful with --crew-text (the guidance-unit power-up/"
+            "OBSERV write-through only runs on that poll loop); defaults "
+            "off, a true no-op when absent."
+        ),
+    )
+    parser.add_argument(
         "--eyesight-view",
         action="store_true",
         help=(
@@ -3964,6 +4181,11 @@ def main() -> None:
         parser.error("--belief-truth-log requires --console or --crew-text")
     if args.mission_memory is not None and not (args.console or args.crew_text):
         parser.error("--mission-memory requires --console or --crew-text")
+    if args.slew_trace is not None and not args.crew_text:
+        parser.error(
+            "--slew-trace requires --crew-text (the guidance-unit power-up/"
+            "OBSERV write-through only runs on that poll loop)"
+        )
     if args.brain_client == "http" and args.brain_url is None:
         parser.error("--brain-client http requires --brain-url")
 
@@ -4068,6 +4290,7 @@ def main() -> None:
     speech_log_base = _expand_log_base(args.speech_log)
     group_trace_base = _expand_log_base(args.group_trace)
     mission_memory_base = _expand_log_base(args.mission_memory)
+    slew_trace_base = _expand_log_base(args.slew_trace)
 
     # BL-11 Stage 5: each run writes its own files rather than appending to
     # one that grows across sorties. Applied after the default resolution
@@ -4085,12 +4308,15 @@ def main() -> None:
     # the same reason `--group-trace` has one -- see
     # `_resolve_mission_memory_log_path`'s own docstring.
     args.mission_memory = _resolve_mission_memory_log_path(args.mission_memory)
+    # BL-B66 Stage 4b: a sixth per-run log, same sibling-function shape.
+    args.slew_trace = _resolve_slew_trace_log_path(args.slew_trace)
     for label, rolled in (
         ("detection-trace", args.detection_trace),
         ("belief-truth-log", args.belief_truth_log),
         ("speech-log", args.speech_log),
         ("group-trace", args.group_trace),
         ("mission-memory", args.mission_memory),
+        ("slew-trace", args.slew_trace),
     ):
         if rolled is not None:
             print(f"{label}: writing {rolled}", file=sys.stderr)
@@ -4177,6 +4403,8 @@ def main() -> None:
                 speech_log_base,
                 group_trace_base,
                 mission_memory_base,
+                args.slew_trace,
+                slew_trace_base,
             ),
             daemon=True,
         )

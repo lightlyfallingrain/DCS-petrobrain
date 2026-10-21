@@ -209,6 +209,19 @@ doesn't). The join itself (`src/detection_trace_writer.py`) is the one module in
 deliberately allowed to hold both ground truth and belief at once, and is read-only against
 `ContactStore` — see that module's own docstring for the boundary this preserves.
 
+Add `--slew-trace PATH` alongside `--crew-text` (`BL-B66` Stage 4b, `plans/9k113-effectors/
+plan.md`) to write one JSON line per poll to `PATH`: desired vs. actual 9K113 sight aim
+(azimuth/elevation), whether `actual` came from a real position readback or body-layer's own
+rate-limiting model (`actual_*_source`), the resulting error, OBSERV commanded/observed, and optic
+mode — data for `[[BL-B80]]`'s rate-loop tuning, not a user-facing feature. `src/
+sight_trace_writer.py` is the writer; reduce with `.claude/skills/sortie-log-triage`, which also
+reads `Export.lua`'s own per-**frame** companion log (`aircraft_layer_slew_debug.flag` →
+`aircraft_layer_slew_trace.log`, a different flag from the general `DEBUG` one, since this writes
+every frame rather than a handful of one-shot dumps). `parser.error`s if passed without
+`--crew-text` (the guidance-unit power-up/OBSERV write-through this writer reads only runs on that
+poll loop, unlike `--detection-trace`'s `--console`-or-`--crew-text` either/or above); defaults
+off, a true no-op when absent, same additive posture as every other per-run log.
+
 **A genuine DCS mission (re)start** (`BL-15`, `plans/bl15-mission-start/plan.md`) is detected via
 the aircraft-layer's `onSimulationStart`-driven `GET /mission_start/latest` and gives belief,
 mission memory, and every perception source a clean slate (`logger._check_for_new_mission`/
@@ -235,8 +248,9 @@ path a failed switch only stops perception, silently from the pilot's perspectiv
 `--console` is a debug harness, not the flight path.
 
 **Per-mission log files (Decision 5).** `--detection-trace`/`--belief-truth-log`/`--mission-memory`/
-`--speech-log`/`--group-trace` each roll to a *fresh* stamped filename (same `run_log_paths`
-mechanism as the initial per-run stamp, `BL-11` Stage 5) on every detected mission (re)start, not
+`--speech-log`/`--group-trace`/`--slew-trace` each roll to a *fresh* stamped filename (same
+`run_log_paths` mechanism as the initial per-run stamp, `BL-11` Stage 5) on every detected mission
+(re)start, not
 just once at process start — a sortie that restarts the mission mid-process gets its own set of
 log files per mission, the same way starting a fresh process would, rather than one file spanning
 several unrelated missions.

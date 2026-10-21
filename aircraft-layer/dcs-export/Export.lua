@@ -136,7 +136,19 @@ local socket = require("socket.core")
 -- additive only, but the version string still moves per this comment's
 -- own rule. Update aircraft-layer/src/collector/server.py's
 -- EXPECTED_EXPORT_VERSION in the same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-05"
+--
+-- Bumped again 2026-10-21 (plans/9k113-effectors/plan.md, BL-B66 Stage 1)
+-- for the new "cockpit_switch" inbound command op and the matching
+-- cockpit-switch state line (args 773/761/885/955/886/673, wire key
+-- "missl_pw") -- additive only, same reasoning.
+--
+-- Bumped again the same day, "...21b" (BL-B66 Stage 4b) for two more
+-- fields on the same cockpit-switch line: args 874/876 (the sight's own
+-- actual-position readback, wire keys "sight_az"/"sight_elev") -- additive
+-- only, same reasoning. Update
+-- aircraft-layer/src/collector/server.py's EXPECTED_EXPORT_VERSION in the
+-- same commit.
+local EXPORT_SCRIPT_VERSION = "2026-10-21b"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -173,6 +185,46 @@ local WHEEL_CENTER_BUTTON = 3015
 -- above that threshold since the release is only checked once per frame,
 -- not on a dedicated timer.
 local WHEEL_LONG_PRESS_S = 0.6
+
+-- 9K113 guidance-unit power-up / OBSERV / weapon-safety-bar switches
+-- (plans/9k113-effectors/plan.md, BL-B66 Stage 1). **Only the draw
+-- arguments are declared here, for the readback telemetry push below
+-- (push_cockpit_switch_state) -- the write side is the new generic
+-- "cockpit_switch" op (handle_cockpit_switch_command), which takes
+-- device/cmd/value straight off the wire with no allow-list (user
+-- direction 2026-10-21, see aircraft-layer/CLAUDE.md's "What this is").**
+-- `body-layer/src/belief/sight_effector.py` is the one module that knows
+-- these six switches' device/cmd numbers; this file deliberately does not
+-- duplicate them for the write path.
+--
+-- Confirmed live (aircraft-layer/research/2026-10-17-9k113-effector-and-
+-- slew-probe-findings.md) for 773/955/885/886/673. **761 (CPLR DISTR) is
+-- UNVERIFIED** -- corroborated by two independent readings
+-- (mi24p-command-surface.md's positional table and DCS-BIOS's own Mi-24P
+-- survey, aircraft-layer/research/2026-10-21-dcs-bios-mi24p-9k113-
+-- controls.md Q2), but which physical switch arg 761 actually is has not
+-- been confirmed by a live read-probe -- per the user's own "we can
+-- change the switch number easily" (explore-notes.md), a one-line fix if
+-- the acceptance sortie finds it wrong, not a blocker.
+local ARG_MISSL_PW = 773
+local ARG_CPLR_DISTR = 761 -- UNVERIFIED, see comment above
+local ARG_SIGHT_PW = 885
+local ARG_SCHO_PW = 955
+local ARG_OBSERVE = 886
+local ARG_WEAP_SAFE = 673
+
+-- The sight head's own actual-position readback -- args 874 (azimuth) and
+-- 876 (elevation), BL-B66 Stage 4b (`plans/9k113-effectors/plan.md`). Not a
+-- switch: these are the AI/player slew axes' position feedback, read here
+-- so `push_cockpit_switch_state` can carry them for BL-B80's own
+-- rate-loop tuning. Azimuth is calibrated (`arg_874 = (deg/60) * 0.44`,
+-- confirmed live on the readback while the *player* axis drove the head --
+-- `aircraft-layer/research/2026-10-17-9k113-effector-and-slew-probe-
+-- findings.md` finding 2); elevation's degrees-per-unit is still
+-- unmeasured, which is why both are sent raw and the degree conversion (for
+-- azimuth only) happens on the body-layer side, never here.
+local ARG_SIGHT_AZ = 874
+local ARG_SIGHT_ELEV = 876
 
 -- Debug logging, gated so the branch is free when off. DCS internals here
 -- are heavily unverified (field shapes, module load behavior) and this
@@ -235,6 +287,115 @@ local function debug_dump(label, value)
     end
     debug_log(label .. ":")
     dump(value, "  ", 0)
+end
+
+-- Per-frame slew telemetry log, BL-B66 Stage 4b (`plans/9k113-effectors/
+-- plan.md`) -- "Put logging in so that the slew loop can be adjusted based
+-- on data from logs" (user direction, 2026-10-21). Its own flag, separate
+-- from DEBUG above: DEBUG's own per-frame cost is already paid only on a
+-- handful of one-shot dumps and a few throttled sends, while this writes
+-- one line **every frame** while OBSERV is on -- a different cost profile
+-- that should not be forced on whenever someone wants the ordinary debug
+-- log, and should not silently ride along with it either. Touch
+-- `Saved Games\DCS\Scripts\aircraft_layer_slew_debug.flag` to enable;
+-- output goes to `Saved Games\DCS\Logs\aircraft_layer_slew_trace.log`.
+-- Checked once at load time, same as DEBUG.
+local SLEW_DEBUG = false
+do
+    local ok, f = pcall(io.open, lfs.writedir() .. "Scripts\\aircraft_layer_slew_debug.flag", "r")
+    if ok and f ~= nil then
+        SLEW_DEBUG = true
+        f:close()
+    end
+end
+
+local slew_log_file = nil
+local slew_log_buffer = {}
+
+-- Lines are buffered and flushed together rather than one `write`+`flush`
+-- per frame -- at DCS's frame rate that is one disk flush every ~8-16ms for
+-- the whole time OBSERV is on, which is the "tiny per-frame cost" this
+-- entry's own plan asks for. Flushed at least this often so a crash mid-
+-- sortie loses at most this many lines, same tradeoff `detection_trace_
+-- writer.DEFAULT_FLUSH_EVERY_N_POLLS` makes on the body-layer side.
+local SLEW_LOG_FLUSH_EVERY_N_LINES = 25
+
+local function slew_log_flush()
+    if #slew_log_buffer == 0 then
+        return
+    end
+    if slew_log_file == nil then
+        local ok, f = pcall(io.open, lfs.writedir() .. "Logs\\aircraft_layer_slew_trace.log", "a")
+        if not ok or f == nil then
+            slew_log_buffer = {} -- can't open the file; drop rather than grow unbounded
+            return
+        end
+        slew_log_file = f
+    end
+    slew_log_file:write(table.concat(slew_log_buffer))
+    slew_log_file:flush()
+    slew_log_buffer = {}
+end
+
+-- `nil` formats as the bare JSON literal `null`, never a quoted string --
+-- `encode_json_line` above does the same for its own flat tables; this is
+-- the same convention for the one-off lines built below with direct string
+-- concatenation.
+local function fmt_num_or_null(v)
+    if type(v) ~= "number" then
+        return "null"
+    end
+    return string.format("%.5f", v)
+end
+
+-- How many seconds of logging to keep *after* OBSERV goes off -- long
+-- enough to catch the tail of a slew that was still in progress at the
+-- moment OBSERV was switched off, short enough that an idle sortie
+-- (OBSERV never touched) never fills the file. Not a tuning constant
+-- (root CLAUDE.md's "Behaviour-affecting constants are tunable"): it
+-- changes what gets logged, never what Petrovich does.
+local SLEW_TRACE_TAIL_S = 5.0
+local slew_trace_observ_off_since = nil
+
+-- Every frame, flag-gated: sim time, the sight's own actual-position
+-- readback (874/876, raw), OBSERV (886), and the last slew command sent on
+-- the player axis (3025/3026) -- always `nil` in this entry, since nothing
+-- in this codebase writes that axis yet (BL-B80 is the slew loop
+-- itself). The field exists now so BL-B80 only has to start assigning it,
+-- never add a new log line format. Logged only while OBSERV is on (or
+-- within SLEW_TRACE_TAIL_S of it going off) so an idle sortie's log stays
+-- empty -- body-layer's own 1 Hz poll cannot see a slew at all, which is
+-- the entire reason this runs here, every frame, rather than there.
+local function push_slew_trace(t)
+    if not SLEW_DEBUG then
+        return
+    end
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local observ_on = type(observe) == "number" and observe >= 0.5
+    if observ_on then
+        slew_trace_observ_off_since = nil
+    elseif slew_trace_observ_off_since == nil then
+        slew_trace_observ_off_since = t
+    end
+    if slew_trace_observ_off_since ~= nil
+        and (t - slew_trace_observ_off_since) > SLEW_TRACE_TAIL_S then
+        return
+    end
+    local az = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
+    end)
+    local elev = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
+    end)
+    slew_log_buffer[#slew_log_buffer + 1] = string.format(
+        '{"t":%.3f,"az":%s,"elev":%s,"observe":%s,"slew_cmd_az":null,"slew_cmd_el":null}\n',
+        t, fmt_num_or_null(az), fmt_num_or_null(elev), fmt_num_or_null(observe)
+    )
+    if #slew_log_buffer >= SLEW_LOG_FLUSH_EVERY_N_LINES then
+        slew_log_flush()
+    end
 end
 
 local client = nil
@@ -538,6 +699,106 @@ local function push_spu8_state(t)
     end
 end
 
+--: Below this, two readings of any of the six 9K113 switch args are the
+--: same reading -- same reasoning as SPU8_EPSILON above (the probe found
+--: a ~3-frame animation ramp on every one of these switches, same shape
+--: as the SPU-8 panel's own 377/664).
+local COCKPIT_SWITCH_EPSILON = 0.01
+
+-- The sight-position readback (874/876) moves continuously during a slew
+-- rather than stepping between two settled values the way a switch does,
+-- and the 2026-10-17 probe drove it in steps as small as 0.002 (`aircraft-
+-- layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`,
+-- staircase test) -- `COCKPIT_SWITCH_EPSILON` above would silently merge
+-- several of those steps into one. A finer epsilon for these two fields
+-- only; BL-B80's own deadband is a body-layer concern, not this one.
+local SIGHT_POS_EPSILON = 0.0005
+
+local last_missl_pw_sent = nil
+local last_cplr_distr_sent = nil
+local last_sight_pw_sent = nil
+local last_scho_pw_sent = nil
+local last_observe_sent = nil
+local last_weap_safe_sent = nil
+local last_sight_az_sent = nil
+local last_sight_elev_sent = nil
+
+-- Reads the six 9K113 switch args plus the sight's own position readback
+-- (874/876, BL-B66 Stage 4b) and sends a line only when at least one has
+-- moved -- same "every frame, sent only on change" shape as
+-- push_spu8_state above. Wire key "missl_pw" (not "net1"/"ptt"/etc, so
+-- collector.server._handle_line can tell this line kind apart from every
+-- other one on this connection). 874/876 are optional-shaped on the Python
+-- side (schema.cockpit_switch.CockpitSwitchState) precisely so an older
+-- deployed copy of this file (without these two fields) still parses.
+local function push_cockpit_switch_state(t)
+    if client == nil then
+        return -- nothing to send to yet; the next change will be sent
+    end
+    local missl_pw = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_MISSL_PW)
+    end)
+    local cplr_distr = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_CPLR_DISTR)
+    end)
+    local sight_pw = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_PW)
+    end)
+    local scho_pw = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SCHO_PW)
+    end)
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local weap_safe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_WEAP_SAFE)
+    end)
+    local sight_az = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
+    end)
+    local sight_elev = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
+    end)
+    if missl_pw == nil or cplr_distr == nil or sight_pw == nil
+        or scho_pw == nil or observe == nil or weap_safe == nil
+        or sight_az == nil or sight_elev == nil then
+        return -- no mainpanel device (briefing screen, wrong airframe)
+    end
+    if last_missl_pw_sent ~= nil
+        and math.abs(missl_pw - last_missl_pw_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(cplr_distr - last_cplr_distr_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(sight_pw - last_sight_pw_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(scho_pw - last_scho_pw_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(observe - last_observe_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(weap_safe - last_weap_safe_sent) < COCKPIT_SWITCH_EPSILON
+        and math.abs(sight_az - last_sight_az_sent) < SIGHT_POS_EPSILON
+        and math.abs(sight_elev - last_sight_elev_sent) < SIGHT_POS_EPSILON then
+        return
+    end
+    last_missl_pw_sent = missl_pw
+    last_cplr_distr_sent = cplr_distr
+    last_sight_pw_sent = sight_pw
+    last_scho_pw_sent = scho_pw
+    last_observe_sent = observe
+    last_weap_safe_sent = weap_safe
+    last_sight_az_sent = sight_az
+    last_sight_elev_sent = sight_elev
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"missl_pw":' .. string.format("%.3f", missl_pw)
+        .. ',"cplr_distr":' .. string.format("%.3f", cplr_distr)
+        .. ',"sight_pw":' .. string.format("%.3f", sight_pw)
+        .. ',"scho_pw":' .. string.format("%.3f", scho_pw)
+        .. ',"observe":' .. string.format("%.3f", observe)
+        .. ',"weap_safe":' .. string.format("%.3f", weap_safe)
+        .. ',"sight_az":' .. string.format("%.5f", sight_az)
+        .. ',"sight_elev":' .. string.format("%.5f", sight_elev) .. '}\n')
+    if not ok then
+        debug_log("cockpit-switch send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
+end
+
 -- SPU-8 device (GetDevice(55)) / command code for the co-pilot's ICS power
 -- switch -- confirmed live 2026-10-05: from the pilot seat,
 -- GetDevice(55):performClickableAction(3015, v) moved arg 664 0->1 and
@@ -609,6 +870,22 @@ local function extract_json_string_field(json_text, field_name)
     return json_text:match("\"" .. field_name .. "\"%s*:%s*\"([%w_]+)\"")
 end
 
+-- Same purpose-built extraction as extract_json_string_field above, for a
+-- bare (unquoted) JSON number field -- the "cockpit_switch" op's
+-- "device"/"cmd"/"value" fields (plans/9k113-effectors/plan.md, BL-B66
+-- Stage 1). Accepts an optional leading "-" and an optional fractional
+-- part; returns nil (via tonumber on a failed match) if the field is
+-- absent or not shaped like a number, which handle_cockpit_switch_command
+-- below treats as "ignore this command" the same way a nil mode already
+-- does for petrovich_search.
+local function extract_json_number_field(json_text, field_name)
+    local raw = json_text:match("\"" .. field_name .. "\"%s*:%s*(-?%d+%.?%d*)")
+    if raw == nil then
+        return nil
+    end
+    return tonumber(raw)
+end
+
 -- Pending long-press release deadline (DCS model-time seconds), or nil if
 -- no press is currently being held open. Set by handle_command below when
 -- a "forward" search is requested; consumed once per frame in
@@ -652,6 +929,43 @@ local function handle_petrovich_search_command(mode, t)
     end
 end
 
+-- Writes *any* clickable cockpit control the caller names
+-- (plans/9k113-effectors/plan.md, BL-B66 Stage 1) -- GetDevice(device):
+-- performClickableAction(cmd, value), no allow-list of which
+-- device/cmd pairs are accepted. **Deliberate, user direction 2026-10-21,
+-- overriding the security plan review's required fix**: "Allow any
+-- cockpit switch. That gives us much more freedom later and even now
+-- with experimenting. This is LAN only and switch behaviour is limited
+-- to DCS." See aircraft-layer/CLAUDE.md's "What this is" section for the
+-- full quote and the standing invariant this is a named departure from.
+-- Validated for *shape* only -- device/cmd must be integers, value a
+-- finite number -- never for *which* switch. Every write is debug-logged
+-- (flag-gated, this file's existing convention), so a stray/careless
+-- write is at least diagnosable after the fact even though it is not
+-- prevented.
+local function handle_cockpit_switch_command(device, cmd, value)
+    if device == nil or cmd == nil or value == nil then
+        debug_log("ignoring malformed cockpit_switch command (missing device/cmd/value)")
+        return
+    end
+    if device ~= math.floor(device) or cmd ~= math.floor(cmd) then
+        debug_log("ignoring cockpit_switch command with non-integer device/cmd: "
+            .. tostring(device) .. "/" .. tostring(cmd))
+        return
+    end
+    -- `value ~= value` is true only for NaN; math.huge/-math.huge are
+    -- Lua's only other non-finite float values.
+    if value ~= value or value == math.huge or value == -math.huge then
+        debug_log("ignoring cockpit_switch command with non-finite value: " .. tostring(value))
+        return
+    end
+    debug_log("cockpit_switch command received: device=" .. tostring(device)
+        .. " cmd=" .. tostring(cmd) .. " value=" .. tostring(value))
+    safe_call(function()
+        GetDevice(device):performClickableAction(cmd, value)
+    end)
+end
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame in LuaExportAfterNextFrame, *before* that
@@ -670,6 +984,11 @@ local function poll_command_socket(t)
         if op == "petrovich_search" then
             local mode = extract_json_string_field(data, "mode")
             handle_petrovich_search_command(mode, t)
+        elseif op == "cockpit_switch" then
+            local device = extract_json_number_field(data, "device")
+            local cmd = extract_json_number_field(data, "cmd")
+            local value = extract_json_number_field(data, "value")
+            handle_cockpit_switch_command(device, cmd, value)
         else
             debug_log("ignoring command with unknown op: " .. tostring(op))
         end
@@ -682,6 +1001,15 @@ function LuaExportStart()
 end
 
 function LuaExportStop()
+    -- BL-B66 Stage 4b: flush whatever the slew-trace buffer still holds so
+    -- a mission end/restart does not lose up to SLEW_LOG_FLUSH_EVERY_N_
+    -- LINES-1 lines (a true no-op when SLEW_DEBUG is off -- the buffer is
+    -- then always empty).
+    slew_log_flush()
+    if slew_log_file then
+        slew_log_file:close()
+        slew_log_file = nil
+    end
     if client then
         client:close()
         client = nil
@@ -761,6 +1089,14 @@ function LuaExportAfterNextFrame()
     -- plans/spu8-intercom/plan.md Stage 1: same "every frame, send only
     -- on change" reasoning as push_ptt_state immediately above.
     push_spu8_state(t)
+    -- plans/9k113-effectors/plan.md, BL-B66 Stage 1: same "every frame,
+    -- send only on change" reasoning as push_spu8_state immediately above.
+    push_cockpit_switch_state(t)
+    -- plans/9k113-effectors/plan.md, BL-B66 Stage 4b: a true no-op unless
+    -- SLEW_DEBUG is on (see that flag's own comment) -- writes to a local
+    -- file, not the collector socket, so it runs even before `client` is
+    -- connected.
+    push_slew_trace(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)

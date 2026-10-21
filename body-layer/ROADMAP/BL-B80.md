@@ -36,12 +36,23 @@
     or lagged"* from *"the motion is stepped"*. The fix is per-frame logging of args 874/876 — a
     one-line change to `Export.probe-9k113-slew.lua`, not a new script.
 
+  **The extra probe run may come free, 2026-10-21.** `BL-B66` Stage 4b adds per-frame logging of
+  args 874/876 and a slot for the 3025/3026 command (user: *"Put logging in so that the slew loop
+  can be adjusted based on data from logs. Actual vs desired angles especially, slew command
+  values, etc."*), and the `BL-B66` sortie includes ~2 minutes of hand-slewing. If that log
+  separates quantised / lagged / stepped readback, the probe above is done. **This entry must fill
+  the command slot and add its loop internals** (deflection chosen, error, deadband in/out,
+  converged) to the body-layer sight trace, so the loop is tuned from logs, not guessed.
+
   ## What it is not
 
   **Not the slew *time* model.** §8's requirement — the sight takes time to move, so Petrovich
   cannot expect instant alignment — is satisfied inside `advance_sight_aim` by rate-limiting
   `actual` toward `desired` at the device spec's 20°/s azimuth and 10°/s elevation. That is
-  body-layer only, needs no cockpit write, and belongs with `[[BL-B64]]`/`[[BL-B66]]`. This entry
+  body-layer only, needs no cockpit write, and belongs with `[[BL-B64]]`/`[[BL-B66]]`.
+  **Superseded 2026-10-21 (user direction, *"yes"*): the slew-time model moves *into* this
+  entry** — `BL-B66` keeps `advance_sight_aim` a pass-through, and the model lands here beside the
+  loop whose readback replaces it (`plans/9k113-effectors/explore-notes.md`, point 3). This entry
   only makes the **real head follow** a pointing direction that is already correctly paced.
 
   ## Field-of-regard limits: DCS enforces them once this lands

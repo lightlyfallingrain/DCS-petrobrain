@@ -35,6 +35,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Final
 
+from .cockpit_switch import CockpitSwitchParseError, CockpitSwitchState
 from .f10_command import F10CommandEvent, F10CommandParseError
 from .line_of_sight import (
     LineOfSightParseError,
@@ -61,6 +62,8 @@ from .world_objects import (
 )
 
 __all__ = [
+    "CockpitSwitchParseError",
+    "CockpitSwitchState",
     "F10CommandEvent",
     "F10CommandParseError",
     "LineOfSightParseError",

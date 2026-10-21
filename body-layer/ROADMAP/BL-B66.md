@@ -1,11 +1,17 @@
 # BL-B66 — The 9K113 sight, entry 2 of 3: effectors
 
-- [ ] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
+- [~] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
   as an actual cockpit mode, and the weapon safety bar. Everything that is visible to the pilot in
-  the cockpit rather than only inside Petrovich's head.** #status/open
+  the cockpit rather than only inside Petrovich's head.** #status/in-progress
   **SCOPE NARROWED 2026-10-17** (user direction, *"OK to split BL-B66"*): **the slew loop left
   this entry and is now `[[BL-B80]]`**, because it is blocked on `[[BL-B63]]` and this half is not.
   Pinpoint-on-request rides the slew loop and went with it.
+
+  **STARTED 2026-10-21 on `feature/9k113-effectors`.** Explore pass settled scope and behaviour —
+  `plans/9k113-effectors/explore-notes.md`: `[[BL-B65]]` folds in here (the safety bar); 761 is
+  built unverified and confirmed on the sortie; the slew-time model moves to `[[BL-B80]]`. Power-up
+  is **autonomous after takeoff**, ends in one *"Guidance unit ready"*, no OBSERV while warming up,
+  and **ARMED only on the pilot's spoken attack-run or "weapons on/armed" command**.
 
   **The procedures are the user's, not the PDF's** —
   `docs/acceptance/2026-10-17-9k113-procedures-direction.md`, captured verbatim, supersedes
@@ -247,6 +253,35 @@
   **Consequence for `[[BL-B63]]`: its hard-dependency status is *conditional on that decision*** and
   disappears under the position-axis answer, along with the controller, the deflection/deadband
   tuning pair, the limit-cycle risk and the feedback half of the probe.
+
+  ## Implemented 2026-10-21 — Stages 1-4, on `feature/9k113-effectors`
+
+  **Architect's 2026-10-21 narrowed-scope revision** (`plans/9k113-effectors/plan.md`, text above
+  its own `---` divider — everything below that divider, including the two sections above this
+  one, predates the split and is kept for history only) built Stages 1-4: the generic
+  `cockpit_switch` cockpit-action channel (no allow-list, user direction); the four-switch
+  guidance-unit power-up, autonomous after takeoff, zero real warm-up, ending in one "Guidance
+  unit ready"; OBSERV on/off as a real cockpit write, gated on `sight_ready`; the weapons safety
+  bar (ARMED/SAFE, voice-only "weapons armed"/"weapons safe"). `advance_sight_aim` stays the
+  pass-through `[[BL-B80]]` keeps; the slew loop itself is entirely that entry's problem, not
+  this one's.
+
+  **Stage 5 (acceptance sortie) is still open** — this entry stays `#status/in-progress` until
+  that flies. 761 (`CPLR DISTR`) is built as planned but UNVERIFIED, confirmed on the sortie by
+  logging changed arguments while the user throws it by hand. See `plans/9k113-effectors/
+  implementation.md` for the full per-stage account.
+
+  **DoD-passed 2026-10-21 for Stages 1-4 + 4b, at `510084a3`.** `#needs-flight` — Stage 5 (the
+  acceptance sortie) has not flown. Reviewer (two passes, the second covering the review-fix tests
+  and Stage 4b), Performance Reviewer (APPROVED — MONITOR, the `push_cockpit_switch_state`
+  unconditional 8-reads-per-frame addition flagged for future attention, not now), and Security
+  (APPROVED, one low/low filed as `AC-B11`) all signed off; all three touched subprojects'
+  format/lint/mypy/test commands pass clean, independently re-run by DoD (not taken on report):
+  body-layer 2401 passed/4 xfailed, aircraft-layer 409 passed, audio-adapter 346 passed/2 skipped;
+  `luac5.1 -p`/`-l -p` global-leak scan on `Export.lua` clean. See
+  `plans/9k113-effectors/dod-check.md` for the full report and the Stage 5 sortie card draft.
+  **Do not mark this entry `[x]` until Stage 5 flies and the sortie's observations are recorded
+  here.**
 
   ## Second-order effect
 

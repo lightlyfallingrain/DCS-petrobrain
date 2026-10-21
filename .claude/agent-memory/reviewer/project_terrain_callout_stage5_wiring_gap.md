@@ -1,6 +1,6 @@
 ---
 name: project_terrain_callout_stage5_wiring_gap
-description: terrain-feature-probing Rev3 Stages 3a-5 review — NEEDS REVISION on an untested wiring seam, not the mechanism itself
+description: Recurring pattern (3x as of 2026-10-21) — a leaf module/pure function is thoroughly unit-tested but its wiring into the poll loop/consuming site is not; verify by mutating the wiring, not just grepping or reading it. Started as terrain-feature-probing Rev3 Stages 3a-5.
 metadata:
   type: project
 ---
@@ -32,3 +32,19 @@ See [[precise_position_belief_hybrid_gap]] for the sibling case this generalizes
 skipped, not a wiring seam skipped) — same root cause, different shape.
 
 Full detail: `plans/terrain-feature-probing/review-rev3.md`.
+
+**Third occurrence, 2026-10-21, `feature/9k113-effectors` (BL-B66 Stages 1-4):** same shape again.
+`sight_effector.py`'s sequencer/`sight_ready`/write functions were thoroughly unit-tested (21
+tests against fake `AircraftLayerClient`s), and `CrewConsole.drain_guidance_unit_ready` had correct
+logic read by eye — but the ~130 lines wiring both into `logger.py`'s `_run_crew_text_poll_loop`
+(takeoff rising-edge detection, the sequencer-advance/readback-refresh/`sight_ready`-refresh/
+`drain_guidance_unit_ready` call chain, and the OBSERV/weapons-safety write-through) had zero test
+coverage at the wiring point. Confirmed by mutation, not just grep this time: forcing the
+rising-edge `if` to `False` left `test_logger.py` at 160/160; removing the `announced` guard from
+`drain_guidance_unit_ready` (so "Guidance unit ready." would speak every poll, not once) left the
+full body-layer suite at 2383/2383. The implementer's own `implementation.md` had even added a
+`cockpit_switch_writes` recorder to the fake client "so a test can assert on the... actual writes"
+— and then no test used it. **The tell to watch for**: when an implementer adds test-enabling
+plumbing (a recorder, a hook) and the diff's own test files never call it, that is as strong a
+signal as a zero-grep-hit on the consuming site's key string. Full detail:
+`plans/9k113-effectors/review.md`.
