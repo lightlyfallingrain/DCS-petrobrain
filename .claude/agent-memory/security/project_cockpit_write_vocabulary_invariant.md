@@ -27,3 +27,6 @@ aircraft-layer (a new op taking an arg number, a device id, a raw value, etc.) s
 against this exact invariant first. A write path that accepts anything beyond a closed enum/fixed
 set is the recurring shape of the problem here — check for an allow-list at the Lua dispatch layer
 specifically, not just a body-shape check at the HTTP boundary one layer up.
+
+
+**Overridden by the user, 2026-10-21** — the BL-B66 allow-list fix was declined: *"Allow any cockpit switch. That gives us much more freedom later and even now with experimenting. This is LAN only and switch behaviour is limited to DCS."* `aircraft-layer/CLAUDE.md` now names `cockpit_switch` as the one deliberate exception. Do not re-raise the missing allow-list on that op as a required fix; a *new* free-form surface (code, arbitrary SetCommand on axes, file writes) is still a finding.

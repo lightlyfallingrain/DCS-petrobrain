@@ -127,16 +127,14 @@ sequencing.
 **aircraft-layer**
 
 - `dcs-export/Export.lua` — one new `op` (`"cockpit_switch"`) on `poll_command_socket`'s existing
-  dispatch, writing via `GetDevice(device):performClickableAction(cmd, value)` **only for a fixed
-  allow-list of `(device, cmd)` pairs and their permitted values** — the six switches this entry
-  throws (773, 761, 885, 955, 886, 673), each with the value set the 2026-10-17 probe used
-  (on/off). Anything else is rejected and debug-logged without touching the cockpit. **Security
-  plan review, required fix** (`security-plan-review.md`): `aircraft-layer/CLAUDE.md` forbids a
-  general-purpose remote-exec surface, and every existing write path checks an enum first
-  (`petrovich_search`'s mode set, F10's `ALLOWED_COMMANDS`). The check lives in **Lua**, the
-  unsandboxed host layer, so it holds whatever the layers above it do; the HTTP API repeats it as
-  defence in depth. "Reusable" therefore means *one op, one table*: a later entry (`BL-B80`,
-  `BL-B67`) adds rows to the table, it does not get a free-form write. A new
+  dispatch, writing via `GetDevice(device):performClickableAction(cmd, value)` for **any**
+  `(device, cmd, value)` — validated for *shape* only (integers / a finite number), **no allow-list
+  of switches. User direction 2026-10-21, overriding the security plan review's required fix:**
+  *"Allow any cockpit switch. That gives us much more freedom later and even now with
+  experimenting. This is LAN only and switch behaviour is limited to DCS."* This is a deliberate,
+  stated departure from `aircraft-layer/CLAUDE.md`'s "no general-purpose remote-exec surface"
+  line, which is amended to name it; the command socket itself stays loopback-only and the HTTP
+  API is the LAN surface, as for every other write path. Every write is debug-logged. A new
   `push_cockpit_switch_state` telemetry push (SPU-8's change-epsilon shape) for the six args this
   entry cares about (773, 761, 885, 955, 886, 673). Flag-gated debug logging (`debug_log`, already
   the file's own convention) on every write and every state-change push, from the first commit —
@@ -185,8 +183,8 @@ sequencing.
 **Cross-subproject (voice)**
 
 - `audio-adapter/src/vocabulary.py` — two new `VOICE_ONLY_TOKENS` entries, `weapons_armed`/
-  `weapons_safe`, with `PHRASES` entries ("weapons on", "weapons armed", "weapons off", "weapons
-  safe"). **Not added to the F10 menu** — root `CLAUDE.md`/`vocabulary.py`'s own docstring: voice
+  `weapons_safe`, with `PHRASES` entries ("weapons armed", "weapons safe" — user direction 2026-10-21; *"weapons
+  on/off"* dropped). **Not added to the F10 menu** — root `CLAUDE.md`/`vocabulary.py`'s own docstring: voice
   is primary, the F10 vocabulary is the legacy, non-growing one (2026-09-19 direction). Checked,
   per the task brief's instruction to check; the answer is "voice only, by existing precedent."
 
@@ -376,32 +374,13 @@ discover mid-flight.
 
 ---
 
-## Decisions Requiring User Input
+## Decisions — all answered 2026-10-21 (user)
 
-**1. Transport: this entry's own new `Export.lua` op, or DCS-BIOS?**
-*Recommendation: own `Export.lua` op (Stage 1 as planned); treat DCS-BIOS as reference-only, not a
-runtime dependency* — carrying the investigator's own recommendation
-(`aircraft-layer/research/2026-10-21-dcs-bios-mi24p-9k113-controls.md`, §4). Reasons: every
-argument number this plan needs already works through the existing Export.lua path and is now
-independently corroborated by DCS-BIOS's own survey, so adopting it buys no new read/write
-capability for this entry; it cannot drive the player slew axis `BL-B80` needs, so it would not even
-unify the two entries' transports; it does not solve the READY-lamp question either; and it adds a
-second install step and a second project's patch-tracking cadence for a project that intends to
-stay installable by a stranger. **This is still the user's decision, not a default acted on
-silently** — if the answer is "adopt DCS-BIOS anyway" (e.g. for its 30 Hz export rate or its own
-maintenance momentum), only Stage 1's aircraft-layer-side implementation changes; the HTTP contract
-and everything in body-layer stay as written.
-
-**2. The refusal wording for OBSERV-before-ready.**
-*Recommendation: `"Unable, guidance unit not ready."`*, matching the existing
-`"Unable, on the ground."` template exactly. Flagged because `explore-notes.md` proposed it but
-left it "to confirm on the plan" rather than settling it.
-
-**3. ARMED/SAFE voice phrasing.**
-*Recommendation: `"weapons armed"`/`"weapons on"` for ARMED, `"weapons safe"`/`"weapons off"` for
-SAFE*, per the user's own wording in the explore pass. Flagged as a genuine open fork only in the
-sense that the exact phrase list feeds `PHRASES` and the recogniser bias hint — any reasonable
-superset is cheap to adjust after the first sortie, so this is confirmable rather than consequential.
+1. **Transport: own `Export.lua` op; DCS-BIOS reference-only.** *"yes"*.
+2. **Refusal wording: `"Unable, guidance unit not ready."`** *"ok"*.
+3. **Voice phrases: `"weapons armed"` / `"weapons safe"`** only. *"weapons armed/safe"*.
+4. **No switch allow-list on `cockpit_switch`** — overrides the security plan review's required
+   fix; see the Export.lua bullet under Affected Modules for the user's words.
 
 ---
 
