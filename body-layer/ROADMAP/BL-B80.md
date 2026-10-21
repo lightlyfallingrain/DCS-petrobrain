@@ -5,6 +5,39 @@
   2026-10-17 by user direction (*"OK to split BL-B66, do not start working on it yet"*), after the
   slew probe settled which channel exists.
 
+  > **SUPERSEDED 2026-10-21 — read this block first; the text below it predates the finding.**
+  > Probes flown 2026-10-21 (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`,
+  > "Pointing probe runs 2–3") settled the channel. It is **not** the player axis and **not** a
+  > rate loop. It is the **AI axis (3061/3060), an exact position target**: readback matched every
+  > target to 0.1°, and the pilot saw the ASP-17 crosshair follow. Two conditions:
+  > **DCS AI Petrovich must be on**, and **the target must be re-sent every frame** while we hold
+  > the sight. With him off, writes are inert and 874/876 read 0. When we stop re-sending, he takes
+  > the sight back. **`[[BL-B63]]` is therefore not a dependency.** The readback is trustworthy
+  > under those conditions, so it serves as the check.
+  >
+  > **User direction, 2026-10-21, verbatim:**
+  > *"These findings mean one additional thing: DCS Petrovich AI overlay *must be on* when
+  > Petrobrain uses 9K113. We must ensure that in code. Turn AI overlay ON when with OBSERV ON and
+  > make sure it keeps ON, even if player closes it, open it again immediately. Turn overlay OFF
+  > with OBSERV OFF. Note that DCS AI may turn OBSERV OFF at too hard manouvres (or player can
+  > turn any switch at any time), so OBSERV state in code must come from OBSERV state in DCS."*
+  >
+  > So, in scope here:
+  > - **AI overlay follows the observed OBSERV state** (arg 886 readback), never the commanded one.
+  >   On when OBSERV reads on, re-opened at once if closed, off when OBSERV reads off.
+  > - **Open before planning.** The only known control is `ShowMenu` (device 30, cmd 3001), and it
+  >   is a **toggle**. Keeping the overlay on therefore needs a readable "is it open" signal, or a
+  >   blind toggle could close it. Candidate: whether `list_indication(10)` (the wheel, already
+  >   exported as `petrovich_wheel`) is empty while it is closed. Unverified. Also unverified:
+  >   whether closing the overlay is the same thing as switching his AI off.
+  > - **Update, same day:** the wheel can't be the signal. User: *"Since we have to keep overlay
+  >   open, I'd rather hide the wheel, it's possible in DCS settings. We need some other way."*
+  >   **Proposed:** detect his AI from the pointing readback itself. If 874/876 stay 0 for ~0.5 s
+  >   while the target is non-zero, his AI is off: press `ShowMenu` once and recheck. Aim 0.5° off
+  >   a centre target, because centre reads 0 either way. The user confirmed: with the wheel hidden,
+  >   `ShowMenu` still toggles his AI (*"yes"*), and one press reliably flips it (*"yes"*). Still to
+  >   measure: how fast the readback obeys after he comes back on. Probe planned for 2026-10-22.
+
   **Why it is its own entry rather than a stage of `[[BL-B66]]`.** The switch half of `BL-B66` is
   unblocked and buildable today — all five writes measured working. This half is blocked on
   `[[BL-B63]]`, needs a controller with an empirical deflection law, and needs one more probe run

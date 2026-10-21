@@ -271,10 +271,61 @@ def slew_report(path: Path, cap: int | None) -> None:
                   f"{dt:.2f} s -> {rate_deg_s:.1f} deg/s "
                   f"(device-spec expectation: up to 20 deg/s, h_axis_velocity)")
 
-    print("\nreadback lag: not computed -- slew_cmd_az/slew_cmd_el are always null in "
-          "this entry (nothing writes the player axis yet, BL-B80 is the slew loop "
-          "itself); there is no commanded-side timestamp in this file to lag against "
-          "until that entry fills those two fields.")
+    # Readback lag + plateau-vs-ramp, for a run that actually fills
+    # slew_cmd_az/slew_cmd_el (production Export.lua never does -- see the
+    # comment above DEFAULT_SLEW -- but
+    # Export.probe-9k113-slew-readback.lua, BL-B80's feedback-term probe,
+    # writes this same JSON shape with the command it is holding, so this
+    # file doubles as that probe's own analysis once pointed at its log via
+    # --slew).
+    has_commands = any(
+        isinstance(r.get("slew_cmd_az"), (int, float))
+        or isinstance(r.get("slew_cmd_el"), (int, float))
+        for r in data
+    )
+    if not has_commands:
+        print("\nreadback lag: not computed -- slew_cmd_az/slew_cmd_el are always null in "
+              "this entry (nothing writes the player axis yet, BL-B80 is the slew loop "
+              "itself); there is no commanded-side timestamp in this file to lag against "
+              "until that entry fills those two fields.")
+        return
+
+    print("\nreadback lag / plateau-vs-ramp, per command-hold:")
+    for axis, axis_key in (("az", "az"), ("elev", "el")):
+        cmd_field = f"slew_cmd_{axis_key}"
+        runs: list[list[tuple[float, float | None]]] = []
+        current = None
+        current_value = None
+        for r in data:
+            t, cmd, val = r.get("t"), r.get(cmd_field), r.get(axis)
+            if not isinstance(t, (int, float)):
+                continue
+            if isinstance(cmd, (int, float)):
+                if current is None or cmd != current_value:
+                    current = []
+                    current_value = cmd
+                    runs.append(current)
+                current.append((t, val if isinstance(val, (int, float)) else None))
+            else:
+                current, current_value = None, None
+        for run in runs:
+            t_start = run[0][0]
+            start_val = run[0][1]
+            first_move_t = None
+            distinct = 0
+            prev_val = start_val
+            for t, val in run:
+                if val is None:
+                    continue
+                if prev_val is not None and val != prev_val:
+                    distinct += 1
+                    if first_move_t is None:
+                        first_move_t = t
+                prev_val = val
+            lag = f"{first_move_t - t_start:.3f}s" if first_move_t is not None else "never moved"
+            print(f"  {axis:<4} cmd-hold starting t={t_start:7.2f}  "
+                  f"{len(run):3d} samples  distinct readback values after start: {distinct:2d}  "
+                  f"lag to first move: {lag}")
 
 
 def body_slew_report(path: Path, cap: int | None) -> None:
