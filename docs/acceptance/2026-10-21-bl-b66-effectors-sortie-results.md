@@ -34,7 +34,31 @@ arrived.
 player axis (3025/3026) with `SetCommand`. So DCS can report the head moving. What differs today is
 the input: the pilot's own hardware slew, not a script write.
 
-Open until the per-frame Windows log is read:
+**Pilot's answers** (verbatim, 2026-10-21):
+
+> *"1 - yes"* (the head visibly moved in the sight view)
+> *"2 - copilot seat. In DCS the bindings are under Mi-24P CPG Aiming Station → Aiming Station
+> Left/Right (Joystick), Aiming Station Up/Down (Joystick)"*
+
+So the head moved and 874/876 still read 0. The input was flown from the copilot (CPG) seat with
+the CPG Aiming Station joystick axes. The 2026-10-17 probe wrote 3025/3026 by script from the
+pilot's seat.
+
+**Per-frame Windows log** (`aircraft_layer_slew_trace.log`), pilot's reading: *"observ changed
+value 1 or 0. az and elev 0 always"*. **So Export.lua itself read 874/876 = 0 every frame while the
+head moved.** The pipeline is cleared: DCS does not report CPG-seat hand slew on 874/876.
+
+**Consequence for `[[BL-B80]]`:** the slew loop's planned feedback term (874/876) does not exist
+in the case that matters. It needs another source of sight position before any controller can be
+designed. Candidates for a probe:
+
+- an all-argument diff scan during a hand slew;
+- the 9K113 device's `get_param_handle` parameters;
+- the camera orientation while in the sight view.
+
+Seat (pilot vs CPG) is the leading suspect for why 2026-10-17 differed.
+
+Originally open until the per-frame Windows log is read:
 
 - Did the head visibly move in the sight view?
 - Which seat, and which binding, drove the slew?
