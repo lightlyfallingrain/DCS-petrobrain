@@ -175,7 +175,14 @@ When the probe stopped re-asserting (after `PROBE DONE`), the sight went back to
    assertion hands the sight back. This matches 2026-09-11.
 4. **The readback is trustworthy under those conditions**, so BL-B80 can close a check on it.
    No rate loop is needed.
-5. Run 3 of the readback probe ("mark held") was gyro stabilisation (pilot: *"The 9K113 lock onto
+5. **Visually confirmed by the pilot**, verbatim: *"I saw the ASP-17 crosshair moving -> works as
+   expected in that regard."* Side observation, also verbatim: *"The ASP-17 vertical and
+   horizontal adjustment knobs turned in pilot cockpit. I don't think they would in real Mi-24, but
+   since that happened with the DCS AI Petrovich scanning, that may simply be laziness on DCS's
+   part, they may have implemented ASP-17 crosshair pointing by turning the knobs in code."* It
+   happens under ED's own Petrovich too, so it is DCS behaviour, not something our writes add.
+   Not ours to fix.
+6. Run 3 of the readback probe ("mark held") was gyro stabilisation (pilot: *"The 9K113 lock onto
    where it is when OBSERV activates"*). Judge pointing by readback with AI Petrovich on, not by
    the mark.
 
