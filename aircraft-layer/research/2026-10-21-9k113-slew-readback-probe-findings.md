@@ -59,6 +59,9 @@ no longer shows where it points.
 **Today every input path gives the same answer**: player axis by script, AI axis by script, hand
 slew from the CPG seat. 874/876 read 0 except for a few frames at each change.
 
+**Pilot, verbatim: *"yes, mark held at position"*.** So the AI axis still points the sight from
+the pilot seat with a single position write, as on 2026-09-11. **Only the readback is wrong.**
+
 **Version change.** 2026-09-11 ran on DCS **2.9.29.27278**. Today is **2.9.30.28738**; the first
 note recording 2.9.30 is from 2026-10-20. Argument and command numbers are positional
 (`mi24p-command-surface.md`), so an ED patch can renumber them. **New leading hypothesis: in
