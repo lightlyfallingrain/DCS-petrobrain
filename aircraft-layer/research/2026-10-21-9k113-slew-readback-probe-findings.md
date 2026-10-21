@@ -124,6 +124,25 @@ mission, ground vs air, the view the cockpit was rendered in.
 run 3) but no position readback can be relied on. Build open-loop on the AI axis, with readback as
 an optional cross-check if the cause is ever found.
 
+## Pointing probe run 1 — CORRECTS run 3: the AI axis did nothing
+
+`Export.probe-9k113-point.lua`: eleven single AI-axis writes, each held 10 s, judged by eye. Pilot,
+verbatim: *"no movement. The 9K113 lock onto where it is when OBSERV activates, that is what I saw
+earlier and thought it was minor movement from us, but was actually airframe moving. At 1:50 I
+activated DCS AI Petrovich and commanded forward scan with 9K113. Then it moves."*
+
+- **Run 3's "mark held at position" was gyro stabilisation**, holding the line of sight fixed while
+  the airframe moved. It was not our write. The "AI axis works, only readback is wrong" reading is
+  withdrawn.
+- **Every working measurement on record was made with DCS AI Petrovich ON**: 2026-09-11 drove his
+  wheel and searches. Every failing one today had him off.
+
+**Leading hypothesis:** the AI axis (3060/3061) is ED Petrovich's own channel and acts only while
+his AI runs. 874/876 may also need it running. Compare 2026-09-11: *"Our command held 9/9 even
+while Petrovich was SEARCHING/TRACKING… he takes the sight back when the list is scrolled or a
+target selected."* That would make BL-B80 depend on ED's Petrovich being enabled, with our writes
+overriding his. Test: pointing probe run 2, AI Petrovich on, readback logged every second.
+
 ## What differs from 2026-10-17
 
 The 2026-10-17 slew run (`Export.probe-9k113-slew.lua`) wrote the **AI axis (3060/3061) first**,

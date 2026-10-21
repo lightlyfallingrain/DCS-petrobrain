@@ -122,6 +122,21 @@ local row_start = nil
 local last_heartbeat_t = -1e9
 local aborted = false
 
+-- Run 2: the readback is logged too. Run 1 showed AI-axis writes do nothing
+-- while DCS's own AI Petrovich is off; on 2026-09-11 (AI Petrovich on) both the
+-- write and 874/876 worked.
+local ARG_AZ = 874
+local ARG_ELEV = 876
+local READBACK_EVERY_S = 1.0
+local last_readback_t = -1e9
+
+local function log_readback(dt)
+    local az, el = read_arg(ARG_AZ), read_arg(ARG_ELEV)
+    local deg = type(az) == "number" and string.format("%+.1f deg", az / 0.44 * 60) or "?"
+    log(string.format("  . t=%6.1f  874=%s (%s)  876=%s  886=%s",
+                      dt, fmt(az), deg, fmt(el), fmt(read_arg(ARG_OBSERVE))))
+end
+
 local function start_row(dt)
     local r = SCHEDULE[row_idx]
     log(string.format("=== TARGET %d/%d t=%6.1f  %s   (az %+d deg, elev %s), holding %.0f s",
@@ -164,6 +179,13 @@ function LuaExportAfterNextFrame()
         if type(t) ~= "number" then return end
         if t0 == nil then t0 = t end
         local dt = t - t0
+
+        -- Logged in every phase, including before OBSERV and after the
+        -- schedule ends, so whatever DCS AI Petrovich does is captured too.
+        if (dt - last_readback_t) >= READBACK_EVERY_S then
+            log_readback(dt)
+            last_readback_t = dt
+        end
 
         if phase == "WAIT_OBSERV" then
             local observe = read_arg(ARG_OBSERVE)
