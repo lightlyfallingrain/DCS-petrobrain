@@ -1,7 +1,7 @@
 # BL-B65 — Weapons safety circuit switch
 
-- [ ] **BL-B65 — Model the weapons safety circuit switch as its own cockpit action, before any ATGM
-  attack run is built.** #status/open Asked for explicitly by the user in `docs/concept/9K113.md`'s
+- [x] **BL-B65 — Model the weapons safety circuit switch as its own cockpit action, before any ATGM
+  attack run is built.** #status/done **FOLDED INTO `[[BL-B66]]` 2026-10-21** (user direction, *"ok"*): the safety bar (arg 673) is built there, pilot-commanded ARMED/SAFE — `plans/9k113-effectors/explore-notes.md`. Original text kept below. Asked for explicitly by the user in `docs/concept/9K113.md`'s
   closing line: *"Weapons safety circuit switch — This should be it's own roadmap item before ATGM
   attack run."*
 

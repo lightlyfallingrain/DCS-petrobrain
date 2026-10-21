@@ -41,7 +41,10 @@
   **Not the slew *time* model.** §8's requirement — the sight takes time to move, so Petrovich
   cannot expect instant alignment — is satisfied inside `advance_sight_aim` by rate-limiting
   `actual` toward `desired` at the device spec's 20°/s azimuth and 10°/s elevation. That is
-  body-layer only, needs no cockpit write, and belongs with `[[BL-B64]]`/`[[BL-B66]]`. This entry
+  body-layer only, needs no cockpit write, and belongs with `[[BL-B64]]`/`[[BL-B66]]`.
+  **Superseded 2026-10-21 (user direction, *"yes"*): the slew-time model moves *into* this
+  entry** — `BL-B66` keeps `advance_sight_aim` a pass-through, and the model lands here beside the
+  loop whose readback replaces it (`plans/9k113-effectors/explore-notes.md`, point 3). This entry
   only makes the **real head follow** a pointing direction that is already correctly paced.
 
   ## Field-of-regard limits: DCS enforces them once this lands

@@ -1,11 +1,17 @@
 # BL-B66 — The 9K113 sight, entry 2 of 3: effectors
 
-- [ ] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
+- [~] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
   as an actual cockpit mode, and the weapon safety bar. Everything that is visible to the pilot in
-  the cockpit rather than only inside Petrovich's head.** #status/open
+  the cockpit rather than only inside Petrovich's head.** #status/in-progress
   **SCOPE NARROWED 2026-10-17** (user direction, *"OK to split BL-B66"*): **the slew loop left
   this entry and is now `[[BL-B80]]`**, because it is blocked on `[[BL-B63]]` and this half is not.
   Pinpoint-on-request rides the slew loop and went with it.
+
+  **STARTED 2026-10-21 on `feature/9k113-effectors`.** Explore pass settled scope and behaviour —
+  `plans/9k113-effectors/explore-notes.md`: `[[BL-B65]]` folds in here (the safety bar); 761 is
+  built unverified and confirmed on the sortie; the slew-time model moves to `[[BL-B80]]`. Power-up
+  is **autonomous after takeoff**, ends in one *"Guidance unit ready"*, no OBSERV while warming up,
+  and **ARMED only on the pilot's spoken attack-run or "weapons on/armed" command**.
 
   **The procedures are the user's, not the PDF's** —
   `docs/acceptance/2026-10-17-9k113-procedures-direction.md`, captured verbatim, supersedes
