@@ -36,7 +36,7 @@ The plan review already flagged this as a one-line update owed on ship, not a bl
 filed as a new backlog item** — it is a one-line edit to an existing, already-filed item
 (`AC-B11`), not a new finding.
 
-### Verdict
+### Verdict (Stages 1-3, as originally written)
 
 APPROVED
 
@@ -47,3 +47,101 @@ plan review is implemented and tested, the `ShowMenu` auto-press path is interna
 strictly less exposed than the already-accepted `cockpit_switch` precedent, and the Reviewer's five
 required fixes (including the `safe_call` wrap and the `ai_off_since` reset correction) are present
 in the diff. Proceed to DoD.
+
+**Correction, 2026-10-22 (this section's row 21 and the verdict paragraph above were wrong):** the
+claim that `extract_json_number_field`'s digits-only pattern "cannot match `NaN`/`Infinity`/
+non-numeric text" and therefore "cannot produce a non-finite number" missed that the pattern did
+something worse than reject — it **silently truncated** exponent notation at the `e`, parsing
+`"1e-05"` as `1` and `"-3.3e-07"` as `-3.3`. Both are ordinary-looking, in-range finite numbers, so
+nothing downstream ever saw `nil` or non-finite to catch. `command_sender.py`'s `send_sight_target`/
+`send_cockpit_switch` built their datagram with `json.dumps`, which emits exactly that notation for
+`|value| < 1e-4` — a magnitude body-layer float arithmetic near sight centre readily produces — so
+this was reachable from ordinary operation, not a theoretical adversarial input. Filed and fixed as
+the exponent-float fix below; see the corrected agent-memory note
+(`.claude/agent-memory/security/project_export_lua_json_extractor_cannot_yield_nonfinite.md`) for
+the generalizable lesson. The rest of this section's findings (bound checks, loopback-only scope,
+fixed-device/cmd shape, `ShowMenu` press-rate reasoning) are unaffected by this correction.
+
+## Deep analysis (exponent-float fix)
+
+Diff `5a8a4672..1277c9df`: `Export.lua`'s `extract_json_number_field`/`handle_sight_target_command`,
+and `command_sender.py`'s new `_format_fixed_point` helper used by `send_cockpit_switch`/
+`send_sight_target`. Scope: this one fix only, landed after the Stages 1-3 batch above was already
+approved and merged.
+
+**What changed.** The Lua pattern widened from `"field"%s*:%s*(-?%d+%.?%d*)` to
+`"field"%s*:%s*(-?%d+%.?%d*[eE]?[%-%+]?%d*)`, admitting an optional exponent. The extractor now
+explicitly checks the parsed result (`value ~= value` for NaN, `value == math.huge`/`-math.huge`
+for overflow) and returns `nil` on any of them, rather than relying on the pattern to make
+non-finite unreachable. On the Python side, `_format_fixed_point` replaces `json.dumps` for the
+three float fields on this channel (`cockpit_switch`'s `value`, `sight_target`'s `az_cmd`/
+`elev_cmd`), rendering fixed-point decimal only, so the sender never again emits the notation that
+caused the bug.
+
+**Can the widened pattern now admit huge/non-finite values only to have them rejected?** Yes, and
+that is the intended shape, verified three ways:
+
+- `"1e999"` parses via `tonumber` to `math.huge` in Lua (C `strtod` overflow behaviour) — the new
+  explicit check catches this and returns `nil`. Verified against a real Lua interpreter in
+  `test_exponent_float_fix.py::test_huge_exponent_overflow_is_rejected_as_non_finite`, not just
+  read off the pattern.
+- The pattern cannot itself produce a literal `"NaN"`/`"Infinity"` token (`%d+` requires the
+  capture to start with a digit after the optional sign), so that path to non-finite stays closed
+  exactly as the original (now-corrected) finding claimed, just no longer load-bearing on its own
+  — the explicit post-`tonumber` check is what actually guarantees it now, not the regex's
+  character class.
+- A huge-but-now-finite value (e.g. `"1e10"`) passes the extractor's finite check and would
+  previously have reached `handle_sight_target_command` unclamped. This fix adds
+  `SIGHT_TARGET_CMD_BOUND = 1.5` in Lua, checked before the value is stored, mirroring
+  `api.server`'s `_SIGHT_TARGET_CMD_BOUND`. **This is a second line of defense, not the only one**:
+  the API layer (`_handle_command_sight_target`) already rejects `abs(az_cmd/elev_cmd) > 1.5` before
+  `send_sight_target` is ever called, so a value that size cannot originate from the one real
+  caller on this LAN-only system. The Lua-side bound only matters if something other than this
+  project's own API ever writes to the loopback command socket directly — true defense in depth,
+  correctly reasoned as such in the comment added alongside it, not oversold as the primary gate.
+  `cockpit_switch`'s `value` field has no equivalent bound (by design — it is the one channel with
+  "no allow-list", user direction 2026-10-21), so a huge-but-finite `value` there is not rejected by
+  either layer; that is pre-existing, unchanged by this fix, and already accepted under that
+  direction.
+
+**Any input that still parses to a wrong-but-plausible number?** One case worth naming, not
+blocking: `"1e-400"` underflows past `math.huge`'s negative threshold the other way — `tonumber`
+returns `0.0` (a finite, in-range value), not `nil`. This is correct behaviour (0.0 is a legitimate
+sight-command value) and not a truncation bug like the one being fixed — the magnitude information
+lost is "some underflowed tiny command became exactly zero," which is the same rounding-to-zero any
+IEEE-754 float arithmetic does, not a parser defect. No action.
+
+**What the sender change exposes.** `_format_fixed_point` is a pure formatting helper with no new
+input surface — it only ever receives values the API layer has already validated as finite
+(`math.isfinite`) and, for `sight_target`, bound-checked to ±1.5. It cannot itself be reached from
+untrusted LAN input; it is called from Python code with already-validated floats, not from a wire
+parser. The one path that would call it with a non-finite value (`nan`/`inf`) bypassing that
+validation is a hypothetical direct caller of `CommandSender` methods, not the LAN-facing API —
+`f"{float('nan'):.9f}"` renders `"nan"`, which `extract_json_number_field`'s pattern correctly fails
+to match (`%d+` requires a leading digit), so even that hypothetical path degrades to "command
+ignored" on the Lua side rather than a parser crash or malformed-JSON desync. No finding.
+
+`device`/`cmd` (ints) are still embedded via plain Python f-string interpolation
+(`f'"device": {device}'`), not `_format_fixed_point` — confirmed safe because `_handle_command_
+cockpit_switch` rejects anything that is not `isinstance(x, int)` (and excludes `bool`) before
+`send_cockpit_switch` is called, so only digit-string renders of a Python `int` ever reach the
+f-string; no quote/brace characters can appear in that position to break out of the JSON object
+structure. Unchanged by this diff; checked here because the diff touches the same payload-building
+f-strings.
+
+Test coverage (`test_exponent_float_fix.py`) runs the real `Export.lua` extractor through a live
+Lua interpreter (not a hand-copied duplicate) for the round-trip and overflow-rejection cases, and
+checks the Python side's rendered datagram bytes directly for absence of exponent notation — this
+is the right verification shape for a wire-format bug (verify the bytes on the wire, not the
+formatter's intent).
+
+### Verdict (exponent-float fix)
+
+APPROVED
+
+The fix closes the only reachable mechanism in this batch (ordinary near-zero float values from
+body-layer belief-state arithmetic, not an adversarial LAN input), adds an explicit finite check
+where the old pattern's safety was previously (wrongly) assumed structural, adds a second,
+correctly-scoped bound check in Lua as defense in depth, and is verified against a real Lua
+interpreter rather than read-and-reasoned-about. No new attack surface, no dependency change, no
+LLM/prompt-injection surface, no secrets. Nothing to file — see "Closing step" note below.
