@@ -48,6 +48,15 @@
    uses the **actual** position (readback), never the desired one. Nothing is perceived through
    the 9K113 along a bearing it has not reached.
 
+## Gyro re-alignment, 2026-10-22, verbatim
+
+> *"note that if anything sets OBSERV OFF (AI, player) turning it back ON causes the ~10s gyro
+> alignment delay every time."*
+
+After every observed OBSERV off→on transition, the sight is unusable for ~10 s, whoever caused it.
+In that window: no sight perception, and the AI-off detector must not fire. Nothing in Petrobrain
+should cycle OBSERV casually.
+
 ## Open, measured by the 2026-10-22 probe
 
 - Latency from `ShowMenu` (AI back on) until the readback obeys. This sets the AI-off detection
