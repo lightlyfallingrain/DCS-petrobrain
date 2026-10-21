@@ -47,6 +47,28 @@ while the command is still held. Spike sizes match run 1 (az ≈ 0.04 at full de
 0.11). So no bound axis was overriding the script. The bindings were also present on
 2026-10-17, when 874 *did* hold 0.165 / 0.33.
 
+## Run 3 — AI axis (3061/3060) from the pilot seat: same pattern
+
+`AXIS_MODE = ai`, sequence from t = 26.9 s. **Identical shape**: 2–3 non-zero frames at each
+command change, then exactly 0 while the position command is held. Elevation is no longer
+sign-inverted, as expected for the AI channel. **Spike size does not scale with commanded
+position**: az +1.0 (±60°) peaks at 0.034, +0.1 at 0.031, while a working position target would
+read 0.44 and 0.044. So the AI axis does not point the sight the way it did on 2026-09-11, or 874
+no longer shows where it points.
+
+**Today every input path gives the same answer**: player axis by script, AI axis by script, hand
+slew from the CPG seat. 874/876 read 0 except for a few frames at each change.
+
+**Version change.** 2026-09-11 ran on DCS **2.9.29.27278**. Today is **2.9.30.28738**; the first
+note recording 2.9.30 is from 2026-10-20. Argument and command numbers are positional
+(`mi24p-command-surface.md`), so an ED patch can renumber them. **New leading hypothesis: in
+2.9.30, args 874/876 are no longer the sight-head position.** The real readout has moved to
+another argument, and 874/876 now belong to something that twitches on input. Not yet tested.
+
+**Next:** an all-argument diff scan during the same AI-axis writes, to find which argument tracks
+the commanded position. Also re-derive the device/command/argument tables from the 2.9.30
+install. BL-B90's registry generator is that tool.
+
 ## What differs from 2026-10-17
 
 The 2026-10-17 slew run (`Export.probe-9k113-slew.lua`) wrote the **AI axis (3060/3061) first**,
