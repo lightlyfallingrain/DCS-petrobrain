@@ -152,7 +152,14 @@ local socket = require("socket.core")
 -- Bumped again 2026-10-22 (`plans/9k113-sight-pointing/plan.md`, BL-B80)
 -- for the new "sight_target" inbound command op and the per-frame sight-
 -- pointing loop (`run_sight_pointing`) -- additive only, same reasoning.
-local EXPORT_SCRIPT_VERSION = "2026-10-22"
+--
+-- Bumped again the same day, "...22b" (BL-B80 exponent-float fix) for
+-- `extract_json_number_field` now accepting exponent notation and
+-- rejecting non-finite results -- a behavioral fix to the inbound
+-- command path, not an additive wire-format change, but bumped anyway so
+-- a collector talking to a pre-fix Export.lua is visibly flagged rather
+-- than silently keeping the exponent-truncation bug.
+local EXPORT_SCRIPT_VERSION = "2026-10-22b"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -949,19 +956,31 @@ local function extract_json_string_field(json_text, field_name)
 end
 
 -- Same purpose-built extraction as extract_json_string_field above, for a
--- bare (unquoted) JSON number field -- the "cockpit_switch" op's
--- "device"/"cmd"/"value" fields (plans/9k113-effectors/plan.md, BL-B66
--- Stage 1). Accepts an optional leading "-" and an optional fractional
--- part; returns nil (via tonumber on a failed match) if the field is
--- absent or not shaped like a number, which handle_cockpit_switch_command
--- below treats as "ignore this command" the same way a nil mode already
+-- bare (unquoted) JSON number field shared by every numeric inbound op --
+-- "cockpit_switch"'s "device"/"cmd"/"value" (plans/9k113-effectors/
+-- plan.md, BL-B66 Stage 1) and "sight_target"'s "az_cmd"/"elev_cmd"
+-- (plans/9k113-sight-pointing/plan.md, BL-B80). Accepts an optional
+-- leading "-", an optional fractional part, and an optional exponent
+-- (e.g. "1e-05") -- the sender's `json.dumps` emits exponent notation
+-- for small magnitudes, which the original digits-only pattern silently
+-- truncated at the "e" (BL-B80 bug, found 2026-10-22: "1e-05" parsed as
+-- "1", a 60deg-equivalent sight command from a near-zero intent).
+-- Returns nil if the field is absent, not shaped like a number, or
+-- parses to a non-finite value (NaN, or `math.huge`/`-math.huge` from a
+-- huge exponent overflowing, e.g. "1e999") -- every caller already
+-- treats nil as "ignore this command" the same way a nil mode already
 -- does for petrovich_search.
 local function extract_json_number_field(json_text, field_name)
-    local raw = json_text:match("\"" .. field_name .. "\"%s*:%s*(-?%d+%.?%d*)")
+    local raw = json_text:match(
+        "\"" .. field_name .. "\"%s*:%s*(-?%d+%.?%d*[eE]?[%-%+]?%d*)")
     if raw == nil then
         return nil
     end
-    return tonumber(raw)
+    local value = tonumber(raw)
+    if value == nil or value ~= value or value == math.huge or value == -math.huge then
+        return nil
+    end
+    return value
 end
 
 -- Pending long-press release deadline (DCS model-time seconds), or nil if
@@ -1094,12 +1113,26 @@ local function sight_rate_limit_step(current, target, rate_per_s, dt)
     return target
 end
 
+-- Mirrors `aircraft-layer/src/api/server.py`'s `_SIGHT_TARGET_CMD_BOUND`
+-- -- that handler's own clamp, kept in sync by hand across this file
+-- boundary like `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION`
+-- already does. `extract_json_number_field` now accepts exponent
+-- notation (BL-B80 exponent-float fix, 2026-10-22), so a finite-but-huge
+-- value it would previously have truncated into range (e.g. "1e10")
+-- must be rejected here on this side too, not assumed caught upstream.
+local SIGHT_TARGET_CMD_BOUND = 1.5
+
 -- Stores the persistent target from a `sight_target` command -- external
 -- state, held across frames exactly like `pending_release_t` is for a
 -- different purpose, consumed every frame by `run_sight_pointing` below.
 local function handle_sight_target_command(az_cmd, elev_cmd)
     if az_cmd == nil or elev_cmd == nil then
         debug_log("ignoring malformed sight_target command (missing az_cmd/elev_cmd)")
+        return
+    end
+    if math.abs(az_cmd) > SIGHT_TARGET_CMD_BOUND or math.abs(elev_cmd) > SIGHT_TARGET_CMD_BOUND then
+        debug_log("ignoring out-of-range sight_target command: az_cmd="
+            .. tostring(az_cmd) .. " elev_cmd=" .. tostring(elev_cmd))
         return
     end
     target_az_cmd = az_cmd

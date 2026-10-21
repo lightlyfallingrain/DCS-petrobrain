@@ -33,6 +33,27 @@ from typing import Literal, Self
 
 logger = logging.getLogger(__name__)
 
+
+def _format_fixed_point(value: float) -> str:
+    """Render `value` as fixed-point decimal, never exponent notation --
+    `json.dumps` emits exponent form for small magnitudes
+    (`json.dumps({'x': 0.00001})` -> `'{"x": 1e-05}'`), which
+    `Export.lua`'s `extract_json_number_field` pattern-matched straight
+    past the "e" and silently truncated (`"1e-05"` parsed as `1`,
+    `"-3.3e-07"` as `-3.3` -- a 60deg-equivalent sight-slew command from
+    a near-zero intent). BL-B80 exponent-float fix, 2026-10-22. 9 decimal
+    places is ample precision for every value on this channel (raw
+    `-1.5..1.5` sight/cockpit-switch commands); trailing zeros are
+    trimmed but at least one digit after the point is kept so the result
+    is still a valid JSON number token (`"0.0"`, never `"0."`)."""
+    text = f"{value:.9f}"
+    if "." in text:
+        text = text.rstrip("0")
+        if text.endswith("."):
+            text += "0"
+    return text
+
+
 #: Loopback only -- `Export.lua`'s new inbound command listener runs inside
 #: the same DCS process tree as the collector's UDP peer, exactly like
 #: `collector.text_sender.DEFAULT_HOST`/`DEFAULT_PORT` for the existing
@@ -126,15 +147,21 @@ class CommandSender:
         **no allow-list of which `(device, cmd)` pairs are accepted** at
         any of those three layers -- user direction 2026-10-21, overriding
         the security plan review's required fix; see `aircraft-layer/
-        CLAUDE.md`'s "What this is" section for the quote."""
+        CLAUDE.md`'s "What this is" section for the quote.
+
+        `value` is hand-formatted via `_format_fixed_point`, not
+        `json.dumps`, so it never reaches `Export.lua` in exponent
+        notation (see that helper's docstring -- BL-B80 exponent-float
+        fix, 2026-10-22)."""
         if self._socket is None:
             self.open()
         sock = self._socket
         assert sock is not None  # `open()` above always sets it
 
-        payload = json.dumps(
-            {"op": "cockpit_switch", "device": device, "cmd": cmd, "value": value}
-        ).encode("utf-8")
+        payload = (
+            f'{{"op": "cockpit_switch", "device": {device}, "cmd": {cmd}, '
+            f'"value": {_format_fixed_point(value)}}}'
+        ).encode()
         try:
             sock.sendto(payload, (self._host, self._port))
         except OSError as exc:
@@ -166,15 +193,23 @@ class CommandSender:
         **No validation happens here** -- same division of labour as
         `send_cockpit_switch`'s own docstring: `api.server`'s `POST
         /command/sight_target` handler validates shape (both values
-        finite) before this method is ever called."""
+        finite) before this method is ever called.
+
+        Both fields are hand-formatted via `_format_fixed_point`, not
+        `json.dumps`, so neither ever reaches `Export.lua` in exponent
+        notation (see that helper's docstring -- BL-B80 exponent-float
+        fix, 2026-10-22): body-layer float arithmetic near sight centre
+        readily produces values below `1e-4`, exactly the magnitude
+        `json.dumps` switches to exponent form for."""
         if self._socket is None:
             self.open()
         sock = self._socket
         assert sock is not None  # `open()` above always sets it
 
-        payload = json.dumps(
-            {"op": "sight_target", "az_cmd": az_cmd, "elev_cmd": elev_cmd}
-        ).encode("utf-8")
+        payload = (
+            f'{{"op": "sight_target", "az_cmd": {_format_fixed_point(az_cmd)}, '
+            f'"elev_cmd": {_format_fixed_point(elev_cmd)}}}'
+        ).encode()
         try:
             sock.sendto(payload, (self._host, self._port))
         except OSError as exc:

@@ -184,3 +184,68 @@ mechanical scan (clean — only stdlib/DCS globals). body-layer — `ruff format
 `ruff check` (pass), `mypy --strict` (pass, 70 source files), `pytest` (2418 passed, 4 xfailed —
 one more passed than the pre-fix run, the new integration test; the previously-flaky
 `test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop` did not recur).
+
+### Exponent-float fix (2026-10-22)
+
+**The bug.** `CommandSender.send_sight_target`/`send_cockpit_switch` built their datagram with
+`json.dumps`, which emits exponent notation for small magnitudes
+(`json.dumps({"az_cmd": 0.00001})` → `'{"az_cmd": 1e-05}'`). `Export.lua`'s
+`extract_json_number_field` (line ~959) matched `"field"%s*:%s*(-?%d+%.?%d*)` — plain decimal
+digits only — and silently stopped at the `e`: `"1e-05"` parsed as `1` (a 60°-equivalent sight
+command from a near-zero intent), `"-3.3e-07"` as `-3.3`. Any `|value| < 1e-4` was affected, a
+magnitude body-layer float arithmetic near sight centre readily produces. `cockpit_switch`'s
+`value` field shares the same extractor, so it carried the same latent defect.
+
+**Files changed:**
+
+- `aircraft-layer/src/collector/command_sender.py` — new module-level `_format_fixed_point(value)`
+  helper: renders a float as fixed-point decimal (9 decimal places, trailing zeros trimmed, at
+  least one digit kept after the point so e.g. `0.0`/`-0.0` stay valid JSON numbers), never
+  exponent notation. `send_sight_target`'s `az_cmd`/`elev_cmd` and `send_cockpit_switch`'s `value`
+  now hand-build their JSON object string using this helper for the float field(s) instead of
+  `json.dumps` — `device`/`cmd` stay plain Python ints spliced directly, since they were never the
+  affected fields. One helper, reused by both ops, per the fix's own instruction not to hand-roll
+  JSON beyond what's needed.
+- `aircraft-layer/dcs-export/Export.lua` — `extract_json_number_field`'s pattern gained an
+  optional exponent (`[eE]?[%-%+]?%d*`), and the function now rejects a non-finite `tonumber`
+  result (NaN, or `math.huge`/`-math.huge` from a huge exponent overflowing, e.g. `"1e999"`)
+  before returning — moved into the shared extractor itself rather than left to each caller, so
+  "accept exponents, then check finite/range" holds regardless of which op calls it. Comment above
+  the function rewritten to state what actually happened (the old comment's "digits-only, so
+  non-finite is unreachable" claim was the bug's own premise). Added `SIGHT_TARGET_CMD_BOUND =
+  1.5` (mirrors `api.server`'s `_SIGHT_TARGET_CMD_BOUND`) and a range check inside
+  `handle_sight_target_command`, since a finite-but-huge exponent value (e.g. `"1e10"`) would
+  otherwise pass the extractor's new finite check and still be a nonsense command —
+  `cockpit_switch`'s own existing NaN/huge re-check in `handle_cockpit_switch_command` was left
+  as-is (now genuinely redundant rather than falsely claimed redundant, see the memory file below);
+  no range check was added there since that op's whole point (BL-B66, user direction 2026-10-21)
+  is accepting any value for any switch.
+  `EXPORT_SCRIPT_VERSION` bumped to `"2026-10-22b"`.
+- `aircraft-layer/src/collector/server.py` — `EXPECTED_EXPORT_VERSION` bumped to match, same
+  paired-commit convention as every other wire-format version bump in this file.
+- `aircraft-layer/tests/test_exponent_float_fix.py` (new) — `TestSenderNeverEmitsExponentNotation`
+  covers `_format_fixed_point` directly (1e-05, -3.3e-07, 0.0, -0.0, 0.25, -0.5) plus both
+  `CommandSender` methods' actual datagram bytes; `TestExportLuaExtractorAcceptsExponentAndRejectsNonFinite`
+  extracts the live `extract_json_number_field` source out of `Export.lua` (balanced
+  `function`/`if`/`end` counting, so it is the real currently-deployed function, not a hand-copied
+  duplicate that could drift) and runs it against a real Lua interpreter (`luajit` preferred,
+  falling back to `lua5.5`/`lua5.1`/`lua`, skipping cleanly with none installed) for `1e-05`,
+  `-3.3e-07`, `0.25`, `-0.5`, and `1e999` (overflow → `inf` → must come back `nil`).
+  **Counterfactual run**: reverted the extractor to its old digits-only pattern and re-ran this
+  Lua-side test class — it failed exactly as expected (`"1e-05"` → `1`, `"1e999"` → `1` instead of
+  `nil`), then the revert was undone and `shasum` on both touched files confirmed an exact restore
+  before continuing.
+- `.claude/agent-memory/security/project_export_lua_json_extractor_cannot_yield_nonfinite.md` —
+  rewritten. Its premise (the digits-only regex makes non-finite values unreachable, so a missing
+  re-check is not a gap) was the bug's own blind spot: the regex doesn't reject exponent notation,
+  it truncates it into a different, in-range-looking number that no `nil`/non-finite check could
+  ever catch. The corrected entry states what the fix actually does and draws the generalizable
+  lesson (verify a "this input can't happen" claim by constructing the adversarial input, not by
+  re-reading the regex's intended character class).
+
+**Checks**: aircraft-layer — `ruff format --check` (pass), `ruff check` (pass, after `--fix` for
+two `UP012` unnecessary-`encoding`-argument lints on the new `.encode()` calls), `mypy --strict`
+(pass, 26 source files), `pytest` (469 passed — the 10 new tests on top of the previous 459, same
+count as before this fix), `test_dcs_export_lua_local_order.py` run by name (32 passed, confirming
+the new Lua code introduces no local-read-as-global defect). body-layer untouched by this fix, so
+its checks were not re-run.
