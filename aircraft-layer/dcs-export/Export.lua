@@ -148,7 +148,11 @@ local socket = require("socket.core")
 -- only, same reasoning. Update
 -- aircraft-layer/src/collector/server.py's EXPECTED_EXPORT_VERSION in the
 -- same commit.
-local EXPORT_SCRIPT_VERSION = "2026-10-21b"
+--
+-- Bumped again 2026-10-22 (`plans/9k113-sight-pointing/plan.md`, BL-B80)
+-- for the new "sight_target" inbound command op and the per-frame sight-
+-- pointing loop (`run_sight_pointing`) -- additive only, same reasoning.
+local EXPORT_SCRIPT_VERSION = "2026-10-22"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -225,6 +229,19 @@ local ARG_WEAP_SAFE = 673
 -- azimuth only) happens on the body-layer side, never here.
 local ARG_SIGHT_AZ = 874
 local ARG_SIGHT_ELEV = 876
+
+-- The 9K113's AI-axis pointing channel (`plans/9k113-sight-pointing/
+-- plan.md`, BL-B80) -- device 7 (I9K113, same device the switch arg
+-- numbers above read from), `SetCommand(3061, deg/60)` azimuth /
+-- `SetCommand(3060, v)` elevation. Settled by the 2026-10-21 pointing
+-- probe (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-
+-- findings.md`, "Pointing probe runs 2-3"): a position target, exact,
+-- but only while DCS's own AI Petrovich is on and only while re-asserted
+-- every frame -- a single write is overwritten by him. `run_sight_
+-- pointing` below is this file's per-frame re-assertion loop.
+local DEV_I9K113 = 7
+local CMD_AI_AZ = 3061
+local CMD_AI_ELEV = 3060
 
 -- Debug logging, gated so the branch is free when off. DCS internals here
 -- are heavily unverified (field shapes, module load behavior) and this
@@ -717,8 +734,63 @@ local COCKPIT_SWITCH_EPSILON = 0.01
 -- layer/research/2026-10-17-9k113-effector-and-slew-probe-findings.md`,
 -- staircase test) -- `COCKPIT_SWITCH_EPSILON` above would silently merge
 -- several of those steps into one. A finer epsilon for these two fields
--- only; BL-B80's own deadband is a body-layer concern, not this one.
+-- only. Also reused by `run_sight_pointing`'s own AI-on/off detector
+-- (`plans/9k113-sight-pointing/plan.md`, BL-B80) to decide whether the
+-- readback is reading "near zero" -- the same "is this reading
+-- distinguishable from centre" question, just asked of a live readback
+-- rather than two stored samples.
 local SIGHT_POS_EPSILON = 0.0005
+
+-- `run_sight_pointing`'s own constants (`plans/9k113-sight-pointing/
+-- plan.md`, BL-B80) -- the per-frame rate limit, the deadband/bias that
+-- keeps the AI-off detector from reasoning about an ambiguous all-zero
+-- target, the gyro-alignment window, and the detector's own placeholder
+-- timing.
+--
+-- Rate mimics the 9K113's own slew rate (`Devices_specs/9K113.lua`
+-- h_axis_velocity/v_axis_velocity, 20 deg/s az / 10 deg/s elev -- the same
+-- source `mi24p-command-surface.md` §4.2 already cites for the player
+-- axis), converted into the AI axis's own raw **command** units (what
+-- `SetCommand` takes -- the same domain `commanded_az_cmd`/`commanded_
+-- elev_cmd` below live in, not the readback argument `push_cockpit_
+-- switch_state` reads). Azimuth: `value = deg/60`, so 20 deg/s ->
+-- 20/60 raw/s. Elevation mirrors `belief.sight_effector.sight_elevation_
+-- deg_to_raw`'s own command-domain piecewise split (coordinator
+-- amendment 4): 10 deg/s is 0.5 raw/s above centre (20 deg per command
+-- unit) and 10/15 raw/s below (15 deg per command unit). This mimics a
+-- slew rate, not a calibration of where the head actually is, so the
+-- derived-formula risk on the degree conversion is cosmetic here (plan's
+-- Risks section).
+local SIGHT_RATE_AZ_RAW_PER_S = 20.0 / 60.0
+local SIGHT_RATE_ELEV_UP_RAW_PER_S = 0.5
+local SIGHT_RATE_ELEV_DOWN_RAW_PER_S = 10.0 / 15.0
+
+-- Below this, a commanded value reads as "at centre" for the bias/
+-- detector logic below. `SIGHT_POS_EPSILON`'s own "near zero" threshold
+-- is too tight here -- a rate-limited approach only asymptotically
+-- reaches exact zero -- so this is a second, slightly looser deadband
+-- for that one purpose.
+local SIGHT_TARGET_DEADBAND_RAW = 0.002
+-- 0.5 deg in azimuth raw units (`value = deg/60`) -- the explore notes'
+-- own figure for the centre-target bias ("A centre target is offset
+-- 0.5 deg, because centre reads 0 either way"). Azimuth only, applied
+-- only to the value handed to `SetCommand` this frame -- the *tracked*
+-- `commanded_az_cmd` state below is never biased.
+local SIGHT_TARGET_CENTRE_BIAS_AZ_RAW = 0.5 / 60.0
+
+-- Mirrors body-layer's `belief.sight_effector.GYRO_ALIGNMENT_S` tunable
+-- (10.0 default) -- Lua-side constants cannot use `tuning.py`; keep this
+-- value in sync by hand if that one changes (same cross-file convention
+-- `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` already uses).
+local GYRO_ALIGNMENT_S = 10.0
+
+-- Placeholder detector timing (plan's Risks section, coordinator
+-- amendment 5) -- the explore notes' own stated ~0.5 s stuck-at-zero
+-- figure for the timeout, a conservative re-press interval so a single
+-- missed detection does not spam ShowMenu. Both should be revisited once
+-- the 2026-10-22 AI-on latency probe reports.
+local AI_OFF_DETECT_TIMEOUT_S = 0.5
+local AI_OFF_REPRESS_INTERVAL_S = 2.5
 
 local last_missl_pw_sent = nil
 local last_cplr_distr_sent = nil
@@ -972,6 +1044,202 @@ local function handle_cockpit_switch_command(device, cmd, value)
     end)
 end
 
+-- The 9K113 pointing channel's own per-frame state (`plans/
+-- 9k113-sight-pointing/plan.md`, BL-B80) -- `target_*` is external
+-- (set by the `sight_target` command, persists across frames until
+-- replaced or OBSERV reads off); `commanded_*` is internal, rate-limited
+-- toward `target_*` every frame; the rest is the AI-on/off detector's own
+-- bookkeeping. All reset to `nil`/`false` on the OBSERV falling edge --
+-- see `run_sight_pointing`'s own handling below (Co-moving Fields table's
+-- last row: "a stale target must never survive to the next OBSERV-on").
+local target_az_cmd = nil
+local target_elev_cmd = nil
+local commanded_az_cmd = nil
+local commanded_elev_cmd = nil
+local observ_on_since = nil
+local ai_off_since = nil
+local last_showmenu_press_t = nil
+-- Coordinator amendment 1 (2026-10-22): true once the readback has obeyed
+-- a non-trivial target after alignment; false after a detector press
+-- that has not yet been confirmed by the readback obeying again. Gates
+-- the OBSERV-falling-edge ShowMenu press below -- "if unsure, do not
+-- press" (a wrongly-left-on overlay is harmless with the wheel hidden; a
+-- wrongly-pressed one turns DCS's AI on with nobody holding the sight).
+local ai_believed_on = false
+
+-- Writes the AI-axis position command every frame -- the proven
+-- mechanism from the pointing probe (`Export.probe-9k113-point.lua`'s
+-- `point_quiet`), operating directly on raw command units (the wire
+-- already carries `deg/60`-style values, converted on the body-layer
+-- side) rather than degrees.
+local function sight_point_quiet(az_cmd, elev_cmd)
+    local dev = GetDevice(DEV_I9K113)
+    if dev == nil then return end
+    pcall(dev.SetCommand, dev, CMD_AI_AZ, az_cmd)
+    pcall(dev.SetCommand, dev, CMD_AI_ELEV, elev_cmd)
+end
+
+-- Moves `current` toward `target` by at most `rate_per_s * dt`, landing
+-- exactly on `target` rather than overshooting once within one step of
+-- it. Shared by both axes; `run_sight_pointing` passes a different rate
+-- for each.
+local function sight_rate_limit_step(current, target, rate_per_s, dt)
+    local delta = target - current
+    local max_step = rate_per_s * dt
+    if delta > max_step then
+        return current + max_step
+    elseif delta < -max_step then
+        return current - max_step
+    end
+    return target
+end
+
+-- Stores the persistent target from a `sight_target` command -- external
+-- state, held across frames exactly like `pending_release_t` is for a
+-- different purpose, consumed every frame by `run_sight_pointing` below.
+local function handle_sight_target_command(az_cmd, elev_cmd)
+    if az_cmd == nil or elev_cmd == nil then
+        debug_log("ignoring malformed sight_target command (missing az_cmd/elev_cmd)")
+        return
+    end
+    target_az_cmd = az_cmd
+    target_elev_cmd = elev_cmd
+end
+
+-- Export.lua's per-frame sight owner (`plans/9k113-sight-pointing/
+-- plan.md`'s "Architecture" section) -- rate-limits toward whatever
+-- target body-layer last sent and re-asserts it every frame while OBSERV
+-- reads on (the 2026-10-21 probe's own settled conditions), runs the
+-- AI-on/off detector, and handles the OBSERV falling-edge overlay press.
+-- Called every frame from `LuaExportAfterNextFrame`, gated on OBSERV the
+-- same way `push_slew_trace`/`push_cockpit_switch_state` already read it
+-- (each reads its own copy -- cheap, read-only, same existing pattern).
+--
+-- **Must stay below `safe_call`/`sight_point_quiet`** -- same reasoning
+-- as every other function in this file that was found calling a `local`
+-- declared below itself (`push_ptt_state`'s own comment has the full
+-- story): a name referenced above its declaration compiles as a global
+-- lookup, nil at call time, and `luac -p` cannot see it.
+local sight_last_frame_t = nil
+
+local function run_sight_pointing(t)
+    local observe = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_OBSERVE)
+    end)
+    local observ_on = type(observe) == "number" and observe >= 0.5
+
+    if not observ_on then
+        -- OBSERV falling edge (or simply off, which is a no-op repeat of
+        -- the same reset): press ShowMenu once, only if `ai_believed_on`
+        -- -- coordinator amendment 1. "If unsure, do not press."
+        if observ_on_since ~= nil and ai_believed_on then
+            safe_call(function()
+                GetDevice(30):performClickableAction(WHEEL_MENU_BUTTON, 1)
+            end)
+            safe_call(function()
+                GetDevice(30):performClickableAction(WHEEL_MENU_BUTTON, 0)
+            end)
+            debug_log("sight pointing: OBSERV off, AI overlay was believed on -- pressed ShowMenu")
+        end
+        target_az_cmd = nil
+        target_elev_cmd = nil
+        commanded_az_cmd = nil
+        commanded_elev_cmd = nil
+        observ_on_since = nil
+        ai_off_since = nil
+        last_showmenu_press_t = nil
+        ai_believed_on = false
+        sight_last_frame_t = nil
+        return
+    end
+
+    if observ_on_since == nil then
+        observ_on_since = t
+    end
+
+    local dt = 0.0
+    if sight_last_frame_t ~= nil then
+        dt = t - sight_last_frame_t
+    end
+    sight_last_frame_t = t
+
+    if target_az_cmd == nil or target_elev_cmd == nil then
+        return -- nothing commanded yet this OBSERV-on
+    end
+    if commanded_az_cmd == nil then commanded_az_cmd = 0.0 end
+    if commanded_elev_cmd == nil then commanded_elev_cmd = 0.0 end
+
+    local elev_rate = SIGHT_RATE_ELEV_UP_RAW_PER_S
+    if commanded_elev_cmd < 0 then
+        elev_rate = SIGHT_RATE_ELEV_DOWN_RAW_PER_S
+    end
+    commanded_az_cmd = sight_rate_limit_step(
+        commanded_az_cmd, target_az_cmd, SIGHT_RATE_AZ_RAW_PER_S, dt)
+    commanded_elev_cmd = sight_rate_limit_step(
+        commanded_elev_cmd, target_elev_cmd, elev_rate, dt)
+
+    -- Bias the write, never the tracked state, whenever both axes are
+    -- near centre -- otherwise the detector below would be comparing
+    -- against an ambiguous all-zero target (explore notes: "A centre
+    -- target is offset 0.5 deg, because centre reads 0 either way").
+    local at_centre = math.abs(commanded_az_cmd) < SIGHT_TARGET_DEADBAND_RAW
+        and math.abs(commanded_elev_cmd) < SIGHT_TARGET_DEADBAND_RAW
+    local write_az_cmd = commanded_az_cmd
+    if at_centre then
+        write_az_cmd = commanded_az_cmd + SIGHT_TARGET_CENTRE_BIAS_AZ_RAW
+    end
+
+    sight_point_quiet(write_az_cmd, commanded_elev_cmd)
+
+    -- AI-on/off detector (coordinator amendments 2/3): reactive only,
+    -- gated to not even start accumulating until the gyro-alignment
+    -- window has elapsed, and self-correcting -- a false press (AI was
+    -- actually on) turns it off, the readback drops to 0, and the
+    -- detector presses again after the re-press interval. Never latches
+    -- off after N presses.
+    local az = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_AZ)
+    end)
+    local elev = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_SIGHT_ELEV)
+    end)
+    local commanded_nontrivial = math.abs(write_az_cmd) > SIGHT_TARGET_DEADBAND_RAW
+        or math.abs(commanded_elev_cmd) > SIGHT_TARGET_DEADBAND_RAW
+    local readback_responding = (type(az) == "number" and math.abs(az) > SIGHT_POS_EPSILON)
+        or (type(elev) == "number" and math.abs(elev) > SIGHT_POS_EPSILON)
+
+    if commanded_nontrivial and readback_responding then
+        ai_believed_on = true
+    end
+
+    if (t - observ_on_since) >= GYRO_ALIGNMENT_S then
+        if commanded_nontrivial and not readback_responding then
+            if ai_off_since == nil then
+                ai_off_since = t
+            end
+            if (t - ai_off_since) >= AI_OFF_DETECT_TIMEOUT_S
+                and (last_showmenu_press_t == nil
+                    or (t - last_showmenu_press_t) >= AI_OFF_REPRESS_INTERVAL_S) then
+                safe_call(function()
+                    GetDevice(30):performClickableAction(WHEEL_MENU_BUTTON, 1)
+                end)
+                safe_call(function()
+                    GetDevice(30):performClickableAction(WHEEL_MENU_BUTTON, 0)
+                end)
+                debug_log("sight AI-off detector fired: pressed ShowMenu")
+                last_showmenu_press_t = t
+                ai_believed_on = false
+            end
+            -- Reset either way -- fired or not, this frame's observation
+            -- restarts the window rather than every subsequent frame
+            -- re-triggering the same press.
+            ai_off_since = t
+        else
+            ai_off_since = nil
+        end
+    end
+end
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame in LuaExportAfterNextFrame, *before* that
@@ -995,6 +1263,10 @@ local function poll_command_socket(t)
             local cmd = extract_json_number_field(data, "cmd")
             local value = extract_json_number_field(data, "value")
             handle_cockpit_switch_command(device, cmd, value)
+        elseif op == "sight_target" then
+            local az_cmd = extract_json_number_field(data, "az_cmd")
+            local elev_cmd = extract_json_number_field(data, "elev_cmd")
+            handle_sight_target_command(az_cmd, elev_cmd)
         else
             debug_log("ignoring command with unknown op: " .. tostring(op))
         end
@@ -1025,6 +1297,21 @@ function LuaExportStop()
         command_socket = nil
     end
     pending_release_t = nil
+    -- `plans/9k113-sight-pointing/plan.md`, BL-B80: a mission end/restart
+    -- is not an observed OBSERV falling edge, so `run_sight_pointing`'s
+    -- own falling-edge reset never runs for it -- reset explicitly here,
+    -- same reasoning as `pending_release_t`'s reset immediately above, so
+    -- a stale target/detector state never survives into the next
+    -- mission.
+    target_az_cmd = nil
+    target_elev_cmd = nil
+    commanded_az_cmd = nil
+    commanded_elev_cmd = nil
+    observ_on_since = nil
+    ai_off_since = nil
+    last_showmenu_press_t = nil
+    ai_believed_on = false
+    sight_last_frame_t = nil
     -- plans/spu8-intercom/plan.md Stage 4: reset so a mission restart
     -- re-triggers the 5-second wait rather than staying latched from a
     -- previous sortie.
@@ -1103,6 +1390,12 @@ function LuaExportAfterNextFrame()
     -- file, not the collector socket, so it runs even before `client` is
     -- connected.
     push_slew_trace(t)
+    -- `plans/9k113-sight-pointing/plan.md`, BL-B80: the per-frame sight
+    -- owner -- re-asserts the AI-axis position command, runs the AI-on/
+    -- off detector, and handles the OBSERV falling-edge overlay press.
+    -- Must run every frame regardless of the 5 Hz export throttle below,
+    -- same reasoning as every other per-frame function above it.
+    run_sight_pointing(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)

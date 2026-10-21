@@ -150,6 +150,45 @@ class CommandSender:
                 f"value={value!r}: {exc}"
             ) from exc
 
+    def send_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
+        """Send `{"op": "sight_target", "az_cmd": az_cmd, "elev_cmd":
+        elev_cmd}` to `Export.lua`'s command listener -- the 9K113
+        pointing channel (`plans/9k113-sight-pointing/plan.md`, BL-B80).
+        A **persistent** target, unlike `send_cockpit_switch`'s one-shot
+        write: Export.lua caches this value and rate-limits a commanded
+        position toward it every frame while OBSERV reads on (that plan's
+        "Architecture" section on why this is a third, narrow op rather
+        than reusing `cockpit_switch`'s "write once now" semantics). Same
+        `CommandSendError` posture as `send_cockpit_switch`: a dropped
+        target update is a real behavioral gap, not an opaque display
+        string to swallow.
+
+        **No validation happens here** -- same division of labour as
+        `send_cockpit_switch`'s own docstring: `api.server`'s `POST
+        /command/sight_target` handler validates shape (both values
+        finite) before this method is ever called."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {"op": "sight_target", "az_cmd": az_cmd, "elev_cmd": elev_cmd}
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "sight-target command send failed: az_cmd=%r elev_cmd=%r",
+                az_cmd,
+                elev_cmd,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send sight target az_cmd={az_cmd!r} "
+                f"elev_cmd={elev_cmd!r}: {exc}"
+            ) from exc
+
 
 #: Loopback only -- `petrobrain-line-of-sight-hook.lua`'s own inbound
 #: listener runs inside the same DCS process tree as the collector's UDP

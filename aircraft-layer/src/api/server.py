@@ -186,6 +186,24 @@ the body/brain process, on either Windows or Mac (compute topology note in
   dropped switch write is a real behavioral gap, not an opaque display
   string to swallow).
 
+- `POST /command/sight_target` -> the aircraft layer's seventh
+  inbound/write path (`plans/9k113-sight-pointing/plan.md`, BL-B80). Body
+  `{"az_cmd": number, "elev_cmd": number}`; forwards to `collector.
+  command_sender.CommandSender.send_sight_target`, which fires the JSON
+  command at `Export.lua`'s inbound UDP listener (the same listener
+  `/command/cockpit_switch` already targets) -- a **persistent** target
+  Export.lua rate-limits toward every frame, not a one-shot write,
+  responding `200 {"ok": true}` on the same "attempted the call" contract
+  as `/command/cockpit_switch`. `400 {"error": ...}` on a missing/
+  non-finite `az_cmd`/`elev_cmd` or a non-JSON body -- shape validation
+  only, both values clamped-checked against a generous sane range
+  (Security plan review's non-blocking recommendation) rather than left
+  truly unbounded, since Export.lua's own rate limiter only ever
+  *approaches* an out-of-range target rather than jumping to it. `503
+  {"error": "sight target channel not configured"}` if this server was
+  built without a `command_sender`; a send failure propagates as
+  `500 {"error": ...}`, same posture as `/command/cockpit_switch`.
+
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
 content, so during a paused mission it returned every motionless sample as
@@ -257,6 +275,7 @@ _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
 _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
+_COMMAND_SIGHT_TARGET_PATH = "/command/sight_target"
 _F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 _AUDIO_PLAY_PATH = "/audio/play"
 _AUDIO_STOP_PATH = "/audio/stop"
@@ -285,6 +304,19 @@ _LOOK_DIRECTION_FOV_MAX_DEG = 180
 #: of this constant in `server.py` -- duplicated rather than imported,
 #: module independence).
 _MAX_CORRELATION_ID_LEN = 128
+
+#: `/command/sight_target`'s own clamp -- the Security plan review's
+#: non-blocking recommendation (`plans/9k113-sight-pointing/plan.md`,
+#: BL-B80, security-plan-review.md): the finite-float check alone lets an
+#: absurd magnitude (e.g. `az_cmd=1e30`) reach Export.lua's own `ai_off_
+#: since` "commanded is non-trivial" comparison. A generous raw-command-
+#: unit bound well past the real ±60 deg azimuth stop (`value = deg/60`,
+#: so `±1.5` is a ±90 deg equivalent) and the +20/-15 deg elevation stops
+#: (`±1.5` raw is likewise past either gauge direction) costs nothing
+#: real: Export.lua's rate limiter only ever *approaches* an out-of-range
+#: target, never jumps to it, and DCS's own mechanical stops bound the
+#: head's real position regardless of what this allows through.
+_SIGHT_TARGET_CMD_BOUND = 1.5
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -480,6 +512,9 @@ def _make_handler(
             if path == _COMMAND_COCKPIT_SWITCH_PATH:
                 self._handle_command_cockpit_switch()
                 return
+            if path == _COMMAND_SIGHT_TARGET_PATH:
+                self._handle_command_sight_target()
+                return
             self._respond_json(404, {"error": f"not found: {path}"})
 
         def _handle_text_push(self) -> None:
@@ -659,6 +694,76 @@ def _make_handler(
 
             try:
                 command_sender.send_cockpit_switch(device, cmd, float(value))
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_sight_target(self) -> None:
+            """`POST /command/sight_target` -- shape validation only
+            (both values finite, clamped to `_SIGHT_TARGET_CMD_BOUND`,
+            the Security plan review's non-blocking recommendation --
+            see the module docstring's own entry for this endpoint).
+            Reuses `command_sender`, the same `CommandSender` instance
+            `/command/cockpit_switch` already forwards through, since
+            both target `Export.lua`'s one inbound command listener."""
+            if command_sender is None:
+                self._respond_json(
+                    503, {"error": "sight target channel not configured"}
+                )
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            az_cmd = data.get("az_cmd")
+            if (
+                isinstance(az_cmd, bool)
+                or not isinstance(az_cmd, (int, float))
+                or not math.isfinite(az_cmd)
+                or abs(az_cmd) > _SIGHT_TARGET_CMD_BOUND
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'az_cmd' must be a finite number in "
+                            f"[-{_SIGHT_TARGET_CMD_BOUND}, "
+                            f"{_SIGHT_TARGET_CMD_BOUND}], got {az_cmd!r}"
+                        )
+                    },
+                )
+                return
+
+            elev_cmd = data.get("elev_cmd")
+            if (
+                isinstance(elev_cmd, bool)
+                or not isinstance(elev_cmd, (int, float))
+                or not math.isfinite(elev_cmd)
+                or abs(elev_cmd) > _SIGHT_TARGET_CMD_BOUND
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'elev_cmd' must be a finite number in "
+                            f"[-{_SIGHT_TARGET_CMD_BOUND}, "
+                            f"{_SIGHT_TARGET_CMD_BOUND}], got {elev_cmd!r}"
+                        )
+                    },
+                )
+                return
+
+            try:
+                command_sender.send_sight_target(float(az_cmd), float(elev_cmd))
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return

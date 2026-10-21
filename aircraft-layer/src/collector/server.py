@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-10-21b"
+EXPECTED_EXPORT_VERSION = "2026-10-22"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -113,6 +113,9 @@ EXPECTED_EXPORT_VERSION = "2026-10-21b"
 #: Bumped again the same day (`"b"` suffix, BL-B66 Stage 4b) for two more
 #: fields on that same feed: args 874/876 (`sight_az`/`sight_elev`, the
 #: sight's own actual-position readback) -- additive only, same reasoning.
+#: Bumped again 2026-10-22 (`plans/9k113-sight-pointing/plan.md`, BL-B80)
+#: for the new `sight_target` inbound command op (the 9K113 pointing
+#: channel) -- additive only, same reasoning.
 #: Loopback-only by design -- Export.lua and the collector run on the same
 #: Windows box (plan decision 2); nothing outside this machine should be able
 #: to push telemetry samples.
