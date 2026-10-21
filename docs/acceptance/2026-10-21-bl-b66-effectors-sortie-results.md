@@ -58,6 +58,21 @@ designed. Candidates for a probe:
 
 Seat (pilot vs CPG) is the leading suspect for why 2026-10-17 differed.
 
+**Correction, same day: the case above is not one Petrovich is ever in.** The user's rule, verbatim:
+
+> *"If player sits in copilot seat, slew is his responsibility. This is not implemented or even
+> planned yet, but as a general rule, Petrovich can only operate the controls of the cockpit he
+> occupies. That is the opposite of what player occupies. So, if player switches to copilot role,
+> then all the copilot things are his responsibility and Petrovich is *not* doing them. But, this
+> is for later and only as information for now."*
+
+So the case BL-B80 actually serves is the player in the pilot seat with Petrovich slewing from the
+copilot seat. That matches the 2026-10-17 setup (pilot seat, script write), where 874 did move.
+**BL-B80 is not blocked by this sortie.** What it still needs to know is whether 874/876 track the
+head finely and continuously enough to close a loop on: 2026-10-17 saw 22.5° plateaus rather than
+a ramp. BL-B66 Stage 4b's per-frame trace answers that the first time BL-B80 writes the axis, so
+the first BL-B80 stage can serve as the probe.
+
 Originally open until the per-frame Windows log is read:
 
 - Did the head visibly move in the sight view?
