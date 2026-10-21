@@ -47,11 +47,11 @@ measures it properly.
    hand — the same setup flown on 2026-10-21 (`GUID.UNIT POWER`, arg 885; `OBSERV.`, arg 886).
 2. **Do nothing else.** The probe watches arg 886 and starts on its own, about 5 seconds after it
    reads on. You do not need to touch the slew controls at any point — the script drives them.
-3. The sequence runs once, azimuth first then elevation: full deflection to the limits and back
+4. The sequence runs once, azimuth first then elevation: full deflection to the limits and back
    (both signs), then ±0.5/0.25/0.1/0.05/0.02, then one short pulse. Total runtime from OBSERV-on
-   is about 2 minutes; add the 5 s start delay. The log marks `SEQUENCE START` / `SEQUENCE DONE`.
-4. Exit after the log says `PROBE DONE`.
-5. **Restore the real `Export.lua`**: copy `aircraft-layer/dcs-export/Export.lua` from the
+   is about 2 minutes; add the 20 s start delay. The log marks `SEQUENCE START` / `SEQUENCE DONE`.
+5. Exit after the log says `PROBE DONE`.
+6. **Restore the real `Export.lua`**: copy `aircraft-layer/dcs-export/Export.lua` from the
    repository back to `Saved Games\DCS\Scripts\Export.lua`. Do not restore the `.backup` you made
    in step 1 of Setup (see `aircraft-layer/WORKFLOW.md` on why not — it can be stale).
 
