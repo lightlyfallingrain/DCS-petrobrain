@@ -78,6 +78,12 @@ directory?**
    commit is fine — do not amend the merge commit). A merge is not finished until the roadmap
    reflects it, and it must go out in the *same push* as the merge itself, not a later,
    easy-to-forget follow-up.
+
+   **Then run `python3 .claude/scripts/command-map-check.py`.** Exit 1 means the merge changed the
+   spoken vocabulary and the pilot's command map is behind: run `/command-map`, commit the page with
+   the roadmap commit, and republish after the push (user direction 2026-10-21, *"keep the command
+   map updated automatically"*). Like the roadmap, never a reason to hold the merge — if the redraw
+   cannot happen now, say "command map stale" in the report.
 7. `git push origin main`.
 8. `git branch -d <branch>` if the user wants the local branch cleaned up (ask, or infer from
    context — don't delete without at least implicit consent).
@@ -108,7 +114,7 @@ directory?**
     cross-cutting/unscoped item there. Commit
     this (separate commit from the merge commit is fine). A merge is not finished until the
     roadmap reflects it, and it must go out in the *same push* as the merge — not a later,
-    easy-to-forget follow-up.
+    easy-to-forget follow-up. Then the command-map check, as in step 6.
 11. `git push origin main`.
 12. `git worktree remove ../<repo-name>-merge-<short-branch-name>`.
 13. `git branch -d feature/<name>` if the user wants the local branch cleaned up.

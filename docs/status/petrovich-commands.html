@@ -1,0 +1,255 @@
+<title>Petrovich Command Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: kneeboard card stack. One card per job the pilot has; each card is one graph. */
+:root{
+  --bg:#eef0ea; --card:#f8f9f5; --fg:#1d2420; --muted:#5b665e; --line:#c9cfc4;
+  --accent:#4f6b3a; --new:#a3561c; --newbg:#f6e7d9;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#161a17; --card:#1e2420; --fg:#e3e8e0; --muted:#97a397; --line:#36403a;
+  --accent:#9cbf7c; --new:#f0a868; --newbg:#3a2a1c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#161a17; --card:#1e2420; --fg:#e3e8e0; --muted:#97a397; --line:#36403a;
+  --accent:#9cbf7c; --new:#f0a868; --newbg:#3a2a1c; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);line-height:1.5}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:16px;padding-block:28px 48px;display:grid;gap:20px}
+header h1{font-family:var(--display);font-weight:700;font-size:clamp(1.6rem,4vw,2.3rem);letter-spacing:.01em;margin:0;text-wrap:balance}
+header p{margin:.35rem 0 0;color:var(--muted);max-width:68ch}
+.legend{display:flex;flex-wrap:wrap;gap:10px 22px;font-size:.85rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.k{font-family:var(--mono);font-size:.8rem;border:1px solid var(--line);padding:1px 7px}
+.k.pill{border-radius:999px}.k.hex{clip-path:polygon(12% 0,88% 0,100% 50%,88% 100%,12% 100%,0 50%);padding:1px 12px;background:var(--line);border:0;color:var(--fg)}
+.badge{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--new);background:var(--newbg);padding:2px 7px;border-radius:3px;white-space:nowrap}
+.f10{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:1px 6px;border-radius:3px}
+section{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:16px 18px;min-width:0;display:grid;gap:8px}
+section h2{font-family:var(--display);font-weight:700;font-size:1.15rem;letter-spacing:.04em;text-transform:uppercase;margin:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+section h2 .n{font-family:var(--mono);color:var(--accent);font-weight:500}
+section p.note{margin:0;color:var(--muted);font-size:.9rem;max-width:75ch}
+.g{overflow-x:auto}
+.g pre.mermaid{margin:0;background:transparent;font-family:var(--mono)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));gap:20px}
+code{font-family:var(--mono);font-size:.88em}
+footer{color:var(--muted);font-size:.8rem}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Petrovich Command Map</h1>
+  <p>Every deterministic voice command on <code>main</code>, updated 2026-10-21. Read left to right: say the words on each node in order. Dashed arrows are optional parts; skip any of them.</p>
+</header>
+
+<div class="legend">
+  <span><span class="k pill">scan</span> words you say</span>
+  <span><span class="k hex">where</span> slot — shared word list, see card 2</span>
+  <span><span class="k">ahead · left</span> pick one</span>
+  <span>- - → optional</span>
+  <span><span class="badge">new</span> added since the previous update</span>
+  <span><span class="f10">F10</span> also in the radio menu</span>
+</div>
+
+<section>
+  <h2><span class="n">1</span> Every transmission</h2>
+  <p class="note">Nothing happens until you release PTT. Starting with “Petrovich” makes it free speech for the brain instead of a command. Ending with “nevermind” throws the whole transmission away.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  PTT(["press PTT"]) --> Q{"first word<br/>Petrovich?"}
+  Q -- "petrovich / hey petrovich" --> BR["free speech → brain layer"]
+  Q -- no --> CMD["command — cards 3 to 8"]
+  CMD --> REL(["release PTT → acted on"])
+  BR --> REL
+  CMD -.-> NV(["… nevermind / never mind / disregard"])
+  NV --> X["nothing happens"]
+  </pre></div>
+</section>
+
+<section>
+  <h2><span class="n">2</span> Shared slots</h2>
+  <p class="note">Report, select target, engage and follow reuse these lists. Where a card shows a slot, say any one word from it.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  WHAT{{"what"}} --> W1["armor · truck · infantry · sam · aaa · ship · group"]
+  WHERE{{"where"}} --> C1["eight … twelve … four  o'clock<br/>(forward half only: 8 9 10 11 12 1 2 3 4)"]
+  WHERE --> C2["north · northeast · east · southeast<br/>south · southwest · west · northwest"]
+  WHERE --> C3["left · right · ahead"]
+  FAR{{"how far"}} --> F1["near / close · medium / mid · far / distant / long"]
+  </pre></div>
+</section>
+
+<div class="grid2">
+<section>
+  <h2><span class="n">3</span> Search <span class="f10">F10</span></h2>
+  <p class="note">Points Petrovich's search. Clock and bearing are relative to the nose and to north respectively. F10 has ahead/left/right/full and the compass points.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  S(["scan"]) --> A["ahead · left · right"]
+  L(["look"]) --> A
+  S --> F["full · all around"]
+  FS(["full scan"])
+  S --> CK["8 … 4  o'clock"]
+  S --> CP["north … northwest"]
+  S --> B(["bearing"]) --> D["three digits, 5° steps<br/>“three two zero”"]
+  CS(["cancel scan / stop scan / stop scanning"])
+  </pre></div>
+</section>
+
+<section>
+  <h2><span class="n">4</span> Watch a contact <span class="f10">F10</span></h2>
+  <p class="note">Watching makes him report that contact's movement and range changes unprompted. “Follow” with slots picks the best match.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  WN(["watch nearest / follow nearest"]) -.-> AD["air defence"]
+  FO(["follow"]) -.-> WH{{"what"}}
+  FO -.-> CK["8 … 4  o'clock"]
+  FO -.-> KM["n km<br/>(km · klicks · kilometres)"]
+  CW(["cancel watch / stop watching<br/>stop following"])
+  </pre></div>
+</section>
+</div>
+
+<section>
+  <h2><span class="n">5</span> Ask what's out there</h2>
+  <p class="note">One slotted command. Use any, all or none of the three slots; “report” and “describe” are the same. With no slot he summarises everything.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  R(["report / describe"]) -.-> WHAT{{"what"}}
+  R -.-> WHERE{{"where"}}
+  R -.-> FAR{{"how far"}}
+  R --> ALL["nothing more = everything"]
+  WYS(["what do you see"]) --> ALL
+  R --> B(["bearing"]) --> D["three digits"]
+  </pre></div>
+</section>
+
+<section>
+  <h2><span class="n">6</span> Attack run</h2>
+  <p class="note">Select a target, step the selection if he picked the wrong one, then engage. Guidance is o'clock and “come left/higher”; silence means lined up.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  ST(["select target / set target"]) --> WHAT{{"what"}}
+  ST --> WHERE{{"where"}}
+  ST -.-> FAR{{"how far"}}
+  STP(["step"]) -.-> N["one … nine"]
+  STP --> DIR["left · right<br/>near / closer · far / further / away"]
+  N --> DIR
+  EN(["engage / engage target"]) -.-> SL["what · where · how far"]
+  EN -.-> WP["guns · rockets · missiles"]
+  EN ==> ARM["also sets weapons ARMED  ⟵ new"]
+  DT(["drop target"])
+  DG(["disengage / stop attack / abort"])
+  </pre></div>
+</section>
+
+<div class="grid2">
+<section>
+  <h2><span class="n">7</span> 9K113 sight &amp; weapons <span class="badge">new</span></h2>
+  <p class="note">After takeoff Petrovich powers the guidance unit up by himself and says “Guidance unit ready”. Observ on before that gets “Unable, guidance unit not ready.”</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  AUTO["after takeoff (automatic)"] --> RDY["“Guidance unit ready”"]
+  OB(["observ / observe"]) --> ON["on"]
+  OB --> OFF["off"]
+  RDY -.->|"needed first"| ON
+  WP(["weapons"]) --> AR["armed  ⟵ new"]
+  WP --> SF["safe  ⟵ new"]
+  </pre></div>
+</section>
+
+<section>
+  <h2><span class="n">8</span> Crew &amp; memory</h2>
+  <p class="note">Talk control, checks, and marks for the post-flight notepad.</p>
+  <div class="g"><pre class="mermaid">
+flowchart LR
+  T1(["stop"]) --> T1a["cuts off what he is saying"]
+  T2(["silence / be quiet / shut up"]) --> T2a["quiet until next command"]
+  T3(["say again / repeat / repeat that"])
+  T4(["cancel / cancel task"]) --> T4a["drop current task"]
+  RC(["radio check"])
+  GM(["good"]) --> TOD["morning · day · evening · night"] --> PV(["petrovich"])
+  MK(["mark"]) --> MH["here / this position"]
+  MK --> MT["target"]
+  RM(["remember"]) --> RL["this location"]
+  RM --> RT["target"]
+  </pre></div>
+</section>
+</div>
+
+<footer>Source: <code>audio-adapter/src/vocabulary.py</code> (PHRASES and the slot word lists). Phrasings shown are the ones the recogniser is tuned toward; close variants may also match. Kept current by <code>.claude/scripts/command-map-check.py</code>, run at every merge.</footer>
+<script type="application/json" id="command-map-manifest">
+{
+ "vocabulary_sha256": "c1e00eb214087ced7bc8ddba25d060b0fd6f647ce0c136c4520d9af1b2808af8",
+ "cards": {
+  "wake_petrovich": 1,
+  "cancel_nevermind": 1,
+  "scan_ahead": 3,
+  "scan_left": 3,
+  "scan_right": 3,
+  "scan_full": 3,
+  "scan_bearing_n": 3,
+  "scan_bearing_ne": 3,
+  "scan_bearing_e": 3,
+  "scan_bearing_se": 3,
+  "scan_bearing_s": 3,
+  "scan_bearing_sw": 3,
+  "scan_bearing_w": 3,
+  "scan_bearing_nw": 3,
+  "scan_bearing_deg": 3,
+  "scan_clock_8": 3,
+  "scan_clock_9": 3,
+  "scan_clock_10": 3,
+  "scan_clock_11": 3,
+  "scan_clock_12": 3,
+  "scan_clock_1": 3,
+  "scan_clock_2": 3,
+  "scan_clock_3": 3,
+  "scan_clock_4": 3,
+  "cancel_scan": 3,
+  "watch_nearest": 4,
+  "watch_nearest_air_defence": 4,
+  "follow": 4,
+  "cancel_watch": 4,
+  "report_all": 5,
+  "report": 5,
+  "report_bearing_deg": 5,
+  "report_bearing_n": 5,
+  "report_bearing_ne": 5,
+  "report_bearing_e": 5,
+  "report_bearing_se": 5,
+  "report_bearing_s": 5,
+  "report_bearing_sw": 5,
+  "report_bearing_w": 5,
+  "report_bearing_nw": 5,
+  "report_clock_8": 5,
+  "report_clock_9": 5,
+  "report_clock_10": 5,
+  "report_clock_11": 5,
+  "report_clock_12": 5,
+  "report_clock_1": 5,
+  "report_clock_2": 5,
+  "report_clock_3": 5,
+  "report_clock_4": 5,
+  "select_target": 6,
+  "drop_target": 6,
+  "step": 6,
+  "engage": 6,
+  "disengage": 6,
+  "observ_on": 7,
+  "observ_off": 7,
+  "weapons_armed": 7,
+  "weapons_safe": 7,
+  "stop_talking": 8,
+  "say_again": 8,
+  "silence": 8,
+  "cancel_task": 8,
+  "radio_check": 8,
+  "greeting": 8,
+  "mark_here": 8,
+  "mark_target": 8
+ }
+}
+</script>
+</div>
