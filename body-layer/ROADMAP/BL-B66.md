@@ -1,8 +1,17 @@
 # BL-B66 — The 9K113 sight, entry 2 of 3: effectors
 
-- [~] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
+- [x] **BL-B66 — Make the real cockpit systems move: the guidance-unit power-up sequence, OBSERV
   as an actual cockpit mode, and the weapon safety bar. Everything that is visible to the pilot in
-  the cockpit rather than only inside Petrovich's head.** #status/in-progress
+  the cockpit rather than only inside Petrovich's head.** #status/done
+  **DONE 2026-10-21: the Stage 5 sortie flew, and all six blocks passed** (pilot: *"1 - 6: pass."*,
+  `docs/acceptance/2026-10-21-bl-b66-effectors-sortie-results.md`). CPLR DISTR moved at takeoff,
+  confirming arg 761. The slew-trace data from block 5 read 874/876 = 0. That was explained the
+  same evening and belongs to `[[BL-B80]]`: the readback needs DCS AI Petrovich on
+  (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`).
+  **Downstream effect:** BL-B80 changes from a rate loop on the player axis to per-frame
+  AI-axis position writes with DCS AI Petrovich kept on, and `[[BL-B63]]` drops out as a
+  dependency. One gap carried into BL-B80: Petrovich's sight mode follows the OBSERV *command*,
+  but must follow the observed arg 886 (user direction, 2026-10-21).
   **SCOPE NARROWED 2026-10-17** (user direction, *"OK to split BL-B66"*): **the slew loop left
   this entry and is now `[[BL-B80]]`**, because it is blocked on `[[BL-B63]]` and this half is not.
   Pinpoint-on-request rides the slew loop and went with it.
@@ -272,7 +281,7 @@
   implementation.md` for the full per-stage account.
 
   **Merged to `main` 2026-10-21 (`a877de9d`, `feature/9k113-effectors`).** Entry stays open until Stage 5 flies.
-  **DoD-passed 2026-10-21 for Stages 1-4 + 4b, at `510084a3`.** `#needs-flight` — Stage 5 (the
+  **DoD-passed 2026-10-21 for Stages 1-4 + 4b, at `510084a3`.** needs-flight (flown 2026-10-21, see top) — Stage 5 (the
   acceptance sortie) has not flown. Reviewer (two passes, the second covering the review-fix tests
   and Stage 4b), Performance Reviewer (APPROVED — MONITOR, the `push_cockpit_switch_state`
   unconditional 8-reads-per-frame addition flagged for future attention, not now), and Security
