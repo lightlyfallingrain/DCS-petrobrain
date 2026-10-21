@@ -58,9 +58,18 @@
   where DCS stops it. What stays Petrovich's job is the **pointing intent** — choosing a sensible
   direction to look. Do not invest in hardening the simulated enforcement further.
 
-  **Open for this entry's plan, not decided:** what becomes of the simulated check when the loop
-  lands — remove it, or keep only enough of it that the intent never asks for a direction the head
-  cannot reach (which would leave the loop chasing a target it can never hit).
+  **What becomes of the simulated check when the loop lands — decided, user, 2026-10-21:** keep
+  only enough of it that the intent never asks for a direction the head cannot reach (otherwise the
+  loop chases a target it can never hit). In his words:
+
+  > *"keep enough of it that Petrovich never asks for a direction the head can't physically reach
+  > -> this. The +-60 azimuth limit especially. Might leave the vertical limit out, since that's
+  > difficult for a real operator to judge."*
+
+  So: **±60° azimuth stays as an intent constraint** — an operator knows where the head's side
+  stops are. **The +20°/−15° elevation limits are likely dropped** from intent, because a real
+  operator would not judge them reliably; DCS's own stop handles them. "Might" — the elevation
+  half is his leaning, to be confirmed when this entry is planned, not a settled removal.
 
   Related: `[[BL-B66]]` (the switch half, unblocked), `[[BL-B63]]` (hard dependency),
   `[[BL-B64]]` (perception, lands first), `[[BL-B67]]` (the ATGM run, which is built out of this

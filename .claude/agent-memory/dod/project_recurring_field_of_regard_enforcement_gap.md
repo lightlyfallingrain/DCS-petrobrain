@@ -65,7 +65,8 @@ where we want to point the sight must behave correctly."* So the simulated regar
 temporary, retired by the real slew loop (`body-layer/ROADMAP/BL-B80.md`, "Field-of-regard
 limits"). **Do not recommend extra process or plan sections to harden it.** What still deserves
 scrutiny is the pointing-intent logic — that the direction chosen makes sense — not the stand-in
-for the mechanical stop.
+for the mechanical stop. Follow-up the same day: once the loop lands, keep ±60° azimuth as an
+intent constraint; elevation likely dropped from intent ("difficult for a real operator to judge").
 
 See also `.claude/agent-memory/implementer/feedback_declared_bound_check_at_selection_not_at_consumer.md`
 (the mechanism-level fix pattern: reject not clamp, fix at the producer/choke point) and
