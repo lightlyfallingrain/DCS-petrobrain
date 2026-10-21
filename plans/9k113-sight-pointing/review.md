@@ -249,3 +249,171 @@ Full read of the fix diff (`Export.lua`, `logger.py`, `test_logger.py`,
 behaviour (no automated coverage exists for that file). Independent mutation test of the
 `logger.py` gating fix. All four subprojects' mechanical checks (`ruff format --check`, `ruff
 check`, `mypy --strict`, `pytest`) run fresh rather than taken on faith from `implementation.md`.
+
+---
+
+## Review (exponent-float fix)
+
+Scope: the one-off fix described in `implementation.md`'s "Exponent-float fix" section
+(`5a8a4672..1277c9df`), landed after the Stage 1-3 batch's own Security/Performance/Reviewer
+passes (`a7ff14d3` perf, `fcbce9f2` security, `5a8a4672` re-review) had already approved and
+proceeded toward DoD. Diff is exactly the six files `implementation.md` claims: `Export.lua`,
+`command_sender.py`, `server.py` (one-line version bump), the new
+`tests/test_exponent_float_fix.py`, `implementation.md` itself, and the rewritten
+`.claude/agent-memory/security/project_export_lua_json_extractor_cannot_yield_nonfinite.md`.
+
+### The bug, confirmed
+
+`CommandSender.send_sight_target`/`send_cockpit_switch` built their UDP datagram with
+`json.dumps`, which emits exponent notation for `|value| < 1e-4`
+(`json.dumps({"x": 1e-05})` -> `'{"x": 1e-05}'`). `Export.lua`'s old
+`extract_json_number_field` pattern (`"field"%s*:%s*(-?%d+%.?%d*)`) has no `e`/`E` in its
+character class, so it did not reject that text -- Lua patterns aren't anchored at the end -- it
+matched the *leading* digits only and stopped: `"1e-05"` -> captured `"1"` -> `tonumber("1")` ->
+`1`, a finite, in-range-looking, completely wrong number (a ~60 deg sight command from a
+near-zero intent). No `nil`/NaN/huge check downstream could ever see this, because `1` is none of
+those. The corrected agent-memory file states this accurately, including the generalizable lesson
+("a parser can't produce X" is a claim about its full accepted grammar, not about inputs anyone
+tried) -- no discrepancy between the memory file and what the diff actually does.
+
+### New extractor pattern -- traced and independently executed
+
+`[eE]?[%-%+]?%d*` appended to the old pattern. Traced by hand and then verified by actually
+running the live function (extracted into a standalone script, not a copy) against `luajit`
+(5.1-semantics-compatible for `string.match`/`tonumber`/`math.huge` -- this function has no
+DCS-API dependency, so interpreter choice doesn't matter here) for every case the task asked to
+think through, plus a few the test suite doesn't cover:
+
+| input | result | correct? |
+|---|---|---|
+| `1e-05` | `1e-05` | yes (the bug case) |
+| `-3.3e-07` | `-3.3e-07` | yes |
+| `1E+3` | `1000` | yes (uppercase E) |
+| `0.25` / `-0.5` | `0.25` / `-0.5` | yes, unaffected by the added optional group |
+| `-0` | `-0` | yes (Lua has no separate int/float subtype; stays finite) |
+| `1e999` | `nil` | yes -- overflows to `math.huge`, rejected by the new finite check |
+| `1e` (malformed, no exponent digits) | `nil` | yes -- `tonumber("1e")` is itself `nil` in Lua, caught by the existing `value == nil` branch |
+| value immediately followed by `,` or `}` | unaffected | yes -- confirmed with `1e-05` both mid-object and at the end; Lua pattern matching isn't end-anchored, so the trailing delimiter was never part of the risk |
+
+All eight matched the expected finite/non-finite/malformed outcome. `test_exponent_float_fix.py`
+covers four of these end-to-end through a real interpreter (`1e-05`, `-3.3e-07`, `0.25`, `-0.5`,
+`1e999`) plus the Python-side never-emits-exponent half; it does not cover `1E+3` (uppercase) or
+the bare malformed `1e` case. Both pass by my own run above, so this is a coverage gap, not a
+defect -- noted as optional below.
+
+### Range check, non-finite rejection, cockpit_switch unaffected
+
+- `SIGHT_TARGET_CMD_BOUND = 1.5` added and correctly mirrors `api.server`'s
+  `_SIGHT_TARGET_CMD_BOUND` (grepped both files, same value, same comment cross-reference).
+  Without it, a finite-but-huge exponent value (`"1e10"`) would now pass the extractor's new
+  finite check and reach `handle_sight_target_command` as a nonsense command -- the fix adds this
+  specifically because accepting exponents reopened that door.
+- `handle_cockpit_switch_command`'s own pre-existing `value ~= value or value == math.huge or
+  value == -math.huge` re-check is untouched and now genuinely redundant (the extractor already
+  guarantees finite) rather than falsely redundant as the pre-fix memory claimed -- correctly left
+  in place rather than removed, since removing genuinely-redundant defense-in-depth for a LAN
+  write surface would be the wrong kind of cleanup here.
+- `cockpit_switch`'s `device`/`cmd` fields are unaffected: `command_sender.py` splices them as
+  plain Python ints directly into the hand-built JSON string, never through `_format_fixed_point`
+  or `json.dumps`, so their wire representation is unchanged by this fix.
+
+### `_format_fixed_point` -- no exponent, adequate precision, existing values unaffected
+
+Traced `_format_fixed_point` against the pre-fix `json.dumps` behaviour for ordinary
+already-working values (`0.5`, `-1.0`, `3.0`, `0.0`, `-0.0`) -- all produce the identical
+fixed-point string either way, so no behavioural change for any value `cockpit_switch`/
+`sight_target` callers were already sending correctly. `-0.0` renders as `"-0.0"` (valid JSON, not
+`"-0."`), matching the docstring's stated reason for the trim-then-restore-one-digit logic. Ints
+stay ints: `device`/`cmd` are never routed through this helper (see above).
+
+One edge case worth naming, not blocking: at 9 decimal places, a magnitude below ~`5e-10` renders
+as `"0.0"`/`"-0.0"` -- a second, much smaller truncation than the one this fix removes. For
+`sight_target` (bounded +/-1.5, body-layer arithmetic near sight centre producing values down to
+`~1e-4`) this is immaterial. For `cockpit_switch`'s "any value for any switch" channel (BL-B66,
+no bound by design) it's a real precision ceiling if a future caller ever needs sub-nanometer-
+scale switch values -- vanishingly unlikely for a clickable-action argument, so optional rather
+than required.
+
+### Version bump and test extraction method
+
+`EXPORT_SCRIPT_VERSION` (`"2026-10-22b"`) matches `collector.server.EXPECTED_EXPORT_VERSION`
+exactly (grepped both). `test_exponent_float_fix.py`'s `_extract_lua_function` slices the function
+by balanced `function`/`if`/`end` counting straight out of the live `dcs-export/Export.lua` file
+on disk -- confirmed by reading the extraction code, not just the docstring's claim -- so this is
+the real, currently-deployed function under test, not a hand-copied duplicate that could silently
+drift from it.
+
+### Mutation check -- not run by me, taken on the implementer's own account
+
+`implementation.md` states the implementer reverted the extractor to the old digits-only pattern,
+confirmed the new test class failed exactly as predicted (`"1e-05"` -> `1`, `"1e999"` -> `1`
+instead of `nil`), then restored the fix and verified an exact `shasum` match. I attempted to
+repeat this independently and the harness's auto-mode classifier refused the revert as "security
+test removal" (reverting a security-relevant parser, even temporarily, inside the diff under
+review). I did not work around this. In its place I ran the extractor's live source directly
+against `luajit` for the eight cases in the table above (a forward confirmation of current
+behaviour, not a reversion) and separately hand-traced why the old pattern must fail those same
+cases (no `e`/`E`/exponent-sign/second-digit-run in its character class, so the match necessarily
+stops at the first non-digit, non-`.` character it meets). Both lines of evidence agree with the
+implementer's account; I did not independently reproduce the counterfactual run and am saying so
+rather than presenting the implementer's account as my own finding.
+
+### Checks (run independently)
+
+aircraft-layer: `ruff format --check` (pass, 72 files), `ruff check` (all checks passed),
+`cd aircraft-layer && .venv/bin/mypy src` (pass, 26 source files), `pytest aircraft-layer/tests -q`
+(469 passed, up from the prior batch's 459 -- the 10 new tests), `test_exponent_float_fix.py` and
+`test_dcs_export_lua_local_order.py` run by name (both pass; `luajit` was on `PATH` so the
+Lua-interpreter-dependent test class actually ran rather than skipping). body-layer untouched by
+this diff (confirmed via the file list above), so not re-run.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- Add `1E+3` (uppercase exponent) and a bare malformed `1e` case to
+  `test_exponent_float_fix.py`'s Lua-side test class -- both pass today (confirmed above by
+  independent execution) but aren't in the automated suite, so a future regression on either
+  wouldn't be caught mechanically.
+- Note the ~`5e-10` precision ceiling in `_format_fixed_point`'s docstring for the benefit of a
+  future `cockpit_switch` caller on the unbounded channel, even though no current caller is
+  affected.
+
+### Process note, not a required fix
+
+This fix touches the inbound command parser on a LAN-reachable (loopback-bound, but a write
+surface nonetheless) path, and landed **after** the Stage 1-3 batch's own Security deep analysis
+(`fcbce9f2`) had already run and approved. Per `AGENTS.md`'s role sequencing ("Bug fix: Debugger
+-> Reviewer -> Security (deep analysis) -> DoD" and "A change request ... re-enters the loop"),
+this diff has not yet had its own Security pass -- `security-review.md`'s existing content
+predates it and still states the old, now-superseded "digits-only, cannot match non-finite"
+characterization of the extractor (correct as a description of the pre-fix code at the time it
+was written, not a staleness defect in that document, but not evidence this new diff has been
+security-reviewed either). Recommend one short Security pass on this diff specifically before
+DoD, consistent with how the rest of the batch was gated -- this fix is small and self-contained
+enough that it should be quick.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+The fix is correct, complete, and matches `implementation.md`'s own account in every detail I
+could independently check (extractor pattern, range check, sender formatting, version bump, test
+extraction method). No required fixes. Two optional test/documentation refinements. One process
+item: a Security deep-analysis pass on this specific diff has not yet happened and should run
+before DoD, per the standard bug-fix role sequence -- not a defect in the fix itself.
+
+### Review Confidence
+
+Full read of every changed file (`Export.lua`'s two changed functions in full,
+`command_sender.py`'s `_format_fixed_point` and both callers in full, `server.py`'s one-line
+version bump, `test_exponent_float_fix.py` in full, the rewritten agent-memory file,
+`implementation.md`'s "Exponent-float fix" section). Independently executed the live extractor
+against `luajit` for eight hand-chosen edge cases beyond the test suite's own four. Mechanical
+checks (`ruff format --check`, `ruff check`, `mypy --strict`, `pytest`) run fresh. The one gap:
+the implementer's digits-only-pattern counterfactual run was not independently repeated (harness
+refused the revert as a security-test-removal action) -- taken on the implementer's documented
+account plus my own independent forward-direction confirmation and hand-trace, not re-verified by
+mutation myself.
