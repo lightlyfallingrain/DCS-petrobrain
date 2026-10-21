@@ -11,7 +11,13 @@ audio-adapter can all stay off.
 
 **Script:** `aircraft-layer/dcs-export/Export.probe-9k113-slew-readback.lua`.
 
-**Run 3 (current script): `AXIS_MODE = "ai"`.** It writes the AI axis (3061/3060) as position
+**Run 4 (current script): `SCAN = true`, `SCAN_ONLY = true`.** The sequence shrinks to five 3 s
+AI-axis position holds: az +0.5, −0.5, +0.25, elev +0.5, −0.5. At the end of each hold the script
+logs every cockpit arg and every external-model draw arg that differs from the start. It also dumps
+the 9K113 device's own methods once. Expect a short stutter at each hold's end; that is the scan.
+Same setup and procedure.
+
+**Run 3: `AXIS_MODE = "ai"`.** It writes the AI axis (3061/3060) as position
 targets, not the player slew axis. Each step's value is a position, and the release step returns
 the sight to centre. Same setup and procedure as runs 1–2. Results so far:
 `aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`.

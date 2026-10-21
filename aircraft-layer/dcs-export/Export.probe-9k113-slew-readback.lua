@@ -116,6 +116,19 @@ local CMD_AI_ELEV = 3060
 -- (0) returns the head to centre.
 local AXIS_MODE = "ai"
 
+-- Run 4: 874/876 read 0 in runs 1-3 although the AI axis visibly points and
+-- holds the sight, and 2.9.30 still declares them as the 9K113 gauge. So
+-- search for anything else that tracks the sight: at each hold's end, diff
+-- every cockpit arg (GetDevice(0)) and every external-model draw arg
+-- (LoGetAircraftDrawArgumentValue) against a baseline taken at sequence
+-- start, and dump the 9K113 device's own methods once. SCAN_ONLY shortens the
+-- sequence to five 3 s position holds, since only the scans matter here.
+local SCAN = true
+local SCAN_ONLY = true
+local SCAN_MAX_COCKPIT_ARG = 3000
+local SCAN_MAX_DRAW_ARG = 3000
+local SCAN_DIFF_EPSILON = 0.001
+
 -- How long OBSERV must read on, continuously, before the sequence starts --
 -- guards against a single noisy frame triggering early.
 local OBSERV_DEBOUNCE_S = 0.5
@@ -228,13 +241,82 @@ local DEFLECTIONS_STEP = { 0.5, -0.5, 0.25, -0.25, 0.1, -0.1, 0.05, -0.05, 0.02,
 -- Built once at load time: a flat list of
 -- { axis, value, mode = "full"|"fixed"|"pulse", hold }.
 local STEPS = {}
-for _, axis in ipairs(AXES) do
+if SCAN_ONLY then
+    STEPS[#STEPS + 1] = { axis = AXES[1], value =  0.5,  mode = "fixed", hold = STEP_HOLD_S }
+    STEPS[#STEPS + 1] = { axis = AXES[1], value = -0.5,  mode = "fixed", hold = STEP_HOLD_S }
+    STEPS[#STEPS + 1] = { axis = AXES[1], value =  0.25, mode = "fixed", hold = STEP_HOLD_S }
+    STEPS[#STEPS + 1] = { axis = AXES[2], value =  0.5,  mode = "fixed", hold = STEP_HOLD_S }
+    STEPS[#STEPS + 1] = { axis = AXES[2], value = -0.5,  mode = "fixed", hold = STEP_HOLD_S }
+end
+for _, axis in ipairs(SCAN_ONLY and {} or AXES) do
     STEPS[#STEPS + 1] = { axis = axis, value =  1.0, mode = "full" }
     STEPS[#STEPS + 1] = { axis = axis, value = -1.0, mode = "full" }
     for _, v in ipairs(DEFLECTIONS_STEP) do
         STEPS[#STEPS + 1] = { axis = axis, value = v, mode = "fixed", hold = STEP_HOLD_S }
     end
     STEPS[#STEPS + 1] = { axis = axis, value = 1.0, mode = "pulse", hold = PULSE_HOLD_S }
+end
+
+-- ============================================================= scan
+-- One full read of both arg spaces. pcall per arg, silently: an arg number
+-- with nothing behind it must not spam the log.
+local function snapshot_args()
+    local snap = { cockpit = {}, draw = {} }
+    local mp = try("GetDevice(0)", GetDevice, DEV_MAINPANEL)
+    local get = mp and safe_index(mp, "get_argument_value")
+    if type(get) == "function" then
+        for a = 0, SCAN_MAX_COCKPIT_ARG do
+            local ok, v = pcall(get, mp, a)
+            if ok and type(v) == "number" then snap.cockpit[a] = v end
+        end
+    end
+    if type(LoGetAircraftDrawArgumentValue) == "function" then
+        for a = 0, SCAN_MAX_DRAW_ARG do
+            local ok, v = pcall(LoGetAircraftDrawArgumentValue, a)
+            if ok and type(v) == "number" then snap.draw[a] = v end
+        end
+    end
+    return snap
+end
+
+local scan_baseline = nil
+
+local function log_scan_diff(label)
+    local now = snapshot_args()
+    for _, space in ipairs({ "cockpit", "draw" }) do
+        local n = 0
+        for a, v in pairs(now[space]) do
+            local b = scan_baseline[space][a]
+            if b == nil or math.abs(v - b) > SCAN_DIFF_EPSILON then
+                log(string.format("    SCAN %s %s arg %d: %s -> %s",
+                                  label, space, a, fmt(b), fmt(v)))
+                n = n + 1
+            end
+        end
+        log(string.format("    SCAN %s %s: %d arg(s) differ from baseline", label, space, n))
+    end
+end
+
+-- Every method name on the 9K113 device and the main panel; any zero-arg
+-- getter is called once and its result logged.
+local function dump_device_methods(dev_id)
+    local dev = try("GetDevice(" .. dev_id .. ")", GetDevice, dev_id)
+    if dev == nil then return end
+    local mt = getmetatable(dev)
+    local idx = mt and mt.__index
+    if type(idx) ~= "table" then
+        log(string.format("  device %d: no method table (%s)", dev_id, tostring(idx)))
+        return
+    end
+    for name, fn in pairs(idx) do
+        local line = string.format("  device %d method %s", dev_id, tostring(name))
+        if type(fn) == "function" and type(name) == "string" and name:sub(1, 4) == "get_" then
+            local ok, a, b, c = pcall(fn, dev)
+            line = line .. string.format("() -> ok=%s %s %s %s",
+                                         tostring(ok), tostring(a), tostring(b), tostring(c))
+        end
+        log(line)
+    end
 end
 
 -- ============================================================= state
@@ -276,6 +358,15 @@ end
 local function begin_sequence(dt)
     log(string.format("  ================ SEQUENCE START t=%6.1f ================", dt))
     sequence_start_t = dt
+    if SCAN then
+        dump_device_methods(DEV_I9K113)
+        dump_device_methods(DEV_MAINPANEL)
+        scan_baseline = snapshot_args()
+        local nc, nd = 0, 0
+        for _ in pairs(scan_baseline.cockpit) do nc = nc + 1 end
+        for _ in pairs(scan_baseline.draw) do nd = nd + 1 end
+        log(string.format("  SCAN baseline: %d cockpit args, %d draw args readable", nc, nd))
+    end
     step_idx = 1
     start_step(dt)
 end
@@ -384,6 +475,9 @@ function LuaExportAfterNextFrame()
                     done = held_for >= s.hold
                 end
                 if done then
+                    if SCAN and scan_baseline then
+                        log_scan_diff(string.format("step%d %s=%s", step_idx, s.axis.name, fmt(s.value)))
+                    end
                     set_command(DEV_I9K113, s.axis.cmd, 0, s.axis.name .. " release")
                     log(string.format("    step %d held %.2fs, releasing  874=%s 876=%s",
                                       step_idx, held_for, fmt(az), fmt(elev)))
