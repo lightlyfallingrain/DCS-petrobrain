@@ -104,6 +104,18 @@ local ARG_OBSERVE = 886
 local CMD_PLAYER_AZ = 3026     -- left/right, same sign as arg 874
 local CMD_PLAYER_ELEV = 3025   -- up/down, sign-inverted against arg 876
 
+-- The AI axis: a POSITION target (2026-09-11, pilot seat: az value = deg/60,
+-- arg_874 = value * 0.44; elevation not sign-inverted).
+local CMD_AI_AZ = 3061
+local CMD_AI_ELEV = 3060
+
+-- Which channel this run writes. "player" was runs 1-2 (2026-10-21): the
+-- readback snapped back to 0 within ~5 frames from the pilot seat. "ai" is
+-- run 3: does the AI axis point the sight from the pilot seat, as it did on
+-- 2026-09-11? With "ai", a step's value is a position, and the release write
+-- (0) returns the head to centre.
+local AXIS_MODE = "ai"
+
 -- How long OBSERV must read on, continuously, before the sequence starts --
 -- guards against a single noisy frame triggering early.
 local OBSERV_DEBOUNCE_S = 0.5
@@ -179,9 +191,11 @@ end
 -- error -- restoring the axis is more important than finishing the
 -- sequence.
 local function restore_axes(reason)
-    log("  --- RESTORE (" .. tostring(reason) .. "): writing 0 to both player-axis commands")
+    log("  --- RESTORE (" .. tostring(reason) .. "): writing 0 to player and AI axis commands")
     set_command(DEV_I9K113, CMD_PLAYER_AZ, 0, "player az -> 0")
     set_command(DEV_I9K113, CMD_PLAYER_ELEV, 0, "player elev -> 0")
+    set_command(DEV_I9K113, CMD_AI_AZ, 0, "ai az -> 0")
+    set_command(DEV_I9K113, CMD_AI_ELEV, 0, "ai elev -> 0")
 end
 
 -- One JSON sample per frame while the sequence is running. Same flat shape
@@ -205,8 +219,8 @@ end
 -- pulse. Azimuth first, then elevation -- the order the card tells the
 -- pilot to expect.
 local AXES = {
-    { name = "az",   cmd = CMD_PLAYER_AZ,   arg = ARG_AZ },
-    { name = "elev", cmd = CMD_PLAYER_ELEV, arg = ARG_ELEV },
+    { name = "az",   cmd = AXIS_MODE == "ai" and CMD_AI_AZ or CMD_PLAYER_AZ,     arg = ARG_AZ },
+    { name = "elev", cmd = AXIS_MODE == "ai" and CMD_AI_ELEV or CMD_PLAYER_ELEV, arg = ARG_ELEV },
 }
 
 local DEFLECTIONS_STEP = { 0.5, -0.5, 0.25, -0.25, 0.1, -0.1, 0.05, -0.05, 0.02, -0.02 }
@@ -271,6 +285,7 @@ function LuaExportStart()
     log("")
     log("#########################################################")
     log("9K113 SLEW READBACK PROBE")
+    log("  AXIS_MODE = " .. AXIS_MODE .. " (writes " .. AXES[1].cmd .. "/" .. AXES[2].cmd .. ")")
     local v = try("LoGetVersionInfo", LoGetVersionInfo)
     if type(v) == "table" then
         -- FileVersion/ProductVersion are TABLES of numbers, not strings --

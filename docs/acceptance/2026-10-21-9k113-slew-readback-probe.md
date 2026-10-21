@@ -11,6 +11,11 @@ audio-adapter can all stay off.
 
 **Script:** `aircraft-layer/dcs-export/Export.probe-9k113-slew-readback.lua`.
 
+**Run 3 (current script): `AXIS_MODE = "ai"`.** It writes the AI axis (3061/3060) as position
+targets, not the player slew axis. Each step's value is a position, and the release step returns
+the sight to centre. Same setup and procedure as runs 1–2. Results so far:
+`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`.
+
 ## Why this card exists
 
 `BL-B80` is the slew-loop controller — the thing that will hold the player axis down until the
