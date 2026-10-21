@@ -213,3 +213,66 @@ ready" is heard; try "Observ on" before and after that callout (expect a refusal
 acceptance); say "Observ off"; say "weapons armed"/"engage" and "weapons safe", confirming arg
 673's readback both ways; and specifically confirm or correct arg 761 (`CPLR DISTR`) by throwing
 it by hand while watching `GET /cockpit_switch/latest`'s `cplr_distr`/`cplr_distr_on` fields.
+
+## Review fix (`plans/9k113-effectors/review.md`, required fix)
+
+The review's one required fix: the `_run_crew_text_poll_loop` wiring for Stages 2-4 (takeoff
+rising-edge detection, sequencer advance/readback refresh/`sight_ready` refresh/
+`drain_guidance_unit_ready`, and the OBSERV/weapons-safety cockpit write-through) had no test
+driving the real poll loop — only `belief.sight_effector`'s own pure-function tests in isolation,
+confirmed as a real gap by the reviewer's own two mutations (forcing the takeoff `if` to `False`;
+removing the `announced` guard in `CrewConsole.drain_guidance_unit_ready`), both of which left the
+full suite green.
+
+**Added three tests to `body-layer/tests/test_logger.py`**, all driving the real
+`_run_crew_text_poll_loop` on a background thread (same technique as the pre-existing
+`test_crew_text_poll_loop_resets_belief_on_mission_restart`), mutating the fake client's telemetry
+dict between polls the way a real sortie's clock would:
+
+- `test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_loop` — no write
+  while still on the ground; the four switches (`(6, 3028, 1.0)`, `(16, 3015, 1.0)`,
+  `(7, 3001, 1.0)`, `(6, 3030, 1.0)`) written in order on the takeoff rising edge, advancing the
+  fake's own sim clock by `GUIDANCE_UNIT_SWITCH_DELAY_S` between writes (the sequencer's own gate
+  is *sim* time, not wall time); `sight_ready` checked `False` on every partial count (1-3
+  switches) so a sequencer that readied early would be caught even if the 4th write landed on the
+  very next tick; "Guidance unit ready." spoken exactly once across six further polls after
+  completion, captured via `crew_console.output = io.StringIO()` (not `capsys` — this reads more
+  reliably across the poll thread/main thread boundary than a global stdout capture).
+- `test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up` — starts from an
+  already-ready `GuidanceUnitState` (bypassing the sequence the first test already covers), drives
+  a landing then a second takeoff via `crew_console.on_ground`, and confirms no further writes.
+- `test_observ_and_weapons_safety_write_through_the_real_poll_loop` — "Observ on" before
+  `sight_ready` is refused through the real loop with no write
+  (`["Unable, guidance unit not ready."]`, `cockpit_switch_writes == []`); once ready, "Observ on"
+  writes `(7, 3002, 1.0)`, "weapons armed" writes `(6, 3020, 1.0)`, "weapons safe" writes
+  `(6, 3020, 0.0)`, each via `crew_console.handle_command` dispatched from the main thread and
+  observed landing on the real poll thread's own write-through block.
+
+**Both of the reviewer's mutations re-run and confirmed to fail** (then reverted, confirmed by
+`shasum` before/after on both files):
+- Forcing the takeoff `if` to `False` in `logger.py` → `test_takeoff_runs_the_guidance_unit_
+  power_up_sequence_through_the_real_poll_loop` fails (`cockpit_switch_writes == []` instead of the
+  expected four writes).
+- Removing the `announced` guard from `CrewConsole.drain_guidance_unit_ready` → the same test fails
+  (`spoken.count("Guidance unit ready.") == 20`, not `1`).
+
+No bug was found while writing these tests — the wiring behaves exactly as the plan and the
+pure-function tests already claimed; the gap was coverage, not correctness. One scope note: a
+telemetry fixture that starts airborne (rather than on the ground, `CrewConsole.on_ground`'s own
+default) produces a takeoff rising edge on the very first poll, since `on_ground` defaults `True`
+— the third test's telemetry was adjusted to start on the ground for exactly this reason, after
+first hitting it as a test-authoring mistake, not a product bug.
+
+**Checks (re-run after the fix):**
+- `ruff format --check body-layer/src body-layer/tests`: pass (one file reformatted by
+  `ruff format` before the check — the new tests' multi-line `while (...)` conditions over
+  3-tuples, reformatted to ruff's own single-line style).
+- `ruff check body-layer/src body-layer/tests`: pass.
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues (69 source files). `mypy tests` is not a
+  project command (see `body-layer/CLAUDE.md`'s "Commands") and was not run; it has ~170
+  pre-existing errors unrelated to this change.
+- `pytest body-layer/tests -q`: **2386 passed, 4 xfailed** (2383 passed before this fix, +3 new
+  tests, no regressions).
+- No `.venv` existed in this worktree (fresh worktree) — created with `python3.12 -m venv .venv`
+  and `pyproj`/`numpy<2.5`/`pytest`/`ruff`/`mypy` installed per `body-layer/pyproject.toml`'s own
+  declared dependencies.
