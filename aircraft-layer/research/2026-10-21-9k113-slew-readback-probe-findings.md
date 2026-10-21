@@ -72,6 +72,34 @@ another argument, and 874/876 now belong to something that twitches on input. No
 the commanded position. Also re-derive the device/command/argument tables from the 2.9.30
 install. BL-B90's registry generator is that tool.
 
+## Windows-side file read (peer session on the DCS box, read-only)
+
+DCS 2.9.30.28738, `autoupdate.cfg` timestamp **2026-10-06**. `mainpanel_init.lua:1575-1585`
+still declares `Sight9K113_Azimuth` = arg 874 and `Sight9K113_Elevation` = arg 876, identical to
+2.9.29, and the file is unchanged since 2025-03-04. Commands 3025/3026/3060/3061 are unchanged.
+No `get_param_handle` exists anywhere in `Cockpit/Scripts`. **The renumbering hypothesis is
+false.** Also, the install dates from 2026-10-06, so **2026-10-17's working readback was on 2.9.30
+too**: the version is not the difference either.
+
+## Run 4 — all-argument scan
+
+At the end of each 3 s AI-axis hold, the probe diffed all 3001 cockpit args and all 3001 draw args
+against the sequence-start baseline. The run stopped during step 4 (elev +0.5), so only the three
+azimuth holds were scanned (+0.5, −0.5, +0.25).
+
+- 58–80 cockpit args and 37–43 draw args differ at each scan. Nearly all are instrument and
+  airframe drift, small and not correlated with the command.
+- **No argument tracks the commanded azimuth.** The only one that ranked was cockpit
+  1120/1140 = draw 523/540: 0.712 → 0.988 / 0.588 / 0.186. Every delta is ≡ 0.276 mod 0.4,
+  sampled exactly 4 s apart, so it is a periodic animation, not the sight.
+- 874 read 0 at every scan.
+- The 9K113 device (7) exposes only `listen_event`, `listen_command`, `performClickableAction` and
+  `SetCommand`: **no getters.**
+
+**So, in this setup, the sight position is not readable from Export Lua by any argument or device
+method**, although the AI-axis write visibly points and holds the sight. Something made 874 read
+on 2026-10-17 (same version, `Export.probe-9k113-slew.lua`) and it is not yet known what.
+
 ## What differs from 2026-10-17
 
 The 2026-10-17 slew run (`Export.probe-9k113-slew.lua`) wrote the **AI axis (3060/3061) first**,
