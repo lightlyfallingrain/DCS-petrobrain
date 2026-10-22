@@ -257,6 +257,10 @@ azimuth_deg = GetDevice(0):get_argument_value(874) * 136.36
 **`SetCommand` is the verb** — `performClickableAction` only works on controls
 that have a clickable element, and the sight axes have none.
 
+> **CORRECTION 2026-10-22:** the position reading below is withdrawn. The AI axis is a **rate**
+> command at the spec rates, obeyed intermittently by DCS; 874/876 echo the demand. See
+> `docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` (runs 1–10).
+
 **The AI axis (3060/3061) is a POSITION target, exactly linear**, measured at
 five points with ratio `0.440000` in every case, settling inside 0.25 s and
 then holding flat. So pointing is a **single write** — no closed loop.
