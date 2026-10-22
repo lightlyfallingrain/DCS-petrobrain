@@ -318,3 +318,41 @@ mark to centre. Rate: as in run 3.
 Setup as run 3, except: **turn the DCS AI Petrovich overlay ON before OBSERV** and leave it on
 (do not command any scan). Timeline identical to run 3 (T+0:20 centre … 1:32–1:52 TURN 2 at 2° L …
 1:57–2:05 release, done 2:05). Video by file timestamp again.
+
+## Results, run 4 (2026-10-22)
+
+Log: `aircraft-layer/research/logs/2026-10-22/aircraft_layer_probe_9k113_ai_steps_on.log`. Video (4K):
+`win-mac-sync/from-windows/Digital Combat Simulator  Black Shark 2026.10.22 - 12.04.50.06.mp4`
+(start 12:04:50 by file name).
+
+Pilot, verbatim: *"Crosshair moved slowly to left, stayed at edge of hud. I turned so that HUD
+showed where it's actually pointing. Overlay is the triangle style three line grosshair since I've
+turned the menu wheel off. At the end of video is me slewing the 9K113 +-60 degrees using the player
+9K113 view and controls."* and *"the red line in 9K113 player view is the controller deflection
+vector"*.
+
+### Measured (565 = ASP-17 mark horizontal; 0.333 left edge, 0.667 right edge)
+
+| step | command | 565 | reading |
+|---|---|---|---|
+| S1 | 0° | 0.512 → 0.507 | drift only |
+| S2 | 1° L | → 0.399, **steady −0.0135/s** | slides (overlay off: 1° did nothing) |
+| S3 | 2° L | −0.03/s, edge at ~3 s | slides faster, pins |
+| S4, S5 | 3° L, then 0° | pinned 0.333 | pilot turns left 004° → 348°: mark comes back to 0.57 with the turn |
+| S6 | 1° R | +0.002–0.005/s (heading drift alone ≈ +0.003/s) | ~nothing |
+| S7 | 2° R | +0.013 → +0.025/s, edge 0.667 | slides, pins |
+| S8–S10 | 3° R, 0°, 2° L | pinned 0.667 | head far right of the field |
+| ~t 170 on | — | 565/555/874 frozen | **pilot moved to the copilot seat / 9K113 view** (video ~2:50) |
+
+- **Overlay ON does not make the AI axis a position command.** It is still rate: steps slide and
+  never settle, 0° stops but does not return. The deadzone looks smaller or offset (1° L slides,
+  1° R barely), but the model is the same.
+- **So the 2026-10-21 "position target, exact" reading is withdrawn in both modes.** 874 echoes the
+  demand; it never showed position.
+- **With the player in the copilot seat, the probe's AI-axis writes stop showing in 874** (it stayed
+  at −0.0147 through S11's 0° writes), and the pilot-seat ASP-17 args (565/555) stop updating.
+  Fits the opposite-seat rule (`project_petrovich_operates_opposite_seat`): whoever sits in the
+  copilot seat owns the sight.
+- The pilot's hand slew to ±60° at the end of the video came after the probe had stopped logging,
+  so no args were recorded for it. The red line in the 9K113 view is the controller deflection,
+  not a position indicator.
