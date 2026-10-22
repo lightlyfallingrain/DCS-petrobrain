@@ -73,6 +73,32 @@ angles. Every exact-match measurement so far was in steady flight, where the two
 sends `look_azimuth_deg` as nose-relative; if the axis is world-relative, that needs a heading
 conversion. The latency probe's TURN 2 settles it (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`).
 
+## Probe runs 1–3 overturn the channel model (2026-10-22)
+
+Full record: `docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` on `probe/9k113-ai-latency`.
+
+- With the overlay **off**, the AI axis re-asserted per frame **does** move the sight, but as a
+  **rate** command (deadzone ~1.5°, rate ≈ (|cmd| − 1.5°) °/s), into the gyro-stabilised world
+  direction. Not a position.
+- 874/876 echo the demand, in every mode tried. They are not a head readback.
+- 565/566 (az) and 555/556 (elev) are the ASP-17 mark position: the actual line of sight, clipped
+  at the ASP-17 field edge (≈ ±6°, ~0.028 per degree for 565).
+- No run has shown a true position command with the overlay on either; run 4 tests that.
+
+This invalidates the plan's premise (position target, overlay kept on, 874 as readback).
+
+Pilot, verbatim: real 9K113 slew is rate with *"small deadzone"*; *"copilot knows by the
+indicators in the sight view itself"* (`docs/concept/mi-24_info/9k113-reticle-narrow-x10.png`);
+*"The pilot does not outside of ASP-17 crosshair, except that what the copilot *says*."*
+
+Direction, verbatim:
+
+> *"If there's no way to know where it is pointing, we may have to separate within HUD and outside
+> HUD pointing logic.*
+> *- outside could just be the current simulation plus slew time*
+> *- within HUD it's important to get the ASP-17 show *where* the target is so that pilot can line
+> up. Important for attack runs in general and critical for ATGM guidance."*
+
 ## Open, measured by the 2026-10-22 probe
 
 - Latency from `ShowMenu` (AI back on) until the readback obeys. This sets the AI-off detection
