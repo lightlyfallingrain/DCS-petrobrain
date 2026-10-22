@@ -740,3 +740,26 @@ Pilot asked whether 960 is the guidance-unit ready lamp BL-B66 looked for. Very 
 every air start (warm unit) 960 lights at t ≈ 0.02 s. BL-B66 concluded *"The `READY` lamp is not
 readable"* after trying `list_indication`; `get_argument_value(960)` was never tried. **To
 confirm: a cold start with the warm-up run — 960 should go 0 → 1 about 3–5 min after `PWR`.**
+
+## Run 8 — stall detection and recovery by stick park toggle
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-stall.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_stall.log`. Video welcome.
+
+Setup as run 7, plus **no joystick axes bound to the operator's controls**. Hands off the sight
+throughout.
+
+The probe steers the ASP-17 mark in a closed loop (arg 566) between targets 2° either side of
+boresight, a new target every 6 s. A **stall** is ≥1.5° commanded for ≥0.4 s with the mark moving
+< 0.003 in that time; the probe logs when each stall starts and ends.
+
+| T+ | block | policy |
+|---|---|---|
+| 0:20 | settle at boresight | observe |
+| 0:26–0:56 | **O**, 5 targets | observe: no toggles → how often, how long |
+| 0:56–1:38 | **R**, 7 targets | recover: a stick park toggle on every stall (≥1 s apart) → does motion resume, how fast |
+| 1:38–2:08 | **P**, 5 targets | preempt: a toggle at every target change, none on stalls → are stalls prevented |
+| 2:08–2:17 | back to boresight, stop | |
+
+A per-policy summary (stalls, stalled seconds, recoveries, toggle→resume latency) closes the log.
+What the pilot sees: the mark sweeping ~4° left and right across the HUD centre, with pauses.
