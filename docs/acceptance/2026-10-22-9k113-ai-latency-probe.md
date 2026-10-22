@@ -288,3 +288,33 @@ now known to echo the demand. Its targets (20–60°) were all outside the ASP-1
 yet shown a true position command in either mode. BL-B80 as built (position target, rate-limited in
 Export.lua, overlay kept on, 874 as the readback) rests on that reading. **Explore with the user
 before any change.**
+
+### Pilot answers after run 3, verbatim
+
+1. Real 9K113 slew control rate-based with a deadzone? *"yes, small deadzone"*.
+2. How does the operator know where the sight points? *"copilot knows by the indicators in the
+   sight view itself. (ref docs/concept/mi-24_info/9k113-reticle-narrow-x10.png). The pilot does
+   not outside of ASP-17 crosshair, except that what the copilot *says*."*
+
+Direction, verbatim:
+
+> *"If there's no way to know where it is pointing, we may have to separate within HUD and outside
+> HUD pointing logic.*
+> *- outside could just be the current simulation plus slew time*
+> *- within HUD it's important to get the ASP-17 show *where* the target is so that pilot can line
+> up. Important for attack runs in general and critical for ATGM guidance."*
+
+*"Build the probe."* → run 4: the same small steps with the overlay **on**.
+
+## Run 4 — the same small steps, overlay ON
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-ai-steps-on.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_ai_steps_on.log`.
+
+**Question:** with DCS AI Petrovich on, is the AI axis a **position** command? Position: each step
+moves at a steady pace and then holds at a place proportional to the command, and 0° returns the
+mark to centre. Rate: as in run 3.
+
+Setup as run 3, except: **turn the DCS AI Petrovich overlay ON before OBSERV** and leave it on
+(do not command any scan). Timeline identical to run 3 (T+0:20 centre … 1:32–1:52 TURN 2 at 2° L …
+1:57–2:05 release, done 2:05). Video by file timestamp again.
