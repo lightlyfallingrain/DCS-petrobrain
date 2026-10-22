@@ -159,3 +159,28 @@ the pilot seat.
 
 Bring back: per row, did the mark move, which way, roughly how far; TURN 2 and TURN 1 answers;
 the log.
+
+## Results, run 2 (2026-10-22)
+
+Log: `aircraft-layer/research/logs/2026-10-22/aircraft_layer_probe_9k113_ai_axis_off.log`.
+Pilot's visual observations: not yet given (log only so far).
+
+### Measured
+
+- **AI axis per frame, overlay off, no player-axis writes before it:** 874 = the command exactly
+  (−0.07333 / +0.07333 = ∓10.0°), every step. Run 1's confound is gone.
+- **874 moves far faster than the sight can.** 0 → −10° in ~0.04 s (S1); −10° → +10° in ~0.04 s
+  (S2); back to 0 within ~0.05 s when writes stop (S5). That is ~250°/s against the 9K113's
+  20°/s horizontal slew (`Devices_specs/9K113.lua`), and the pilot reported the real ASP-17 mark
+  moving "at steady pace, not instantaneously" under the AI. Player axis likewise: 874 → +50° in
+  ~0.7 s on a 1 s +0.3 pulse, back to 0 within ~0.1 s at axis 0. **Reading: 874/876 report the
+  slew demand (target or input), not the head position, in both modes.** Run 2 is consistent
+  with that; the pilot's eyes decide it.
+- **565/566** slid 0.439 → 0.333 over ~2.7 s at the start of S1 (steady pace), then stayed at
+  exactly 0.33333 for the rest of the run, through 10° R and both player pulses. Looks like
+  something reaching a limit — possibly the ASP-17 mark at the edge of its field. Unresolved.
+- **555/556** change only with manoeuvre (TURN 2 dip to 0.66, TURN 1 to 1.0), not with any command.
+- **No arg in the all-arg diffs tracks the commands** (left / right / held / pulse-and-hold). The
+  remaining movers are attitude-driven instruments or blinking lights (157/358/929 alternate 0/1).
+- Heading drifted right ~0.4°/s through the straight segments (006° → 046°); TURN 2 018° → 035°,
+  TURN 1 048° → 027°.
