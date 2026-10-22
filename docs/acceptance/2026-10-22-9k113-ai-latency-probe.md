@@ -628,6 +628,17 @@ stick park toggle #1. Whether the 10° pulse at T+87 broke through a hold or cam
 timed out (21 s after T+66) cannot be told. The pilot did not fly the HDG step (heading constant),
 so caged vs world-held during a hold is answered only for the first one (world-held).
 
-Hypothesis for the next run: entering the boresight zone re-cages the sight, and leaving it
-starts an uncage plus a realignment delay. The Л5 "ROLL SYNC TR UNCAGE" lamp would show that
-directly.
+**Cross-check against the pilot's alternating run weakens the lamp-off-edge reading:** there the
+sight passed through the zone under a live command (T+59–62, T+152–155) and kept moving. That
+run never held the axis at 0. A reading that fits both logs:
+
+> **Axis released (0) while the sight is within ~1° of boresight → small commands are ignored for
+> ~10+ s.** Run 6: hold 1 sat in the zone (0.52–0.53), hold 2 at 0.529–0.533, hold 3 at
+> 0.459–0.470 (zone edge 0.473–0.530); axis-0 steps far from boresight (0.35–0.39, steps 7 and
+> 12) were followed by working pulses. Exception: steps 9–10 sat in the zone and step 11 worked,
+> with stick park toggle #1 in between.
+
+During a hold the mark does not snap to boresight; it stays world-held (hold 1). So this is the
+axis being ignored, not a re-cage. Next run: measure the hold's length directly (release near
+boresight, then probe with a 2.5° pulse every few seconds), test the toggle as a release on its
+own, and log Л5 (898 and L1–L14) per frame.
