@@ -244,3 +244,47 @@ seat.
 
 Bring back: does each step move then hold, or keep sliding; is 3° still on the glass; TURN 2;
 release; the log (and the video, if recorded).
+
+## Results, run 3 (2026-10-22)
+
+Log: `aircraft-layer/research/logs/2026-10-22/aircraft_layer_probe_9k113_ai_steps.log`. Video (4K):
+`win-mac-sync/from-windows/Digital Combat Simulator  Black Shark 2026.10.22 - 11.34.02.04.mp4`,
+synced by file timestamp against the log's wall clock (pilot: *"I started video early so it's easier
+to sync by (file) timestamp"*). Spot frames at video 2:25 / 2:38 (mark left, 565 = 0.333) and 2:54
+(mark right, 565 = 0.625) agree with the log. Heading held 011.9–012.1° until TURN 2.
+
+### Measured (565 = ASP-17 mark horizontal; 0.333 = left edge)
+
+| step | command | 565 over the step | reading |
+|---|---|---|---|
+| S1 | 0° | 0.468 → 0.466 | slow drift only |
+| S2 | 1° L | 0.465 → 0.464 | **no movement** |
+| S3 | 2° L | 0.464 → 0.358, **steady −0.0135/s for all 8 s, never settles** | slides |
+| S4 | 3° L | → 0.333 (edge) in ~1 s | slides faster, pins |
+| S5 | 0° | 0.333 | stays pinned: **does not return** |
+| S6 | 1° R | 0.333 | no movement |
+| S7 | 2° R | 0.333 until the last ~1 s | head comes back into the field |
+| S8 | 3° R | 0.353 → 0.625, **steady +0.040/s** | slides, 3× the 2° rate |
+| S9 | 0° | 0.625 → 0.646 | stops (residual matches −0.5° heading drift) |
+| TURN 2 | 2° L, right turn 011.5° → 021.7° | 0.650 → 0.333 (edge) in ~5 s | runs left with the turn |
+| release | writes stop | 0.333 | pinned, nothing to see |
+
+- **The AI axis, with the overlay off, is a rate command, not a position.** A held 2° never
+  settles; 0° does not bring the mark back; a step reverses the slide instead of going to a place.
+- **Rate law (rough):** 1° → 0, 2° → 0.48°/s, 3° → 1.4°/s, and run 2's 10° → ~9.5°/s. That fits
+  rate ≈ (|cmd| − ~1.5°) °/s: a joystick-style deadzone of ~0.025 axis units and ~60°/s per unit
+  beyond it. Degree scale used: 565 ≈ 0.028 per degree, from TURN 2's gyro run-off (below).
+- **Gyro world hold confirmed.** In TURN 2 the mark ran left at ~0.03 of 565 per degree of heading
+  change, beyond the commanded slide. The commanded slide adds on top: the AI axis drives the
+  gyro-stabilised direction (the pilot's guess, verbatim earlier: *"relative to current sight gyro
+  stabilised angles"*).
+- **ASP-17 mark field ≈ ±6°** at that scale (0.333 … 0.667 around 0.5).
+- **565/566 is the only arg that tracks the slides** (all-arg diffs). 874 echoes the demand.
+
+### What this changes
+
+The 2026-10-21 "position target, exact" reading was made with the overlay on, and rested on 874,
+now known to echo the demand. Its targets (20–60°) were all outside the ASP-17 field, so no run has
+yet shown a true position command in either mode. BL-B80 as built (position target, rate-limited in
+Export.lua, overlay kept on, 874 as the readback) rests on that reading. **Explore with the user
+before any change.**
