@@ -5,6 +5,27 @@
   2026-10-17 by user direction (*"OK to split BL-B66, do not start working on it yet"*), after the
   slew probe settled which channel exists.
 
+  > **SUPERSEDED AGAIN 2026-10-22 — read this block first; both blocks below predate it.**
+  > Probe runs 1–10 (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`, merged to `main` as
+  > `6d6c99a9`) overturned the 2026-10-21 channel model:
+  > - The AI axis (3061/3060) is a **rate** command at the spec rates (20°/s az, 10°/s el per
+  >   unit), not a position target, with the overlay on or off. 874/876 echo the demand; the only
+  >   readback is the ASP-17 mark (565/566, 555/556), inside the HUD field (~±4.3°).
+  > - DCS **obeys it intermittently** (ignored 3–100+ s, invisibly, position-independent). A small
+  >   fast **dither** on the command (0.6° at 8 Hz) kept it obeyed in runs 9–10. Stick park toggle
+  >   and the overlay are not the gate.
+  > - **Л5, arg 898** lights when gyro alignment is done (T+10 s after OBSERV on, five runs); arg
+  >   **960** is very likely the guidance-unit READY lamp ([[BL-B66]] concluded it unreadable).
+  >
+  > **Design direction (explore, 2026-10-22, `plans/9k113-sight-pointing/explore-notes.md` on
+  > `feature/9k113-sight-pointing`):** Petrobrain's simulated sight is Petrovich's sight (*"what
+  > Petrovich could plausibly see with a sight that works as it should"*), held to gimbal limits
+  > and maximum slew rate; the DCS sight is a best-effort slave with tiny dither always on; inside
+  > the HUD, any trick that gets it on the simulated direction is allowed, and for ATGM the mark
+  > must sit within ~0.02° (BTR at 3–4 km). Gate on 960 and 898. **The branch
+  > `feature/9k113-sight-pointing` was built on the position model and is to be re-planned.**
+  > Status: probe phase closed; re-plan next.
+  >
   > **SUPERSEDED 2026-10-21 — read this block first; the text below it predates the finding.**
   > Probes flown 2026-10-21 (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`,
   > "Pointing probe runs 2–3") settled the channel. It is **not** the player axis and **not** a

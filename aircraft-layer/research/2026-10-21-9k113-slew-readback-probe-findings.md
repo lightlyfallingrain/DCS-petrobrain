@@ -1,5 +1,10 @@
 # 2026-10-21 — 9K113 slew readback probe, run 1: findings
 
+> **CORRECTION 2026-10-22:** the "position target, exact" reading of the AI axis (3061/3060) in this
+> note is withdrawn. Probe runs 1–10 (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`) show
+> it is a rate command at the spec rates, obeyed intermittently, and that 874/876 echo the demand
+> rather than the head position. Read that record before relying on anything below.
+
 Probe `aircraft-layer/dcs-export/Export.probe-9k113-slew-readback.lua`, card
 `docs/acceptance/2026-10-21-9k113-slew-readback-probe.md`. DCS 2.9.30.28738. Player in the pilot
 seat, the script writing the player slew axis (`SetCommand` 3026 az / 3025 elev on device 7). The
