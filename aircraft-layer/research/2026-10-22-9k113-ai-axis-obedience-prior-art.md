@@ -59,3 +59,8 @@ Ranked by cost, cheapest first — all are things Architect/the next probe run s
   - `https://forum.dcs.world/topic/368258-observe-on-stutter` — expected: a description of what "stutters" under OBSERV ON, possibly describing the same all-or-nothing gate from the player's side.
   - `https://forum.dcs.world/topic/347628-yet-another-complaint-about-petro-fix-this` — expected: a catalogue of sight-slew complaints, possibly naming the gate directly.
   - `https://forum.dcs.world/topic/339243-luamoose-class-apachegeorge-ai` — expected: whether the MOOSE class actually touches George's device-level controls or stays at the mission-task level (WebSearch snippet suggests the latter).
+
+**Correction 2026-10-22 (pilot):** all four forum links above return **404** in a browser, not
+only 403 to the fetcher. The thread IDs/slugs came from search-result snippets and are unverified,
+possibly wrong; treat these four threads as not found. Searching the forum by the titles is the only
+remaining route.
