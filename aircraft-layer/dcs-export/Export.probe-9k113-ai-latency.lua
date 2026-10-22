@@ -88,6 +88,9 @@ local PART_A = {
     { CMD_PLAYER_AZ,   0.0,  5.0, "player az 0" },
     { CMD_PLAYER_ELEV, 0.5, 10.0, "player elev +0.5 (DOWN? sign-inverted)" },
     { CMD_PLAYER_ELEV, 0.0,  5.0, "player elev 0" },
+    -- Flown in the air: the gyro holds the line of sight while the airframe turns. Does 874
+    -- (airframe-relative?) change during a turn with his AI off? Heading is in every row.
+    { CMD_PLAYER_AZ,   0.0, 15.0, "TURN: pilot makes a gentle ~30 deg turn, axis 0" },
 }
 
 -- Part B/C: AI-axis target, 20 deg left, re-asserted every frame.
@@ -182,8 +185,11 @@ end
 local function readback_row(dt, tag)
     local az, el = read_arg(ARG_AZ), read_arg(ARG_ELEV)
     local deg = type(az) == "number" and string.format("%+.1f deg", az / 0.44 * 60) or "?"
-    log(string.format("  . %s t=%7.3f  874=%s (%s)  876=%s  886=%s",
-                      tag, dt, fmt(az), deg, fmt(el), fmt(read_arg(ARG_OBSERVE))))
+    local sd = try("LoGetSelfData", LoGetSelfData)
+    local hdg = type(sd) == "table" and safe_index(sd, "Heading") or nil
+    local hdg_s = type(hdg) == "number" and string.format("%05.1f", math.deg(hdg) % 360) or "?"
+    log(string.format("  . %s t=%7.3f  874=%s (%s)  876=%s  886=%s  hdg=%s",
+                      tag, dt, fmt(az), deg, fmt(el), fmt(read_arg(ARG_OBSERVE)), hdg_s))
 end
 
 local function obeys(az)

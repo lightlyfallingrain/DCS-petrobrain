@@ -26,11 +26,13 @@ Nothing else of ours needs to run.
 ## Setup (Windows)
 
 1. Back up `Saved Games\DCS\Scripts\Export.lua`, then copy the probe over it.
-2. Mi-24P on the ground, warm-up done. Park facing something recognisable.
+2. Mi-24P **air start** with the guidance unit warmed up (a ground start needs a 5-minute
+   warm-up). Autopilot on, **straight and level, no turns** except in the TURN window: the gyro
+   holds the line of sight while the airframe moves, which can look like sight motion.
 3. **DCS AI Petrovich OFF** (overlay closed). Wheel hidden, as you fly normally.
 4. From the **copilot seat**, switch OBSERV **on last** = **T+0**. Move to the **pilot seat**.
 
-## Timeline (T+ from OBSERV on, ~2:30 total)
+## Timeline (T+ from OBSERV on, ~2:45 total)
 
 | T+ | what the probe does | what you do |
 |---|---|---|
@@ -41,9 +43,10 @@ Nothing else of ours needs to run.
 | 0:45–0:50 | player az 0 | stays or returns? |
 | 0:50–1:00 | player elev **+0.5** (sign-inverted, so probably **down**) | moves up or down? |
 | 1:00–1:05 | player elev 0 | stays or returns? |
-| 1:07 | **probe presses ShowMenu** (his AI on), AI target 20° left | does anything show on screen? mark should go 20° left |
-| 1:27–2:27 | holds 20° left | **close the overlay by hand (your AI-menu key) about 3 times, ~15 s apart** — e.g. at 1:35, 1:50, 2:05. The probe should reopen it each time. |
-| ~2:30 | centres everything, done | his AI is probably still on; turn it off if you like |
+| 1:05–1:20 | player axis 0 | **TURN: make a gentle ~30° turn, then level.** Does the mark stay on the ground point (gyro hold) or swing with the nose? |
+| 1:22 | **probe presses ShowMenu** (his AI on), AI target 20° left | does anything show on screen? mark should go 20° left |
+| 1:42–2:42 | holds 20° left; straight and level again | **close the overlay by hand (your AI-menu key) about 3 times, ~15 s apart** — e.g. at 1:50, 2:05, 2:20. The probe should reopen it each time. |
+| ~2:45 | centres everything, done | his AI is probably still on; turn it off if you like |
 
 If his AI is already on at 1:07 the probe does **not** press, so it doesn't turn it off.
 
@@ -51,6 +54,7 @@ If his AI is already on at 1:07 the probe does **not** press, so it doesn't turn
 
 - **Part A, per step: did the mark move, which way, how far, and did it hold or return at the 0
   steps?** "Nothing" is a full answer.
+- TURN window: did the mark hold the ground point or follow the nose?
 - Part B–C: did a ShowMenu press show anything visible (wheel, text, sound)? Did the mark jump back
   to 20° left after each time you closed the overlay?
 - `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_ai_latency.log`.
