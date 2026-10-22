@@ -1,46 +1,55 @@
 ---
 name: generator-strips-legitimate-closing-backtick
-description: body-layer's tools/generate_defaults.py _first_sentence() corrupts a rendered tunable description whenever the source comment's first sentence ends with a legitimately-closed inline-code span (`` `X`. ``) or contains an embedded quoted period -- a fourth and fifth instance of the "check the rendered file, not the comment" defect class, found on BL-B80 v2 (SLEW_EL_DPS, SEEN_AIM_HEIGHT_OFFSET_M).
+description: body-layer's tools/generate_defaults.py had two _first_sentence() bugs -- stripped a legitimate closing inline-code backtick, and split on a period inside an embedded pilot quote -- a fourth/fifth instance of the "check the rendered file, not the comment" defect class, found on BL-B80 v2 (SLEW_EL_DPS, SEEN_AIM_HEIGHT_OFFSET_M). FIXED in BL-B80 v2 review fix 1 (28d45a09); this entry is now the historical record plus the transferable lesson.
 metadata:
   type: project
 ---
 
-`body-layer/tools/generate_defaults.py`'s `_first_sentence()` has two related bugs, both newly
-exposed (not newly introduced) by BL-B80 v2's two new tunables:
+**Status: fixed.** `body-layer/tools/generate_defaults.py`'s `_first_sentence()`/`_SENTENCE_SPLIT`
+were rewritten in BL-B80 v2 review fix 1 (commit `28d45a09`). Verified by re-review (mutation
+of both the regex and the strip logic independently reproduced the original red, then restored
+clean) -- this is not a residual risk, it is closed. Kept as a memory entry for the transferable
+lesson, not as an open finding.
 
-1. `_SENTENCE_SPLIT` matches `\.` optionally followed by `**`/backtick, assuming any markup
+**The two original bugs, for context:**
+
+1. `_SENTENCE_SPLIT` matched `\.` optionally followed by `**`/backtick, assuming any markup
    *closing* a sentence sits *after* the period. The normal, correct Markdown form is the
-   opposite -- `` `X`. `` -- markup closes, *then* the full stop. When the split fires on that
-   trailing period, `parts[0]` correctly retains the sentence's own trailing backtick. But
-   `_first_sentence` then does `parts[0].strip().strip("*\`")`, which blindly strips trailing
-   backticks/asterisks regardless of why they're there -- eating the legitimate, correctly-placed
-   closing backtick of an inline-code span that happens to be the sentence's last token. Found on
-   `SLEW_EL_DPS`'s comment ("same source as `` `SLEW_AZ_DPS`. ``" rendered as
-   "same source as `` `SLEW_AZ_DPS. ``" -- closing backtick gone, confirmed byte-for-byte with
-   `od -c`, not a terminal-rendering artifact).
-2. The same regex has no awareness of an embedded quotation's own internal punctuation. A comment
-   quoting the pilot verbatim with its own full stop (`` verbatim: *"no idea. let's assume on
-   ground"*) ``) splits at the *first* period, i.e. the one inside the quote, discarding
-   everything after it -- including the actual substance of the quote. Found on
-   `SEEN_AIM_HEIGHT_OFFSET_M`'s comment, where the rendered description cuts off mid-quote and
-   also loses the comment's opening backtick (the leading-strip half of the same `.strip("*\`")`
-   call).
+   opposite -- `` `X`. `` -- markup closes, *then* the full stop. `_first_sentence` then did
+   `parts[0].strip().strip("*\`")`, which blindly stripped trailing backticks/asterisks
+   regardless of why they're there -- eating the legitimate, correctly-placed closing backtick of
+   an inline-code span that happened to be the sentence's last token (`SLEW_EL_DPS`).
+2. The same regex had no awareness of an embedded quotation's own internal punctuation, so a
+   comment quoting the pilot verbatim with its own full stop split at the period *inside* the
+   quote, discarding the quote's substance (`SEEN_AIM_HEIGHT_OFFSET_M`).
 
-Both corruptions regenerate identically from a fresh run, so `test_tuning_defaults_toml.py`'s
-staleness check passes on both -- it only proves the committed file matches a fresh regeneration,
-never that the generator itself is correct. This is the fourth/fifth instance of this project's
-`X-T26`-named defect class ("the generator emits only the first sentence... reaches nobody"), and
-the pattern repeats: **read the rendered file with `od -c` or equivalent, don't infer it from the
-source comment** -- a diff review of the `.py` comment alone would never surface either bug, since
-the comment itself is correct in both cases.
+**The fix:** `_SENTENCE_SPLIT` now has a forward lookahead requiring an even number of `"` between
+the candidate period and the end of the comment block (so a period inside a balanced quoted span
+never ends the sentence), and `_first_sentence` no longer blanket-strips both ends -- it only
+removes markup the split's own optional group actually matched *after* the period, putting it
+back after the period unless that markup also opened the sentence (in which case both ends are
+dropped as a whole-sentence wrap). Regenerating repaired 9 entries total: the two above plus 7
+already on the branch that had silently lost a leading or closing backtick/asterisk
+(`ATTACK_RUN_ELEVATION_GATE_DEG`, `ATTACK_RUN_LINED_UP_AZIMUTH_DEG`,
+`BUILT_UP_VILLAGE_MAX_AREA_M2`, `ATTACK_TARGET_LOS_MAX_AGE_S`, `FIRING_MAX_AGE_S`,
+`IDENTITY_HALF_LIFE_S`, `MEDRES_ANGULAR_RADIUS_RAD`) -- confirming this was a generic generator
+defect, not confined to the two new tunables that exposed it. New
+`tests/test_generate_defaults_first_sentence.py` holds the fix with 7 tests, 4 of which fail
+against the pre-fix code (verified again independently at re-review, not just taken from the
+implementer's account).
 
-**Transferable lesson for future tunable comments in this codebase**: avoid an embedded
-sentence-ending period inside a quoted phrase in the comment's *first* sentence (move the quote
-later, or rephrase without an internal full stop) until the generator's splitter is fixed to
-respect quote nesting. The trailing-backtick-eating half is a pure generator bug with no
-comment-side workaround beyond ending the first sentence on a word rather than a code span.
+Both corruptions used to regenerate identically from a fresh run, so `test_tuning_defaults_toml.py`'s
+staleness check passed on both -- it only proves the committed file matches a fresh regeneration,
+never that the generator itself is correct. This is why the fix needed its own dedicated test file
+rather than relying on the staleness check to hold it.
 
-See `plans/9k113-sight-pointing/review.md`'s "Finding 1" for the full trace, and
-`.claude/agents/reviewer.md`'s "Verifying the tuning pattern" section, which this is a new,
-concrete instance of (the "three separate X-T26 defects" paragraph now has analogues outside that
-one feature).
+**Transferable lesson, still live:** when adding a new `#:` comment whose first sentence would
+embed a quoted period or end on a legitimately-closed inline-code span, the generator now handles
+both correctly -- but **always re-read the rendered `config/defaults.toml` line itself after
+regenerating**, not the source comment, before trusting a new tunable's description. The generator
+fix closes this specific class of corruption; it does not change the standing instruction that the
+rendered file, not the `.py` diff, is the thing to check (`.claude/agents/reviewer.md`, "Verifying
+the tuning pattern").
+
+See `plans/9k113-sight-pointing/review.md`'s "Finding 1" (original) and its "v2 re-review" section
+(fix verification) for the full trace.

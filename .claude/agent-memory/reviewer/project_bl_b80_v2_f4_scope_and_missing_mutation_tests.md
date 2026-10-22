@@ -5,6 +5,11 @@ metadata:
   type: project
 ---
 
+**Status: both fixed** (review fixes 2 and 3, commits `ebd48c41`/`fdfe3948`, verified at
+re-review by independently mutating the production wiring each test claims to guard and
+confirming red before restoring). Kept as a memory entry for the transferable lesson below, not as
+an open finding.
+
 Two gaps found reviewing BL-B80 v2 (Stages 1-4/3b, `feature/9k113-sight-pointing`,
 `plans/9k113-sight-pointing/plan.md`/`review.md`), both found the same way: reading the plan's own
 stated test requirements word-for-word and grepping the actual test file for whether each one

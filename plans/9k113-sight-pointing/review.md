@@ -187,6 +187,119 @@ verify there beyond confirming they are labelled as such (they are).
 
 ---
 
+### v2 re-review (fixes)
+
+Reviewed the three v2 required fixes against the fix commits (`28d45a09`, `ebd48c41`, `fdfe3948`)
+and `implementation.md`'s "Review fixes (v2 review, 2026-10-22)" section, plus a light read of the
+Stage 0 probe/card the main loop added (`0c542d5f`). Branch fast-forwarded cleanly from `49fa122b`
+to the named tip `816250c8` (strict ancestor, clean tree).
+
+**Finding 1 — `defaults.toml` generator.** Read every rendered entry the fix claims to repair, not
+just the two the original finding named: `SEEN_AIM_HEIGHT_OFFSET_M`, `SLEW_EL_DPS`, and all 7
+"already on the branch" repairs (`ATTACK_RUN_ELEVATION_GATE_DEG`,
+`ATTACK_RUN_LINED_UP_AZIMUTH_DEG`, `BUILT_UP_VILLAGE_MAX_AREA_M2`, `ATTACK_TARGET_LOS_MAX_AGE_S`,
+`FIRING_MAX_AGE_S`, `IDENTITY_HALF_LIFE_S`, `MEDRES_ANGULAR_RADIUS_RAD`). All 9 render correctly
+against their source comments (traced the `_SENTENCE_SPLIT`/`_first_sentence`/`_join_comment_lines`
+logic by hand for each, including the hand-wrapped-backtick join case on
+`ATTACK_RUN_LINED_UP_AZIMUTH_DEG` and the nested-quote-inside-backtick case on
+`BUILT_UP_VILLAGE_MAX_AREA_M2`/`ATTACK_TARGET_LOS_MAX_AGE_S`) — none of the 9 lost or gained markup,
+and no sentence boundary moved incorrectly. `test_generate_defaults_first_sentence.py` (7 tests)
+passes. **Verified by mutation, not just by reading the diff**: reverted `_SENTENCE_SPLIT` to its
+pre-fix form (no quote-balance lookahead) — `test_period_inside_a_quoted_verbatim_does_not_end_the_
+sentence` failed exactly as expected. Restored (confirmed by `shasum` matching pre-mutation), then
+separately reverted `_first_sentence`'s closing-markup handling to a blanket
+`sentence.strip("*\`") + "."` — three tests failed exactly as expected
+(`test_closing_backtick_before_the_period_is_kept`,
+`test_opening_backtick_at_the_start_is_kept`,
+`test_bold_closing_after_the_period_mid_sentence_is_put_back`). Restored, `shasum` matched again.
+Both halves of the fix are load-bearing, independently.
+
+**Finding 2 — F4 widened.** Read `_f4_poll`/`_f4_scenario`/`_f4_tool_results` and the four test
+methods in `TestF4DifferentialNoLeak` in full: the scenario now drives `run_once`, the attack-run
+drain, the real `_mission_memory_step`, and the event/positional-reply drains for four polls, with
+`select_target`/`mark_target`/`engage` commands, and compares `ContactStore` positions,
+`MissionMemory` entries, every utterance, and every `TOOL_SET` result (checked against `TOOL_SET`
+itself so a new tool can't escape the fence) — matching the plan's own F4 spec, not the narrower
+`ContactStore`-only scope the original finding caught. Ran the suite green at baseline, then
+**independently constructed a new mutation** (not one of the three implementation.md already
+reports) to confirm the widened assertions are load-bearing rather than coincidentally passing:
+edited `logger._mark_target_fn`'s `mark_target` to add `+0.5` to `now_sim` whenever
+`runner.sight_head.aim_source == "seen"` — a direct simulation of the leak class F4 exists to
+catch (a seen-aim artifact reaching a `MissionMemory` entry's `t_sim`).
+`test_mission_memory_is_identical_with_and_without_the_seen_aim` and
+`test_tool_set_results_are_identical_with_and_without_the_seen_aim` both failed red exactly as
+expected (the latter via `get_contact_history`'s folded mark entry); the position and utterance
+tests correctly stayed green, since this particular mutation doesn't touch either path — consistent
+with the fence being scoped per-sink rather than one undifferentiated assertion. Reverted via
+`git checkout --`, confirmed a clean diff. (A first attempt at this mutation, multiplying by the
+seen goal's azimuth value, passed by accident because the scenario's seen azimuth happens to be
+exactly 0° — a reminder that a mutation's own correctness has to be checked, not just whether the
+test went green or red.)
+
+**Finding 3 — wiring tests.** Read both new tests
+(`test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_aim`,
+`test_run_once_seen_look_moves_the_next_goal_onto_the_true_direction`) in full; both match the
+plan's Stage 3/3b wording. Ran green at baseline, then independently reproduced both of
+`implementation.md`'s named mutations rather than taking them on account: (a) in
+`_apply_active_gaze`'s sight-tier branch, fed `decision.look_azimuth_deg` instead of
+`sight_head_body_az_deg` into `actual_aim_azimuth_deg` — the Stage 3 test failed red
+(`[50.0, 50.0, 50.0]` instead of `[0.0, 20.0, 10.0]`); (b) in `run_once`, forced
+`advance_sight_head`'s `look_contact` argument to always be `None` — the Stage 3b test failed red
+(`aim_source` stayed `"belief"`, never reached `"seen"`). Both reverted via `git checkout --`,
+confirmed clean.
+
+**Stage 0 (`0c542d5f`).** Light read of `Export.probe-9k113-calibration.lua` (`luac5.1 -p` clean)
+and `docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`: the card's block table (settle / A / E1-E2 /
+E3 / B / D / F / end) and "Measures" list map directly onto the plan's "Flight A" spec (mark scale
+both axes, az/el boresight from 962's edges, 555's clip edges and elevation closed-loop
+feasibility, azimuth steady error vs. run 10, AI-rate frame in a turn) plus the separate cold-start
+READY-lamp check from Part 2. Branch and run command are named for the pilot per this project's
+"naming the branch is the only channel" rule. Not independently re-derived against the probe
+script's own per-block timing logic (Stage 0 is outside the reviewed batch per the plan's own
+"Stage 0 is a probe, outside the batch"); this is a scope-fit check only, not a probe-logic review.
+
+**Checks, run fresh:**
+- body-layer: `ruff format --check` (pass, 170 files), `ruff check` (pass, `src tests tools`),
+  `mypy src` (pass, 71 files), `pytest` (2443 passed, 4 xfailed — matches `implementation.md`'s
+  own count), `test_tuning_defaults_toml.py` (pass, in isolation).
+- aircraft-layer: `ruff format --check` (pass, 75 files), `ruff check` (pass), `mypy src` (pass, 27
+  files), `pytest` (533 passed — 3 more than `implementation.md`'s last-recorded 530 for this
+  subproject; this fix diff is body-layer-only per `implementation.md` and the file list below, so
+  the discrepancy predates this fix and is not attributable to it; not a regression since 0
+  failures either time), the luajit-backed `test_sight_servo_lua.py`/`test_sight_servo_api.py`/
+  `test_sight_target.py`/`test_exponent_float_fix.py` run by name (52 passed), `luac5.1 -p` clean
+  on both `Export.lua` and `Export.probe-9k113-calibration.lua`, the `GETGLOBAL` scan (clean — only
+  genuine DCS/stdlib globals and the file's own pre-existing `DUMPED_*` debug-dump flags, no
+  own-helper referenced before its `local`).
+- `git status --porcelain` clean throughout; no leftover debug/TODO code in the three fix commits
+  (`git diff` grepped for `TODO`/`FIXME`/`XXX`/`print(`, no hits).
+
+**Memory.** `.claude/agent-memory/reviewer/feedback_generator_strips_legitimate_closing_backtick.md`
+and `.claude/agent-memory/reviewer/project_bl_b80_v2_f4_scope_and_missing_mutation_tests.md` (my own
+v2-review memories) updated to record both fixes as closed, keeping the transferable lesson in each.
+
+### v2 Re-review Verdict
+
+APPROVED
+
+All three required fixes are correct, complete, and independently verified by mutation (not taken
+on `implementation.md`'s account) — including one mutation of my own construction beyond the three
+the implementer already reports for Finding 2. No new required fixes. Proceed to DoD.
+
+### v2 Re-review Confidence
+
+Full read of the fix diff (`defaults.toml`'s rendered form for all 9 repaired entries, not just the
+two the original finding named; `tools/generate_defaults.py`'s rewritten functions end to end;
+`test_generate_defaults_first_sentence.py`; the widened `TestF4DifferentialNoLeak` and its
+scenario helpers in full; both new `run_once` wiring tests). Independent mutation of all three
+fixes (five mutations total: two for Finding 1's two sub-bugs, one newly constructed for Finding 2
+beyond the implementer's own three, two reproducing Finding 3's named mutations), each confirmed
+red then cleanly restored (`git checkout --`/`shasum`). All four subprojects' mechanical checks run
+fresh. The Stage 0 probe/card read for scope-fit only, not for probe-logic correctness, consistent
+with it being outside the reviewed batch.
+
+---
+
 ## v1 (superseded)
 
 ### Review Summary
