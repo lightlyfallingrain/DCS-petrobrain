@@ -434,3 +434,35 @@ estimate.
 
 Something gates the AI axis that we do not understand yet. Candidates: a gimbal stop on the
 blocked direction, a deadzone that is not fixed, or a difference in setup between runs.
+
+## Results, run 5b (2026-10-22, same script flown again)
+
+Log: `aircraft-layer/research/logs/2026-10-22/aircraft_layer_probe_9k113_methods_b.log`. Pilot,
+verbatim: *"I saw croshair move at about 0:40 and 0:50"*. The log ends at S12.
+
+- **2.5° L (S3): slid −0.035/s of 565 = 0.9°/s. 2.5° R (S5): +0.033/s = 0.85°/s.** Then
+  4° L, 4° R and elevation +0.1: **nothing**.
+- Method listing identical to run 5a.
+
+### The rate law is already in the module's own spec file
+
+`aircraft-layer/research/mi24p-command-surface.md` §4 (from `Devices_specs/9K113.lua`):
+`axis_use_velocity = true`, `h_axis_velocity = 20°/s`, `v_axis_velocity = 10°/s`,
+`Slew_dead_zone = 0.003`. So rate = value × 20°/s in azimuth, × 10°/s in elevation:
+
+| command | predicted | measured |
+|---|---|---|
+| az 2.5° (0.0417) | 0.83°/s | 0.85–0.9°/s (5b) |
+| az 3° (0.05) | 1.0°/s | 1.03°/s (run 3) |
+| elev −0.1 | 1.0°/s | 0.96°/s (5a) |
+
+The "deadzone of ~1.5°" read from run 3 was wrong: the real deadzone is 0.003 (0.2°). What
+stopped the small commands is a gate.
+
+### The gate: arg 962
+
+Arg 962 flips **1 → 0 in exactly the step where the AI axis first starts to move the sight**, in
+every run where it moved: run 3 S3 (2° L), run 4 S2 (1° L), run 5a S13 (elev −0.1). In run 5b it
+flipped **0 → 1 in S5**, and **every later command did nothing**. While 962 = 1, commands of up
+to 4° for 2–3 s were ignored (5a), and 1° for 8 s (run 3). Its name is not in any note here;
+`mainpanel_init.lua` / `clickabledata.lua` on the DCS machine will say.
