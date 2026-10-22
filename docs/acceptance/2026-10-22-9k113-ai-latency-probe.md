@@ -529,3 +529,22 @@ lamp means **sight direction = the aircraft's own axis (±~0.3°)**, and a lit l
 azimuth 0 / elevation 0 in the airframe frame, always inside the HUD field. Open: while the lamp is lit and commands are
 ignored, is the sight caged to the airframe axis (mark fixed to the nose through a heading
 change) or still gyro-held? Run 6 adds a ~3° heading change at 1:19 to tell.
+
+### Pilot on gyro alignment, verbatim
+
+> *"Sight sits at boresight until the gyro alignment is done. OBSERV ON, then the gyro alignment
+> delay *during which* sight is locked to boresight. After alignment is done, then the sight can be
+> skewed by axis commands. (The way it works for a player)"*
+
+Against the runs (probe steps start at T+20 s after OBSERV on):
+
+| run | first ignored | first worked | fits "locked until aligned"? |
+|---|---|---|---|
+| 3 | 1° L at T+28 | 2° L at T+36 | yes, if alignment took ~30 s |
+| 4 | — | 1° L at T+28 | yes |
+| 5a | az pulses T+40 … T+62 | elev −0.1 at T+67 | only if alignment took ~65 s |
+| 5b | — | 2.5° L at T+40 | yes; **but it stopped again at T+52**, after the sight came back to boresight — alignment does not explain that |
+
+So alignment explains the start of most runs, if it takes longer than the ~10 s assumed (BL-B80's
+`GYRO_ALIGNMENT_S` = 10). 5b's re-lock does not fit. Run 6 logs lamps 957–961 every row;
+960 (`SCHO_9K113_READY`) may mark alignment done.
