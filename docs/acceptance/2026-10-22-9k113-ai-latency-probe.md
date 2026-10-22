@@ -668,3 +668,44 @@ Don't press the stick park key.
 
 Every lamp change (L1–L14, 957–962) is logged the frame it happens; the HOME steps are also the first
 trial of the inside-HUD closed loop BL-B80 would use.
+
+## Run 7 results (`logs/2026-10-22/aircraft_layer_probe_9k113_hold.log`)
+
+OBSERV on at t=26.107 = T+0. Pilot seat throughout, overlay off.
+
+- **Л5 = arg 898, confirmed: lit at T+10.0 exactly** (0 → 1, the only L-lamp to change at
+  alignment). So the alignment-done lamp is readable; BL-B80 can gate on it instead of a timer.
+- **Arg 888 (named L3) is not a lamp in practice:** it flickers between 0 and 0.5 every frame while
+  OBSERV is on. Ignore it.
+- 960 READY lights at mission start; 962 behaves as before.
+
+Mark response per command (raw 566 change over each 0.6 s pulse: ±0.014 = moved, ~0 = ignored;
+874 echoed the demand in every step, moving or not):
+
+| T+ | step | position (566) | moved? |
+|---|---|---|---|
+| 24 | A1 (after 4 s at 0 at boresight) | 0.456 | **yes** |
+| 27–37 | A2–A5 | 0.38–0.47 | no |
+| 39 | A6 | 0.48 | **yes** |
+| 42–56 | A7, A8, HOME before B (8 s) | 0.45–0.46 | no |
+| 60 | **stick park toggle #1** | | |
+| 61–68 | B1–B3 | 0.39–0.46 | **yes** |
+| 70 | B4 | 0.39 | no |
+| 73 | **stick park toggle #2** | | |
+| 74–82 | HOME before C | 0.39 → 0.50 | **yes** (homed to 0.498) |
+| 86–92 | C big pulse, C1, C2 | 0.41–0.49 | **yes** |
+| 94–101 | C3, D drive 4 s | 0.39–0.41 | no |
+| 105 | D1 (after 4 s at 0, far from boresight) | 0.38 | **yes** |
+| 108–122 | D2, D3, HOME end | 0.36–0.40 | no |
+
+**The near-boresight reading is refuted.** Commands were ignored well away from boresight (0.36–0.41,
+2.5–3.5° off) and worked right after a rest at boresight (A1, C). The gate is intermittent in time:
+response comes in short windows (one to three commands), then stops for 4–18 s. Each response is
+all-or-nothing for the whole step.
+
+**Stick park toggle correlates with release:** both toggles were followed immediately by
+responding commands (B1–B3; HOME before C). One counter-example in run 6 (toggle #2 at T+69, step 16
+ignored 3 s later). Position-independent, so not the boresight hold. Unknown: what closes the windows.
+
+The HOME closed loop worked when the axis was responding (HOME before C) and did nothing when it was
+not, which the loop itself can detect from 566 inside the HUD.
