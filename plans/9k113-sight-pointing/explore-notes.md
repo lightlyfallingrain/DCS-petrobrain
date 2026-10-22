@@ -108,3 +108,42 @@ Direction, verbatim:
 
 Body-layer's sight mode follows the OBSERV *command*, but must follow the observed arg 886
 (direction above). It belongs in this entry's first stage.
+
+## Explore 2026-10-22 (after probe runs 1–8): pointing with an unreliable AI axis
+
+Evidence going in: `docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` and
+`aircraft-layer/research/2026-10-22-9k113-ai-axis-obedience-prior-art.md` on `probe/9k113-ai-latency`.
+The AI axis is a rate command that DCS obeys intermittently (ignored 3–100+ s, invisibly); the
+ASP-17 mark (565/566, 555/556) is the only readback, inside ±~4.3°.
+
+**Q1 — is Petrovich allowed to "see" through Petrobrain's simulated sight where the DCS sight cannot
+be verified?** Pilot, verbatim:
+
+> *"what Petrovich could plausibly see with a sight that works as it should. -> Yes. Ideally we
+> could drive the CDS sight and get back it's readings, but since we can't, a Petrobrain simulation
+> of that beats a non-functional sight. That means we do have to build code for the angular limits
+> and a max slew rate. Those are the important things that keep it from being an instant point
+> anywhere miracle optic."*
+
+So **Petrobrain's simulated sight is Petrovich's sight**: perception comes from it, constrained by
+gimbal limits and maximum slew rate. This revises the 2026-10-22 answer 4 above ("perception uses
+the actual position (readback), never the desired one") — the rule is now plausibility of a working
+sight, not agreement with DCS's sight object.
+
+**Q2 — when must the ASP-17 mark sit on the target?** *"as soon as target is within HUD. Exact."*
+
+**Q3 — mark won't move while lined up?** *"ATGM run is completely dependent on the sight
+moving/being on target. Plan B is DCS AI guindance, but I'd rather not."*
+
+**On Q2 and Q3 together**, verbatim:
+
+> *"We need to point the DCS 9K113 where we simulate it being, but accept that it may or may not
+> work. Within HUD limits, any cheats that get the 9K113 where we need it are allowed, since this
+> is a dcs-commanding-problem not us trying to break the no-omniscience rule."*
+
+So the DCS sight is a **best-effort slave** to the simulated one everywhere, and inside the HUD
+(where it shows to the pilot and matters for attack runs and ATGM) any DCS-side trick that gets it
+onto the simulated direction is allowed — closed loop on the mark, recovery actions, anything.
+
+Pilot's idea for the gate, verbatim: *"Would not stopping sight movement help? Keep small movement
+all the time, small circle on target unit?"* — to be tested in probe run 9.
