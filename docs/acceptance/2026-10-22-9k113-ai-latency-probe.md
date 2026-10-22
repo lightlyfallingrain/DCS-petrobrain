@@ -396,3 +396,41 @@ copilot seat = T+0, then to the pilot seat. Nothing in this script touches a swi
 
 Bring back: the log (and video); whether the mark stayed on the glass; which way the elevation
 pulse moved it first.
+
+## Results, run 5 (2026-10-22)
+
+Log: `aircraft-layer/research/logs/2026-10-22/aircraft_layer_probe_9k113_methods.log`. No video
+(pilot: *"no video this time"*).
+
+### E — device methods: definitive negative
+
+Every device object is the same thin wrapper — one own key, `link` (userdata), and an `__index`
+table:
+
+- device 7 (9K113) and 16 (ASP-17): `SetCommand`, `listen_command`, `listen_event`,
+  `performClickableAction`. Nothing else.
+- device 0 (main panel): the same plus `get_argument_value`, `set_argument_value`,
+  `update_arguments`, `get_light_reference`.
+
+None of the native getter names (`get_LandPoint`, `getCurrentFOV`, `isGyroReady`, …) resolve.
+**There is no Lua route to the sight's aim point.** Outside the ASP-17 field, Petrobrain can only
+estimate.
+
+### Mark scales (gyro world hold, axis 0)
+
+- **Rest position** (OBSERV off): 565 = 0.500, 555 = 0.556.
+- **565 ≈ −0.039 per degree of heading** (nose right → mark left): +2.6° → −0.103, and back
+  −2.6° → +0.102. So the horizontal field edges (0.333 / 0.667) sit about **±4.3°** from centre.
+  Corrects runs 3–4's 0.028/deg estimate, which mixed commanded slide into the heading change.
+- **555 ≈ −0.028 per degree of nose-up pitch**: +0.88° → −0.024, −1.51° → +0.042.
+
+### Rate law: inconsistent with run 3
+
+- Azimuth 2.5° L/R (3 s each) and 4° L/R (2 s each): **no movement** beyond heading drift.
+  In run 3, 2° and 3° slid steadily (≈0.35°/s and ≈1.0°/s at the corrected scale).
+- Elevation −0.1 (2 s): slid ~1°/s (555 −0.027/s) within 0.1 s of the command, and stopped at 0.
+  Elevation +0.1: no movement.
+- The sight's elevation sat ~10° off the rest position throughout (555 ≈ 0.83 against 0.556).
+
+Something gates the AI axis that we do not understand yet. Candidates: a gimbal stop on the
+blocked direction, a deadzone that is not fixed, or a difference in setup between runs.
