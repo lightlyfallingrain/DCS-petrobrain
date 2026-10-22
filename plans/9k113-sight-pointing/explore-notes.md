@@ -163,3 +163,18 @@ Dither wobble on the mark ≈ (command amplitude / 3) °/s ÷ (2π f): run 9's 1
 at 4 Hz → ±0.02°; 0.6° at 4 Hz → ±0.008°. So **dither frequency, not amplitude, is the lever**
 (amplitude must stay above the 0.18° deadzone). Unmeasured: whether faster dither keeps the axis
 obeyed as 1 Hz did.
+
+### Decisions after probe run 10 (2026-10-22), verbatim
+
+> *"If there's no reason to use big wobble, use tiny all the time"*
+> *"close probe phase"*
+> *"take in the guidance unit ready light while building this all"*
+
+- Dither: the smallest/fastest dither that kept the axis obeyed in run 10 (0.6° at 8 Hz; mark
+  wobble ~0.03° p-p including loop motion) is used **always**, not only near the target — run 10
+  gave no reason for a larger one.
+- The probe phase is closed; `probe/9k113-ai-latency` merges to `main` as research.
+- BL-B80's rebuild includes the guidance-unit **READY lamp, arg 960** (`SCHO_9K113_READY`, very
+  likely the ЩО `READY` lamp BL-B66 could not read via `list_indication`) as the warm-up-done
+  signal, alongside Л5 (arg 898) as the gyro-alignment-done signal. 960 is unconfirmed on a cold
+  start (expected 0 → 1 about 3–5 min after `PWR`); every air start shows it lit from t ≈ 0.
