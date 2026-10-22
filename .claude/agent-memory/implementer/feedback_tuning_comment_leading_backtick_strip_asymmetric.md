@@ -1,37 +1,27 @@
 ---
 name: feedback_tuning_comment_leading_backtick_strip_asymmetric
-description: a #: comment's first sentence starting with a backtick-wrapped term renders with only the opening backtick eaten in config/defaults.toml -- never open the first sentence with inline code
+description: FIXED 2026-10-22 (BL-B80 review fix 1) -- generate_defaults.py used to eat a #: comment's leading/closing backtick and split on a period inside a quote; now regression-tested, but still read the rendered defaults.toml
 metadata:
   type: feedback
 ---
 
-`tools/generate_defaults.py`'s `_first_sentence()` does
-`parts[0].strip().strip("*`").strip()` -- `str.strip("*\`")` only removes characters that are in
-the given set from the very *start* and *end* of the whole string, not every inline-code span
-inside it. Writing a `#:` comment whose first sentence opens with a backtick-wrapped term, e.g.
-`` `BL-B71`'s de-escalation-only hysteresis band... ``, renders in `config/defaults.toml` as
-`` BL-B71`'s de-escalation-only hysteresis band... `` -- the opening backtick is silently eaten
-(it was at position 0) but the term's *closing* backtick survives (it is not at the very end of
-the sentence), leaving a stray trailing backtick glued to the word.
+**Fixed 2026-10-22** on `feature/9k113-sight-pointing` (BL-B80 v2 review fix 1). Until then
+`tools/generate_defaults.py`'s `_first_sentence()` did `parts[0].strip().strip("*`")`, which ate
+an opening backtick at position 0 and a legitimate closing one before the period, and
+`_SENTENCE_SPLIT` split on a period inside a quoted pilot verbatim (`*"no idea. let's ..."*`).
+Regenerating after the fix repaired 9 rendered entries, 7 of which nobody had reported. That count
+is the measure of how often a reader of the source comment misses this.
+`body-layer/tests/test_generate_defaults_first_sentence.py` pins each case. It also requires
+balanced `"` in every declaration block, because the quote rule counts parity.
 
-**How to apply:** never open a `tuning.real`/`tuning.whole`/etc. `#:` comment's first sentence
-with a backtick-wrapped term (an identifier, a module name, a milestone id). Reword so the first
-word is plain text -- e.g. `BL-B71's de-escalation-only hysteresis band...` instead of `` `BL-B71`'s ``.
-Found and fixed on `GUIDANCE_OPTIC_HYSTERESIS_FRACTION`/`GUIDANCE_OPTIC_MIN_INTERVAL_S`
-(`body-layer/src/belief/optic_policy.py`, `BL-B71`) -- caught only by reading the rendered
-`config/defaults.toml`, not the source diff, exactly the failure mode root `CLAUDE.md`'s "read the
-rendered file, not your source comment" rule exists to catch.
+**Rule that survives the fix:** read the rendered `config/defaults.toml` line after every `#:` edit.
+The old workaround (never open the first sentence with inline code) is no longer needed. The habit
+of checking the rendered line still is: this bug recurred three times before anyone fixed the
+generator, and each time it was caught only by someone reading the rendered line.
 
-**Recurred 2026-10-20** on a fresh tunable in the same module (`SIGHT_SEARCH_FAR_M`,
-`plans/9k113-narrow-search`), opening with `` `SIGHT_NARROW_OPTIC`'s own presence reach... `` --
-same asymmetric strip, same fix (reworded to "The sight narrow setting's own presence reach...").
-Two instances in the same file, months apart, both caught only by reading the rendered line: the
-habit does not generalize from having been burned once, so keep checking the rendered line as a
-mechanical step, not a thing to remember to do.
+**Generator-bug class, transferable:** a staleness test that compares committed output against a
+fresh regeneration cannot catch a bug *in the generator*. Both sides carry the bug. Test the
+extraction function directly, case by case.
 
-This is a sibling bug to [[feedback_backtick_span_across_line_wrap_eats_space]] (same generator,
-same `#:`-comment convention, different trigger: that one is about a span wrapped across two
-physical lines, this one is about a span sitting at the very start of the rendered sentence) and to
-[[project_tuning_generator_comment_extraction]] (the generator-author's own account of the two
-failure modes found while *building* the tool -- this is a third, found while *writing against*
-it).
+Related: [[feedback_backtick_span_across_line_wrap_eats_space]],
+[[project_tuning_generator_comment_extraction]].

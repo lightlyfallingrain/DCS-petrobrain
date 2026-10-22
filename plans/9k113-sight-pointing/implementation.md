@@ -33,6 +33,69 @@ the cockpit-switch feed, the `sight_servo` schema/cache/endpoint (+ API and luaj
 regenerated `config/defaults.toml`. `ShowMenu`/`ai_believed_on` are gone; `GYRO_ALIGNMENT_S` survives
 only in a docstring.
 
+### Review fixes (v2 review, 2026-10-22)
+
+The three required fixes in `review.md`'s v2 section, one commit each (`28d45a09`, `ebd48c41`,
+`fdfe3948`). body-layer only; aircraft-layer untouched.
+
+**1 — `defaults.toml` first sentence.** `tools/generate_defaults.py`: `_SENTENCE_SPLIT` no longer
+splits on a period inside a double-quoted span (an even number of `"` must follow it), and
+`_first_sentence` no longer strips `` ` ``/`*` off both ends. Markup the split consumed after the
+period (`.**`, `` .` ``) is either dropped together with its opening, when it wrapped the whole
+sentence, or put back after the period. The regeneration repaired **9** rendered entries: the two in
+the review, plus 7 already on the branch that had lost a leading backtick (5:
+`ATTACK_RUN_ELEVATION_GATE_DEG`, `ATTACK_RUN_LINED_UP_AZIMUTH_DEG`, `BUILT_UP_VILLAGE_MAX_AREA_M2`,
+`ATTACK_TARGET_LOS_MAX_AGE_S`, `FIRING_MAX_AGE_S`) or a closing one (2: `IDENTITY_HALF_LIFE_S`'s
+`*is*`, `MEDRES_ANGULAR_RADIUS_RAD`'s `` `LOWRES_ANGULAR_RADIUS_RAD` ``). No sentence boundary moved
+in any other entry (diffed the whole rendered file). Both new `#:` comments now open with a
+pilot-facing sentence (what it does, which way is dangerous, what the default is in the world);
+the pilot's verbatim quote moved to the second sentence. New
+`tests/test_generate_defaults_first_sentence.py` (7 tests); 4 of them fail against the
+pre-fix generator (quoted period, closing backtick, opening backtick, mid-sentence bold), restored
+by `shasum`. The quote rule is only sound when quotes are balanced, so one test holds every
+declaration's comment block to an even `"` count, and checks it scanned as many blocks as
+`collect_declarations()` found.
+
+**2 — F4 widened.** `_f4_scenario` now runs four polls through `_f4_poll`, which calls the crew-text
+loop's own belief-to-speech sinks in that loop's order (`run_once`, attack-run transition + `drain_
+attack_run`, the real `logger._mission_memory_step`, `drain_events`, `drain_pending_positional_
+replies`), with `select_target armor` after poll 1 and `mark_target` + `engage` after poll 2 (the
+seen poll). It is driven inline rather than through the threaded `_run_crew_text_poll_loop`
+because a differential test needs both runs to see the same polls, and that loop rebuilds
+`runner.sources`. It compares `ContactStore` positions, `MissionMemory` entries, every utterance,
+and every `TOOL_SET` result (all 17, keyed by name and asserted equal to `TOOL_SET`'s own names so
+a new tool cannot escape). Each comparison also asserts it is non-empty. `Entry.t_wall` is pinned,
+because it is the one field two runs differ in whatever the seen aim does. The world-model
+connection is an empty built store (`open_for_build`), so the enrichment-taking tools can run.
+**Red runs** (mutations in `logger.py`, restored by `shasum`): seen aim written into the
+looked-at contact's position → positions, memory, utterances, tools all fail; seen aim shifting a
+commanded mark's `t_sim` → memory and tools fail; seen aim setting the contact's attention to
+`ignore` → tools fail. A first draft of that last mutation set `priority` and stayed green. That
+was the mutation's mistake, not the test's: `select_target` had already made the contact
+`priority`.
+
+**3 — wiring tests.** `test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_aim`
+(Stage 3): desired 50° right throughout; actual aim 0 → 20 → 10° over three 1 s polls, the last
+after a 30° turn. `test_run_once_seen_look_moves_the_next_goal_onto_the_true_direction` (Stage 3b):
+poll 2's goal is the true direction (0°, `atan(1.2/1000)`), not belief's (12°, −3°), and the
+contact's position is unchanged. **Red runs**, each restored by `shasum`: Stage 3, perception fed
+`optic_decision.look_azimuth_deg` instead of the head → the new Stage 3 test fails; the not-free cap
+removed → the existing `test_run_once_caps_a_sight_tier_optic_until_the_head_is_free` fails (the
+review's suggested mutation). Stage 3b, `look_contact=None` passed to `advance_sight_head` → fails;
+the `last_sight_look_sim` stamp removed → fails; `select_sight_goal`'s `seen` row disabled (goal
+always from belief, the plan's own mutation) → the new 3b test and F4's
+`test_the_heads_own_aim_source_differs` fail, while F4's four identity tests stay green, as they
+should.
+
+**Checks (body-layer)**: `ruff format --check` pass, `ruff check` pass (`src tests tools`), `mypy
+src` pass (71 files), `pytest` 2443 passed, 4 xfailed.
+
+**Open, not fixed:** the plan's F4 spec says *"a target inside the sight FOV under both aims"*. The
+scenario uses a canned `FakeSource`, so perception does not depend on the aim at all. It proves the
+seen value does not reach the sinks downstream of perception. It does not prove that a changed aim
+cannot change what a real `NakedEyePerceptionSource` admits. The plan allows that difference (*"it
+can change how many looks he gets"*).
+
 ---
 
 ## v1 (superseded — position-command model)
