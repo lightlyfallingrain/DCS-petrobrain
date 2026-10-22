@@ -20,7 +20,9 @@ Lua: `luac5.1 -p` clean on every `dcs-export/*.lua`.
   as a separate commit.
 - **Mechanism and calibration share that commit** (`SEEN_AIM_HEIGHT_OFFSET_M` = 1.2 m, pilot's
   2026-10-22 answer *"let's assume on ground"*, lands with the seen-aim mechanism).
-- **Stage 0 (calibration probe, Flight A) was not built.**
+- **Stage 0 (calibration probe, Flight A)** was not built by the implementer; the main loop built it
+  afterwards: `aircraft-layer/dcs-export/Export.probe-9k113-calibration.lua` (from run 11's probe;
+  luajit mock-run clean) and its card `docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`.
 - No per-stage notes from the implementer; what was built has to be read from the diff.
 
 Present in the WIP (by search, to be confirmed by review): `belief/sight_head.py` (+ tests),
