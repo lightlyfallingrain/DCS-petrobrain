@@ -25,6 +25,11 @@ ATTACK_RUN_LINED_UP_AZIMUTH_DEG = 5.0
 # source: belief/attack_run.py:ATTACK_RUN_RELATIVE_MAX_AGE_S
 ATTACK_RUN_RELATIVE_MAX_AGE_S = 2.0
 
+# seen_world_direction`'s own aim-point correction (`[[BL-B80]]`, plan Decision 6, pilot 2026-10-22, verbatim: *"no idea.
+# status: agreed-guess | range: 0.0 .. 3.0
+# source: belief/attack_run.py:SEEN_AIM_HEIGHT_OFFSET_M
+SEEN_AIM_HEIGHT_OFFSET_M = 1.2
+
 [belief.callouts]
 # A breath between lines, and slack absorbing a small under-estimate in `estimate_speech_duration_s` -- see that function's own docstring.
 # status: judgement | range: 0.1 .. 5.0
@@ -121,10 +126,21 @@ SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 # source: belief/sight_effector.py:GUIDANCE_UNIT_SWITCH_DELAY_S
 GUIDANCE_UNIT_SWITCH_DELAY_S = 1.0
 
-# How long the sight stays unusable after any observed OBSERV off->on transition, whoever caused it (player, DCS's own hard-manoeuvre auto-off, or our own write) -- the real 9K113 gyro's own re-alignment time.
-# status: measured | range: 5.0 .. 20.0
-# source: belief/sight_effector.py:GYRO_ALIGNMENT_S
-GYRO_ALIGNMENT_S = 10.0
+[belief.sight_head]
+# How long the sight keeps tracking the last *seen* direction after the target drops out of the glass (left the FOV, LOS blocked, a binocular/ unaided poll, hands busy) before falling back to belief's own desired direction -- the plan's "Aim source" selection rule, `held` row.
+# status: agreed-guess | range: 0.0 .. 10.0
+# source: belief/sight_head.py:SEEN_AIM_HOLD_S
+SEEN_AIM_HOLD_S = 3.0
+
+# The simulated head's per-axis slew rate -- the same figures `Export.lua`'s own per-frame setpoint rate limit mirrors by hand (no tuning mechanism outside body-layer), sourced from `Devices_specs/9K113.lua` (`h_axis_velocity`/`v_axis_velocity`, confirmed live per `mi24p-command-surface.md` §4.2).
+# status: derived | range: 5.0 .. 40.0
+# source: belief/sight_head.py:SLEW_AZ_DPS
+SLEW_AZ_DPS = 20.0
+
+# Elevation's own slew rate -- same source as `SLEW_AZ_DPS.
+# status: derived | range: 2.0 .. 20.0
+# source: belief/sight_head.py:SLEW_EL_DPS
+SLEW_EL_DPS = 10.0
 
 [mission_memory.admission]
 # How long, in seconds, a `fired_on` entry for one shooter suppresses a second entry from the same shooter -- the user's own "~2 min" (explore notes, Decision 5), stated there as a tunable.

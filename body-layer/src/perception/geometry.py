@@ -397,6 +397,62 @@ def heading_relative_to_body_relative(
     )
 
 
+def world_direction_from_body(
+    body_azimuth_deg: float,
+    body_elevation_deg: float,
+    *,
+    heading_true_deg: float,
+    pitch_deg: float,
+    bank_deg: float,
+) -> tuple[float, float]:
+    """Inverse of `body_relative_direction`'s rotation (`[[BL-B80]]`,
+    `plans/9k113-sight-pointing/plan.md`, "Simulated head" -- the
+    `SightHead`'s own frame conversion): given a direction already
+    expressed in the airframe's body frame (`BodyRelativeDirection`'s own
+    sign convention), returns the equivalent world-true direction --
+    `(azimuth_true_deg` in `[0, 360)`, `elevation_deg` above the
+    world-horizontal plane`)` -- at the given attitude.
+
+    **Built on `body_relative_direction`, not a separate derivation**, the
+    same construction `heading_relative_to_body_relative` uses for its own
+    inverse-of-the-yaw-step case: a unit-range vector is built directly in
+    the body frame from `body_azimuth_deg`/`body_elevation_deg`, then each
+    of `body_relative_direction`'s three rotation steps (yaw, pitch, bank)
+    is undone in the reverse order it applies them (bank, pitch, yaw) --
+    each step's inverse is its transpose, since every one of these is an
+    orthonormal rotation. A future change to `body_relative_direction`'s
+    rotation (or its sign conventions) is undone here by the same
+    transpose relationship, not by an independent re-derivation that could
+    drift out of step with it."""
+    az_rad = math.radians(body_azimuth_deg)
+    el_rad = math.radians(body_elevation_deg)
+    forward1 = math.cos(el_rad) * math.cos(az_rad)
+    right2 = math.cos(el_rad) * math.sin(az_rad)
+    up2 = math.sin(el_rad)
+
+    bank_rad = math.radians(bank_deg)
+    # Undo step 3 (bank): the transpose of `body_relative_direction`'s own
+    # right1/up1 -> right2/up2 rotation.
+    right1 = right2 * math.cos(bank_rad) + up2 * math.sin(bank_rad)
+    up1 = -right2 * math.sin(bank_rad) + up2 * math.cos(bank_rad)
+
+    pitch_rad = math.radians(pitch_deg)
+    # Undo step 2 (pitch): the transpose of forward0/up0 -> forward1/up1.
+    forward0 = forward1 * math.cos(pitch_rad) - up1 * math.sin(pitch_rad)
+    up0 = forward1 * math.sin(pitch_rad) + up1 * math.cos(pitch_rad)
+    right0 = right1
+
+    heading_rad = math.radians(heading_true_deg)
+    # Undo step 1 (yaw): the transpose of north/east -> forward0/right0.
+    north = forward0 * math.cos(heading_rad) - right0 * math.sin(heading_rad)
+    east = forward0 * math.sin(heading_rad) + right0 * math.cos(heading_rad)
+    up = up0
+
+    azimuth_true_deg = math.degrees(math.atan2(east, north)) % 360.0
+    elevation_deg = math.degrees(math.atan2(up, math.hypot(north, east)))
+    return azimuth_true_deg, elevation_deg
+
+
 def elevation_at(
     conn: sqlite3.Connection, theatre: str, x: float, z: float
 ) -> float | None:

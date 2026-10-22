@@ -1,15 +1,14 @@
 """The 9K113 pointing channel's wire op (`plans/9k113-sight-pointing/
-plan.md`, BL-B80): `CommandSender.send_sight_target` and the
+plan.md`, BL-B80 v2): `CommandSender.send_sight_target` and the
 `POST /command/sight_target` endpoint.
 
 Mirrors `test_cockpit_switch.py`'s `TestSendCockpitSwitch`/
 `TestCockpitSwitchCommandEndpoint` structure -- same shape-validation-
-only, raise-on-failure posture -- with one addition this op has and
-`cockpit_switch` does not: a numeric bound on both fields (the Security
-plan review's non-blocking recommendation, since Export.lua's own rate
-limiter only ever *approaches* an out-of-range target rather than
-jumping to it, but an absurd magnitude should not reach its "commanded
-is non-trivial" comparison either)."""
+only, raise-on-failure posture -- with the bound checks this op has and
+`cockpit_switch` does not: a numeric bound on every field, including
+`t_sim` (the security plan review's required change, re-plan v2: `t_sim`
+feeds `Export.lua`'s own `clamp(t - t_sim, 0, cap)` directly, so it is
+bounded exactly like `az`/`el`/`rate`)."""
 
 from __future__ import annotations
 
@@ -22,9 +21,23 @@ from collections.abc import Iterator
 
 import pytest
 
-from api.server import _SIGHT_TARGET_CMD_BOUND, TelemetryAPIServer
+from api.server import (
+    _SIGHT_TARGET_AZ_BOUND,
+    _SIGHT_TARGET_EL_BOUND,
+    _SIGHT_TARGET_RATE_BOUND,
+    _SIGHT_TARGET_TSIM_BOUND,
+    TelemetryAPIServer,
+)
 from collector.cache import TelemetryCache
 from collector.command_sender import CommandSender, CommandSendError
+
+_VALID_BODY = {
+    "goal_az_deg": 12.0,
+    "goal_el_deg": -3.0,
+    "goal_rate_az_deg_s": 1.5,
+    "goal_rate_el_deg_s": -0.5,
+    "t_sim": 123.0,
+}
 
 
 class TestSendSightTarget:
@@ -39,14 +52,17 @@ class TestSendSightTarget:
 
         try:
             with CommandSender(host="127.0.0.1", port=port) as sender:
-                sender.send_sight_target(0.5, -0.25)
+                sender.send_sight_target(12.0, -3.0, 1.5, -0.5, 123.0)
 
             data, _addr = receiver.recvfrom(4096)
             decoded = json.loads(data.decode("utf-8"))
             assert decoded == {
                 "op": "sight_target",
-                "az_cmd": 0.5,
-                "elev_cmd": -0.25,
+                "goal_az_deg": 12.0,
+                "goal_el_deg": -3.0,
+                "goal_rate_az_deg_s": 1.5,
+                "goal_rate_el_deg_s": -0.5,
+                "t_sim": 123.0,
             }
         finally:
             receiver.close()
@@ -64,7 +80,7 @@ class TestSendSightTarget:
         sender._socket = _FailingSocket()  # type: ignore[assignment]
 
         with pytest.raises(CommandSendError):
-            sender.send_sight_target(0.5, -0.25)
+            sender.send_sight_target(12.0, -3.0, 1.5, -0.5, 123.0)
 
 
 class _RecordingCommandSender(CommandSender):
@@ -72,15 +88,22 @@ class _RecordingCommandSender(CommandSender):
 
     def __init__(self) -> None:
         super().__init__()
-        self.sent: list[tuple[float, float]] = []
+        self.sent: list[tuple[float, float, float, float, float]] = []
         self.raise_on_send = False
 
     def send_sight_target(  # type: ignore[override]
-        self, az_cmd: float, elev_cmd: float
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
     ) -> None:
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
-        self.sent.append((az_cmd, elev_cmd))
+        self.sent.append(
+            (goal_az_deg, goal_el_deg, goal_rate_az_deg_s, goal_rate_el_deg_s, t_sim)
+        )
 
 
 @pytest.fixture
@@ -112,23 +135,19 @@ def _post(server: TelemetryAPIServer, path: str, body: object) -> tuple[int, obj
 
 
 class TestSightTargetCommandEndpoint:
-    """`POST /command/sight_target` -- shape validation plus the bound
-    check (no allow-list question here, unlike `cockpit_switch` -- there
-    is only one `(device, cmd)` pair this op ever reaches)."""
+    """`POST /command/sight_target` -- shape validation plus the per-field
+    bound checks (no allow-list question here, unlike `cockpit_switch` --
+    there is only one `(device, cmd)` pair this op ever reaches)."""
 
     def test_valid_request_forwards_to_sender(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
     ) -> None:
         server, sender = running_server_with_sender
-        status, body = _post(
-            server,
-            "/command/sight_target",
-            {"az_cmd": 0.5, "elev_cmd": -0.25},
-        )
+        status, body = _post(server, "/command/sight_target", _VALID_BODY)
         assert status == 200
         assert body == {"ok": True}
-        assert sender.sent == [(0.5, -0.25)]
+        assert sender.sent == [(12.0, -3.0, 1.5, -0.5, 123.0)]
 
     def test_integer_values_are_accepted_and_forwarded_as_floats(
         self,
@@ -136,10 +155,18 @@ class TestSightTargetCommandEndpoint:
     ) -> None:
         server, sender = running_server_with_sender
         status, _body = _post(
-            server, "/command/sight_target", {"az_cmd": 0, "elev_cmd": 1}
+            server,
+            "/command/sight_target",
+            {
+                "goal_az_deg": 0,
+                "goal_el_deg": 1,
+                "goal_rate_az_deg_s": 0,
+                "goal_rate_el_deg_s": 0,
+                "t_sim": 5,
+            },
         )
         assert status == 200
-        assert sender.sent == [(0.0, 1.0)]
+        assert sender.sent == [(0.0, 1.0, 0.0, 0.0, 5.0)]
 
     def test_values_at_the_bound_are_accepted(
         self,
@@ -150,80 +177,137 @@ class TestSightTargetCommandEndpoint:
             server,
             "/command/sight_target",
             {
-                "az_cmd": _SIGHT_TARGET_CMD_BOUND,
-                "elev_cmd": -_SIGHT_TARGET_CMD_BOUND,
+                "goal_az_deg": _SIGHT_TARGET_AZ_BOUND,
+                "goal_el_deg": -_SIGHT_TARGET_EL_BOUND,
+                "goal_rate_az_deg_s": _SIGHT_TARGET_RATE_BOUND,
+                "goal_rate_el_deg_s": -_SIGHT_TARGET_RATE_BOUND,
+                "t_sim": _SIGHT_TARGET_TSIM_BOUND,
             },
         )
         assert status == 200
-        assert sender.sent == [(_SIGHT_TARGET_CMD_BOUND, -_SIGHT_TARGET_CMD_BOUND)]
+        assert sender.sent == [
+            (
+                _SIGHT_TARGET_AZ_BOUND,
+                -_SIGHT_TARGET_EL_BOUND,
+                _SIGHT_TARGET_RATE_BOUND,
+                -_SIGHT_TARGET_RATE_BOUND,
+                _SIGHT_TARGET_TSIM_BOUND,
+            )
+        ]
 
-    def test_az_cmd_beyond_the_bound_returns_400(
+    def test_goal_az_deg_beyond_the_bound_returns_400(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
     ) -> None:
         server, sender = running_server_with_sender
-        status, _body = _post(
-            server,
-            "/command/sight_target",
-            {"az_cmd": _SIGHT_TARGET_CMD_BOUND + 0.1, "elev_cmd": 0.0},
-        )
+        body = {**_VALID_BODY, "goal_az_deg": _SIGHT_TARGET_AZ_BOUND + 0.1}
+        status, _body = _post(server, "/command/sight_target", body)
         assert status == 400
         assert sender.sent == []
 
-    def test_elev_cmd_beyond_the_bound_returns_400(
+    def test_goal_el_deg_beyond_the_bound_returns_400(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
     ) -> None:
         server, sender = running_server_with_sender
-        status, _body = _post(
-            server,
-            "/command/sight_target",
-            {"az_cmd": 0.0, "elev_cmd": -(_SIGHT_TARGET_CMD_BOUND + 0.1)},
-        )
+        body = {**_VALID_BODY, "goal_el_deg": -(_SIGHT_TARGET_EL_BOUND + 0.1)}
+        status, _body = _post(server, "/command/sight_target", body)
         assert status == 400
         assert sender.sent == []
 
-    def test_missing_az_cmd_returns_400(
+    def test_goal_rate_az_deg_s_beyond_the_bound_returns_400(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
     ) -> None:
         server, sender = running_server_with_sender
-        status, body = _post(server, "/command/sight_target", {"elev_cmd": 0.0})
-        assert status == 400
-        assert isinstance(body, dict)
-        assert "error" in body
-        assert sender.sent == []
-
-    def test_missing_elev_cmd_returns_400(
-        self,
-        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
-    ) -> None:
-        server, sender = running_server_with_sender
-        status, _body = _post(server, "/command/sight_target", {"az_cmd": 0.0})
+        body = {**_VALID_BODY, "goal_rate_az_deg_s": _SIGHT_TARGET_RATE_BOUND + 0.1}
+        status, _body = _post(server, "/command/sight_target", body)
         assert status == 400
         assert sender.sent == []
 
-    def test_boolean_az_cmd_returns_400(
+    def test_goal_rate_el_deg_s_beyond_the_bound_returns_400(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
     ) -> None:
         server, sender = running_server_with_sender
-        status, _body = _post(
-            server, "/command/sight_target", {"az_cmd": True, "elev_cmd": 0.0}
-        )
+        body = {**_VALID_BODY, "goal_rate_el_deg_s": -(_SIGHT_TARGET_RATE_BOUND + 0.1)}
+        status, _body = _post(server, "/command/sight_target", body)
         assert status == 400
         assert sender.sent == []
 
-    def test_non_finite_elev_cmd_returns_400(
+    def test_t_sim_beyond_the_bound_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """The security plan review's required change -- `t_sim` is
+        bounded exactly like every other field."""
+        server, sender = running_server_with_sender
+        body = {**_VALID_BODY, "t_sim": _SIGHT_TARGET_TSIM_BOUND + 1.0}
+        status, _body = _post(server, "/command/sight_target", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_negative_t_sim_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """DCS model time is never negative -- unlike `az`/`el`/`rate`,
+        `t_sim`'s own lower bound is 0, not symmetric."""
+        server, sender = running_server_with_sender
+        body = {**_VALID_BODY, "t_sim": -1.0}
+        status, _body = _post(server, "/command/sight_target", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_non_finite_t_sim_returns_400(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
     ) -> None:
         server, sender = running_server_with_sender
-        status, _body = _post(
-            server,
-            "/command/sight_target",
-            {"az_cmd": 0.0, "elev_cmd": float("nan")},
-        )
+        body = {**_VALID_BODY, "t_sim": float("nan")}
+        status, _body = _post(server, "/command/sight_target", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_missing_goal_az_deg_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {k: v for k, v in _VALID_BODY.items() if k != "goal_az_deg"}
+        status, body_out = _post(server, "/command/sight_target", body)
+        assert status == 400
+        assert isinstance(body_out, dict)
+        assert "error" in body_out
+        assert sender.sent == []
+
+    def test_missing_t_sim_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {k: v for k, v in _VALID_BODY.items() if k != "t_sim"}
+        status, _body = _post(server, "/command/sight_target", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_boolean_goal_az_deg_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {**_VALID_BODY, "goal_az_deg": True}
+        status, _body = _post(server, "/command/sight_target", body)
+        assert status == 400
+        assert sender.sent == []
+
+    def test_non_finite_goal_el_deg_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {**_VALID_BODY, "goal_el_deg": float("nan")}
+        status, _body = _post(server, "/command/sight_target", body)
         assert status == 400
         assert sender.sent == []
 
@@ -243,11 +327,7 @@ class TestSightTargetCommandEndpoint:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            status, body = _post(
-                server,
-                "/command/sight_target",
-                {"az_cmd": 0.0, "elev_cmd": 0.0},
-            )
+            status, body = _post(server, "/command/sight_target", _VALID_BODY)
             assert status == 503
             assert isinstance(body, dict)
             assert "error" in body
@@ -261,11 +341,7 @@ class TestSightTargetCommandEndpoint:
     ) -> None:
         server, sender = running_server_with_sender
         sender.raise_on_send = True
-        status, body = _post(
-            server,
-            "/command/sight_target",
-            {"az_cmd": 0.0, "elev_cmd": 0.0},
-        )
+        status, body = _post(server, "/command/sight_target", _VALID_BODY)
         assert status == 500
         assert isinstance(body, dict)
         assert "error" in body

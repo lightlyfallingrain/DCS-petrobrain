@@ -1,13 +1,20 @@
 """Tests for `belief.sight_effector` -- `BL-B66` Stages 2-4 and `[[BL-B80]]`
-(`plans/9k113-effectors/plan.md`, `plans/9k113-sight-pointing/plan.md`).
+v2 (`plans/9k113-effectors/plan.md`, `plans/9k113-sight-pointing/plan.md`).
 No live DCS/aircraft-layer needed -- every effector write goes through a
 fake `AircraftLayerClient` double, same posture as every other body-layer
-effector test."""
+effector test.
+
+v1's degree<->raw conversions, `GYRO_ALIGNMENT_S`/`in_gyro_alignment`, and
+the zero-real-warm-up `sight_ready` field are removed with the code they
+tested (the Removal commit) -- `sight_ready()` now reads the real 960
+lamp, and the wire carries degrees directly (`write_sight_target`'s own
+test)."""
 
 from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -16,15 +23,9 @@ import pytest
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.sight_effector import (
     GUIDANCE_UNIT_SWITCH_DELAY_S,
-    GYRO_ALIGNMENT_S,
     GuidanceUnitState,
     advance_power_up,
-    in_gyro_alignment,
     refresh_readback,
-    sight_azimuth_deg_to_raw,
-    sight_azimuth_raw_to_deg,
-    sight_elevation_deg_to_raw,
-    sight_elevation_raw_to_deg,
     sight_ready,
     start_power_up,
     write_observ,
@@ -41,13 +42,22 @@ class _RecordingAircraftClient:
 
     def __init__(self) -> None:
         self.writes: list[tuple[int, int, float]] = []
-        self.sight_target_writes: list[tuple[float, float]] = []
+        self.sight_target_writes: list[tuple[float, float, float, float, float]] = []
 
     def write_cockpit_switch(self, device: int, cmd: int, value: float) -> None:
         self.writes.append((device, cmd, value))
 
-    def write_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
-        self.sight_target_writes.append((az_cmd, elev_cmd))
+    def write_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
+        self.sight_target_writes.append(
+            (goal_az_deg, goal_el_deg, goal_rate_az_deg_s, goal_rate_el_deg_s, t_sim)
+        )
 
     def get_cockpit_switch_state_latest(self) -> dict[str, object] | None:
         return None
@@ -64,7 +74,14 @@ class _FailingAircraftClient:
         self.attempts += 1
         raise AircraftLayerError("simulated failure")
 
-    def write_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
+    def write_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
         self.attempts += 1
         raise AircraftLayerError("simulated failure")
 
@@ -115,7 +132,6 @@ def test_advance_power_up_writes_the_first_switch_immediately() -> None:
     _device, _cmd, value = client.writes[0]
     assert value == 1.0
     assert advanced.next_switch_due_sim == 10.0 + GUIDANCE_UNIT_SWITCH_DELAY_S
-    assert advanced.sight_ready is False
 
 
 def test_advance_power_up_does_not_fire_before_the_delay_has_elapsed() -> None:
@@ -135,7 +151,10 @@ def test_advance_power_up_does_not_fire_before_the_delay_has_elapsed() -> None:
     assert len(client.writes) == 1
 
 
-def test_advance_power_up_writes_all_four_switches_in_order_and_becomes_ready() -> None:
+def test_advance_power_up_writes_all_four_switches_in_order_and_completes() -> None:
+    """`[[BL-B80]]` v2: completion no longer *declares* readiness itself
+    -- `sight_ready()` reads the real 960 lamp, not a sequence-completion
+    latch."""
     client = _RecordingAircraftClient()
     state = start_power_up(GuidanceUnitState(), now_sim=0.0)
 
@@ -146,13 +165,10 @@ def test_advance_power_up_writes_all_four_switches_in_order_and_becomes_ready() 
         t += GUIDANCE_UNIT_SWITCH_DELAY_S
 
     assert len(client.writes) == 4
-    # Never skips a switch even when called with a far-future `now_sim`
-    # (zero-warmup direction: ordering is structural, timing gates are not
-    # the thing being tested here, but a stray extra call must still be a
-    # no-op once complete).
-    assert sight_ready(state) is True
-    assert state.guidance_unit_ready_announced is False  # the caller's job
     assert state.next_switch_due_sim is None
+    # Readiness is independent of the power-up sequence now.
+    assert sight_ready(state) is False
+    assert sight_ready(replace(state, ready_observed=True)) is True
 
     # A true no-op once complete.
     final = advance_power_up(state, now_sim=t + 100.0, aircraft_client=_client(client))
@@ -217,12 +233,13 @@ def test_advance_power_up_uses_the_device_cmd_pairs_in_order() -> None:
     assert cmds == [3028, 3015, 3001, 3030]
 
 
-# --- sight_ready --------------------------------------------------------
+# --- sight_ready (`[[BL-B80]]` v2: the real 960 lamp) ----------------------
 
 
-def test_sight_ready_reflects_the_state_field() -> None:
+def test_sight_ready_reflects_ready_observed() -> None:
     assert sight_ready(GuidanceUnitState()) is False
-    assert sight_ready(GuidanceUnitState(sight_ready=True)) is True
+    assert sight_ready(GuidanceUnitState(ready_observed=False)) is False
+    assert sight_ready(GuidanceUnitState(ready_observed=True)) is True
 
 
 # --- write_observ / write_weapon_safety ---------------------------------
@@ -289,165 +306,59 @@ def test_refresh_readback_leaves_fields_unchanged_when_keys_are_missing() -> Non
     assert result.weapon_safety_observed is False
 
 
-def test_refresh_readback_sets_sight_position_raw_fields_from_the_latest_sample() -> (
-    None
-):
-    """Stage 4b -- args 874/876, raw, from an `Export.lua` new enough to
-    send them."""
+def test_refresh_readback_sets_the_three_lamp_fields() -> None:
+    """`[[BL-B80]]` v2: 898 (Л5 gyro alignment), 960 (READY), 962 (launch
+    permission), real readbacks, no timer."""
     state = GuidanceUnitState()
-    result = refresh_readback(state, {"sight_az": 0.16500, "sight_elev": -0.28125})
-    assert result.sight_az_raw == pytest.approx(0.16500)
-    assert result.sight_elev_raw == pytest.approx(-0.28125)
+    result = refresh_readback(
+        state,
+        {"align_lamp": True, "ready_lamp": False, "launch_perm_lamp": True},
+    )
+    assert result.align_observed is True
+    assert result.ready_observed is False
+    assert result.launch_perm_observed is True
 
 
-def test_refresh_readback_leaves_sight_position_unchanged_when_absent() -> None:
-    """An `Export.lua` predating Stage 4b never sends `sight_az`/
-    `sight_elev` at all -- absence must not be read as "the sight reset to
-    zero", the same reasoning `refresh_readback`'s own docstring states."""
-    state = GuidanceUnitState(sight_az_raw=0.5, sight_elev_raw=-0.25)
+def test_refresh_readback_leaves_lamp_fields_unchanged_when_absent() -> None:
+    """An `Export.lua` predating the three lamps must not be read as "the
+    lamp is off" -- absence leaves the prior value, same posture every
+    other `*_observed` field in this class already takes."""
+    state = GuidanceUnitState(
+        align_observed=True, ready_observed=True, launch_perm_observed=False
+    )
     result = refresh_readback(state, {"observe_on": True})
-    assert result.sight_az_raw == pytest.approx(0.5)
-    assert result.sight_elev_raw == pytest.approx(-0.25)
+    assert result.align_observed is True
+    assert result.ready_observed is True
+    assert result.launch_perm_observed is False
 
 
-def test_sight_azimuth_raw_to_deg_uses_the_confirmed_calibration() -> None:
-    """`arg_874 = (deg / 60) * 0.44`, inverted -- the live-measured
-    calibration (`aircraft-layer/research/2026-10-17-9k113-effector-and-
-    slew-probe-findings.md` finding 2). 0.16500 raw measured at a
-    commanded +22.5 deg."""
-    assert sight_azimuth_raw_to_deg(0.16500) == pytest.approx(22.5)
-    assert sight_azimuth_raw_to_deg(0.33000) == pytest.approx(45.0)
-    assert sight_azimuth_raw_to_deg(0.0) == pytest.approx(0.0)
+# --- write_sight_target (`[[BL-B80]]` v2: degrees on the wire, no raw) ----
 
 
-def test_sight_azimuth_deg_to_raw_is_the_inverse() -> None:
-    assert sight_azimuth_deg_to_raw(22.5) == pytest.approx(0.16500)
-    assert sight_azimuth_deg_to_raw(45.0) == pytest.approx(0.33000)
-    assert sight_azimuth_deg_to_raw(0.0) == pytest.approx(0.0)
-
-
-# --- elevation conversion (`[[BL-B80]]`, derived not measured) ----------
-
-
-def test_sight_elevation_raw_to_deg_matches_the_two_mechanical_stops() -> None:
-    """`elevation_deg = arg_876 * 20.0`, one formula both signs -- fits
-    the sourced physical limits exactly (`regard_elevation_up_deg
-    =20.0`/`regard_elevation_down_deg=-15.0`) with no free parameter
-    (plan Stage 1): command=+1.0 reads back as arg=+1.0 (the up stop,
-    20 deg); command=-1.0 reads back as arg=-0.75 (the down stop,
-    0.75 * 20.0 = -15 deg -- the 0.75/20/15 ratio cancelling exactly, see
-    `_SIGHT_ELEVATION_DEG_PER_RAW_UNIT`'s own comment)."""
-    assert sight_elevation_raw_to_deg(1.0) == pytest.approx(20.0)
-    assert sight_elevation_raw_to_deg(-0.75) == pytest.approx(-15.0)
-    assert sight_elevation_raw_to_deg(0.0) == pytest.approx(0.0)
-
-
-def test_sight_elevation_raw_to_deg_matches_the_measured_piecewise_gauge() -> None:
-    """A command of +-0.5 reads back as arg +0.5 / -0.375 (the pointing
-    probe's own measured piecewise gauge split,
-    `2026-10-21-9k113-slew-readback-probe-findings.md` pointing-probe
-    table) -- both convert to +-10 deg under the one readback formula."""
-    assert sight_elevation_raw_to_deg(0.5) == pytest.approx(10.0)
-    assert sight_elevation_raw_to_deg(-0.375) == pytest.approx(-7.5)
-
-
-def test_sight_elevation_deg_to_raw_returns_the_command_value_not_the_readback() -> (
-    None
-):
-    """Piecewise by sign, in the *command* domain -- `write_sight_target`
-    needs the value to send, not the argument a readback would report
-    (`sight_elevation_deg_to_raw`'s own docstring on why this is not a
-    literal inverse of `sight_elevation_raw_to_deg`)."""
-    assert sight_elevation_deg_to_raw(20.0) == pytest.approx(1.0)
-    assert sight_elevation_deg_to_raw(-15.0) == pytest.approx(-1.0)
-    assert sight_elevation_deg_to_raw(10.0) == pytest.approx(0.5)
-    assert sight_elevation_deg_to_raw(-10.0) == pytest.approx(-0.6667, abs=1e-3)
-    assert sight_elevation_deg_to_raw(0.0) == pytest.approx(0.0)
-
-
-# --- gyro-alignment window ------------------------------------------------
-
-
-def test_in_gyro_alignment_is_false_with_no_rising_edge_recorded() -> None:
-    assert in_gyro_alignment(GuidanceUnitState(), now_sim=100.0) is False
-
-
-def test_in_gyro_alignment_is_true_immediately_after_the_rising_edge() -> None:
-    state = GuidanceUnitState(observ_observed=True, observ_observed_since_sim=10.0)
-    assert in_gyro_alignment(state, now_sim=10.0) is True
-    assert in_gyro_alignment(state, now_sim=10.0 + GYRO_ALIGNMENT_S - 0.01) is True
-
-
-def test_in_gyro_alignment_is_false_once_the_window_elapses() -> None:
-    state = GuidanceUnitState(observ_observed=True, observ_observed_since_sim=10.0)
-    assert in_gyro_alignment(state, now_sim=10.0 + GYRO_ALIGNMENT_S) is False
-    assert in_gyro_alignment(state, now_sim=10.0 + GYRO_ALIGNMENT_S + 5.0) is False
-
-
-# --- refresh_readback's observ_observed_since_sim stamping ----------------
-
-
-def test_refresh_readback_stamps_the_rising_edge() -> None:
-    state = GuidanceUnitState()
-    result = refresh_readback(state, {"observe_on": True}, now_sim=42.0)
-    assert result.observ_observed_since_sim == pytest.approx(42.0)
-
-
-def test_refresh_readback_does_not_restamp_while_already_on() -> None:
-    """The edge is the *transition*, not every poll OBSERV reads on --
-    restamping every poll would mean the gyro-alignment window never
-    actually elapses."""
-    state = GuidanceUnitState(observ_observed=True, observ_observed_since_sim=10.0)
-    result = refresh_readback(state, {"observe_on": True}, now_sim=50.0)
-    assert result.observ_observed_since_sim == pytest.approx(10.0)
-
-
-def test_refresh_readback_clears_the_stamp_on_the_falling_edge() -> None:
-    state = GuidanceUnitState(observ_observed=True, observ_observed_since_sim=10.0)
-    result = refresh_readback(state, {"observe_on": False}, now_sim=50.0)
-    assert result.observ_observed_since_sim is None
-
-
-def test_refresh_readback_without_now_sim_never_stamps_a_rising_edge() -> None:
-    """`now_sim` defaults to `None` -- every pre-existing caller that has
-    no gyro-alignment window to track keeps working unchanged."""
-    state = GuidanceUnitState()
-    result = refresh_readback(state, {"observe_on": True})
-    assert result.observ_observed is True
-    assert result.observ_observed_since_sim is None
-
-
-def test_refresh_readback_a_falling_then_rising_edge_resets_the_stamp() -> None:
-    """No stale window survives a falling edge even when a fresh rising
-    edge follows later -- the second stamp, not the first."""
-    state = GuidanceUnitState(observ_observed=True, observ_observed_since_sim=10.0)
-    state = refresh_readback(state, {"observe_on": False}, now_sim=20.0)
-    assert state.observ_observed_since_sim is None
-    state = refresh_readback(state, {"observe_on": True}, now_sim=30.0)
-    assert state.observ_observed_since_sim == pytest.approx(30.0)
-
-
-# --- write_sight_target ---------------------------------------------------
-
-
-def test_write_sight_target_converts_degrees_to_raw_command_units() -> None:
+def test_write_sight_target_passes_the_world_goal_through_unconverted() -> None:
     client = _RecordingAircraftClient()
-    write_sight_target(_client(client), azimuth_deg=22.5, elevation_deg=10.0)
-    assert client.sight_target_writes == [(pytest.approx(0.16500), pytest.approx(0.5))]
-
-
-def test_write_sight_target_handles_negative_elevation() -> None:
-    client = _RecordingAircraftClient()
-    write_sight_target(_client(client), azimuth_deg=-45.0, elevation_deg=-10.0)
-    assert client.sight_target_writes == [
-        (pytest.approx(-0.33000), pytest.approx(-0.6667, abs=1e-3))
-    ]
+    write_sight_target(
+        _client(client),
+        goal_azimuth_deg=22.5,
+        goal_elevation_deg=-10.0,
+        rate_azimuth_deg_s=1.5,
+        rate_elevation_deg_s=-0.2,
+        t_sim=123.0,
+    )
+    assert client.sight_target_writes == [(22.5, -10.0, 1.5, -0.2, 123.0)]
 
 
 def test_write_sight_target_raises_on_a_failed_write() -> None:
     client = _FailingAircraftClient()
     with pytest.raises(AircraftLayerError):
-        write_sight_target(_client(client), azimuth_deg=0.0, elevation_deg=0.0)
+        write_sight_target(
+            _client(client),
+            goal_azimuth_deg=0.0,
+            goal_elevation_deg=0.0,
+            rate_azimuth_deg_s=0.0,
+            rate_elevation_deg_s=0.0,
+            t_sim=0.0,
+        )
 
 
 # --- single construction site (plan's "Construction-site check") -------

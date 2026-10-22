@@ -1,29 +1,24 @@
-"""`SightTraceWriter` -- BL-B66 Stage 4b (`plans/9k113-effectors/plan.md`).
+"""`SightTraceWriter` -- `--slew-trace` (`BL-B66` Stage 4b, extended by
+`[[BL-B80]]` v2, `plans/9k113-sight-pointing/plan.md`).
 
-A per-poll JSONL trace of the 9K113 sight's desired-vs-actual aim, so
-`[[BL-B80]]`'s rate loop can be tuned from real data instead of guessing:
-user direction, 2026-10-21, *"Put logging in so that the slew loop can be
+A per-poll JSONL trace of the 9K113 sight's desired-vs-actual aim, so the
+rate loop can be tuned from real data instead of guessing: user
+direction, 2026-10-21, *"Put logging in so that the slew loop can be
 adjusted based on data from logs. Actual vs desired angles especially,
 slew command values, etc."*
 
-Follows `detection_trace_writer.DetectionTraceWriter`'s own shape
-(buffer a few polls, flush periodically, disable-after-first-write-error
-rather than crash the sortie) at a fraction of the complexity: there is no
-ground-truth/belief join here, just `belief.optic_policy.OpticState` and
-`belief.sight_effector.GuidanceUnitState`, both already belief-side and
-already public.
-
-**"Desired" is `OpticState.look_azimuth_deg`/`look_elevation_deg`
-(belief's own commanded aim); "actual" is the sight head's real position
-when a readback exists (`GuidanceUnitState.sight_az_raw`/
-`sight_elev_raw`, raw args 874/876), else `OpticState.actual_aim_azimuth_
-deg`/`actual_aim_elevation_deg`'s own *model* of the head.** Both axes'
-raw readbacks are converted to degrees via `belief.sight_effector`'s
-`sight_azimuth_raw_to_deg`/`sight_elevation_raw_to_deg` -- as of
-`[[BL-B80]]`, elevation's conversion exists too (derived, not yet
-independently measured live -- see that module's own comment), so
-`actual_elevation_source` can read `"readback"` the same way azimuth's
-already could, once both the conversion and a raw sample exist."""
+**v2 columns** (replacing v1's 874/876-as-"readback" shape, since those
+args echo the demand rather than a position -- see `belief.sight_head`'s
+own docstring): "desired" is still `OpticState.look_azimuth_deg`/
+`look_elevation_deg` (belief's own commanded aim, body-relative);
+"actual" is `OpticState.actual_aim_azimuth_deg`/`actual_aim_elevation_
+deg`, which for a sight-tier optic is now the simulated `SightHead`'s own
+body direction (set by `logger._apply_active_gaze`, never a cockpit
+readback). The head's own world-frame state (`mode`, `world_az_true_deg`/
+`world_el_deg`, `goal_world_az_deg`/`goal_world_el_deg`, `aim_source`) is
+carried separately, and the DCS-slave servo's own status (`sight_servo_
+latest`, `GET /sight_servo/latest`) when available -- mode, the mark-
+derived body direction, error, and the stall flag."""
 
 from __future__ import annotations
 
@@ -31,14 +26,11 @@ import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from belief.optic_policy import OpticState
-from belief.sight_effector import (
-    GuidanceUnitState,
-    sight_azimuth_raw_to_deg,
-    sight_elevation_raw_to_deg,
-)
+from belief.sight_effector import GuidanceUnitState
+from belief.sight_head import SightHead
 
 #: Same reasoning/value as `detection_trace_writer.DEFAULT_FLUSH_EVERY_N_
 #: POLLS` -- a few polls' worth of buffering, not "as rarely as possible".
@@ -67,16 +59,31 @@ class SightTraceWriter:
         t_sim: float,
         optic_state: OpticState,
         guidance_unit_state: GuidanceUnitState,
+        sight_head: SightHead,
+        sight_servo_latest: dict[str, Any] | None = None,
     ) -> None:
         """Appends this poll's one row. Called every poll, unconditionally
         (unlike the Lua-side per-frame log, which only runs while OBSERV
         is on -- body-layer's own 1 Hz poll cannot see a slew in progress
         either way, so "every poll" here is for continuity of the belief-
-        side record, not resolution)."""
+        side record, not resolution). `sight_servo_latest` is the raw
+        `GET /sight_servo/latest` dict (`None` before the first sample, or
+        for a caller that does not poll it) -- optional so every existing
+        construction/call site keeps working."""
         if self._disabled:
             return
         try:
-            self._file.write(json.dumps(_row(t_sim, optic_state, guidance_unit_state)))
+            self._file.write(
+                json.dumps(
+                    _row(
+                        t_sim,
+                        optic_state,
+                        guidance_unit_state,
+                        sight_head,
+                        sight_servo_latest,
+                    )
+                )
+            )
             self._file.write("\n")
         except OSError as exc:
             self._fail(exc)
@@ -119,39 +126,16 @@ class SightTraceWriter:
 
 
 def _row(
-    t_sim: float, optic_state: OpticState, guidance_unit_state: GuidanceUnitState
+    t_sim: float,
+    optic_state: OpticState,
+    guidance_unit_state: GuidanceUnitState,
+    sight_head: SightHead,
+    sight_servo_latest: dict[str, Any] | None,
 ) -> dict[str, object | None]:
-    raw_az = guidance_unit_state.sight_az_raw
-    raw_el = guidance_unit_state.sight_elev_raw
-
-    actual_azimuth_deg: float | None
-    actual_azimuth_source: str | None
-    if raw_az is not None:
-        actual_azimuth_deg = sight_azimuth_raw_to_deg(raw_az)
-        actual_azimuth_source = "readback"
-    elif optic_state.actual_aim_azimuth_deg is not None:
-        actual_azimuth_deg = optic_state.actual_aim_azimuth_deg
-        actual_azimuth_source = "model"
-    else:
-        actual_azimuth_deg = None
-        actual_azimuth_source = None
-
-    # `[[BL-B80]]`: elevation now has a conversion too (derived, same
-    # "prefer readback, fall back to model" split azimuth already has).
-    actual_elevation_deg: float | None
-    actual_elevation_source: str | None
-    if raw_el is not None:
-        actual_elevation_deg = sight_elevation_raw_to_deg(raw_el)
-        actual_elevation_source = "readback"
-    elif optic_state.actual_aim_elevation_deg is not None:
-        actual_elevation_deg = optic_state.actual_aim_elevation_deg
-        actual_elevation_source = "model"
-    else:
-        actual_elevation_deg = None
-        actual_elevation_source = None
-
     desired_azimuth_deg = optic_state.look_azimuth_deg
     desired_elevation_deg = optic_state.look_elevation_deg
+    actual_azimuth_deg = optic_state.actual_aim_azimuth_deg
+    actual_elevation_deg = optic_state.actual_aim_elevation_deg
 
     error_azimuth_deg = (
         desired_azimuth_deg - actual_azimuth_deg
@@ -164,18 +148,34 @@ def _row(
         else None
     )
 
+    servo_mode = None
+    servo_error_azimuth_deg = None
+    servo_error_elevation_deg = None
+    servo_stalled = None
+    if sight_servo_latest is not None:
+        servo_mode = sight_servo_latest.get("mode")
+        servo_error_azimuth_deg = sight_servo_latest.get("error_azimuth_deg")
+        servo_error_elevation_deg = sight_servo_latest.get("error_elevation_deg")
+        servo_stalled = sight_servo_latest.get("stalled")
+
     return {
         "t": t_sim,
         "desired_azimuth_deg": desired_azimuth_deg,
         "desired_elevation_deg": desired_elevation_deg,
         "actual_azimuth_deg": actual_azimuth_deg,
-        "actual_azimuth_source": actual_azimuth_source,
         "actual_elevation_deg": actual_elevation_deg,
-        "actual_elevation_source": actual_elevation_source,
         "error_azimuth_deg": error_azimuth_deg,
         "error_elevation_deg": error_elevation_deg,
-        "raw_sight_az": raw_az,
-        "raw_sight_elev": raw_el,
+        "head_mode": sight_head.mode,
+        "head_world_azimuth_deg": sight_head.world_az_true_deg,
+        "head_world_elevation_deg": sight_head.world_el_deg,
+        "head_goal_world_azimuth_deg": sight_head.goal_world_az_deg,
+        "head_goal_world_elevation_deg": sight_head.goal_world_el_deg,
+        "aim_source": sight_head.aim_source,
+        "servo_mode": servo_mode,
+        "servo_error_azimuth_deg": servo_error_azimuth_deg,
+        "servo_error_elevation_deg": servo_error_elevation_deg,
+        "servo_stalled": servo_stalled,
         "observ_commanded": guidance_unit_state.observ_commanded,
         "observ_observed": guidance_unit_state.observ_observed,
         "optic_mode": (

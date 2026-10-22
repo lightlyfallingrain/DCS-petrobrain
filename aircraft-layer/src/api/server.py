@@ -187,22 +187,34 @@ the body/brain process, on either Windows or Mac (compute topology note in
   string to swallow).
 
 - `POST /command/sight_target` -> the aircraft layer's seventh
-  inbound/write path (`plans/9k113-sight-pointing/plan.md`, BL-B80). Body
-  `{"az_cmd": number, "elev_cmd": number}`; forwards to `collector.
-  command_sender.CommandSender.send_sight_target`, which fires the JSON
-  command at `Export.lua`'s inbound UDP listener (the same listener
-  `/command/cockpit_switch` already targets) -- a **persistent** target
-  Export.lua rate-limits toward every frame, not a one-shot write,
-  responding `200 {"ok": true}` on the same "attempted the call" contract
-  as `/command/cockpit_switch`. `400 {"error": ...}` on a missing/
-  non-finite `az_cmd`/`elev_cmd` or a non-JSON body -- shape validation
-  only, both values clamped-checked against a generous sane range
-  (Security plan review's non-blocking recommendation) rather than left
-  truly unbounded, since Export.lua's own rate limiter only ever
-  *approaches* an out-of-range target rather than jumping to it. `503
-  {"error": "sight target channel not configured"}` if this server was
-  built without a `command_sender`; a send failure propagates as
+  inbound/write path (`plans/9k113-sight-pointing/plan.md`, BL-B80 v2).
+  Body `{"goal_az_deg": number, "goal_el_deg": number, "goal_rate_az_
+  deg_s": number, "goal_rate_el_deg_s": number, "t_sim": number}`;
+  forwards to `collector.command_sender.CommandSender.send_sight_target`,
+  which fires the JSON command at `Export.lua`'s inbound UDP listener
+  (the same listener `/command/cockpit_switch` already targets) -- a
+  **persistent** world goal `Export.lua`'s own per-frame servo
+  rate-limits toward, not a one-shot write, responding `200 {"ok":
+  true}` on the same "attempted the call" contract as `/command/
+  cockpit_switch`. `400 {"error": ...}` on a missing/non-finite field or
+  a non-JSON body -- shape validation only, every field clamped-checked
+  against a generous sane range: `az`/`el` as before (Security plan
+  review's non-blocking recommendation), plus `t_sim` itself (**the same
+  review's required change**, re-plan v2) -- a non-finite or wildly
+  out-of-range `t_sim` would feed `Export.lua`'s own `clamp(t - t_sim, 0,
+  cap)` directly, so it is bounded exactly like `az`/`el`/`rate`, never
+  left unchecked on the assumption that only `az`/`el` could misbehave.
+  `503 {"error": "sight target channel not configured"}` if this server
+  was built without a `command_sender`; a send failure propagates as
   `500 {"error": ...}`, same posture as `/command/cockpit_switch`.
+
+- `GET /sight_servo/latest` -> the most recent `SightServoState`
+  (`plans/9k113-sight-pointing/plan.md`, BL-B80 v2) as JSON, or JSON
+  `null` on the same "not an error" basis as every other `/latest`
+  endpoint. `Export.lua`'s own per-frame DCS-slave servo status -- mode,
+  setpoint, the mark-derived body direction (or `null` when invalid),
+  error, and the stall flag. A **second** feed from `/cockpit_switch/
+  latest` (see `schema.sight_servo`'s own "Departure, stated").
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -240,6 +252,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    SightServoCache,
     Spu8Cache,
     TelemetryCache,
     UnitVelocityCache,
@@ -269,6 +282,7 @@ _FIRING_LATEST_PATH = "/firing/latest"
 _PTT_STATE_PATH = "/ptt/state"
 _SPU8_STATE_PATH = "/spu8/state"
 _COCKPIT_SWITCH_LATEST_PATH = "/cockpit_switch/latest"
+_SIGHT_SERVO_LATEST_PATH = "/sight_servo/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
@@ -305,18 +319,22 @@ _LOOK_DIRECTION_FOV_MAX_DEG = 180
 #: module independence).
 _MAX_CORRELATION_ID_LEN = 128
 
-#: `/command/sight_target`'s own clamp -- the Security plan review's
-#: non-blocking recommendation (`plans/9k113-sight-pointing/plan.md`,
-#: BL-B80, security-plan-review.md): the finite-float check alone lets an
-#: absurd magnitude (e.g. `az_cmd=1e30`) reach Export.lua's own `ai_off_
-#: since` "commanded is non-trivial" comparison. A generous raw-command-
-#: unit bound well past the real ±60 deg azimuth stop (`value = deg/60`,
-#: so `±1.5` is a ±90 deg equivalent) and the +20/-15 deg elevation stops
-#: (`±1.5` raw is likewise past either gauge direction) costs nothing
-#: real: Export.lua's rate limiter only ever *approaches* an out-of-range
-#: target, never jumps to it, and DCS's own mechanical stops bound the
-#: head's real position regardless of what this allows through.
-_SIGHT_TARGET_CMD_BOUND = 1.5
+#: `/command/sight_target`'s own clamps (`plans/9k113-sight-pointing/
+#: plan.md`, BL-B80 v2) -- `az`/`el`/`rate` are the Security plan
+#: review's non-blocking recommendation, generous bounds well past the
+#: sight's own physical envelope (±60 deg az, +20/-15 deg el) and a sane
+#: slew rate, costing nothing real since Export.lua's own setpoint only
+#: ever *approaches* an out-of-range goal, never jumps to it, and DCS's
+#: own mechanical stops bound the head's real position regardless.
+#: `_SIGHT_TARGET_TSIM_BOUND` is the **required** change from that same
+#: review: `t_sim` feeds `Export.lua`'s own `clamp(t - t_sim, 0, cap)`
+#: directly, so an unbounded value there is as dangerous as an unbounded
+#: angle -- a day's worth of seconds is generous headroom past any real
+#: `LoGetModelTime()` value a sortie will ever produce.
+_SIGHT_TARGET_AZ_BOUND = 360.0
+_SIGHT_TARGET_EL_BOUND = 90.0
+_SIGHT_TARGET_RATE_BOUND = 30.0
+_SIGHT_TARGET_TSIM_BOUND = 86400.0
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -400,6 +418,15 @@ def _handle_cockpit_switch_latest(
     return None if sample is None else sample.to_api_dict()
 
 
+def _handle_sight_servo_latest(
+    cache: SightServoCache,
+) -> dict[str, Any] | None:
+    """`null` before the first sight-servo line arrives -- same "not an
+    error" posture as `/cockpit_switch/latest`."""
+    sample = cache.latest()
+    return None if sample is None else sample.to_api_dict()
+
+
 def _handle_petrovich_indication_latest(
     cache: PetrovichIndicationCache,
 ) -> dict[str, Any] | None:
@@ -435,6 +462,7 @@ def _make_handler(
     emitter_tracker: EmitterTracker,
     mission_start_cache: MissionStartCache,
     cockpit_switch_cache: CockpitSwitchCache,
+    sight_servo_cache: SightServoCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -475,6 +503,9 @@ def _make_handler(
                 self._respond_json(
                     200, _handle_cockpit_switch_latest(cockpit_switch_cache)
                 )
+                return
+            if path == _SIGHT_SERVO_LATEST_PATH:
+                self._respond_json(200, _handle_sight_servo_latest(sight_servo_cache))
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
@@ -701,12 +732,13 @@ def _make_handler(
 
         def _handle_command_sight_target(self) -> None:
             """`POST /command/sight_target` -- shape validation only
-            (both values finite, clamped to `_SIGHT_TARGET_CMD_BOUND`,
-            the Security plan review's non-blocking recommendation --
-            see the module docstring's own entry for this endpoint).
-            Reuses `command_sender`, the same `CommandSender` instance
-            `/command/cockpit_switch` already forwards through, since
-            both target `Export.lua`'s one inbound command listener."""
+            (every field finite, each clamped to its own generous bound
+            -- see the module docstring's own entry for this endpoint,
+            including `t_sim`'s own bound, the security plan review's
+            required change). Reuses `command_sender`, the same
+            `CommandSender` instance `/command/cockpit_switch` already
+            forwards through, since both target `Export.lua`'s one
+            inbound command listener."""
             if command_sender is None:
                 self._respond_json(
                     503, {"error": "sight target channel not configured"}
@@ -724,46 +756,73 @@ def _make_handler(
                 self._respond_json(400, {"error": "body must be a JSON object"})
                 return
 
-            az_cmd = data.get("az_cmd")
-            if (
-                isinstance(az_cmd, bool)
-                or not isinstance(az_cmd, (int, float))
-                or not math.isfinite(az_cmd)
-                or abs(az_cmd) > _SIGHT_TARGET_CMD_BOUND
-            ):
-                self._respond_json(
-                    400,
-                    {
-                        "error": (
-                            "'az_cmd' must be a finite number in "
-                            f"[-{_SIGHT_TARGET_CMD_BOUND}, "
-                            f"{_SIGHT_TARGET_CMD_BOUND}], got {az_cmd!r}"
-                        )
-                    },
-                )
-                return
+            def _bounded_field(field: str, bound: float) -> float | None:
+                value = data.get(field)
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or abs(value) > bound
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                f"{field!r} must be a finite number in "
+                                f"[-{bound}, {bound}], got {value!r}"
+                            )
+                        },
+                    )
+                    return None
+                return float(value)
 
-            elev_cmd = data.get("elev_cmd")
+            goal_az_deg = _bounded_field("goal_az_deg", _SIGHT_TARGET_AZ_BOUND)
+            if goal_az_deg is None:
+                return
+            goal_el_deg = _bounded_field("goal_el_deg", _SIGHT_TARGET_EL_BOUND)
+            if goal_el_deg is None:
+                return
+            goal_rate_az_deg_s = _bounded_field(
+                "goal_rate_az_deg_s", _SIGHT_TARGET_RATE_BOUND
+            )
+            if goal_rate_az_deg_s is None:
+                return
+            goal_rate_el_deg_s = _bounded_field(
+                "goal_rate_el_deg_s", _SIGHT_TARGET_RATE_BOUND
+            )
+            if goal_rate_el_deg_s is None:
+                return
+            # `t_sim` has no sign (DCS model time is never negative) --
+            # bounded to `[0, _SIGHT_TARGET_TSIM_BOUND]`, not `+-`, the
+            # security plan review's required change.
+            t_sim_raw = data.get("t_sim")
             if (
-                isinstance(elev_cmd, bool)
-                or not isinstance(elev_cmd, (int, float))
-                or not math.isfinite(elev_cmd)
-                or abs(elev_cmd) > _SIGHT_TARGET_CMD_BOUND
+                isinstance(t_sim_raw, bool)
+                or not isinstance(t_sim_raw, (int, float))
+                or not math.isfinite(t_sim_raw)
+                or t_sim_raw < 0
+                or t_sim_raw > _SIGHT_TARGET_TSIM_BOUND
             ):
                 self._respond_json(
                     400,
                     {
                         "error": (
-                            "'elev_cmd' must be a finite number in "
-                            f"[-{_SIGHT_TARGET_CMD_BOUND}, "
-                            f"{_SIGHT_TARGET_CMD_BOUND}], got {elev_cmd!r}"
+                            "'t_sim' must be a finite number in "
+                            f"[0, {_SIGHT_TARGET_TSIM_BOUND}], got {t_sim_raw!r}"
                         )
                     },
                 )
                 return
+            t_sim = float(t_sim_raw)
 
             try:
-                command_sender.send_sight_target(float(az_cmd), float(elev_cmd))
+                command_sender.send_sight_target(
+                    goal_az_deg,
+                    goal_el_deg,
+                    goal_rate_az_deg_s,
+                    goal_rate_el_deg_s,
+                    t_sim,
+                )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return
@@ -878,6 +937,7 @@ class TelemetryAPIServer:
         emitter_tracker: EmitterTracker | None = None,
         mission_start_cache: MissionStartCache | None = None,
         cockpit_switch_cache: CockpitSwitchCache | None = None,
+        sight_servo_cache: SightServoCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`/
@@ -933,6 +993,9 @@ class TelemetryAPIServer:
             cockpit_switch_cache
             if cockpit_switch_cache is not None
             else CockpitSwitchCache()
+        )
+        self._sight_servo_cache = (
+            sight_servo_cache if sight_servo_cache is not None else SightServoCache()
         )
         # `EmitterTracker` defaults to a fresh, never-fed instance -- same
         # "unconfigured answers the empty/default state, never crashes"
@@ -990,6 +1053,7 @@ class TelemetryAPIServer:
                 self._emitter_tracker,
                 self._mission_start_cache,
                 self._cockpit_switch_cache,
+                self._sight_servo_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

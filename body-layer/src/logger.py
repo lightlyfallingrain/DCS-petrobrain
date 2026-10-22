@@ -243,7 +243,6 @@ from belief.optic_policy import (
 from belief.optic_policy import decide as decide_optic
 from belief.sight_effector import (
     GuidanceUnitState,
-    in_gyro_alignment,
     write_sight_target,
 )
 from belief.sight_effector import advance_power_up as advance_guidance_unit_power_up
@@ -252,6 +251,7 @@ from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_effector import start_power_up as start_guidance_unit_power_up
 from belief.sight_effector import write_observ as write_observ_switch
 from belief.sight_effector import write_weapon_safety as write_weapon_safety_switch
+from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
 from coordinates.projections import THEATRE_PROJECTIONS
@@ -491,6 +491,26 @@ class ConsolePerceptionRunner:
     #: this field only carries the value between polls.
     guidance_unit_state: GuidanceUnitState = field(default_factory=GuidanceUnitState)
 
+    #: Petrovich's **simulated** 9K113 sight head (`[[BL-B80]]` v2,
+    #: `plans/9k113-sight-pointing/plan.md`) -- carried the same way
+    #: `optic_state`/`guidance_unit_state` are, advanced once per poll by
+    #: `advance_sight_head` inside `run_once`. This **is** his sight for
+    #: perception; the real DCS sight is a best-effort slave of it.
+    sight_head: SightHead = field(default_factory=SightHead)
+
+    #: The `t_sim` of the most recent poll whose *applied* optic was
+    #: sight-tier with `sight_head.mode == "free"` -- `None` until the
+    #: first such poll. The one freshness stamp `belief.sight_head.
+    #: select_sight_goal`'s "seen" row compares a look's own `t_look`
+    #: against (plan's "Aim source", Co-moving Fields): a binocular/
+    #: unaided look also produces an exact seen direction, and this is
+    #: what keeps it from steering the sight. Set at the *end* of
+    #: `run_once`, once this poll's percepts have actually been ingested
+    #: -- the value `select_sight_goal` reads earlier in the *next* poll
+    #: is therefore always one poll old, the same lag `observ_observed`'s
+    #: own consumers already accept.
+    last_sight_look_sim: float | None = None
+
     #: Recent `(t_sim, pitch, bank, heading)` samples, oldest first -- the
     #: steadiness gate's only input. Bounded because it is a *rate*
     #: estimate: a longer history would let a manoeuvre a minute ago still
@@ -547,8 +567,8 @@ class ConsolePerceptionRunner:
         via `_reset_mission_state`'s explicit ordering). Everything else
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
-        `guidance_unit_state`, `attitude_history`, `optic`,
-        `_last_look_direction`, `last_mission_
+        `guidance_unit_state`, `sight_head`, `last_sight_look_sim`,
+        `attitude_history`, `optic`, `_last_look_direction`, `last_mission_
         start_sequence`) resets to its declared default.
 
         **`_last_look_direction` needs an explicit line, not just the
@@ -757,37 +777,70 @@ class ConsolePerceptionRunner:
                 else None
             ),
         )
-        # `[[BL-B80]]`: Petrovich must not perceive through the sight
-        # while the real gyro is still re-aligning, even though `home_
-        # phase` is already `SIGHTING` (set above) -- capped to `BINOCULAR_
-        # OPTIC` immediately after `decide_optic` returns, before anything
-        # downstream reads `optic_decision.optic`, the same cap value
-        # `_apply_guidance` already uses for "home_phase is not SIGHTING".
-        # Re-derived fresh every poll (never cached), so the moment the
-        # window ends the very next poll's check simply passes.
-        if optic_decision.optic in (
-            SIGHT_WIDE_OPTIC,
-            SIGHT_NARROW_OPTIC,
-        ) and in_gyro_alignment(self.guidance_unit_state, ownship.t_sim):
+        # `[[BL-B80]]` v2: Petrovich must not perceive through the sight
+        # while the simulated head is not `free` yet -- capped to
+        # `BINOCULAR_OPTIC` immediately after `decide_optic` returns,
+        # before anything downstream reads `optic_decision.optic`, the
+        # same cap value `_apply_guidance` already uses for "home_phase
+        # is not SIGHTING". `align_observed`/`observ_observed` are the
+        # *previous* poll's readback (`refresh_cockpit_switch_readback`
+        # runs after `run_once` in the poll loop), the same one-poll lag
+        # `home_phase`'s own derivation above already accepts -- the head
+        # advanced a few lines below will reach the identical mode from
+        # the identical inputs, so this prediction and that advance never
+        # disagree. Re-derived fresh every poll (never cached), so the
+        # moment the head reaches `free` the very next poll's check
+        # simply passes.
+        align_observed = self.guidance_unit_state.align_observed is True
+        head_will_be_free = observ_observed is True and align_observed
+        if (
+            optic_decision.optic
+            in (
+                SIGHT_WIDE_OPTIC,
+                SIGHT_NARROW_OPTIC,
+            )
+            and not head_will_be_free
+        ):
             optic_decision = replace(optic_decision, optic=BINOCULAR_OPTIC)
         self.optic = optic_decision.optic
+        is_sight_tier = optic_decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
         # `plans/9k113-sight/plan.md` §15a: `last_t_sim` still holds the
         # *previous* poll's own `t_sim` here (it is updated later in this
         # method), so this is an ordinary poll-to-poll delta, 0.0 on the
-        # first poll -- unused by `advance_sight_aim`'s current body, kept
-        # threaded through for the effector stage's controller.
+        # first poll.
         dt_s = ownship.t_sim - (
             self.last_t_sim if self.last_t_sim is not None else ownship.t_sim
         )
-        # `[[BL-B80]]` required fix: the readback is anchored to the 9K113
-        # head, so it must only reach perception while a sight-tier optic
-        # is actually in use -- gated on the post-cap `optic_decision.optic`
-        # (the cap above may have already demoted it to `BINOCULAR_OPTIC`
-        # for the gyro-alignment window). Passing it through unconditionally
-        # anchored naked-eye/binocular gaze to the sight head whenever any
-        # readback had ever arrived this mission, defeating the alignment
-        # cap's own purpose.
-        is_sight_tier = optic_decision.optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
+        # `[[BL-B80]]` v2: the look target `decide_optic` just chose for
+        # *this* poll (`None` while idle/searching, via `OpticState.
+        # look_contact_id`) -- resolved before this poll's own `ingest`
+        # below, so its `last_percept` still reflects the *previous*
+        # poll's observation (this poll's own look, if any, has not
+        # happened yet).
+        look_contact = next(
+            (
+                contact
+                for contact in self.store.contacts
+                if contact.id == self.optic_state.look_contact_id
+            ),
+            None,
+        )
+        self.sight_head = advance_sight_head(
+            self.sight_head,
+            ownship=ownship,
+            dt_s=dt_s,
+            align_observed=align_observed,
+            observ_observed=observ_observed is True,
+            look_contact=look_contact,
+            desired_body_az_deg=(
+                optic_decision.look_azimuth_deg if is_sight_tier else None
+            ),
+            desired_body_el_deg=(
+                optic_decision.look_elevation_deg if is_sight_tier else None
+            ),
+            last_sight_look_sim=self.last_sight_look_sim,
+        )
+        sight_head_body_direction = head_body_direction(self.sight_head, ownship)
         updated_optic_state = _apply_active_gaze(
             self.sources,
             self.tasks,
@@ -795,15 +848,22 @@ class ConsolePerceptionRunner:
             decision=optic_decision,
             optic_state=self.optic_state,
             dt_s=dt_s,
-            # `[[BL-B80]]`: the previous poll's own readback (same lag as
-            # `home_phase`'s derivation above) -- `advance_sight_aim`
-            # prefers it, per axis, over the pass-through model -- but
-            # only while a sight-tier optic is actually resolved.
-            sight_az_raw=(
-                self.guidance_unit_state.sight_az_raw if is_sight_tier else None
+            # `[[BL-B80]]` v2: the sight tier's actual aim is the
+            # simulated head's own body direction, never a cockpit
+            # readback -- `None` while the head is not `free`, or for a
+            # non-sight-tier optic (`head_body_direction` already returns
+            # `None` in the first case; the second is excluded here so a
+            # `free` head does not leak into a binocular/unaided poll's
+            # own pass-through branch).
+            sight_head_body_az_deg=(
+                sight_head_body_direction[0]
+                if is_sight_tier and sight_head_body_direction is not None
+                else None
             ),
-            sight_elev_raw=(
-                self.guidance_unit_state.sight_elev_raw if is_sight_tier else None
+            sight_head_body_el_deg=(
+                sight_head_body_direction[1]
+                if is_sight_tier and sight_head_body_direction is not None
+                else None
             ),
         )
         if updated_optic_state is not None:
@@ -825,6 +885,13 @@ class ConsolePerceptionRunner:
             else []
         )
         self.store.ingest(observations, now_sim=ownship.t_sim)
+        # `[[BL-B80]]` v2: stamp the "most recent sight-tier, head-free
+        # poll" marker *after* this poll's own percepts have landed, so
+        # the *next* poll's `select_sight_goal` reads a fully-settled
+        # value -- never this poll's own. `is_sight_tier`/`self.sight_
+        # head` were both finalised earlier this same `run_once` call.
+        if is_sight_tier and self.sight_head.mode == "free":
+            self.last_sight_look_sim = ownship.t_sim
         events_before = len(self.store.events)
         # `plans/watch-reporting/plan.md` Stage 2 -- `ownship` is already in
         # hand at this call site; `ContactStore.tick`'s sixth block (range
@@ -1351,8 +1418,8 @@ def _apply_active_gaze(
     decision: OpticDecision | None = None,
     optic_state: OpticState | None = None,
     dt_s: float = 0.0,
-    sight_az_raw: float | None = None,
-    sight_elev_raw: float | None = None,
+    sight_head_body_az_deg: float | None = None,
+    sight_head_body_el_deg: float | None = None,
 ) -> OpticState | None:
     """Assigns the resolved scan plan and optic onto whichever `sources`
     entry is a `NakedEyePerceptionSource` -- a true no-op for every other
@@ -1377,26 +1444,45 @@ def _apply_active_gaze(
     plan whose every leg is the same direction *is* a fixed stare, and no
     branch is needed anywhere downstream.
 
-    **This is the conversion point `plans/9k113-sight/plan.md` §15a
-    names**: `decision.look_azimuth_deg`/`look_elevation_deg` are belief's
-    *desired* aim; `advance_sight_aim` converts that into the sight's
-    *actual* pointing direction, and the `ScanPlan`/`Gaze` built below
-    reads *actual*, never desired. `optic_state` is optional (`None` for
-    every pre-existing caller, including the several tests that call this
-    directly with no decision) -- when given, the returned `OpticState`
-    (or `None` if nothing changed) is what the caller must persist back
-    onto its own `optic_state` field, the same way `run_once` already
-    persists `decide_optic`'s return value. `dt_s` is threaded through to
-    `advance_sight_aim` unused today -- see that function's own docstring.
-
-    `sight_az_raw`/`sight_elev_raw` (`[[BL-B80]]`) are threaded through to
-    `advance_sight_aim` the same way, so it can prefer a real readback
-    over the model per axis -- `None` for every pre-existing caller, a
-    true no-op (same as `dt_s` defaulting to `0.0`)."""
+    **`[[BL-B80]]` v2 splits "actual aim" by tier.** For a sight-tier
+    optic, `sight_head_body_az_deg`/`sight_head_body_el_deg` (the
+    simulated `SightHead`'s own body direction, `None` while it is not
+    `free`) are the *only* source of `actual_aim_*` -- `advance_sight_
+    aim` is never consulted for this tier any more. For every other optic
+    (naked eye, binoculars), `advance_sight_aim`'s pass-through still
+    applies, exactly as before `[[BL-B80]]` existed. `optic_state` is
+    optional (`None` for every pre-existing caller, including the several
+    tests that call this directly with no decision) -- when given, the
+    returned `OpticState` (or `None` if nothing changed) is what the
+    caller must persist back onto its own `optic_state` field, the same
+    way `run_once` already persists `decide_optic`'s return value."""
     resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
     optic = decision.optic if decision is not None else UNAIDED_OPTIC
     updated_state = optic_state
-    if (
+    is_sight_tier = optic in (SIGHT_WIDE_OPTIC, SIGHT_NARROW_OPTIC)
+    if is_sight_tier:
+        if sight_head_body_az_deg is not None and sight_head_body_el_deg is not None:
+            if optic_state is not None:
+                updated_state = replace(
+                    optic_state,
+                    actual_aim_azimuth_deg=sight_head_body_az_deg,
+                    actual_aim_elevation_deg=sight_head_body_el_deg,
+                )
+            resolved_plan = ScanPlan.fixed_look_at(
+                azimuth_deg=sight_head_body_az_deg,
+                elevation_deg=sight_head_body_el_deg,
+            )
+        elif optic_state is not None and (
+            optic_state.actual_aim_azimuth_deg is not None
+            or optic_state.actual_aim_elevation_deg is not None
+        ):
+            # The head is not `free` yet -- no aim to perceive through.
+            updated_state = replace(
+                optic_state,
+                actual_aim_azimuth_deg=None,
+                actual_aim_elevation_deg=None,
+            )
+    elif (
         decision is not None
         and decision.look_azimuth_deg is not None
         and decision.look_elevation_deg is not None
@@ -1413,15 +1499,10 @@ def _apply_active_gaze(
             decision.look_azimuth_deg,
             decision.look_elevation_deg,
             dt_s=dt_s,
-            sight_az_raw=sight_az_raw,
-            sight_elev_raw=sight_elev_raw,
         )
         # Both desired values are non-`None` on this branch (checked
-        # above), and `advance_sight_aim` falls back to `desired` on
-        # whichever axis has no readback -- so `actual` cannot be `None`
-        # here either way. A future rate-limited controller must preserve
-        # that: it never has a desired aim to converge toward without one
-        # to converge *from*.
+        # above), and `advance_sight_aim` is a pure pass-through -- so
+        # `actual` cannot be `None` here either way.
         assert actual_azimuth_deg is not None
         assert actual_elevation_deg is not None
         if optic_state is not None:
@@ -3209,14 +3290,13 @@ def _run_crew_text_poll_loop(
                         # refreshes the readback fields from the aircraft
                         # layer's own cockpit-switch telemetry.
                         # `weapon_safety_observed` is carried forward with
-                        # no consumer yet, for `BL-B67` (plan §3); `observ_
-                        # observed`/`sight_az_raw`/`sight_elev_raw` do have
-                        # consumers now (`[[BL-B80]]`'s `home_phase`
-                        # derivation and `advance_sight_aim`'s readback
-                        # preference, both read one poll lagged from here
-                        # -- see `run_once`'s own comments on that lag).
-                        # `runner.last_t_sim` stamps the gyro-alignment
-                        # window's own rising edge.
+                        # no consumer yet, for `BL-B67` (plan §3);
+                        # `observ_observed`/`align_observed`/`ready_
+                        # observed`/`launch_perm_observed` do have
+                        # consumers now (`[[BL-B80]]` v2's `home_phase`/
+                        # `SightHead.mode` derivation, read one poll
+                        # lagged from here -- see `run_once`'s own
+                        # comments on that lag).
                         runner.guidance_unit_state = advance_guidance_unit_power_up(
                             runner.guidance_unit_state,
                             runner.last_t_sim,
@@ -3225,7 +3305,6 @@ def _run_crew_text_poll_loop(
                         runner.guidance_unit_state = refresh_cockpit_switch_readback(
                             runner.guidance_unit_state,
                             aircraft_client.get_cockpit_switch_state_latest(),
-                            runner.last_t_sim,
                         )
                         is_sight_ready = guidance_unit_sight_ready(
                             runner.guidance_unit_state
@@ -3390,28 +3469,36 @@ def _run_crew_text_poll_loop(
                             # `decide_optic` above) deliberately is.
                             resolving_optic=runner.optic,
                         )
-                        # `[[BL-B80]]`: send the desired sight aim every
-                        # poll while `home_phase is SIGHTING` -- idle
-                        # included, since the `9k113-narrow-search`
-                        # follow-on already guarantees the idle sight
-                        # carries a real in-regard aim, so there is always
-                        # something valid to send (no special case
-                        # needed). Runs regardless of the gyro-alignment
-                        # cap in `run_once` -- that cap only affects
-                        # *perception*, never whether the head is told
-                        # where Petrovich eventually wants to look, and
-                        # the head should already be most of the way
-                        # there by the time alignment ends. A dropped
-                        # write degrades to "Export.lua keeps re-asserting
-                        # whatever target it last received" -- never
-                        # stops the poll loop.
-                        if runner.optic_state.home_phase is OpticPhase.SIGHTING:
-                            desired_az = runner.optic_state.look_azimuth_deg
-                            desired_elev = runner.optic_state.look_elevation_deg
-                            if desired_az is not None and desired_elev is not None:
+                        # `[[BL-B80]]` v2: send the head's current world
+                        # goal every poll while `sight_head.mode ==
+                        # "free"` -- idle included, since the idle sight
+                        # always carries a real in-regard aim, so there is
+                        # always something valid to send (no special case
+                        # needed). `t_sim` is the telemetry the decision
+                        # used -- the look's own `last_seen_t_look` for a
+                        # `seen`/`held` goal, this poll's own `t_sim`
+                        # otherwise (the plan's "Wire (sight_target)"
+                        # section). A dropped write degrades to
+                        # "Export.lua keeps re-asserting whatever goal it
+                        # last received" -- never stops the poll loop.
+                        if runner.sight_head.mode == "free":
+                            goal_az = runner.sight_head.goal_world_az_deg
+                            goal_el = runner.sight_head.goal_world_el_deg
+                            if goal_az is not None and goal_el is not None:
+                                goal_t_sim = (
+                                    runner.sight_head.last_seen_t_look
+                                    if runner.sight_head.aim_source in ("seen", "held")
+                                    and runner.sight_head.last_seen_t_look is not None
+                                    else runner.last_t_sim
+                                )
                                 try:
                                     write_sight_target(
-                                        aircraft_client, desired_az, desired_elev
+                                        aircraft_client,
+                                        goal_az,
+                                        goal_el,
+                                        runner.sight_head.goal_rate_az_deg_s,
+                                        runner.sight_head.goal_rate_el_deg_s,
+                                        goal_t_sim,
                                     )
                                 except AircraftLayerError:
                                     logger.warning(
@@ -3422,14 +3509,22 @@ def _run_crew_text_poll_loop(
                         # state exists (the same guard the guidance-unit/
                         # OBSERV block above this is nested under), after
                         # that block has had its turn to update `optic_
-                        # state`/`guidance_unit_state` this poll -- never
-                        # before, or the row would log last poll's values
-                        # under this poll's timestamp.
+                        # state`/`guidance_unit_state`/`sight_head` this
+                        # poll -- never before, or the row would log last
+                        # poll's values under this poll's timestamp.
                         if slew_trace_writer is not None:
+                            try:
+                                sight_servo_latest = (
+                                    aircraft_client.get_sight_servo_latest()
+                                )
+                            except AircraftLayerError:
+                                sight_servo_latest = None
                             slew_trace_writer.write_poll(
                                 runner.last_t_sim,
                                 runner.optic_state,
                                 runner.guidance_unit_state,
+                                runner.sight_head,
+                                sight_servo_latest,
                             )
                     # BL-8: after `run_once()` has settled this poll's
                     # belief, before `drain_events` -- Decision 3's

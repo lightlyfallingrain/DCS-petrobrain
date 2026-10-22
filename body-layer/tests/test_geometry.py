@@ -461,3 +461,58 @@ def test_heading_relative_to_body_relative_bank_rotates_elevation_into_azimuth()
     assert level.elevation_deg == pytest.approx(-17.0)
     assert banked.azimuth_deg == pytest.approx(8.69, abs=0.01)
     assert banked.elevation_deg == pytest.approx(-14.67, abs=0.01)
+
+
+class TestWorldDirectionFromBody:
+    """`[[BL-B80]]`'s `SightHead` frame conversion -- the inverse of
+    `body_relative_direction`."""
+
+    def test_round_trips_through_body_relative_direction(self) -> None:
+        observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+        target = GeoPosition(x=1200.0, z=-300.0, alt_m=620.0)
+        heading_true_deg, pitch_deg, bank_deg = 37.0, 8.0, -15.0
+
+        body = geometry.body_relative_direction(
+            observer,
+            target,
+            heading_true_deg=heading_true_deg,
+            pitch_deg=pitch_deg,
+            bank_deg=bank_deg,
+        )
+        world_az, world_el = geometry.world_direction_from_body(
+            body.azimuth_deg,
+            body.elevation_deg,
+            heading_true_deg=heading_true_deg,
+            pitch_deg=pitch_deg,
+            bank_deg=bank_deg,
+        )
+
+        expected_az = geometry.bearing_deg(observer, target)
+        expected_el = math.degrees(
+            math.atan2(
+                target.alt_m - observer.alt_m,
+                geometry.range_m(
+                    GeoPosition(x=observer.x, z=observer.z, alt_m=observer.alt_m),
+                    GeoPosition(x=target.x, z=target.z, alt_m=observer.alt_m),
+                ),
+            )
+        )
+        assert world_az == pytest.approx(expected_az, abs=1e-6)
+        assert world_el == pytest.approx(expected_el, abs=1e-6)
+
+    def test_level_unbanked_is_identity(self) -> None:
+        # Heading/pitch/bank all zero: body frame == world frame, mirroring
+        # `test_body_relative_direction_level_unbanked_matches_world_frame`.
+        world_az, world_el = geometry.world_direction_from_body(
+            45.0, 10.0, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+        )
+        assert world_az == pytest.approx(45.0)
+        assert world_el == pytest.approx(10.0)
+
+    def test_azimuth_wraps_into_zero_to_360(self) -> None:
+        # Dead astern (body azimuth 180) of a heading-270 aircraft is
+        # world-true heading 90, not -90.
+        world_az, _ = geometry.world_direction_from_body(
+            180.0, 0.0, heading_true_deg=270.0, pitch_deg=0.0, bank_deg=0.0
+        )
+        assert world_az == pytest.approx(90.0)

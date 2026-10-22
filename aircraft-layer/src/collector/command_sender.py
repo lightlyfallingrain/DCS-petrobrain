@@ -177,26 +177,36 @@ class CommandSender:
                 f"value={value!r}: {exc}"
             ) from exc
 
-    def send_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
-        """Send `{"op": "sight_target", "az_cmd": az_cmd, "elev_cmd":
-        elev_cmd}` to `Export.lua`'s command listener -- the 9K113
-        pointing channel (`plans/9k113-sight-pointing/plan.md`, BL-B80).
-        A **persistent** target, unlike `send_cockpit_switch`'s one-shot
-        write: Export.lua caches this value and rate-limits a commanded
-        position toward it every frame while OBSERV reads on (that plan's
-        "Architecture" section on why this is a third, narrow op rather
-        than reusing `cockpit_switch`'s "write once now" semantics). Same
-        `CommandSendError` posture as `send_cockpit_switch`: a dropped
-        target update is a real behavioral gap, not an opaque display
-        string to swallow.
+    def send_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
+        """Send `{"op": "sight_target", "goal_az_deg": ..., "goal_el_deg":
+        ..., "goal_rate_az_deg_s": ..., "goal_rate_el_deg_s": ...,
+        "t_sim": ...}` to `Export.lua`'s command listener -- the 9K113
+        pointing channel (`plans/9k113-sight-pointing/plan.md`, BL-B80
+        v2). A **persistent** world goal, unlike `send_cockpit_switch`'s
+        one-shot write: `Export.lua` caches it and its own per-frame
+        servo rate-limits a setpoint toward it while OBSERV reads on
+        (that plan's "Architecture" section on why this is a third,
+        narrow op rather than reusing `cockpit_switch`'s "write once now"
+        semantics). Same `CommandSendError` posture as `send_cockpit_
+        switch`: a dropped goal update is a real behavioral gap, not an
+        opaque display string to swallow.
 
         **No validation happens here** -- same division of labour as
         `send_cockpit_switch`'s own docstring: `api.server`'s `POST
-        /command/sight_target` handler validates shape (both values
-        finite) before this method is ever called.
+        /command/sight_target` handler validates shape (every value
+        finite, in range, including `t_sim`'s own bound -- the security
+        plan review's required change) before this method is ever
+        called.
 
-        Both fields are hand-formatted via `_format_fixed_point`, not
-        `json.dumps`, so neither ever reaches `Export.lua` in exponent
+        Every field is hand-formatted via `_format_fixed_point`, not
+        `json.dumps`, so none ever reaches `Export.lua` in exponent
         notation (see that helper's docstring -- BL-B80 exponent-float
         fix, 2026-10-22): body-layer float arithmetic near sight centre
         readily produces values below `1e-4`, exactly the magnitude
@@ -207,21 +217,28 @@ class CommandSender:
         assert sock is not None  # `open()` above always sets it
 
         payload = (
-            f'{{"op": "sight_target", "az_cmd": {_format_fixed_point(az_cmd)}, '
-            f'"elev_cmd": {_format_fixed_point(elev_cmd)}}}'
+            f'{{"op": "sight_target", "goal_az_deg": {_format_fixed_point(goal_az_deg)}, '
+            f'"goal_el_deg": {_format_fixed_point(goal_el_deg)}, '
+            f'"goal_rate_az_deg_s": {_format_fixed_point(goal_rate_az_deg_s)}, '
+            f'"goal_rate_el_deg_s": {_format_fixed_point(goal_rate_el_deg_s)}, '
+            f'"t_sim": {_format_fixed_point(t_sim)}}}'
         ).encode()
         try:
             sock.sendto(payload, (self._host, self._port))
         except OSError as exc:
             logger.warning(
-                "sight-target command send failed: az_cmd=%r elev_cmd=%r",
-                az_cmd,
-                elev_cmd,
+                "sight-target command send failed: goal_az_deg=%r goal_el_deg=%r "
+                "goal_rate_az_deg_s=%r goal_rate_el_deg_s=%r t_sim=%r",
+                goal_az_deg,
+                goal_el_deg,
+                goal_rate_az_deg_s,
+                goal_rate_el_deg_s,
+                t_sim,
                 exc_info=True,
             )
             raise CommandSendError(
-                f"failed to send sight target az_cmd={az_cmd!r} "
-                f"elev_cmd={elev_cmd!r}: {exc}"
+                f"failed to send sight target goal_az_deg={goal_az_deg!r} "
+                f"goal_el_deg={goal_el_deg!r} t_sim={t_sim!r}: {exc}"
             ) from exc
 
 

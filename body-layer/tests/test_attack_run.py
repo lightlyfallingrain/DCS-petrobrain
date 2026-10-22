@@ -9,6 +9,7 @@ readers."""
 from __future__ import annotations
 
 import inspect
+import math
 import pathlib
 import re
 
@@ -22,12 +23,14 @@ from belief.attack_run import (
     ATTACK_RUN_RELATIVE_MAX_AGE_S,
     AZIMUTH_WORD_TABLE,
     ELEVATION_WORD_TABLE,
+    SEEN_AIM_HEIGHT_OFFSET_M,
     TIER2_AZIMUTH_WORD_TABLE,
     AttackRunState,
     _no_look_cause,
     _tier1_alignment,
     _tier2_alignment,
     decide,
+    seen_world_direction,
 )
 from belief.contacts import Contact
 from belief.groups import Group
@@ -338,6 +341,116 @@ def test_decide_change_driven_cadence_resuppresses_unchanged_errors() -> None:
     # An unchanged look the very next poll must stay silent.
     state, speech2 = decide(state, now_sim=1.1, ownship=_ownship(), contact=contact)
     assert speech2 is None
+
+
+# -- seen_world_direction (`[[BL-B80]]`, "Aim source") -------------------
+
+
+def test_seen_world_direction_is_world_true_not_body_relative() -> None:
+    """Dead ahead of a heading-90 (east-pointed) aircraft is world-true
+    bearing 90 -- unlike `_tier1_alignment`, which would read this as
+    azimuth 0 (body-relative)."""
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(heading_true_deg=90.0),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+    seen = seen_world_direction(contact)
+    assert seen is not None
+    assert seen.az_true_deg == pytest.approx(90.0, abs=1e-6)
+    # `SEEN_AIM_HEIGHT_OFFSET_M` raises the elevation slightly, even
+    # dead-level, since the reported position is assumed ground-level.
+    assert seen.el_deg == pytest.approx(
+        math.degrees(math.atan2(SEEN_AIM_HEIGHT_OFFSET_M, 1000.0))
+    )
+
+
+def test_seen_world_direction_elevation_from_up_m() -> None:
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(heading_true_deg=0.0),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=300.0),
+    )
+    seen = seen_world_direction(contact)
+    assert seen is not None
+    assert seen.az_true_deg == pytest.approx(0.0, abs=1e-6)
+    assert seen.el_deg == pytest.approx(
+        math.degrees(math.atan2(300.0 + SEEN_AIM_HEIGHT_OFFSET_M, 1000.0))
+    )
+
+
+def test_seen_world_direction_raises_elevation_by_the_height_offset() -> None:
+    """Plan Decision 6 (pilot, 2026-10-22): the reported position is
+    ground-level, so the aim point is raised toward the hull centre by
+    the angle `SEEN_AIM_HEIGHT_OFFSET_M` subtends at the look's range."""
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(),
+        relative=RelativeDirection(forward_m=2000.0, right_m=0.0, up_m=0.0),
+    )
+    seen = seen_world_direction(contact)
+    assert seen is not None
+    expected = math.degrees(math.atan2(SEEN_AIM_HEIGHT_OFFSET_M, 2000.0))
+    assert seen.el_deg == pytest.approx(expected)
+    assert seen.el_deg > 0.0
+
+
+def test_seen_world_direction_carries_the_look_time() -> None:
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+        t_sim=42.5,
+    )
+    seen = seen_world_direction(contact)
+    assert seen is not None
+    assert seen.t_look == pytest.approx(42.5)
+
+
+def test_seen_world_direction_none_without_a_relative_direction() -> None:
+    percept = Percept(
+        t_sim=0.0,
+        source="hybrid_scope",
+        classification_raw="OP_ARMORED",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        observation_id="OBS_1",
+        relative_direction=None,
+    )
+    contact = Contact.from_percept("CONTACT_1", percept)
+    assert seen_world_direction(contact) is None
+
+
+def test_seen_world_direction_none_without_any_percept() -> None:
+    # `Contact.from_percept` always carries a `last_percept`, so build one
+    # the same way and then strip it -- `last_percept=None` is the one
+    # state a hand-rolled `Contact()` constructor would not reach
+    # naturally, and is exactly what `seen_world_direction`'s own first
+    # guard must handle.
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(),
+        relative=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+    contact.last_percept = None
+    assert seen_world_direction(contact) is None
+
+
+def test_seen_world_direction_unaffected_by_re_rotation_current_heading() -> None:
+    """Unlike `_tier1_alignment` (Decision 16's own pinned case), the seen
+    direction does not change with the *current* ownship heading -- it is
+    fixed at the look's own observing attitude, since it carries no
+    attitude re-rotation at all (`_seen_world_offset`'s own docstring)."""
+    relative = RelativeDirection(forward_m=1000.0, right_m=50.0, up_m=0.0)
+    contact = _contact_with_relative_direction(
+        ownship_at_observation=_ownship(heading_true_deg=0.0), relative=relative
+    )
+    seen = seen_world_direction(contact)
+    assert seen is not None
+    # Calling `decide`/`_tier1_alignment` with a different *current*
+    # heading must not perturb `contact.last_percept` at all (no I/O
+    # performed by either function) -- the same contact's seen direction
+    # is stable regardless.
+    _tier1_alignment(_ownship(heading_true_deg=37.0), contact, now_sim=0.1)
+    seen_again = seen_world_direction(contact)
+    assert seen_again is not None
+    assert seen_again.az_true_deg == pytest.approx(seen.az_true_deg)
 
 
 # -- decide(): tier 2, the degraded fallback, and tier transitions -------

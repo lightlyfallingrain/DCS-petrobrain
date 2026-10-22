@@ -43,7 +43,6 @@ from typing import Final, Literal
 import tuning
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.position_belief import PositionEstimate
-from belief.sight_effector import sight_azimuth_raw_to_deg, sight_elevation_raw_to_deg
 from perception.gaze import SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition, body_relative_direction, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
@@ -715,8 +714,6 @@ def advance_sight_aim(
     desired_elevation_deg: float | None,
     *,
     dt_s: float,
-    sight_az_raw: float | None = None,
-    sight_elev_raw: float | None = None,
 ) -> tuple[float | None, float | None]:
     """Converge the sight's *actual* pointing direction toward belief's
     *desired* one, one poll at a time -- `plans/9k113-sight/plan.md` §15a,
@@ -725,36 +722,21 @@ def advance_sight_aim(
     actually uses (`logger._apply_active_gaze`), so a future controller
     replaces this function's body without moving that call site.
 
-    **`[[BL-B80]]` adds a real readback, per axis, independently**: when
-    `sight_az_raw`/`sight_elev_raw` (raw args 874/876) are given, each one
-    wins over the model for its own axis, converted via `sight_effector`'s
-    raw-to-degrees functions -- the same per-axis split
-    `sight_trace_writer.py` already documents and expects. **Model
-    fallback, per axis, otherwise: a pure pass-through**, `actual :=
-    desired` instantly -- *permanently* correct for the naked eye and
-    binoculars (a head turn is instant against a 1 Hz poll), and the
-    stated placeholder for a sighted optic whenever no readback has
-    arrived yet this mission (startup, or an `Export.lua` predating the
-    readback it needs).
+    **A pure pass-through**, `actual := desired` instantly -- *permanently*
+    correct for the naked eye and binoculars (a head turn is instant
+    against a 1 Hz poll). **`[[BL-B80]]` v1 added a readback-preferring
+    branch for the sight tier (874/876 read as a position); that branch is
+    removed** -- those args echo the *demand*, not a position (confirmed
+    by probe runs 1-10, `docs/acceptance/2026-10-22-9k113-ai-latency-
+    probe.md`), and the sight's own actual aim is now `belief.sight_head.
+    SightHead`'s own simulated body direction, read by `logger._apply_
+    active_gaze` directly rather than through this function at all.
 
     `actual_azimuth_deg`/`actual_elevation_deg` (the prior poll's own
-    `actual` aim) and `dt_s` are accepted and unused by both branches here
-    -- reserved for a genuinely rate-limited controller that bounds how
-    far `actual` may move in one poll rather than reading a readback or
-    jumping straight to `desired`. Keeping them in the signature now, even
-    though this body ignores them, is what lets that controller drop in
-    without changing the call site or its callers."""
-    actual_azimuth_deg = (
-        sight_azimuth_raw_to_deg(sight_az_raw)
-        if sight_az_raw is not None
-        else desired_azimuth_deg
-    )
-    actual_elevation_deg = (
-        sight_elevation_raw_to_deg(sight_elev_raw)
-        if sight_elev_raw is not None
-        else desired_elevation_deg
-    )
-    return actual_azimuth_deg, actual_elevation_deg
+    `actual` aim) and `dt_s` are accepted and unused -- reserved for a
+    future rate-limited controller for the naked-eye/binocular case (the
+    sight tier's own rate limiting lives in `SightHead` instead)."""
+    return desired_azimuth_deg, desired_elevation_deg
 
 
 def _step_centres_deg(half_width_deg: float, fov_full_width_deg: float) -> list[float]:

@@ -53,6 +53,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     PttCache,
+    SightServoCache,
     Spu8Cache,
     TelemetryCache,
     WorldObjectsCache,
@@ -66,6 +67,8 @@ from schema import (
     PetrovichWheelSample,
     PttParseError,
     PttSample,
+    SightServoParseError,
+    SightServoState,
     Spu8ParseError,
     Spu8Sample,
     TelemetryParseError,
@@ -89,7 +92,12 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-10-22b"
+#: Bumped again 2026-10-22 ("...22c", `plans/9k113-sight-pointing/
+#: plan.md`, BL-B80 re-plan v2) for the non-additive `sight_target`
+#: reshape, the dropped `sight_az`/`sight_elev` fields, the three new
+#: lamp fields, and the new `sight_servo` status line -- see `Export.
+#: lua`'s own matching comment on `EXPORT_SCRIPT_VERSION`.
+EXPECTED_EXPORT_VERSION = "2026-10-22c"
 #: Bumped 2026-10-05 (`plans/spu8-intercom/plan.md` Stage 1) for the new
 #: SPU-8 intercom state feed (args 377/664/457, wire key "net1") -- an
 #: additive wire-format change (an old deployed script keeps working, it
@@ -151,6 +159,9 @@ class CollectorServer:
         # Same optional-cache reasoning again: a collector without a
         # CockpitSwitchCache simply drops "missl_pw" lines.
         cockpit_switch_cache: CockpitSwitchCache | None = None,
+        # Same optional-cache reasoning again: a collector without a
+        # SightServoCache simply drops "servo_mode" lines.
+        sight_servo_cache: SightServoCache | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
@@ -161,6 +172,7 @@ class CollectorServer:
         self._ptt_cache = ptt_cache
         self._spu8_cache = spu8_cache
         self._cockpit_switch_cache = cockpit_switch_cache
+        self._sight_servo_cache = sight_servo_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -404,6 +416,21 @@ class CollectorServer:
             logger.debug("parsed cockpit-switch sample: %r", cockpit_switch_sample)
             if self._cockpit_switch_cache is not None:
                 self._cockpit_switch_cache.push(cockpit_switch_sample)
+            return
+
+        if "servo_mode" in data:
+            # `[[BL-B80]]` v2 -- ahead of the telemetry fallthrough for
+            # the same reason every other named kind above is.
+            try:
+                sight_servo_sample = SightServoState.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except SightServoParseError:
+                logger.warning("dropping malformed sight-servo line: %r", line)
+                return
+            logger.debug("parsed sight-servo sample: %r", sight_servo_sample)
+            if self._sight_servo_cache is not None:
+                self._sight_servo_cache.push(sight_servo_sample)
             return
 
         try:

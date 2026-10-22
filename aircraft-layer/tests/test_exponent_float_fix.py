@@ -155,7 +155,7 @@ class TestSenderNeverEmitsExponentNotation:
         sender = CommandSender(host="127.0.0.1", port=1)
         sender.open()
         sender._socket = _RecordingSocket()  # type: ignore[assignment]
-        sender.send_sight_target(1e-05, -3.3e-07)
+        sender.send_sight_target(1e-05, -3.3e-07, 1e-05, -3.3e-07, 1e-05)
 
         text = captured["payload"].decode("utf-8")
         assert not _EXPONENT_NUMBER_RE.search(text), (

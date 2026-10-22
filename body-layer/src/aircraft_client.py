@@ -107,13 +107,22 @@ integers. `get_cockpit_switch_state_latest` is an ordinary `get_*` read
 
 `write_sight_target` (`plans/9k113-sight-pointing/plan.md`, BL-B80) is a
 third, narrower write op on the same `POST /command/*` family -- a
-persistent target Export.lua rate-limits toward every frame, not a
-one-shot `cockpit_switch` write. Same raise-on-failure posture as
-`write_cockpit_switch`, same "no validation, this client is a pure
-pass-through" division -- `belief.sight_effector.write_sight_target` is
-the one caller above this client and the one place the degree<->raw
-conversion happens.
-"""
+persistent **world** goal direction/rate Export.lua's own per-frame servo
+rate-limits toward, not a one-shot `cockpit_switch` write. Same
+raise-on-failure posture as `write_cockpit_switch`, same "no validation,
+this client is a pure pass-through" division. **v2 (re-plan) drops the
+degree<->raw conversion entirely** -- the wire carries degrees directly,
+and `Export.lua`'s own servo converts internally; `belief.sight_effector.
+write_sight_target` is still the one caller above this client, just a
+pure pass-through now rather than a conversion site.
+
+`get_sight_servo_latest` is this seam's read side for the same feed --
+`Export.lua`'s per-frame DCS-slave servo status (mode, setpoint, the
+mark-derived body direction when valid, error, stall flag), a *second*
+feed from `/cockpit_switch/latest` (that one is change-gated; this one
+changes every frame under the per-frame value-change mechanism, a
+different rate class -- see the plan's Affected Files "Departure,
+stated")."""
 
 from __future__ import annotations
 
@@ -272,18 +281,48 @@ class AircraftLayerClient:
             {"device": device, "cmd": cmd, "value": value},
         )
 
-    def write_sight_target(self, az_cmd: float, elev_cmd: float) -> None:
-        """`POST /command/sight_target` -> sends the 9K113 sight's desired
-        aim, in the AI axis's own raw command units, to `Export.lua`'s
-        per-frame sight owner (`aircraft-layer/src/collector/command_
-        sender.py`'s `CommandSender.send_sight_target`,
-        `plans/9k113-sight-pointing/plan.md`, BL-B80). Raises
-        `AircraftLayerError` on any failure, mirroring `write_cockpit_
-        switch` -- see the module docstring for why."""
+    def write_sight_target(
+        self,
+        goal_az_deg: float,
+        goal_el_deg: float,
+        goal_rate_az_deg_s: float,
+        goal_rate_el_deg_s: float,
+        t_sim: float,
+    ) -> None:
+        """`POST /command/sight_target` -> sends the simulated sight
+        head's current world goal direction, rate, and the sim time it
+        was computed at, to `Export.lua`'s per-frame servo
+        (`aircraft-layer/src/collector/command_sender.py`'s
+        `CommandSender.send_sight_target`, `plans/9k113-sight-pointing/
+        plan.md`, BL-B80 v2). Raises `AircraftLayerError` on any failure,
+        mirroring `write_cockpit_switch` -- see the module docstring for
+        why."""
         self._post_json(
             "/command/sight_target",
-            {"az_cmd": az_cmd, "elev_cmd": elev_cmd},
+            {
+                "goal_az_deg": goal_az_deg,
+                "goal_el_deg": goal_el_deg,
+                "goal_rate_az_deg_s": goal_rate_az_deg_s,
+                "goal_rate_el_deg_s": goal_rate_el_deg_s,
+                "t_sim": t_sim,
+            },
         )
+
+    def get_sight_servo_latest(self) -> dict[str, Any] | None:
+        """`GET /sight_servo/latest` -> the most recent DCS-slave servo
+        status (see `aircraft-layer/src/schema/sight_servo.py`'s
+        `SightServoState.to_api_dict`), or `None` if nothing has been
+        received yet -- same "not an error" posture as `get_cockpit_
+        switch_state_latest` (`plans/9k113-sight-pointing/plan.md`,
+        BL-B80 v2)."""
+        result = self._get_json("/sight_servo/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /sight_servo/latest, got {type(result).__name__}"
+            )
+        return result
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         """`POST /command/look_direction` -> pushes the currently-commanded

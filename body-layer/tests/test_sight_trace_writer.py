@@ -1,11 +1,10 @@
 """Tests for `sight_trace_writer.SightTraceWriter` -- `--slew-trace`
-(`BL-B66` Stage 4b, `plans/9k113-effectors/plan.md`).
+(`BL-B66` Stage 4b, extended by `[[BL-B80]]` v2).
 
-Mirrors `detection_trace_writer.DetectionTraceWriter`'s own tests for the
-buffering/disable-after-first-failure shape (via `write_logger.py`'s
-wiring-level tests for the real poll loop, see `test_logger.py`), plus the
-field-by-field logic unique to this writer: desired-vs-actual source
-selection and the azimuth-only raw-to-degrees conversion."""
+v1's "874/876 preferred as readback" tests are gone with that code (the
+Removal commit) -- these cover the v2 shape: desired/actual (body),
+the simulated head's own world-frame state, and the DCS-servo columns
+sourced from an optional `sight_servo_latest` dict."""
 
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ import pytest
 
 from belief.optic_policy import OpticState
 from belief.sight_effector import GuidanceUnitState
+from belief.sight_head import SightHead
 from perception.optics import SIGHT_WIDE_OPTIC
 from sight_trace_writer import SightTraceWriter
 
@@ -26,91 +26,7 @@ def _row(path: Path, index: int = 0) -> dict[str, object]:
 
 
 class TestFieldSelection:
-    def test_actual_azimuth_prefers_readback_and_converts_to_degrees(
-        self, tmp_path: Path
-    ) -> None:
-        """Azimuth has a confirmed raw-to-degrees calibration
-        (`sight_effector.sight_azimuth_raw_to_deg`) -- when a readback
-        exists, it wins over the model value and the source says so."""
-        writer = SightTraceWriter(tmp_path / "slew.jsonl")
-        optic_state = OpticState(
-            look_azimuth_deg=10.0,
-            look_elevation_deg=5.0,
-            actual_aim_azimuth_deg=10.0,  # model says "arrived"
-            actual_aim_elevation_deg=5.0,
-        )
-        # 0.16500 raw * (60 / 0.44) = 22.5 deg -- the probe's own measured
-        # conversion (`aircraft-layer/research/2026-10-17-9k113-effector-
-        # and-slew-probe-findings.md` finding 2).
-        guidance_unit_state = GuidanceUnitState(sight_az_raw=0.16500)
-        writer.write_poll(1.0, optic_state, guidance_unit_state)
-        writer.flush()
-
-        row = _row(tmp_path / "slew.jsonl")
-        assert row["actual_azimuth_source"] == "readback"
-        assert row["actual_azimuth_deg"] == pytest.approx(22.5)
-        assert row["raw_sight_az"] == pytest.approx(0.16500)
-
-    def test_actual_azimuth_falls_back_to_model_when_no_readback(
-        self, tmp_path: Path
-    ) -> None:
-        writer = SightTraceWriter(tmp_path / "slew.jsonl")
-        optic_state = OpticState(
-            look_azimuth_deg=10.0,
-            look_elevation_deg=5.0,
-            actual_aim_azimuth_deg=7.5,
-            actual_aim_elevation_deg=5.0,
-        )
-        writer.write_poll(1.0, optic_state, GuidanceUnitState())
-        writer.flush()
-
-        row = _row(tmp_path / "slew.jsonl")
-        assert row["actual_azimuth_source"] == "model"
-        assert row["actual_azimuth_deg"] == pytest.approx(7.5)
-        assert row["raw_sight_az"] is None
-
-    def test_actual_elevation_prefers_readback_and_converts_to_degrees(
-        self, tmp_path: Path
-    ) -> None:
-        """`[[BL-B80]]` adds elevation's conversion -- same "readback
-        wins when present" split azimuth already has. -0.28125 raw *
-        20.0 = -5.625 deg (`sight_elevation_raw_to_deg`'s one formula,
-        both signs)."""
-        writer = SightTraceWriter(tmp_path / "slew.jsonl")
-        optic_state = OpticState(
-            look_azimuth_deg=10.0,
-            look_elevation_deg=5.0,
-            actual_aim_azimuth_deg=10.0,
-            actual_aim_elevation_deg=5.0,  # model says "arrived"
-        )
-        guidance_unit_state = GuidanceUnitState(sight_elev_raw=-0.28125)
-        writer.write_poll(1.0, optic_state, guidance_unit_state)
-        writer.flush()
-
-        row = _row(tmp_path / "slew.jsonl")
-        assert row["actual_elevation_source"] == "readback"
-        assert row["actual_elevation_deg"] == pytest.approx(-5.625)
-        assert row["raw_sight_elev"] == pytest.approx(-0.28125)
-
-    def test_actual_elevation_falls_back_to_model_when_no_readback(
-        self, tmp_path: Path
-    ) -> None:
-        writer = SightTraceWriter(tmp_path / "slew.jsonl")
-        optic_state = OpticState(
-            look_azimuth_deg=10.0,
-            look_elevation_deg=5.0,
-            actual_aim_azimuth_deg=10.0,
-            actual_aim_elevation_deg=5.0,
-        )
-        writer.write_poll(1.0, optic_state, GuidanceUnitState())
-        writer.flush()
-
-        row = _row(tmp_path / "slew.jsonl")
-        assert row["actual_elevation_source"] == "model"
-        assert row["actual_elevation_deg"] == pytest.approx(5.0)
-        assert row["raw_sight_elev"] is None
-
-    def test_error_is_desired_minus_actual(self, tmp_path: Path) -> None:
+    def test_desired_and_actual_are_body_relative(self, tmp_path: Path) -> None:
         writer = SightTraceWriter(tmp_path / "slew.jsonl")
         optic_state = OpticState(
             look_azimuth_deg=10.0,
@@ -118,10 +34,12 @@ class TestFieldSelection:
             actual_aim_azimuth_deg=7.0,
             actual_aim_elevation_deg=4.0,
         )
-        writer.write_poll(1.0, optic_state, GuidanceUnitState())
+        writer.write_poll(1.0, optic_state, GuidanceUnitState(), SightHead())
         writer.flush()
 
         row = _row(tmp_path / "slew.jsonl")
+        assert row["desired_azimuth_deg"] == pytest.approx(10.0)
+        assert row["actual_azimuth_deg"] == pytest.approx(7.0)
         assert row["error_azimuth_deg"] == pytest.approx(3.0)
         assert row["error_elevation_deg"] == pytest.approx(1.0)
 
@@ -130,13 +48,12 @@ class TestFieldSelection:
     ) -> None:
         """Scanning, not sighting -- `OpticState()`'s own defaults."""
         writer = SightTraceWriter(tmp_path / "slew.jsonl")
-        writer.write_poll(1.0, OpticState(), GuidanceUnitState())
+        writer.write_poll(1.0, OpticState(), GuidanceUnitState(), SightHead())
         writer.flush()
 
         row = _row(tmp_path / "slew.jsonl")
         assert row["desired_azimuth_deg"] is None
         assert row["actual_azimuth_deg"] is None
-        assert row["actual_azimuth_source"] is None
         assert row["error_azimuth_deg"] is None
         assert row["optic_mode"] is None
 
@@ -147,7 +64,7 @@ class TestFieldSelection:
             look_elevation_deg=0.0,
             look_optic=SIGHT_WIDE_OPTIC,
         )
-        writer.write_poll(1.0, optic_state, GuidanceUnitState())
+        writer.write_poll(1.0, optic_state, GuidanceUnitState(), SightHead())
         writer.flush()
 
         row = _row(tmp_path / "slew.jsonl")
@@ -160,12 +77,64 @@ class TestFieldSelection:
         guidance_unit_state = GuidanceUnitState(
             observ_commanded=True, observ_observed=False
         )
-        writer.write_poll(1.0, OpticState(), guidance_unit_state)
+        writer.write_poll(1.0, OpticState(), guidance_unit_state, SightHead())
         writer.flush()
 
         row = _row(tmp_path / "slew.jsonl")
         assert row["observ_commanded"] is True
         assert row["observ_observed"] is False
+
+    def test_head_fields_carried_through(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        head = SightHead(
+            mode="free",
+            world_az_true_deg=12.0,
+            world_el_deg=-3.0,
+            goal_world_az_deg=15.0,
+            goal_world_el_deg=-1.0,
+            aim_source="seen",
+        )
+        writer.write_poll(1.0, OpticState(), GuidanceUnitState(), head)
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["head_mode"] == "free"
+        assert row["head_world_azimuth_deg"] == pytest.approx(12.0)
+        assert row["head_world_elevation_deg"] == pytest.approx(-3.0)
+        assert row["head_goal_world_azimuth_deg"] == pytest.approx(15.0)
+        assert row["head_goal_world_elevation_deg"] == pytest.approx(-1.0)
+        assert row["aim_source"] == "seen"
+
+    def test_servo_columns_null_without_a_servo_sample(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(1.0, OpticState(), GuidanceUnitState(), SightHead())
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["servo_mode"] is None
+        assert row["servo_stalled"] is None
+
+    def test_servo_columns_read_from_the_servo_sample(self, tmp_path: Path) -> None:
+        writer = SightTraceWriter(tmp_path / "slew.jsonl")
+        writer.write_poll(
+            1.0,
+            OpticState(),
+            GuidanceUnitState(),
+            SightHead(),
+            sight_servo_latest={
+                "mode": "closed",
+                "error_azimuth_deg": 0.01,
+                "error_elevation_deg": -0.02,
+                "stalled": False,
+            },
+        )
+        writer.flush()
+
+        row = _row(tmp_path / "slew.jsonl")
+        assert row["servo_mode"] == "closed"
+        assert row["servo_error_azimuth_deg"] == pytest.approx(0.01)
+        assert row["servo_error_elevation_deg"] == pytest.approx(-0.02)
+        assert row["servo_stalled"] is False
 
 
 class TestBufferingAndFailure:
@@ -174,12 +143,12 @@ class TestBufferingAndFailure:
         writer = SightTraceWriter(path, flush_every_n_polls=3)
 
         for i in range(2):
-            writer.write_poll(float(i), OpticState(), GuidanceUnitState())
+            writer.write_poll(float(i), OpticState(), GuidanceUnitState(), SightHead())
         # Not auto-flushed yet -- the internal counter, not a file read
         # (Python/OS write buffering makes "has it reached disk" an
         # unreliable thing to assert on directly).
         assert writer._polls_since_flush == 2
-        writer.write_poll(2.0, OpticState(), GuidanceUnitState())
+        writer.write_poll(2.0, OpticState(), GuidanceUnitState(), SightHead())
         # Third poll crosses the threshold -- `flush()` fires automatically
         # and resets the counter.
         assert writer._polls_since_flush == 0
@@ -188,7 +157,7 @@ class TestBufferingAndFailure:
     def test_close_flushes_and_closes(self, tmp_path: Path) -> None:
         path = tmp_path / "slew.jsonl"
         writer = SightTraceWriter(path)
-        writer.write_poll(0.0, OpticState(), GuidanceUnitState())
+        writer.write_poll(0.0, OpticState(), GuidanceUnitState(), SightHead())
         writer.close()
 
         assert len(path.read_text(encoding="utf-8").splitlines()) == 1
@@ -225,7 +194,7 @@ class TestBufferingAndFailure:
         writer._file = full_disk  # type: ignore[assignment]
 
         for i in range(3):
-            writer.write_poll(float(i), OpticState(), GuidanceUnitState())
+            writer.write_poll(float(i), OpticState(), GuidanceUnitState(), SightHead())
 
         assert full_disk.writes == 1, "kept writing after the first failure"
         assert capsys.readouterr().err.count("sight-trace: write to") == 1

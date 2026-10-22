@@ -62,6 +62,7 @@ from schema import (
     PetrovichIndicationSample,
     PetrovichWheelSample,
     PttSample,
+    SightServoState,
     Spu8Sample,
     TelemetrySample,
     UnitVelocitySnapshot,
@@ -303,6 +304,27 @@ class CockpitSwitchCache:
         """Return the most recently pushed sample, or `None` if no
         cockpit-switch line has arrived yet this session (the normal
         state at startup, same as `Spu8Cache.latest`)."""
+        return self._latest
+
+
+class SightServoCache:
+    """Holds the latest `SightServoState` sample (`plans/
+    9k113-sight-pointing/plan.md`, BL-B80 v2) -- the DCS-slave servo's own
+    per-frame status. Same "latest of one" shape as `CockpitSwitchCache`,
+    a **separate** cache rather than a shared one because the two feeds
+    change at different rates (see `schema.sight_servo`'s own module
+    docstring, "Departure, stated")."""
+
+    def __init__(self) -> None:
+        self._latest: SightServoState | None = None
+
+    def push(self, sample: SightServoState) -> None:
+        """Record a newly-received sample as the current servo state."""
+        self._latest = sample
+
+    def latest(self) -> SightServoState | None:
+        """Return the most recently pushed sample, or `None` if no
+        sight-servo line has arrived yet this session."""
         return self._latest
 
 
