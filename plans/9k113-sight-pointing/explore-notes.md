@@ -57,6 +57,22 @@ After every observed OBSERV off→on transition, the sight is unusable for ~10 s
 In that window: no sight perception, and the AI-off detector must not fire. Nothing in Petrobrain
 should cycle OBSERV casually.
 
+## How the sight stabilises, 2026-10-22, verbatim
+
+> *"the sight does not hold a fixed ground point. I may have expressed it imprecisely. It holds the
+> last set pointing direction in world coordinate angles, within gimbal limits of course. So in
+> practice, the gyro stabilized sight operates in world coordinate axis and keeps it direction. The
+> gimbal limits from the airframe coordinate axis of course limit the sight position. From this
+> follows: sight does not track a point on ground, but it keeps its world axis relative angles
+> steady when the airframe axis rotates. When aircraft moves, so does the point-on-ground where the
+> sight is looking. The slew axis commands, I'm not perfectly sure, but I think they are relative to
+> current sight gyro stabilised angles."*
+
+Open: whether the AI axis (3061/3060) commands airframe (gimbal) angles or world-stabilised
+angles. Every exact-match measurement so far was in steady flight, where the two agree. Body-layer
+sends `look_azimuth_deg` as nose-relative; if the axis is world-relative, that needs a heading
+conversion. The latency probe's TURN 2 settles it (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`).
+
 ## Open, measured by the 2026-10-22 probe
 
 - Latency from `ShowMenu` (AI back on) until the readback obeys. This sets the AI-off detection
