@@ -184,3 +184,30 @@ Pilot's visual observations: not yet given (log only so far).
   remaining movers are attitude-driven instruments or blinking lights (157/358/929 alternate 0/1).
 - Heading drifted right ~0.4°/s through the straight segments (006° → 046°); TURN 2 018° → 035°,
   TURN 1 048° → 027°.
+
+### Video (2026-10-22, `win-mac-sync/from-windows/Digital Combat Simulator  Black Shark 2026.10.22 - 11.04.07.01.mov`)
+
+Pilot, verbatim: *"After video started, a couple of seconds I and swithced OBSERV on. After that I
+moved to pilot seat and started the timer (Mi-24 clock in build timer), so about 1-2s after observ
+on."* and *"sight movement apparent video time 0:20 - 0:30"*.
+
+At 1280×720 the clock face is too small to read the chronometer. Synced instead on one event:
+the ASP-17 crosshair was tracked frame by frame (every 0.5 s, position relative to the two lamps on
+the sight frame) and its sudden slide left at video ~0:26 lined up with arg 565 sliding
+0.439 → 0.333 at log t = 56.6 (S1 start). So video ≈ log t − 30.8 s. The file-name timestamp
+against the log's wall clock gives the same to ~1 s.
+
+- **Video 0:17–0:25 (DELAY, no writes):** the mark drifts slowly left of centre while the heading
+  creeps right ~0.4°/s. Fits the gyro holding a world direction.
+- **Video ~0:26 (S1 start, AI axis 10° L, overlay off):** the mark slides quickly to the left edge
+  of the ASP-17. **The AI axis moved the sight with the overlay off.**
+- **Video 0:27 → end:** the mark stays pinned at the left edge, exactly as 565 stays at 0.33333.
+  10° R, the release, both player pulses and both turns produce no visible change. Whatever the
+  head did after S1 is outside the ASP-17's field, so this run cannot say.
+- **Video 1:46–1:53 (TURN 1):** the crosshair leaves the glass vertically; 555/556 read 1.0 in the
+  same window.
+
+**Reading: 565/566 are the ASP-17 mark's horizontal position and 555/556 its vertical.** They
+follow the actual line of sight (steady-pace slide, gyro drift) but clip at the edge of the
+ASP-17's field (565 = 0.333 at the left edge). That makes them a real actual-position readback,
+but only near the boresight. Their scale in degrees is unknown.
