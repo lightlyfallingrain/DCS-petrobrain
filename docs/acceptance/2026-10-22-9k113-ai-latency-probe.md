@@ -81,3 +81,40 @@ If his AI is already on at 1:07 the probe does **not** press, so it doesn't turn
 - `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_ai_latency.log`.
 
 Restore the production `Export.lua` afterwards.
+
+## Results, run 1 (2026-10-22)
+
+Log: `aircraft-layer/research/logs/2026-10-22/aircraft_layer_probe_9k113_ai_latency.log`.
+DCS 2.9.30.28738, air start.
+
+Pilot, verbatim: *"sight did move and then stay where it moved to. no AI overlay change unless I
+pressed a button to do it"*.
+
+### Measured
+
+- **Part A, player axis held every frame — it steers.** 874 ramped 0 → +0.44 (the +60° gauge
+  limit) in ~0.17 s and stayed there while held. At the axis-0 step, 874 fell to 0 in ~0.1 s
+  and stayed 0 — **while the pilot saw the sight stay where it had moved to.** Same for −0.5
+  (874 → −0.41) and elevation +0.5 (876 → −0.74, near the −0.75 gauge limit).
+  **So under the player axis, 874/876 track the input, not the head position.**
+- **Candidate position args** (from the per-step diffs: moved during the step, held at the
+  following axis-0 step). Not confirmed:
+  - **565/566** (identical pair): 0.476 → **0.667** at az +0.5, unchanged at az 0, → **0.333** at
+    az −0.5, unchanged at az 0. Exact thirds look like a stop or limit, not the head itself.
+  - **555/556** (identical pair): 0.883 → **0.277** at elev +0.5, unchanged at elev 0, and changed
+    0.277 → 0.573 during TURN 1. Possibly the elevation counterpart.
+  - Your earlier note that the ASP-17 adjustment knobs turn would fit paired args like these.
+- **TURN 1:** the turn came in the last ~5 s of the window (heading 018° → 359°). 874 stayed 0.
+- **Part B — the AI axis obeyed with the overlay off.** Within 1 s of the −20° target, 874 read
+  exactly −0.14667 (−20.0°). The probe treated that as "his AI already on" and did not press. It
+  held for the rest of the run, ~80 s, and fell to 0 the moment the probe stopped re-asserting.
+- **Part C:** three brief near-0 readings (t = 128.1, 134.1, 163.7), each recovering within one
+  sample without any press. Possibly the pilot's presses.
+- The Part B truth-bracketed diff did not run: it was tied to the press, which never happened.
+
+### Contradicts 2026-10-21
+
+"The AI axis requires DCS AI Petrovich ON" rested on runs that were confounded: with his AI off,
+the AI axis was only ever written **once per step**, never per frame. Per-frame writes were only
+ever tried with his AI on. This run is the first per-frame AI-axis hold with the overlay off, and
+it worked. One confound remains: Part A's player-axis writes came first.
