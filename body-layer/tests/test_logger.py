@@ -3173,6 +3173,122 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
 
 
+def test_run_once_perceives_through_the_world_stabilised_head_not_the_desired_aim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B80]]` Stage 3's `run_once` wiring test: a sight-tier poll's
+    actual aim -- what perception looks through -- is the simulated head's
+    own body direction, so it lags `decide_optic`'s desired direction by
+    the slew rate and holds its world direction through a turn. Desired
+    stays 50 deg right of the nose throughout; the head starts at the
+    boresight. Polls at 1 s: the first has no elapsed time, the second
+    slews 20 deg, the third (ownship now heading 030) slews another 20 deg
+    in world, which is only 10 deg right of the new nose."""
+    from belief.optic_policy import OpticDecision, OpticState
+    from belief.sight_head import SLEW_AZ_DPS, SightHead
+
+    assert SLEW_AZ_DPS == pytest.approx(20.0), "the expected angles assume 20 deg/s"
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True, align_observed=True
+    )
+    runner.sight_head = SightHead(mode="free", world_az_true_deg=0.0, world_el_deg=0.0)
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        return state, OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=50.0, look_elevation_deg=0.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    actual_az: list[float | None] = []
+    for heading_deg in (0.0, 0.0, 30.0):
+        telemetry["heading_true_rad"] = math.radians(heading_deg)
+        telemetry["dcs_model_time_s"] = sim_t
+        runner.run_once()
+        actual_az.append(runner.optic_state.actual_aim_azimuth_deg)
+        sim_t += 1.0
+
+    assert actual_az == [
+        pytest.approx(0.0, abs=1e-9),
+        pytest.approx(20.0),
+        pytest.approx(10.0),
+    ]
+
+
+def test_run_once_seen_look_moves_the_next_goal_onto_the_true_direction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`[[BL-B80]]` Stage 3b's `run_once` wiring test: a contact admitted
+    through the sight with an exact `relative_direction` (dead ahead,
+    1000 m, level) on poll 1 moves poll 2's sight goal -- the value the
+    crew-text loop writes to the wire as `sight_target` -- onto that true
+    direction, away from belief's desired one (12 deg right, 3 deg down),
+    while the contact's believed position is untouched by it."""
+    from belief.attack_run import SEEN_AIM_HEIGHT_OFFSET_M
+    from belief.optic_policy import OpticDecision, OpticState
+    from belief.sight_head import SightHead
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    observation = _make_observation(
+        ownship,
+        relative_direction=RelativeDirection(forward_m=1000.0, right_m=0.0, up_m=0.0),
+    )
+    source = FakeSource([observation])
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(
+        aircraft_client=aircraft_client,  # type: ignore[arg-type]
+        sources=[source],  # type: ignore[list-item]
+    )
+    runner.guidance_unit_state = GuidanceUnitState(
+        observ_observed=True, align_observed=True
+    )
+    runner.sight_head = SightHead(mode="free", world_az_true_deg=0.0, world_el_deg=0.0)
+
+    def fake_decide_optic(
+        state: OpticState, **_kwargs: object
+    ) -> tuple[OpticState, OpticDecision]:
+        look = "CONTACT_1" if runner.store.contacts else None
+        return replace(state, look_contact_id=look), OpticDecision(
+            optic=SIGHT_WIDE_OPTIC, look_azimuth_deg=12.0, look_elevation_deg=-3.0
+        )
+
+    monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
+
+    runner.run_once()  # poll 1: admitted through the sight
+    assert runner.sight_head.aim_source == "belief"
+    (contact,) = runner.store.contacts
+    believed = (contact.position.x, contact.position.z)
+
+    source._observations = []
+    sim_t += 1.0
+    telemetry["dcs_model_time_s"] = sim_t
+    runner.run_once()  # poll 2: looks at it
+
+    head = runner.sight_head
+    assert head.aim_source == "seen"
+    assert head.goal_world_az_deg == pytest.approx(0.0, abs=1e-9)
+    assert head.goal_world_el_deg == pytest.approx(
+        math.degrees(math.atan2(SEEN_AIM_HEIGHT_OFFSET_M, 1000.0))
+    )
+    (contact,) = runner.store.contacts
+    assert (contact.position.x, contact.position.z) == believed
+
+
 @dataclass
 class _F4Run:
     """One F4 scenario run's every observable sink, captured for diffing."""
