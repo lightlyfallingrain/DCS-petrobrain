@@ -48,7 +48,10 @@ SLEW_AZ_DPS: float = tuning.real(
     hi=40.0,
     status="derived",
 )
-#: Elevation's own slew rate -- same source as `SLEW_AZ_DPS`.
+#: How fast Petrovich's simulated sight can slew in elevation, in degrees
+#: per second -- the 9K113's own vertical rate, half the azimuth figure,
+#: from the same source as `SLEW_AZ_DPS`; a higher value has him settle
+#: on a new look sooner than the real sight can.
 SLEW_EL_DPS: float = tuning.real(
     "belief.sight_head.SLEW_EL_DPS",
     10.0,

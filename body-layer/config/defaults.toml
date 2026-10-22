@@ -10,12 +10,12 @@
 # set PETROBRAIN_TUNING=config/tuning.toml in your run command.
 
 [belief.attack_run]
-# ATTACK_RUN_ELEVATION_GATE_DEG` (10.0): deliberately wide (§11: "it's there to make me aim at the correct unit, not wrong one"), so a lofted nose stays inside it.
+# `ATTACK_RUN_ELEVATION_GATE_DEG` (10.0): deliberately wide (§11: "it's there to make me aim at the correct unit, not wrong one"), so a lofted nose stays inside it.
 # status: agreed-guess | range: 1.0 .. 45.0
 # source: belief/attack_run.py:ATTACK_RUN_ELEVATION_GATE_DEG
 ATTACK_RUN_ELEVATION_GATE_DEG = 10.0
 
-# ATTACK_RUN_LINED_UP_AZIMUTH_DEG` (5.0): above `estimation.BEARING_SIGMA_DEG` (3.0, tier 2's own bearing-statement noise), so belief noise alone cannot chatter the band; below half a clock hour (`_SECTOR_HALF_DEG`, 15.0), so the band sits strictly inside the 12 o'clock sector.
+# `ATTACK_RUN_LINED_UP_AZIMUTH_DEG` (5.0): above `estimation.BEARING_SIGMA_DEG` (3.0, tier 2's own bearing-statement noise), so belief noise alone cannot chatter the band; below half a clock hour (`_SECTOR_HALF_DEG`, 15.0), so the band sits strictly inside the 12 o'clock sector.
 # status: agreed-guess | range: 0.5 .. 14.0
 # source: belief/attack_run.py:ATTACK_RUN_LINED_UP_AZIMUTH_DEG
 ATTACK_RUN_LINED_UP_AZIMUTH_DEG = 5.0
@@ -25,7 +25,7 @@ ATTACK_RUN_LINED_UP_AZIMUTH_DEG = 5.0
 # source: belief/attack_run.py:ATTACK_RUN_RELATIVE_MAX_AGE_S
 ATTACK_RUN_RELATIVE_MAX_AGE_S = 2.0
 
-# seen_world_direction`'s own aim-point correction (`[[BL-B80]]`, plan Decision 6, pilot 2026-10-22, verbatim: *"no idea.
+# How far above a seen target's reported ground point the 9K113 sight aims, in metres -- zero aims at the vehicle's base, too large rides the crosshair over the top of a small vehicle at close range; the default 1.2 m is half a BTR-80's 2.4 m hull height.
 # status: agreed-guess | range: 0.0 .. 3.0
 # source: belief/attack_run.py:SEEN_AIM_HEIGHT_OFFSET_M
 SEEN_AIM_HEIGHT_OFFSET_M = 1.2
@@ -48,7 +48,7 @@ SPEECH_RATE_WPS = 2.5
 ON_GROUND_AGL_THRESHOLD_M = 10.0
 
 [belief.decay]
-# Slowest-decaying attribute: what a contact *is.
+# Slowest-decaying attribute: what a contact *is*.
 # status: judgement | range: 60.0 .. 1800.0
 # source: belief/decay.py:IDENTITY_HALF_LIFE_S
 IDENTITY_HALF_LIFE_S = 600.0
@@ -64,7 +64,7 @@ LOST_THRESHOLD_S = 120.0
 POSITION_HALF_LIFE_S = 30.0
 
 [belief.enrichment]
-# landmark-words-no-names` (F7 settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the area, in m^2, below which a subtype-less/`"built_up"` settlement polygon reads as "a village" rather than "a town" in speech -- the only size evidence available when `world-model`'s `SettlementInfo.subtype` isn't one of the named `city`/`town`/`village` place values.
+# `landmark-words-no-names` (F7 settled, `docs/acceptance/2026-10-20-sortie-feedback.md`): the area, in m^2, below which a subtype-less/`"built_up"` settlement polygon reads as "a village" rather than "a town" in speech -- the only size evidence available when `world-model`'s `SettlementInfo.subtype` isn't one of the named `city`/`town`/`village` place values.
 # status: judgement | range: 100000.0 .. 5000000.0
 # source: belief/enrichment.py:BUILT_UP_VILLAGE_MAX_AREA_M2
 BUILT_UP_VILLAGE_MAX_AREA_M2 = 1000000.0
@@ -137,7 +137,7 @@ SEEN_AIM_HOLD_S = 3.0
 # source: belief/sight_head.py:SLEW_AZ_DPS
 SLEW_AZ_DPS = 20.0
 
-# Elevation's own slew rate -- same source as `SLEW_AZ_DPS.
+# How fast Petrovich's simulated sight can slew in elevation, in degrees per second -- the 9K113's own vertical rate, half the azimuth figure, from the same source as `SLEW_AZ_DPS`; a higher value has him settle on a new look sooner than the real sight can.
 # status: derived | range: 2.0 .. 20.0
 # source: belief/sight_head.py:SLEW_EL_DPS
 SLEW_EL_DPS = 10.0
@@ -197,12 +197,12 @@ FOCUS_DWELL_S = 2.0
 SCAN_PLAN = [12, 11, 10, 9, 12, 1, 2, 3]
 
 [perception.naked_eye_source]
-# plans/attack-run-sortie-fixes/plan.md` (BL-B70 §9) -- how stale the attack-run target's own live LOS verdict may be before `belief.attack_run._no_look_cause` treats it as no verdict at all (`"unknown"`, fail-open) rather than a real `"obstructed"` call; a *smaller* value here is the dangerous direction, since it starts discarding genuinely fresh verdicts and reporting `"unknown"` instead.
+# `plans/attack-run-sortie-fixes/plan.md` (BL-B70 §9) -- how stale the attack-run target's own live LOS verdict may be before `belief.attack_run._no_look_cause` treats it as no verdict at all (`"unknown"`, fail-open) rather than a real `"obstructed"` call; a *smaller* value here is the dangerous direction, since it starts discarding genuinely fresh verdicts and reporting `"unknown"` instead.
 # status: agreed-guess | range: 0.5 .. 3.0
 # source: perception/naked_eye_source.py:ATTACK_TARGET_LOS_MAX_AGE_S
 ATTACK_TARGET_LOS_MAX_AGE_S = 1.5
 
-# plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the maximum age, in sim seconds, a `GET /firing/latest` snapshot's own `dcs_model_time_s` may be before its join onto this poll's world-objects snapshot is discarded (same shape/reasoning as `LOS_MAX_AGE_S` above).
+# `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the maximum age, in sim seconds, a `GET /firing/latest` snapshot's own `dcs_model_time_s` may be before its join onto this poll's world-objects snapshot is discarded (same shape/reasoning as `LOS_MAX_AGE_S` above).
 # status: judgement | range: 1.0 .. 15.0
 # source: perception/naked_eye_source.py:FIRING_MAX_AGE_S
 FIRING_MAX_AGE_S = 3.0
@@ -218,7 +218,7 @@ HIRES_ANGULAR_RADIUS_RAD = 0.028
 # source: perception/visibility.py:LOWRES_ANGULAR_RADIUS_RAD
 LOWRES_ANGULAR_RADIUS_RAD = 0.003
 
-# Classification tier ("something is a BMP"): a *smaller* value here means a *longer* naked-eye classification range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction, and `lo` is floored at the same resolution limit as `LOWRES_ANGULAR_RADIUS_RAD.
+# Classification tier ("something is a BMP"): a *smaller* value here means a *longer* naked-eye classification range (`range = size_m / threshold` under `UNAIDED_OPTIC`), and the default puts the boundary at ~0.5 km for a 7 m vehicle, so `lo` below (not `hi`) is the dangerous direction, and `lo` is floored at the same resolution limit as `LOWRES_ANGULAR_RADIUS_RAD`.
 # status: measured | range: 0.00128 .. 0.05
 # source: perception/visibility.py:MEDRES_ANGULAR_RADIUS_RAD
 MEDRES_ANGULAR_RADIUS_RAD = 0.014

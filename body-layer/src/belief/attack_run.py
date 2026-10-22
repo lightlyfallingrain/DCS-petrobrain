@@ -140,19 +140,18 @@ ATTACK_RUN_RELATIVE_MAX_AGE_S: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: `seen_world_direction`'s own aim-point correction (`[[BL-B80]]`,
-#: plan Decision 6, pilot 2026-10-22, verbatim: *"no idea. let's assume on
-#: ground"*). The associated object's reported position is the DCS unit's
-#: reference point, likely near ground/base level -- this raises the seen
-#: elevation by the angle a half-nominal-vehicle-height offset subtends at
-#: the look's own range, so the sight aims closer to the hull centre
-#: rather than the base. One flat offset, no per-class table yet (the
-#: plan's own Decision 6, left for a later, separate change if Flight B's
-#: screenshot shows it is still off). A different value changes where the
-#: sight settles on a resolved target, so this is tunable (root `CLAUDE.
-#: md`'s "Behaviour-affecting constants are tunable"). Default: half a
-#: BTR-80's 2.4 m hull height (1.2 m), an agreed guess pending that
-#: flight.
+#: How far above a seen target's reported ground point the 9K113 sight
+#: aims, in metres -- zero aims at the vehicle's base, too large rides the
+#: crosshair over the top of a small vehicle at close range; the default
+#: 1.2 m is half a BTR-80's 2.4 m hull height. `seen_world_direction`'s own
+#: aim-point correction (`[[BL-B80]]`, plan Decision 6, pilot 2026-10-22,
+#: verbatim: *"no idea. let's assume on ground"*). The associated object's
+#: reported position is the DCS unit's reference point, likely near
+#: ground/base level -- this raises the seen elevation by the angle the
+#: offset subtends at the look's own range. One flat offset, no per-class
+#: table yet (the plan's own Decision 6, left for a later, separate change
+#: if Flight B's screenshot shows it is still off). The default is an
+#: agreed guess pending that flight.
 SEEN_AIM_HEIGHT_OFFSET_M: Final[float] = tuning.real(
     "belief.attack_run.SEEN_AIM_HEIGHT_OFFSET_M",
     1.2,
