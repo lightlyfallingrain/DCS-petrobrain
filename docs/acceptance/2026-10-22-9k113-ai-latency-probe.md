@@ -466,3 +466,16 @@ every run where it moved: run 3 S3 (2° L), run 4 S2 (1° L), run 5a S13 (elev �
 flipped **0 → 1 in S5**, and **every later command did nothing**. While 962 = 1, commands of up
 to 4° for 2–3 s were ignored (5a), and 1° for 8 s (run 3). Its name is not in any note here;
 `mainpanel_init.lua` / `clickabledata.lua` on the DCS machine will say.
+
+### Arg 962 identified (Windows session `omen-proud-beaver`, read-only, 2026-10-22)
+
+**Arg 962 is the 9K113 LAUNCH PERMITTED lamp** (`SCHO_9K113_LAUNCH_PERM`, operator's right
+board): `lamps.lua:617`, a 1:1 binary lamp fed by the native `op_right_board_lights` controller.
+Siblings: 957 COMPL_ON, 958 PU_OFF, 959 CHECK, 960 READY, 961 MSL_EXIST. So it is an **effect**,
+not a gate: launch permission is withdrawn while the sight moves. The correlation stands — every
+time the AI axis was ignored, the lamp was lit — but what blocks the axis is still unknown.
+
+Also from that lookup: `Devices_specs/9K113.lua` has no park, cage, helper or lock keys; the
+operator stick has a **Park/Unpark** toggle, `Command_StickPark_Ext = 3055` on device 7
+(`Input/Mi_24P_op/*/default.lua`, `value_down = 1`); any park/cage/enable state lives in native
+code. Candidate to test: a parked operator stick blocks the AI axis.
