@@ -781,3 +781,6 @@ makes it a plausible gate for the AI axis, not a side issue: both toggles in run
 axis, which suggests the switch event matters rather than which of the two states it lands in.
 Unknown, and worth watching in run 8: with the player in the pilot seat, does a toggle change
 anything about who flies (autopilot, controls)?
+
+Pilot, verbatim: *"I think DCS won't let the copilot take over flight controls, if player is in
+pilot seat. Not sure."* Run 8's card still asks whether any toggle changed how the aircraft flies.
