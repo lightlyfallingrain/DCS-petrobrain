@@ -587,3 +587,14 @@ So two of the three stalls are OBSERV cycling followed by the ~10 s realignment,
 gap is the alignment itself. **The one stall that is still unexplained is a sight that passes
 through boresight, is caught there, and holds for about 6 s under a live command.** Run 6 now
 logs every lamp change per frame, which will show whether a lamp marks that hold.
+
+Pilot, verbatim, on the unexplained stalls:
+
+> *"the couple of unexpected no-slew are probably me using the 9K113 view position. The script
+> seems to have no effect then. That is ok."*
+
+So the probe's writes do nothing while the player is in the operator's 9K113 sight view — the
+opposite-seat rule (Petrovich only works the seat the player is not in), and accepted as correct
+behaviour. That fits T+20–41 directly (874 = 0). For T+74–80 it is the likeliest explanation, but
+not proven by the log: 874 kept echoing +2.5 there. Run 6 is flown from the pilot seat throughout,
+so a hold that still appears there is a real gate.
