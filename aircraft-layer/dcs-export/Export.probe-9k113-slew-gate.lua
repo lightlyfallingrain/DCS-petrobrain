@@ -21,7 +21,11 @@ WHY
   S11-S14 the same pulses: does the axis work again?
   S15     SetCommand(3055, 1) once more -- toggles it back.
   S16-S17 one more pulse.
-  S18-S23 escape attempts: a short 10 deg azimuth pulse, a short elevation
+  S18     pilot makes a ~3 deg heading change with the axis at 0: if the
+          sight is held at boresight, does the mark stay fixed to the airframe
+          (caged) or slide with the heading change (gyro world hold)?
+          Boresight is the aircraft's own axis (pilot, 2026-10-22).
+  S19-S24 escape attempts: a short 10 deg azimuth pulse, a short elevation
           pulse, then 2.5 deg again -- does a bigger or a different-axis
           command break the hold?
 
@@ -105,6 +109,7 @@ local STEPS = {
     { "park", CMD_AI_AZ, ai(0),    3.0, "STICK PARK TOGGLE #2 (back), then AI az 0" },
     { "ai",   CMD_AI_AZ, ai(-2.5), 4.0, "AI az 2.5 L (after second toggle)" },
     { "ai",   CMD_AI_AZ, ai(0),    3.0, "AI az 0" },
+    { "ai",   CMD_AI_AZ, ai(0),    8.0, "HDG: gentle ~3 deg heading change, then back; axis 0 (caged to the airframe, or gyro-held?)" },
     { "ai",   CMD_AI_AZ, ai(-10),  0.5, "ESCAPE: AI az 10 L, 0.5 s" },
     { "ai",   CMD_AI_AZ, ai(0),    3.0, "AI az 0" },
     { "aie",  CMD_AI_ELEV, -0.1,   1.0, "ESCAPE: AI elev -0.1, 1 s" },

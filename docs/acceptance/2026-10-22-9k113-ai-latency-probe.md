@@ -499,8 +499,9 @@ copilot seat = T+0, then to the pilot seat. **Don't press the stick park key you
 | 0:55–1:09 | 2.5° L / 0 / 2.5° R / 0 | moves again? |
 | 1:09 | **stick park toggle #2** (back) | |
 | 1:12–1:19 | 2.5° L / 0 | moves? |
-| 1:19–1:34 | **escape attempts:** 10° L for 0.5 s, 0, elev −0.1 for 1 s, 0, then 2.5° R, 0 | which of these moved the mark? |
-| 1:37 | done | |
+| 1:19–1:27 | axis 0 | **HDG: gentle ~3° heading change, then back.** Does the mark stay fixed on the nose, or slide? |
+| 1:27–1:42 | **escape attempts:** 10° L for 0.5 s, 0, elev −0.1 for 1 s, 0, then 2.5° R, 0 | which of these moved the mark? |
+| 1:45 | done | |
 
 Bring back: the log; which pulses visibly moved the mark; anything on screen at the two toggles.
 
@@ -519,3 +520,9 @@ Consequences:
 - **Every ignored AI command so far happened with the sight at boresight.** Run 6 now ends with
   escape attempts (a short 10° azimuth pulse, a short elevation pulse) to see what breaks the hold.
 - For BL-B67 (ATGM): the lamp is the launch condition itself.
+
+Pilot, verbatim: *"boresight is aircraft boresight. Fixed at aircraft coordinate axis."* So the
+lamp means **sight direction = the aircraft's own axis (±~0.3°)**, and a lit lamp is a fix of
+azimuth 0 / elevation 0 in the airframe frame. Open: while the lamp is lit and commands are
+ignored, is the sight caged to the airframe axis (mark fixed to the nose through a heading
+change) or still gyro-held? Run 6 adds a ~3° heading change at 1:19 to tell.
