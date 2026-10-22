@@ -1,329 +1,368 @@
-# BL-B80 — pointing the real 9K113 sight at Petrovich's modelled aim
+# BL-B80 — the 9K113 sight: Petrovich's simulated sight, with the DCS sight as its slave (v2)
 
-## Goal
+Re-plan, 2026-10-22. Supersedes `plan-v1-position-model.md` (built, reviewed, never flown), whose
+premises — AI axis is a position target, 874/876 are a readback, DCS's AI overlay must be kept
+on — were overturned by probe runs 1–10 (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`).
+Specification: `explore-notes.md`, sections from "Explore 2026-10-22 (after probe runs 1–8)" on.
 
-Make the real 9K113 sight head follow Petrovich's belief-side desired aim (`OpticState.
-look_azimuth_deg`/`look_elevation_deg`), on the channel the 2026-10-21 probes settled: the AI axis
-(device 7, `SetCommand(3061, …)`/`SetCommand(3060, …)`), a position target that works only while
-DCS's own AI Petrovich is on and only while re-asserted every frame — and keep DCS's AI enabled and
-the real readback flowing without the player ever seeing a wheel, while Petrovich's own sight
-perception reads only where the head has actually reached.
+### Goal
 
-## What is settled, and what this plan must still decide
+Give Petrovich a **simulated 9K113 sight** — gyro world-stabilised, gimbal-limited (±60° az,
++20/−15° el, airframe frame), slew-rate-limited (20°/s az, 10°/s el) — that **is** his sight for
+perception, and make the real DCS sight a **best-effort slave** of it: open-loop outside the
+ASP-17 field, closed-loop on the ASP-17 mark inside it (target ±0.02° there), with a tiny dither
+always on, gated on the real lamps (960 READY for the guidance unit, 898 Л5 for gyro alignment).
 
-Settled by the 2026-10-21 probes and the 2026-10-21/22 user direction (`explore-notes.md`, `BL-B80.md`'s
-SUPERSEDED block): the channel, the "AI Petrovich on + re-assert every frame" conditions, that
-Petrovich always holds the sight while OBSERV is on (idle included), that his side effects are
-accepted, and that perception must read the actual position, never the desired one.
+### The picture
 
-Not yet decided by anyone: how the per-frame reassertion and rate limit are split between
-Export.lua (the only thing running every frame) and body-layer (which owns the desired aim and
-polls at ~1 Hz) — this plan makes that split explicit below, because it is the one architectural
-question the inputs leave open.
+```mermaid
+flowchart LR
+  subgraph BL["body-layer (1 Hz poll) — owns truth for perception"]
+    D["decide()\ndesired look, body frame"] --> H["SightHead\nworld-held dir, gimbal clamp,\nslew-rate limit, caged/free"]
+    H -->|"body-frame dir"| P["perception\n(sight-tier optic only,\nonly when free)"]
+    H -->|"goal (world dir) + goal rate + t_sim"| W["write_sight_target"]
+  end
+  subgraph EX["Export.lua (every frame, ~160 fps) — DCS slave"]
+    S["setpoint\nrate-limited toward goal(t),\ngimbal clamp"] --> M{"mark in ASP-17\nfield?"}
+    M -->|yes| CL["closed loop on 566/555\nPI + feed-forward"]
+    M -->|no| OL["open loop on estimate\n(re-anchored at boresight,\nmark, clipped edge)"]
+    CL --> U["+ dither 0.6° @ 8 Hz\n→ SetCommand 3061/3060"]
+    OL --> U
+  end
+  W -->|"POST /command/sight_target"| S
+  EX -->|"lamps 898/960/962 (change-gated)\nservo status (5 Hz)"| BL
+```
 
-## Architecture: who owns what, and why
+```mermaid
+stateDiagram-v2
+  [*] --> off
+  off --> caged: arg 886 on (any cause)
+  caged --> free: Л5 arg 898 lit (~T+10 s)
+  free --> caged: 898 off while 886 on (unexpected; treat as re-alignment)
+  caged --> off: 886 off
+  free --> off: 886 off (pilot, DCS hard-manoeuvre auto-off, our write)
+  note right of caged: sight = airframe boresight\nno sight perception\nno DCS writes
+  note right of free: world-held, slews ≤20/10 °/s\nperception through it\nDCS slaved to it
+```
 
-**Export.lua becomes the per-frame sight owner. Body-layer stays the once-per-poll aim-setter.**
-This is forced, not chosen: the 2026-10-21 findings are that a single write is overwritten by ED's
-AI (needs re-assertion every frame) and that the only readable position (874/876) is only
-trustworthy under those same frame-rate conditions. Body-layer's poll loop runs at ~1–5 Hz; nothing
-it does can reassert at 150 fps. So:
+**The inference that shapes the inside-HUD loop, and what it rests on.** Run 10's 0.06–0.10°
+steady error matches *heading drift (~0.07°/s) ÷ loop gain (1 /s)*: the probe held a target fixed
+in the **airframe** frame while the real sight is **world**-held, so every yaw was a ramp
+disturbance a proportional loop on an integrating plant cannot null. In this design the setpoint is
+a **world** direction converted to airframe axes every frame, so the sight and the setpoint drift
+together under yaw and that disturbance vanishes. What remains is target motion from own
+translation (≈0.02°/s at 3.5 km closing) — handled by feed-forward plus an integral term. **This
+rests on the AI-axis rate adding to the world-held direction** (pilot's reading, and consistent with
+runs 6–7); Flight B measures it. If it holds, the P loop alone may already be near ±0.02°, which is
+why Stage 5 (precision) is gated on Flight B's numbers rather than built blind.
 
-- **Export.lua** caches the last target body-layer sent, rate-limits a *commanded* value toward it
-  every frame (mimicking the 20°/s az / 10°/s el slew the AI axis would show if driven for real —
-  derived from `Devices_specs/9K113.lua`'s `h_axis_velocity`/`v_axis_velocity`, the same source
-  already cited for the player axis in `mi24p-command-surface.md` §4.2), writes that commanded
-  value to the AI axis every frame while OBSERV reads on, and runs the AI-on/off detector and the
-  gyro-alignment suppression (both below) — all of this needs frame-rate reaction and a round trip
-  through body-layer's poll loop cannot give it that.
-- **Body-layer** computes the desired aim once per poll (unchanged — `optic_policy.decide`'s
-  existing SIGHTING cycle), sends it to Export.lua as a new persistent target, and reads back the
-  real position (already flowing via `GET /cockpit_switch/latest`'s `sight_az`/`sight_elev`) for
-  perception and for `OpticState.actual_aim_*_deg`.
+### What survives from the v1 branch, and what is removed
 
-This reuses the existing seam (`AircraftLayerClient` HTTP ↔ collector ↔ loopback UDP ↔ Export.lua,
-`aircraft-layer/CLAUDE.md` "What this is") and the existing wire shape (`CommandSender`'s one
-method per op — `send_command`/`send_cockpit_switch`/`send_look_direction`). It does **not** reuse
-the `cockpit_switch` op: that op's semantics are "write once now" (`performClickableAction`), and
-conflating it with "hold and rate-limit toward this target forever" under one op would make the
-same op mean two different persistence models depending on which device/cmd pair is sent. A third,
-small, named op (**reuse the op mechanism's shape, not the switch op's semantics**) is the one
-place this plan departs from "do not reinvent the wheel" in the transport layer, and the reason is
-stated: no existing op holds state across frames.
+| v1 piece | fate | why |
+|---|---|---|
+| `home_phase` derived from observed arg 886 every poll (`logger.run_once`), command block no longer sets it | **keep** | settled direction; independent of channel model |
+| sight-tier-only gating of sight-derived input into `_apply_active_gaze` | **keep, re-sourced** | same seam now carries the simulated head's direction instead of 874/876 |
+| alignment cap of sight-tier optic → `BINOCULAR_OPTIC` right after `decide_optic` | **keep, re-gated** | gate becomes "head not `free`" (Л5 898), not a timer |
+| `sight_target` op plumbing: `CommandSender.send_sight_target`, `POST /command/sight_target`, `AircraftLayerClient.write_sight_target`, Lua `handle_sight_target_command` + bound check, `sight_effector.write_sight_target` | **keep, reshaped** | new payload (world goal in degrees + rate + `t_sim`); validation pattern unchanged |
+| `extract_json_number_field` exponent/non-finite fix + `test_exponent_float_fix.py` | **keep as is** | a real parser bug fix, model-independent |
+| `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` paired bump | **keep** (bump again) | convention |
+| Lua `sight_rate_limit_step` | **keep** | reused for the setpoint's slew limit |
+| Lua `run_sight_pointing`: position re-assertion, centre-target 0.5° bias, 874/876-based AI-off detector, ShowMenu presses (detector and OBSERV-off), `ai_believed_on`, `AI_OFF_*`, Lua `GYRO_ALIGNMENT_S` | **remove** | position model; the overlay is not needed (axis works with it off, runs 2–10) and pressing ShowMenu would switch ED's AI on — a likely second writer to device 7 (`2026-10-22-9k113-ai-axis-obedience-prior-art.md` finding 1) |
+| `sight_azimuth_deg_to_raw`, `sight_elevation_raw_to_deg`/`_deg_to_raw`, `_SIGHT_ELEVATION_*` constants | **remove** | position-model conversions of a demand echo |
+| `GYRO_ALIGNMENT_S` tunable, `in_gyro_alignment`, `observ_observed_since_sim`, `refresh_readback(now_sim)` | **remove** | Л5 lamp replaces the timer (five runs: lit at T+10.0 s) |
+| `advance_sight_aim`'s `sight_az_raw`/`sight_elev_raw` readback preference; trace's elevation "readback" path | **remove** | 874/876 echo the demand (runs 1–10) — reading them as position is now a known-wrong claim |
+| `docs/acceptance/2026-10-22-bl-b80-sight-pointing-sortie.md` | **superseded** (header added) | must not be flown |
 
-**Elevation's command→degree conversion is derived, not independently probed, and that is this
-plan's one real unknown — see Risks.**
+**Overlay logic: removed entirely.** Nothing in v2 presses ShowMenu.
 
-## Affected Modules / Files
+### Affected Modules / Files
 
-- `aircraft-layer/dcs-export/Export.lua` — new per-frame sight-owner state machine: cached target,
-  rate-limited commanded value, per-frame AI-axis reassertion (`point_quiet`, the proven mechanism
-  from `Export.probe-9k113-point.lua`), the AI-on/off detector, the gyro-alignment suppression
-  window, `EXPORT_SCRIPT_VERSION` bump.
-- `aircraft-layer/src/collector/command_sender.py` — `CommandSender.send_sight_target(az_cmd,
-  elev_cmd)`, same shape as `send_cockpit_switch`/`send_look_direction`.
-- `aircraft-layer/src/api/` — `POST /command/sight_target`, same shape as `/command/cockpit_switch`.
-- `aircraft-layer/src/collector/server.py` — `EXPECTED_EXPORT_VERSION` bump (paired commit with the
-  Export.lua version bump, per that file's own convention).
-- `body-layer/src/aircraft_client.py` — `AircraftLayerClient.write_sight_target(az_cmd, elev_cmd)`.
-- `body-layer/src/belief/sight_effector.py` — the new degree↔raw conversion functions (azimuth's
-  inverse, plus both elevation directions), `GuidanceUnitState.observ_observed_since_sim` (new
-  field, for the gyro-alignment window), `in_gyro_alignment()`, the write-through for the new op.
-- `body-layer/src/logger.py` — sends the sight target every poll while `home_phase is SIGHTING`;
-  the observed-arg-886-driven `home_phase` transition (closing the carried-forward BL-B66 gap);
-  the gyro-alignment cap on `optic_decision.optic` in `run_once`, immediately after `decide_optic`
-  returns and before it is assigned; `advance_sight_aim`'s call site reading the real readback when
-  present, falling back to today's pass-through model otherwise.
-- `body-layer/src/belief/optic_policy.py` — `advance_sight_aim`'s body (was `return desired`):
-  prefers the real readback (converted via `sight_effector`'s new functions) over the model, same
-  split `sight_trace_writer.py` already documents and expects.
-- `body-layer/src/sight_trace_writer.py` — elevation gains an `actual_elevation_source ==
-  "readback"` path once the conversion exists; no shape change otherwise.
-- `body-layer/src/tuning.py` / `config/defaults.toml` — `GYRO_ALIGNMENT_S` (new tunable).
-- `aircraft-layer/research/2026-10-22-9k113-ai-latency-probe-findings.md` — the probe this plan is
-  staged to consume once flown (not written by this plan).
+**aircraft-layer**
+- `dcs-export/Export.lua` — remove `run_sight_pointing` (above); add `run_sight_servo(t)` (per
+  frame): setpoint, world↔airframe rotation, mark conversion, open/closed loop, dither, stall flag;
+  add lamps 898/960/962 to `push_cockpit_switch_state`; **drop 874/876 from that feed's change
+  gate and payload** (they would change every frame under dither and flood it); new 5 Hz
+  `sight_servo` line; extend `push_slew_trace` with servo internals; version bump.
+- `src/schema/cockpit_switch.py` — `align_lamp`/`ready_lamp`/`launch_perm_lamp: bool | None`
+  (optional, older Export.lua never sends them); `sight_az`/`sight_elev` stay optional and go absent.
+- `src/schema/sight_servo.py` (new), `src/collector/cache.py`, `src/collector/server.py`,
+  `src/api/server.py` — `GET /sight_servo/latest`, same shape as `/cockpit_switch/latest`.
+  **Departure, stated:** a second feed rather than more fields on `cockpit_switch`, because that
+  feed is change-gated and the servo status changes every frame — a different rate class.
+- `src/api/server.py`, `src/collector/command_sender.py` — `sight_target` payload reshaped.
+- `tests/test_sight_target.py` (reshape), `tests/test_sight_servo_api.py` (new),
+  `tests/test_sight_servo_lua.py` (new — pure-math Lua functions run under `luajit`/`lua5.1`,
+  **skipped without one**, the precedent `test_dcs_export_lua_syntax.py::test_loads_as_lua` set).
+- `dcs-export/Export.probe-9k113-calibration.lua` (new probe, Stage 0) — reuses
+  `Export.probe-9k113-dither.lua`'s logging/loop scaffold rather than starting fresh.
 
-## Co-moving Fields
+**body-layer**
+- `src/belief/sight_head.py` (new) — `SightHead` (frozen) + `advance_sight_head(...)`, the **only**
+  construction site besides the runner's `default_factory` (grep-enforced, `MissionMemory.append`
+  precedent). New module because it is new physical state with no existing home: `sight_effector`
+  is the cockpit-write module, `optic_policy` is intent. It removes no duplication; it adds none.
+- `src/perception/geometry.py` — `world_direction_from_body(...)` (inverse of
+  `body_relative_direction`'s rotation, built on it as `heading_relative_to_body_relative` is),
+  with a round-trip test.
+- `src/belief/sight_effector.py` — v1 removals; `GuidanceUnitState` gains `align_observed`,
+  `ready_observed`, `launch_perm_observed`; `refresh_readback` reads them; `sight_ready` becomes
+  `ready_observed is True` (the BL-B66 seam doing what it was left for); `write_sight_target`
+  reshaped to (goal az/el world, rates, `t_sim`).
+- `src/belief/optic_policy.py` — `advance_sight_aim` back to the pass-through for unaided/binocular
+  (v1 readback params removed); sight-tier actual aim comes from the head.
+- `src/logger.py` — runner field `sight_head`; advance it every poll after `decide_optic`; cap
+  re-gated on `sight_head.mode is not "free"`; `_apply_active_gaze` takes the head's body direction
+  for sight-tier optics; `write_sight_target` sends goal every poll while the head is `free`.
+- `src/belief/crew_console.py` — no new utterances (see Decisions); `sight_ready` source changes.
+- `src/aircraft_client.py` — `write_sight_target` payload; `get_sight_servo_latest()`.
+- `src/sight_trace_writer.py` — columns: desired (body), head (body + world + mode), DCS servo
+  (mode, mark-derived body dir, error, stalled) from the servo feed; 874/876 no longer labelled
+  "readback".
+- `src/tuning.py` consumers / `config/defaults.toml` — remove `GYRO_ALIGNMENT_S`; add
+  `belief.sight_head.SLEW_AZ_DPS` (20.0, lo 5, hi 40) and `SLEW_EL_DPS` (10.0, lo 2, hi 20),
+  `status="sourced"` (`Devices_specs/9K113.lua` `h_axis_velocity`/`v_axis_velocity`). Gimbal
+  limits are **not** new constants: read from `SIGHT_WIDE_OPTIC.regard_*` (one source of truth).
+  Regenerate and check the **rendered** `defaults.toml` first sentence.
 
-Two separate state machines, each spanning command (external) and observed (internal/derived)
-fields, built by grepping every construction site (`OpticState(` has two fresh-construction sites
-in `optic_policy.py`, both already carry the BL-B71 "replace, never construct fresh" rule in
-comment; `GuidanceUnitState(` has one, in `logger.py`'s `default_factory` — no other site to worry
-about there).
+**Lua-side constants (no tuning mechanism outside body-layer — noted, not improvised):** dither
+amplitude/frequency (0.6° / 8 Hz az, elevation component as run 10), Kp (3), Ki, integrator clamp,
+mark scale and boresight per axis, field edges, stale-target timeout, extrapolation cap, stall
+thresholds, status rate. Grouped in one commented block so a flight-to-flight retune is one diff.
 
-**Body-layer (`OpticState.phase`/`home_phase`, `GuidanceUnitState.observ_commanded`/
-`observ_observed`/`observ_observed_since_sim`):**
+### Design detail
+
+**Simulated head (`SightHead`), per poll.** Fields: `mode: off|caged|free`, `world_az_true_deg`,
+`world_el_deg` (above horizon; `None` unless `free`), `goal_world_*` + `goal_rate_*` (what was last
+sent). Inputs: observed 886 and 898 (one poll lagged, same lag v1 accepted), attitude (heading,
+pitch, bank from ownship telemetry), the decision's desired look **if** the decision is sight-tier,
+`dt`. In `free`: current body dir = world→body at this attitude; goal = desired (clamped to
+gimbal) or, with no sight-tier desire this poll (glance away, binocular, capped), the head's own
+current direction — **it holds, it does not snap back**; step each body axis toward goal by ≤
+rate·dt; clamp to gimbal (a held direction that leaves the gimbal envelope is dragged at the stop,
+as the real head is); store back as world. `caged`: body (0,0). Entering `free` from `caged`:
+world dir = boresight at that poll's attitude. `off`: all `None`.
+
+**Perception** through the sight uses the head's body direction, only in `free`, only for a
+sight-tier optic. Perceiving along the slew path is correct (he looks through the glass as it
+moves); nothing is perceived along a direction the head has not reached.
+
+**Wire (`sight_target`)**, sent every poll while `free`: goal az (true, deg), goal el (deg), goal
+rate az/el (deg/s, world), `t_sim` (DCS model time of the telemetry the decision used). Goal rate
+= finite difference of the desired world direction across consecutive polls **while the look
+target is the same contact** (`look_contact_id` unchanged), else 0 — belief-only input. Bounds:
+az ∈ [−360, 360], el ∈ [−90, 90], |rate| ≤ 30 °/s, all finite; enforced in the API **and** in
+Lua (v1's two-sided pattern). Fixed device 7 / cmds 3060/3061 — no widening of the write surface.
+
+**Why goal, not head position, on the wire.** Lua re-runs the same rate limit (`sight_rate_limit_
+step`) from the same start (boresight at alignment) toward the same goals, so its setpoint tracks
+the body-layer head to within one poll without any resync — sending the head's position plus a
+rate instead overshoots by up to 20° whenever a slew ends between polls. The cost is a second
+3-line rate limiter in Lua; the Python one is the truth for perception.
+
+**Export.lua `run_sight_servo(t)`, per frame.**
+1. 886 off → reset all servo state, write nothing. 898 off → `caged`: estimate := boresight, no
+   writes. No fresh target, or target older than the stale timeout (3 s) → `hold`: dither only
+   (zero-mean, no net motion — the gyro holds the world direction anyway).
+2. goal(t) = goal + rate·clamp(t − t_sim, 0, cap); setpoint ← rate-limited toward goal(t) in
+   airframe axes at the frame's attitude (`LoGetSelfData` heading/pitch/bank), gimbal-clamped,
+   stored world.
+3. Mark: 566 → az, 555 → el (the probe's channels; 565/556 logged alongside), converted with the
+   calibrated scale/boresight. **Valid** when OBSERV on, aligned, and not at a clip edge.
+4. **Closed loop** when the setpoint is inside the field (minus margin) and the mark is valid:
+   e = setpoint_body − mark_body; u = Kp·e + I + ff, ff = 3 × goal world rate (rate = u/3 °/s per
+   degree-of-command); I += Ki·e·dt, clamped, frozen while stalled or saturated. Estimate := mark.
+5. **Open loop** otherwise: u = sat(Kp·(setpoint − estimate)) + ff; estimate += modelled obeyed
+   rate·dt (deadzone 0.18° modelled). **Re-anchors**: boresight at alignment; the mark whenever
+   valid; a **clipped** mark is a half-plane fact (the sight is beyond that edge) — if the estimate
+   contradicts it, project the estimate to edge + 1°, which is what breaks the "estimate says
+   inside, sight stuck outside, loop never engages" deadlock.
+6. u += dither (0.6° sin 8 Hz az; elevation component cos, run 10's ratio); saturate ±1 unit;
+   `SetCommand(3061, u_az/60)`, `SetCommand(3060, u_el_units)` every frame.
+7. Stall: |u_loop| ≥ 1.5° for ≥ 0.4 s with mark motion < eps (run 8's definition) → `stalled`
+   flag + count. **Report only** — no recovery trick has evidence (stick park refuted, overlay
+   inconclusive); dither is the remedy and is already on.
+8. Status line at 5 Hz: mode (`off|caged|hold|open|closed`), setpoint body, mark body (or null),
+   error, `stalled`, stall count, 962. Per-frame internals (u_p, u_i, ff, dither, mark args) to the
+   existing `push_slew_trace` debug log.
+
+**Candidate, measurement pending — "hold still, re-wobble to correct" (user, 2026-10-22).** User,
+verbatim: *"what about wobble movement > stop > wobble movement? if that is reliable, we can point
+the sight at target and stop. If the sight drifts or target moves then wobble move to realign.
+Would that work? That'd help with the ATGM guindace."* A stopped sight is world-held (run 10:
+moved 0.001 of 0.011 mark units over a 3 s pause), so once on target, writing **nothing** removes
+the dither's own ~0.03° p-p from the final seconds; a correction is then made by resuming dither
+plus the loop. Evidence so far is one case (run 10 T: 3 s off, then a 0.5° step landed in 1.28 s),
+and run 9 shows the restart must be **with** dither — a plain step after a dither block stalled at
+once. **Not settled; the plan does not depend on it.** It slots in as a third closed-loop sub-mode,
+`still`: entered when |e| < a still-band for a dwell time, left (back to `closed`, dither on, I
+reset) when |e| exceeds a re-wobble threshold or the goal moves. It is gated on **probe run 11**:
+stop→re-wobble reliability and latency over stops of 2/5/10/20 s and corrections of 0.05° and 0.5°.
+If run 11 says reliable, `still` is built in Stage 5; if not, Stage 5 is PI only. Re-wobble
+latency (1.28 s once) is the number that decides whether it suits a moving target — at ATGM
+ranges the LOS drifts ≈0.02°/s, so a stop longer than ~1 s needs a correction.
+
+**Calibration (mark scale and boresight).** Near boresight — where an ATGM is launched (962 is the
+launch-permission lamp) — scale error barely matters (5% at 0.5° = 0.025°) but **boresight offset
+error counts in full**, so boresight is calibrated directly: slow sweeps through boresight in each
+axis, boresight = midpoint of 962's rising and falling edges in both sweep directions. Scale: free
+sight, zero command, gentle heading change → slope of mark against `LoGetSelfData` heading (run 5's
+method, many frames instead of two points); same with pitch for elevation. **Elevation is the open
+end**: rest reads 555 = 0.556 but caged-at-boresight reads ≈ 0.833 (runs 5, pilot's alternating
+run), and 555's clip edges are unknown — if 555 clips at or near the 9K113 boresight, an
+inside-HUD elevation loop is impossible and elevation stays open-loop. Elevation has **never** been
+closed-loop-tested, with or without dither.
+
+**Readiness.** `sight_ready` := 960 observed lit. Unchanged around it: OBSERV-on is refused with
+`render_unable("GUIDANCE_NOT_READY")` while not ready; one "Guidance unit ready." on readiness. The
+four-switch power-up sequence is unchanged and still writes the switches; it just no longer
+*declares* readiness. Gyro alignment: Л5 898, via the head's `caged` mode. Both lamps are read
+from the observed args, never inferred from our own writes.
+
+### Co-moving Fields
+
+Built from construction sites, not the narrative: `GuidanceUnitState` — `default_factory` at
+`logger.py:492`, `replace()` in `sight_effector` (`start_power_up`, `advance_power_up`,
+`refresh_readback`) and `logger.py` ≈3238/3304/3323/3343/3356; `OpticState` — fresh constructions
+at `optic_policy.py:2364` and `:2443` (both already carry `actual_aim_*` forward; keep it so);
+`SightHead` — new, one constructor function + one `default_factory`, grep-enforced. Lua state is
+module-level, reset in two places: the 886-off branch and `LuaExportStop`.
 
 | Field | Written by | Transition | Must hold true after |
 |---|---|---|---|
-| `home_phase` | **changes in this plan**: today the pilot's "Observ on"/"off" command (internal, one-shot signal in `logger.py`); **must become** the observed arg-886 edge (`guidance_unit_state.observ_observed`) | OBSERV reads on (observed) | `home_phase is SIGHTING` |
-| `home_phase` | as above | OBSERV reads off (observed, whoever caused it — pilot, DCS auto-off on hard manoeuvre, or our own write) | `home_phase is SCANNING` |
-| `phase` | internal (`decide`'s own dispatch, `_back_to_home`) | any `home_phase` transition | moves to match `home_phase` only at the next phase boundary — unchanged by this plan, already correct per the BL-B71 precedent (`_apply_guidance_override` re-derives from `home_phase` fresh every call, never caches) |
-| `observ_observed_since_sim` (new field) | `sight_effector.refresh_readback`, on the rising edge of `observ_observed` | OBSERV reads on (observed) | holds the sim time of that edge until the next edge |
-| the sight-tier optic cap in `run_once` | **new**, immediately after `decide_optic` | `now_sim - observ_observed_since_sim < GYRO_ALIGNMENT_S` | `optic_decision.optic` is capped to `BINOCULAR_OPTIC` if `decide_optic` chose a sight-tier optic — same cap target `_apply_guidance_override` already uses when `home_phase is not SIGHTING`, re-derived every poll, never latched |
+| `observ_observed` | external (886) | any OBSERV edge | equals 886; `home_phase` follows next poll |
+| `home_phase` | derived from `observ_observed` | 886 on / off | `SIGHTING` / `SCANNING`; the command drain block never writes it |
+| `align_observed` | external (898) | 886 on (898 still off) | `False`; head `caged` |
+| `SightHead.mode` | internal (`advance_sight_head`) | 886 on | `caged`, world dir `None`, no `sight_target` sent |
+| `SightHead.mode` | internal | 898 rises | `free`, world dir = boresight at that attitude, goal = same |
+| `SightHead.mode` | internal | 898 falls while 886 on | `caged`, world dir `None` (treated as re-alignment) |
+| `SightHead.*` | internal | 886 off (pilot, DCS auto-off, our write) | `off`, every direction/goal/rate `None` |
+| sight-tier optic cap | derived, every poll | head not `free` | `optic_decision.optic` is never sight-tier; recomputed, never latched |
+| `OpticState.actual_aim_*` | from head (sight-tier) / pass-through (other) | sight-tier ↔ non-sight optic | sight-tier: equals head body dir; the head itself is **not** reset by a non-sight poll |
+| `ready_observed` / `sight_ready` | external (960) | 960 rises / falls | `sight_ready` equals it; OBSERV-on gated on it; announcement latch per Decision 2 |
+| everything above | `reset_for_new_mission` | mission restart | defaults (`off`, `None`, `False`) |
+| Lua goal/setpoint/estimate/I/stall | internal | 886 off, or `LuaExportStop` | all `nil`/0; nothing written |
+| Lua estimate | internal | 898 rises | boresight; I = 0 |
+| Lua I | internal | open ↔ closed switch, stall, saturation | reset on entering closed; frozen while stalled/saturated |
+| Lua goal | external (`sight_target`) | no message for > stale timeout | mode `hold`; dither only |
+| Lua `still` sub-mode (candidate, Stage 5, run 11 pending) | internal | |e| > re-wobble threshold, goal moves, mark invalid, or 886/898 edge | back to `closed` with dither on and I = 0 — never left `still` across any reset above |
 
-**Export.lua (new, entirely local to the per-frame loop):**
+### Implementation Plan
 
-| Field | Written by | Transition | Must hold true after |
-|---|---|---|---|
-| `target_az_deg`/`target_elev_cmd` | the `sight_target` command (external, from body-layer, persists across frames) | a new `sight_target` datagram arrives | holds until replaced or OBSERV reads off |
-| `commanded_az_cmd`/`commanded_elev_cmd` | internal, rate-limited every frame toward `target_*` | every frame while OBSERV reads on | moves at most `rate × dt` per frame toward the target, never jumps |
-| `ai_off_since` (detector timer) | internal, from the 874/876-vs-commanded comparison | commanded is non-trivial and 874/876 stay near 0 | accumulates only while **outside** the gyro-alignment window (below) |
-| `observ_on_since` | internal, OBSERV (886) rising edge, read every frame | OBSERV reads on | gates the detector (`ai_off_since` does not start accumulating until `t - observ_on_since >= GYRO_ALIGNMENT_S`) |
-| ShowMenu press | internal, fired when `ai_off_since` exceeds the timeout | detector fires | one press, then the timer resets and `ai_off_since` starts over — never fires while inside the alignment window, by construction (it never started accumulating) |
-| all of the above | internal, OBSERV (886) falling edge | OBSERV reads off | `target_*`/`commanded_*`/`ai_off_since`/`observ_on_since` all reset to `nil` — a stale target must never survive to the next OBSERV-on |
+0. **Calibration probe (aircraft-layer probe script only; can fly in parallel with Stages 1–2).**
+   `Export.probe-9k113-calibration.lua`: (a) boresight sweeps az and el through 962's window, both
+   directions, ~0.3°/s, dither on; (b) zero-command heading and pitch steps for mark scale;
+   (c) elevation closed loop on 555 with dither (first ever) and 555 clip edges; (d) azimuth P loop
+   with a **world-frame** target (setpoint fixed in world, converted per frame) — the direct test
+   of the inference above; (e) an AI-axis rate during a steady turn, to tell whether the rate adds
+   in airframe or world axes. **Flight A** (below). Output: a research note with the numbers.
+1. **Removal commit (both subprojects, no new behaviour).** Everything marked *remove* in the
+   table; `advance_sight_aim` back to pass-through; tests that asserted v1 behaviour are deleted
+   with the code they tested, not rewritten. Separate commit so the surviving diff is reviewable.
+2. **Lamps and readiness (both subprojects; testable without DCS except the lamp values).** 898,
+   960, 962 on the cockpit-switch feed; 874/876 out of it; schema + `GuidanceUnitState` +
+   `refresh_readback`; `sight_ready` from 960. Tests: lamp parsing, `None` leaves prior value,
+   OBSERV-on refused while 960 off, announcement latch.
+3. **Simulated head and perception (body-layer only; fully testable without DCS).**
+   `sight_head.py`, `world_direction_from_body`, runner wiring, cap re-gated, `_apply_active_gaze`
+   reading the head. Tests: world hold through a 30° turn (body az changes by −30°, world
+   constant); stop-dragging at ±60°; per-axis rate limits over several 1 s polls; caged → free
+   seeds boresight; 886 off resets; glance-away holds the head; perception never sight-tier while
+   `caged`; a wiring test through `run_once` (the recurring leaf-tested/wiring-untested defect,
+   three prior instances) and a mutation of that wiring to show the test catches it.
+4. **Slave servo, proportional (aircraft-layer + body-layer send).** `run_sight_servo` steps 1–8
+   with Kp only (I = 0) and Stage 0's calibration constants; reshaped `sight_target`; servo status
+   feed; body-layer sends goal every poll while `free`; trace columns. Pure-math Lua functions
+   (rotation, mark conversion, setpoint step, PI step, clip re-anchor) tested under `luajit` against
+   Python reference vectors from `geometry.py`/`sight_head.py`. **Flight B.**
+5. **Inside-HUD precision (aircraft-layer; only if Flight B misses ±0.02°, or for the terminal
+   phase).** Integral term with anti-windup and feed-forward tuning, from Flight B's slew trace;
+   plus the `still` sub-mode (hold still, re-wobble to correct) **only if probe run 11 shows
+   stop→re-wobble is reliable**. Run 11 can fly any time — it needs only a probe script, and its
+   answer decides Stage 5's shape, not Stages 0–4. **Flight C.**
 
-## Implementation Plan
+Stages 1–4 are one batch (one performance and one security pass after Stage 4). Stage 0 is a
+probe, outside the batch. Stage 5 is its own batch if built.
 
-1. **Elevation calibration + the carried-forward BL-B66 gap (body-layer only, no cockpit write
-   changes, testable without DCS).**
-   - Add `sight_elevation_raw_to_deg`/`sight_elevation_deg_to_raw` to `sight_effector.py`, derived
-     from two already-sourced facts: the manual's physical limits (`regard_elevation_up_deg=20.0`,
-     `regard_elevation_down_deg=-15.0`, `optics.py`'s own sourced comment) and the measured
-     piecewise gauge split (`arg_876`: value for value ≥ 0, `0.75 × value` for value < 0,
-     `2026-10-21-9k113-slew-readback-probe-findings.md` table). The two combine to one linear
-     formula, `elevation_deg = arg_876 × 20.0`, both signs (value=+1 → arg=+1.0 → 20°, matching the
-     sourced up-limit exactly; value=−1 → arg=−0.75 → −15°, matching the sourced down-limit
-     exactly) — and its inverse for the command direction (`value = elevation_deg / 20.0` for
-     elevation_deg ≥ 0, `value = elevation_deg / 15.0` for elevation_deg < 0). **Mark this
-     `status="derived"`, not `"measured"`**, in whatever doc-comment convention
-     `_SIGHT_AZIMUTH_DEG_PER_RAW_UNIT` uses — it fits every data point on record but was never
-     independently probed (see Risks).
-   - Add `sight_azimuth_deg_to_raw` (azimuth's existing conversion only runs raw→deg today).
-   - Add `GuidanceUnitState.observ_observed_since_sim: float | None`, set by `refresh_readback` on
-     the rising edge of `observ_observed` (comparing the previous value before the `replace()`),
-     cleared to `None` on the falling edge, `None` until the first sample ever arrives.
-   - Add `sight_effector.in_gyro_alignment(state, now_sim) -> bool`:
-     `state.observ_observed_since_sim is not None and now_sim - state.observ_observed_since_sim <
-     GYRO_ALIGNMENT_S`.
-   - `GYRO_ALIGNMENT_S: Final[float] = tuning.real("belief.sight_effector.GYRO_ALIGNMENT_S", 10.0,
-     lo=5.0, hi=20.0, status="measured")` — sourced from `2026-09-11-SUMMARY-petrovich-control.md`
-     ("every ON costs the ~10 s gyro alignment") and the fresh verbatim direction this plan
-     responds to.
-   - In `logger.py`'s `crew_console.observ_transition` handling (the block that currently sets
-     `home_phase=OpticPhase.SIGHTING`/`SCANNING` synchronously with the command): **stop setting
-     `home_phase` there.** Instead, derive `home_phase` from `runner.guidance_unit_state.
-     observ_observed` on every poll, in the same place `_apply_active_gaze`/`decide_optic` is
-     called — rising edge → `home_phase=SIGHTING`, falling edge → `home_phase=SCANNING`, re-checked
-     fresh every poll (mirrors the `_apply_guidance_override` precedent the Co-moving Fields table
-     cites). The command (`observ_transition`) still drives the cockpit write and the hands-busy
-     suppression exactly as today — those are about the pilot's/Petrovich's hand moving to the
-     switch, which is tied to the command event, not the observed edge.
-   - Immediately after `decide_optic(...)` returns in `run_once`, before `self.optic =
-     optic_decision.optic`: if `optic_decision.optic` is `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC` and
-     `in_gyro_alignment(self.guidance_unit_state, ownship.t_sim)`, replace `optic_decision` with
-     `optic` capped to `BINOCULAR_OPTIC` — same cap value `_apply_guidance_override` already uses
-     for "home_phase is not SIGHTING", same "never cached, re-derived every poll" property. This is
-     the "Petrovich must not perceive through the sight during alignment" requirement; `home_phase`
-     itself is already `SIGHTING` (set above) so the cap is the only thing stopping perception —
-     the moment the window ends, the very next poll's cap check passes with no special-casing.
-   - Tests: `in_gyro_alignment` pure-function unit tests at the window's edges; a `run_once`-level
-     test that an OBSERV-on edge followed immediately by a poll inside the window never yields
-     `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC` even when `decide_optic` would otherwise choose one;
-     one test confirming a falling-then-rising edge resets `observ_observed_since_sim` (no stale
-     window from a previous OBSERV-on).
+**Flights — each says what it measures.**
+- **Flight A** (Stage 0 probe, air start): mark scale both axes; az and el boresight from 962
+  edges; 555 clip edges and whether 555 can be closed-loop at all; P-loop steady error with a
+  world-frame target (prediction: well under run 10's 0.06–0.10°); AI-rate frame in a turn.
+  **Plus one cold start** (can be the same session): time from `PWR` to 960 lit (expected
+  3–5 min), confirming 960 is the READY lamp.
+- **Flight B** (Stage 4, air start, pilot seat, no operator axes bound): OBSERV on → mark at
+  boresight ~10 s, then Petrovich's search moves it (mark leaves/re-enters the field as legs cross
+  it); in a 20° turn the mark holds world direction; a contact ahead within the field → mark
+  settles on Petrovich's simulated direction; logged: settle time, last-2 s RMS error (target
+  ≤ 0.02°), stall count/duration per minute; a hard manoeuvre DCS auto-off → `home_phase`
+  `SCANNING` within one poll, head `off`, no writes; OBSERV back on → caged ~10 s, no sight reports
+  in that window; no ShowMenu ever.
+- **Probe run 11** (probe script, any time): stop→re-wobble — after a dithered hold on target,
+  stop writing for 2/5/10/20 s, then correct by 0.05° and 0.5° with dither back on; per case:
+  responded or not, latency to first motion, settle time, world-hold drift during the stop.
+  Decides whether Stage 5 includes `still`.
+- **Flight C** (Stage 5, only if built): Flight B's precision rows again, and with `still` built,
+  the error during stops and the re-wobble latency in real use.
 
-2. **The wire op and the Export.lua per-frame loop (needs a Windows redeploy to test live).**
-   - `aircraft-layer/src/api/`: `POST /command/sight_target` taking `{"az_cmd": float, "elev_cmd":
-     float}`, forwarding to `CommandSender.send_sight_target`, same validation/shape posture as
-     `/command/cockpit_switch`.
-   - `Export.lua`: a new inbound op `"sight_target"` in `poll_command_socket`, storing
-     `target_az_cmd`/`target_elev_cmd` (persists across frames, like `pending_release_t` already
-     does for a different purpose).
-   - New per-frame function, called from `LuaExportAfterNextFrame` alongside `push_cockpit_switch_
-     state`/`push_slew_trace`, gated on `observ_on` (read once per frame, as those two already do):
-     - Rate-limit `commanded_az_cmd`/`commanded_elev_cmd` toward `target_az_cmd`/`target_elev_cmd`
-       by at most `rate × dt` (az: `20°/60/s` in command-value units since `value = deg/60`; elev:
-       convert similarly using the body-layer-side formula's inverse — **or**, simpler and avoiding
-       a second elevation conversion inside Lua, have body-layer send the elevation *rate limit* in
-       the same raw command units it already uses for the target, i.e. body-layer computes `10°/s`
-       in raw-value units via its own conversion and Export.lua receives a plain command-value step
-       size; **decide this at implementation time, default to the Lua-side conversion** since it
-       keeps Export.lua self-contained and the rate constant never changes at runtime).
-     - Bias the write: if the commanded value is within a small deadband of centre on both axes,
-       offset the azimuth write by the fixed 0.5° (named constant) the explore notes specify, so the
-       AI-off detector below is never comparing against an ambiguous all-zero target. The *tracked*
-       `commanded_az_cmd` state is never biased, only the value passed to `point_quiet` that frame.
-     - Call `point_quiet(commanded_az_cmd, commanded_elev_cmd)` every frame (the proven mechanism
-       from the pointing probe).
-   - AI-on/off detector, same per-frame function, gated the same way:
-     - `observ_on_since`: set on the OBSERV rising edge (mirrors `slew_trace_observ_off_since`'s
-       existing shape, inverted).
-     - Only while `t - observ_on_since >= GYRO_ALIGNMENT_S` (a **Lua-side literal**, commented as
-       mirroring `body-layer`'s `GYRO_ALIGNMENT_S` tunable — "Lua-side constants cannot use
-       `tuning.py`; keep this value in sync by hand if that one changes," the same cross-file
-       convention `EXPORT_SCRIPT_VERSION`/`EXPECTED_EXPORT_VERSION` already uses), accumulate
-       `ai_off_since` whenever the commanded target is non-trivial and 874/876 read near 0.
-     - On `ai_off_since` exceeding a timeout constant (placeholder default, flagged below — the
-       2026-10-22 probe is what should set this), press `ShowMenu` (device 30, cmd `WHEEL_MENU_
-       BUTTON`, the same constant `handle_petrovich_search_command` already uses) once, reset
-       `ai_off_since`, and do not press again until a re-press interval constant has elapsed.
-   - On the OBSERV falling edge: clear `target_*`/`commanded_*`/`ai_off_since`/`observ_on_since` to
-     `nil` — the Co-moving Fields table's last row.
-   - `EXPORT_SCRIPT_VERSION` bump; `aircraft-layer/src/collector/server.py`'s
-     `EXPECTED_EXPORT_VERSION` bump in the same commit.
-   - **Placeholder timeout/re-press values, explicitly flagged as provisional**: until the
-     2026-10-22 latency probe reports, use the explore notes' own stated figure (~0.5 s stuck-at-
-     zero before concluding AI is off) for the timeout, and a conservative re-press interval (e.g.
-     2–3 s) so a single missed detection does not spam `ShowMenu`. **Both numbers should be
-     revisited the moment that probe lands** — this is this plan's second open risk.
+### Risks & Unknowns
 
-3. **Body-layer sends the target, every poll, and reads the real position back.**
-   - `AircraftLayerClient.write_sight_target(az_cmd, elev_cmd)`, raising on failure like
-     `write_cockpit_switch` — same posture, same caller-decides-what-to-do-with-a-failure division.
-   - In `logger.py`'s poll loop, whenever `home_phase is SIGHTING` (post-alignment-cap, i.e. this
-     runs regardless of the cap in step 1 — the cap only affects *perception*, not whether the head
-     is told where Petrovich eventually wants to look; the head should already be most of the way
-     there by the time alignment ends): convert `OpticState.look_azimuth_deg`/`look_elevation_deg`
-     to raw command values via the Stage 1 conversions, call `write_sight_target`. **Always send a
-     target while `home_phase is SIGHTING`, idle included** — the 9k113-narrow-search follow-on
-     already guarantees the idle sight carries a real in-regard aim, so there is always something
-     valid to send; this satisfies "always holds the sight… idle included" without a special case.
-   - `advance_sight_aim` (today `return desired`): prefer the real readback
-     (`sight_az_raw`/`sight_elev_raw`, converted via Stage 1's functions) when both are present;
-     fall back to today's pass-through model otherwise (no readback yet this mission, or an older
-     Export.lua). This is exactly the split `sight_trace_writer.py` already documents and expects —
-     that file's `actual_elevation_source` only ever said `"model"` because no elevation conversion
-     existed; after Stage 1 it can say `"readback"` too, no shape change to the writer itself.
-   - Tests: `advance_sight_aim` prefers readback when present; falls back cleanly when absent;
-     `sight_trace_writer` rows show `actual_elevation_source == "readback"` once both the
-     conversion and a raw sample exist (extend its existing fixture-based tests, don't rewrite
-     them).
+- **The ±0.02° is servo precision against the simulated direction, not against the vehicle.**
+  Inside the HUD the mark will sit where *belief* puts the target, which can be tens of metres
+  (≈0.2–0.5° at 3 km) off the real vehicle. For gun/rocket line-up that is honest and probably
+  fine; for an ATGM it is the miss. Decision 1.
+- **Elevation inside the field may not be closable** (555 boresight/clip unknown; never
+  closed-loop-tested). Flight A decides; fallback is open-loop elevation, which the pilot sees as
+  an elevation error he cannot be told about.
+- **Intermittent obedience is not explained**, only suppressed by dither (22/22 + 7/7 steps, two
+  runs). If it returns, outside the field nothing can see it; inside, the stall flag records it.
+- **Open-loop estimate drifts** when DCS ignores commands outside the field. Harmless to the pilot
+  (he cannot see it there); costs acquisition time when the setpoint enters the field. The
+  clipped-edge re-anchor bounds the worst case.
+- **`min_slew_velocity = rad(0.07)`** (`Devices_specs/9K113.lua`) may impose a minimum obeyed rate
+  → a small limit cycle at the setpoint. Visible in Flight B's wobble numbers.
+- **Gimbal limits are sourced, not file-verified**: ±60° az user-supplied (2026-09-11), +20/−15°
+  el from the manual §3.4 (`optics.py`); DCS's own are native (`av9K113::initLimits`), unreadable
+  from Lua. The DCS head stops where DCS stops it; ours where the manual says. A mismatch shows as
+  the DCS sight lagging at a stop — outside the HUD, invisible.
+- **Lua math has a Python twin.** The rotation and rate limit exist in both; the luajit test is the
+  only thing keeping them equal, and it skips on a machine without luajit.
+- **960 on a cold start is unconfirmed.** If it never lights, Petrovich never reports ready and
+  refuses OBSERV for the whole sortie. Flight A's cold start is therefore before any merge.
+- **No investigator dispatch**, deliberately: every remaining unknown (mark calibration, 555
+  edges, AI-rate frame, 960 cold-start timing) is a live behaviour, not something the installed
+  files hold — the files have been read for this (`Devices_specs/9K113.lua`, `lamps.lua`,
+  `mainpanel_init.lua`) and the answers are native. Flights A–B are the instrument.
 
-4. **Acceptance (live sortie, Windows).**
-   - Fly an OBSERV-on with the pilot watching the ASP-17 crosshair, confirming smooth motion (no
-     1 Hz jumps) toward a few known bearings, same visual-check pattern the 2026-10-21 probe already
-     used for azimuth.
-   - **Verify the elevation calibration live**: command the two physical stops (+20°/−15°) and
-     confirm the pilot sees the sight hit its mechanical limit at each, not short of it or past it
-     — this is the one independent check the derived formula has not yet had.
-   - Verify the gyro-alignment window: toggle OBSERV off then on, confirm (a) no spurious `ShowMenu`
-     press fires during the ~10 s window even though 874/876 necessarily read near 0 through it, and
-     (b) Petrovich does not report anything through the sight until the window has elapsed.
-   - Observe ordinary flight for spurious `ShowMenu` presses outside any deliberate test — the
-     detector should never fire when DCS's own AI Petrovich is in fact on and tracking.
-   - Confirm `home_phase` now follows DCS's own automatic OBSERV-off (hard manoeuvre) rather than
-     only the player's spoken command — this is the carried-forward BL-B66 gap's own acceptance
-     test.
+### Decisions Requiring User Input
 
-## Risks & Unknowns
+1. **Where does the terminal-phase ATGM aim come from?** The servo can put the mark within 0.02°
+   of a direction; belief cannot supply a direction that good. A real operator holds the crosshair
+   on the hull through ×10 optics — which, for Petrovich, means letting the *associated object's*
+   true position steer the sight while he has the target resolved in the narrow sight: a sanctioned
+   ground-truth channel like `detection_trace_writer`, and a no-omniscience question only you can
+   answer. **Recommendation:** not decided here — BL-B80 ships the servo against belief's direction
+   (fine for line-up, honest), and this is the first question of BL-B67's explore. Say if you want
+   it decided before Stage 5, because Stage 5's value depends on it.
+2. **"Guidance unit ready" on a warm air start**, where 960 is lit from t ≈ 0. **Recommendation:**
+   announce only on an observed off→on edge — silent on air starts, spoken once on a cold start
+   when the unit actually comes up.
+3. **What Petrovich says during gyro alignment, and if the sight stalls.** **Recommendation:**
+   nothing new — he has already said "Observ on."; the ~10 s is short and expected; a stall is a
+   DCS-commanding problem the pilot cannot act on. Both are logged.
+4. **Elevation limits in Petrovich's *intent*** (BL-B80 entry: *"Might leave the vertical limit
+   out"*). **Recommendation:** leave the intent checks as they are; the simulated head now clamps
+   at +20/−15° physically, so an over-ambitious intent only looks along the stop. No reason to
+   touch a check that has shipped wrong four times.
+5. **Build Stage 5 (PI precision) only if Flight B misses ±0.02°.** **Recommendation:** yes —
+   the world-frame setpoint is predicted to remove the dominant error source, and measuring first
+   costs one flight against a stage that may be unnecessary. Your "wobble → stop → wobble"
+   idea is folded in as Stage 5's candidate `still` mode, built only if probe run 11 shows the
+   restart is reliable; it is the natural terminal-phase mode for BL-B67 if it is.
 
-- **Elevation's degree conversion is derived, not independently measured.** It fits every data
-  point currently on record (the sourced ±20°/−15° physical limits, the measured piecewise gauge
-  split) with no free parameter, but `CockpitMi24.dll`'s own true angle is native and unreachable
-  from Lua (`mi24p-command-surface.md` §4.1), so no further file-grep or Investigator pass can
-  close this — only a live check against the known mechanical stops (Stage 4) can. Flagged, not
-  blocking: the formula is the best available account of sourced data, and the azimuth conversion
-  was accepted on the same "sanity-check live" basis.
-- **The AI-off detection timeout and re-press interval are placeholders** pending the 2026-10-22
-  latency probe (not yet flown as of this plan). Shipping with a provisional value means the
-  detector could be slower or twitchier than necessary until that probe lands and the Lua-side
-  constants are revisited.
-- **Rate-limiting elevation in raw command-value units inside Export.lua** needs the elevation
-  rate (10°/s) converted through the same derived (not measured) formula — compounding the first
-  risk onto the rate, not just the position. Keeping that conversion on the body-layer side (second
-  bullet of Stage 2) avoids introducing a second derived-conversion site in Lua, at the cost of
-  sending a rate rather than letting Export.lua own the whole physical model; worth revisiting once
-  Stage 4 confirms or corrects the conversion.
-- **A stray `ShowMenu` press is a cockpit-visible side effect** (it opens Petrovich's AI wheel,
-  however briefly, with the wheel hidden in settings this should be invisible, but has not been
-  confirmed invisible with the wheel hidden *while a press fires mid-flight* rather than at mission
-  start). Low risk, flagged for the acceptance sortie to specifically watch for.
-- **No automated test reaches `Export.lua` itself** (per `aircraft-layer/CLAUDE.md`'s own
-  "Structure" section — this subproject's standing limitation, not new to this plan). Everything in
-  Stage 2 is validated live only.
+### Second-order effect
 
-## Coordinator amendments (2026-10-22) — these override the text above where they differ
-
-1. **Overlay OFF with OBSERV OFF was missing.** The user direction is explicit: *"Turn overlay OFF
-   with OBSERV OFF."* ShowMenu is a toggle and, with OBSERV off, the readback cannot say whether
-   DCS's AI is on. So Export.lua keeps `ai_believed_on`: true once the readback has obeyed a
-   non-trivial target after alignment, false after a detector press that has not yet been
-   confirmed by the readback obeying again. On the OBSERV falling edge, press ShowMenu once **only
-   if `ai_believed_on`**, then clear it. If unsure, do not press — a wrongly-left-on overlay is
-   harmless with the wheel hidden; a wrongly-pressed one turns DCS's AI on with nobody holding the
-   sight.
-2. **Decision 3 (proactive press) is settled by the same direction: reactive only.** The detector
-   runs from the moment the alignment window ends, so *"Turn AI overlay ON with OBSERV ON"* is met
-   within one timeout of the sight becoming usable. A blind proactive press would turn the AI
-   **off** whenever it was already on, because the press toggles.
-3. **A false detector fire corrects itself**, and the implementation must keep it that way: a press
-   while the AI was in fact on turns it off, the readback drops to 0, and after the re-press
-   interval the detector presses again. Never latch the detector off after N presses.
-4. **Elevation rate lives in Export.lua** (Stage 2's default, not the Risks section's alternative):
-   10°/s is 0.5 raw/s above centre (20°/unit) and 0.667 raw/s below (15°/unit). The rate is a mimic
-   of the slew, so the derived-formula risk on it is cosmetic.
-5. **Decisions 1 and 2 taken as recommended**: ship the derived elevation formula and verify it at
-   the two mechanical stops in Stage 4; ship placeholder detector timing (0.5 s timeout, 2.5 s
-   re-press) and retune from the 2026-10-22 latency probe.
-6. **Batching**: Stages 1–3 are one implementation batch (one performance and one security pass
-   after Stage 3); Stage 4 is the sortie.
-
-## Decisions Requiring User Input (answered — see amendments 2 and 5)
-
-- **Ship the derived elevation formula now, verified live in Stage 4, or hold Stage 1/3's elevation
-  work until a dedicated calibration probe runs first?** Recommendation: ship and verify live — the
-  formula has no free parameter and the live check is cheap (two known mechanical stops), the same
-  basis azimuth's own conversion was accepted on.
-- **Ship Stage 2 with placeholder AI-off-detection timing, or wait for the 2026-10-22 probe?**
-  Recommendation: ship with the explore notes' own stated ~0.5 s timeout and a conservative re-press
-  interval, and treat the probe's numbers as a follow-up tuning pass rather than a blocker — the
-  detector's correctness (does it ever fire when it should not) does not depend on the exact
-  timeout value, only its responsiveness does.
-- **Should Export.lua press `ShowMenu` proactively once, the moment the gyro-alignment window
-  elapses on a fresh OBSERV-on, rather than waiting passively for the reactive detector's first
-  timeout?** This plan's default (Stage 2) is reactive-only, per the explore notes' own wording
-  ("press ShowMenu once and recheck" describes the detector's response, not a proactive act). A
-  proactive press would shave the detector's own timeout off the first engagement of a sortie, at
-  the cost of one more cockpit-visible press on every single OBSERV-on regardless of whether DCS's
-  AI was already on. Flagging rather than deciding, since the explore notes do not settle it either
-  way.
-
-## Second-order effect
-
-`[[BL-B67]]` (the ATGM run) is what this unblocks — it needs a real, trustworthy pointing channel
-to keep the sight on a moving target, and this plan is the one that makes "the head is actually
-where Petrovich says it is" true rather than simulated. It also narrows `BL-B67`'s own design: the
-elevation calibration this plan derives (and Stage 4 verifies) becomes the number that run's
-guidance accuracy is built on, so if Stage 4 finds the derived formula wrong, that correction must
-land here before `BL-B67` is planned, not after.
+Unblocks `[[BL-B67]]` and moves its hardest question to the front: not "can the sight be pointed"
+(this answers it) but "what is allowed to point it precisely" (Decision 1). It also retires
+`[[BL-B63]]` as a dependency for *pointing* — the per-frame loop lives in Export.lua — though a
+faster goal-rate update may still want it for tracking a manoeuvring target. `[[BL-B66]]`'s Stage
+4b trace semantics change (874/876 are no longer a position), and its readiness seam is finally
+filled by a real lamp.

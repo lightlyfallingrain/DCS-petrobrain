@@ -9,6 +9,10 @@
   below.** This heading used to still say "player axis"; it did not, and the body text already
   carried the correction — fixed here by the 2026-10-22 DoD pass on Stages 1-3.
 
+  **Re-planned 2026-10-22: `plans/9k113-sight-pointing/plan.md` (v2 — simulated sight is
+  Petrovich's sight, DCS sight slaved to it). The status block below describes the v1 build
+  (`plan-v1-position-model.md`); its Stage 4 sortie is not to be flown.**
+
   ## Status, 2026-10-22 — Stages 1-3 built, Stage 4 (live sortie) outstanding
 
   `feature/9k113-sight-pointing` (tip `8b2967008f7654f41be52d2779cc430c5605c32d`) implements the

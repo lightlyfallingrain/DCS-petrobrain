@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-22 — do not fly.** Written for the v1 position model (`plans/9k113-sight-pointing/plan-v1-position-model.md`); the re-plan is `plans/9k113-sight-pointing/plan.md`, whose Flights A–C replace this card.
+
 # 2026-10-22 — BL-B80 Stages 1-3: 9K113 sight pointing acceptance sortie (Stage 4)
 
 Source of truth for the published card. Built from `plans/9k113-sight-pointing/plan.md`'s own
