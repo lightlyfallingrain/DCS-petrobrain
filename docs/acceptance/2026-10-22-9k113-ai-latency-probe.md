@@ -211,3 +211,36 @@ against the log's wall clock gives the same to ~1 s.
 follow the actual line of sight (steady-pace slide, gyro drift) but clip at the edge of the
 ASP-17's field (565 = 0.333 at the left edge). That makes them a real actual-position readback,
 but only near the boresight. Their scale in degrees is unknown.
+
+## Run 3 — AI axis small steps, overlay off
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-ai-steps.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_ai_steps.log`. No flag needed. Video welcome.
+
+**Questions:** degree scale of 565 (the ASP-17 mark); position or rate command (each step settles
+and holds, or keeps sliding to the edge); airframe- or world-relative (TURN 2 at 2° L); does the
+mark stay when writes stop.
+
+Setup: air start, guidance unit warm, autopilot, **hold heading as steady as you can** (run 2
+drifted ~40° in two minutes, and the gyro turns drift into mark movement). Straight and level except
+in TURN 2. **Overlay OFF the whole flight.** OBSERV on from the copilot seat = T+0, then to the pilot
+seat.
+
+| T+ | AI axis, every frame | you |
+|---|---|---|
+| 0:20 | 0° (centre) | where does the mark sit? |
+| 0:28 | 1° L | small step left, then holds? |
+| 0:36 | 2° L | |
+| 0:44 | 3° L | still on the glass? |
+| 0:52 | 0° | back to centre? |
+| 1:00 | 1° R | |
+| 1:08 | 2° R | |
+| 1:16 | 3° R | |
+| 1:24 | 0° | |
+| 1:32–1:52 | 2° L | **TURN 2: gentle ~20° right turn, then level.** Mark stays 2° left of the nose, or runs left? |
+| 1:52 | 0° | |
+| 1:57–2:05 | writes stop | mark stays, or moves? |
+| 2:05 | centre written once, done | |
+
+Bring back: does each step move then hold, or keep sliding; is 3° still on the glass; TURN 2;
+release; the log (and the video, if recorded).
