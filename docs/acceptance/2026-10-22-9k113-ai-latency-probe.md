@@ -902,3 +902,68 @@ baseline (O) at the end: 0.06, 0.53, 1.11, 0.52 — two of four steps barely mov
   design work for BL-B80, not a DCS unknown.
 - Unverified: the mark's scale (0.039/°) and the exact boresight value are approximate; ATGM-grade
   pointing will need them calibrated (e.g. against lamp 962 and a known target).
+
+## Run 11 — invisible flicker vs constant value; wobble → stop → wobble
+
+**Branch: `probe/9k113-flicker`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-flicker.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_flicker.log`. Video welcome.
+
+Setup as run 10 (overlay OFF, pilot seat, no 9K113 view, no operator axes bound, hands off).
+
+Tests the pilot's hypothesis (explore notes, 2026-10-22): DCS acts on an axis only when its value
+**changes**, so a constant value loses the axis to any other writer and never takes it back, while
+a value that changes every frame retakes it every frame. If so, a per-frame flicker far below the
+0.003-unit deadzone does what the visible wobble did, without moving the mark.
+
+| T+ | block | command |
+|---|---|---|
+| 0:20 | settle at boresight | dither 0.6° 8 Hz |
+| 0:26–0:44 | **P0**: 6 pulses, 2.5° L/R 1.2 s, gaps at exactly 0 | **constant values (control)** |
+| 0:44–1:02 | **P1** | same, flicker ±1e-5 |
+| 1:02–1:20 | **P2** | same, flicker ±1e-4 |
+| 1:20–1:38 | **P3** | same, flicker ±1e-3 (0.06°, below deadzone) |
+| 1:38–2:02 | re-centre, then **H**: closed-loop hold, 0.5° steps | flicker ±1e-4, **no wobble** |
+| 2:02–3:03 | **S**: hold 3 s with dither → **STOP** 2 / 5 / 10 / 20 s (exactly 0) → restart with dither + a 0.5° or 0.1° step | pilot's wobble → stop → wobble |
+| 3:03–3:15 | **P0b**: 4 constant pulses again (control) | constant |
+| 3:15–3:24 | back to boresight, stop | |
+
+Read: if P1–P3 respond ~1.0 every pulse while P0/P0b do not, the hypothesis holds and BL-B80 uses
+invisible flicker instead of a wobble. S gives restart reliability, latency, and drift while stopped.
+
+## Run 11 results (`logs/2026-10-22/aircraft_layer_probe_9k113_flicker.log`)
+
+OBSERV on at t=32.494; Л5 at T+10.0 (sixth time). Ran to DONE at ~157 fps.
+
+**The pilot's rule is confirmed: DCS takes the axis only when the value changes.**
+
+| block | value | pulses that moved (ratio ≥ 0.85) |
+|---|---|---|
+| P0 | constant | **3 of 6** (2, 3, 4 ignored: 0.04, 0.04, 0.10) |
+| P1 | flicker ±1e-5 | **6 of 6** (0.93–1.09) |
+| P2 | flicker ±1e-4 | **6 of 6** (0.95–1.03) |
+| P3 | flicker ±1e-3 | **6 of 6** (0.97–1.01) |
+| P0b | constant, at the end | **0 of 4** (0.01) |
+
+Even ±1e-5 (≈0.0006°, invisible) is enough.
+
+**Precision while holding** (last-2 s RMS error / peak-to-peak on the mark):
+
+| hold | RMS | p-p |
+|---|---|---|
+| H, flicker 1e-4, no wobble | 0.039–0.058° | 0.002–0.015° |
+| S holds, dither 0.6° 8 Hz | **0.006–0.013°** | 0.023–0.025° |
+
+The dither does a second job flicker cannot: it carries the loop's small corrections across the
+0.18° command deadzone (classic dither linearisation). **With 0.6° / 8 Hz the hold meets the ATGM
+budget (±0.02°)**; flicker alone leaves the 0.04–0.06° deadzone error.
+
+**Wobble → stop → restart:** all four restarts moved. A stopped sight drifts: −0.011° in 2 s,
+−0.020° in 5 s, −0.036° in 10 s, −0.063° in 20 s (≈0.003–0.005°/s), so for ATGM a stop would need
+a correction every ~4 s — continuous dither is simpler and more precise. **Probe defect:** the
+restart steps ran without dither (policy name `restart` was not matched by the dither branch); they
+moved anyway because the closed loop's own output changes every frame. So restart reliability is
+shown for a changing loop output, not for dither specifically.
+
+**Consequence for BL-B80:** the per-frame value change is what keeps the axis; any change works.
+Default: dither 0.6° / 8 Hz always (pilot: *"tiny all the time"*), which also gives the precision.
+Flicker remains the fallback where the mark must look perfectly still.

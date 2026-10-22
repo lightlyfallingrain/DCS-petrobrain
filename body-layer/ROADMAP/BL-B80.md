@@ -61,7 +61,10 @@
   > the HUD, any trick that gets it on the simulated direction is allowed, and for ATGM the mark
   > must sit within ~0.02° (BTR at 3–4 km). Gate on 960 and 898. **The branch
   > `feature/9k113-sight-pointing` was built on the position model and is to be re-planned.**
-  > Status: probe phase closed; re-plan next.
+  > **Run 11 (merged `d6ed947f`):** DCS takes the axis only when its value **changes** (pilot's
+  > hypothesis, confirmed: constant 3/10, per-frame flicker 18/18). Holding with 0.6° / 8 Hz dither:
+  > 0.006–0.013° RMS, inside the ATGM budget.
+  > Status: probe phase closed; v2 plan on `feature/9k113-sight-pointing`, Stages 0–4 being built.
   >
   > **SUPERSEDED 2026-10-21 — read this block first; the text below it predates the finding.**
   > Probes flown 2026-10-21 (`aircraft-layer/research/2026-10-21-9k113-slew-readback-probe-findings.md`,
