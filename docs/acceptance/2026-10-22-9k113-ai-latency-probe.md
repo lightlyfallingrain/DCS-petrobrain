@@ -902,3 +902,30 @@ baseline (O) at the end: 0.06, 0.53, 1.11, 0.52 — two of four steps barely mov
   design work for BL-B80, not a DCS unknown.
 - Unverified: the mark's scale (0.039/°) and the exact boresight value are approximate; ATGM-grade
   pointing will need them calibrated (e.g. against lamp 962 and a known target).
+
+## Run 11 — invisible flicker vs constant value; wobble → stop → wobble
+
+**Branch: `probe/9k113-flicker`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-flicker.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_flicker.log`. Video welcome.
+
+Setup as run 10 (overlay OFF, pilot seat, no 9K113 view, no operator axes bound, hands off).
+
+Tests the pilot's hypothesis (explore notes, 2026-10-22): DCS acts on an axis only when its value
+**changes**, so a constant value loses the axis to any other writer and never takes it back, while
+a value that changes every frame retakes it every frame. If so, a per-frame flicker far below the
+0.003-unit deadzone does what the visible wobble did, without moving the mark.
+
+| T+ | block | command |
+|---|---|---|
+| 0:20 | settle at boresight | dither 0.6° 8 Hz |
+| 0:26–0:44 | **P0**: 6 pulses, 2.5° L/R 1.2 s, gaps at exactly 0 | **constant values (control)** |
+| 0:44–1:02 | **P1** | same, flicker ±1e-5 |
+| 1:02–1:20 | **P2** | same, flicker ±1e-4 |
+| 1:20–1:38 | **P3** | same, flicker ±1e-3 (0.06°, below deadzone) |
+| 1:38–2:02 | re-centre, then **H**: closed-loop hold, 0.5° steps | flicker ±1e-4, **no wobble** |
+| 2:02–3:03 | **S**: hold 3 s with dither → **STOP** 2 / 5 / 10 / 20 s (exactly 0) → restart with dither + a 0.5° or 0.1° step | pilot's wobble → stop → wobble |
+| 3:03–3:15 | **P0b**: 4 constant pulses again (control) | constant |
+| 3:15–3:24 | back to boresight, stop | |
+
+Read: if P1–P3 respond ~1.0 every pulse while P0/P0b do not, the hypothesis holds and BL-B80 uses
+invisible flicker instead of a wobble. S gives restart reliability, latency, and drift while stopped.
