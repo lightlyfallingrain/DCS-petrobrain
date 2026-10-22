@@ -763,3 +763,21 @@ boresight, a new target every 6 s. A **stall** is ≥1.5° commanded for ≥0.4 
 
 A per-policy summary (stalls, stalled seconds, recoveries, toggle→resume latency) closes the log.
 What the pilot sees: the mark sweeping ~4° left and right across the HUD centre, with pauses.
+
+### Pilot on Park/Unpark Operators Stick, verbatim
+
+> *"- there's two modes when player is in copilot seat: flight controls or 9K113. It's mutually
+> exclusive.*
+> *- default state (with my DCS config) when I jump to copilot seat is I have control over aircraft
+> \*flight\*, but not of 9K113.*
+> *- parking the stick mean that AI Petrovich as pilot takes control of flying the aircraft
+> (poorly) and I get control of the 9K113*
+> *- unparking reverses, I get control of flight controls, lose 9K113 view*
+> *- now, I'm not entirely sure if controlling aircraft is exclusive with operating 9K113 slew
+> axis, but it is mutually exclusive with being able to use the CPG view."*
+
+So 3055 switches the operator's stick between flying the aircraft and slewing the 9K113. That
+makes it a plausible gate for the AI axis, not a side issue: both toggles in runs 7/7b freed the
+axis, which suggests the switch event matters rather than which of the two states it lands in.
+Unknown, and worth watching in run 8: with the player in the pilot seat, does a toggle change
+anything about who flies (autopilot, controls)?
