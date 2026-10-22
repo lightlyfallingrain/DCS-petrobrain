@@ -191,8 +191,10 @@ rate az/el (deg/s, world), `t_sim` (DCS model time of the telemetry the decision
 direction across consecutive polls **while the look target is the same contact**
 (`look_contact_id` unchanged), else 0 — belief-only input for a `belief` goal; for a `seen` goal,
 the finite difference across consecutive seen looks of that contact ("Aim source"). Bounds:
-az ∈ [−360, 360], el ∈ [−90, 90], |rate| ≤ 30 °/s, all finite; enforced in the API **and** in
-Lua (v1's two-sided pattern). Fixed device 7 / cmds 3060/3061 — no widening of the write surface.
+az ∈ [−360, 360], el ∈ [−90, 90], |rate| ≤ 30 °/s, **`t_sim` finite and ≥ 0**, all finite;
+enforced in the API **and** in Lua (v1's two-sided pattern) — a missing or non-finite `t_sim`
+rejects the whole command, exactly like a non-finite `az`/`el` (security plan review, required
+change; `t_sim` feeds `clamp(t − t_sim, 0, cap)` directly). Fixed device 7 / cmds 3060/3061 — no widening of the write surface.
 
 **Why goal, not head position, on the wire.** Lua re-runs the same rate limit (`sight_rate_limit_
 step`) from the same start (boresight at alignment) toward the same goals, so its setpoint tracks
@@ -405,6 +407,17 @@ module-level, reset in two places: the 886-off branch and `LuaExportStop`.
 | Lua `still` sub-mode (candidate, Stage 5, run 11 pending) | internal | |e| > re-wobble threshold, goal moves, mark invalid, or 886/898 edge | back to `closed` with dither on and I = 0 — never left `still` across any reset above |
 
 ### Implementation Plan
+
+> **Probe run 11 result (2026-10-22, `docs/acceptance/2026-10-22-9k113-ai-latency-probe.md` on
+> `probe/9k113-flicker`), folded in before building:** the pilot's rule is confirmed — DCS takes
+> the axis only when the value changes (constant pulses 3 of 10 moved; flicker of any size
+> ±1e-5…1e-3, 18 of 18). Holding with **dither 0.6° / 8 Hz gave 0.006–0.013° RMS** (meets the
+> ±0.02° ATGM budget: the dither carries small corrections across the 0.18° deadzone); flicker alone
+> left 0.04–0.06°. A stopped sight drifts ~0.003–0.005°/s. So: **`SERVO_WOBBLE` default `"dither"`
+> (0.6°, 8 Hz), always on**; `"flicker"` (±1e-4) kept as the alternative; **the `still` sub-mode is
+> dropped** (stopping drifts and gains nothing). Stage 5 (PI precision) is expected to be
+> unnecessary — Flight B checks the world-frame hold against ±0.02°.
+
 
 0. **Calibration probe (aircraft-layer probe script only; can fly in parallel with Stages 1–2).**
    `Export.probe-9k113-calibration.lua`: (a) boresight sweeps az and el through 962's window, both
