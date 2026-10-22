@@ -513,16 +513,19 @@ Bring back: the log; which pulses visibly moved the mark; anything on screen at 
 
 Consequences:
 
-- **962 is an at-boresight readback** (sight within ~0.3° of boresight), across the whole
-  ±60°: the only full-range position fact we have. It can re-anchor the outside-HUD estimate
-  whenever the sight passes through boresight, and the ASP-17 mark's boresight value can be
-  calibrated from it (in 5b the lamp lit with 565 ≈ 0.517, not 0.500).
+- **962 is an at-boresight readback** (sight within ~0.3° of boresight). The ASP-17 mark's
+  boresight value can be calibrated from it (in 5b the lamp lit with 565 ≈ 0.517, not 0.500).
+  **Correction (pilot, verbatim): *"no. Boresight is always within HUD. Both are fixed at
+  aircraft ahead direction. Boresight sits within HUD, but HUD area a larger."*** So the lamp adds
+  nothing outside the HUD — inside it the mark args already give position; the lamp is a finer
+  at-boresight signal and the launch condition. An earlier draft here claimed it re-anchors the
+  outside-HUD estimate; that was wrong.
 - **Every ignored AI command so far happened with the sight at boresight.** Run 6 now ends with
   escape attempts (a short 10° azimuth pulse, a short elevation pulse) to see what breaks the hold.
 - For BL-B67 (ATGM): the lamp is the launch condition itself.
 
 Pilot, verbatim: *"boresight is aircraft boresight. Fixed at aircraft coordinate axis."* So the
 lamp means **sight direction = the aircraft's own axis (±~0.3°)**, and a lit lamp is a fix of
-azimuth 0 / elevation 0 in the airframe frame. Open: while the lamp is lit and commands are
+azimuth 0 / elevation 0 in the airframe frame, always inside the HUD field. Open: while the lamp is lit and commands are
 ignored, is the sight caged to the airframe axis (mark fixed to the nose through a heading
 change) or still gyro-held? Run 6 adds a ~3° heading change at 1:19 to tell.
