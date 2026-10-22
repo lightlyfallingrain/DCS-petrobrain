@@ -850,3 +850,28 @@ overlay closed at the end).
   contention hypothesis is neither confirmed nor refuted.
 - One run only. Next: repeat dither, longer, and **hold on a fixed target with dither** (the real
   use: mark on target while lined up), and test a smaller dither amplitude.
+
+## Run 10 — dither: repeat, hold on target, faster/smaller, terminal pause
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-dither.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_dither.log`. Video welcome.
+
+Setup as run 9 (overlay OFF, pilot seat, no 9K113 view, no operator axes bound, hands off).
+
+Requirement (pilot, 2026-10-22): for ATGM the mark must sit within ~0.02° of a BTR at 3–4 km in the
+terminal phase. Mark wobble ≈ (dither amplitude / 3) °/s ÷ (2π f).
+
+| T+ | block | dither | expected mark wobble |
+|---|---|---|---|
+| 0:20 | settle at boresight | 1.5° 1 Hz | ±0.08° |
+| 0:26–0:50 | **W**: ±2° sweeps ×4 — repeat of run 9 | 1.5° 1 Hz | ±0.08° |
+| 0:50–1:10 | **H1**: hold, 0.5° steps every 5 s | 1.5° 1 Hz | ±0.08° |
+| 1:10–1:30 | **H2**: same | 1.5° 4 Hz | ±0.02° |
+| 1:30–1:50 | **H3**: same | 0.6° 4 Hz | ±0.008° |
+| 1:50–2:10 | **H4**: same | 0.6° 8 Hz | ±0.004° |
+| 2:10–2:23 | **T**: hold 5 s, **dither off 3 s** (terminal phase), then a 0.5° step with dither back on | 0.6° 4 Hz | does it answer after the pause? |
+| 2:23–2:43 | **O**: the H steps without dither (baseline) | none | |
+| 2:43–2:52 | back to boresight, stop | | |
+
+Per step the log gives the response ratio, settle time to within 0.04°, and the last-2-s RMS error
+and peak-to-peak wobble in degrees, plus frame rate.
