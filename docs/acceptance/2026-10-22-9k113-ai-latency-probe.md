@@ -709,3 +709,34 @@ ignored 3 s later). Position-independent, so not the boresight hold. Unknown: wh
 
 The HOME closed loop worked when the axis was responding (HOME before C) and did nothing when it was
 not, which the loop itself can detect from 566 inside the HUD.
+
+### Run 7b — flown again with the joystick axes unbound (`…_hold_b_no_axes.log`)
+
+Pilot, verbatim: *"I had joystick axes bound. I removed them and flew again."*
+
+OBSERV on at t=28.989. Л5 (898) lit at **T+10.0** again — confirmed twice.
+
+| | run 7 (axes bound) | run 7b (axes unbound) |
+|---|---|---|
+| commands that moved the mark | 10 of 23 | 13 of 23 |
+| ignored | A2–A5, A7, A8, HOME-B, B4, C3, D-drive, D2, D3, HOME-end | A3–A5, B3, C1, C2, D1–D3, HOME-end |
+| first command after each stick park toggle | moved (2 of 2) | moved (2 of 2) |
+
+Unbinding the axes helped somewhat but did not remove the gate: response still comes in windows,
+and each command is all-or-nothing. In 7b the D drive took the sight ~1° past the HUD edge (565 =
+566 = 0.333), after which D1–D3 and the 8 s HOME at full 2.5° produced nothing, so the sight stayed
+outside the field: ≥17 s ignored. **Across runs 6, 7, 7b the first command after a stick park toggle
+moved 5 times out of 6.**
+
+The all-arg diffs show arg 995 and args 866/867/1022/1023 changing between steps, but neither lines
+up with moved/ignored. Not pursued.
+
+### Arg 960 is the ЩО `READY` lamp BL-B66 could not read
+
+Pilot asked whether 960 is the guidance-unit ready lamp BL-B66 looked for. Very likely:
+`SCHO_9K113_READY` — `SCHO` = ЩО, the operator panel — and its siblings 957 `COMPL_ON` and
+958 `PU_OFF` are the `COMP ON` / `LNCHR OFF` lamps the warm-up note
+(`body-layer/research/2026-10-14-9k113-warmup-atgm-procedure.md`, row 7) says light at `PWR`. In
+every air start (warm unit) 960 lights at t ≈ 0.02 s. BL-B66 concluded *"The `READY` lamp is not
+readable"* after trying `list_indication`; `get_argument_value(960)` was never tried. **To
+confirm: a cold start with the warm-up run — 960 should go 0 → 1 about 3–5 min after `PWR`.**
