@@ -784,3 +784,23 @@ anything about who flies (autopilot, controls)?
 
 Pilot, verbatim: *"I think DCS won't let the copilot take over flight controls, if player is in
 pilot seat. Not sure."* Run 8's card still asks whether any toggle changed how the aircraft flies.
+
+## Run 8 results (`logs/2026-10-22/aircraft_layer_probe_9k113_stall.log`)
+
+OBSERV on at t=25.545; Л5 (898) lit at T+10.0 (third time). The log ends in block P step 18: OBSERV
+went off at T+121.8 (886 1 → 0, 898 off, mark to rest) and no DONE/summary was written.
+
+**The AI axis was dead for essentially the whole run.** From T+20 the loop commanded +2.5° (right,
+the correct sign — the same law homed correctly in run 7) almost continuously; the mark instead
+drifted **left** from 0.48 to the field edge 0.333 by T+43, ~0.14°/s, about twice what the heading
+drift (+0.07°/s) explains, and stayed clipped there. 874 echoed +2.5 throughout.
+
+- O: every sweep stalled; the "resumed" entries in the first 15 s are sub-second noise in a slow
+  drift, not response.
+- **R: 42 stick park toggles, one per second through 7 steps — not one restored motion.**
+- P: 5 preemptive toggles, no motion.
+
+**This refutes the stick park lead.** The 5-of-6 correlation in runs 6–7b was coincidence, or the
+toggle mattered only in some state this run never reached. The one firm thing left: whether the AI
+axis is obeyed is decided by state the probe can neither see (no arg tracks it) nor change (no
+command tried restores it), and it can be off for ≥100 s.
