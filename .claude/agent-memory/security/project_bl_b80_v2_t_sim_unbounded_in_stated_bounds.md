@@ -36,3 +36,12 @@ Implementation Plan explicitly.
 and not others, check every field actually used in Lua/Python arithmetic downstream — not just the
 ones the sentence names — especially a timestamp/time-delta field feeding a `clamp` or similar
 bound, where "the bound protects me" is only true given finiteness upstream of it.
+
+**Confirmed implemented correctly at deep analysis (2026-10-22, `plans/9k113-sight-pointing/
+security-review.md`'s v2 top section).** Both layers reject the whole command on a missing/
+non-finite `t_sim` (API: `isfinite` + `[0, 86400]`; Lua: presence + `t_sim < 0`, no upper bound
+needed there since `extract_json_number_field`'s finite guarantee plus `run_sight_servo`'s own
+`age = clamp(t - t_sim, 0, EXTRAPOLATION_CAP_S)` structurally bounds the extrapolation term for
+*any* finite `t_sim` regardless of magnitude — the API's `86400` cap is defence-in-depth, not the
+thing making the Lua arithmetic safe). One field's "bound" sentence can correctly be narrower than
+another's layer-by-layer, as long as the reason is written down, as it was here.
