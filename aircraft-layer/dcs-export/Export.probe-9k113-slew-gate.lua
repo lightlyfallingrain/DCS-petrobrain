@@ -81,7 +81,20 @@ local CMD_PLAYER_ELEV = 3025
 local CMD_STICK_PARK = 3055   -- Command_StickPark_Ext, Park/Unpark Operators Stick (toggle)
 
 -- Run-1 candidate head-position args, logged in every row.
-local WATCH_ARGS = { 565, 566, 555, 556, 957, 958, 959, 960, 961, 962 }
+local WATCH_ARGS = { 565, 566, 555, 556, 898, 957, 958, 959, 960, 961, 962 }
+
+-- Guidance-unit lamps PK_9K113_L1..L14 (lamps.lua:619-632) and the 9K113 board
+-- lamps 957-962. Every change is logged the frame it happens, from probe start,
+-- so the alignment-done lamp (pilot: L5 "ROLL SYNC TR UNCAGE", likely arg 898)
+-- shows its own flip time.
+local LAMP_ARGS = {
+    { 902, "L1" }, { 901, "L2" }, { 888, "L3" }, { 889, "L4" }, { 898, "L5" },
+    { 904, "L6" }, { 900, "L7" }, { 894, "L8" }, { 896, "L9" }, { 897, "L10" },
+    { 891, "L11" }, { 892, "L12" }, { 895, "L13" }, { 893, "L14" },
+    { 957, "COMPL_ON" }, { 958, "PU_OFF" }, { 959, "CHECK" }, { 960, "READY" },
+    { 961, "MSL_EXIST" }, { 962, "LAUNCH_PERM" },
+}
+local LAMP_EPS = 0.1
 
 local OBSERV_DEBOUNCE_S = 0.5
 local START_DELAY_S = 20.0
@@ -324,6 +337,24 @@ local aborted = false
 
 local idx, step_start, step_frames, last_dense = 0, nil, 0, -1e9
 local step_snap = nil
+local lamp_last = {}
+
+local function log_lamp_changes(dt)
+    for _, e in ipairs(LAMP_ARGS) do
+        local v = read_arg(e[1])
+        if type(v) == "number" then
+            local prev = lamp_last[e[1]]
+            if prev == nil then
+                log(string.format("  lamp %d %s = %s (initial) t=%7.3f", e[1], e[2], fmt(v), dt))
+                lamp_last[e[1]] = v
+            elseif math.abs(v - prev) >= LAMP_EPS then
+                local tplus = delay_start and string.format("T+%.1f", dt - delay_start) or "before T+0"
+                log(string.format("  lamp %d %s %s -> %s  t=%7.3f  %s", e[1], e[2], fmt(prev), fmt(v), dt, tplus))
+                lamp_last[e[1]] = v
+            end
+        end
+    end
+end
 
 local function start_step(dt)
     local r = STEPS[idx]
@@ -371,6 +402,8 @@ function LuaExportAfterNextFrame()
         if type(t) ~= "number" then return end
         if t0 == nil then t0 = t end
         local dt = t - t0
+
+        log_lamp_changes(dt)
 
         if phase ~= "STEPS" and phase ~= "FINISHED" and (dt - last_slow_t) >= 1.0 then
             readback_row(dt, "1s")
