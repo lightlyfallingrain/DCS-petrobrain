@@ -875,3 +875,30 @@ terminal phase. Mark wobble ≈ (dither amplitude / 3) °/s ÷ (2π f).
 
 Per step the log gives the response ratio, settle time to within 0.04°, and the last-2-s RMS error
 and peak-to-peak wobble in degrees, plus frame rate.
+
+## Run 10 results (`logs/2026-10-22/aircraft_layer_probe_9k113_dither.log`)
+
+OBSERV on at t=14.690; Л5 at T+10.0 (fifth time). Ran to DONE at ~160 fps.
+
+**Dither confirmed (second run).** All 22 dithered steps had response ratios 0.80–1.20; three brief
+stalls, 0.24–0.30 s each, all during the 1 Hz sweeps, each recovering by itself. The no-dither
+baseline (O) at the end: 0.06, 0.53, 1.11, 0.52 — two of four steps barely moved.
+
+| block | dither | ratio | settle (0.5° step) | last-2 s RMS error | wobble p-p (expected) |
+|---|---|---|---|---|---|
+| H1 | 1.5° 1 Hz | 0.98–1.13 | 1.8–3.0 s | 0.065–0.099° | 0.18–0.29° (0.16) |
+| H2 | 1.5° 4 Hz | 0.98–1.04 | 1.5 s / never | 0.051–0.082° | 0.057–0.062° (0.04) |
+| H3 | 0.6° 4 Hz | 0.87–1.15 | 1.4 s / never | 0.065–0.091° | 0.033–0.034° (0.016) |
+| H4 | 0.6° 8 Hz | 0.83–1.15 | 1.4 s / never | 0.075–0.098° | 0.027–0.031° (0.008) |
+| T | 0.6° 4 Hz, 3 s off, back on | 0.97 / 0.08 / 1.17 | step after pause 1.28 s | 0.083° | — |
+
+- **8 Hz / 0.6° still keeps the axis obeyed.** The wobble shrinks with frequency as predicted, down
+  to a floor of ~0.03° p-p, which is the loop's own correction motion rather than the dither.
+- **Terminal pause survived this time:** after 3 s without dither, the next step landed (1.28 s).
+- **The limit now is the loop, not DCS: a steady error of 0.06–0.10°**, every "settle never" being a
+  0.500 target (approached against the heading drift). Cause: proportional gain 3 with the 0.18°
+  command deadzone leaves a 0.06° band the loop cannot correct, plus heading drift on one side. The
+  ATGM requirement is ±0.02°, so the loop needs an integral term or deadzone compensation. This is
+  design work for BL-B80, not a DCS unknown.
+- Unverified: the mark's scale (0.039/°) and the exact boresight value are approximate; ATGM-grade
+  pointing will need them calibrated (e.g. against lamp 962 and a known target).
