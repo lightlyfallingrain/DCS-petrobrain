@@ -334,6 +334,23 @@ probe, outside the batch. Stage 5 is its own batch if built.
 
 ### Decisions Requiring User Input
 
+> **ANSWERED 2026-10-22 (pilot), verbatim — these override the recommendations below:**
+> 1. *"actual position. This same question was discussed and explored earlier, search for it.
+>    Crux: Petrovich can \*see\* the target and point sight at it even if belief about world
+>    location is incorrect."* — The earlier exploration is
+>    `docs/acceptance/2026-10-15-9k113-sight-direction.md` §2–§3: *"The 9K113 itself is very
+>    precise on where it is pointing"*; belief about *where the target is in the world* is built
+>    by cross-reference (coarse azimuth + the view + landmarks). So **while Petrovich has the
+>    target resolved in the sight, the sight aims at the target's actual position** (the
+>    associated object's true direction); belief's world location stays as imprecise as it is.
+>    This is a sanctioned channel in the plan, scoped to sight aim only — it must not feed the
+>    belief's position estimate. In scope for BL-B80 (not deferred to BL-B67).
+> 2. *"only on change"* — "Guidance unit ready" spoken only on an observed 960 off→on edge.
+> 3. *"nothing new"* — nothing spoken for alignment or stalls; both logged.
+> 4–5. Not answered; the recommendations stand (intent elevation checks unchanged; Stage 5 only if
+>    Flight B misses ±0.02°).
+
+
 1. **Where does the terminal-phase ATGM aim come from?** The servo can put the mark within 0.02°
    of a direction; belief cannot supply a direction that good. A real operator holds the crosshair
    on the hull through ×10 optics — which, for Petrovich, means letting the *associated object's*

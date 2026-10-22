@@ -194,3 +194,12 @@ dither changes the value every frame and was obeyed 29/29. **Consequence if true
 not need to be physical — a per-frame change far below the 0.003-unit deadzone (e.g. ±1e-5 on the
 value) would keep the axis obeyed with **no visible wobble**, which removes the dither error from the
 ATGM precision budget. Testable in probe run 11.
+
+### Plan v2 open questions answered (2026-10-22), verbatim
+
+1. Terminal ATGM aim: *"actual position. This same question was discussed and explored earlier,
+   search for it. Crux: Petrovich can \*see\* the target and point sight at it even if belief about
+   world location is incorrect."* (earlier: `docs/acceptance/2026-10-15-9k113-sight-direction.md`
+   §2–§3).
+2. "Guidance unit ready" on air starts: *"only on change"*.
+3. Alignment / stall speech: *"nothing new"*.
