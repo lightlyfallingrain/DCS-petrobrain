@@ -23,6 +23,26 @@ Nothing else of ours needs to run.
   AI-off detector timing. The first press is also bracketed by an all-arg diff, with 874 as known
   truth: it lists every arg that moves with the head, to cross-read against Part A.
 
+## How the sight stabilises — user, 2026-10-22, verbatim
+
+> *"the sight does not hold a fixed ground point. I may have expressed it imprecisely. It holds the
+> last set pointing direction in world coordinate angles, within gimbal limits of course. So in
+> practice, the gyro stabilized sight operates in world coordinate axis and keeps it direction. The
+> gimbal limits from the airframe coordinate axis of course limit the sight position. From this
+> follows: sight does not track a point on ground, but it keeps its world axis relative angles
+> steady when the airframe axis rotates. When aircraft moves, so does the point-on-ground where the
+> sight is looking. The slew axis commands, I'm not perfectly sure, but I think they are relative to
+> current sight gyro stabilised angles."*
+
+So two frames, and the probe tells them apart with turns:
+
+| | airframe frame (gimbal) | world frame (gyro) |
+|---|---|---|
+| what holds steady | — | the sight's world direction (his AI off, no input) |
+| what limits it | ±60° az, +20/−15° el gimbal stops | — |
+| 874/876, if a true gimbal readback | changes by −Δheading during a turn | — |
+| AI axis (3061/3060), unknown | 874 stays on the commanded value, mark swings with the nose | 874 drifts by the turn, mark keeps its world direction |
+
 ## Setup (Windows)
 
 1. Back up `Saved Games\DCS\Scripts\Export.lua`, then copy the probe over it.
@@ -43,9 +63,9 @@ Nothing else of ours needs to run.
 | 0:45–0:50 | player az 0 | stays or returns? |
 | 0:50–1:00 | player elev **+0.5** (sign-inverted, so probably **down**) | moves up or down? |
 | 1:00–1:05 | player elev 0 | stays or returns? |
-| 1:05–1:20 | player axis 0 | **TURN: make a gentle ~30° turn, then level.** Does the mark stay on the ground point (gyro hold) or swing with the nose? |
+| 1:05–1:20 | player axis 0 | **TURN 1: gentle ~30° turn, then level.** Expect the mark to keep its world direction (gyro). The log shows whether 874 moves with it — if it stays 0, 874 is no readback with his AI off. |
 | 1:22 | **probe presses ShowMenu** (his AI on), AI target 20° left | does anything show on screen? mark should go 20° left |
-| 1:42–2:42 | holds 20° left; straight and level again | **close the overlay by hand (your AI-menu key) about 3 times, ~15 s apart** — e.g. at 1:50, 2:05, 2:20. The probe should reopen it each time. |
+| 1:42–2:42 | holds 20° left; straight and level again | **close the overlay by hand (your AI-menu key) about 3 times, ~15 s apart** — e.g. at 1:50, 2:05, 2:20. The probe should reopen it each time. **After the third, at ~2:25: TURN 2, gentle ~30° turn to the RIGHT, then level.** Does the mark stay 20° left of the nose (AI axis is airframe-relative) or keep its world direction (world-relative)? The probe stops pressing after 3 recoveries, so the turn cannot trigger one. |
 | ~2:45 | centres everything, done | his AI is probably still on; turn it off if you like |
 
 If his AI is already on at 1:07 the probe does **not** press, so it doesn't turn it off.
@@ -54,7 +74,8 @@ If his AI is already on at 1:07 the probe does **not** press, so it doesn't turn
 
 - **Part A, per step: did the mark move, which way, how far, and did it hold or return at the 0
   steps?** "Nothing" is a full answer.
-- TURN window: did the mark hold the ground point or follow the nose?
+- TURN 1 (his AI off): did the mark keep its world direction or follow the nose?
+- TURN 2 (AI axis holding 20° L): did the mark stay 20° left of the nose, or keep its world direction?
 - Part B–C: did a ShowMenu press show anything visible (wheel, text, sound)? Did the mark jump back
   to 20° left after each time you closed the overlay?
 - `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_ai_latency.log`.

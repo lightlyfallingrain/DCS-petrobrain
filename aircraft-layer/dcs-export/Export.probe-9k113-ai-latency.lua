@@ -88,9 +88,9 @@ local PART_A = {
     { CMD_PLAYER_AZ,   0.0,  5.0, "player az 0" },
     { CMD_PLAYER_ELEV, 0.5, 10.0, "player elev +0.5 (DOWN? sign-inverted)" },
     { CMD_PLAYER_ELEV, 0.0,  5.0, "player elev 0" },
-    -- Flown in the air: the gyro holds the line of sight while the airframe turns. Does 874
+    -- Flown in the air: the gyro holds the sight's world direction while the airframe turns. Does 874
     -- (airframe-relative?) change during a turn with his AI off? Heading is in every row.
-    { CMD_PLAYER_AZ,   0.0, 15.0, "TURN: pilot makes a gentle ~30 deg turn, axis 0" },
+    { CMD_PLAYER_AZ,   0.0, 15.0, "TURN 1: pilot makes a gentle ~30 deg turn, axis 0" },
 }
 
 -- Part B/C: AI-axis target, 20 deg left, re-asserted every frame.
