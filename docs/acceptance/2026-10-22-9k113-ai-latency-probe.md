@@ -804,3 +804,26 @@ drift (+0.07°/s) explains, and stayed clipped there. 874 echoed +2.5 throughout
 toggle mattered only in some state this run never reached. The one firm thing left: whether the AI
 axis is obeyed is decided by state the probe can neither see (no arg tracks it) nor change (no
 command tried restores it), and it can be off for ≥100 s.
+
+## Run 9 — Petrovich's wheel state, dither, overlay cheat
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-wheel.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_wheel.log`. Video welcome.
+
+Setup as run 8 (overlay OFF at start, pilot seat, no 9K113 view, no operator axes bound, hands off).
+
+- **Wheel state:** `list_indication(10)` (ED Petrovich's AI wheel: OBSERV. OFF / WAITING /
+  SEARCHING / TRACKING) logged on every change; every stall line carries it. Tests the prior-art
+  note's hypothesis that ED's Petrovich AI is a second writer to the sight.
+- Per step, a **response ratio**: path the mark moved / path the commands asked for.
+
+| T+ | block | trick |
+|---|---|---|
+| 0:20 | settle at boresight | — |
+| 0:26–0:56 | **O**, 5 targets ±2° | none (baseline) |
+| 0:56–1:38 | **W**, 7 targets | **dither** (pilot's idea): a small circle added to the command, 1.5° az / 0.03 el, 1 s period — the command never rests |
+| 1:38–2:08 | **V**, 5 targets | **overlay cheat**: on a stall, open DCS Petrovich's AI overlay, close it 1.5 s later |
+| 2:08–2:17 | back to boresight, stop | |
+
+What the pilot sees: the mark sweeping ±2°; in W it also wobbles in a small circle; in V the AI
+overlay may flash open and shut.
