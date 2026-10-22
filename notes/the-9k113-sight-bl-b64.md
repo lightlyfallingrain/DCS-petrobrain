@@ -142,3 +142,28 @@
   untested-for. The general shape: a field two code paths share (one that owns writing it, several
   that read it generically) must be gated at the read site on which path currently applies, not
   assumed clear just because the writer's own caller thinks it is between uses.
+- **DCS's AI axis (the 9K113's own guidance-unit servo) only obeys a `SetCommand` write whose
+  value differs from the previous frame's — a per-frame constant value, however correct, is
+  silently ignored after the first frame.** Eleven probe runs on `BL-B80` chased "intermittent
+  obedience" under several hypotheses (timing, device index, command id) before the pilot's own
+  hypothesis — "DCS acts on an axis only when its value changes" — was tested directly and
+  confirmed (flicker 18/18 steps obeyed, constant 3/10). A tiny invisible per-frame dither
+  (0.6°/8 Hz here) or flicker (±1e-5…1e-3 unit) written on top of the real setpoint keeps the axis
+  "live" without a visible effect, and this reclassified a whole prior plan's "intermittent
+  obedience" defect as expected behaviour of an edge-triggered axis, not a bug to chase further.
+  Worth checking for on any DCS-cockpit axis that appears to only sometimes take a commanded value:
+  try a dithered/changing write before assuming a timing or addressing problem.
+- **A position-model premise built and reviewed can still be wrong in a way invisible to any of
+  its own unit tests, because the axis it reasoned about behaves like a different control
+  primitive than assumed.** `BL-B80`'s v1 plan modelled the 9K113 axis as a *position* target
+  (874/876 as a position readback, the AI overlay required on) — internally consistent, reviewed,
+  security-approved, fully unit-tested — and was overturned wholesale by live probe runs 1–10 once
+  flown: the axis is rate/edge-driven, 874/876 echo the *demand* not a position, and the AI overlay
+  is not required at all. Nothing in the v1 test suite could have caught this, because every test
+  exercised the model's own internals against its own assumptions; only flying the probe against
+  the real DCS axis surfaced the mismatch. The whole mechanism (`ShowMenu`, `ai_believed_on`,
+  `GYRO_ALIGNMENT_S`, the elevation-conversion functions above) was removed rather than patched.
+  When a plan's physical/control-loop model of a DCS system has never been checked against a live
+  probe, treat "passes review and all its own tests" as necessary, not sufficient — the probe is
+  what the architecture actually depends on, and it belongs before the model is built on, not
+  after.

@@ -10,37 +10,77 @@
   carried the correction — fixed here by the 2026-10-22 DoD pass on Stages 1-3.
 
   **Re-planned 2026-10-22: `plans/9k113-sight-pointing/plan.md` (v2 — simulated sight is
-  Petrovich's sight, DCS sight slaved to it). The status block below describes the v1 build
-  (`plan-v1-position-model.md`); its Stage 4 sortie is not to be flown.**
+  Petrovich's sight, DCS sight slaved to it). The "Status, 2026-10-22 — Stages 1-3" block that
+  used to sit here described the v1 build (`plan-v1-position-model.md`), which this re-plan
+  overturned wholesale (run 11, below); its Stage 4 sortie card is superseded and not to be flown.
+  See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
+  have caught this — only the live probe could.**
 
-  ## Status, 2026-10-22 — Stages 1-3 built, Stage 4 (live sortie) outstanding
+  ## Status, 2026-10-22 — v2 Stages 1-4 (with 3b) built and reviewed; Stage 0/4 flights outstanding
 
-  `feature/9k113-sight-pointing` (tip `8b2967008f7654f41be52d2779cc430c5605c32d`) implements the
-  elevation calibration + carried-forward `home_phase` fix (Stage 1), the Export.lua per-frame
-  sight owner + `sight_target` wire op + AI-on/off detector (Stage 2), and the body-layer
-  write-through + readback-preferring `advance_sight_aim` (Stage 3) — `plans/9k113-sight-pointing/
-  plan.md`. DoD passed all mechanical checks (ruff/mypy --strict/pytest clean both subprojects,
-  `luac5.1 -p` clean) and confirmed both Reviewer required-fix rounds and all Security/Performance
-  verdicts are APPROVED. **Not yet merged to `main`** — Stage 4, the live sortie, has not flown.
-  Acceptance card: `docs/acceptance/2026-10-22-bl-b80-sight-pointing-sortie.md` (published artifact
-  linked from DoD's report). **Not tagged `#needs-flight`** — that tag is for a shipped, merged
-  change awaiting its sortie (`docs/TAGS.md`); this entry has not merged yet, so `#status/
-  in-progress` ([~]) is the correct state. Add `#needs-flight` only if this ever merges before
-  Stage 4 flies.
+  `feature/9k113-sight-pointing` (tip `e009465eba841a1a320ac02740dbbd1133221b96`) implements the
+  v2 design — Petrovich's simulated 9K113 sight (`belief/sight_head.py`: gyro world-stabilised,
+  gimbal-limited, slew-rate-limited) drives perception directly, and the real DCS sight is a
+  best-effort slave of it via a reshaped `sight_target` wire op and a proportional (Kp-only)
+  `run_sight_servo` loop in `Export.lua`, with an always-on per-frame dither to keep the AI axis
+  obeyed (run 11's finding). "Seen aim" (Stage 3b, `attack_run.seen_world_direction` /
+  `select_sight_goal`) lets the sight aim at the resolved target's true direction while belief's
+  world-location estimate stays exactly as imprecise as before — the pilot's own answer to
+  Decision 1, a sanctioned second consumer of `Percept.relative_direction` alongside attack-run
+  alignment, fenced by `test_sight_head.py` and an `F4` differential no-leak test.
 
-  **What Stage 4 must still verify, not yet checked by anything automated:**
-  - The derived (not measured) elevation degree&harr;raw conversion, at the two mechanical stops
-    (+20&deg;/&minus;15&deg;).
-  - The gyro-alignment window (no spurious `ShowMenu`, no sight reports, for ~10s after OBSERV
-    on).
-  - No spurious `ShowMenu` in ordinary flight.
-  - `home_phase` following DCS's own automatic OBSERV-off, not only the spoken command.
-  - The overlay reopening after the pilot closes it by hand.
+  DoD (2026-10-22, this pass) re-ran every mechanical check fresh in an isolated worktree:
+  `ruff format --check` / `ruff check` / `mypy --strict` clean on both aircraft-layer (27 files)
+  and body-layer (71 files); `aircraft-layer` pytest 533 passed; `body-layer` pytest 2443 passed,
+  4 xfailed (one order-dependent flake under randomized test order,
+  `test_connection_reporter_announces_the_first_connection`, confirmed pre-existing — introduced
+  by `a5def59e`, outside this branch's diff — and not reproducible with ordering disabled; not a
+  blocker, worth a `caplog`-isolation fix sometime, not gating this entry); `luac5.1 -p` clean on
+  `Export.lua` and the new calibration probe; the `GETGLOBAL` scan lists only genuine DCS/stdlib
+  globals. Both Reviewer required-fix rounds (`review.md`, NEEDS REVISION → three fixes → APPROVED)
+  and Security's plan review, deep analysis, and Performance review are all APPROVED (Performance:
+  MONITOR on two already-accepted patterns, not a blocker). Full detail:
+  `plans/9k113-sight-pointing/dod-check.md`.
 
-  **This blocks `[[BL-B67]]` (the ATGM run)**, which needs a trustworthy pointing channel and the
-  verified elevation calibration as its guidance-accuracy baseline — per the plan's own
-  "Second-order effect" section, a Stage 4 correction to the elevation formula must land here
-  before `BL-B67` is planned, not after.
+  **Not yet merged to `main`.** Two live flights are outstanding, neither of which this DoD pass
+  can perform:
+  - **Flight A (Stage 0, the calibration probe)** — mark scale, boresight, 555's elevation clip
+    edges, the world-frame azimuth-loop steady error, and the AI-rate frame in a turn. **Also
+    carries the 960-cold-start READY-lamp check, which the plan itself states must happen "before
+    any merge"** (`plan.md`, Risks: "960 on a cold start is unconfirmed... refuses OBSERV for the
+    whole sortie") — if 960 never lights, Petrovich cannot use OBSERV at all, which is a
+    correctness blocker on the whole feature, not an ordinary deferred acceptance item. Card
+    (published): https://claude.ai/artifact/YAfTTDn8XbeinrPjUAyovf (source
+    `docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`).
+  - **Flight B (Stage 4)** — the simulated head holding a world direction through a turn, the mark
+    settling on the servo, the seen-aim rows (mark sits on the real vehicle, belief stays off),
+    and the acceptance-boundary items below. Card not yet written — follows Flight A's numbers
+    (Stage 0's calibration constants feed Stage 4's servo).
+
+  **Per root `CLAUDE.md`'s standing direction, live acceptance does not gate other work starting**
+  — but per the plan's own words above, Flight A's cold-start half specifically gates *this merge*,
+  which is a plan-stated condition, not this DoD pass inventing one. Not tagged `#needs-flight`:
+  that tag is for a shipped, merged change awaiting its sortie (`docs/TAGS.md`); this entry has not
+  merged, so `#status/in-progress` ([~]) stays correct. Add `#needs-flight` only if a future
+  decision merges this ahead of Flight A/B (would need the 960 risk separately accepted).
+
+  **What Stage 4/Flight B must still verify, not yet checked by anything automated** — this
+  batch's own acceptance boundary, stated so a fixture pass is never read as a flight pass:
+  - Whether the real DCS 9K113 actually holds the simulated world direction through a turn at the
+    numbers Flight A/B predict, not just that the Python/Lua math agrees with itself.
+  - Whether the seen-aim mark visibly sits on the real vehicle hull (not its base) at the ranges
+    Flight B exercises — the vertical-offset risk the plan names.
+  - Whether belief's position estimate genuinely stays unaffected by a held seen-aim look, in a
+    real flight rather than the differential fixture test (F4) that proves the mechanism, not the
+    live behaviour.
+  - Whether a hard manoeuvre's real DCS auto-OBSERV-off is followed correctly by `home_phase` and
+    the head going `off`, not only the commanded path.
+  - Whether the intermittent-obedience risk (suppressed by dither in probe runs, not explained)
+    ever resurfaces in ordinary flight outside the field, where nothing can see it.
+
+  **This blocks `[[BL-B67]]` (the ATGM run)**, which needs a trustworthy pointing channel as its
+  guidance-accuracy baseline — per the plan's own "Second-order effect" section, Flight A/B's
+  numbers (and any correction they force) must land here before `BL-B67` is planned, not after.
 
   > **SUPERSEDED AGAIN 2026-10-22 — read this block first; both blocks below predate it.**
   > Probe runs 1–10 (`docs/acceptance/2026-10-22-9k113-ai-latency-probe.md`, merged to `main` as
