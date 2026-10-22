@@ -203,3 +203,6 @@ ATGM precision budget. Testable in probe run 11.
    §2–§3).
 2. "Guidance unit ready" on air starts: *"only on change"*.
 3. Alignment / stall speech: *"nothing new"*.
+4. Where DCS puts a ground vehicle's position point (plan Decision 6): *"no idea. let's assume on
+   ground"* — seen aim raised by half a nominal vehicle height (`SEEN_AIM_HEIGHT_OFFSET_M`, 1.2 m);
+   Flight B checks the mark sits on the hull.

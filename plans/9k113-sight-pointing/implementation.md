@@ -1,3 +1,40 @@
+# BL-B80 v2 — implementation record
+
+## Status 2026-10-22: Stages 1–4 (with 3b) built, unreviewed; Stage 0 pending
+
+Built against `plan.md` v2 (tip `1c433fc6`). The implementing agent's session was **terminated
+early by an automated content check** before it committed anything or wrote this file; its
+uncommitted work was preserved by the main loop as one WIP commit, **`e16e31e2`**, then the branch
+was merged with `main` (`90cf2ec0`). Checks on the WIP, run by the main loop:
+
+| subproject | ruff | mypy --strict | pytest |
+|---|---|---|---|
+| aircraft-layer | clean | clean (27 files) | 527 passed |
+| body-layer | clean | clean (71 files) | 2431 passed, 4 xfailed |
+
+Lua: `luac5.1 -p` clean on every `dcs-export/*.lua`.
+
+**Deviations from the plan and the project rules, all caused by the early stop:**
+
+- **One commit for all stages**, not one per stage; the removal-only Stage 1 commit does not exist
+  as a separate commit.
+- **Mechanism and calibration share that commit** (`SEEN_AIM_HEIGHT_OFFSET_M` = 1.2 m, pilot's
+  2026-10-22 answer *"let's assume on ground"*, lands with the seen-aim mechanism).
+- **Stage 0 (calibration probe, Flight A) was not built.**
+- No per-stage notes from the implementer; what was built has to be read from the diff.
+
+Present in the WIP (by search, to be confirmed by review): `belief/sight_head.py` (+ tests),
+`attack_run.seen_world_direction`, `select_sight_goal`, `SEEN_AIM_HOLD_S`, `SEEN_AIM_HEIGHT_OFFSET_M`,
+the F2/F3 fences and the F4 differential no-leak test (`tests/test_logger.py`), lamps 898/960/962 on
+the cockpit-switch feed, the `sight_servo` schema/cache/endpoint (+ API and luajit tests),
+`SERVO_WOBBLE` in `Export.lua`, `t_sim` validation, the `body-layer/CLAUDE.md` invariant edit, and
+regenerated `config/defaults.toml`. `ShowMenu`/`ai_believed_on` are gone; `GYRO_ALIGNMENT_S` survives
+only in a docstring.
+
+---
+
+## v1 (superseded — position-command model)
+
 ### Implementation Summary
 
 BL-B80 Stages 1–3 of `plans/9k113-sight-pointing/plan.md` (Stage 4 is the live sortie, not
