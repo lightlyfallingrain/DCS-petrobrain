@@ -370,3 +370,29 @@ S11 and S12 **did** record it (the probe was still running until video 3:14).
   566, 556 and 882. A full-range index would have to end each step where it started to be missed.
 - Remaining places a full-range readback could live: args above 3000, or the 9K113 sight's
   `list_indication` text (the reticle's 0/1/3/6 scale may be drawn as an indication, not an arg).
+
+## Run 5 — device methods, mark scales, rate law
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-methods.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_methods.log`. Video welcome (file timestamp).
+
+**Questions:** (E) does the 9K113 device object expose any native getter to Lua — `get_LandPoint`
+above all? (S1/S2) the ASP-17 mark's degree scale in azimuth (565) and elevation (555), from the
+gyro world hold during small heading and pitch changes; (S3–S14) the AI-axis rate law, azimuth and
+elevation, in short pulses that keep the mark on the glass.
+
+Setup: air start, guidance unit warm, autopilot, heading steady, **overlay OFF**. OBSERV on from the
+copilot seat = T+0, then to the pilot seat. Nothing in this script touches a switch or ShowMenu.
+
+| T+ | probe | you |
+|---|---|---|
+| 0:20 | lists device methods (instant, one log burst) | — |
+| 0:20–0:30 | axis 0 | **HDG: gentle ~5° heading change right, then back.** |
+| 0:30–0:40 | axis 0 | **PITCH: gentle ~3° nose up, then back.** |
+| 0:40–1:02 | AI az pulses: 2.5° L, 0, 2.5° R, 0, 4° L, 0, 4° R, 0 | watch: small steps, mark stays on the glass? |
+| 1:02–1:12 | AI elev pulses: +0.1, 0, −0.1, 0 | mark moves up / down? which way first? |
+| 1:12–1:17 | writes stop | — |
+| 1:17 | done | |
+
+Bring back: the log (and video); whether the mark stayed on the glass; which way the elevation
+pulse moved it first.
