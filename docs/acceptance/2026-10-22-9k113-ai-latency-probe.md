@@ -598,3 +598,36 @@ opposite-seat rule (Petrovich only works the seat the player is not in), and acc
 behaviour. That fits T+20–41 directly (874 = 0). For T+74–80 it is the likeliest explanation, but
 not proven by the log: 874 kept echoing +2.5 there. Run 6 is flown from the pilot seat throughout,
 so a hold that still appears there is a real gate.
+
+## Run 6 results (`logs/2026-10-22/aircraft_layer_probe_9k113_slew_gate.log`)
+
+Flown with the run-6 script **before** the lamp logger was added: rows carry 957–962, not 898 or
+L1–L14. OBSERV on at t=30.508 = T+0. AI L → 565 down, R → 565 up; a moving 2.5° pulse gives
+≈0.11–0.16 per 4 s (0.83°/s), as before.
+
+- **Alignment ≈ 13 s.** 565 stays at 0.5001 while heading moves 341.8→338.1 (caged to the
+  airframe), then from T+13–15 follows heading (world-held).
+- **Lamps:** 960 READY is lit from mission start, so it is not the alignment lamp. 962 is lit for
+  565 ≈ 0.473–0.530, i.e. about ±0.7° around 0.50, and at rest before OBSERV.
+- **Stick park toggle:** no visible effect of its own.
+
+| T+ | 962 lamp | AI axis |
+|---|---|---|
+| 20.7–24.7 | lit (sitting near boresight, axis 0) | — |
+| 24–38 | off | **2.5° L and R ignored**; mark only follows heading (world-held) |
+| 38–64 | lit 48.3–53.0 (sitting, axis 0); toggle #1 at 52.5 | every pulse moves |
+| 64.5–66.0 | lit (passing through under command) | — |
+| 72–76 | off | **2.5° L ignored**; toggle #2 at 69 |
+| 87.1 | | 10° L for 0.5 s **moves** (≈1.7°), lamp lit 87.1–87.6 passing boresight |
+| 90–99 | off | **elev −0.1 and 2.5° R ignored** (mark change = heading +2.7° alone) |
+
+Reading, not yet proven: **after the sight leaves the boresight zone (962 goes off), the AI axis
+is ignored for roughly 10–14 s**, the same length as the alignment after OBSERV on. Three of the four
+lamp-off edges are followed by such a hold. The fourth (T+53.0) is not, and it came 0.5 s after
+stick park toggle #1. Whether the 10° pulse at T+87 broke through a hold or came after one had
+timed out (21 s after T+66) cannot be told. The pilot did not fly the HDG step (heading constant),
+so caged vs world-held during a hold is answered only for the first one (world-held).
+
+Hypothesis for the next run: entering the boresight zone re-cages the sight, and leaving it
+starts an uncage plus a realignment delay. The Л5 "ROLL SYNC TR UNCAGE" lamp would show that
+directly.
