@@ -566,3 +566,24 @@ re-lock seen in 5b did not appear. 5b's re-lock came after a return to boresight
 So alignment completion has its own lamp on the guidance unit (Л5, "ROLL SYNC TR UNCAGE"), and the
 probe can log it rather than infer alignment from the first movement. Its arg number is not yet
 known (not in 957–962); to be looked up on the DCS machine and added to run 6's `WATCH_ARGS`.
+
+### Pilot's alternating run: log (`logs/2026-10-22/aircraft_layer_probe_9k113_methods_c_pilot_alternating.log`)
+
+Second session in the file, OBSERV on at t=38.725 = T+0. The pilot's script is not in the repo:
+its log shows STEP 2/2 "AI az 2.5 R" repeating, 874 echoing +2.5 nearly throughout, yet the mark
+swings both ways. So the direction actually sent cannot be read from this log alone.
+
+| T+ | what the args show | explained by |
+|---|---|---|
+| 0–10 | 565 fixed at 0.5002, 555 settles to 0.833 | **caged during alignment, ~10 s** — matches the pilot's ~10 s |
+| 10–20 | 565 drifts −0.004/s while heading drifts +0.1°/s, 874 = 0 | gyro free: world-held direction, the nose turning under it |
+| 20–41 | 874 = **0** although the script writes; mark only drifts with heading | the writes are not landing. Unlike every earlier "ignored" phase, where 874 echoed the demand |
+| 41– | 874 = 2.5, mark moves at ~0.8°/s | normal |
+| 74.3–80.2 | mark **stops dead at 0.527** with 874 = +2.5, lamp 962 lit, OBSERV on throughout; resumes after **6.0 s** | **unexplained** — the 5b re-lock, reproduced |
+| 183.4 | OBSERV (886) **off for ~1 s**, then on; mark snaps to boresight, held ~10 s | re-cage + realignment |
+| 266 | OBSERV **off ~4 s** during a hard manoeuvre (hdg 340→004→340, pitch +5/−5); held ~12 s | re-cage + realignment |
+
+So two of the three stalls are OBSERV cycling followed by the ~10 s realignment, and the first
+gap is the alignment itself. **The one stall that is still unexplained is a sight that passes
+through boresight, is caught there, and holds for about 6 s under a live command.** Run 6 now
+logs every lamp change per frame, which will show whether a lamp marks that hold.
