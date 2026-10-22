@@ -642,3 +642,7 @@ During a hold the mark does not snap to boresight; it stays world-held (hold 1).
 axis being ignored, not a re-cage. Next run: measure the hold's length directly (release near
 boresight, then probe with a 2.5° pulse every few seconds), test the toggle as a release on its
 own, and log Л5 (898 and L1–L14) per frame.
+
+Pilot, verbatim, on run 6: *"sight correctly world held at turns"* — so during the holds too the
+sight keeps its world direction through turns (consistent with hold 1 in the log): the hold drops
+AI-axis commands, it does not cage the sight.
