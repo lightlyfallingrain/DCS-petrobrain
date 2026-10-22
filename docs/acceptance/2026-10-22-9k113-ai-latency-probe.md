@@ -118,3 +118,44 @@ pressed a button to do it"*.
 the AI axis was only ever written **once per step**, never per frame. Per-frame writes were only
 ever tried with his AI on. This run is the first per-frame AI-axis hold with the overlay off, and
 it worked. One confound remains: Part A's player-axis writes came first.
+
+### Pilot answers, verbatim
+
+1. Overlay: *"off until I pressed to open it at about T+2min"*. So Part B's −20° hold (from
+   T+1:20) ran with the overlay **off**.
+2. Did the mark go to 20° left: *"could not tell. part A put elevation down beyond what the ASP-17
+   can show in HUD."*
+3. *"Elevation slew did move, so it works. If you rewrite the probe so that elevation change is
+   removed, I can fly again."* → run 2: azimuth only, AI axis first (no player-axis writes before
+   it), no ShowMenu presses at all.
+
+## Run 2 — AI axis with the overlay off, azimuth only
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-ai-axis-off.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_ai_axis_off.log`. No flag needed.
+
+**Questions:** (1) does the AI axis point the sight, by eye, with the overlay off and no
+player-axis writes before it? (2) does 874 then report the head, or echo the command?
+(3) airframe- or world-relative (TURN 2)? (4) does the gyro keep the world direction after
+player slew, and do 565/566 follow (TURN 1)? No elevation, no ShowMenu presses.
+
+Setup: air start, guidance unit warm, autopilot, straight and level except in the TURN windows.
+**Overlay OFF the whole flight — do not touch it.** OBSERV on from the copilot seat = T+0, then to
+the pilot seat.
+
+| T+ | probe | you |
+|---|---|---|
+| 0:20–0:30 | AI axis 10° **left**, every frame | mark goes ~10° left? |
+| 0:30–0:40 | AI axis 10° **right** | mark goes ~10° right? |
+| 0:40–0:45 | AI axis 10° left | settle |
+| 0:45–1:05 | AI axis holds 10° left | **TURN 2: gentle ~30° right turn, then level.** Mark stays 10° left of the nose, or keeps its world direction? |
+| 1:05–1:15 | stops writing | sight stays, or moves somewhere? |
+| 1:15–1:16 | player axis +0.3 pulse | moves right? |
+| 1:16–1:25 | player axis 0 | holds? |
+| 1:25–1:27 | player axis −0.3, twice as long | moves left past where it started? |
+| 1:27–1:35 | player axis 0 | holds? |
+| 1:35–1:55 | player axis 0 | **TURN 1: gentle ~30° left turn, then level.** Mark keeps its world direction, or follows the nose? |
+| 1:55 | centre written once, done | |
+
+Bring back: per row, did the mark move, which way, roughly how far; TURN 2 and TURN 1 answers;
+the log.
