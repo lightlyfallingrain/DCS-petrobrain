@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 import urllib.error
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -32,6 +32,7 @@ from support.mock_aircraft_layer import MockAircraftLayerServer
 
 import logger as logger_module
 from aircraft_client import AircraftLayerError
+from belief.attack_run import AttackRunState
 from belief.attention import AttentionArea
 from belief.audio_client import AudioAdapterError
 from belief.console import Console
@@ -72,6 +73,8 @@ from logger import (
     format_observation_line,
     main,
 )
+from mission_memory.admission import FiredOnTracker
+from mission_memory.store import MissionMemory
 from perception import association
 from perception.forest import ForestOcclusion
 from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
@@ -3170,20 +3173,130 @@ def test_run_once_caps_a_sight_tier_optic_until_the_head_is_free(
     assert runner.optic_state.actual_aim_elevation_deg == pytest.approx(-3.0)
 
 
+@dataclass
+class _F4Run:
+    """One F4 scenario run's every observable sink, captured for diffing."""
+
+    runner: ConsolePerceptionRunner
+    #: `aim_source` after each poll -- the one thing F4 permits to differ.
+    aim_sources: list[str]
+    #: The head's world goal (az, el) after each poll -- also permitted to
+    #: differ.
+    goals: list[tuple[float | None, float | None]]
+    #: Every line he spoke: command readbacks plus everything the poll's
+    #: drains printed, in order.
+    utterances: list[str]
+    #: `MissionMemory.entries`, admission and commanded marks alike.
+    memory_entries: list[object]
+    #: Every `TOOL_SET` tool's result, by tool name, called after the polls.
+    tool_results: dict[str, object]
+
+
+def _f4_poll(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    memory: MissionMemory,
+    fired_on_tracker: FiredOnTracker,
+) -> None:
+    """One poll of `_run_crew_text_poll_loop`'s belief-to-speech sinks, in
+    that loop's own order, minus its cockpit writes (switches and the
+    sight-target goal, which F4 permits to differ) and thread plumbing:
+    `run_once` -> attack-run transition and guidance drain ->
+    `_mission_memory_step` -> `drain_events` -> pending positional replies.
+    Driven inline rather than through the threaded loop because a
+    differential test needs both runs to see exactly the same polls."""
+    runner.run_once()
+    assert runner.last_t_sim is not None and runner.theatre is not None
+    crew_console.enrichment = runner.enrichment
+    crew_console.on_ground = False
+    if crew_console.attack_run_transition == "engage":
+        runner.attack_run_state = AttackRunState()
+        crew_console.attack_run_transition = None
+    runner.attack_run_state = crew_console.drain_attack_run(
+        runner.attack_run_state,
+        runner.last_t_sim,
+        runner.last_ownship_state,
+        resolving_optic=runner.optic,
+    )
+    logger_module._mission_memory_step(
+        memory, runner, runner.last_t_sim, runner.theatre, None, fired_on_tracker
+    )
+    crew_console.drain_events(runner.last_t_sim)
+    crew_console.drain_pending_positional_replies(runner.last_t_sim)
+
+
+def _f4_tool_results(
+    runner: ConsolePerceptionRunner, memory: MissionMemory, now_sim: float
+) -> dict[str, object]:
+    """Calls every `TOOL_SET` tool once. Keyed by tool name and checked
+    against `TOOL_SET` itself, so a tool added later without a call here
+    fails the test rather than silently escaping the fence."""
+    from belief.tasks import PendingIntent
+    from belief.tool_api import TOOL_SET
+
+    tools = {spec.name: spec.fn for spec in TOOL_SET}
+    store, tasks = runner.store, runner.tasks
+    enrichment = runner.enrichment
+    ownship = runner.last_ownship_state
+    assert enrichment is not None and ownship is not None
+    cid = "CONTACT_1"
+    centre = GeoPosition(x=ownship.x, z=ownship.z, alt_m=0.0)
+    results: dict[str, object] = {}
+    # Read-only queries first, so the mutators below cannot shape them.
+    results["get_contacts"] = tools["get_contacts"](store, now_sim, None, enrichment)
+    results["describe_contact"] = tools["describe_contact"](
+        store, cid, now_sim, enrichment
+    )
+    results["get_contact_history"] = tools["get_contact_history"](store, memory, cid)
+    results["find_contact"] = tools["find_contact"](store, "BMP", now_sim, enrichment)
+    results["get_attention_state"] = tools["get_attention_state"](store, cid)
+    events = tools["poll_events"](store)
+    results["poll_events"] = events
+    results["find_place"] = tools["find_place"](enrichment, "a")
+    results["get_situation"] = tools["get_situation"](store, now_sim, enrichment)
+    results["describe_our_position"] = tools["describe_our_position"](enrichment)
+    results["recall_memory"] = tools["recall_memory"](memory, include_struck=True)
+    # Mutators: their results are what the brain would be told.
+    results["remember_location"] = tools["remember_location"](
+        memory,
+        ownship,
+        store,
+        now_sim,
+        anchor="target",
+        contact_id=cid,
+        theatre=runner.theatre,
+        enrichment=enrichment,
+    )
+    results["set_attention"] = tools["set_attention"](store, cid, "watch")
+    results["watch_area"] = tools["watch_area"](store, centre, 2000.0)
+    assert isinstance(events, list)
+    first_event_id = events[0]["id"] if events else "none"
+    results["acknowledge_event"] = tools["acknowledge_event"](store, first_event_id)
+    intent = tools["scan_area"](store, tasks, centre, 2000.0, "f4", now_sim)
+    results["scan_area"] = intent
+    assert isinstance(intent, PendingIntent)
+    task_id = intent.id
+    results["get_task_status"] = tools["get_task_status"](tasks, task_id)
+    results["cancel_task"] = tools["cancel_task"](store, tasks, task_id)
+    assert set(results) == set(tools), set(tools) ^ set(results)
+    return results
+
+
 def _f4_scenario(
-    monkeypatch: pytest.MonkeyPatch, *, leak_seen_aim: bool
-) -> tuple[ConsolePerceptionRunner, float]:
-    """Shared two-poll scenario for the F4 differential no-leak test
-    below: a contact is admitted with an exact `relative_direction` on
-    poll 1 (sight-tier, head free throughout), then looked at again on
-    poll 2 -- `aim_source` resolves to `seen` on poll 2 unless `leak_seen_
-    aim` is `False`, in which case `belief.sight_head.seen_world_
-    direction` is monkeypatched to always return `None` (the plan's own
-    differential construction). `decide_optic`'s desired body direction
-    (12.0, -3.0 deg) is deliberately offset from the seen direction (the
-    contact sits dead ahead, 0/0) -- belief's own systematic bias,
-    per the plan's F4 spec."""
-    import logger as logger_module
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, leak_seen_aim: bool
+) -> _F4Run:
+    """Shared scenario for the F4 differential no-leak test below: a
+    contact is admitted with an exact `relative_direction` on poll 1
+    (sight-tier, head free throughout), then looked at again on poll 2 --
+    `aim_source` resolves to `seen` on poll 2 unless `leak_seen_aim` is
+    `False`, in which case `belief.sight_head.seen_world_direction` is
+    monkeypatched to always return `None` (the plan's own differential
+    construction). Polls 3-4 carry the head through `held` while the
+    pilot's `mark_target`/`engage` commands give memory and speech
+    something to say about the contact. `decide_optic`'s desired body
+    direction (12.0, -3.0 deg) is deliberately offset from the seen
+    direction (the contact sits dead ahead, 0/0) -- belief's own
+    systematic bias, per the plan's F4 spec."""
     from belief.optic_policy import OpticDecision, OpticState
     from belief.sight_head import SightHead
 
@@ -3193,6 +3306,16 @@ def _f4_scenario(
         monkeypatch.setattr(
             sight_head_module, "seen_world_direction", lambda contact: None
         )
+
+    # `Entry.t_wall` is the one field two runs differ in regardless of the
+    # seen aim; pin it so the memory comparison is about content.
+    import types
+
+    import mission_memory.store as memory_store_module
+
+    monkeypatch.setattr(
+        memory_store_module, "time", types.SimpleNamespace(time=lambda: 0.0)
+    )
 
     telemetry = _console_telemetry_dict()
     telemetry["altitude_agl_m"] = 500.0
@@ -3206,14 +3329,30 @@ def _f4_scenario(
     )
     source = FakeSource([observation])
     aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    db_path = tmp_path / f"region-leak-{leak_seen_aim}.sqlite"
+    open_for_build(db_path).close()
+    world_model_conn = logger_module.open_world_model(db_path)
     runner = ConsolePerceptionRunner(
         aircraft_client=aircraft_client,  # type: ignore[arg-type]
         sources=[source],  # type: ignore[list-item]
+        world_model_conn=world_model_conn,
+        theatre="Syria",
     )
     runner.guidance_unit_state = GuidanceUnitState(
         observ_observed=True, align_observed=True
     )
     runner.sight_head = SightHead(mode="free", world_az_true_deg=0.0, world_el_deg=0.0)
+
+    memory = MissionMemory()
+    fired_on_tracker = FiredOnTracker()
+    crew_console = CrewConsole(
+        store=runner.store,
+        tasks=runner.tasks,
+        mark_here_fn=logger_module._mark_here_fn(memory, runner),
+        mark_target_fn=logger_module._mark_target_fn(memory, runner),
+    )
+    output = io.StringIO()
+    crew_console.output = output
 
     call_count = 0
 
@@ -3231,53 +3370,108 @@ def _f4_scenario(
 
     monkeypatch.setattr(logger_module, "decide_optic", fake_decide_optic)
 
-    runner.run_once()  # poll 1: admits the contact, stamps last_sight_look_sim
-    source._observations = []  # the look is not re-admitted by a new observation
-    sim_t += 1.0
-    telemetry["dcs_model_time_s"] = sim_t
-    runner.run_once()  # poll 2: looks at the now-existing contact
+    utterances: list[str] = []
+    aim_sources: list[str] = []
+    goals: list[tuple[float | None, float | None]] = []
+    armour: dict[str, int | str] = {"descriptor": "armor"}
+    commands_after_poll: dict[int, list[tuple[str, dict[str, int | str] | None]]] = {
+        1: [("select_target", armour)],
+        # After the seen poll, so both read belief while the head is seen.
+        2: [("mark_target", None), ("engage", None)],
+    }
+    for poll in range(1, 5):
+        _f4_poll(runner, crew_console, memory, fired_on_tracker)
+        aim_sources.append(runner.sight_head.aim_source)
+        goals.append(
+            (runner.sight_head.goal_world_az_deg, runner.sight_head.goal_world_el_deg)
+        )
+        if poll == 1:
+            # The look is not re-admitted by a new observation.
+            source._observations = []
+        for token, slots in commands_after_poll.get(poll, []):
+            utterances.extend(
+                crew_console.handle_command(token, now_sim=sim_t, slots=slots)
+            )
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
 
-    return runner, sim_t
+    utterances.extend(output.getvalue().splitlines())
+    memory_entries: list[object] = list(memory.entries)
+    tool_results = _f4_tool_results(runner, memory, sim_t - 1.0)
+    return _F4Run(
+        runner=runner,
+        aim_sources=aim_sources,
+        goals=goals,
+        utterances=utterances,
+        memory_entries=memory_entries,
+        tool_results=tool_results,
+    )
 
 
 class TestF4DifferentialNoLeak:
     """`[[BL-B80]]` v2's F4 fence (plan's "Where the true direction may
-    go, and where it may not" table): a differential run with `belief.
-    sight_head.seen_world_direction` monkeypatched to `None` must leave
-    `ContactStore` position estimates identical to the unpatched run --
-    only the head's own goal/aim may differ. Scoped to `ContactStore`
-    (the position-belief claim F4 names first); `MissionMemory`/
-    `TOOL_SET`/utterance identity rest on the structural fact that
-    `seen_world_direction`'s only consumer is `sight_head.py`
-    (fence F2/F3, `test_sight_head.py`), which neither `mission_memory/`
-    nor `belief/tools.py`/`crew_console.py`/`speech.py` import at all."""
+    go, and where it may not" table): the same scenario run twice, once
+    with `belief.sight_head.seen_world_direction` monkeypatched to `None`.
+    `ContactStore` positions, `MissionMemory` entries, every utterance and
+    every `TOOL_SET` result must be identical; only the head's own aim
+    source and goal may differ. A behavioural check of the value's reach,
+    independent of who imports what."""
 
     def test_contact_positions_are_identical_with_and_without_the_seen_aim(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        leaking_runner, _t = _f4_scenario(monkeypatch, leak_seen_aim=True)
-        not_leaking_runner, _t2 = _f4_scenario(monkeypatch, leak_seen_aim=False)
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
 
-        leaking_contacts = {c.id: c.position for c in leaking_runner.store.contacts}
+        leaking_contacts = {c.id: c.position for c in leaking.runner.store.contacts}
         not_leaking_contacts = {
-            c.id: c.position for c in not_leaking_runner.store.contacts
+            c.id: c.position for c in not_leaking.runner.store.contacts
         }
         assert leaking_contacts == not_leaking_contacts
         assert leaking_contacts, "the scenario admitted no contact at all"
 
+    def test_mission_memory_is_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        assert leaking.memory_entries == not_leaking.memory_entries
+        assert leaking.memory_entries, "the scenario wrote no memory entry at all"
+
+    def test_utterances_are_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        assert leaking.utterances == not_leaking.utterances
+        assert leaking.utterances, "the scenario spoke nothing at all"
+
+    def test_tool_set_results_are_identical_with_and_without_the_seen_aim(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
+
+        for name, result in leaking.tool_results.items():
+            assert result == not_leaking.tool_results[name], name
+        assert leaking.tool_results["describe_contact"] is not None
+
     def test_the_heads_own_aim_source_differs(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """The one thing F4 permits to differ -- proof the scenario
         actually exercises the seen path when it is not suppressed."""
-        leaking_runner, _t = _f4_scenario(monkeypatch, leak_seen_aim=True)
-        not_leaking_runner, _t2 = _f4_scenario(monkeypatch, leak_seen_aim=False)
+        leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=True)
+        not_leaking = _f4_scenario(monkeypatch, tmp_path, leak_seen_aim=False)
 
-        assert leaking_runner.sight_head.aim_source == "seen"
-        assert not_leaking_runner.sight_head.aim_source == "belief"
-        assert leaking_runner.sight_head.goal_world_az_deg != pytest.approx(
-            not_leaking_runner.sight_head.goal_world_az_deg
-        )
+        assert leaking.aim_sources[1] == "seen"
+        assert "seen" not in not_leaking.aim_sources
+        leaking_az = leaking.goals[1][0]
+        not_leaking_az = not_leaking.goals[1][0]
+        assert leaking_az is not None and not_leaking_az is not None
+        assert leaking_az != pytest.approx(not_leaking_az)
 
 
 # -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side
