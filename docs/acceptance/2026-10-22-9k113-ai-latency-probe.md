@@ -356,3 +356,17 @@ vector"*.
 - The pilot's hand slew to ±60° at the end of the video came after the probe had stopped logging,
   so no args were recorded for it. The red line in the 9K113 view is the controller deflection,
   not a position indicator.
+
+### The hand slew at video 2:55 onwards (correction to the line above)
+
+Pilot, verbatim: *"player slew video time 2:55 onwards"*. That is log t ≈ 172 → 192, so S10's tail,
+S11 and S12 **did** record it (the probe was still running until video 3:14).
+
+- **Only 566 and 556 move** during the hand slew (566 0.667 → 0.333 across the field; 556 swings).
+  Their pilot-seat twins 565/555 froze at the seat change. So each pair is two copies of the ASP-17
+  mark, and the 566/556 copy keeps updating with the player in the copilot seat.
+- **874 does not follow the hand slew at all** (stays −0.0147, the probe's last AI value).
+- **No arg in 0..3000 tracks a full-range sight position.** The S11/S12 all-arg diffs list only
+  566, 556 and 882. A full-range index would have to end each step where it started to be missed.
+- Remaining places a full-range readback could live: args above 3000, or the 9K113 sight's
+  `list_indication` text (the reticle's 0/1/3/6 scale may be drawn as an indication, not an arg).
