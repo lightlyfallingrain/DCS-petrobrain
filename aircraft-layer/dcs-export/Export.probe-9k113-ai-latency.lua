@@ -9,13 +9,21 @@ WHAT THIS PROBE ANSWERS
   Part A -- does the PLAYER slew axis (device 7, SetCommand 3026 az / 3025
   elev) steer the sight when it is re-asserted EVERY FRAME, with DCS AI
   Petrovich OFF? The 2026-10-21 readback runs wrote it once per step and saw
-  only a 4-6 frame blip. If it steers, BL-B80 might not need the overlay.
-  The readback (874/876) is logged, but it is known to read 0 with his AI
-  off, so the pilot's eyes on the ASP-17 mark are the measurement.
+  only a 4-6 frame blip. If it steers, BL-B80 might not need the overlay --
+  but only if something still says where the sight points. 874/876 are the
+  sight head's own gauge args (Sight9K113_Azimuth/Elevation); with his AI
+  off they have read 0, but no run has shown them reading 0 while the head
+  was actually off-centre. Part A answers it: the pilot's eyes on the ASP-17
+  mark against 874/876 in this log. Each step also diffs every cockpit arg
+  (0..SCAN_MAX_ARG) from its start to its end, in case another arg tracks
+  the head when 874/876 do not.
 
   Part B -- latency from a ShowMenu press (device 30, cmd 3001, his AI ON)
   until the AI-axis readback obeys a target re-asserted every frame. Sets
-  BL-B80's AI-off detector timeout and re-press interval.
+  BL-B80's AI-off detector timeout and re-press interval. The first press is
+  also bracketed by an all-arg diff: centre -> 20 deg left with 874 as known
+  truth, which lists every arg that moves with the head. Cross-read against
+  Part A's diffs.
 
   Part C -- with the target still held, the pilot closes the overlay by hand
   (his AI-menu key). The probe detects it from the readback, presses ShowMenu
@@ -96,6 +104,11 @@ local MIN_REPRESS_S = 3.0
 local MAX_RECOVERIES = 3
 local LATENCY_GIVE_UP_S = 10.0
 
+-- All-arg diff scans: which cockpit args move with the sight head?
+local SCAN_MAX_ARG = 3000
+local SCAN_EPS = 0.003
+local SCAN_LOG_MAX = 80
+
 local READBACK_EVERY_S = 1.0
 local DENSE_FRAMES = 30         -- per-frame readback rows at each Part A step start
 local DENSE_EVERY_S = 0.25      -- then every 0.25 s within Part A
@@ -112,6 +125,36 @@ local function read_arg(arg)
     local fn = safe_index(mp, "get_argument_value")
     if type(fn) ~= "function" then return nil end
     return try("get_argument_value", fn, mp, arg)
+end
+
+local function snapshot_args()
+    local mp = try("GetDevice(0)", GetDevice, DEV_MAINPANEL)
+    if mp == nil then return nil end
+    local fn = safe_index(mp, "get_argument_value")
+    if type(fn) ~= "function" then return nil end
+    local s = {}
+    for a = 0, SCAN_MAX_ARG do
+        local ok, v = pcall(fn, mp, a)
+        if ok and type(v) == "number" then s[a] = v end
+    end
+    return s
+end
+
+local function log_arg_diff(label, s0, s1)
+    if s0 == nil or s1 == nil then
+        log("  SCAN " .. label .. ": no snapshot")
+        return
+    end
+    local d = {}
+    for a, v1 in pairs(s1) do
+        local v0 = s0[a]
+        if type(v0) == "number" and math.abs(v1 - v0) > SCAN_EPS then d[#d + 1] = { a, v0, v1 } end
+    end
+    table.sort(d, function(x, y) return math.abs(x[3] - x[2]) > math.abs(y[3] - y[2]) end)
+    log(string.format("  SCAN %s: %d args changed > %.3f", label, #d, SCAN_EPS))
+    for i = 1, math.min(#d, SCAN_LOG_MAX) do
+        log(string.format("    arg %4d  %s -> %s  (%+.5f)", d[i][1], fmt(d[i][2]), fmt(d[i][3]), d[i][3] - d[i][2]))
+    end
 end
 
 local function set_quiet(cmd, value)
@@ -161,6 +204,8 @@ local last_readback_t = -1e9
 local aborted = false
 
 local a_idx, a_start, a_frames, a_last_dense = 0, nil, 0, -1e9
+local a_snap = nil
+local b_snap = nil           -- at the Part B press; diffed once the readback obeys
 
 local b_start = nil
 local press_t = nil          -- last ShowMenu press awaiting the readback to obey
@@ -175,6 +220,7 @@ local function start_a_row(dt)
     log(string.format("=== PART A %d/%d t=%7.3f  %s  SetCommand(%d, %s) every frame, %.0f s",
                       a_idx, #PART_A, dt, r[4], r[1], fmt(r[2]), r[3]))
     a_start, a_frames, a_last_dense = dt, 0, -1e9
+    a_snap = snapshot_args()
 end
 
 local function finish(dt)
@@ -265,6 +311,7 @@ function LuaExportAfterNextFrame()
                 a_last_dense = dt
             end
             if (dt - a_start) >= r[3] then
+                log_arg_diff(string.format("A%d %s, step start -> end", a_idx, r[4]), a_snap, snapshot_args())
                 a_idx = a_idx + 1
                 if a_idx > #PART_A then
                     centre_all()
@@ -293,6 +340,10 @@ function LuaExportAfterNextFrame()
                 local l = string.format("%.3f s (press t=%.3f)", dt - press_t, press_t)
                 latencies[#latencies + 1] = l
                 log("  <<< READBACK OBEYS after " .. l)
+                if b_snap ~= nil then
+                    log_arg_diff("B press -> obeys (head centre -> 20 deg L, 874 = truth)", b_snap, snapshot_args())
+                    b_snap = nil
+                end
                 press_t = nil
             elseif (dt - press_t) >= LATENCY_GIVE_UP_S then
                 local l = string.format("NO OBEY within %.0f s (press t=%.3f)", LATENCY_GIVE_UP_S, press_t)
@@ -308,6 +359,7 @@ function LuaExportAfterNextFrame()
                     log("  his AI is already ON (readback obeys) -- NOT pressing. Part B latency not measured.")
                     latencies[#latencies + 1] = "B skipped: AI already on"
                 else
+                    b_snap = snapshot_args()
                     press_show_menu(dt, "Part B: turn his AI on")
                     press_t, last_press_t = dt, dt
                 end

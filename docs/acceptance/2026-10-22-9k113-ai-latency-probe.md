@@ -13,10 +13,15 @@ Nothing else of ours needs to run.
 - **Part A.** The 2026-10-21 player-axis runs wrote 3026/3025 once per step and saw the readback
   jump for 4–6 frames, then 0. They never re-sent it every frame, which is what made the AI axis
   work. If the player axis steers when held every frame **with DCS AI Petrovich off**, BL-B80 may
-  not need the overlay at all. The readback reads 0 with his AI off, so **your eyes on the ASP-17
-  mark are the measurement.**
+  not need the overlay at all — **but only if something still reports where the sight points**
+  (user, 2026-10-22: without angles or a world position, DCS and Petrobrain cannot be kept in
+  sync). 874/876 are the sight head's own gauge args. They have read 0 with his AI off, but no run
+  has caught them at 0 while the head was visibly off-centre. So Part A compares **your eyes on the
+  ASP-17 mark** with 874/876 in the log, and each step diffs every cockpit arg in case another one
+  tracks the head.
 - **Parts B–C.** How long from a ShowMenu press until the readback obeys. That sets BL-B80's
-  AI-off detector timing.
+  AI-off detector timing. The first press is also bracketed by an all-arg diff, with 874 as known
+  truth: it lists every arg that moves with the head, to cross-read against Part A.
 
 ## Setup (Windows)
 
