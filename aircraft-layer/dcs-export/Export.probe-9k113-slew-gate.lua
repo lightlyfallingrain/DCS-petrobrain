@@ -20,7 +20,15 @@ WHY
   S10     SetCommand(3055, 1) once -- toggles Park/Unpark.
   S11-S14 the same pulses: does the axis work again?
   S15     SetCommand(3055, 1) once more -- toggles it back.
-  S16-S18 one more pulse, then writes stop.
+  S16-S17 one more pulse.
+  S18-S23 escape attempts: a short 10 deg azimuth pulse, a short elevation
+          pulse, then 2.5 deg again -- does a bigger or a different-axis
+          command break the hold?
+
+  Pilot, 2026-10-22: the LAUNCH PERMITTED lamp (962) is lit when the sight
+  points within ~0.3 deg of boresight (the guidance beam's width), else off.
+  So 962 doubles as an at-boresight readback, and every ignored command so
+  far happened with the sight at boresight.
   Every row logs the ASP-17 mark (565/566/555/556) and the operator's right
   board lamps 957-962 (962 = LAUNCH PERMITTED).
 
@@ -96,6 +104,12 @@ local STEPS = {
     { "ai",   CMD_AI_AZ, ai(0),    3.0, "AI az 0" },
     { "park", CMD_AI_AZ, ai(0),    3.0, "STICK PARK TOGGLE #2 (back), then AI az 0" },
     { "ai",   CMD_AI_AZ, ai(-2.5), 4.0, "AI az 2.5 L (after second toggle)" },
+    { "ai",   CMD_AI_AZ, ai(0),    3.0, "AI az 0" },
+    { "ai",   CMD_AI_AZ, ai(-10),  0.5, "ESCAPE: AI az 10 L, 0.5 s" },
+    { "ai",   CMD_AI_AZ, ai(0),    3.0, "AI az 0" },
+    { "aie",  CMD_AI_ELEV, -0.1,   1.0, "ESCAPE: AI elev -0.1, 1 s" },
+    { "aie",  CMD_AI_ELEV,  0.0,   3.0, "AI elev 0" },
+    { "ai",   CMD_AI_AZ, ai(2.5),  4.0, "AI az 2.5 R (after escapes)" },
     { "ai",   CMD_AI_AZ, ai(0),    3.0, "AI az 0" },
     { "none", nil,       nil,      3.0, "writes stopped" },
 }

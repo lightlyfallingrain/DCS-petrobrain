@@ -499,6 +499,23 @@ copilot seat = T+0, then to the pilot seat. **Don't press the stick park key you
 | 0:55–1:09 | 2.5° L / 0 / 2.5° R / 0 | moves again? |
 | 1:09 | **stick park toggle #2** (back) | |
 | 1:12–1:19 | 2.5° L / 0 | moves? |
-| 1:22 | done | |
+| 1:19–1:34 | **escape attempts:** 10° L for 0.5 s, 0, elev −0.1 for 1 s, 0, then 2.5° R, 0 | which of these moved the mark? |
+| 1:37 | done | |
 
 Bring back: the log; which pulses visibly moved the mark; anything on screen at the two toggles.
+
+### Pilot on the LAUNCH PERMITTED lamp, verbatim
+
+> *"9K113 LAUNCH PERMITTED lamp - is lit when 9K113 point at boresight within a certain (0.3 deg?)
+> limit. Otherwise it is off. Reason is the missile guidance radio beam width limit. This is only
+> relevant for ATGM guidance and launch."*
+
+Consequences:
+
+- **962 is an at-boresight readback** (sight within ~0.3° of boresight), across the whole
+  ±60°: the only full-range position fact we have. It can re-anchor the outside-HUD estimate
+  whenever the sight passes through boresight, and the ASP-17 mark's boresight value can be
+  calibrated from it (in 5b the lamp lit with 565 ≈ 0.517, not 0.500).
+- **Every ignored AI command so far happened with the sight at boresight.** Run 6 now ends with
+  escape attempts (a short 10° azimuth pulse, a short elevation pulse) to see what breaks the hold.
+- For BL-B67 (ATGM): the lamp is the launch condition itself.
