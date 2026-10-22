@@ -548,3 +548,21 @@ Against the runs (probe steps start at T+20 s after OBSERV on):
 So alignment explains the start of most runs, if it takes longer than the ~10 s assumed (BL-B80's
 `GYRO_ALIGNMENT_S` = 10). 5b's re-lock does not fit. Run 6 logs lamps 957–961 every row;
 960 (`SCHO_9K113_READY`) may mark alignment done.
+
+### Pilot's own run (modified v5: alternating left/right slews), verbatim
+
+> *"No sprict v6 yet, but I did one test of my own. I modified v5 scripts to simple slew left then
+> right then left, then right, .... The croshair does move."*
+
+No log for this run. With a continuous left/right alternation the sight keeps moving, so the
+re-lock seen in 5b did not appear. 5b's re-lock came after a return to boresight with the axis at
+0; this run probably never let the sight settle there.
+
+### Pilot on the alignment-done lamp, verbatim
+
+> *"light ROLL SYNC TR UNCAGE also by Л5 in the guidance unit illuminates when the 9K113 gyro
+> alignment is done and the sight can be moved."*
+
+So alignment completion has its own lamp on the guidance unit (Л5, "ROLL SYNC TR UNCAGE"), and the
+probe can log it rather than infer alignment from the first movement. Its arg number is not yet
+known (not in 957–962); to be looked up on the DCS machine and added to run 6's `WATCH_ARGS`.
