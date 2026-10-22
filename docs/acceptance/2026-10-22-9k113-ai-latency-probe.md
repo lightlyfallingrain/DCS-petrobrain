@@ -827,3 +827,26 @@ Setup as run 8 (overlay OFF at start, pilot seat, no 9K113 view, no operator axe
 
 What the pilot sees: the mark sweeping ±2°; in W it also wobbles in a small circle; in V the AI
 overlay may flash open and shut.
+
+## Run 9 results (`logs/2026-10-22/aircraft_layer_probe_9k113_wheel.log`)
+
+OBSERV on at t=34.666; Л5 (898) at T+10.0 (fourth time). Ran to DONE, 4 ShowMenu presses (even —
+overlay closed at the end).
+
+| block | response ratio per step | stalls | targets reached |
+|---|---|---|---|
+| O (observe) | 0.79 0.12 1.50* 0.24 0.25 | 6 (7.2 s) | 1 of 5 |
+| **W (dither)** | **1.03 1.02 1.00 1.05 0.98 1.06 0.96** | **0** | **7 of 7** (566 0.420–0.423 / 0.569–0.572 vs 0.422 / 0.578) |
+| V (overlay cheat) | 0.07 0.71 1.11 0.93 1.12 | 1 (V1, 5.6 s) | 4 of 5 |
+
+\* a small asked path; the mark drifted with heading.
+
+- **The pilot's dither idea worked: with a 1 s circle added (1.5° az / 0.03 el command), the axis was
+  obeyed fully for 42 s, every sweep, no stall.** The block before it, the same sweeps without
+  dither, reached 1 target of 5. The first step after dither stopped (V1) stalled at once.
+- Overlay cheat: inconclusive. V1 stayed stalled through two open/close cycles; V2 onward worked.
+- **Wheel state: no data.** `list_indication(10)` returned an empty tree (`#1# children are { }`)
+  the whole flight, presumably because the wheel is only populated while displayed. The
+  contention hypothesis is neither confirmed nor refuted.
+- One run only. Next: repeat dither, longer, and **hold on a fixed target with dither** (the real
+  use: mark on target while lined up), and test a smaller dither amplitude.
