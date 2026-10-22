@@ -1,5 +1,196 @@
 ### Review Summary
 
+Reviewed BL-B80 v2 Stages 1–4 (with 3b) on `feature/9k113-sight-pointing`, tip `99eafdf0`
+(`git diff 1c433fc6 e16e31e2` is the actual code; `99eafdf0` adds only `implementation.md`'s
+record of the early stop). Stage 0 (calibration probe) is known missing, per the plan and
+`implementation.md`; not counted against this review. Checked against `plan.md` v2 ("Re-plan,
+2026-10-22"), `security-plan-review.md`, `explore-notes.md`, and `implementation.md`'s own account
+of the early-stopped session.
+
+All mechanical checks pass, run fresh: aircraft-layer `ruff format --check`/`ruff check`/
+`mypy --strict` (27 files) / `pytest` (530 passed, including the luajit-backed
+`test_sight_servo_lua.py`/`test_sight_servo_api.py`); body-layer the same (`mypy --strict`, 71
+files / `pytest`, 2431 passed, 4 xfailed); `luac5.1 -p` clean on `Export.lua`; the `GETGLOBAL`
+mechanical scan lists only genuine DCS/stdlib globals (no own-helper referenced before its `local`).
+`test_tuning_defaults_toml.py` passes (the committed `defaults.toml` matches a fresh regeneration).
+
+The frame question this subsystem has broken on four times before (`[[project_recurring_field_
+of_regard_enforcement_gap]]`) is **correct here**: both the Python `SightHead._clamp_gimbal` and
+the Lua `run_sight_servo` gimbal clamp operate on body-relative az/el computed through the
+heading+pitch+bank rotation (`body_relative_direction`/`sight_world_to_body`, the matched
+Python/Lua twins) — the airframe-boresight frame the 2026-10-20 sortie correction (F5) requires,
+not a ground-anchored one. The removal of v1's position-model pieces (`ShowMenu`, `ai_believed_on`,
+874/876-as-position, `GYRO_ALIGNMENT_S`) is complete — grepped clean except one surviving docstring
+mention, as `implementation.md` itself states. The `t_sim` security required-change is implemented
+correctly at both layers (API `isfinite`+bound+sign check, Lua presence+bound check, whole-command
+rejection on failure). `body-layer/CLAUDE.md`'s invariant edit matches the plan's text verbatim.
+F2/F3 fences exist and are exercised by real test cases (not just declared).
+
+However, three things need fixing before this goes to DoD: the **rendered** `config/defaults.toml`
+carries a severe content-loss corruption and a cosmetic markup corruption for the two new
+`sight_head`/`attack_run` tunables (finding 1 — exactly the class of defect this project's own
+process note warns a diff-reading reviewer will miss); the F4 differential no-leak test is
+narrower than the plan's own spec and narrower than what Security's plan review approval rested on
+(finding 2); and the plan's explicitly-named "wiring test + mutation" requirement — called out by
+name because this project has three prior leaf-tested/wiring-untested defects on exactly this
+shape — was not built for either Stage 3's basic head-cap wiring or Stage 3b's seen-aim wiring
+(finding 3).
+
+### Required Fixes
+
+- **Finding 1 — the rendered `config/defaults.toml` is corrupted for both new tunables in this
+  diff, not just the source comment.** Per this project's own standing instruction ("check the
+  rendered file, not the `#:` comment"), I read `config/defaults.toml` itself, not
+  `sight_head.py`'s source:
+
+  - `body-layer/config/defaults.toml:28` (`SEEN_AIM_HEIGHT_OFFSET_M`) renders as:
+    > `seen_world_direction`'s own aim-point correction (`[[BL-B80]]`, plan Decision 6, pilot
+    > 2026-10-22, verbatim: *"no idea.`
+
+    The actual source comment (`body-layer/src/belief/attack_run.py:143-146`) reads *"no idea.
+    let's assume on ground"*) — the pilot's own quoted answer, which is the entire rationale this
+    comment exists to record. The rendered line cuts off mid-quote, drops the closing `*"` and the
+    rest of the sentence, and also drops the comment's *opening* backtick (the line should start
+    `` `seen_world_direction`'s ``, not `seen_world_direction`'s`). Root cause:
+    `tools/generate_defaults.py`'s `_SENTENCE_SPLIT` regex splits on the first unescaped `.` not
+    adjacent to a digit — including the period *inside* the pilot's quoted sentence ("no idea.")
+    — so the "first sentence" extractor treats an embedded quotation's own full stop as the
+    comment's sentence boundary. This is a real instance of exactly the bug class
+    `docs/AGENT_ROLES.md`/this project's tuning notes warn about: a rendered description reaching
+    nobody, except here it's not a second sentence being dropped, it's the pilot's own stated
+    reason for the value being truncated into nonsense.
+  - `body-layer/config/defaults.toml:140` (`SLEW_EL_DPS`) renders as:
+    > Elevation's own slew rate -- same source as `` `SLEW_AZ_DPS. ``
+
+    (confirmed byte-for-byte with `od -c` — the closing backtick after `SLEW_AZ_DPS` is genuinely
+    absent, not a terminal-rendering artifact). Source
+    (`body-layer/src/belief/sight_head.py:51`) correctly reads `` same source as `SLEW_AZ_DPS`. ``
+    — closing backtick, then the full stop. Root cause: `_first_sentence`'s
+    `parts[0].strip().strip("*\`")` unconditionally strips trailing backticks/asterisks from the
+    extracted sentence, intended to remove markup the split's own optional
+    `(?:\*\*|`)?` group consumed *after* the period — but here the backtick is the correct,
+    legitimate close of an inline-code span sitting *before* the period (the normal, correct
+    Markdown form), and the blanket `.strip("*\`")` eats it regardless of which case produced it.
+
+  Both are new to this diff (`git diff 1c433fc6 e16e31e2 -- body-layer/config/defaults.toml`
+  confirms both added lines) and both are a generator defect exposed by, not independent of, this
+  diff's two new comments — the regex/strip bug in `tools/generate_defaults.py` is generic and
+  will recur on the next tunable whose first sentence contains an embedded quoted period or ends
+  with a legitimately-closed inline-code span. `test_tuning_defaults_toml.py`'s staleness check
+  passes on both corrupted lines, because it only proves the committed file matches a fresh
+  regeneration — it cannot catch a bug baked into the generator itself, per this project's own
+  "would it fail if someone edited one side only" caveat. **Fix, both parts**: (a) rewrite
+  `SEEN_AIM_HEIGHT_OFFSET_M`'s comment so its first sentence does not contain an embedded
+  sentence-ending period inside the pilot's quote (e.g. move the quote to a later sentence, or
+  rephrase it without an internal full stop), since this is the more urgent, content-losing half;
+  (b) fix `tools/generate_defaults.py`'s `_first_sentence` so it does not strip a backtick that
+  closes an inline-code span immediately before the sentence-ending period (the strip should only
+  remove markup the split's own trailing-markup group actually matched, not blindly strip the
+  sentence's last character class) — this is a latent bug independent of this feature and will
+  keep corrupting future tunables' rendered descriptions until fixed. Regenerate and re-read the
+  rendered file, not just the diff, after either fix.
+
+- **Finding 2 — F4's differential no-leak test is scoped to `ContactStore` positions only, not the
+  plan's own F4 spec.** Plan (`plan.md` lines 338, 451) specifies: *"`ContactStore` position
+  estimates, `MissionMemory` appends, every utterance and every `TOOL_SET` result must be
+  identical; only the head direction and the wire goal may differ"*, and Security's plan review
+  explicitly endorsed F4 as *"the strongest fence in the set... a behavioral proof... rather than
+  only a static grep"* precisely because it independently verifies the no-leak claim for every
+  consumer, not just the one a reader happens to check. The implemented test
+  (`body-layer/tests/test_logger.py:3243-3279`, `TestF4DifferentialNoLeak`) asserts only
+  `{c.id: c.position for c in runner.store.contacts}` is identical with/without the seen-aim
+  channel; its own docstring states the rest ("`MissionMemory`/`TOOL_SET`/utterance identity")
+  rests on "the structural fact that `seen_world_direction`'s only consumer is `sight_head.py`" —
+  i.e. it falls back to the same grep-based (F2/F3) argument Security's review explicitly said a
+  behavioral test was needed *in addition to*, not instead of. A grep proves nobody imports the
+  function; it does not prove the function's *value* cannot reach those sinks through some other
+  path (e.g. a future caller threading the head's `aim_source` or `goal_world_*` fields into a
+  callout or a `MissionMemory` entry — exactly the leak class F4 was designed to catch
+  independently of whether anyone remembered to grep). **Fix**: extend the two-poll
+  `_f4_scenario` (or add a longer one) so it also asserts identical `MissionMemory` entries (e.g.
+  via `runner.store`'s mission-memory sink if wired in the test harness, or a minimal
+  `MissionMemory` instance passed to the runner) and identical spoken output
+  (`crew_console.output`/drained events) between the two runs — matching the plan's stated scope,
+  not a narrower one the test's own docstring talks its way around.
+
+- **Finding 3 — the plan's explicitly-named "wiring test + mutation" requirement was not built**,
+  for either Stage 3 or Stage 3b. Plan Stage 3 (`plan.md` line 441-442) calls for *"a wiring test
+  through `run_once` (the recurring leaf-tested/wiring-untested defect, three prior instances) and
+  a mutation of that wiring to show the test catches it"*; Stage 3b (line 452-453) calls for the
+  analogous *"a `run_once` wiring test that a seen look moves the next poll's wire goal onto the
+  true direction while the contact's believed position is unchanged, plus a mutation (goal from
+  belief) the test catches."* Both are named explicitly because this project has three prior
+  instances of exactly this failure shape (a test exercises the leaf function correctly but never
+  proves the runner actually wires it in) — the plan is quoting its own prior incident, not
+  adding boilerplate. Grepped `test_logger.py`/`test_sight_head.py` for `mutation`: the only two
+  hits (lines 4756, 4854) are about the guidance-unit power-up sequencer and the "ready" speech
+  latch, unrelated to `sight_head`/`select_sight_goal` wiring. `test_run_once_caps_a_sight_tier_
+  optic_until_the_head_is_free` (test_logger.py:3108) and
+  `test_advance_sight_head_seen_goal_feeds_through_to_world_goal` (test_sight_head.py:393) are real
+  wiring/unit tests that currently pass, but neither is accompanied by a demonstrated mutation
+  showing the test would fail if the wiring broke — the exact gap the plan is naming. **Fix**: add
+  at least one mutation per stage (e.g. for Stage 3, temporarily bypass the `optic_decision.optic`
+  → `is_sight_tier` gating at the `_apply_active_gaze` call site and confirm the existing test
+  fails; for Stage 3b, force `select_sight_goal` to always return the `belief` row and confirm the
+  seen-goal wiring test fails), demonstrate the red, then restore — matching this project's "show
+  the red" convention for a test asserting a positive wiring claim.
+
+### Optional Refinements
+
+- `tools/generate_defaults.py`'s `_SENTENCE_SPLIT` regex has no special handling for a quoted
+  pilot verbatim containing its own full stop, which is now a second occurrence in this codebase's
+  tunable comments (any future `verbatim: "..."` quote with internal punctuation will hit the same
+  bug) — worth a project-wide grep for other tunables whose comment contains an embedded quote with
+  a period, once finding 1 is fixed, to confirm this is the only other instance (optional, since
+  finding 1's fix for this specific comment is required regardless).
+- `implementation.md`'s own "Deviations" section already documents the single-commit/no-per-stage-
+  notes/Stage-0-not-built deviations honestly; no additional note needed there.
+
+### Verdict
+
+NEEDS REVISION
+
+The core mechanism — frame correctness on the gimbal clamp (this subsystem's own four-time-recurring
+defect class), the `t_sim` security fix, the removal of v1's position-model pieces, the Lua/Python
+rate-limit and world↔body rotation twins, and the overall Stage 1–4/3b scope — is built correctly
+and matches the plan. All three required fixes are narrower in scope than finding 1's severity
+might suggest: finding 1 is a two-line comment fix (plus a small, separable generator bug) with no
+runtime-behaviour implication; findings 2 and 3 are both "extend an existing, correctly-targeted
+test" rather than "the mechanism is wrong." None of the three touches `Export.lua`'s per-frame
+servo logic, the part of this change with no automated coverage at all, which I read in full and
+found correct against the plan's own step-by-step spec (closed/open-loop switch, mark-validity
+gate, clip-edge re-anchor, stall detection, the shared dither/flicker parity flag). Recommend:
+Implementer fixes the three items above (finding 1 first, since it is the one a live sortie's
+pilot could actually open `defaults.toml` and read), Reviewer re-checks the diff, then proceed to
+DoD. Flight B (Stage 4's live sortie) should not be flown to validate anything finding 2/3 would
+have caught — this is a documentation/test-coverage gate, not a live-behaviour risk, so it does not
+block a flight test of the loop itself if the user wants one before the re-review lands.
+
+### Review Confidence
+
+Full read of every changed body-layer/aircraft-layer source file in the diff: `Export.lua`'s
+`run_sight_servo` and its helper functions end to end; `sight_head.py` end to end; `geometry.py`'s
+new/changed functions; `attack_run.py`'s refactor and `seen_world_direction`; `optic_policy.py`'s
+changed sections; `logger.py`'s changed call sites (gyro-alignment cap, `last_sight_look_sim`
+stamping, `write_sight_target` wiring); `sight_effector.py`'s lamp readback changes;
+`sight_trace_writer.py`; `aircraft_client.py`; `command_sender.py`; `api/server.py`'s new handler,
+read in full including the `t_sim` bound; `schema/sight_servo.py`. `body-layer/CLAUDE.md`'s diff
+checked word-for-word against the plan's specified text. `config/defaults.toml` read as the
+rendered file (confirmed byte-for-byte with `od -c` on the corrupted line), not inferred from the
+source comment. Test files read for coverage-gap verification (F2/F3/F4, the wiring tests, the
+mutation grep) rather than for their own correctness. All mechanical checks (`ruff format --check`,
+`ruff check`, `mypy --strict`, `pytest`, `luac5.1 -p`, the `GETGLOBAL` scan,
+`test_tuning_defaults_toml.py`) run fresh, not taken from `implementation.md`. Not independently
+re-derived: the mark-scale/boresight calibration constants and the Kp/FF_GAIN tuning numbers,
+which the plan itself states are Stage 0/Flight A placeholders, not yet calibrated — nothing to
+verify there beyond confirming they are labelled as such (they are).
+
+---
+
+## v1 (superseded)
+
+### Review Summary
+
 Reviewed BL-B80 Stages 1–3 (`feature/9k113-sight-pointing`, `edc8dd73..4c887644`) against
 `plans/9k113-sight-pointing/plan.md` (including the 2026-10-22 coordinator amendments),
 `explore-notes.md`, `implementation.md`, and `security-plan-review.md`.
