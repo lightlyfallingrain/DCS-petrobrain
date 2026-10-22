@@ -479,3 +479,26 @@ Also from that lookup: `Devices_specs/9K113.lua` has no park, cage, helper or lo
 operator stick has a **Park/Unpark** toggle, `Command_StickPark_Ext = 3055` on device 7
 (`Input/Mi_24P_op/*/default.lua`, `value_down = 1`); any park/cage/enable state lives in native
 code. Candidate to test: a parked operator stick blocks the AI axis.
+
+## Run 6 — reproduce the gate, try the stick park toggle
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-slew-gate.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_slew_gate.log`. Video welcome.
+
+**Questions:** does the gate reproduce (axis works, sight comes back near centre, lamp lights, then
+ignored)? Does toggling Park/Unpark Operators Stick (`SetCommand(3055, 1)`) release it? Every row
+logs the ASP-17 mark and lamps 957–962.
+
+Setup: air start, guidance unit warm, autopilot, heading steady, **overlay OFF**. OBSERV on from the
+copilot seat = T+0, then to the pilot seat. **Don't press the stick park key yourself.**
+
+| T+ | probe | you |
+|---|---|---|
+| 0:20–0:52 | 2.5° L / 0 / 2.5° R / 0, twice | mark moves each time, or stops responding? |
+| 0:52 | **stick park toggle #1** | anything visible? |
+| 0:55–1:09 | 2.5° L / 0 / 2.5° R / 0 | moves again? |
+| 1:09 | **stick park toggle #2** (back) | |
+| 1:12–1:19 | 2.5° L / 0 | moves? |
+| 1:22 | done | |
+
+Bring back: the log; which pulses visibly moved the mark; anything on screen at the two toggles.
