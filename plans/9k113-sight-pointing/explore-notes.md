@@ -178,3 +178,19 @@ obeyed as 1 Hz did.
   likely the ЩО `READY` lamp BL-B66 could not read via `list_indication`) as the warm-up-done
   signal, alongside Л5 (arg 898) as the gyro-alignment-done signal. 960 is unconfirmed on a cold
   start (expected 0 → 1 about 3–5 min after `PWR`); every air start shows it lit from t ≈ 0.
+
+### Pilot's hypothesis for why dither works (2026-10-22), verbatim
+
+> *"joystick axis value that does not change, and if something else then overrides that, it can be
+> overwritten, and because the joystick axis value doesn't change, it doesn't re-override that. So
+> that may be behind this behavior, because it's in our case constant 40 constant rate movement.
+> But then because we introduced that circling behavior or other small deviations in the movement,
+> then that overrides the axis value at every change. I think this is a general rule for all
+> joystick axis behavior in DCS."*
+
+Fits the record: run 8 (one constant value for 100 s) was dead throughout; run 7 (joystick axes
+bound — a jittering physical axis is exactly such an "other writer") was worse than 7b (unbound);
+dither changes the value every frame and was obeyed 29/29. **Consequence if true:** the wobble does
+not need to be physical — a per-frame change far below the 0.003-unit deadzone (e.g. ±1e-5 on the
+value) would keep the axis obeyed with **no visible wobble**, which removes the dither error from the
+ATGM precision budget. Testable in probe run 11.
