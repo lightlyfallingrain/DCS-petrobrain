@@ -646,3 +646,25 @@ own, and log Л5 (898 and L1–L14) per frame.
 Pilot, verbatim, on run 6: *"sight correctly world held at turns"* — so during the holds too the
 sight keeps its world direction through turns (consistent with hold 1 in the log): the hold drops
 AI-axis commands, it does not cage the sight.
+
+## Run 7 — measure the boresight hold
+
+**Branch: `probe/9k113-ai-latency`.** Script: `aircraft-layer/dcs-export/Export.probe-9k113-hold.lua`.
+Log: `Saved Games\DCS\Logs\aircraft_layer_probe_9k113_hold.log`. Video welcome.
+
+Setup as run 6: air start, guidance unit warm, autopilot, straight and level, **overlay OFF**,
+OBSERV on from the copilot seat = T+0, then the **pilot seat, and stay there — no 9K113 view**.
+Don't press the stick park key.
+
+| T+ | probe | question |
+|---|---|---|
+| 0:20–0:48 | **A:** axis 0 for 4 s at boresight, then a 0.6 s 2.5° L pulse every 3 s, eight times | which pulse is the first to move the mark (each ~0.5°)? → hold length |
+| 0:48 | HOME: closed loop on 566 back to boresight, 8 s | |
+| 0:56–1:13 | **B:** axis 0 4 s, stick park toggle, then 4 pulses; toggled back at 1:13 | does the toggle release the hold at once? |
+| 1:14 | HOME | |
+| 1:22–1:37 | **C:** axis 0 4 s, one 10° L pulse for 0.3 s, then 3 pulses | does a big command break the hold? |
+| 1:37–1:54 | **D (control):** drive ~3° L, axis 0 there 4 s, then 3 R pulses | expected: moves at once |
+| 1:54–2:05 | HOME, writes stopped, done | |
+
+Every lamp change (L1–L14, 957–962) is logged the frame it happens; the HOME steps are also the first
+trial of the inside-HUD closed loop BL-B80 would use.
