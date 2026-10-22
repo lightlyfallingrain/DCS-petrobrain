@@ -147,3 +147,19 @@ onto the simulated direction is allowed — closed loop on the mark, recovery ac
 
 Pilot's idea for the gate, verbatim: *"Would not stopping sight movement help? Keep small movement
 all the time, small circle on target unit?"* — to be tested in probe run 9.
+
+### ATGM accuracy (2026-10-22, after probe run 9 showed dither keeps the AI axis obeyed)
+
+Pilot, verbatim: *"for ATGM guidance we need to hit a target like BTR-2 at about 3-4 km. That gives
+angular freedom of X deg. It can wobble a bit first but should focus on target unit body as the
+missile get closer (maybe <1km)."*
+
+X, for a BTR-80-sized front (2.9 m wide, 2.4 m high): the miss distance is the sight's angular error
+× the **aircraft-to-target** range, so at launch range 3–4 km the half-width is **0.021–0.028°**
+and the half-height 0.017–0.023°. The final ~1 km of missile flight is ~2.5 s.
+
+Dither wobble on the mark ≈ (command amplitude / 3) °/s ÷ (2π f): run 9's 1.5° at 1 Hz → ±0.08°
+(±5 m at 3.5 km) — fine for search and lining up, too coarse for the terminal phase. The same 1.5°
+at 4 Hz → ±0.02°; 0.6° at 4 Hz → ±0.008°. So **dither frequency, not amplitude, is the lever**
+(amplitude must stay above the 0.18° deadzone). Unmeasured: whether faster dither keeps the axis
+obeyed as 1 Hz did.
