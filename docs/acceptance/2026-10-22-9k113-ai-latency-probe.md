@@ -929,3 +929,41 @@ a value that changes every frame retakes it every frame. If so, a per-frame flic
 
 Read: if P1–P3 respond ~1.0 every pulse while P0/P0b do not, the hypothesis holds and BL-B80 uses
 invisible flicker instead of a wobble. S gives restart reliability, latency, and drift while stopped.
+
+## Run 11 results (`logs/2026-10-22/aircraft_layer_probe_9k113_flicker.log`)
+
+OBSERV on at t=32.494; Л5 at T+10.0 (sixth time). Ran to DONE at ~157 fps.
+
+**The pilot's rule is confirmed: DCS takes the axis only when the value changes.**
+
+| block | value | pulses that moved (ratio ≥ 0.85) |
+|---|---|---|
+| P0 | constant | **3 of 6** (2, 3, 4 ignored: 0.04, 0.04, 0.10) |
+| P1 | flicker ±1e-5 | **6 of 6** (0.93–1.09) |
+| P2 | flicker ±1e-4 | **6 of 6** (0.95–1.03) |
+| P3 | flicker ±1e-3 | **6 of 6** (0.97–1.01) |
+| P0b | constant, at the end | **0 of 4** (0.01) |
+
+Even ±1e-5 (≈0.0006°, invisible) is enough.
+
+**Precision while holding** (last-2 s RMS error / peak-to-peak on the mark):
+
+| hold | RMS | p-p |
+|---|---|---|
+| H, flicker 1e-4, no wobble | 0.039–0.058° | 0.002–0.015° |
+| S holds, dither 0.6° 8 Hz | **0.006–0.013°** | 0.023–0.025° |
+
+The dither does a second job flicker cannot: it carries the loop's small corrections across the
+0.18° command deadzone (classic dither linearisation). **With 0.6° / 8 Hz the hold meets the ATGM
+budget (±0.02°)**; flicker alone leaves the 0.04–0.06° deadzone error.
+
+**Wobble → stop → restart:** all four restarts moved. A stopped sight drifts: −0.011° in 2 s,
+−0.020° in 5 s, −0.036° in 10 s, −0.063° in 20 s (≈0.003–0.005°/s), so for ATGM a stop would need
+a correction every ~4 s — continuous dither is simpler and more precise. **Probe defect:** the
+restart steps ran without dither (policy name `restart` was not matched by the dither branch); they
+moved anyway because the closed loop's own output changes every frame. So restart reliability is
+shown for a changing loop output, not for dither specifically.
+
+**Consequence for BL-B80:** the per-frame value change is what keeps the axis; any change works.
+Default: dither 0.6° / 8 Hz always (pilot: *"tiny all the time"*), which also gives the precision.
+Flicker remains the fallback where the mark must look perfectly still.
