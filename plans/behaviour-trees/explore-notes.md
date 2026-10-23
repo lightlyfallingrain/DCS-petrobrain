@@ -121,5 +121,25 @@ conversation as it happens.
 it may also not be worth it. One option would be to build future behaviour with it and leave what we
 have as is for now."*
 
-No Architect pass. Whether behaviour trees are worth it at all is still open. The user's candidate
-route, if they are: new behaviour is built on trees, and existing hard-coded behaviour stays as it is.
+## Decision, 2026-10-23: keep the direction, build the vocabulary first
+
+*"Keep this idea, we'll move in this direction, but need the commands first. Future code should be
+structured so that refactoring to decision trees can be easy.*
+
+*We'll stick with effector sequences for now and add parameter comparisons there, see the light
+level example. That is a good POC for the decision trees as well.*
+
+*Add backlog item, reference notes, merge to main. No implementation now. But let's build the
+commands, actions, params that these trees will need and create code so that it supports the tree
+usage ones we get there."*
+
+So:
+
+- **Direction kept, no tree engine yet.** Filed as `[[BL-B95]]`, deferred until the vocabulary
+  of commands, actions and params is large enough.
+- **Next concrete step: parameter comparisons in sequence-file conditions**, with the dome-light rules
+  as the proof of concept. Filed as `[[BL-B94]]`.
+- **Standing direction for new code:** structure it as named actions plus named state params, with
+  "when" decisions kept out of the action code, so a later move to trees is a refactor and not a
+  rewrite. Recorded in root `CLAUDE.md`, "Behaviour as actions and params".
+- Existing hard-coded behaviour stays as it is.
