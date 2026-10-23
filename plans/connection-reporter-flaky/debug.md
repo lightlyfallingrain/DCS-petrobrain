@@ -148,11 +148,13 @@ unfiltered form.
   the pre-fix unfiltered form failed immediately under identical noise, confirming the fix
   specifically closes the mechanism identified above and is not a coincidental pass.
 - `pytest body-layer/tests/test_brain_client.py -q -p no:randomly` — **1 failed** (
-  `test_unreachable_brain_logs_one_line_without_traceback`), **10 passed**; confirmed this one
-  failure is the pre-existing host-specific socket-timing issue described below, not a
+  `test_unreachable_brain_logs_one_line_without_traceback`), **10 passed**; at the time this was
+  believed to be the pre-existing host-specific socket-timing issue described below, not a
   regression (reproduces identically against the unmodified pre-fix code on this host, with or
   without `pytest-randomly`). The thread-identity fix itself verified by deterministic injection
-  instead — see below.
+  instead — see below. **Superseded, 2026-10-23: this was not "pre-existing and host-specific
+  and therefore out of scope," it was a real, always-failing-on-this-host latent defect — see
+  "Follow-up" at the end of this file.**
 
 ### Two more flaky tests reported mid-investigation — checked against the same root cause
 
@@ -231,3 +233,94 @@ second thread logging the same message *without* `exc_info` (standing in for thi
 client) while the leaked thread was still alive. Unfiltered `caplog.records[0]` picked up the
 leaked thread's record (`exc_info` present) — reproducing the reported failure's shape exactly.
 Filtering by `record.thread == <own thread>.ident` picked the right one every time.
+
+**Superseded, 2026-10-23 — see "Follow-up" below.** The framing above ("cannot presently be driven
+to a real pass on this particular machine," "out of `BL-B92`'s scope") was wrong in its conclusion,
+not its measurements: the ~5.0 s block on a bound-but-unlistened socket on this host was measured
+correctly, but it does not follow that the test is therefore untestable here. It means the test's
+*premise* (a real socket reproduces connection-refused fast enough to matter) does not hold on
+this host — the fix was to stop depending on that premise, not to leave the test failing on it.
+Confirmed separately (main loop, not this report): this test fails **always** on this host, alone
+and in the full suite, pre-fix and post-fix of the connection-reporter fix above, 3/3 — a
+deterministic latent defect this report's own evidence already established but did not act on.
+
+### Follow-up, 2026-10-23: `test_unreachable_brain_logs_one_line_without_traceback` fixed
+
+**Fix.** Stopped depending on real socket timing. The test now monkeypatches
+`urllib.request.urlopen` (the one call site `_poll_once` makes) to raise
+`urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))` directly — the same
+`URLError`-wrapping-`OSError` shape a real refused connection produces, so `_poll_loop`'s
+`exc_info=not isinstance(exc.__cause__, (URLError, OSError))` split is exercised exactly, but
+deterministically rather than depending on this (or any) host's TCP stack. `base_url` is now the
+same inert `"http://127.0.0.1:1"` other tests in this file already use ("nothing listening") since
+nothing actually dials it any more — the bind-but-unlistened socket and its "connect is refused at
+once" comment (now false on this host, as established above) are both gone. The thread-identity
+filter (`record.thread == worker.ident`) is unchanged.
+
+**Why monkeypatching here does not conflict with this subproject's own stated testing
+convention** (`body-layer/CLAUDE.md` "Testing": "tested against a real ... loopback server ...
+not by mocking `urllib`"). That convention is about `BrainLayerClient`'s *wire-format* tests —
+whether it parses a real server's real bytes correctly — where mocking would hide a real
+wire-mismatch. This test asserts a different thing entirely: which branch of `_poll_loop`'s own
+`exc_info=` decision fires for a given *exception shape*, which is exactly the kind of thing an
+injected exception tests more precisely than a real socket does, not less — the real socket was
+never exercising "connection refused," it was exercising "whatever this host's kernel does with a
+bound-unlistened socket," which turned out to be a 5 s block, not a refusal, and was never the
+thing the test's own docstring said it was testing.
+
+**Leaked-thread interaction with the monkeypatch, checked.** `client._poll_worker` is a
+`daemon=True` thread that outlives the test (same accepted leak as every other test in this file).
+`monkeypatch.setattr` is reverted by pytest at test teardown, after the assertions run, so the
+worker's *next* retry (≥1.0 s later, `_POLL_RETRY_BACKOFF_S`) calls the real
+`urllib.request.urlopen` against `http://127.0.0.1:1` — the identical "nothing listening" target
+`test_handle_never_raises_when_the_server_is_unreachable`/
+`test_poll_replies_never_blocks_or_raises_when_the_server_is_unreachable` already leak threads
+against in this same file. No new leak behaviour. While the patch is still active (the 2.0 s
+window inside the `with` block), any *other* leaked thread from an earlier test that happens to
+retry during that window also gets the fake instead of its own real target — harmless here, since
+the fake raises the same `URLError` shape a real refusal does and this test's own assertion is
+scoped to `record.thread == worker.ident`, not to what any other thread logs.
+
+**Other tests relying on the same "bound but never listening: connect is refused at once"
+premise** — searched (`grep` over `tests/*.py` for the bind-then-connect pattern): **none**. This
+was the only test in the suite using a real `bind()`-without-`listen()` socket to stand in for an
+instantly-refused connection; `test_crew_console.py`'s only bind-not-listen socket
+(`_WedgedBrainServer`) calls `.listen(5)` and is modelling an *accepted-but-wedged* server, a
+different premise entirely, unaffected by this host's bind-only-socket timing.
+
+**A different, unrelated latent flake found and left alone while sweeping seeds for this fix.**
+`tests/test_mission_start_reset.py::test_check_for_new_mission_keeps_the_traceback_for_a_non_
+connection_failure` failed once, at `--randomly-seed=2`, on the *pre-fix* code (not post-fix) —
+not previously reported. It shares BL-B92's general root-cause family (an exact-list/`records[0]`
+caplog assertion with no logger-name or thread filter, vulnerable to the leaked-daemon-thread
+cross-logger pollution this file's whole investigation is about) but is a different file, a
+different test, and was not reproducible: three more runs at the identical seed (post-fix) did not
+reproduce it, and it passes 3/3 alone — consistent with debug.md's own established mechanism
+(wall-clock-coincidental, not seed-deterministic) rather than anything this fix touched. Per this
+task's own instruction ("fix them only if they fail alone on this host"), left unfixed; worth its
+own backlog item if it recurs, since it is the same unfiltered-`caplog.records[0]` pattern BL-B92
+already fixed twice elsewhere in this codebase.
+
+**Verification, this follow-up.**
+- `ruff format --check src tests` — PASS (163 files already formatted, after reformatting this
+  file's own edit)
+- `ruff check src tests` — PASS (all checks passed)
+- `cd body-layer && .venv/bin/mypy src` (strict) — PASS (71 source files, no issues; the 4
+  pre-existing, unrelated `attr-defined` errors in `tests/test_brain_client.py` noted in the
+  original review are unchanged — `mypy src` does not type-check `tests/` at all, confirmed by
+  running `mypy tests/test_brain_client.py` directly)
+- Mutation check: changed `_poll_loop`'s `exc_info=not isinstance(...)` to `exc_info=True` —
+  test failed as expected (asserts `not record.exc_info`); reverted, confirmed `git diff` on
+  `src/belief/brain_client.py` is empty
+- `pytest tests/test_brain_client.py::test_unreachable_brain_logs_one_line_without_traceback -q`
+  — PASS, 5/5 consecutive runs
+- `pytest tests/test_brain_client.py -q -p no:randomly` — PASS, 11 passed
+- `pytest tests -q -p no:randomly` — PASS, 2445 passed, 4 xfailed (full baseline, zero failures —
+  previously 2444 passed / 1 failed with this test as the one failure)
+- `pytest tests -q --randomly-seed=<n>` for n in {11, 22, 33, 44, 55} — target test and the whole
+  `test_connection_reporter_*` group green in all 5; the only failure anywhere in the sweep was
+  the already out-of-scope `test_main_print_tuning_works_without_aircraft_layer_url` (seeds 11,
+  33, 55), matching its own already-documented mechanism above
+- `pytest tests -v --randomly-seed=11` — confirmed `test_unreachable_brain_logs_one_line_without_
+  traceback` and all three `test_connection_reporter_*` tests PASSED **by name** in the unfiltered
+  verbose output, not inferred from a `-k`-filtered count

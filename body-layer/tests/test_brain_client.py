@@ -14,6 +14,8 @@ import json
 import socket
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Self
@@ -289,6 +291,7 @@ def test_poll_replies_never_blocks_or_raises_when_the_server_is_unreachable() ->
 
 
 def test_unreachable_brain_logs_one_line_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Connection refused is an expected state (brain-layer not started
@@ -311,16 +314,28 @@ def test_unreachable_brain_logs_one_line_without_traceback(
     name alone cannot discriminate between two instances of the same
     client class, unlike `BL-B92`'s fix on `test_logger.py`'s
     `_ConnectionReporter` tests (one logger, one call site) -- thread
-    identity can."""
-    # Bound but never listening: connect is refused at once, unlike a bare
-    # port number, which some sandboxes time out on instead.
-    with (
-        socket.socket() as closed_port,
-        caplog.at_level("WARNING", logger="belief.brain_client"),
-    ):
-        closed_port.bind(("127.0.0.1", 0))
-        port = closed_port.getsockname()[1]
-        client = BrainLayerClient(base_url=f"http://127.0.0.1:{port}")
+    identity can.
+
+    The connection-refused condition itself is injected, not produced by
+    a real bound-but-unlistened socket: on at least one host this test
+    has run on, `connect()` against such a socket does not refuse
+    instantly -- it blocks for this client's whole 5.0s `poll_timeout_s`,
+    past the 2.0s deadline below, which previously made this test fail
+    *always* on that host rather than flake. Monkeypatching
+    `urllib.request.urlopen` (the one call site `_poll_once` makes,
+    `belief/brain_client.py`) to raise the same `URLError`-wrapping-
+    `OSError` shape a real refused connection produces reproduces
+    `_poll_loop`'s `exc_info=not isinstance(exc.__cause__, (URLError,
+    OSError))` split exactly, deterministically, on every host."""
+
+    def _refused(url: str, timeout: float = 0.0) -> object:
+        raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _refused)
+    with caplog.at_level("WARNING", logger="belief.brain_client"):
+        client = BrainLayerClient(
+            base_url="http://127.0.0.1:1"
+        )  # never dialled; urlopen is faked
         client.poll_replies()
         worker = client._poll_worker
         assert worker is not None, "poll_replies() must start the worker synchronously"

@@ -42,7 +42,11 @@
     this time, from a *different* leaked `BrainLayerClient` instance) and is fixed here**: filters
     `caplog.records` by `record.thread == client._poll_worker.ident` instead of blindly taking
     `caplog.records[0]`, since logger-name filtering alone can't distinguish two different client
-    instances sharing one logger name. Verified by deterministic injection (the live-socket path
-    couldn't be exercised to a pass *on this investigation's own host* — a separate, pre-existing,
-    host-specific socket-timing quirk reproduces identically against unmodified pre-fix code, see
-    `debug.md`).
+    instances sharing one logger name. **Follow-up, 2026-10-23 (`debug.md`'s own "Follow-up"
+    section):** the real-socket half of the test (a `bind()`-but-never-`listen()`-ed socket,
+    meant to stand in for an instantly-refused connection) was a genuine, always-failing defect on
+    this host, not a verification gap — the first pass mistook "cannot be driven to a pass here"
+    for "pre-existing and out of scope." Fixed by monkeypatching
+    `urllib.request.urlopen` to raise the same `URLError`-wrapping-`OSError` shape a real refusal
+    produces, removing the test's dependence on this (or any) host's socket timing entirely. Green
+    5/5 alone, in the full suite under `-p no:randomly`, and across 5 random seeds.
