@@ -133,3 +133,98 @@ Full read of the diff and the surrounding production code it depends on (`_check
 `reset_for_new_mission` on both `ConsolePerceptionRunner` and `CrewConsole`, `on_ground`'s field
 docstring, `aircraft-layer`'s `TelemetryCache`). Mutation re-verified independently, not taken on
 the implementer's word. Full subproject check suite run and passing.
+
+---
+
+## Fix re-review (2026-10-23)
+
+Re-reviewed fix commit `8fd8fc38` (tip, confirmed via `git rev-parse HEAD` against the dispatched
+sha) on `feature/switch-reference-values`, diffed against the previously-reviewed `b61bf3e6`.
+Addresses this review's required fix (stale "warm air start re-fires takeoff" documentation) and
+its first optional refinement (baseline-collision stall during mission-start resolving).
+
+**Stale documentation**: confirmed gone everywhere — grepped `src/`, `config/sequences/`,
+`plans/effector-sequences/`, `body-layer/CLAUDE.md`, and
+`docs/acceptance/2026-10-23-bl-b90-sequences-reflight.md` for "air start". Every remaining hit
+states the *new*, correct behaviour (air start fires `mission-start`/`mission-start-in-air`, never
+`takeoff`); the implementer's own grep caught two spots this review's three-item list missed
+(`logger.py`'s `elif` comment, two in `plan.md`) and fixed those too. The rendered
+`config/sequences/triggers.md` and `copilot-takeoff.md`'s header both read correctly — checked the
+rendered files, not the source comments, as this review's own brief requires.
+
+**Rendered `defaults.toml`**: the new `[logger] MISSION_START_RESOLVE_FALLBACK_S` entry's rendered
+comment is the `#:` block's full first sentence, verbatim, no truncation and no corrupted
+backtick/space span — compared byte-for-byte against the source. `status: judgement | range: 5.0
+.. 120.0` matches the declaration's `lo=5.0, hi=120.0, status="judgement"`.
+
+**New test fails on pre-fix code**: independently re-verified, not taken on the implementer's
+report. Copied the fixed `src/logger.py` aside, restored the `b61bf3e6` version, ran
+`test_baseline_collision_resolves_via_bounded_fallback` alone — `ImportError: cannot import name
+'MISSION_START_RESOLVE_FALLBACK_S' from 'logger'`, red for the stated reason (the mechanism does
+not exist on the reviewed tip). Restored the fixed file; `git diff` on it came back empty.
+
+**`implementation.md` overwrite claim**: confirmed nothing lost. `git show b61bf3e6:plans/
+effector-sequences/implementation.md` is byte-identical to the first 261 lines of the new 389-line
+file — the new section is a pure append, not a rewrite.
+
+**Checks**: `ruff format --check`, `ruff check` (`src tests tools`), `mypy src` (74 files clean),
+`mypy tools` (10 files clean), `pytest -q` — 2603 passed, 4 xfailed, from inside this worktree's
+`body-layer/`, matching the implementer's reported counts.
+
+### Required Fix
+
+- **The fallback's own comments claim a narrower trigger condition than the code actually has, and
+  the gap matters because the two cases behave differently.** Both `MISSION_START_RESOLVE_FALLBACK_S`'s
+  declaration comment (`src/logger.py:318-337`) and `mission_start_resolving_since_wall`'s field
+  docstring frame the 30 s fallback as covering exactly one case: *"the restart happens near `t_sim
+  = 0` **and** the first fresh sample lands on the exact same float as the baseline"* — a
+  coincidence that "self-heals on the next restart." The code cannot tell that case apart from a
+  second, more mundane one: **no fresh sample has arrived at all yet** when the 30 s elapses —
+  e.g. a long mission-load screen, or (common in DCS) a mission that starts paused and the pilot
+  takes their time un-pausing. `fresh_sample_confirmed` and `fallback_due` are both computed purely
+  from `t_sim` equality and wall-clock elapsed time; neither can distinguish "a fresh sample
+  coincidentally matches the baseline" from "there has been no fresh sample at all," because
+  body-layer's only signal is the value it reads over HTTP — there is no cheaper signal available
+  today (a monotonic per-sample generation counter from the collector, which the original review
+  already flagged as future BL-15 backlog, is the only thing that would actually distinguish them).
+  In the second case the fallback fires `MISSION_START`/`MISSION_START_IN_AIR` against
+  `crew_console.on_ground` computed from the genuinely stale, previous-mission sample — not "the
+  first real ownship sample after the mission start" as the call site's own comment claims
+  (`logger.py:3628-3632`), and unlike the coincidence case **this does not self-heal**:
+  `pending_mission_start_in_air_check` is cleared unconditionally once the fallback fires, so a
+  wrong classification stands for the rest of that mission, with no second chance at the next
+  genuinely fresh sample. The committed comments assert "short enough to self-heal within the same
+  sortie" and "only reachable if a real restart happens near `t_sim = 0` **and** ..." — both read as
+  confident claims about *when* the fallback fires and are each only half true. Required because
+  these are exactly the kind of load-bearing "X, so Y" claims this project's own review discipline
+  asks to be checked, not because the underlying design choice is wrong: given body-layer's actual
+  telemetry contract, there is no cheaper correct signal, and the task scoped this as a minimal
+  fallback, not a redesign. **Fix is documentation-only, no behaviour change needed to close this
+  finding**: state plainly, in both comments, that the fallback also fires whenever no fresh sample
+  has arrived within the window (paused sim, slow load) and not only on a `t_sim` coincidence, and
+  that in that case the `MISSION_START_IN_AIR` classification may be wrong for previous-mission
+  reasons and will not self-correct until the next restart.
+
+### Optional Refinement
+
+- **Whether that residual misclassification risk is worth mitigating now is a product question,
+  not purely a reviewer judgement call** — flagging for the user rather than deciding it here,
+  per CLAUDE.md's escalation rule for genuine ambiguity about expected behaviour. Today's actual
+  consequence is zero: no sequence file ships for either new trigger yet, so nothing reads whether
+  `MISSION_START_IN_AIR` fired correctly (same reasoning the original review used to leave the
+  coincidence case unmitigated). The moment a sequence file is attached to `mission-start-in-air`,
+  this stops being free — a pilot who starts a mission paused and un-pauses after 30+ seconds could
+  get a wrong one-shot classification with no recovery. Worth a decision at that point, not
+  necessarily before.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+### Review Confidence (fix re-review)
+
+Full read of the diff against `b61bf3e6`. Mutation-verified the new test independently. Full
+subproject check suite run and passing. Did not re-verify the untouched parts of the mission-start
+mechanism already covered by the first review pass (the mid-mission-start distinction, the
+takeoff-suppression window, the module/scope checks) — no code in that surface changed in this
+commit.
