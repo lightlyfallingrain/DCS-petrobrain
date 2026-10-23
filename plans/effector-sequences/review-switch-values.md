@@ -115,3 +115,153 @@ mismatch exists elsewhere in the group. The real `config/effectors-raw/mi-24p.to
 `values` field yet (expected — awaits the Windows rerun per `stage0c-run.md`), so the Values
 column's real-world content could not be read from the committed file; readability was checked
 against the unit tests' synthetic cases and one hand-built fixture instead.
+
+---
+
+## Fix re-review, 2026-10-23
+
+Re-reviewed `c13ec5c1` (fix pass) against this review and the real-run findings it addresses, at
+tip `e4f2915d` (`c13ec5c1` + a parallel explore-notes commit on mission-start triggers, out of
+scope for this pass — not reviewed, and not touched by this diff). `git diff 97ad4e3a c13ec5c1`:
+9 files, `generate_effector_registry.py`, `render_switch_reference.py`,
+`effector_sequences.py`/`triggers.md`, both test files, the two generated config files, the
+research note, and `implementation.md`.
+
+**Both Required Fixes verified closed, by mutation, not just by reading the diff:**
+
+- **`default_1_position_tumb`'s default `arg_lim_`** now special-cases to
+  `(0.0, arg_val_ if arg_val_ is not None else 1.0)` (lines ~466-477), reading `arg_val_` one
+  offset before `arg_lim_` per the research note's row 36. Three new tests cover: no-`arg_val_`
+  stays `(0,1)`; a custom `arg_val_` (`2`) with no `arg_lim_` changes the upper bound to `2.0`;
+  an unresolvable `arg_val_` is `"unknown"`, never a silent fallback. The implementer's own
+  mutation log (disabling the branch, both new tests failing as expected, restored by checksum)
+  is consistent with what I read in the code.
+- **Mutation-coverage gap closed**: `test_value_range_for_every_helper_signature_minimal_call`
+  now iterates all 22 `_HELPER_SIGNATURES` entries via one minimal call each, asserted against
+  an independently-transcribed `_EXPECTED_DEFAULT_VALUE_RANGES` table (verified the two sets are
+  equal, `set(_EXPECTED_DEFAULT_VALUE_RANGES) == set(gen._HELPER_SIGNATURES)`, so no helper can
+  silently drop out of coverage the way `default_blue_cover` did). **Re-ran the
+  `default_blue_cover` mutation myself** — removed it from its `_discrete([0.0, 1.0],
+  momentary=False)` group (line ~444), ran `test_generate_effector_registry.py`: the new test
+  fails with exactly the predicted `discrete` → `unknown` downgrade (`1 failed, 93 passed`).
+  Restored the file (confirmed byte-identical via `diff` against a pre-mutation copy), re-ran:
+  `94 passed`. The fix holds.
+
+**New real-run findings (arithmetic, NULL class, `radio_wheel_1`, rounding, unknowns reporting),
+checked against the amended research note and the code:**
+
+- **Safe arithmetic evaluator** (`_eval_constant_arithmetic`/`_lua_arithmetic`/`_ARITHMETIC_BINOPS`):
+  an AST whitelist over `ast.Constant` (numeric only, explicitly excluding `bool`), `ast.UnaryOp`
+  with `ast.USub`, and `ast.BinOp` restricted to `(Add, Sub, Mult, Div)` — no `eval` anywhere, and
+  `ast.Pow` is not in the whitelist, so `**` falls through to the final `return None` rather than
+  being evaluated (confirmed by reading `_ARITHMETIC_BINOPS`'s definition and the fallthrough at
+  the end of the function) — no exponent of any size can be computed, so there is no hang/crash
+  surface from large exponents, and none from the evaluator being asked to do anything but
+  `+ - * /` on literals. `ast.Name`/`ast.Call`/everything else hits the same fallthrough, so a
+  real identifier or a function call is rejected, never silently substituted. Division by zero:
+  `_lua_arithmetic` wraps the *entire* top-level evaluation in one `try/except ZeroDivisionError`
+  outside the recursive walk, so a `0` denominator anywhere in a nested expression (e.g.
+  `1 / (2 - 2)`) propagates up through the recursion untouched and is caught once at the top —
+  verified this structurally holds by reading the call shape, not just trusting the single-level
+  test case. **Animation-only identifiers do not make a value unknown**: the anim-speed argument
+  sits at a different helper offset than the value-affecting ones (`delta_`/`gain_`/`arg_val_`),
+  so an identifier like `anim_speed_default` passed as the *animation* parameter is never routed
+  through `_lua_scalar` for a value-range computation at all — confirmed directly by
+  `test_default_1_position_tumb_default_arg_lim_uses_custom_arg_val`, whose call text carries
+  `anim_speed_default` in the anim slot and still resolves to a clean `discrete (0.0, 2.0)`, and
+  by `test_multiposition_switch_steps_from_count_delta_min`/`..._fractional_delta_is_evaluated`,
+  both of which also carry `anim_speed_default` in the anim slot alongside a literal/arithmetic
+  `delta_` and resolve cleanly. The *value*-position identifier case (`anim_speed_default / 5` as
+  `delta_` itself) is correctly the opposite: `test_multiposition_switch_unresolvable_delta_
+  expression_is_unknown` confirms that one is `"unknown"`, as it must be — these are two
+  different parameters, not a contradiction. Agree with this split.
+- **NULL-class `"none"` kind**: `ValueKind.NONE`, `_none_value()`, and
+  `_value_ranges_for_raw_literal`'s `elif kind == "NULL": result.append(_none_value())` branch,
+  ahead of the generic `unhandled raw-literal class` fallback. Rendered as `"—"` in
+  `render_switch_reference.py`. `test_raw_table_literal_null_class_action_is_none_not_unknown`
+  exercises `BRAKE-LEVEL-OP-PTR`'s own shape directly; `test_none_kind_renders_as_an_em_dash`
+  covers the render side. Correct and matches the amended research note's point 3.
+- **`radio_wheel_1`: relative, stepped.** Now emitted via the `relative=True` branch in `_discrete`
+  rather than `_continuous`, with step count derived from `(hi - lo) / step_size`, and two guard
+  clauses (`step_size <= 0`, `n_steps < 0`) that fail to `"unknown"` rather than raising or
+  producing a garbage range. Both the explicit-args and default-args cases are tested
+  (`test_radio_wheel_1_is_relative_discrete_not_continuous`/`..._default_step_and_limit`), and the
+  render side is covered by `test_relative_discrete_list_is_marked`. Matches the amended research
+  note's point 2.
+- **Rounding**: `_VALUE_ROUND_NDIGITS = 6`, `_round_value`, applied once at construction in
+  `_discrete` (every value, via a set comprehension before `sorted`) and `_continuous`
+  (`min`/`max`/`gain`) — computed once at the point of computation, not re-applied by every
+  downstream reader, matching the module's own stated design posture elsewhere in this file.
+  `test_default_axis_arithmetic_gain_is_evaluated_and_rounded` checks the rounding directly
+  (`vr.gain == round(vr.gain, 6)`), not just that the value is approximately right.
+- **Unknowns in the run report and header, exit 0**: `_unknown_value_ranges` walks every handled
+  element's `value_ranges` for `kind == ValueKind.UNKNOWN`, printed as a count in both `main`'s
+  stdout summary and the TOML header's `# Elements:` comment line, and listed in full (element,
+  action index, reason) in the stdout report. **Agree with exit 0.** Confirmed by reading `main`:
+  nothing gates the return value on `unknown_value_ranges` — only `unhandled` (without
+  `--allow-unhandled`) does, same posture as `ignored`/`n_post_assigns`. This is consistent with
+  the module's own documented design ("fails closed, at two levels" — the `ValueRange` level
+  already fails closed to `"unknown"`; making the whole run fail over it would be a second,
+  redundant refusal at a coarser grain, for a condition that already can't silently ship wrong
+  data). Confirmed live against the `clean` fixture (which has one `default_button_tumb`-caused
+  unknown): `--scripts-dir tests/fixtures/effector_registry/clean` (report mode) prints `1 value
+  range(s) unknown` in the summary line, the element/action/reason beneath it, and (in `--write`
+  mode) the TOML header carries `Value ranges unknown: 1 (see the run report).` — the mechanism
+  works exactly as described.
+  - **Gap, not required**: no test asserts any of this wiring. `test_clean_fixture_report_mode_
+    exits_zero_and_writes_nothing` only checks `"9 emitted, 0 unhandled"` in stdout, and
+    `test_clean_fixture_write_mode_produces_loadable_toml` checks the header's `Statements
+    ignored: 1` line but not the adjacent `Value ranges unknown: 1` one, even though the `clean`
+    fixture exercises both (confirmed live above). The code is correct and the behaviour is
+    simple string-count plumbing off data this file already computes elsewhere, which is why this
+    is not a required fix — but it is new, user-visible output with zero assertion coverage,
+    worth closing opportunistically (one `assert "1 value range(s) unknown" in result.stdout`
+    and one `assert "Value ranges unknown: 1" in rendered`, both in the existing end-to-end tests
+    at lines ~798/818, no new test needed).
+- **`"to"` notation**: reads unambiguously for both the discrete-step-count and continuous forms,
+  including the negative-lower-bound case the first review flagged (`-1 to 1 continuous`,
+  confirmed in the regenerated `switch-reference.md`'s `COLLECTIVE-CORR-PTR`/`OP-COLL-THROTTLE-
+  PTR` rows). Both optional refinements from the first review (the separator, and the stale
+  `config/effectors-raw.toml` → `config/effectors-raw/mi-24p.toml` source-line path) are applied
+  and verified in the rendered file; the third (`implementation.md`'s orphaned line) is gone.
+- **`TRIGGER_INFO[TAKEOFF]` wording**: now correctly attributes the self-check to the engine ("the
+  engine's own implicit self-check -- a row does not write if its switch is already observed at
+  the target value") rather than to the sequence file's own row conditions, matching
+  `effector_engine.advance`'s documented behaviour in `body-layer/CLAUDE.md`. `triggers.md`'s
+  generated copy matches (staleness test green).
+
+**Checks** (body-layer only): `ruff format --check src tests tools` clean (183 files);
+`ruff check src tests tools` clean; `cd body-layer && .venv/bin/mypy src` clean (74 files);
+`.venv/bin/mypy tools` clean (10 files); `pytest -q` — 2596 passed, 4 xfailed, matching the
+implementer's own report exactly. `test_render_switch_reference.py`/`test_render_triggers.py`
+(the staleness checks against both generated files) pass, confirming the committed
+`switch-reference.md`/`triggers.md` match the current generator/code.
+
+**Not reviewed, per scope**: mission-start trigger wiring (the parallel explore-notes commit at
+the tip, being built by another agent) and the raw dump's real values (awaits the pending Windows
+rerun — the committed `config/effectors-raw/mi-24p.toml` is confirmed unchanged by this diff, and
+its ~25 arithmetic-`helper_args` elements, 5 `radio_wheel_1` elements, and NULL-class actions are
+exactly where the implementer said they'd be).
+
+### Verdict (fix pass)
+
+APPROVED
+
+Both Required Fixes from the first review are closed and independently mutation-verified by this
+pass, not just re-read. All three optional refinements were also applied. The real-run findings
+(arithmetic evaluator, NULL class, `radio_wheel_1`, rounding, unknowns reporting) are each correct,
+tested, and consistent with the amended research note. The one new gap found — no test asserts
+the unknowns-count wiring in the run report/header — is cosmetic test-coverage on otherwise-correct
+plumbing, not a required fix; worth closing opportunistically next time this file is touched.
+
+### Review Confidence (fix pass)
+
+Full read of the diff and both generated config files. Mutation-verified both Required Fixes
+myself (the `default_blue_cover` removal/restore, confirmed by re-running the full
+`test_generate_effector_registry.py` suite before and after) rather than relying on the
+implementer's reported mutation log alone. Ran every check command myself rather than trusting
+the implementation summary's reported numbers. Did not independently re-verify the
+`default_1_position_tumb` branch-disable mutation (`elif helper == "..." ` → `elif False`) the
+implementer reported — the three dedicated tests for that fix are correct and sufficient reading
+of the code, and the `default_blue_cover` mutation already demonstrates the review's mutation
+methodology holds on this file.

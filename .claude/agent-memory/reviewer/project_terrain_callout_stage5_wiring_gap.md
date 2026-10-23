@@ -28,6 +28,18 @@ sufficient coverage on a file-list skim. The check is the same standing one as t
 rule ([[reviewer-wiring-grep]] if that memory exists) — grep for the *consuming* site's own key
 string across `tests/`, not just the producing function's test file.
 
+**Milder variant, found 2026-10-23 on the `switch-reference-values` fix pass
+(`generate_effector_registry.py`'s `_unknown_value_ranges`/run-report/header count): the
+end-to-end fixture that would trigger the new field already existed and was already run by an
+existing test (`clean` fixture has one `default_button_tumb`-caused unknown value range), but
+that test's own assertions simply never looked at the new string** (`"N value range(s) unknown"`
+in stdout, `"Value ranges unknown: N"` in the TOML header). Not a missing wiring path — running
+the generator against the fixture live showed the feature works correctly — just a printed
+field nobody asserted on, in a test that already exercises the exact condition. Grep for the
+*literal format string* across `tests/`, not just for whether a fixture triggering the condition
+exists: a fixture that triggers it is necessary but not sufficient if the assertion list wasn't
+extended alongside the new field.
+
 See [[precise_position_belief_hybrid_gap]] for the sibling case this generalizes (a channel
 skipped, not a wiring seam skipped) — same root cause, different shape.
 
