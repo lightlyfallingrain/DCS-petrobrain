@@ -18,3 +18,18 @@
   the reproduced code, and weigh a domain expert's structural diagnosis ("there's no gate for X")
   as seriously as a numerically-confirmed mechanism (`position-belief-runaway` debug report +
   review, 2026-09-25).
+
+- **A correct measurement that a test's premise is false on this host is not, by itself, evidence
+  the test is out of scope or untestable here — it may mean the test depends on the wrong premise
+  and should stop depending on it.** `connection-reporter-flaky`'s debugger measured, correctly,
+  that a `bind()`-but-never-`listen()`-ed socket does not refuse `connect()` instantly on this
+  host (it blocks ~5.0 s) and concluded the test "cannot presently be driven to a real pass on
+  this particular machine" — out of scope. The reviewer's first pass reproduced the identical
+  measurement and reached the identical conclusion, independently. Both were wrong in the same
+  way: the test's own docstring claimed to test "connection refused," and the real fix was to stop
+  depending on real socket timing at all (monkeypatch `urlopen` to raise the same exception shape
+  a refusal produces) — not to leave a correctly-diagnosed, always-failing test unfixed. Two roles
+  made the identical inferential error on the same ticket in the same session; the lesson is to
+  treat "this premise is false on this host" as a prompt to ask whether the premise itself should
+  change, not as a verdict that the test cannot be fixed (`connection-reporter-flaky` debug + review
+  reports, 2026-10-23).

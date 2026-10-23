@@ -50,3 +50,29 @@
     `urllib.request.urlopen` to raise the same `URLError`-wrapping-`OSError` shape a real refusal
     produces, removing the test's dependence on this (or any) host's socket timing entirely. Green
     5/5 alone, in the full suite under `-p no:randomly`, and across 5 random seeds.
+
+    **Stated precisely, since "fixed" covers two independent defects, not one:** on `main`, this
+    test's pre-fix `caplog.records[0]` (no thread filter) meant that whenever it *did* pass, it was
+    passing by accident — correctness depended on no other leaked `BrainLayerClient` thread firing
+    into the same capture window during this test's 2.0 s wait, not on the code actually
+    distinguishing its own record from a different leaked instance's. That is the general
+    `BL-B92` root cause, one layer deeper. Separately and additionally, on *this* host specifically,
+    the test's second premise — a `bind()`-but-never-`listen()`-ed socket refuses `connect()` at
+    once — was simply false (measured ~5.0 s block, confirmed on a bare `socket.create_connection`
+    with no test framework involved), so here it did not even get the chance to pass by accident:
+    it failed deterministically, pre-fix and post-fix of the first (thread-identity) fix, 3/3,
+    before the follow-up replaced the real socket with a monkeypatched `urlopen`.
+
+  **On this entry's original "done when" wording** (quoted verbatim in this file's own history):
+  *"the full body-layer suite passes under several random seeds (`--randomly-seed=<n>`), not only
+  with ordering disabled."* That bar was met before `pytest-randomly` was uninstalled from the
+  shared venv (user decision, 2026-10-23): the debugger's 61-seed sweep (1-10, 36, 56, 100-150) and
+  the follow-up's 5-seed sweep (11/22/33/44/55) both exercised the real plugin, not a simulation of
+  it, and both are reported above. The plugin's own package directory under `body-layer/.venv` is
+  now an empty, entry-point-less leftover (DoD check, 2026-10-23: `pip show pytest-randomly` finds
+  nothing, no `dist-info`, pytest does not register it as a plugin) — the uninstall is real, not
+  partial. **This entry's own random-seed evidence is historical and cannot be re-run as stated**:
+  a future reader checking this fix after a regression should use `pytest tests -q` in file order
+  (BL-B93's method) rather than attempting `--randomly-seed=`, which now fails loudly
+  (`error: unrecognized arguments: --randomly-seed=<n>`, confirmed by this DoD check) rather than
+  silently running unordered.
