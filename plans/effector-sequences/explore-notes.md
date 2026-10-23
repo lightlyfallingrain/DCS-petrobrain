@@ -67,6 +67,25 @@ The plan's "Decisions Requiring User Input":
    may not work.'"*
 4. **Re-flight: own short card** — *"re-flight: own short card."*
 
+### Readback rate and scope (2026-10-23, after the plan revision)
+
+On the revised plan's R7 (*"BL-B80 already reads all six switches every frame"*), the user:
+
+> *"we'll be reading a lot of args eventually. Better not do it every frame. The axis value
+> (BL-B80) are required at max rate, but for switch positions the normal lower frequency poll is
+> enough. If possible, query a set of switches when they are needed, not everything. This at DCS
+> export level if possible, for performance reasons. Ok to defer to later stage, but will be needed
+> soonish. Let's say BL-B90 last step."*
+
+So: axis args stay per-frame (BL-B80). Switch positions move to the lower-rate poll, ideally an
+on-demand query of just the needed set, done in `Export.lua`. Deferred, but it is BL-B90's **last
+stage** (in scope, not backlog). That reverses the revised plan's "Stage 4 deferred, additive":
+it now also moves the six switch args off BL-B80's per-frame push.
+
+On "Guidance unit ready" at spawn on an air start: *"there's already a note somewhere to say it on
+*change* to ready. Use that."* (BL-B80 decision 2, *"only on change"*.) Fixed separately on
+`fix/guidance-ready-edge` before Flight A, not in BL-B90.
+
 Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
 tool for creating the switch list."* (Stage 0, the generator.)
 
