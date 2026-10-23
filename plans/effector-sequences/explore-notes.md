@@ -100,6 +100,34 @@ effectors list": the curated registry plus the full reference both sit in `seque
 generated raw dump (`config/effectors-raw.toml`) stays where Stage 0 put it, as machine data. That
 placement is reversible, so it is the main loop's choice; say so if it should move too.
 
+### Already-set switches are skipped by the engine, not by a condition (2026-10-23, after Stage 1)
+
+On the shipped takeoff row `| missile_power != on | missile_power | on |`:
+
+> *"that's kinda duplicate. Rather that condition like that, I'd expect the code to check that
+> switch is already in set position, so no action. I'll use the conditions for real
+> this-depends-on-some-other-condition cases."*
+
+So the engine itself skips a row whose effector already reads the target value, so no write, no
+step delay and no line spoken. The `condition` column is kept for genuine cross-switch
+dependencies. The shipped files drop their `X != on` self-conditions. Main-loop choice where the
+user did not say: if the effector's readback is still unknown after
+`EFFECTOR_CONDITION_READBACK_WAIT_S`, the row **writes** (a write sets an absolute value, so it
+is harmless if the switch was already there). Reversible; say if unknown should skip instead.
+
+### Collision rule and per-aircraft registry (2026-10-23)
+
+> *"keep first. effectors.toml has to be aircraft specific. While we're only working with Mi-24P at
+> this time, better to be ready now."*
+
+- When two curated entries point at the same device/cmd/arg, the **first wins**. The later one is
+  rejected with an error (non-fatal, D5). This replaces Stage 1's drop-both rule.
+- The registry is per aircraft. Main-loop layout, reversible: one directory per aircraft,
+  `body-layer/config/sequences/mi-24p/`, holding that aircraft's `effectors.toml`,
+  `switch-reference.md`, and its sequence files. The raw dump becomes
+  `body-layer/config/effectors-raw/mi-24p.toml`. A sequence file's `aircraft` param must match
+  the directory it sits in, and it resolves effectors only against that aircraft's registry.
+
 Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
 tool for creating the switch list."* (Stage 0, the generator.)
 
