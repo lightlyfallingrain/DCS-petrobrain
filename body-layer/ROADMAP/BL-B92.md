@@ -1,7 +1,8 @@
 # BL-B92 — Connection-reporter tests are order-dependent under pytest-randomly
 
 - [x] **BL-B92 — Isolate the `test_connection_reporter_*` tests so they pass in any order.**
-  #status/done Filed 2026-10-23 at user direction (*"yes"*, to filing one item for the group).
+  #status/done **Merged to `main` 2026-10-23 (`27f9821f`, `fix/connection-reporter-flaky`).**
+  Filed 2026-10-23 at user direction (*"yes"*, to filing one item for the group).
   (`BL-B91` was already taken on `feature/effector-sequences` when this was minted on
   `fix/guidance-ready-edge`, hence the skip.)
 
