@@ -240,3 +240,79 @@ Stage 1's review already covered their staleness test and generator logic in ful
 independently re-verify Stage 0's ED-forms research note (`aircraft-layer/research/
 2026-10-23-mi24p-clickabledata-forms.md`) — out of this stage's scope and already the input to a
 Stage 0/0d review, not Stage 2's.
+
+---
+
+### Fix re-review (2026-10-23)
+
+Scope: the two fix commits on top of this review's own tip, `feature/effector-sequences` now at
+`0605611f` -- `03e175c5` (cherry-picked from `b9c9644c`, this review's required fix: the
+intercom-gate test phase) and `0605611f` (the performance change request from
+`performance-stage1-2.md`: gate `GET /spu8/state` behind `crew_console.config_error_pending`). The
+security deep-analysis commit in between (`d3432963`) touches docs only.
+
+**Required fix verified, by mutation, not just by reading the new test phase.** Deleted `if not
+intercom_open: return` from `CrewConsole.drain_config_error` (`body-layer/src/belief/
+crew_console.py`) and ran `test_config_error_held_while_silenced_and_intercom_closed_then_
+speaks_once` in isolation -- it now fails exactly where the new phase asserts
+`config_error_pending is True` (actual `False`: the line spoke immediately once unsilenced, intercom
+still closed), the precise failure the fix's own phase exists to catch. Restored the two lines by
+hand; `git diff` on the file is empty after restore, confirming an exact restore rather than a
+by-eye one. This closes the one required fix from the review above -- the gate is no longer
+unverified.
+
+**Performance guard verified, by mutation, for both halves.**
+
+- *Load-bearing:* reverted `logger.py`'s `~3581` guard to the unconditional pre-fix call (removed
+  the `if crew_console.config_error_pending:` wrapper) and ran
+  `test_no_spu8_poll_when_config_error_not_pending` in isolation -- failed as expected (`assert 33
+  == 0`, 33 unconditional GETs over the poll window), matching `implementation.md`'s own reported
+  mutation result exactly. Restored by hand; `git diff` on the file is empty after restore.
+- *Behaviour preserved:* re-ran `test_config_error_held_while_silenced_and_intercom_closed_then_
+  speaks_once`, `test_no_spu8_poll_when_config_error_not_pending`, and
+  `test_config_error_pending_survives_a_mission_restart` together against the restored code -- all
+  three pass. The line still speaks once, exactly once, after the gate opens; it is still held
+  while silenced; it survives a mission restart (preserved through `reset_for_new_mission`'s
+  `__init__` re-invocation, unchanged by this diff). A failed fetch is tolerated and retried:
+  `get_spu8_state_latest` (guarded or not) sits inside `_run_crew_text_poll_loop`'s own per-poll
+  `try: ... except Exception as exc:` block (`logger.py` ~3760, pre-existing, unchanged by this
+  diff) -- any exception from the fetch is caught, logged via `logger.exception` or
+  `connection.report_failure` (connection-loss case), and the next poll runs normally; the guard
+  does not add a second failure path.
+
+**No case found where `config_error_pending` flips `True` again after startup without the fetch
+then resuming.** Grepped every read/write site
+(`grep -n "config_error_pending" body-layer/src/belief/crew_console.py body-layer/src/logger.py`):
+it is set once, at `CrewConsole` construction (`logger.py` ~4741, `config_error_pending=had_
+config_errors`, computed by `_load_effector_config()` before the poll loop or `CrewConsole` exist),
+preserved (never re-derived) across a mission restart by `reset_for_new_mission`'s `__init__`
+re-invocation (`crew_console.py` ~1431), and cleared exactly once, on a successful speak, in
+`drain_config_error` (~1590). There is no second site that sets it `True`. So the guard's premise --
+"once cleared, the GET never needs to fire again for this process's lifetime" -- holds for every
+reachable state, not just the common one.
+
+**Checks, this worktree, tip `0605611f` (tools resolved from the main checkout's `.venv` per the
+task's instruction, cwd inside this worktree's `body-layer/`):**
+- `ruff format --check src tests tools` -- pass (180 files)
+- `ruff check src tests tools` -- pass
+- `cd body-layer && .venv/bin/mypy src` -- pass (74 files)
+- `pytest tests -q` -- 2550 passed, 4 xfailed (one more than this review's own earlier run of
+  2549 -- the one new test added by the performance fix, `test_no_spu8_poll_when_config_error_
+  not_pending`; no other count changed)
+
+#### Verdict
+
+**APPROVED.** The one required fix from the original review is genuinely closed (mutation-tested),
+the performance change request is correctly applied and mutation-tested on both its load-bearing
+and its behaviour-preservation claims, and no `config_error_pending` lifecycle gap exists. Clear to
+proceed to DoD.
+
+#### Review Confidence
+
+Full read of both fix commits' diffs (`body-layer/src/logger.py`, `body-layer/src/belief/
+crew_console.py`, `body-layer/tests/test_logger.py`) and the `aircraft_client.py`/`_get_json`
+failure-handling path they rely on. Verified by mutation: the intercom gate (required fix), the
+perf guard's load-bearing half, and re-ran the perf guard's behaviour-preservation tests together
+rather than individually. Did not re-review anything outside the two fix commits -- Stage 2's own
+substance (engine, registry, sequences, aircraft-layer `"args"` map) was the original review's
+scope above and is unchanged by these commits.
