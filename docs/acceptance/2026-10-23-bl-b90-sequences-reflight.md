@@ -72,8 +72,8 @@ belief.effector_engine.EFFECTOR_SEQUENCE_STEP_DELAY_S: 1.0 (derived)
    Expect: a multi-line `EFFECTOR CONFIG ERROR` banner on the body-layer console at startup naming
    the bad row/file; once the intercom (SPU-8) comes up, exactly one spoken line — *"System error,
    bad sequence file, see the logs. Petrobrain will continue, but some functionality may not
-   work."* — spoken once, not repeated; every other trigger (observ, weapons, the undamaged parts
-   of takeoff) still works normally. Record: did the banner appear, was the error line spoken
+   work."* — spoken once, not repeated; the whole takeoff file is ignored (a bad file is dropped
+   as a unit), while OBSERV and weapons still work normally. Record: did the banner appear, was the error line spoken
    exactly once and only after the intercom was up, and did everything else still work?
 
 ## Bring back
