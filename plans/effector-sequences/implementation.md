@@ -107,3 +107,93 @@ fixture directories).
   exercised against the synthetic fixtures and ad hoc `--out` paths under `/tmp` only.
 - **Every Lua form named in the Stage 0a correction message is now built-to and test-covered** --
   nothing in this generator is still working from the plan's original (superseded) guesses.
+
+---
+
+### Follow-up pass -- bringing the generator onto the revised Stage 0 spec
+
+A second Implementer pass, same branch, closing six gaps a `grep` against the revised
+`plans/effector-sequences/plan.md` "Stage 0" section found in the first pass's output (which was
+correct against the Lua forms but had not yet been checked against the plan's own CLI/output-schema
+text). No change to the parsing logic covered above (tokenizer, helper-call/raw-literal detection,
+completeness invariant) -- only the output schema, the CLI's build-detection/exit-code behaviour,
+and the header.
+
+**1. `--dcs-build` resolution from `autoupdate.cfg`.** Added
+`_read_dcs_build_from_autoupdate_cfg(install_path)`: reads `$DCS_INSTALL_PATH/autoupdate.cfg`
+(that exact file, no walking up) and regexes out `"version": "..."`. **Deliberately deferred to
+immediately before the write step, not performed unconditionally at startup** -- the plan's CLI
+section lists this bullet alongside `--write`'s own bullets, and report mode never consumes a
+build string (it is only ever rendered into the TOML header), so requiring it in report mode would
+be a startup refusal with no corresponding need. This is a judgement call the plan's text does not
+fully settle either way; flagging it here rather than asserting it as the only reading.
+
+**2. Header now carries the source path, a sha256 per input file, and a closing regenerate-after-
+patch line**, matching the plan's worked sample: `# Source: Mods/aircraft/Mi-24P/Cockpit/Scripts,
+DCS <build>`, `# Inputs (sha256): devices.lua <hex>, command_defs.lua <hex>, clickabledata.lua
+<hex>`. `sha256_hexdigest()` is a one-line stdlib `hashlib` wrapper, computed only at write time
+(never needed in report mode).
+
+**3. Exit codes corrected to the plan's own text**, which this generator's first pass had wrong:
+"not on the DCS machine" and "an unreadable input" (missing required `.lua` file) are **exit 1**,
+not 2 -- 2 is reserved for "N unhandled element(s)", the only case the plan's CLI section actually
+assigns it to. `CommandDefsParseError` (the `bad_loop` fixture) is left at exit 2, unchanged: the
+plan's text does not name an exit code for that failure mode at all, and changing it was outside
+this pass's named gaps.
+
+**4. Output schema switched from scalar `cmd`/`cmd2`/`arg` to the plan's list shape**: `cmds`,
+`cmd_names`, `args`, and `arg_values` (present only when the source had an `arg_value` field --
+never emitted for a helper-call element, since this generator does not parse helper trailing
+parameters at all). This required `_ordered_dotted_refs` to stop deduplicating -- `STICK-PTT-PTR`'s
+`action = {spu8_commands.CMD_SPU8_TRIGGER_P, spu8_commands.CMD_SPU8_TRIGGER_P}` is the *same*
+command twice (LMB/RMB), and the old dedup collapsed it to one entry while `arg`/`arg_value` kept
+both -- silently mismatched arity that the list schema would have shipped as a bug. `device_name`
+(the device symbol) is now its own TOML field rather than a trailing comment, per the plan's "a
+consumer never branches on type" requirement -- a comment is not data a TOML reader can use.
+
+  **Seat, per the task brief's instruction (not the plan's literal text) -- recorded here as the
+  decision made:** the plan's own Stage 0 text says an absent `crew_member_access` renders
+  `seat = "default"`. The brief overriding it asked for `seat` to always be one of
+  `"pilot"`/`"operator"`/`"both"` (DCS's real default being 0 = pilot), with a separate
+  `seat_explicit: bool` carrying whether the source actually said so. Implemented that way:
+  `_seat_for(numbers)` maps `{0}`/`{1}`/`{0, 1}` to the three canonical strings via a lookup table,
+  returning `None` -- which this generator treats as **unhandled**, not silently guessed -- for any
+  other set. This is new fail-closed behaviour the plan's text did not ask for (it only names the
+  three sets that occur in the real file, 2026-10-23 recon Q6); flagged because a future DCS patch
+  introducing some other `crew_member_access` combination would now show up as an unhandled element
+  rather than an unmapped number, which seemed like the right side of "never guessed at" to land on
+  but is a judgement call, not a literal instruction.
+
+**5. Sorted-by-name output was already correct** in the first pass (`sorted(handled)`,
+`" CONTROL-COVER-PRIORITY-PTR"`'s leading space kept verbatim) -- confirmed, no change needed.
+
+**6. No other gap found.** Re-read the revised plan's full "Tests" paragraph against the test file
+line by line; every item it names now has a corresponding test (the `--dcs-build`/`autoupdate.cfg`
+cases were the only ones actually missing before this pass).
+
+### Files changed, this pass
+
+- `body-layer/tools/generate_effector_registry.py` -- schema/CLI/header changes above.
+- `body-layer/tests/test_generate_effector_registry.py` -- updated assertions for the new list
+  schema and `seat`/`seat_explicit` fields; updated exit-code expectations (1, was 2) for the
+  "not on the DCS machine" and "missing file" cases; new tests for `--dcs-build` resolution from
+  `autoupdate.cfg` (success, missing file, no env and no flag) and for a crew/seat value outside
+  the known three-set mapping being unhandled rather than guessed.
+- No fixture changes were needed -- the existing `clean`/`dirty`/`bad_loop` Lua already exercises
+  every form the schema change touches (the `STICK-PTT-PTR` two-identical-commands case already
+  existed and is what caught the old dedup bug above).
+
+### Checks (this pass)
+
+- `ruff format --check src tests tools`: pass
+- `ruff check src tests tools`: pass
+- `mypy src`: pass (71 source files)
+- `mypy tools`: pass (8 source files)
+- `pytest -q` (whole suite): 2481 passed, 4 xfailed -- no regressions (38/38 in
+  `test_generate_effector_registry.py`, up from 32 before this pass).
+
+### Still out of scope
+
+Unchanged from the first pass: Stage 0c (the real run on the Windows DCS machine, producing the
+real `config/effectors-raw.toml`) and Stage 1+ are not touched. No real `effectors-raw.toml` exists
+yet in this repo.

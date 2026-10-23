@@ -12,6 +12,7 @@ are synthetic fixtures written for this project, not ED source.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -188,11 +189,12 @@ def test_helper_call_positional_extraction(gen: ModuleType) -> None:
     assert heads == 1 and not unhandled and patches == 0
     el = handled["X"]
     assert (el.device_id, el.device_symbol) == (3, "ASP_17V")
-    assert (el.cmd_id, el.cmd_symbol) == (3001, "asp_commands.Power")
-    assert el.arg == 529
+    assert (el.cmd_ids, el.cmd_symbols) == ([3001], ["asp_commands.Power"])
+    assert el.args == [529]
+    assert el.arg_values is None
     assert el.label == "Sight Power"
     assert el.shape == "default_2_position_tumb"
-    assert (el.crew, el.crew_explicit) == (1, True)
+    assert (el.seat, el.seat_explicit) == ("operator", True)
 
 
 def test_helper_call_crew_absent_defaults_to_pilot_not_explicit(
@@ -204,7 +206,7 @@ def test_helper_call_crew_absent_defaults_to_pilot_not_explicit(
     )
     _, handled, unhandled, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
     assert not unhandled
-    assert (handled["X"].crew, handled["X"].crew_explicit) == (0, False)
+    assert (handled["X"].seat, handled["X"].seat_explicit) == ("pilot", False)
 
 
 def test_helper_call_crew_nil_is_not_explicit(gen: ModuleType) -> None:
@@ -214,7 +216,7 @@ def test_helper_call_crew_nil_is_not_explicit(gen: ModuleType) -> None:
     )
     _, handled, unhandled, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
     assert not unhandled
-    assert (handled["X"].crew, handled["X"].crew_explicit) == (0, False)
+    assert (handled["X"].seat, handled["X"].seat_explicit) == ("pilot", False)
 
 
 def test_helper_with_no_crew_parameter_defaults_pilot(gen: ModuleType) -> None:
@@ -224,10 +226,22 @@ def test_helper_with_no_crew_parameter_defaults_pilot(gen: ModuleType) -> None:
     )
     _, handled, unhandled, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
     assert not unhandled
-    assert (handled["X"].crew, handled["X"].crew_explicit) == (0, False)
+    assert (handled["X"].seat, handled["X"].seat_explicit) == ("pilot", False)
 
 
-def test_two_command_helper_records_cmd2(gen: ModuleType) -> None:
+def test_helper_call_crew_value_outside_known_set_is_unhandled(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = default_2_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 529, nil, 2)\n"
+    )
+    _, handled, unhandled, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not handled
+    assert "unrecognised crew_member_access" in unhandled[0].reason
+
+
+def test_two_command_helper_records_both_commands(gen: ModuleType) -> None:
     text = (
         'elements["X"] = default_button_tumb(_("Hint"), devices.SPU_8, '
         "spu8_commands.CMD_SPU8_TRIGGER_P, spu8_commands.CMD_SPU8_O_ICS_RADIO, 702, nil, 1)\n"
@@ -235,8 +249,11 @@ def test_two_command_helper_records_cmd2(gen: ModuleType) -> None:
     _, handled, unhandled, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
     assert not unhandled
     el = handled["X"]
-    assert (el.cmd_id, el.cmd_symbol) == (3001, "spu8_commands.CMD_SPU8_TRIGGER_P")
-    assert (el.cmd2_id, el.cmd2_symbol) == (3002, "spu8_commands.CMD_SPU8_O_ICS_RADIO")
+    assert el.cmd_ids == [3001, 3002]
+    assert el.cmd_symbols == [
+        "spu8_commands.CMD_SPU8_TRIGGER_P",
+        "spu8_commands.CMD_SPU8_O_ICS_RADIO",
+    ]
 
 
 def test_label_with_internal_comma_and_parens_is_not_split(gen: ModuleType) -> None:
@@ -272,7 +289,7 @@ def test_trailing_commented_out_args_after_close_paren_are_stripped_first(
     stripped = gen._strip_lua_comments(text)
     _, handled, unhandled, _ = gen.scan_clickabledata(stripped, _DEVICES, _COMMANDS)
     assert not unhandled
-    assert handled["X"].arg == 83
+    assert handled["X"].args == [83]
 
 
 def test_raw_table_literal_uses_hint_device_action_arg_fields(gen: ModuleType) -> None:
@@ -291,11 +308,16 @@ def test_raw_table_literal_uses_hint_device_action_arg_fields(gen: ModuleType) -
     assert not unhandled
     el = handled["STICK-PTT-PTR"]
     assert (el.device_id, el.device_symbol) == (4, "SPU_8")
-    assert (el.cmd_id, el.cmd_symbol) == (3001, "spu8_commands.CMD_SPU8_TRIGGER_P")
-    assert el.arg == 738
+    assert el.cmd_ids == [3001, 3001]
+    assert el.cmd_symbols == [
+        "spu8_commands.CMD_SPU8_TRIGGER_P",
+        "spu8_commands.CMD_SPU8_TRIGGER_P",
+    ]
+    assert el.args == [738, 738]
+    assert el.arg_values == [1.0, 0.5]
     assert el.label == "Trigger Button"
     assert el.shape == "raw_table_literal"
-    assert (el.crew, el.crew_explicit) == (0, True)
+    assert (el.seat, el.seat_explicit) == ("pilot", True)
 
 
 def test_raw_table_literal_old_schema_fields_are_not_accepted(gen: ModuleType) -> None:
@@ -325,7 +347,24 @@ def test_post_assignment_patches_crew_member_access(gen: ModuleType) -> None:
         text, _DEVICES, _COMMANDS
     )
     assert heads == 2 and not unhandled and patches == 1
-    assert (handled["X"].crew, handled["X"].crew_explicit) == (1, True)
+    assert (handled["X"].seat, handled["X"].seat_explicit) == ("operator", True)
+
+
+def test_post_assignment_crew_member_access_outside_known_set_is_unhandled(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = default_button(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, nil)\n"
+        'elements["X"].crew_member_access  = {2}\n'
+    )
+    heads, handled, unhandled, patches = gen.scan_clickabledata(
+        text, _DEVICES, _COMMANDS
+    )
+    assert heads == 2 and patches == 1
+    assert "X" not in handled
+    assert len(unhandled) == 1
+    assert "unrecognised crew_member_access" in unhandled[0].reason
 
 
 def test_post_assignment_to_other_fields_is_counted_but_not_applied(
@@ -340,7 +379,7 @@ def test_post_assignment_to_other_fields_is_counted_but_not_applied(
         text, _DEVICES, _COMMANDS
     )
     assert heads == 2 and not unhandled and patches == 1
-    assert (handled["X"].crew, handled["X"].crew_explicit) == (0, False)
+    assert (handled["X"].seat, handled["X"].seat_explicit) == ("pilot", False)
 
 
 def test_unrecognised_helper_is_unhandled_not_a_crash(gen: ModuleType) -> None:
@@ -418,13 +457,29 @@ def test_clean_fixture_write_mode_produces_loadable_toml(tmp_path: Path) -> None
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert out.exists()
-    data = tomllib.loads(out.read_text())
+    rendered = out.read_text()
+    assert "Source: Mods/aircraft/Mi-24P/Cockpit/Scripts, DCS 2.9.30.28738" in rendered
+    assert "Inputs (sha256):" in rendered
+    assert "devices.lua " in rendered
+    data = tomllib.loads(rendered)
     assert len(data["elements"]) == 9
     stick_ptt = data["elements"]["STICK-PTT-PTR"]
     assert stick_ptt["shape"] == "raw_table_literal"
-    assert stick_ptt["crew_explicit"] is True
+    assert stick_ptt["seat_explicit"] is True
+    assert stick_ptt["seat"] == "pilot"
+    assert stick_ptt["cmds"] == [3001, 3001]
+    assert stick_ptt["args"] == [738, 738]
+    assert stick_ptt["arg_values"] == [1.0, 0.5]
     double_cmd = data["elements"]["DOUBLE-CMD-PTR"]
-    assert double_cmd["cmd2"] == 3002
+    assert double_cmd["cmds"] == [3001, 3002]
+    assert double_cmd["cmd_names"] == [
+        "spu8_commands.CMD_SPU8_TRIGGER_P",
+        "spu8_commands.CMD_SPU8_O_ICS_RADIO",
+    ]
+    sight_power = data["elements"]["WEAP-SIGHT-ON-PFF-PTR"]
+    assert sight_power["device_name"] == "ASP_17V"
+    assert sight_power["seat"] == "operator"
+    assert "arg_values" not in sight_power
 
 
 def test_dirty_fixture_fails_closed_without_allow_unhandled(tmp_path: Path) -> None:
@@ -446,6 +501,8 @@ def test_dirty_fixture_allow_unhandled_writes_the_rest(tmp_path: Path) -> None:
         "--allow-unhandled",
         "--out",
         str(out),
+        "--dcs-build",
+        "test",
     )
     assert result.returncode == 0, result.stdout + result.stderr
     data = tomllib.loads(out.read_text())
@@ -475,12 +532,71 @@ def test_no_scripts_dir_and_no_env_var_is_a_clear_startup_error(
 ) -> None:
     monkeypatch.delenv("DCS_INSTALL_PATH", raising=False)
     result = _run()
-    assert result.returncode == 2
+    assert result.returncode == 1
     assert "DCS_INSTALL_PATH" in result.stderr
 
 
 def test_missing_required_file_is_a_clear_startup_error(tmp_path: Path) -> None:
     (tmp_path / "devices.lua").write_text("devices = {}\n")
     result = _run("--scripts-dir", str(tmp_path))
-    assert result.returncode == 2
+    assert result.returncode == 1
     assert "command_defs.lua" in result.stderr
+
+
+def test_write_without_dcs_build_and_no_env_var_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DCS_INSTALL_PATH", raising=False)
+    out = tmp_path / "effectors-raw.toml"
+    result = _run(
+        "--scripts-dir", str(_FIXTURES / "clean"), "--write", "--out", str(out)
+    )
+    assert result.returncode == 1
+    assert not out.exists()
+    assert "--dcs-build" in result.stderr
+
+
+def test_report_mode_needs_no_dcs_build(tmp_path: Path) -> None:
+    """Report mode never writes the header, so it never needs a build
+    string -- only `--write` triggers the autoupdate.cfg/`--dcs-build`
+    resolution."""
+    out = tmp_path / "effectors-raw.toml"
+    result = _run("--scripts-dir", str(_FIXTURES / "clean"), "--out", str(out))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not out.exists()
+
+
+def test_dcs_install_path_resolves_scripts_dir_and_reads_autoupdate_cfg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    (install_root / "autoupdate.cfg").write_text(
+        '{\n    "version": "2.9.30.28738",\n}\n'
+    )
+    scripts_dir = install_root / "Mods" / "aircraft" / "Mi-24P" / "Cockpit" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    for name in ("devices.lua", "command_defs.lua", "clickabledata.lua"):
+        shutil.copyfile(_FIXTURES / "clean" / name, scripts_dir / name)
+    monkeypatch.setenv("DCS_INSTALL_PATH", str(install_root))
+    out = tmp_path / "effectors-raw.toml"
+    result = _run("--write", "--out", str(out))
+    assert result.returncode == 0, result.stdout + result.stderr
+    rendered = out.read_text()
+    assert "DCS 2.9.30.28738" in rendered
+
+
+def test_dcs_install_path_set_but_autoupdate_cfg_missing_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_root = tmp_path / "install"
+    scripts_dir = install_root / "Mods" / "aircraft" / "Mi-24P" / "Cockpit" / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    for name in ("devices.lua", "command_defs.lua", "clickabledata.lua"):
+        shutil.copyfile(_FIXTURES / "clean" / name, scripts_dir / name)
+    monkeypatch.setenv("DCS_INSTALL_PATH", str(install_root))
+    out = tmp_path / "effectors-raw.toml"
+    result = _run("--write", "--out", str(out))
+    assert result.returncode == 1
+    assert not out.exists()
+    assert "--dcs-build" in result.stderr

@@ -4,8 +4,11 @@ cockpit scripts -- `plans/effector-sequences/plan.md` Stage 0.
 Reads `devices.lua`, `command_defs.lua` and `clickabledata.lua` from the
 installed Mi-24P module's `Cockpit/Scripts` directory, resolves every
 `elements[...]` entry's symbolic device/command references to integers,
-and emits one TOML entry per clickable element (device, cmd, arg, label,
-shape, crew). **Stdlib only. Parses the Lua as text; never executes it.**
+and emits one TOML entry per clickable element (`device`/`device_name`,
+`cmds`/`cmd_names`, `args`, optional `arg_values`, `label`, `shape`,
+`seat`/`seat_explicit` -- lists everywhere, so a consumer never branches
+on a helper-call vs. raw-table-literal element). **Stdlib only. Parses
+the Lua as text; never executes it.**
 
 **The exact forms below are confirmed against a live install, build
 2.9.30.28738, 2026-10-23** -- see `aircraft-layer/research/
@@ -57,6 +60,7 @@ patch -- a silent drop would otherwise look identical to a clean run.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import sys
@@ -135,8 +139,21 @@ _RAW_HINT_RE = re.compile(r"""\bhint\s*=\s*_\(\s*(["'])(.*?)\1\s*\)""", re.DOTAL
 _RAW_DEVICE_RE = re.compile(r"\bdevice\s*=\s*devices\.(\w+)")
 _RAW_ACTION_RE = re.compile(r"\baction\s*=\s*(\{[^{}]*\}|[^,\n]+)")
 _RAW_ARG_RE = re.compile(r"\barg\s*=\s*(\{[^{}]*\}|-?\d+)")
+_RAW_ARG_VALUE_RE = re.compile(r"\barg_value\s*=\s*(\{[^{}]*\}|-?\d+(?:\.\d+)?)")
 _RAW_CREW_RE = re.compile(r"\bcrew_member_access\s*=\s*(\{[^{}]*\}|-?\d+)")
 _BARE_TOML_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_VERSION_RE = re.compile(r'"version"\s*:\s*"([^"]+)"')
+
+#: `crew_member_access`'s only three forms seen live (Q6, 2026-10-23) --
+#: `plans/effector-sequences/plan.md` Stage 0's `{0}`/`{1}`/`{0, 1}` ->
+#: `"pilot"`/`"operator"`/`"both"` mapping. A set outside this table is
+#: unhandled rather than guessed at.
+_SEAT_BY_NUMBERS: dict[frozenset[int], str] = {
+    frozenset({0}): "pilot",
+    frozenset({1}): "operator",
+    frozenset({0, 1}): "both",
+}
 
 
 class CommandDefsParseError(Exception):
@@ -146,18 +163,26 @@ class CommandDefsParseError(Exception):
 
 @dataclass(frozen=True)
 class RawElement:
+    """`plan.md` Stage 0's output schema: lists everywhere (`cmds`,
+    `cmd_names`, `args`, plus `arg_values` when present) so a consumer
+    never branches between a helper-call element and a raw-table-literal
+    one. `seat` is always one of `"pilot"`/`"operator"`/`"both"` --
+    never the plan's original literal `"default"` -- with
+    `seat_explicit` carrying whether `crew_member_access` was actually
+    present in the source (see this tool's module docstring / the
+    Implementer's report for why)."""
+
     name: str
     device_id: int
     device_symbol: str
-    cmd_id: int
-    cmd_symbol: str
-    arg: int
+    cmd_ids: list[int]
+    cmd_symbols: list[str]
+    args: list[int]
     label: str
     shape: str
-    crew: int
-    crew_explicit: bool
-    cmd2_id: int | None = None
-    cmd2_symbol: str | None = None
+    seat: str
+    seat_explicit: bool
+    arg_values: list[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -407,6 +432,27 @@ def _resolve_device(symbol: str, devices: dict[str, int]) -> tuple[int, str] | s
     return devices[symbol], symbol
 
 
+def _seat_for(numbers: list[int]) -> str | None:
+    return _SEAT_BY_NUMBERS.get(frozenset(numbers))
+
+
+def _parse_int_list(text: str) -> list[int]:
+    """`arg = {738, 738}` or `arg = 738` -- a braced list keeps every
+    number in order, including duplicates (the PTT shape's two
+    identical `738`s)."""
+    text = text.strip()
+    if text.startswith("{"):
+        return [int(n) for n in _NUMBER_RE.findall(text)]
+    return [int(text)]
+
+
+def _parse_float_list(text: str) -> list[float]:
+    text = text.strip()
+    if text.startswith("{"):
+        return [float(n) for n in _NUMBER_RE.findall(text)]
+    return [float(text)]
+
+
 def _resolve_cmd(
     table: str, name: str, command_defs: dict[str, dict[str, int]]
 ) -> tuple[int, str] | str:
@@ -475,13 +521,19 @@ def _parse_helper_call(
     arg = int(arg_text)
 
     if crew_idx is None or len(args) <= crew_idx:
-        crew, crew_explicit = 0, False
+        seat, seat_explicit = "pilot", False
     else:
         crew_text = args[crew_idx].strip()
         if crew_text in ("nil", ""):
-            crew, crew_explicit = 0, False
+            seat, seat_explicit = "pilot", False
         elif _INT_RE.match(crew_text):
-            crew, crew_explicit = int(crew_text), True
+            resolved_seat = _seat_for([int(crew_text)])
+            if resolved_seat is None:
+                return UnhandledElement(
+                    name,
+                    f"unrecognised crew_member_access value: {crew_text}",
+                )
+            seat, seat_explicit = resolved_seat, True
         else:
             return UnhandledElement(
                 name, f"could not parse crew_member_access expression: {crew_text}"
@@ -491,25 +543,23 @@ def _parse_helper_call(
         name=name,
         device_id=device_id,
         device_symbol=device_symbol,
-        cmd_id=cmd_ids[0],
-        cmd_symbol=cmd_symbols[0],
-        arg=arg,
+        cmd_ids=cmd_ids,
+        cmd_symbols=cmd_symbols,
+        args=[arg],
         label=label,
         shape=helper,
-        crew=crew,
-        crew_explicit=crew_explicit,
-        cmd2_id=cmd_ids[1] if len(cmd_ids) > 1 else None,
-        cmd2_symbol=cmd_symbols[1] if len(cmd_symbols) > 1 else None,
+        seat=seat,
+        seat_explicit=seat_explicit,
     )
 
 
-def _distinct_dotted_refs(text: str) -> list[tuple[str, str]]:
-    seen: list[tuple[str, str]] = []
-    for m in _ANY_DOTTED_REF_RE.finditer(text):
-        pair = (m.group(1), m.group(2))
-        if pair not in seen:
-            seen.append(pair)
-    return seen
+def _ordered_dotted_refs(text: str) -> list[tuple[str, str]]:
+    """Every `<table>.<symbol>` reference in `text`, in order, **including
+    duplicates** -- `STICK-PTT-PTR`'s `action = {spu8_commands.X,
+    spu8_commands.X}` (the same command twice, once per LMB/RMB) must
+    produce two list entries matching its two-element `arg`/`arg_value`
+    lists, not collapse to one."""
+    return [(m.group(1), m.group(2)) for m in _ANY_DOTTED_REF_RE.finditer(text)]
 
 
 def _parse_raw_literal(
@@ -538,7 +588,7 @@ def _parse_raw_literal(
     action_match = _RAW_ACTION_RE.search(body)
     if action_match is None:
         return UnhandledElement(name, "raw table literal has no `action = ...` field")
-    refs = _distinct_dotted_refs(action_match.group(1))
+    refs = _ordered_dotted_refs(action_match.group(1))
     if not refs:
         return UnhandledElement(
             name,
@@ -546,7 +596,7 @@ def _parse_raw_literal(
         )
     cmd_ids: list[int] = []
     cmd_symbols: list[str] = []
-    for table, cmd_name in refs[:2]:
+    for table, cmd_name in refs:
         resolved = _resolve_cmd(table, cmd_name, command_defs)
         if isinstance(resolved, str):
             return UnhandledElement(name, resolved)
@@ -557,21 +607,28 @@ def _parse_raw_literal(
     arg_match = _RAW_ARG_RE.search(body)
     if arg_match is None:
         return UnhandledElement(name, "raw table literal has no `arg = ...` field")
-    arg_text = arg_match.group(1)
-    if arg_text.startswith("{"):
-        numbers = re.findall(r"-?\d+", arg_text)
-        if not numbers:
-            return UnhandledElement(name, "raw table literal's `arg = {...}` is empty")
-        arg = int(numbers[0])
-    else:
-        arg = int(arg_text)
+    args = _parse_int_list(arg_match.group(1))
+    if not args:
+        return UnhandledElement(name, "raw table literal's `arg = {...}` is empty")
+
+    arg_value_match = _RAW_ARG_VALUE_RE.search(body)
+    arg_values = (
+        _parse_float_list(arg_value_match.group(1))
+        if arg_value_match is not None
+        else None
+    )
 
     crew_match = _RAW_CREW_RE.search(body)
     if crew_match is None:
-        crew, crew_explicit = 0, False
+        seat, seat_explicit = "pilot", False
     else:
-        numbers = re.findall(r"-?\d+", crew_match.group(1))
-        crew, crew_explicit = (int(numbers[0]), True) if numbers else (0, False)
+        numbers = _parse_int_list(crew_match.group(1))
+        resolved_seat = _seat_for(numbers)
+        if resolved_seat is None:
+            return UnhandledElement(
+                name, f"unrecognised crew_member_access value(s): {numbers}"
+            )
+        seat, seat_explicit = resolved_seat, True
 
     hint_match = _RAW_HINT_RE.search(body)
     label = hint_match.group(2) if hint_match is not None else ""
@@ -580,15 +637,14 @@ def _parse_raw_literal(
         name=name,
         device_id=device_id,
         device_symbol=device_symbol,
-        cmd_id=cmd_ids[0],
-        cmd_symbol=cmd_symbols[0],
-        arg=arg,
+        cmd_ids=cmd_ids,
+        cmd_symbols=cmd_symbols,
+        args=args,
+        arg_values=arg_values,
         label=label,
         shape="raw_table_literal",
-        crew=crew,
-        crew_explicit=crew_explicit,
-        cmd2_id=cmd_ids[1] if len(cmd_ids) > 1 else None,
-        cmd2_symbol=cmd_symbols[1] if len(cmd_symbols) > 1 else None,
+        seat=seat,
+        seat_explicit=seat_explicit,
     )
 
 
@@ -687,11 +743,22 @@ def scan_clickabledata(
     for element_name, field, rhs_text in post_assigns:
         if field != "crew_member_access" or element_name not in handled:
             continue
-        numbers = re.findall(r"-?\d+", rhs_text)
+        numbers = [int(n) for n in _NUMBER_RE.findall(rhs_text)]
         if not numbers:
             continue
+        resolved_seat = _seat_for(numbers)
+        if resolved_seat is None:
+            unhandled.append(
+                UnhandledElement(
+                    element_name,
+                    f"unrecognised crew_member_access value(s) in a post-assignment "
+                    f"patch: {numbers}",
+                )
+            )
+            del handled[element_name]
+            continue
         handled[element_name] = replace(
-            handled[element_name], crew=int(numbers[0]), crew_explicit=True
+            handled[element_name], seat=resolved_seat, seat_explicit=True
         )
 
     return heads, handled, unhandled, len(post_assigns)
@@ -712,38 +779,61 @@ def _toml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _toml_int_array(values: list[int]) -> str:
+    return "[" + ", ".join(str(v) for v in values) + "]"
+
+
+def _toml_float_array(values: list[float]) -> str:
+    return "[" + ", ".join(str(v) for v in values) + "]"
+
+
+def _toml_str_array(values: list[str]) -> str:
+    return "[" + ", ".join(_toml_string(v) for v in values) + "]"
+
+
+def sha256_hexdigest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def render_toml(
     handled: dict[str, RawElement],
     dcs_build: str,
+    sha256_by_file: dict[str, str],
     heads: int,
     n_unhandled: int,
     n_post_assigns: int,
 ) -> str:
+    source_subpath = "/".join(_SCRIPTS_SUBPATH.parts)
+    inputs = ", ".join(f"{name} {digest}" for name, digest in sha256_by_file.items())
     lines = [
         "# GENERATED by body-layer/tools/generate_effector_registry.py. DO NOT HAND-EDIT.",
         "# Regenerate against the installed Mi-24P module (a Windows box with the",
         "# module installed -- this tool reads the live DCS tree and never runs from",
         "# this repo's own dev checkout or CI):",
         "#   python tools/generate_effector_registry.py --write",
-        f"# Source DCS build: {dcs_build}",
+        f"# Source: {source_subpath}, DCS {dcs_build}",
+        f"# Inputs (sha256): {inputs}",
         (
-            f"# Elements: {len(handled)} handled, {n_unhandled} unhandled, "
+            f"# Elements: {len(handled)} emitted, {n_unhandled} unhandled, "
             f"{n_post_assigns} field patches, {heads} elements[ heads total."
         ),
+        "# Regenerate after any DCS update: device and command numbers are positional.",
         "",
     ]
     for name in sorted(handled):
         el = handled[name]
         lines.append(f"[elements.{_toml_key(name)}]")
-        lines.append(f"device = {el.device_id}          # devices.{el.device_symbol}")
-        lines.append(f"cmd = {el.cmd_id}            # {el.cmd_symbol}")
-        if el.cmd2_id is not None:
-            lines.append(f"cmd2 = {el.cmd2_id}            # {el.cmd2_symbol}")
-        lines.append(f"arg = {el.arg}")
+        lines.append(f"device = {el.device_id}")
+        lines.append(f"device_name = {_toml_string(el.device_symbol)}")
+        lines.append(f"cmds = {_toml_int_array(el.cmd_ids)}")
+        lines.append(f"cmd_names = {_toml_str_array(el.cmd_symbols)}")
+        lines.append(f"args = {_toml_int_array(el.args)}")
+        if el.arg_values is not None:
+            lines.append(f"arg_values = {_toml_float_array(el.arg_values)}")
         lines.append(f"label = {_toml_string(el.label)}")
         lines.append(f"shape = {_toml_string(el.shape)}")
-        lines.append(f"crew = {el.crew}")
-        lines.append(f"crew_explicit = {'true' if el.crew_explicit else 'false'}")
+        lines.append(f"seat = {_toml_string(el.seat)}")
+        lines.append(f"seat_explicit = {'true' if el.seat_explicit else 'false'}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -758,6 +848,20 @@ def _resolve_scripts_dir(explicit: Path | None) -> Path | None:
     if not env:
         return None
     return Path(env) / _SCRIPTS_SUBPATH
+
+
+def _read_dcs_build_from_autoupdate_cfg(install_path: Path) -> str | None:
+    """`$DCS_INSTALL_PATH/autoupdate.cfg` -- that exact file, no walking
+    up -- carries a `"version": "..."` field (confirmed live, 2026-10-23
+    recon header). Returns `None` on anything unreadable or unparsable;
+    the caller turns that into the same "pass --dcs-build" refusal as a
+    wholly absent `DCS_INSTALL_PATH`."""
+    try:
+        text = (install_path / "autoupdate.cfg").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = _VERSION_RE.search(text)
+    return m.group(1) if m else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -780,8 +884,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--dcs-build",
-        default="unknown",
-        help="recorded verbatim in the output file's header comment",
+        default=None,
+        help=(
+            "recorded verbatim in the output file's header comment; if omitted and "
+            "--write is passed, read from $DCS_INSTALL_PATH/autoupdate.cfg"
+        ),
     )
     parser.add_argument(
         "--out",
@@ -794,13 +901,11 @@ def main(argv: list[str] | None = None) -> int:
     scripts_dir = _resolve_scripts_dir(args.scripts_dir)
     if scripts_dir is None:
         print(
-            "Not on the DCS machine: no --scripts-dir given and DCS_INSTALL_PATH is "
-            "not set. This tool reads the installed Mi-24P module directly and does "
-            "not search for an install -- pass --scripts-dir, or set "
-            "DCS_INSTALL_PATH and re-run.",
+            "DCS_INSTALL_PATH is not set -- not on the DCS machine; pass "
+            "--scripts-dir to point elsewhere.",
             file=sys.stderr,
         )
-        return 2
+        return 1
 
     required = ("devices.lua", "command_defs.lua", "clickabledata.lua")
     missing = [f for f in required if not (scripts_dir / f).exists()]
@@ -808,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"missing file(s) in {scripts_dir}: {', '.join(missing)}", file=sys.stderr
         )
-        return 2
+        return 1
 
     devices_text = (scripts_dir / "devices.lua").read_text(encoding="utf-8")
     command_defs_text = (scripts_dir / "command_defs.lua").read_text(encoding="utf-8")
@@ -853,9 +958,29 @@ def main(argv: list[str] | None = None) -> int:
         print("(report only -- pass --write to write the registry)")
         return 0
 
+    dcs_build = args.dcs_build
+    if dcs_build is None:
+        install_env = os.environ.get("DCS_INSTALL_PATH")
+        if not install_env:
+            print(
+                "DCS_INSTALL_PATH is not set and no --dcs-build was given -- "
+                "pass --dcs-build.",
+                file=sys.stderr,
+            )
+            return 1
+        dcs_build = _read_dcs_build_from_autoupdate_cfg(Path(install_env))
+        if dcs_build is None:
+            print(
+                f'could not read a "version" field from '
+                f"{install_env}/autoupdate.cfg -- pass --dcs-build.",
+                file=sys.stderr,
+            )
+            return 1
+
     out_path = args.out or _DEFAULT_OUT_PATH
+    sha256_by_file = {f: sha256_hexdigest(scripts_dir / f) for f in required}
     rendered = render_toml(
-        handled, args.dcs_build, heads, len(unhandled), n_post_assigns
+        handled, dcs_build, sha256_by_file, heads, len(unhandled), n_post_assigns
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(rendered, encoding="utf-8")
