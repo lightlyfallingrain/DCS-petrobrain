@@ -66,6 +66,12 @@ default_1_position_tumb, default_button_tumb, springloaded_2_pos_tumb, default_C
   `AC-HEATER2-MODE-PTR … 145, 4, 0.1, …`; `DEICER-KNOB-PTR … 114, 11, 0.1, false, 0, nil, false`;
   `WEAP-SELECT-KNOB-OP-PTR … 709, 5, 0.1, nil, nil, nil, nil, 1`; `R852-CHANNEL-PTR … 518, 4, 0.1`;
   `SHSCHO-KNOB-PTR 963, 9, 0.1 …`; `PK-WORK-CHECK-PTR 899, 5, 0.1 …`.
+  **`AC-TEMP-KNOB-PTR … 146, 11, 1/9, false, 0.0, anim_speed_default, false` tops out at
+  `10 * (1/9) = 1.111111`, not `1.0`** — 11 steps labelled 5/10/15/18/20/22/24/30/35/40/50°C
+  against a `delta_` that does not divide evenly into the unit range. This is ED's own
+  count/delta mismatch, not a generator bug: the real DCS Lua source sets `delta_ = 1/9`
+  verbatim, and `0 to 1.111111 (11 steps)` in the generated `switch-reference.md` is the faithful
+  rendering of that. Worth a sequence author's attention precisely because it looks like a typo.
 - `default_3_position_tumb`: `LTG-COCKPIT-PTR … 356`; `LTG-COCKPIT-OP-PTR … 682, nil,nil,nil,nil,nil, 1`;
   `LTG-CARGO-PTR … 355`; `TAXILIGHT-RETR-PTR … 208`; `NAVLIGHT-BRIGHT-DIM-OFF-PTR … 207`. None sets
   `inversed_` or `arg_value_`, so all are -1/0/1.

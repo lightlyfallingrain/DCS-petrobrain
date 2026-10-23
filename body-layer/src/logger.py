@@ -630,10 +630,15 @@ class ConsolePerceptionRunner:
     #: (and whether `TAKEOFF` may fire at all) has not yet been made for
     #: this mission (re)start -- `_run_crew_text_poll_loop`'s poll block
     #: holds off firing *either* new trigger, and suppresses `TAKEOFF`
-    #: entirely, for as long as this is `True`. Cleared the poll a fresh
-    #: (non-stale) ownship sample is found, which is also the poll
-    #: `crew_console.on_ground`'s baseline is first established without
-    #: a `TAKEOFF` edge (see that poll block's own comment).
+    #: entirely, for as long as this is `True`. Cleared one of two ways:
+    #: the poll a fresh (non-stale) ownship sample is found -- also the
+    #: poll `crew_console.on_ground`'s baseline is first established
+    #: without a `TAKEOFF` edge -- or, if no fresh sample has arrived at
+    #: all, the poll `MISSION_START_RESOLVE_FALLBACK_S` elapses, in which
+    #: case the in-air classification is dropped rather than guessed (see
+    #: that poll block's own comment, and `MISSION_START_RESOLVE_FALLBACK_S`'s
+    #: declaration, for why the two cases cannot be told apart from body-layer's
+    #: own telemetry).
     pending_mission_start_in_air_check: bool = False
 
     #: The `last_t_sim` this runner held *immediately before* the reset
@@ -2483,7 +2488,11 @@ def _check_for_new_mission(
     before the reset -- `_run_crew_text_poll_loop`'s poll block is what
     actually fires `EffectorTrigger.MISSION_START`/`MISSION_START_IN_AIR`,
     once it has a ownship sample it trusts is not the previous mission's
-    stale cached one. Not done here: this function (and `--console`'s
+    stale cached one -- or, if no such sample arrives before
+    `MISSION_START_RESOLVE_FALLBACK_S` elapses, once that bounded fallback
+    fires instead (dropping the in-air classification rather than guessing
+    it from a stale sample; see that poll block's own comment). Not done
+    here: this function (and `--console`'s
     debug REPL, which calls it with no `CrewConsole` at all) has no
     ownship sample of its own to decide freshness or airborne-ness from.
 

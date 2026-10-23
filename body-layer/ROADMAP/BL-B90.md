@@ -80,6 +80,29 @@
   hand-switched-off recovery, one deliberately broken sequence file) all clearable in one sortie on
   the branch above; nothing here has been flown yet, only built and reviewed.
 
-  **Next: Stage 3 is this card** (already published, awaiting a flight) **and then Stage 4** —
-  the generic low-rate/on-demand switch readback (R7), BL-B90's own last stage, not deferred. No
-  merge yet: the user decides when, after (at least) this card's flight.
+  **Switch-reference Values column + `mission-start`/`mission-start-in-air` triggers — done,
+  DoD-passed, 2026-10-23** (`feature/switch-reference-values`, tip `59aebd7e`; fast-forwarded into
+  `feature/effector-sequences` next). Generator now emits each clickable action's settable value
+  range (discrete steps / continuous with gain / `—` / `"unknown"`), rendered as `switch-
+  reference.md`'s new Values column; the real dump was re-run on the Windows DCS machine
+  (`697f5bef`, build 2.9.30.28738, 0 unhandled, 0 unknown value ranges) and `switch-reference.md`
+  regenerated from it (staleness test green). The follow-on `mission-start`/`mission-start-in-air`
+  triggers (explore-notes, "Two new triggers: mission start") landed in the same batch: an air
+  start no longer fires `takeoff`, and the new triggers' resolution window is bounded by
+  `MISSION_START_RESOLVE_FALLBACK_S` (30 s default) so a paused mission load or sim-time
+  coincidence cannot hold `TAKEOFF` suppressed indefinitely — on that fallback path the in-air
+  classification is dropped rather than guessed from a stale sample (three review passes closed
+  the stale-documentation, baseline-collision, and no-fresh-sample-at-all findings in turn; final
+  verdict APPROVED). Performance and security both APPROVED, no findings. No sequence file ships
+  for either new trigger this cut — this batch is data/trigger-mechanism only, same posture as
+  Stage 0's generator. **Milestone-completion question**: this batch does not change what Stage 3
+  or Stage 4 should be — the re-flight card (block 4) already anticipated the mission-start
+  mechanism and needed only a one-line "where things now live" note (same card, same branch), not
+  a rewrite; it sharpens the record, since `mission-start-in-air` is the first trigger whose own
+  resolution can silently drop a classification, worth remembering before a sequence file is ever
+  attached to it.
+
+  **Next: Stage 3 is the re-flight card** (already published, awaiting a flight, now covering both
+  batches above) **and then Stage 4** — the generic low-rate/on-demand switch readback (R7),
+  BL-B90's own last stage, not deferred. No merge yet: the user decides when, after (at least) this
+  card's flight.

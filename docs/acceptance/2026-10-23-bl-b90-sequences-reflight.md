@@ -4,6 +4,13 @@ Source of truth for the published card. **Branch: `feature/effector-sequences`**
 `git checkout feature/effector-sequences`). You fly the **pilot seat**; Petrovich (the copilot
 sequences) operates the seat you are not in.
 
+## Where things live
+
+`body-layer/config/sequences/triggers.md` lists every trigger a sequence file's `run-on-trigger`
+header may name; `body-layer/config/sequences/mi-24p/switch-reference.md`'s Values column shows
+each switch's settable range (discrete/continuous/`—`/`unknown`) if you want to write your own
+`mission-start-in-air` sequence for block 4 below.
+
 ## Not testable this sortie
 
 - **Stage 4 (switch-readback rate/scope)** is not built yet — this is the batch below Stage 3's

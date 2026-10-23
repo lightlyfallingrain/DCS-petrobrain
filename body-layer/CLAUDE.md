@@ -439,7 +439,11 @@ Belief — observation *consumption*:
   generated `config/sequences/<aircraft-dir>/switch-reference.md` (device/seat/element/shape/
   cmd/args), add a curated entry to that aircraft's `effectors.toml`, then reference it from a
   `*.md` sequence file's row — `switch-reference.md`'s own header has the exact TOML shape to
-  copy. For which triggers a sequence file's `run-on-trigger` header cell may name, see
+  copy. **Its Values column** (generator-derived, `render_switch_reference.py`) spells out each
+  element's settable range — discrete steps, a continuous range with gain, or `—` for a
+  write-only/no-range action — so a sequence author can read off a legal value without guessing
+  at ED's own units; `"unknown"` means the generator could not resolve that action's range from
+  the source Lua and the row needs a by-hand check before use. For which triggers a sequence file's `run-on-trigger` header cell may name, see
   `config/sequences/triggers.md` (one file, not per-aircraft — triggers are a code enumeration,
   the same for every aircraft), rendered from `belief.effector_sequences.EffectorTrigger`/
   `TRIGGER_INFO` (the single declaration — `effector_engine.py`'s own `EffectorTrigger` is that
@@ -466,7 +470,11 @@ Belief — observation *consumption*:
   observed ground→air transition does; `crew_console.on_ground`'s baseline is established from
   that first trusted sample without firing anything. A body-layer process start/restart against an
   already-running mission fires neither (unchanged — `_check_for_new_mission`'s pre-existing
-  first-poll rule already refused to treat that as a reset). No sequence file ships for either new
+  first-poll rule already refused to treat that as a reset). **If no fresh sample arrives before
+  `MISSION_START_RESOLVE_FALLBACK_S` elapses** (30 s default, 5–120 s range) — a paused mission
+  load, or the rarer `t_sim`-coincidence case — `mission-start` still fires, but the in-air
+  classification is dropped rather than guessed from the stale previous-mission sample;
+  `TAKEOFF` suppression ends the same poll either way. No sequence file ships for either new
   trigger this cut.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
