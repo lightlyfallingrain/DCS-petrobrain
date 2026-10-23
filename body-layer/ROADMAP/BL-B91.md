@@ -1,7 +1,11 @@
 # BL-B91 — effector-registry TOML renderer does not escape control characters in free-text fields
 
 **Filed by:** Security deep analysis, `plans/effector-sequences/security-stage0.md`, 2026-10-23.
-**State:** `[ ]` open.
+**State:** `[x]` done — fixed 2026-10-23: `_toml_string`/`_toml_key` now escape every TOML
+basic-string short escape (`\b \t \n \f \r \" \\`) and emit `\uXXXX` for any other codepoint
+below U+0020 or DEL (U+007F), so a control character in `label`/`name` round-trips through
+`tomllib` instead of breaking the parse; see `plans/effector-sequences/implementation.md` for
+the round-trip tests. #status/done
 
 `body-layer/tools/generate_effector_registry.py`'s `_toml_string`/`_toml_key` escape `\` and `"`
 only. The two free-text fields sourced from ED's own Lua (`label`, the `hint = _("...")` string;

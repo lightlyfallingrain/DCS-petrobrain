@@ -887,16 +887,47 @@ def scan_clickabledata(
 # --- output ---------------------------------------------------------------
 
 
+#: TOML basic-string short escapes (TOML spec: `\b \t \n \f \r \" \\`).
+#: Every other control codepoint below U+0020, plus DEL (U+007F), has no
+#: short form and must go out as `\uXXXX` -- `BL-B91`: `label`/`name` are
+#: ED-sourced free text, unlike every numeric field here, which is regex-
+#: constrained to `-?\d+` before it ever reaches this renderer, so this is
+#: the one place a stray control character could otherwise produce a raw
+#: literal newline (or other C0 byte) inside a TOML basic string, which
+#: `tomllib` refuses to parse (fails closed, but on the *next* run that
+#: reads the file back -- better to never emit it).
+_TOML_SHORT_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+
+def _toml_escape(value: str) -> str:
+    out: list[str] = []
+    for ch in value:
+        short = _TOML_SHORT_ESCAPES.get(ch)
+        if short is not None:
+            out.append(short)
+        elif ch < "\x20" or ch == "\x7f":
+            out.append(f"\\u{ord(ch):04x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _toml_key(name: str) -> str:
     if _BARE_TOML_KEY_RE.match(name):
         return name
-    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return f'"{_toml_escape(name)}"'
 
 
 def _toml_string(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return f'"{_toml_escape(value)}"'
 
 
 def _toml_int_array(values: list[int]) -> str:

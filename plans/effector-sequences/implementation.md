@@ -309,3 +309,79 @@ None -- no pre-existing comment became stale by this pass; module/function docst
 extended in place rather than replaced (the "Fails closed, at two levels" docstring gained a third
 sentence rather than losing content, since the duplicate-name guard is a genuinely new failure mode
 alongside, not instead of, the two it already described).
+
+### BL-B91 fix pass -- TOML control-character escaping
+
+Addresses the security deep analysis's one filed finding (`plans/effector-sequences/
+security-stage0.md`, `body-layer/ROADMAP/BL-B91.md`): `_toml_string`/`_toml_key` escaped only
+`\` and `"`, so a raw control character in `label` or an element `name` (both sourced from ED's
+own Lua, unlike every other field here which is regex-constrained to `-?\d+` first) produced a
+TOML value `tomllib` refuses to parse. User direction via the task brief picked option (C), fix
+now.
+
+**Fix, per the TOML spec rather than the "mark unhandled" alternative the filed finding also
+named**: a new `_toml_escape()` helper maps the six short escapes (`\b \t \n \f \r \" \\`) and
+emits `\uXXXX` for every other codepoint below U+0020 or DEL (U+007F); `_toml_string`/`_toml_key`
+both call it. Escaping loses no information and needs no new fail-closed branch, so it is strictly
+better here than dropping the owning element as unhandled -- that alternative was named in the
+finding as a fallback for exactly the case where escaping is not possible, which does not apply to
+TOML basic strings (every codepoint has either a short escape or a `\uXXXX` form).
+
+**Reuse check (root `CLAUDE.md`, "Do not reinvent the wheel"):** `generate_defaults.py`'s
+`_toml_value()` (`body-layer/tools/generate_defaults.py:214-221`) has the *same* two-character-only
+gap, confirmed by reading it and by a graph query (`gq.sh`) that surfaced it as the only other
+`_toml_*` escaping code in the subproject -- there is no existing complete helper to reuse. Did
+not fix or touch `generate_defaults.py`: it renders `tuning.*` declarations' own `lo`/`hi`/label
+literals from this codebase's own source tree, not ED-sourced free text, so it is outside this
+finding's scope and outside the task brief. Flagging rather than silently leaving a known-similar
+gap unmentioned: if `generate_defaults.py` ever renders content from outside this repo's own
+source, its `_toml_value()` would want the same fix.
+
+**Counterfactual run, not just read:** stashed `generate_effector_registry.py` alone (the fix),
+reran the 14 new tests against the pre-fix code, confirmed 10 of them fail with
+`tomllib.TOMLDecodeError: Illegal character '\n'` (and the control-character variants) for the
+reason the finding describes, then restored the fix (`git stash apply`, checksum-verified
+byte-identical to before stashing) and reran -- all pass.
+
+### Files changed, BL-B91 fix pass
+
+- `body-layer/tools/generate_effector_registry.py` -- new `_TOML_SHORT_ESCAPES` table and
+  `_toml_escape()` helper; `_toml_string`/`_toml_key` now call it instead of the two-character
+  `.replace()` chain.
+- `body-layer/tests/test_generate_effector_registry.py` -- 14 new tests (round-trip every control
+  class through `_toml_string`, the security report's own injection payload, a control character
+  in a quoted key via `_toml_key`, and one end-to-end test through `render_toml` with a
+  newline-bearing `label`).
+- `body-layer/ROADMAP/BL-B91.md` -- `[ ]` open -> `[x]` done, one-line resolution.
+- `body-layer/ROADMAP/body-layer-backlog.md` -- index line reworded from "(security,
+  low-severity)" to "(fixed)" to match.
+
+### Tests Added, BL-B91 fix pass
+
+- `test_toml_string_round_trips_every_control_class` (parametrized, 11 cases: plain text, quote,
+  backslash, each of the six short-escape characters, three other C0 controls plus DEL, and a
+  mixed string) -- round-trips `_toml_string`'s output through `tomllib.loads` and asserts the
+  parsed value equals the input, byte-identical.
+- `test_toml_string_injection_payload_stays_a_plain_string` -- the security report's own
+  demonstration payload (`'evil\nlabel = "INJECTED"\n[elements.pwn]\nx=1'`); asserts it parses as
+  one scalar string value and creates no `label` or `[elements.pwn]` key.
+- `test_toml_key_escapes_control_characters_in_a_quoted_key` -- a `\n` in an element name renders
+  through `_toml_key` into a quoted key `tomllib` parses back to the same string.
+- `test_render_toml_control_character_in_label_round_trips` -- end-to-end through `render_toml`
+  (not just the escaping helper directly) with a `label` containing a raw newline.
+
+### Checks, BL-B91 fix pass
+
+- `ruff format --check src tests tools`: pass (1 file reformatted by this pass's own new code,
+  then clean)
+- `ruff check src tests tools`: pass
+- `mypy src`: pass (71 source files)
+- `mypy tools`: pass (8 source files)
+- `pytest -q` (whole suite): 2505 passed, 4 xfailed -- no regressions; the 14 new tests confirmed
+  individually by name in `-v` output, not via a filtered summary count.
+
+### Comments pruned, BL-B91 fix pass
+
+None -- the new `_toml_escape()` docstring-comment is new content (explaining why `label`/`name`
+are the one place this matters, referencing `BL-B91`), not a prune of anything pre-existing; the
+two-line `.replace()` bodies it replaced carried no comment of their own to prune.

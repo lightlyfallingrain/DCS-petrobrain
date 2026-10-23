@@ -694,6 +694,97 @@ def test_statements_ignored_does_not_flag_lines_inside_a_multiline_literal(
     assert ignored == []
 
 
+# --- TOML escaping (BL-B91: control characters in ED-sourced free text) ---
+
+
+def _round_trip_string(gen: ModuleType, value: str) -> str:
+    """Render `value` through `_toml_string`, parse the single-key
+    document that produces, and return what comes back -- the
+    byte-identical round trip `BL-B91` asks for."""
+    toml_text = f"v = {gen._toml_string(value)}\n"
+    parsed = tomllib.loads(toml_text)
+    result = parsed["v"]
+    assert isinstance(result, str)
+    return result
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "plain label",
+        'has a "quote" in it',
+        "has a \\backslash\\ in it",
+        "backspace\bhere",
+        "tab\there",
+        "newline\nhere",
+        "form feed\fhere",
+        "carriage\rreturn",
+        "bell\x07and\x01other\x1fC0 controls",
+        "\x7fDEL at the front",
+        'mixed: \\"\n\t\x00\x7f end',
+    ],
+)
+def test_toml_string_round_trips_every_control_class(
+    gen: ModuleType, value: str
+) -> None:
+    assert _round_trip_string(gen, value) == value
+
+
+def test_toml_string_injection_payload_stays_a_plain_string(
+    gen: ModuleType,
+) -> None:
+    """The security report's demonstration payload (`BL-B91`): before the
+    fix this produced a raw multi-line TOML value that `tomllib` refused
+    to parse at all. Escaped, it must round-trip as one scalar string and
+    must not create the `label`/`[elements.pwn]` keys it tries to
+    inject."""
+    payload = 'evil\nlabel = "INJECTED"\n[elements.pwn]\nx=1'
+    toml_text = f"v = {gen._toml_string(payload)}\n"
+    parsed = tomllib.loads(toml_text)
+    assert parsed == {"v": payload}
+
+
+def test_toml_key_escapes_control_characters_in_a_quoted_key(
+    gen: ModuleType,
+) -> None:
+    name = "weird\nname"
+    toml_text = f"[elements.{gen._toml_key(name)}]\nx = 1\n"
+    parsed = tomllib.loads(toml_text)
+    assert parsed == {"elements": {name: {"x": 1}}}
+
+
+def test_render_toml_control_character_in_label_round_trips(
+    gen: ModuleType,
+) -> None:
+    """End-to-end through `render_toml`, not just the escaping helper
+    directly -- a `label` carrying a raw newline (the case `BL-B91`
+    demonstrated) must still produce a document `tomllib` can load, with
+    the control character preserved in the parsed value."""
+    el = gen.RawElement(
+        name="X",
+        device_id=1,
+        device_symbol="SOME_DEVICE",
+        cmd_ids=[3001],
+        cmd_symbols=["Power"],
+        args=[1],
+        label="line one\nline two",
+        shape="tumb",
+        seat="pilot",
+        seat_explicit=True,
+    )
+    rendered = gen.render_toml(
+        {"X": el},
+        "dcs-build",
+        {},
+        heads=1,
+        n_unhandled=0,
+        n_post_assigns=0,
+        n_ignored=0,
+    )
+    parsed = tomllib.loads(rendered)
+    assert parsed["elements"]["X"]["label"] == "line one\nline two"
+
+
 # --- end-to-end CLI, against the fixture directories -----------------------
 
 
