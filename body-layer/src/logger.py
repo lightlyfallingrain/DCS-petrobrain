@@ -315,26 +315,37 @@ from tuning import render_print_tuning, render_startup_block, validate_against_d
 
 logger = logging.getLogger(__name__)
 
-#: Bounded fallback for the mission-start resolving window (`plans/
-#: effector-sequences/review-mission-start.md`'s optional-refinement item):
-#: how many seconds of **wall clock** (not sim time, not a poll count --
-#: see `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own
+#: Bounded fallback for the mission-start resolving window: how many
+#: seconds of **wall clock** (not sim time, not a poll count -- see
+#: `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own
 #: docstring for why) `_run_crew_text_poll_loop` may wait for a fresh
-#: ownship sample before firing `MISSION_START`/`MISSION_START_IN_AIR`
-#: regardless of whether `t_sim` has yet differed from the pre-reset
-#: baseline. The `!=` check this backs up is sound for the reason stated at
-#: its own call site -- the user, confirming the underlying DCS fact:
-#: "Mission restart always resets the mission elapsed timer in DCS" -- so a
-#: real fresh sample's `t_sim` and the stale cached sample's `t_sim`
-#: coincide only if the restart happens near `t_sim = 0` **and** the first
-#: fresh sample lands on the exact same float as the baseline, which
-#: self-heals on the next restart and is not reachable by any shipped
-#: sequence file this cut (none ships for either new trigger yet). This
-#: fallback exists only so that pathological coincidence cannot suppress
-#: `TAKEOFF` for an entire mission -- 30 s is long enough that it is never
-#: reached by an ordinary restart (which resolves on the very next poll,
-#: typically well under a second) and short enough to self-heal within the
-#: same sortie without a second restart.
+#: ownship sample before giving up on `t_sim`-based freshness and firing
+#: `MISSION_START` anyway, without `MISSION_START_IN_AIR` (`plans/
+#: effector-sequences/review-mission-start.md`'s fix re-review, 2026-10-23:
+#: the fallback cannot tell a `t_sim` coincidence apart from no fresh
+#: sample at all, and only the former is safe to classify airborne from).
+#: Two cases reach this fallback. (1) The pathological coincidence this
+#: constant was first written for: the restart happens near `t_sim = 0`
+#: **and** the first fresh sample lands on the exact same float as the
+#: baseline -- the `!=` check this backs up is sound for the reason stated
+#: at its own call site -- the user, confirming the underlying DCS fact:
+#: "Mission restart always resets the mission elapsed timer in DCS" -- so
+#: this is rare and self-heals on the next restart. (2) The far more
+#: ordinary case: no fresh sample has arrived at all within the window --
+#: a long mission-load screen, or (common in DCS) a mission that starts
+#: paused and the pilot has not yet un-paused. Case (2) does **not**
+#: self-heal: firing `MISSION_START_IN_AIR` against `crew_console.
+#: on_ground` computed from the stale previous-mission sample would
+#: classify this mission from the wrong mission's data, uncorrected for
+#: the rest of the sortie -- so the fallback fires `MISSION_START`
+#: (a one-shot setup hook that does not depend on air state) but drops the
+#: `MISSION_START_IN_AIR` check entirely rather than guess, and ends the
+#: takeoff-suppression window the same way normal resolution does, so
+#: `on_ground`'s baseline is re-established from the next sample without
+#: firing `TAKEOFF` on it. 30 s is long enough that it is never reached by
+#: an ordinary restart (which resolves on the very next poll, typically
+#: well under a second) and short enough that case (1) still self-heals
+#: within the same sortie.
 MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
     "logger.MISSION_START_RESOLVE_FALLBACK_S",
     30.0,
@@ -3596,11 +3607,15 @@ def _run_crew_text_poll_loop(
                             # FALLBACK_S`'s own declaration comment and
                             # `mission_start_resolving_since_wall`'s own
                             # docstring for why this is wall-clock, not a
-                            # poll count): only reachable if a real restart
-                            # happens near `t_sim = 0` *and* the first fresh
-                            # sample's `t_sim` happens to land on the exact
-                            # same float as the baseline -- the `!=` check
-                            # above is sound against every other case.
+                            # poll count): reached either by the rare
+                            # `t_sim`-coincidence case the `!=` check above
+                            # cannot resolve on its own, *or* by no fresh
+                            # sample having arrived at all within the
+                            # window (a long mission-load screen, or a
+                            # mission that starts paused) -- the two are
+                            # indistinguishable from here, so `fallback_due`
+                            # never fires `MISSION_START_IN_AIR` below:
+                            # only `fresh_sample_confirmed` may.
                             resolving_since = runner.mission_start_resolving_since_wall
                             fallback_due = not fresh_sample_confirmed and (
                                 resolving_since is not None
@@ -3610,14 +3625,22 @@ def _run_crew_text_poll_loop(
                             if fallback_due:
                                 logger.warning(
                                     "mission-start resolving window hit its "
-                                    "%.0fs fallback without a t_sim mismatch "
-                                    "(baseline=%r) -- firing MISSION_START/"
-                                    "MISSION_START_IN_AIR anyway",
+                                    "%.0fs fallback with no fresh t_sim "
+                                    "(baseline=%r) -- firing MISSION_START "
+                                    "anyway, but dropping the MISSION_START_"
+                                    "IN_AIR check for this mission (re)start "
+                                    "(a stale sample's on_ground cannot be "
+                                    "trusted to classify it)",
                                     MISSION_START_RESOLVE_FALLBACK_S,
                                     baseline,
                                 )
                             if fresh_sample_confirmed or fallback_due:
                                 if runner.pending_mission_start_fire:
+                                    # Fires unconditionally, on either path
+                                    # -- `MISSION_START` is a one-shot setup
+                                    # hook that does not depend on air
+                                    # state, so it need not wait for a
+                                    # fresh sample at all.
                                     runner.effector_state = fire_effector_trigger(
                                         runner.effector_state,
                                         EffectorTrigger.MISSION_START,
@@ -3629,13 +3652,30 @@ def _run_crew_text_poll_loop(
                                     # reassigned above, from this same
                                     # fresh sample -- this *is* "decide it
                                     # on the first real ownship sample
-                                    # after the mission start".
-                                    if not crew_console.on_ground:
+                                    # after the mission start". Gated on
+                                    # `fresh_sample_confirmed`, not just
+                                    # `not crew_console.on_ground`: see the
+                                    # comment below for why a fallback-
+                                    # forced resolution must never reach
+                                    # this fire at all.
+                                    if (
+                                        fresh_sample_confirmed
+                                        and not crew_console.on_ground
+                                    ):
                                         runner.effector_state = fire_effector_trigger(
                                             runner.effector_state,
                                             EffectorTrigger.MISSION_START_IN_AIR,
                                             runner.last_t_sim,
                                         )
+                                    # fallback_due-only case: no fresh
+                                    # sample ever arrived, so
+                                    # `crew_console.on_ground` here is still
+                                    # the *previous* mission's stale cached
+                                    # value -- drop the check rather than
+                                    # classify this mission from the wrong
+                                    # mission's data; unlike the coincidence
+                                    # case this would not self-heal, since
+                                    # the pending flag is cleared either way.
                                     runner.pending_mission_start_in_air_check = False
                                 runner.mission_start_resolving_since_wall = None
                             # `TAKEOFF` is suppressed for every poll this

@@ -22,4 +22,4 @@ file -- see `belief.effector_sequences.load_sequences`.
 | `weapons-arm` | The pilot commands "weapons armed", or starts an attack run ("engage"), which arms the weapons safety bar automatically. | every time |
 | `weapons-safe` | The pilot commands "weapons safe". | every time |
 | `mission-start` | Fires exactly once at every DCS mission (re)start, whether the aircraft spawns on the ground or in the air. | once (per mission) |
-| `mission-start-in-air` | Fires exactly once at a DCS mission (re)start, only when the aircraft is already airborne at that moment -- never on a ground start. Always fires after MISSION_START, same poll. | once (per mission) |
+| `mission-start-in-air` | Fires exactly once at a DCS mission (re)start, only when the aircraft is already airborne at that moment -- never on a ground start. Fires after MISSION_START, same poll, but may not fire at all if no fresh telemetry arrives within MISSION_START_RESOLVE_FALLBACK_S (30s default) of the mission start, e.g. a long load or a mission that starts paused. | once (per mission) |

@@ -387,3 +387,81 @@ touched by this diff, flagged by the review as pre-existing and out of scope for
 - The acceptance card the review's "block 4" reference points at is not a repository file (a
   published Artifact from an earlier `/test-card` run) — nothing here to check against it; noted
   rather than silently skipped.
+
+## Fix: fallback no longer classifies airborne from stale data (2026-10-23)
+
+Addresses the "Fix re-review (2026-10-23)" required fix in `review-mission-start.md`: the 30 s
+fallback (`MISSION_START_RESOLVE_FALLBACK_S`) could not distinguish the rare `t_sim`-coincidence
+case (self-heals) from the ordinary case of no fresh ownship sample arriving at all within the
+window (a long load, or a mission that starts paused) — the latter does not self-heal, because
+firing `MISSION_START_IN_AIR` on fallback classified it from `crew_console.on_ground`'s still-
+stale, previous-mission value and cleared the pending flag regardless.
+
+**Fix, in `src/logger.py`'s poll block**: on fallback expiry, `MISSION_START` still fires
+unconditionally — decided here to be a one-shot setup hook that does not depend on air state, so
+it need not wait for a fresh sample at all (the task's own stated lean, confirmed rather than
+second-guessed). `MISSION_START_IN_AIR` now only fires when `fresh_sample_confirmed` is true —
+never on `fallback_due` alone — so a fallback forced purely by "no sample yet" drops the air/ground
+check entirely instead of guessing from stale data, logs a warning naming why, and still clears
+`pending_mission_start_in_air_check` and `mission_start_resolving_since_wall` so the resolving
+window (and the `TAKEOFF` suppression tied to it) ends the same poll either way. No change was
+needed to end `TAKEOFF` suppression correctly: the existing `if mission_start_resolving: ... elif
+was_on_ground ...` structure already skips the takeoff-edge check for the resolving poll itself
+(fallback or not), so `on_ground`'s baseline for the *next* poll is established from whatever
+sample is in hand without that poll ever reading as a transition — unchanged by this fix, verified
+by the new tests below rather than assumed.
+
+**Comments updated** (per the task's explicit list): `MISSION_START_RESOLVE_FALLBACK_S`'s own
+`#:` declaration (first sentence rewritten — the old one asserted the fallback always fires both
+triggers, which is now false), the call site's "Bounded fallback" comment, `EffectorTrigger.
+MISSION_START_IN_AIR`'s own `#:` comment, and `TRIGGER_INFO[MISSION_START_IN_AIR].description`
+(the one that renders into `triggers.md`) — all now state both cases rather than only the
+coincidence one. Regenerated `config/sequences/triggers.md` (`tools/render_triggers.py --write`)
+and `config/defaults.toml` (`tools/generate_defaults.py --write`) and read both rendered files
+rather than trusting the source comment — `defaults.toml`'s new first sentence for `logger.
+MISSION_START_RESOLVE_FALLBACK_S` correctly states the fallback fires `MISSION_START` "anyway,
+without `MISSION_START_IN_AIR`", matching the code. `copilot-takeoff.md` and the acceptance card
+were checked (`grep` for "mission-start-in-air"/"MISSION_START_IN_AIR") and needed no change —
+neither asserts the now-corrected guarantee.
+
+### Tests added (`tests/test_logger.py`)
+
+- `test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff` — the real poll loop,
+  a stale **airborne** sample left over from a genuine pre-restart takeoff (the one shape the
+  existing `test_baseline_collision_resolves_via_bounded_fallback` cannot exercise, since that
+  test's telemetry stays grounded throughout and so can't tell "correctly skipped because
+  grounded" apart from "wrongly classified from stale data"). Forces the fallback without ever
+  supplying a fresh sample: asserts `MISSION_START` fires, `MISSION_START_IN_AIR` does not (even
+  though the stale sample reads airborne), the pending-check-dropped warning is observable via
+  `caplog`, and the cockpit-switch write list is exactly `[*pre-restart takeoff writes,
+  MISSION_START]`.
+- `test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback` — companion, isolating
+  the two claims the test above doesn't assert on directly: the stale sample left in place
+  immediately after the fallback resolves is not itself read as a `TAKEOFF` edge (several more
+  polls of the unchanged stale sample produce no new writes), and once a genuinely fresh sample
+  lands and the aircraft really leaves the ground, `TAKEOFF` fires — exactly once, counted against
+  the pre-restart takeoff's own four writes landing twice in total, never a spurious third.
+
+**Mutation-tested the "don't classify on stale" rule**, not just the new tests' own pass/fail:
+reverted the `fresh_sample_confirmed and not crew_console.on_ground` guard back to the pre-fix
+`not crew_console.on_ground` (i.e. the exact defect this fix closes), ran
+`test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff` alone — failed red for
+the stated reason (`MISSION_START_IN_AIR`'s write, `(6, 3020, 1.0)`, appears where the assertion
+says it must not). Restored the file from a backup copy and confirmed by `shasum` (not by eye)
+that the restored file is byte-identical to the pre-mutation one.
+
+### Which fires on fallback expiry: decided
+
+Per the task's own framing: `MISSION_START` fires on fallback expiry (does not wait for a fresh
+sample), `MISSION_START_IN_AIR` does not (drops the check instead of guessing). This matches the
+task's stated lean and the code already in place for `MISSION_START` before this fix — only
+`MISSION_START_IN_AIR`'s gating needed to change.
+
+### Checks
+
+- `ruff format --check src tests tools`: pass
+- `ruff check src tests tools`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues, 74 source files
+- `cd body-layer && .venv/bin/mypy tools`: pass, no issues, 10 source files
+- `pytest -q`: pass — 2605 passed, 4 xfailed (two more than the fix re-review's reported 2603 —
+  the two new tests above)

@@ -6418,6 +6418,288 @@ def test_baseline_collision_resolves_via_bounded_fallback(tmp_path: Path) -> Non
     assert runner.mission_start_resolving_since_wall is None
 
 
+def test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`review-mission-start.md`'s fix re-review: the case the previous
+    bounded-fallback test does *not* cover, because that test never
+    changes `altitude_agl_m` across the restart, so a stale, airborne
+    `on_ground` reading never gets the chance to misfire `MISSION_START_
+    IN_AIR`. Here the stale sample left over from a real pre-restart
+    flight is airborne -- the exact shape that would wrongly classify
+    `MISSION_START_IN_AIR` from the *previous* mission's state if the
+    fallback still fired it. It must not: only `MISSION_START` fires
+    (a one-shot setup hook that does not depend on air state), a warning
+    is logged explaining why the air/ground check was dropped, and the
+    takeoff-suppression window still ends cleanly -- the stale sample
+    left in place afterward must not itself look like a takeoff. A later
+    *real* takeoff (once a fresh sample finally arrives and the aircraft
+    genuinely leaves the ground) still fires exactly once."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    with caplog.at_level(logging.WARNING, logger=logger_module.__name__):
+        poll_thread.start()
+        try:
+            deadline = time.monotonic() + 5.0
+            while runner.last_t_sim is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert runner.last_t_sim is not None
+
+            # A real takeoff, mid-process, before any mission restart --
+            # the "old mission's last known state" this test stales into
+            # the restart is a genuine airborne sample, not a contrived
+            # one. Same technique as `test_stale_telemetry_at_mission_
+            # restart_does_not_decide_airborne`.
+            sim_t += 1.0
+            telemetry["altitude_agl_m"] = 500.0
+            telemetry["dcs_model_time_s"] = sim_t
+            deadline = time.monotonic() + 5.0
+            while (
+                (
+                    6,
+                    3030,
+                    1.0,
+                )
+                not in aircraft_client.cockpit_switch_writes
+                and time.monotonic() < deadline
+            ):
+                sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+                telemetry["dcs_model_time_s"] = sim_t
+                time.sleep(0.02)
+            assert (6, 3030, 1.0) in aircraft_client.cockpit_switch_writes
+            stale_t_sim = sim_t
+            time.sleep(0.1)  # let a poll settle `last_t_sim` at exactly that value
+            assert runner.last_t_sim == stale_t_sim
+            writes_before_restart = list(aircraft_client.cockpit_switch_writes)
+
+            # Restart is detected, but -- the case this test exists for --
+            # *no* fresh sample ever arrives: the telemetry object is left
+            # completely unchanged (same `t_sim`, still airborne) for the
+            # rest of this test. A paused mission or a long load screen
+            # looks exactly like this from body-layer's side.
+            aircraft_client.mission_start_sequence = 2
+            deadline = time.monotonic() + 5.0
+            while (
+                runner.pending_mission_start_in_air_check is not True
+                or runner.mission_start_fresh_sample_baseline_t_sim != stale_t_sim
+            ) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert runner.pending_mission_start_in_air_check is True
+            assert runner.mission_start_fresh_sample_baseline_t_sim == stale_t_sim
+
+            for _ in range(10):
+                time.sleep(0.02)
+            assert aircraft_client.cockpit_switch_writes == writes_before_restart
+            assert runner.pending_mission_start_fire is True
+            assert runner.pending_mission_start_in_air_check is True
+
+            # Force the fallback without ever supplying a fresh sample.
+            runner.mission_start_resolving_since_wall = time.monotonic() - (
+                MISSION_START_RESOLVE_FALLBACK_S + 1.0
+            )
+            deadline = time.monotonic() + 5.0
+            while (
+                _MISSION_START_WRITE not in aircraft_client.cockpit_switch_writes
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            assert _MISSION_START_WRITE in aircraft_client.cockpit_switch_writes
+
+            for _ in range(5):
+                time.sleep(0.02)
+        finally:
+            stop_event.set()
+            poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # `MISSION_START` fired; `MISSION_START_IN_AIR` never did, even though
+    # the stale sample the fallback had in hand reads airborne -- this is
+    # the behaviour this fix is for.
+    assert aircraft_client.cockpit_switch_writes == [
+        *writes_before_restart,
+        _MISSION_START_WRITE,
+    ]
+    assert runner.pending_mission_start_fire is False
+    assert runner.pending_mission_start_in_air_check is False
+    assert runner.mission_start_resolving_since_wall is None
+    # The dropped check is observable, not silent.
+    assert any(
+        "dropping the MISSION_START_IN_AIR check" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above, isolating its two remaining claims:
+    the stale sample left in place right after the fallback resolves must
+    not itself be read as a takeoff edge (same rule normal -- fresh-sample
+    -- resolution already follows), and once a genuinely fresh sample
+    finally lands and the aircraft really leaves the ground, `TAKEOFF`
+    fires, exactly once."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # Real pre-restart takeoff, exactly as above, to leave a stale
+        # *airborne* sample behind for the restart to inherit.
+        sim_t += 1.0
+        telemetry["altitude_agl_m"] = 500.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while (
+            6,
+            3030,
+            1.0,
+        ) not in aircraft_client.cockpit_switch_writes and time.monotonic() < deadline:
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert (6, 3030, 1.0) in aircraft_client.cockpit_switch_writes
+        stale_t_sim = sim_t
+        time.sleep(0.1)
+        assert runner.last_t_sim == stale_t_sim
+
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            runner.pending_mission_start_in_air_check is not True
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert runner.pending_mission_start_in_air_check is True
+
+        runner.mission_start_resolving_since_wall = time.monotonic() - (
+            MISSION_START_RESOLVE_FALLBACK_S + 1.0
+        )
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert _MISSION_START_WRITE in aircraft_client.cockpit_switch_writes
+
+        # The stale, still-airborne sample stays in place for several more
+        # polls -- no spurious second TAKEOFF run from the resolving poll
+        # re-establishing `on_ground`'s own baseline.
+        writes_right_after_fallback = list(aircraft_client.cockpit_switch_writes)
+        for _ in range(10):
+            time.sleep(0.02)
+        assert aircraft_client.cockpit_switch_writes == writes_right_after_fallback
+
+        # Now a genuinely fresh sample arrives: land, then take off for
+        # real.
+        telemetry["altitude_agl_m"] = 5.0
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while not crew_console.on_ground and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert crew_console.on_ground is True, "the landing was never observed"
+
+        telemetry["altitude_agl_m"] = 500.0
+        sim_t += 1.0
+        telemetry["dcs_model_time_s"] = sim_t
+        deadline = time.monotonic() + 5.0
+        while (
+            aircraft_client.cockpit_switch_writes.count((6, 3030, 1.0)) < 2
+            and time.monotonic() < deadline
+        ):
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert aircraft_client.cockpit_switch_writes.count((6, 3030, 1.0)) == 2
+
+        for _ in range(5):
+            sim_t += EFFECTOR_SEQUENCE_STEP_DELAY_S + 0.1
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # Each of the real takeoff file's four writes landed exactly twice:
+    # once from the genuine pre-restart flight, once from the genuine
+    # post-fallback takeoff -- never a spurious third from the fallback
+    # resolution itself.
+    for write in _TAKEOFF_WRITES:
+        assert aircraft_client.cockpit_switch_writes.count(write) == 2, (
+            aircraft_client.cockpit_switch_writes
+        )
+
+
 # --- _load_effector_config (D5/D6) ------------------------------------------
 
 

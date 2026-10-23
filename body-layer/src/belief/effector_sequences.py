@@ -82,7 +82,12 @@ class EffectorTrigger(Enum):
     #: Fires immediately after `MISSION_START` (same poll), only when that
     #: first fresh sample is airborne (AGL > `crew_console.
     #: ON_GROUND_AGL_THRESHOLD_M`). An air start never also fires
-    #: `TAKEOFF` -- see `logger.py`'s poll-block comment on why.
+    #: `TAKEOFF` -- see `logger.py`'s poll-block comment on why. **May not
+    #: fire at all** if no fresh ownship sample arrives within
+    #: `logger.MISSION_START_RESOLVE_FALLBACK_S` of the mission (re)start
+    #: (a long load, or a mission that starts paused) -- `logger.py`'s
+    #: bounded-fallback comment has the full account of why that case
+    #: cannot be classified from the stale sample it has instead.
     MISSION_START_IN_AIR = "mission-start-in-air"
 
 
@@ -160,7 +165,11 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
         description=(
             "Fires exactly once at a DCS mission (re)start, only when the "
             "aircraft is already airborne at that moment -- never on a "
-            "ground start. Always fires after MISSION_START, same poll."
+            "ground start. Fires after MISSION_START, same poll, but may "
+            "not fire at all if no fresh telemetry arrives within "
+            "MISSION_START_RESOLVE_FALLBACK_S (30s default) of the "
+            "mission start, e.g. a long load or a mission that starts "
+            "paused."
         ),
         cardinality="once",
     ),
