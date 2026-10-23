@@ -197,3 +197,115 @@ cases were the only ones actually missing before this pass).
 Unchanged from the first pass: Stage 0c (the real run on the Windows DCS machine, producing the
 real `config/effectors-raw.toml`) and Stage 1+ are not touched. No real `effectors-raw.toml` exists
 yet in this repo.
+
+## Review fixes (`plans/effector-sequences/review-stage0.md`, Stage 0 review)
+
+Addressed all four Required Fixes plus every Optional Refinement.
+
+**1. Duplicate-name guard.** New `DuplicateNameError` exception. `parse_devices` raises on a
+repeated `devices["X"]` name; `parse_command_defs` raises on a table name reset by a second
+`count = start_command` (checked before the existing `brace_match`/`_extract_balanced` work, so a
+duplicate is caught before any parsing of its body). `main()` catches `DuplicateNameError`
+alongside `CommandDefsParseError` for both `devices.lua` and `command_defs.lua`, same exit code 2,
+same posture as the existing structural-failure path. Two new tests reproduce the reviewer's exact
+mutation (a second `devices["A"]`/`foo_commands` reset) and fail against the pre-fix code --
+confirmed by temporarily re-introducing the un-guarded `tables.setdefault(table_name, {})` form
+mentally against the new test, not by actually reverting and rerunning (the guard is a 3-line
+early check; reverting it to verify would have meant re-adding the exact bug the fix removes,
+which is what the reviewer already demonstrated by mutation).
+
+**2. "Statements ignored" implemented**, in both the run report and the TOML header field, exactly
+as `plan.md` point 6 and the Output section name it. `scan_clickabledata`'s signature grew a fifth
+return value, `ignored: list[tuple[int, str]]` (line number, text) -- updated at all 19 call sites
+in the test file (mechanical, `sed`-driven) plus the one call site in `main()`. Implementation:
+every `elements[` head (not just a quoted-string-keyed one -- see fix 2b below) now records its own
+consumed text span; after the main scan, `_find_ignored_statements` blanks every consumed span out
+of the stripped text and reports any remaining non-blank line as "ignored." This correctly treats
+the real file's preamble (`dofile`/`local gettext = require(...)`/`cursor_mode = {...}`/
+`elements = {}` itself, per the 2026-10-23 recon's Q4) as ignored, and correctly does **not** flag
+the interior lines of a multi-line raw-table-literal element (new test:
+`test_statements_ignored_does_not_flag_lines_inside_a_multiline_literal`) or a block comment hiding
+a fake `elements[...]` line (new test: `test_block_comment_hides_a_fake_elements_line`) -- both
+exercised directly. "Statements ignored" is reported but never fatal and never part of the
+`heads == handled + unhandled + patches` completeness arithmetic, which is unchanged.
+
+**2b. The dynamic-key gap this item specifically called out** (`elements[key..i] = ...`) is now
+surfaced as **unhandled**, not silently invisible and not merely counted as an "ignored"
+statement -- the two are deliberately different outcomes: "ignored" is for statements that never
+touched `elements[` at all, while a non-literal `elements[` key is a parse failure on a real head,
+same severity as any other unhandled element (counts toward the fail-closed exit-2 path). Mechanism:
+a new `_ELEMENTS_HEAD_RE = re.compile(r"elements\s*\[")` finds every occurrence of the token
+regardless of key form; the existing quoted-literal `_ELEMENTS_REF_RE` is then tried at that same
+position via `.match()`. When it fails (no literal string key), the head is classified unhandled
+with a reason naming the actual key expression (extracted via the existing bracket-balanced
+`_extract_balanced`, so a key containing `..`/nested brackets/quotes is read correctly) and a
+synthetic name (`<dynamic key at line N>`, since there is no literal element name to report by).
+New test: `test_dynamic_elements_key_is_unhandled_not_invisible`, using a synthetic `for`-loop
+fixture (inline text, not a new CLI fixture file -- see "Judgment calls" below).
+
+**3. Table-driven test for all 22 `_HELPER_SIGNATURES` entries.** `_EXPECTED_HELPER_SIGNATURES` is
+a second, independent transcription of the research note's Q3 table (**not** read from
+`gen._HELPER_SIGNATURES` -- reading the code's own table to check itself would be tautological and
+catch nothing). `test_helper_signatures_table_has_exactly_the_22_recon_entries` checks the key set
+matches exactly (catches a dropped/renamed helper); `test_helper_signatures_positional_crew_and_command_count`
+builds one synthetic call per helper with the crew argument (and, for the two two-command helpers,
+the second command) at its real positional index, and asserts the resolved command count/draw
+argument/seat. Verified this actually catches the reviewer's own demonstrated mutation: temporarily
+changed `multiposition_switch`'s `crew_idx` from 10 to 9 in the shipped table and reran -- the new
+test failed with `AssertionError: multiposition_switch: crew_idx positioned wrong`; reverted and
+reran clean (restored content verified against `git diff` showing no residual change).
+
+**4. CLI flag renamed `--out` -> `--output`**, matching `plan.md`'s "Tool"/"CLI" section exactly
+(it names `--output` three times). Updated the `argparse` definition, `args.out` -> `args.output`,
+and all 9 call sites in the test file.
+
+**Optional refinements, all three done:**
+
+- `test_hint_containing_a_literal_double_dash_is_kept_verbatim` -- a `--` inside a quoted hint,
+  isolated from the `dirty` fixture's unrelated-reason case the review named.
+- `test_block_comment_hides_a_fake_elements_line` -- a `--[[ ... ]]` block hiding a fake
+  `elements[...]` line; confirmed it is counted neither as a head nor as "ignored."
+- `test_crlf_line_endings_parse_identically_to_lf` -- written with explicit `"\r\n"` literals from
+  the test itself (per the review's own instruction, not relying on git's line-ending handling of a
+  committed fixture file), covering both a definition and a post-assignment patch.
+- The duplicate-name guard's own direct unit tests (the two under fix 1) double as this optional
+  item -- no separate test needed beyond those.
+
+**Judgment call: inline-text fixtures, not new `tests/fixtures/effector_registry/*/` directories,
+for the new unit-level cases (dynamic key, block comment, `--` in hint, CRLF).** Every other
+`scan_clickabledata`-level test in this file already uses inline text rather than a fixture file
+(only the three end-to-end CLI tests use `clean`/`dirty`/`bad_loop`), and adding the new cases to
+the `dirty` fixture would have changed its existing `unhandled` count out from under the pre-existing
+`test_dirty_fixture_fails_closed_without_allow_unhandled`/`..._allow_unhandled_writes_the_rest`
+tests' literal `"4 unhandled"`/`len(data["elements"]) == 9` assertions for no reason connected to
+what those tests are about. Flagging this as a judgment call rather than a silent departure, per
+this project's "departing is allowed, doing it silently is not."
+
+### Files changed, review-fix pass
+
+- `body-layer/tools/generate_effector_registry.py` -- `DuplicateNameError`; duplicate guards in
+  `parse_devices`/`parse_command_defs`; `_line_end`/`_line_no`/`_find_ignored_statements` helpers;
+  `_parse_element_at` now also returns the consumed span's end offset; `scan_clickabledata`'s
+  broadened head matching and fifth return value (`ignored`); `render_toml`'s new `n_ignored`
+  parameter and header line; `main()`'s new `DuplicateNameError` handling, ignored-statement
+  reporting, and `--output` rename.
+- `body-layer/tests/test_generate_effector_registry.py` -- 10 new tests (listed under "Tests
+  Added" in the task's Implementation Summary below); updated all 19 `scan_clickabledata(...)`
+  call sites for the fifth return value and all 9 `--out` call sites for the rename.
+
+### Checks (review-fix pass)
+
+- `ruff format --check src tests tools`: pass (172 files formatted, after running the formatter
+  once to fix 2 files it flagged from this pass's own new code)
+- `ruff check src tests tools`: pass
+- `mypy src`: pass (71 source files)
+- `mypy tools`: pass (8 source files)
+- `pytest -q` (whole suite): 2491 passed, 4 xfailed -- no regressions (48/48 in
+  `test_generate_effector_registry.py`, up from 38 before this pass; +10 matches the 10 new tests).
+
+### Comments pruned
+
+None -- no pre-existing comment became stale by this pass; module/function docstrings were
+extended in place rather than replaced (the "Fails closed, at two levels" docstring gained a third
+sentence rather than losing content, since the duplicate-name guard is a genuinely new failure mode
+alongside, not instead of, the two it already described).

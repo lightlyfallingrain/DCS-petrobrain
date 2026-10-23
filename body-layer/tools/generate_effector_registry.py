@@ -50,11 +50,17 @@ most importantly, a loop over an empty command table that is not
 *exactly* the one `device_commands` loop shape this file is known to use
 -- is a different, harder failure: there is no partial registry to fall
 back to, so it is always fatal (`CommandDefsParseError`), `--allow-
-unhandled` or not.
+unhandled` or not. A repeated `devices["X"]` or `*_commands` table name
+is the same kind of always-fatal failure (`DuplicateNameError`) -- a
+repeat would otherwise silently restart a counter and reassign an id
+with no error at all.
 
 The completeness count this prints (`elements[` heads == emitted +
 unhandled + post-assignments) is the thing to check after every DCS
 patch -- a silent drop would otherwise look identical to a clean run.
+Top-level statements that are neither (the file's own preamble, in the
+real file) are counted separately as "statements ignored" and never
+count toward or against that completeness check.
 """
 
 from __future__ import annotations
@@ -126,6 +132,7 @@ _LOOP_RE = re.compile(
 )
 
 # -- clickabledata.lua.
+_ELEMENTS_HEAD_RE = re.compile(r"elements\s*\[")
 _ELEMENTS_REF_RE = re.compile(r"""elements\s*\[\s*(["'])(?P<name>.*?)\1\s*\]""")
 _DEF_EQUALS_RE = re.compile(r"\s*=\s*")
 _POST_ASSIGN_RE = re.compile(r"\s*\.(\w+)\s*=\s*")
@@ -159,6 +166,18 @@ _SEAT_BY_NUMBERS: dict[frozenset[int], str] = {
 class CommandDefsParseError(Exception):
     """A `command_defs.lua` structure this generator does not recognise
     at all -- see the module docstring's "Fails closed, at two levels"."""
+
+
+class DuplicateNameError(Exception):
+    """A name `devices.lua`/`command_defs.lua` declare must be unique --
+    a `devices["X"]` name or a `*_commands` table name (reset by a second
+    `count = start_command`) -- appears a second time. Always fatal, same
+    posture as `CommandDefsParseError`: a repeat silently restarts a
+    counter and reassigns an id with no error, no "unhandled" entry, and
+    no effect on the `elements[`-heads completeness count, which only
+    watches `clickabledata.lua` and never this file's own internal
+    consistency -- so it is checked explicitly rather than trusted to
+    surface some other way (found by mutation review, 2026-10-23)."""
 
 
 @dataclass(frozen=True)
@@ -325,11 +344,15 @@ def _split_top_level(text: str) -> list[str]:
 def parse_devices(stripped_text: str) -> dict[str, int]:
     """`devices["NAME"] = counter()` is the only form seen live
     (2026-10-23); a literal int RHS is accepted too, defensively, and
-    simply taken at face value without disturbing the running sequence."""
+    simply taken at face value without disturbing the running sequence.
+    A repeated device name is a `DuplicateNameError`, never a silent
+    reassignment."""
     devices: dict[str, int] = {}
     counter_next = 1
     for m in _DEVICE_ASSIGN_RE.finditer(stripped_text):
         name, rhs = m.group(1), m.group(2).strip()
+        if name in devices:
+            raise DuplicateNameError(f'device "{name}" is declared more than once')
         if _INT_RE.match(rhs):
             value = int(rhs)
             devices[name] = value
@@ -374,7 +397,9 @@ def parse_command_defs(stripped_text: str) -> dict[str, dict[str, int]]:
     see `_parse_command_loop`. `Keys = { PlaneGear = 68, ... }` (the
     global iCommand space, lines 11-623 of the real file) has no
     preceding reset marker and is never touched by this scan, which is
-    exactly right: nothing in `clickabledata.lua` references `Keys`."""
+    exactly right: nothing in `clickabledata.lua` references `Keys`. A
+    table name reset a second time is a `DuplicateNameError`, never a
+    silent restart of its counter."""
     tables: dict[str, dict[str, int]] = {}
     for marker in _RESET_MARKER_RE.finditer(stripped_text):
         header_match = _TABLE_HEADER_RE.match(stripped_text, marker.end())
@@ -384,6 +409,11 @@ def parse_command_defs(stripped_text: str) -> dict[str, dict[str, int]]:
                 "`<table> = ...`"
             )
         table_name = header_match.group(1)
+        if table_name in tables:
+            raise DuplicateNameError(
+                f'table "{table_name}" is reset by a second '
+                "`count = start_command` / table header"
+            )
         brace_match = _BRACE_RE.match(stripped_text, header_match.end())
         if brace_match is None:
             raise CommandDefsParseError(
@@ -393,7 +423,7 @@ def parse_command_defs(stripped_text: str) -> dict[str, dict[str, int]]:
         brace_pos = brace_match.end() - 1
         body = _extract_balanced(stripped_text, brace_pos, "{", "}")
         close_pos = brace_pos + len(body) + 2
-        tables.setdefault(table_name, {})
+        tables[table_name] = {}
         if body.strip() == "":
             tables[table_name].update(
                 _parse_command_loop(stripped_text, close_pos, table_name)
@@ -648,13 +678,29 @@ def _parse_raw_literal(
     )
 
 
+def _line_end(text: str, pos: int) -> int:
+    nl = text.find("\n", pos)
+    return len(text) if nl == -1 else nl
+
+
+def _line_no(text: str, pos: int) -> int:
+    return text.count("\n", 0, pos) + 1
+
+
 def _parse_element_at(
     stripped_text: str,
     name: str,
     rhs_start: int,
     devices: dict[str, int],
     command_defs: dict[str, dict[str, int]],
-) -> RawElement | UnhandledElement:
+) -> tuple[RawElement | UnhandledElement, int]:
+    """Returns the parsed element (or an `UnhandledElement`) alongside the
+    offset immediately after the value it consumed -- the closing `)`/`}`
+    on success, or the end of `rhs_start`'s own line on failure (every
+    call/literal form this parser recognises, or fails to recognise
+    outright, fits on one line per the 2026-10-23 recon). Callers use
+    this span to blank out the statement for "statements ignored"
+    accounting (`scan_clickabledata`)."""
     rest = stripped_text[rhs_start:]
     call_match = _CALL_HEAD_RE.match(rest)
     if call_match is not None:
@@ -663,17 +709,35 @@ def _parse_element_at(
         try:
             args_text = _extract_balanced(stripped_text, open_paren, "(", ")")
         except ValueError:
-            return UnhandledElement(name, "unbalanced parentheses in call")
+            return (
+                UnhandledElement(name, "unbalanced parentheses in call"),
+                _line_end(stripped_text, rhs_start),
+            )
+        close_pos = open_paren + len(args_text) + 2
         args = _split_top_level(args_text)
-        return _parse_helper_call(name, helper, args, devices, command_defs)
+        return (
+            _parse_helper_call(name, helper, args, devices, command_defs),
+            close_pos,
+        )
     if rest[:1] == "{":
         try:
             body = _extract_balanced(stripped_text, rhs_start, "{", "}")
         except ValueError:
-            return UnhandledElement(name, "unbalanced braces in table literal")
-        return _parse_raw_literal(name, body, devices, command_defs)
-    return UnhandledElement(
-        name, "could not determine assignment form (neither a call nor a table literal)"
+            return (
+                UnhandledElement(name, "unbalanced braces in table literal"),
+                _line_end(stripped_text, rhs_start),
+            )
+        close_pos = rhs_start + len(body) + 2
+        return (
+            _parse_raw_literal(name, body, devices, command_defs),
+            close_pos,
+        )
+    return (
+        UnhandledElement(
+            name,
+            "could not determine assignment form (neither a call nor a table literal)",
+        ),
+        _line_end(stripped_text, rhs_start),
     )
 
 
@@ -691,35 +755,88 @@ def _read_simple_rhs(text: str, start: int) -> str:
     return text[start:end]
 
 
+def _find_ignored_statements(
+    stripped: str, consumed_spans: list[tuple[int, int]]
+) -> list[tuple[int, str]]:
+    """`plan.md` point 6's "statements ignored": blank out every matched
+    `elements[...]` head's own span, then any remaining non-blank line is
+    a top-level statement this scanner does not treat as part of the
+    clickable-element surface at all -- the file's own preamble
+    (`dofile`/`local`/plain-assignment lines, and `elements = {}` itself)
+    in the real file, confirmed by the 2026-10-23 recon's Q4 to be
+    everything before the first `elements[...]` assignment there. Never
+    fatal, never part of the `heads == handled + unhandled + patches`
+    completeness arithmetic -- counted and reported separately."""
+    chars = list(stripped)
+    for start, end in consumed_spans:
+        for i in range(start, min(end, len(chars))):
+            if chars[i] != "\n":
+                chars[i] = " "
+    blanked = "".join(chars)
+    ignored: list[tuple[int, str]] = []
+    for line_no, line in enumerate(blanked.split("\n"), start=1):
+        if line.strip():
+            ignored.append((line_no, line.strip()))
+    return ignored
+
+
 def scan_clickabledata(
     text: str, devices: dict[str, int], command_defs: dict[str, dict[str, int]]
-) -> tuple[int, dict[str, RawElement], list[UnhandledElement], int]:
-    """Returns `(heads, handled, unhandled, n_post_assigns)`. Every
-    `elements[...]` occurrence lands in exactly one of three buckets by
-    construction (one regex pass, classified immediately): a definition
+) -> tuple[
+    int, dict[str, RawElement], list[UnhandledElement], int, list[tuple[int, str]]
+]:
+    """Returns `(heads, handled, unhandled, n_post_assigns, ignored)`.
+    Every `elements[` head -- any key form, not only a quoted string
+    literal -- lands in exactly one of three buckets by construction
+    (one pass, classified immediately): a definition
     (`elements["X"] = ...`), a field patch (`elements["X"].field = ...`,
     235 of them in the real file -- only `crew_member_access` patches are
     applied, every other field is counted and otherwise ignored, since
     none of `turn_box`/`sound`/`updatable`/`side`/`arg_value`/`arg_lim`/
     `animation_speed` is part of this registry's schema), or neither (an
-    ambiguous reference, e.g. a read rather than an assignment --
-    unhandled, same as a parse failure). So
+    ambiguous reference, e.g. a read rather than an assignment, **or a
+    dynamic/computed key such as `elements[key..i]`** -- unhandled in
+    both cases, surfaced rather than silently skipped, since the quoted-
+    literal regex alone would never even see a non-literal key). So
     `heads == len(handled) + len(unhandled) + n_post_assigns` always
-    holds; `main()` asserts it rather than trusting the construction."""
+    holds; `main()` asserts it rather than trusting the construction.
+    `ignored` is `_find_ignored_statements`'s result -- see its own
+    docstring; it plays no part in the completeness arithmetic above."""
     stripped = _strip_lua_comments(text)
     heads = 0
     handled: dict[str, RawElement] = {}
     unhandled: list[UnhandledElement] = []
     post_assigns: list[tuple[str, str, str]] = []
+    consumed_spans: list[tuple[int, int]] = []
 
-    for ref in _ELEMENTS_REF_RE.finditer(stripped):
+    for head in _ELEMENTS_HEAD_RE.finditer(stripped):
+        ref = _ELEMENTS_REF_RE.match(stripped, head.start())
+        if ref is None:
+            heads += 1
+            bracket_pos = head.end() - 1
+            try:
+                key_text = _extract_balanced(stripped, bracket_pos, "[", "]")
+            except ValueError:
+                key_text = "?"
+            unhandled.append(
+                UnhandledElement(
+                    f"<dynamic key at line {_line_no(stripped, head.start())}>",
+                    "elements[...] key is not a literal string (dynamic/computed "
+                    f"key: {key_text!r}) -- unhandled",
+                )
+            )
+            consumed_spans.append((head.start(), _line_end(stripped, head.start())))
+            continue
+
         heads += 1
         name = ref.group("name")
         post_match = _POST_ASSIGN_RE.match(stripped, ref.end())
         if post_match is not None:
             field = post_match.group(1)
-            rhs_text = _read_simple_rhs(stripped, post_match.end())
+            rhs_start = post_match.end()
+            rhs_text = _read_simple_rhs(stripped, rhs_start)
             post_assigns.append((name, field, rhs_text))
+            consumed_spans.append((ref.start(), rhs_start + len(rhs_text)))
             continue
         def_match = _DEF_EQUALS_RE.match(stripped, ref.end())
         if def_match is None:
@@ -731,10 +848,12 @@ def scan_clickabledata(
                     "an assignment",
                 )
             )
+            consumed_spans.append((ref.start(), _line_end(stripped, ref.start())))
             continue
-        result = _parse_element_at(
+        result, consumed_end = _parse_element_at(
             stripped, name, def_match.end(), devices, command_defs
         )
+        consumed_spans.append((ref.start(), consumed_end))
         if isinstance(result, RawElement):
             handled[result.name] = result
         else:
@@ -761,7 +880,8 @@ def scan_clickabledata(
             handled[element_name], seat=resolved_seat, seat_explicit=True
         )
 
-    return heads, handled, unhandled, len(post_assigns)
+    ignored = _find_ignored_statements(stripped, consumed_spans)
+    return heads, handled, unhandled, len(post_assigns), ignored
 
 
 # --- output ---------------------------------------------------------------
@@ -802,6 +922,7 @@ def render_toml(
     heads: int,
     n_unhandled: int,
     n_post_assigns: int,
+    n_ignored: int,
 ) -> str:
     source_subpath = "/".join(_SCRIPTS_SUBPATH.parts)
     inputs = ", ".join(f"{name} {digest}" for name, digest in sha256_by_file.items())
@@ -815,7 +936,8 @@ def render_toml(
         f"# Inputs (sha256): {inputs}",
         (
             f"# Elements: {len(handled)} emitted, {n_unhandled} unhandled, "
-            f"{n_post_assigns} field patches, {heads} elements[ heads total."
+            f"{n_post_assigns} field patches, {heads} elements[ heads total. "
+            f"Statements ignored: {n_ignored} (see the run report)."
         ),
         "# Regenerate after any DCS update: device and command numbers are positional.",
         "",
@@ -891,7 +1013,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--out",
+        "--output",
         type=Path,
         default=None,
         help=f"override output path (default {_DEFAULT_OUT_PATH})",
@@ -919,14 +1041,18 @@ def main(argv: list[str] | None = None) -> int:
     command_defs_text = (scripts_dir / "command_defs.lua").read_text(encoding="utf-8")
     clickable_text = (scripts_dir / "clickabledata.lua").read_text(encoding="utf-8")
 
-    devices = parse_devices(_strip_lua_comments(devices_text))
+    try:
+        devices = parse_devices(_strip_lua_comments(devices_text))
+    except DuplicateNameError as exc:
+        print(f"devices.lua: {exc}", file=sys.stderr)
+        return 2
     try:
         command_defs = parse_command_defs(_strip_lua_comments(command_defs_text))
-    except CommandDefsParseError as exc:
+    except (CommandDefsParseError, DuplicateNameError) as exc:
         print(f"command_defs.lua: {exc}", file=sys.stderr)
         return 2
 
-    heads, handled, unhandled, n_post_assigns = scan_clickabledata(
+    heads, handled, unhandled, n_post_assigns, ignored = scan_clickabledata(
         clickable_text, devices, command_defs
     )
     assert heads == len(handled) + len(unhandled) + n_post_assigns, (
@@ -938,12 +1064,16 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"{heads} elements[ heads: {len(handled)} emitted, {len(unhandled)} unhandled, "
-        f"{n_post_assigns} field patches"
+        f"{n_post_assigns} field patches, {len(ignored)} statements ignored"
     )
     if unhandled:
         print("unhandled:")
         for u in unhandled:
             print(f"  {u.name}: {u.reason}")
+    if ignored:
+        print("statements ignored (neither an elements[...] definition nor a patch):")
+        for line_no, snippet in ignored:
+            print(f"  line {line_no}: {snippet}")
 
     if unhandled and not args.allow_unhandled:
         print(
@@ -977,10 +1107,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-    out_path = args.out or _DEFAULT_OUT_PATH
+    out_path = args.output or _DEFAULT_OUT_PATH
     sha256_by_file = {f: sha256_hexdigest(scripts_dir / f) for f in required}
     rendered = render_toml(
-        handled, dcs_build, sha256_by_file, heads, len(unhandled), n_post_assigns
+        handled,
+        dcs_build,
+        sha256_by_file,
+        heads,
+        len(unhandled),
+        n_post_assigns,
+        len(ignored),
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(rendered, encoding="utf-8")
