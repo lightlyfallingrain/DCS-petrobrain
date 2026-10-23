@@ -5,7 +5,7 @@
 #   python tools/generate_effector_registry.py --write
 # Source: Mods/aircraft/Mi-24P/Cockpit/Scripts, DCS 2.9.30.28738
 # Inputs (sha256): devices.lua 96574058b48d1940ea29240297cc75fd6e90df47baff81e1fdfac491982f2c77, command_defs.lua 111b1ebeca3e90940d65647f19152e6c95e1638bc74874cd914d588787ad5df3, clickabledata.lua 9f5aeb2ec3938ab9341025a21351795dd0ca441f8fa4ed235b480f884df23730
-# Elements: 514 emitted, 0 unhandled, 235 field patches, 749 elements[ heads total. Statements ignored: 17 (see the run report).
+# Elements: 514 emitted, 0 unhandled, 235 field patches, 749 elements[ heads total. Statements ignored: 17 (see the run report). Value ranges unknown: 0 (see the run report).
 # Regenerate after any DCS update: device and command numbers are positional.
 
 [elements." CONTROL-COVER-PRIORITY-PTR"]
@@ -51,7 +51,7 @@ cmds = [3005]
 cmd_names = ["ecs_commands.AutomaticHotCold"]
 args = [145]
 helper_args = ["4", "0.1", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3], momentary = false }]
 label = "Automatic Hot Cold Switch, OFF/COLD/HOT/AUTO"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -76,7 +76,7 @@ cmds = [3006]
 cmd_names = ["ecs_commands.Temperature"]
 args = [146]
 helper_args = ["11", "1/9", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.111111, 0.222222, 0.333333, 0.444444, 0.555556, 0.666667, 0.777778, 0.888889, 1.0, 1.111111], momentary = false }]
 label = "Temperature Selector, 5/10/15/18/20/22/24/30/35/40/50"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -163,7 +163,7 @@ cmds = [3005]
 cmd_names = ["arc15_commands.BACKUP_10KHz"]
 args = [468]
 helper_args = ["10", "1/9"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.111111, 0.222222, 0.333333, 0.444444, 0.555556, 0.666667, 0.777778, 0.888889, 1.0], momentary = false }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -176,7 +176,7 @@ cmds = [3006]
 cmd_names = ["arc15_commands.BACKUP_1KHz"]
 args = [469]
 helper_args = ["20", "1/20"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95], momentary = false }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -189,7 +189,7 @@ cmds = [3004]
 cmd_names = ["arc15_commands.BACKUP_100KHz"]
 args = [467]
 helper_args = ["18", "1/17"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.058824, 0.117647, 0.176471, 0.235294, 0.294118, 0.352941, 0.411765, 0.470588, 0.529412, 0.588235, 0.647059, 0.705882, 0.764706, 0.823529, 0.882353, 0.941176, 1.0], momentary = false }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -202,7 +202,7 @@ cmds = [3008]
 cmd_names = ["arc15_commands.PRIMARY_10KHz"]
 args = [465]
 helper_args = ["10", "1/9"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.111111, 0.222222, 0.333333, 0.444444, 0.555556, 0.666667, 0.777778, 0.888889, 1.0], momentary = false }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -215,7 +215,7 @@ cmds = [3009]
 cmd_names = ["arc15_commands.PRIMARY_1KHz"]
 args = [466]
 helper_args = ["20", "1/20"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95], momentary = false }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -228,7 +228,7 @@ cmds = [3007]
 cmd_names = ["arc15_commands.PRIMARY_100KHz"]
 args = [464]
 helper_args = ["18", "1/17"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.058824, 0.117647, 0.176471, 0.235294, 0.294118, 0.352941, 0.411765, 0.470588, 0.529412, 0.588235, 0.647059, 0.705882, 0.764706, 0.823529, 0.882353, 0.941176, 1.0], momentary = false }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -265,7 +265,7 @@ cmds = [3003]
 cmd_names = ["arc15_commands.MODE"]
 args = [463]
 helper_args = ["4", "0.115"]
-values = [{ kind = "discrete", values = [0.0, 0.115, 0.23, 0.34500000000000003], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.115, 0.23, 0.345], momentary = false }]
 label = "ARC-15 mode OFF/COMPASS/ANT/FRAME"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -303,7 +303,7 @@ cmds = [3008]
 cmd_names = ["arc15_commands.PRIMARY_10KHz"]
 args = [643]
 helper_args = ["10", "1/9", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.111111, 0.222222, 0.333333, 0.444444, 0.555556, 0.666667, 0.777778, 0.888889, 1.0], momentary = false }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -316,7 +316,7 @@ cmds = [3009]
 cmd_names = ["arc15_commands.PRIMARY_1KHz"]
 args = [644]
 helper_args = ["20", "1/20", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95], momentary = false }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -329,7 +329,7 @@ cmds = [3007]
 cmd_names = ["arc15_commands.PRIMARY_100KHz"]
 args = [642]
 helper_args = ["18", "1/17", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.058824, 0.117647, 0.176471, 0.235294, 0.294118, 0.352941, 0.411765, 0.470588, 0.529412, 0.588235, 0.647059, 0.705882, 0.764706, 0.823529, 0.882353, 0.941176, 1.0], momentary = false }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -342,7 +342,7 @@ cmds = [3005]
 cmd_names = ["arc15_commands.BACKUP_10KHz"]
 args = [640]
 helper_args = ["10", "1/9", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.111111, 0.222222, 0.333333, 0.444444, 0.555556, 0.666667, 0.777778, 0.888889, 1.0], momentary = false }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -355,7 +355,7 @@ cmds = [3006]
 cmd_names = ["arc15_commands.BACKUP_1KHz"]
 args = [641]
 helper_args = ["20", "1/20", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95], momentary = false }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -368,7 +368,7 @@ cmds = [3004]
 cmd_names = ["arc15_commands.BACKUP_100KHz"]
 args = [639]
 helper_args = ["18", "1/17", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.058824, 0.117647, 0.176471, 0.235294, 0.294118, 0.352941, 0.411765, 0.470588, 0.529412, 0.588235, 0.647059, 0.705882, 0.764706, 0.823529, 0.882353, 0.941176, 1.0], momentary = false }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -407,7 +407,7 @@ cmds = [3003]
 cmd_names = ["arc15_commands.MODE"]
 args = [638]
 helper_args = ["4", "0.115", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "discrete", values = [0.0, 0.115, 0.23, 0.34500000000000003], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.115, 0.23, 0.345], momentary = false }]
 label = "ARC-15 mode OFF/COMPASS/ANT/FRAME"
 shape = "multiposition_switch"
 seat = "operator"
@@ -659,7 +659,7 @@ cmds = [3006, 3001, 3001]
 cmd_names = ["pki_commands.Lock_Unlock", "pki_commands.Reflector_Move", "pki_commands.Reflector_Move"]
 args = [15, 846, 846]
 arg_values = [0.0, 0.0, 0.0]
-values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = -0.01 }, { kind = "unknown", reason = "unhandled raw-literal class 'NULL'" }]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = -0.01 }, { kind = "none" }]
 label = "PKI control"
 shape = "raw_table_literal"
 seat = "operator"
@@ -1731,7 +1731,7 @@ cmds = [3007]
 cmd_names = ["AntiIceSys_commands.ANTIICE_Ammeter"]
 args = [114]
 helper_args = ["11", "0.1", "false", "0", "nil", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "AC Voltmeter knob"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -1744,7 +1744,7 @@ cmds = [3001]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Mode_Sw"]
 args = [334]
 helper_args = ["4", "1/3"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.333333, 0.666667, 1.0], momentary = false }]
 label = "IFF Transponder Mode Selector Switch, AUTO/KD/+-15/KP"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -1853,7 +1853,7 @@ cmds = [3013]
 cmd_names = ["diss_commands.CHECK_SWITCH"]
 args = [826]
 helper_args = ["5", "0.1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4], momentary = false }]
 label = "DISS select mode IDK/IDK/IDK/MEM/OPER"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -2050,7 +2050,7 @@ cmds = [3001]
 cmd_names = ["eucalypt_commands.CHANNEL_CHANGE"]
 args = [337]
 helper_args = ["10", "0.1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], momentary = false }]
 label = "R-828 Channel Select"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -2546,7 +2546,7 @@ cmds = [3037]
 cmd_names = ["fuel_commands.FuelMeter"]
 args = [191]
 helper_args = ["7", "1/6", "false", "0", "nil", "false"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.166667, 0.333333, 0.5, 0.666667, 0.833333, 1.0], momentary = false }]
 label = "Select tank for fuel meter"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -2619,7 +2619,7 @@ cmds = [3004]
 cmd_names = ["greben_commands.LATITUDE"]
 args = [448]
 helper_args = ["0", "-2/3", "true", "true", "true"]
-values = [{ kind = "unknown", reason = "default_axis's gain_ is not a literal number" }]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = -0.666667 }]
 label = "Greben Set Latitude"
 shape = "default_axis"
 seat = "pilot"
@@ -2861,7 +2861,7 @@ cmds = [3045, 3046, 3045, 3046]
 cmd_names = ["asp_commands.Reflector_Fix", "asp_commands.Reflector_Move", "asp_commands.Reflector_Fix", "asp_commands.Reflector_Move"]
 args = [1005, 1006, 1005, 1006]
 arg_values = [-1.0, -0.1, 1.0, 0.1]
-values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = -0.01 }, { kind = "unknown", reason = "unhandled raw-literal class 'NULL'" }, { kind = "unknown", reason = "unhandled raw-literal class 'NULL'" }]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = -0.01 }, { kind = "none" }, { kind = "none" }]
 label = "Sight reflector control"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -2922,7 +2922,7 @@ cmds = [3004]
 cmd_names = ["jadro_commands.FREQ_1MHZ"]
 args = [437]
 helper_args = ["{-0.1, 0.1}", "{0,1}", "{434,{0.0,1.0}, 1.0,slave = {435,{0.0,1.0},1.0,master_lim = {0.9,1.0}}}"]
-values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false, relative = true }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2935,7 +2935,7 @@ cmds = [3007]
 cmd_names = ["jadro_commands.FREQ_100KHZ"]
 args = [436]
 helper_args = ["{-0.1, 0.1}", "{0,1}", "{433,{0.0,1.0}}"]
-values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false, relative = true }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2948,7 +2948,7 @@ cmds = [3010]
 cmd_names = ["jadro_commands.FREQ_10KHZ"]
 args = [429]
 helper_args = ["{-0.1, 0.1}", "{0,1}", "{432,{0.0,1.0}}"]
-values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false, relative = true }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2961,7 +2961,7 @@ cmds = [3013]
 cmd_names = ["jadro_commands.FREQ_1KHZ"]
 args = [428]
 helper_args = ["{-0.1, 0.1}", "{0,1}", "{431,{0.0,1.0}}"]
-values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false, relative = true }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2974,7 +2974,7 @@ cmds = [3016]
 cmd_names = ["jadro_commands.FREQ_100HZ"]
 args = [427]
 helper_args = ["{-0.1, 0.1}", "{0,1}", "{430,{0.0,1.0}}"]
-values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false, relative = true }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -3794,7 +3794,7 @@ cmds = [3009]
 cmd_names = ["i9K113_commands.Command_VHOD_BVK_KV"]
 args = [899]
 helper_args = ["5", "0.1", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4], momentary = false }]
 label = "BVK Set"
 shape = "multiposition_switch"
 seat = "operator"
@@ -3979,7 +3979,7 @@ cmds = [3003]
 cmd_names = ["R60_commands.StationSelector"]
 args = [1032]
 helper_args = ["5", "0.1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4], momentary = false }]
 label = "Active missile selector"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4028,7 +4028,7 @@ cmds = [3001]
 cmd_names = ["r852_commands.CHANNEL"]
 args = [518]
 helper_args = ["4", "0.1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3], momentary = false }]
 label = "R-852 Channel Select"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4066,7 +4066,7 @@ cmds = [3007]
 cmd_names = ["r863_commands.CHANNEL_SEL"]
 args = [513]
 helper_args = ["20", "1/20"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95], momentary = false }]
 label = "R-863 Channel Select"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4238,7 +4238,7 @@ cmds = [3017]
 cmd_names = ["int_lights_commands.RedLightsOperatorPanel_1"]
 args = [1013]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false", "1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 1 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "operator"
@@ -4251,7 +4251,7 @@ cmds = [3012]
 cmd_names = ["int_lights_commands.RedLightsPilotInstrumentPanelRightPanel_1"]
 args = [148]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 1 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4264,7 +4264,7 @@ cmds = [3018]
 cmd_names = ["int_lights_commands.RedLightsOperatorPanel_2"]
 args = [1014]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false", "1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 2 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "operator"
@@ -4277,7 +4277,7 @@ cmds = [3013]
 cmd_names = ["int_lights_commands.RedLightsPilotInstrumentPanelRightPanel_2"]
 args = [147]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 2 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4290,7 +4290,7 @@ cmds = [3020]
 cmd_names = ["int_lights_commands.RedLightsPilotBuiltInRedLights"]
 args = [149]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Builtin Red Lights Transformer, OFF/0.6V/1.2V/1.8V/2.4V/3V/3.6V/4.2V/4.8V/5.4V/6V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4303,7 +4303,7 @@ cmds = [3015]
 cmd_names = ["int_lights_commands.RedLightsPilotLeftPanel_1"]
 args = [820]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 1 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4316,7 +4316,7 @@ cmds = [3016]
 cmd_names = ["int_lights_commands.RedLightsPilotLeftPanel_2"]
 args = [503]
 helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 2 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4518,7 +4518,7 @@ cmds = [3030]
 cmd_names = ["autopilot_commands.RouteAngle"]
 args = [262]
 helper_args = ["0", "1.0 / 6.0", "false", "true", "true"]
-values = [{ kind = "unknown", reason = "default_axis's gain_ is not a literal number" }]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.166667 }]
 label = "Autopilot Route Azimuth"
 shape = "default_axis"
 seat = "pilot"
@@ -4788,7 +4788,7 @@ cmds = [3038]
 cmd_names = ["weapon_commands.Operator_SWITCHER_LAUNCH_STATION"]
 args = [963]
 helper_args = ["9", "0.1", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], momentary = false }]
 label = "Select Station"
 shape = "multiposition_switch"
 seat = "operator"
@@ -5138,7 +5138,7 @@ cmds = [3003]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_MODE"]
 args = [455]
 helper_args = ["6", "1/5"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0], momentary = false }]
 label = "Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -5189,7 +5189,7 @@ cmds = [3011]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_MODE"]
 args = [659]
 helper_args = ["6", "1/5", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0], momentary = false }]
 label = "Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2"
 shape = "multiposition_switch"
 seat = "operator"
@@ -5293,7 +5293,7 @@ cmds = [3003]
 cmd_names = ["spuu_commands.control"]
 args = [276]
 helper_args = ["1", "0.2 * 5 / 6", "true", "false", "false"]
-values = [{ kind = "unknown", reason = "default_axis's gain_ is not a literal number" }]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.166667 }]
 label = "SPUU Adjustment Knob"
 shape = "default_axis"
 seat = "pilot"
@@ -5625,7 +5625,7 @@ cmds = [3025]
 cmd_names = ["elec_commands.ACGangSwitcher"]
 args = [91]
 helper_args = ["11", "1/10", "false", "0", "nil", "false"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], momentary = false }]
 label = "AC Voltmeter knob"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -5638,7 +5638,7 @@ cmds = [3055]
 cmd_names = ["elec_commands.DCGangSwitcher"]
 args = [69]
 helper_args = ["10", "1/10", "false", "0", "nil", "false"]
-values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], momentary = false }]
 label = "DC Voltmeter knob"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -6129,7 +6129,7 @@ cmds = [3027]
 cmd_names = ["weapon_commands.Operator_SWITCHER_WEAP_TYPE_AB"]
 args = [709]
 helper_args = ["5", "0.1", "nil", "nil", "nil", "nil", "1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4], momentary = false }]
 label = "Select Weapon"
 shape = "multiposition_switch"
 seat = "operator"
@@ -6142,7 +6142,7 @@ cmds = [3007]
 cmd_names = ["weapon_commands.Pilot_SWITCHER_OFF_GM_URS_NPU"]
 args = [523]
 helper_args = ["9", "0.1"]
-values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8], momentary = false }]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], momentary = false }]
 label = "Select Weapon"
 shape = "multiposition_switch"
 seat = "pilot"
