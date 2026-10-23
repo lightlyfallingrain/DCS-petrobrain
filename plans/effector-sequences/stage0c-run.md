@@ -1,5 +1,33 @@
 # Stage 0c — the real generator run, Windows DCS machine
 
+## Rerun needed, 2026-10-23 (switch-reference value ranges)
+
+The generator gained three fields since the original Stage 0c run below: `helper_args`
+(verbatim trailing positional parameters), and `values` (settable-value ranges, discrete/
+continuous/unknown — user request 2026-10-23, *"Can we get the argument value ranges there too?
+I.e. what are the possible values to set be it continuous or steps."*). The already-committed
+`body-layer/config/effectors-raw/mi-24p.toml` predates this change and has neither field; every
+other field is unchanged, so the parser's own completeness arithmetic and 0d control points still
+hold against it — nothing is broken by the old dump staying checked in until this rerun lands,
+`render_switch_reference.py`'s new "Values" column simply renders blank for every row until then.
+
+**Rerun exactly the Stage 0c command below** (unchanged — same preconditions, same two-step
+report-then-write sequence), from `body-layer/` on the Windows DCS machine, on a checkout that
+has this value-ranges commit:
+
+```sh
+cd body-layer
+python3 tools/generate_effector_registry.py           # report only
+python3 tools/generate_effector_registry.py --write   # body-layer/config/effectors-raw/mi-24p.toml
+```
+
+Send back exactly what the original run asked for (stdout report, the written
+`config/effectors-raw/mi-24p.toml`, the resolved DCS build string). After it lands: commit the
+regenerated raw dump, then regenerate `config/sequences/mi-24p/switch-reference.md` with
+`python3 tools/render_switch_reference.py --write` (Mac-side — this step needs no DCS install) and
+commit that too; `tests/test_render_switch_reference.py` is the staleness guard that confirms the
+two are in sync.
+
 **Path moved during Stage 2, 2026-10-23 (plan.md R13)**: every `body-layer/config/
 effectors-raw.toml` mention below is the path as it stood for this Stage 0c run and is accurate
 for that run; the real dump now lives at `body-layer/config/effectors-raw/mi-24p.toml`, moved

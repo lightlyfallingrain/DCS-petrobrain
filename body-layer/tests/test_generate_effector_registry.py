@@ -942,6 +942,353 @@ def test_dcs_install_path_resolves_scripts_dir_and_reads_autoupdate_cfg(
     assert "DCS 2.9.30.28738" in rendered
 
 
+# --- value ranges (2026-10-23 follow-up) -----------------------------------
+#
+# Source of truth for every expected number below:
+# `aircraft-layer/research/2026-10-23-mi24p-clickable-value-ranges.md`.
+
+
+def _values_of(gen: ModuleType, text: str) -> list[object]:
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled, unhandled
+    return list(handled["X"].value_ranges)
+
+
+def test_default_button_is_momentary_discrete_0_1(gen: ModuleType) -> None:
+    text = 'elements["X"] = default_button(_("Hint"), devices.ASP_17V, asp_commands.Power, 1, nil)\n'
+    (vr,) = _values_of(gen, text)
+    assert (vr.kind, vr.values, vr.momentary) == ("discrete", (0.0, 1.0), True)
+
+
+def test_default_2_position_tumb_is_latching_discrete_0_1(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = default_2_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, nil, 1)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert (vr.kind, vr.values, vr.momentary) == ("discrete", (0.0, 1.0), False)
+
+
+def test_default_3_position_tumb_default_is_minus_one_zero_one(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = default_3_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, false, nil, false, nil, nil)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert vr.values == (-1.0, 0.0, 1.0)
+
+
+def test_default_3_position_tumb_custom_arg_limit_changes_endpoints(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = default_3_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, false, nil, false, nil, {0, 0.3})\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.values == (0.0, 0.3)
+
+
+def test_default_3_position_tumb_unresolvable_arg_limit_is_unknown(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = default_3_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, false, nil, false, nil, some_expr)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "unknown"
+    assert "arg_limit_" in vr.reason
+
+
+def test_multiposition_switch_steps_from_count_delta_min(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = multiposition_switch(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 148, 11, 0.1, false, 0.0, anim_speed_default, false)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert len(vr.values) == 11
+    assert vr.values[0] == 0.0
+    assert abs(vr.values[-1] - 1.0) < 1e-9
+
+
+def test_multiposition_switch_missing_count_is_unknown(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = multiposition_switch(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 148)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "unknown"
+    assert "count_" in vr.reason
+
+
+def test_triple_switch_is_fixed_four_discrete_values(gen: ModuleType) -> None:
+    text = 'elements["X"] = triple_switch(_("Hint"), devices.ASP_17V, asp_commands.Power, 1)\n'
+    (vr,) = _values_of(gen, text)
+    assert vr.values == (0.0, 0.1, 0.2, 0.3)
+    assert vr.momentary is False
+
+
+def test_default_axis_is_continuous_0_1_with_gain(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = default_axis(_("Hint"), devices.ASP_17V, asp_commands.Power, '
+        "1, 0, 0.05, true, false, false, nil, nil)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert (vr.kind, vr.min, vr.max, vr.gain) == ("continuous", 0.0, 1.0, 0.05)
+
+
+def test_default_axis_limited_custom_range(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = default_axis_limited(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, 0, 0.1, nil, nil, {-0.15, 0.15})\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert (vr.kind, vr.min, vr.max, vr.gain) == ("continuous", -0.15, 0.15, 0.1)
+
+
+def test_default_animated_lever_ignores_its_own_arg_lim_typo(gen: ModuleType) -> None:
+    """DCS's own `arg_lim__` typo makes the parameter dead code in the
+    real helper -- the generator must not apply it either, even though
+    it is a syntactically valid literal pair."""
+    text = (
+        'elements["X"] = default_animated_lever(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, 2, {5, 9})\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.values == (0.0, 1.0)
+
+
+def test_springloaded_3_pos_tumb_default_and_custom(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = springloaded_3_pos_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, device_commands.Button_1, 1, nil)\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(
+        text, _DEVICES, {**_COMMANDS, "device_commands": {"Button_1": 9001}}
+    )
+    assert not unhandled
+    (vr,) = handled["X"].value_ranges
+    assert vr.values == (-1.0, 0.0, 1.0) and vr.momentary is True
+
+
+def test_helper_args_captures_trailing_positional_text(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = default_axis(_("Hint"), devices.ASP_17V, asp_commands.Power, '
+        "1, 0, 0.05, true, false, false, nil, nil)\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    assert handled["X"].helper_args == (
+        "0",
+        "0.05",
+        "true",
+        "false",
+        "false",
+        "nil",
+        "nil",
+    )
+
+
+def test_helper_args_absent_when_nothing_follows_the_draw_argument(
+    gen: ModuleType,
+) -> None:
+    text = 'elements["X"] = stick_button(_("Hint"), devices.ASP_17V, asp_commands.Power, 1)\n'
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    assert handled["X"].helper_args is None
+
+
+def test_raw_table_literal_value_ranges_per_action_btn_and_lev(
+    gen: ModuleType,
+) -> None:
+    """`STICK-PTT-PTR`'s own shape: two `BTN` actions, each its own
+    `arg_lim` pair -- the second control point (`0.0, 0.5`) from the
+    recon, confirmed via the already-committed clean fixture's own
+    element."""
+    text = (
+        'elements["STICK-PTT-PTR"]	= {\n'
+        "\tclass 				= {class_type.BTN, class_type.BTN},\n"
+        '\thint  				= _("Trigger Button"),\n'
+        "\tdevice 				= devices.SPU_8,\n"
+        "\taction 				= {spu8_commands.CMD_SPU8_TRIGGER_P, spu8_commands.CMD_SPU8_TRIGGER_P},\n"
+        "\targ 				= {738, 738},\n"
+        "\targ_value			= {1.0, 0.5},\n"
+        "\targ_lim 			= {{0.0, 1.0}, {0.0, 0.5}},\n"
+        "\tcrew_member_access  = {0}\n"
+        "}\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    vr0, vr1 = handled["STICK-PTT-PTR"].value_ranges
+    assert (vr0.kind, vr0.values, vr0.momentary) == ("discrete", (0.0, 1.0), True)
+    assert (vr1.kind, vr1.values, vr1.momentary) == ("discrete", (0.0, 0.5), True)
+
+
+def test_raw_table_literal_lev_class_is_continuous_with_gain(gen: ModuleType) -> None:
+    text = (
+        'elements["COLLECTIVE-CORR-PTR"] = {\n'
+        "\tclass = {class_type.LEV, class_type.LEV},\n"
+        '\thint = _("Collective"),\n'
+        "\tdevice = devices.ASP_17V,\n"
+        "\taction = {asp_commands.Power, asp_commands.Power},\n"
+        "\targ = {40, 41},\n"
+        "\targ_value = {0.0, 0.0},\n"
+        "\targ_lim = {{-1, 1}, {-1, 1}},\n"
+        "\tgain = {0.1, 0.1}\n"
+        "}\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    vr0, vr1 = handled["COLLECTIVE-CORR-PTR"].value_ranges
+    assert (vr0.kind, vr0.min, vr0.max, vr0.gain) == ("continuous", -1.0, 1.0, 0.1)
+    assert (vr1.kind, vr1.min, vr1.max, vr1.gain) == ("continuous", -1.0, 1.0, 0.1)
+
+
+def test_raw_table_literal_null_class_action_is_unknown(gen: ModuleType) -> None:
+    """`BRAKE-LEVEL-OP-PTR`'s own shape: a bare `0` (`class_type.NULL`)
+    third action -- never guessed at, reported unknown by name."""
+    text = (
+        'elements["BRAKE-LEVEL-OP-PTR"] = {\n'
+        "\tclass = {class_type.TUMB, class_type.LEV, 0},\n"
+        '\thint = _("PKI control"),\n'
+        "\tdevice = devices.ASP_17V,\n"
+        "\taction = {asp_commands.Power, asp_commands.Power, asp_commands.Power},\n"
+        "\targ = {15, 846, 846},\n"
+        "\targ_value = {0, 0, 0},\n"
+        "\targ_lim = {{0, 1}, {0, 1}, {0, 1}}\n"
+        "}\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    vr0, vr1, vr2 = handled["BRAKE-LEVEL-OP-PTR"].value_ranges
+    assert vr0.kind == "discrete" and vr0.momentary is False
+    assert vr1.kind == "continuous"
+    assert vr2.kind == "unknown"
+    assert "NULL" in vr2.reason
+
+
+def test_raw_table_literal_missing_class_field_is_unknown_for_every_action(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = {\n'
+        '\thint = _("Hint"),\n'
+        "\tdevice = devices.ASP_17V,\n"
+        "\taction = {asp_commands.Power},\n"
+        "\targ = {1},\n"
+        "\targ_lim = {{0, 1}}\n"
+        "}\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    (vr,) = handled["X"].value_ranges
+    assert vr.kind == "unknown"
+    assert "class" in vr.reason
+
+
+def test_raw_table_literal_missing_arg_lim_field_is_unknown_for_every_action(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = {\n'
+        "\tclass = {class_type.BTN},\n"
+        '\thint = _("Hint"),\n'
+        "\tdevice = devices.ASP_17V,\n"
+        "\taction = {asp_commands.Power},\n"
+        "\targ = {1}\n"
+        "}\n"
+    )
+    _, handled, unhandled, _, _ = gen.scan_clickabledata(text, _DEVICES, _COMMANDS)
+    assert not unhandled
+    (vr,) = handled["X"].value_ranges
+    assert vr.kind == "unknown"
+    assert "arg_lim" in vr.reason
+
+
+def test_post_assignment_arg_lim_patch_overrides_the_endpoints(
+    gen: ModuleType,
+) -> None:
+    """The two ASP-17 sight switches are patched from the
+    `default_2_position_tumb` call's own 0/1 to 0.0/0.5 after the fact --
+    `aircraft-layer/research/2026-10-23-mi24p-clickable-value-ranges.md`,
+    "Post-assignment patches that change values"."""
+    text = (
+        'elements["SIGHT-MAN-AUTO-PTR"] = default_2_position_tumb(_("Sight mode"), '
+        "devices.ASP_17V, asp_commands.Power, 553, nil)\n"
+        'elements["SIGHT-MAN-AUTO-PTR"].arg_value = {0.5,-0.5}\n'
+        'elements["SIGHT-MAN-AUTO-PTR"].arg_lim = {{0,0.5},{0,0.5}}\n'
+    )
+    _, handled, unhandled, patches, _ = gen.scan_clickabledata(
+        text, _DEVICES, _COMMANDS
+    )
+    assert not unhandled and patches == 2
+    (vr,) = handled["SIGHT-MAN-AUTO-PTR"].value_ranges
+    assert vr.kind == "discrete"
+    assert vr.values == (0.0, 0.5)
+    assert vr.momentary is False
+
+
+def test_unresolved_arg_value_patch_is_counted_but_not_applied_to_values(
+    gen: ModuleType,
+) -> None:
+    """`arg_value` is the step per click, never a position (the recon's
+    own "Reading rule") -- a post-assignment patch to it must not change
+    `values` at all."""
+    text = (
+        'elements["X"] = default_2_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 1, nil)\n"
+        'elements["X"].arg_value = {0.5,-0.5}\n'
+    )
+    _, handled, unhandled, patches, _ = gen.scan_clickabledata(
+        text, _DEVICES, _COMMANDS
+    )
+    assert not unhandled and patches == 1
+    (vr,) = handled["X"].value_ranges
+    assert vr.values == (0.0, 1.0)
+
+
+def test_render_toml_round_trips_discrete_continuous_and_unknown_value_ranges(
+    gen: ModuleType,
+) -> None:
+    el = gen.RawElement(
+        name="X",
+        device_id=1,
+        device_symbol="SOME_DEVICE",
+        cmd_ids=[3001],
+        cmd_symbols=["Power"],
+        args=[1],
+        label="A label",
+        shape="tumb",
+        seat="pilot",
+        seat_explicit=True,
+        helper_args=("nil", "1"),
+        value_ranges=(
+            gen._discrete([0.0, 1.0], momentary=True),
+            gen._continuous(0.0, 1.0, gain=0.1),
+            gen._unknown_value("no parseable arg_lim"),
+        ),
+    )
+    rendered = gen.render_toml(
+        {"X": el},
+        "dcs-build",
+        {},
+        heads=1,
+        n_unhandled=0,
+        n_post_assigns=0,
+        n_ignored=0,
+    )
+    parsed = tomllib.loads(rendered)
+    entry = parsed["elements"]["X"]
+    assert entry["helper_args"] == ["nil", "1"]
+    values = entry["values"]
+    assert values[0] == {"kind": "discrete", "values": [0.0, 1.0], "momentary": True}
+    assert values[1] == {"kind": "continuous", "min": 0.0, "max": 1.0, "gain": 0.1}
+    assert values[2] == {"kind": "unknown", "reason": "no parseable arg_lim"}
+
+
 def test_dcs_install_path_set_but_autoupdate_cfg_missing_exits_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

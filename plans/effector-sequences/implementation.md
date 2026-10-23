@@ -849,3 +849,156 @@ Re-ran the test: passes.
   - `cd body-layer && .venv/bin/mypy src` — pass (74 files)
   - `pytest tests -q` — 2549 passed, 4 xfailed (same totals as `review-stage2.md`'s own run; one
     existing test extended, no test added or removed)
+
+## Switch reference values (2026-10-23 follow-up)
+
+User request, verbatim: *"Can we get the argument value ranges there too? I.e. what are the
+possible values to set be it continuos or steps. Like 0/1, 0.0/0.5/1.0, 0.0-1.0."* Built against
+`aircraft-layer/research/2026-10-23-mi24p-clickable-value-ranges.md` (the Windows-side recon of
+every helper's `arg_value`/`arg_lim`/`class`, the post-assignment patches, and the raw literals).
+
+### `generate_effector_registry.py`
+
+- **`helper_args`** (`plan.md`'s Output section promised it; the real dump never had it) —
+  `RawElement.helper_args: tuple[str, ...] | None`, the verbatim source text of every positional
+  call argument after the draw argument, rendered as a TOML string array when non-empty. Nothing
+  else reads it; it exists so a human can see exactly what a helper call passed without having to
+  re-read `clickabledata.lua`.
+- **`values`** — `RawElement.value_ranges: tuple[ValueRange, ...]`, one entry per `args` entry
+  (always 1 for a helper-call element, one per action for a raw-table-literal element — the 13
+  raw literals genuinely mix kinds per action). `ValueRange.kind` is `"discrete"` (`values` +
+  `momentary`), `"continuous"` (`min`/`max`/optional `gain`), or `"unknown"` (`reason`, never a
+  guess). Rendered as a TOML array of inline tables (`values = [{ kind = "discrete", ... }]`).
+- **Per-helper computation** (`_value_range_for_helper`), one rule per of the 22
+  `_HELPER_SIGNATURES` entries. For the handful of helpers whose Lua signature can carry a custom
+  `arg_lim_`/`arg_value_`/`val1_..val3_` (`default_spring_button`, `default_position_tumb`,
+  `default_1_position_tumb`, `default_3_position_tumb`, `springloaded_3_pos_tumb`,
+  `radio_wheel_1`, `multiposition_switch`, `default_axis`/`default_axis_limited`'s `gain_`), the
+  parameter is read positionally off the real call every time — never hard-coded to the default —
+  via `_lua_scalar`/`_lua_bool`/`_lua_pair`, three tiny Lua-literal parsers each returning a
+  parsed value, `None` for `nil`/absent (use the helper's own documented default), or the
+  `_Unresolved` marker for any other expression (an identifier, an arithmetic expression) — which
+  the caller always turns into `"unknown"`, never a guess. `default_animated_lever` is the one
+  deliberate exception: its `arg_lim_` is parsed but never applied, because DCS's own
+  `arg_lim__` typo (confirmed live) makes it dead code in the real helper too.
+- **Raw-table-literal elements** (`_value_ranges_for_raw_literal`) — new parsing of the `class`
+  field (`class_type.BTN`/`TUMB`/`LEV`/… or a bare integer, `BRAKE-LEVEL-OP-PTR`'s own `0` ==
+  `class_type.NULL`) and the `arg_lim` field (a flat pair for one action, a list of pairs for
+  several — needs balanced-brace extraction, unlike `action`/`arg`/`gain`'s flat regexes, since
+  `arg_lim` nests one level: `{{0.0,1.0},{0.0,0.5}}`). `BTN` → momentary discrete; `TUMB` →
+  latching discrete; `LEV`/`MOVABLE_LEV` → continuous (+ optional `gain` field, the one raw
+  literal pair that has it, `COLLECTIVE-CORR-PTR`/`OP-COLL-THROTTLE-PTR`); anything else
+  (`SNGBTN`/`MULTY_TUMB`/`NULL`/a class-count mismatch/a missing field) → unknown, named.
+- **Post-assignment `arg_lim` patches** — the two ASP-17 sight-mode switches
+  (`SIGHT-MAN-AUTO-PTR`/`SIGHT-SYNC-UNSYNC-PTR`) are patched from their `default_2_position_tumb`
+  call's own 0/1 to 0.0/0.5 after the fact. `scan_clickabledata`'s post-assignment loop now
+  applies an `arg_lim` patch (taking the first pair when the RHS is a list of pairs, since a
+  helper-call element's `value_ranges` always has exactly one entry) *after* the helper-based
+  range, so the patch always wins — matching the "Reading rule" that `arg_value` patches (the step
+  magnitude, never a position) must **not** change `values` at all, which a dedicated test
+  confirms.
+
+### `render_switch_reference.py`
+
+- New **Values** column, computed by `_format_value_range`/`_format_values_cell`: a short
+  discrete list (≤ 6 values) is spelled out (`0/1`, `-1/0/1`, `0/0.5`); a longer one is shown as
+  a step count (`0-1 (11 steps)`); continuous shows `min-max continuous` plus `(gain g)` when
+  present; `momentary` is appended for a spring-back/BTN control; a multi-action element shows
+  `action N: ...` per action; `unknown: <reason>` is shown verbatim rather than guessed at; a
+  dump that predates this column (every committed dump, until the Windows rerun below) renders a
+  blank cell, never "unknown" — there was no recon attempt to report on.
+- Header gained a short explanation of the notation, a pointer to `config/sequences/triggers.md`
+  (the trigger-list follow-up below), and the `Source:` line still names the raw dump's own
+  sha256.
+
+### Triggers list (separate follow-up folded into this same change)
+
+User request, verbatim: *"add a file which lists (and short description) of the available
+triggers. It must be kept up to date as triggers are added (or removed)."*
+
+- **Merged `EffectorTrigger`.** It was declared twice — `effector_engine.py`'s own enum, and
+  `effector_sequences.py`'s `KNOWN_TRIGGERS` frozenset of the same five strings, each commented
+  "the other one must stay in sync by hand." Moved the enum into `effector_sequences.py` (the
+  lower layer; `effector_engine.py` already imports from it) alongside a new `TRIGGER_INFO:
+  Mapping[EffectorTrigger, TriggerInfo]` (`description`, `cardinality`). `KNOWN_TRIGGERS` is now
+  `frozenset(t.value for t in EffectorTrigger)` — derived, not spelled out a second time.
+  `effector_engine.py` imports `EffectorTrigger` from `effector_sequences` and declares
+  `__all__ = ["EffectorTrigger"]` so `mypy --strict` treats the import as a deliberate re-export
+  (needed for `from belief.effector_engine import EffectorTrigger`, unchanged in `logger.py` and
+  the tests, to keep type-checking clean) — a self-aliased import (`import X as X`) was tried
+  first and rejected by `ruff` (`PLC0414`, "import alias does not rename original package").
+- **`body-layer/tools/render_triggers.py`** (new) — same generator convention as
+  `render_switch_reference.py`/`generate_defaults.py` (check mode default, `--write`, GENERATED
+  header). Imports `belief.effector_sequences` directly (not AST, unlike `generate_defaults.py`):
+  that module and its one import, `effector_registry.py`, are stdlib-only, so there is no
+  world-model-seam import to avoid.
+- Descriptions sourced from `logger.py`'s own fire-site comments and
+  `crew_console.py`'s `_handle_observ_on`/`_handle_observ_off`/`_handle_weapons_armed`/
+  `_handle_weapons_safe` docstrings — notably, `observ-off` fires only on the pilot's own command,
+  never on the automatic violent-manoeuvre forced-off path (`_handle_observ_off`'s own docstring:
+  "this handler is the pilot-commanded path only"), and `weapons-arm` fires on either the explicit
+  command or on `engage` (an attack run arms the weapons safety bar automatically). All five
+  shipped triggers are `cardinality="every_time"` — none is a once-per-mission trigger yet; the
+  field exists so a future one does not need a `render_triggers.py` format change.
+- `config/sequences/triggers.md` (new, generated) sits at the sequences root, not per-aircraft —
+  triggers are a code enumeration, the same for every aircraft.
+- `body-layer/CLAUDE.md`'s BL-B90 module-map entry now names `triggers.md` and the merged
+  `EffectorTrigger` declaration site.
+
+### Tests Added
+
+- `tests/test_generate_effector_registry.py` — one test per helper family exercising its default
+  and (where the helper's signature allows it) a customised value (`default_3_position_tumb`'s
+  `arg_limit_`, `multiposition_switch`'s `count_`/`delta_`/`min_`, `default_axis(_limited)`'s
+  `gain_`/`arg_lim_`), `default_animated_lever`'s typo-ignore, `springloaded_3_pos_tumb`,
+  `triple_switch`'s fixed four values, `helper_args` capture (present and absent), three
+  raw-table-literal cases (`BTN`+`BTN`, `LEV`+`LEV` with `gain`, a `NULL`/unknown third action —
+  mirroring `BRAKE-LEVEL-OP-PTR`'s real shape), two "missing field" raw-literal cases (`class`
+  absent, `arg_lim` absent), the `arg_lim` post-assignment patch (`SIGHT-MAN-AUTO-PTR`'s own real
+  patch, reproduced), an `arg_value` patch confirmed to leave `values` untouched, and a
+  `render_toml` round-trip of all three `ValueRange` kinds.
+- `tests/test_render_switch_reference_values.py` (new) — `_format_value_range`/
+  `_format_values_cell` directly: short/negative/fractional discrete lists, a long discrete list
+  as a step count, continuous with and without gain, unknown, blank for `None`/`[]`, and the
+  single-action-vs-multi-action `action N:` labelling.
+- `tests/test_render_triggers.py` (new) — the staleness guard (does **not** need the Windows
+  dump, so it passes now and in CI unconditionally) and a test that every `TRIGGER_INFO` entry has
+  a non-empty description and that its key set equals `EffectorTrigger`'s own members.
+
+### Checks
+
+- `body-layer/`:
+  - `ruff format --check src tests tools` — pass (183 files)
+  - `ruff check src tests tools` — pass
+  - `cd body-layer && .venv/bin/mypy src tools` — pass (84 files)
+  - `pytest tests -q` — 2584 passed, 4 xfailed (pre-existing xfails, unrelated)
+
+### Not done here — needs the Windows DCS machine
+
+**`config/effectors-raw/mi-24p.toml` was not regenerated** (execution-boundary rule — no Mac-side
+role produces it). It still has no `helper_args`/`values` fields; everything else about it is
+unchanged, so every existing check (completeness arithmetic, 0d control points, the runtime
+registry loader) still passes against it unmodified. `config/sequences/mi-24p/switch-reference.md`
+*was* regenerated against that unchanged dump (`render_switch_reference.py --write`), so its new
+Values column is present but blank on every row until the real rerun lands — this is the one test
+that cannot be made to exercise the real numbers before then
+(`tests/test_render_switch_reference.py`, still green against the current dump, will need its
+committed output refreshed again once the real dump is regenerated). See
+`plans/effector-sequences/stage0c-run.md`'s "Rerun needed, 2026-10-23" section for the exact
+command and what to send back.
+
+### Notable discoveries
+
+- `body-layer/src/belief/effector_registry.py`'s runtime loader (`_resolve_entry`) reads only
+  `device`/`cmds`/`args` off a raw-dump element — it never touches `values`/`helper_args`, so it
+  loads both the current (pre-follow-up) dump and the regenerated one unchanged. No code path in
+  the curated-registry/sequence-engine chain needed updating for this.
+- A self-aliased re-export (`from belief.effector_sequences import EffectorTrigger as
+  EffectorTrigger`) is accepted by `mypy --strict` but rejected by this project's `ruff` config
+  (`PLC0414`); `__all__ = ["EffectorTrigger"]` is the form that satisfies both tools at once.
+- A bare `object()` identity sentinel (`_UNRESOLVED`) could not be narrowed by `mypy --strict` at
+  all, because `object` already contains every other arm of a `float | None | object` return
+  type — switched to a dedicated zero-field marker class (`_Unresolved`) narrowed by `isinstance`,
+  which is the form to reach for the next time this project needs a third return state beside a
+  value and `None`.
+    existing test extended, no test added or removed)

@@ -439,10 +439,17 @@ Belief — observation *consumption*:
   generated `config/sequences/<aircraft-dir>/switch-reference.md` (device/seat/element/shape/
   cmd/args), add a curated entry to that aircraft's `effectors.toml`, then reference it from a
   `*.md` sequence file's row — `switch-reference.md`'s own header has the exact TOML shape to
-  copy. `tools/generate_effector_registry.py` (offline, run on the Windows DCS machine, Stage 0)
-  and `tools/render_switch_reference.py` (regenerates `switch-reference.md`, staleness-checked
-  against both TOML files by `test_switch_reference_matches_the_generator`) are dev tools, not run
-  at body-layer startup. Two tunables, `[belief.effector_engine]` in `config/defaults.toml`:
+  copy. For which triggers a sequence file's `run-on-trigger` header cell may name, see
+  `config/sequences/triggers.md` (one file, not per-aircraft — triggers are a code enumeration,
+  the same for every aircraft), rendered from `belief.effector_sequences.EffectorTrigger`/
+  `TRIGGER_INFO` (the single declaration — `effector_engine.py`'s own `EffectorTrigger` is that
+  same enum re-exported, not a second copy). `tools/generate_effector_registry.py` (offline, run
+  on the Windows DCS machine, Stage 0), `tools/render_switch_reference.py` (regenerates
+  `switch-reference.md`, staleness-checked against both TOML files by
+  `test_switch_reference_matches_the_generator`), and `tools/render_triggers.py` (regenerates
+  `triggers.md` from code alone, staleness-checked by `test_render_triggers.py`, no Windows dump
+  needed) are dev tools, not run at body-layer startup. Two tunables, `[belief.effector_engine]`
+  in `config/defaults.toml`:
   `EFFECTOR_CONDITION_READBACK_WAIT_S` (how long an unknown readback is waited on before the
   engine gives up — explicit conditions then skip the row, the implicit self-check instead writes)
   and `EFFECTOR_SEQUENCE_STEP_DELAY_S` (gap between rows within one trigger's own run, renamed from

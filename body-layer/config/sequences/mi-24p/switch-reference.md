@@ -13,964 +13,979 @@ The **Curated as** column names the friendly name(s)
 blank means it is not yet in the curated registry and a sequence file
 cannot reference it until it is.
 
+**Values** is what the control can be set to. `0/1` or `-1/0/1` is a short
+discrete list, spelled out in full; `0.0-1.0 (11 steps)` is a longer
+discrete list, shown as a count instead; `0.0-1.0 continuous` (optionally
+`(gain 0.1)`) is a continuous axis; `momentary` marks a spring-back/BTN
+control rather than a latching one. A control with several independent
+actions (a lever with a button riding on it) shows one `action N: ...`
+per action. `unknown: <reason>` means this generator could not determine
+the range from ED's own source and is not guessing -- a blank cell means
+the raw dump predates this column entirely (regenerate it). Values are
+computed by `generate_effector_registry.py`, not by this tool.
+
+For the triggers a sequence file's own `run-on-trigger` header cell may
+name, see `config/sequences/triggers.md` (generated separately, from code
+rather than from this dump).
+
 ## Device 1 -- ELEC_INTERFACE
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `BATT-HEATING-PTR` | Battery Heating, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3049] | [74] |  |  |
-| `BATT-LEFT-PTR` | Left Battery switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3034] | [75] |  |  |
-| `BATT-RIGHT-PTR` | Right Battery switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3037] | [61] |  |  |
-| `CB-FRAME-LEFT-1-PTR` | All Left CBs ON | pilot (defaulted) | default_button | [3070] | [601] |  |  |
-| `CB-FRAME-RIGHT-1-PTR` | All Right CBs ON | pilot (defaulted) | default_button | [3072] | [632] |  |  |
-| `CB-LEFT-AIRSPEED-SENSOR-PTR` | CB Air Speed Sensor, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3126] | [594] |  |  |
-| `CB-LEFT-AUTOPILOT-ALARM-PTR` | CB AFCS Warn, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3127] | [595] |  |  |
-| `CB-LEFT-BEACON-PTR` | CB Beacon Light, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3130] | [598] |  |  |
-| `CB-LEFT-BOMB-EMERGENCY-DETACH-PTR` | CB Emergency Jettison, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3105] | [573] |  |  |
-| `CB-LEFT-BOMB-EXPLOSION-PTR` | CB Bombs, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3106] | [574] |  |  |
-| `CB-LEFT-EXT-CARGO-EMERGENCY-DROP-PTR` | CB External Cargo Emergency Jettison, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3122] | [590] |  |  |
-| `CB-LEFT-FIRE-1-AUTO-PTR` | CB Fire Protection System - Auto, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3119] | [587] |  |  |
-| `CB-LEFT-FIRE-1-MANUAL-PTR` | CB Fire Protection System - Manual, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3120] | [588] |  |  |
-| `CB-LEFT-FIRE-ALARM-PTR` | CB Fire Protection System Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3121] | [589] |  |  |
-| `CB-LEFT-GEAR-ALARM-PTR` | CB Landing Gear Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3124] | [592] |  |  |
-| `CB-LEFT-GEAR-EXTENT-HANDLE-PTR` | CB Landing Gear Extend / Retract, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3123] | [591] |  |  |
-| `CB-LEFT-GLASS-SPRINKLER-PTR` | CB Windshield Spray, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3114] | [582] |  |  |
-| `CB-LEFT-GLASS-WIPER-OP-PTR` | CB Windshield Wiper Gunner, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3115] | [583] |  |  |
-| `CB-LEFT-GLASS-WIPER-PILOT-PTR` | CB Windshield Wiper Pilot, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3116] | [584] |  |  |
-| `CB-LEFT-HEADLIGHT-CONTROL-PTR` | CB Landing Light Control, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3131] | [599] |  |  |
-| `CB-LEFT-MISSILE-POWER-PTR` | CB Missile Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3104] | [572] |  |  |
-| `CB-LEFT-PILOTING-DEVICE-PTR` | CB Main Attitude Indicator, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3132] | [600] |  |  |
-| `CB-LEFT-PT125TS-PTR` | CB Inverter, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3125] | [593] |  |  |
-| `CB-LEFT-PUMP-TANK-1-PTR` | CB Fuel Shutoff Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3109] | [577] |  |  |
-| `CB-LEFT-PUMP-TANK-5-PTR` | CB Cross Feed Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3110] | [578] |  |  |
-| `CB-LEFT-RADIOCOMPASS-HF-PTR` | CB ADF, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3108] | [576] |  |  |
-| `CB-LEFT-RECORDER-PARAMS-PTR` | CB Flight Recorder, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3118] | [586] |  |  |
-| `CB-LEFT-ROCKETS-PTR` | CB Rockets, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3107] | [575] |  |  |
-| `CB-LEFT-SPEECH-INFORMER-PTR` | CB Audio Warning System, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3117] | [585] |  |  |
-| `CB-LEFT-STARTUP-BLOCK-PTR` | CB Auto Start System, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3128] | [596] |  |  |
-| `CB-LEFT-STARTUP-IGNITION-PTR` | CB Igniter, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3129] | [597] |  |  |
-| `CB-LEFT-VALVE-FIRE-LEFT-PTR` | CB Left Tank Fire Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3112] | [580] |  |  |
-| `CB-LEFT-VALVE-SEPARATION-PTR` | CB Left Valve Separation, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3113] | [581] |  |  |
-| `CB-LEFT-VALVE-TANK-1-PTR` | CB Tank 1 Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3111] | [579] |  |  |
-| `CB-RIGHT-ANTIICE-ALARM-PTR` | CB Anti-Ice System - Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3102] | [630] |  |  |
-| `CB-RIGHT-ANTIICE-CONTROL-PTR` | CB Anti-Ice System - Control, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3103] | [631] |  |  |
-| `CB-RIGHT-ARMAMENT-CAMERA-SHUTTER-PTR` | CB Camera, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3080] | [608] |  |  |
-| `CB-RIGHT-ARMAMENT-CANNON-PTR` | CB Cannon, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3082] | [610] |  |  |
-| `CB-RIGHT-ARMAMENT-CONTROL-PTR` | CB Armament Control, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3081] | [609] |  |  |
-| `CB-RIGHT-ARMAMENT-SIGNAL-PTR` | CB Signal, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3079] | [607] |  |  |
-| `CB-RIGHT-BOMB-COMBAT-DROP-PTR` | CB Bombs Release, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3089] | [617] |  |  |
-| `CB-RIGHT-CONDITIONER-CONTROL-PTR` | CB Air Conditioning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3095] | [623] |  |  |
-| `CB-RIGHT-CONNECTION-DISTRIBUTION-DEVICE-PTR` | CB Connection Distribution Device, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3090] | [618] |  |  |
-| `CB-RIGHT-CONTROL-CLUTCH-PTR` | CB Collective Lever Lock, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3075] | [603] |  |  |
-| `CB-RIGHT-CONTROL-FORCE-MECHANISM-PTR` | CB Control Force Grad, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3074] | [602] |  |  |
-| `CB-RIGHT-DUAS-V-HEATING-PTR` | CB Air Data Computer Heating, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3092] | [620] |  |  |
-| `CB-RIGHT-EMERGENCY-DOOR-DETACH-OP-PTR` | CB Jettision Gunners Door, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3094] | [622] |  |  |
-| `CB-RIGHT-EMERGENCY-DOOR-DETACH-PILOT-PTR` | CB Jettison Pilot´s Door, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3093] | [621] |  |  |
-| `CB-RIGHT-ENGINE-TEMP-ADJUST-LEFT-PTR` | CB Temperature Control Left Governor RPM, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3076] | [604] |  |  |
-| `CB-RIGHT-ENGINE-TEMP-ADJUST-RIGHT-PTR` | CB Temperature Control Right Governor RPM, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3077] | [605] |  |  |
-| `CB-RIGHT-EXT-STORES-LOCK-RELEASE-PTR` | CB External Stores Release Lock, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3086] | [614] |  |  |
-| `CB-RIGHT-EXT-STORES-TACTICAL-DROP-PTR` | CB External Stores Tactical Release, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3085] | [613] |  |  |
-| `CB-RIGHT-FIRE-2-AUTO-PTR` | CB Squib-2 Auto Fire Protection, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3083] | [611] |  |  |
-| `CB-RIGHT-FIRE-2-MANUAL-PTR` | CB Squib-2 Manual Fire Protection, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3084] | [612] |  |  |
-| `CB-RIGHT-FUEL-METER-PTR` | CB Fuel Quantity Indication, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3096] | [624] |  |  |
-| `CB-RIGHT-GEAR-EXTENT-HANDLE-BACKUP-PTR` | CB Landing Gear Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3087] | [615] |  |  |
-| `CB-RIGHT-LAUNCHER-DETACH-PTR` | CB Jettison Missile Rails, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3088] | [616] |  |  |
-| `CB-RIGHT-PILOT-AIM-PTR` | PILOT SIGHT CB, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3091] | [619] |  |  |
-| `CB-RIGHT-PILOT-SEAT-MECHANISM-PTR` | CB Pilot Seat Adjustment, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3101] | [629] |  |  |
-| `CB-RIGHT-PUMP-TANK-2-PTR` | CB Fuel Pump 2, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3099] | [627] |  |  |
-| `CB-RIGHT-PUMP-TANK-4-PTR` | CB Fuel Pump 4, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3100] | [628] |  |  |
-| `CB-RIGHT-ROTOR-RPM-ADJUST-PTR` | CB Rotor RPM Adjust, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3078] | [606] |  |  |
-| `CB-RIGHT-VALVE-FIRE-RIGHT-PTR` | CB Fuel Tank 2 Shutoff Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3098] | [626] |  |  |
-| `CB-RIGHT-VALVE-TANK-2-PTR` | CB Fuel Tank 2 Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3097] | [625] |  |  |
-| `GEN-LEFT-PTR` | Left Generator switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [101] |  |  |
-| `GEN-RIGHT-PTR` | Right Generator switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [80] |  |  |
-| `GROUND-AC-PTR` | AC Ground Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [87] |  |  |
-| `GROUND-DC-PTR` | DC Ground Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3031] | [73] |  |  |
-| `GROUND-RECT-COVER-PTR` | AC Ground Check Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3058] | [88] |  |  |
-| `GROUND-RECT-PTR` | AC Ground Check, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3016] | [89] |  |  |
-| `INV115-COVER-PTR` | Inverter PO-750A Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3061] | [97] |  |  |
-| `INV115-PTR` | Inverter PO-750A, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3019] | [98] |  |  |
-| `INV36-COVER-PTR` | Inverter PT-125Ts Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3064] | [99] |  |  |
-| `INV36-PTR` | Inverter PT-125Ts, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3022] | [100] |  |  |
-| `NET-TO-BATT-COVER-PTR` | Network to Batteries cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3067] | [70] |  |  |
-| `NET-TO-BATT-PTR` | Network to Batteries, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3052] | [71] |  |  |
-| `RECT-LEFT-PTR` | Left Rectifier switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3040] | [62] |  |  |
-| `RECT-RIGHT-PTR` | Right Rectifier switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3043] | [65] |  |  |
-| `STARTER-GEN-PTR` | APU Generator switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3046] | [66] |  |  |
-| `TRANS-DIM-PTR` | DIM Transformer switch, MAIN/BACKUP | pilot (defaulted) | default_2_position_tumb | [3028] | [196] |  |  |
-| `TRANS115-PTR` | AC Transformer 115v, MAIN/AUTO/BACKUP | pilot (defaulted) | default_3_position_tumb | [3010] | [83] |  |  |
-| `TRANS36-PTR` | AC Transformer 36v, MAIN/AUTO/BACKUP | pilot (defaulted) | default_3_position_tumb | [3013] | [85] |  |  |
-| `VOLT-AC-KNOB-PTR` | AC Voltmeter knob | pilot (defaulted) | multiposition_switch | [3025] | [91] |  |  |
-| `VOLT-DC-KNOB-PTR` | DC Voltmeter knob | pilot (defaulted) | multiposition_switch | [3055] | [69] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `BATT-HEATING-PTR` | Battery Heating, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3049] | [74] |  |  |  |
+| `BATT-LEFT-PTR` | Left Battery switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3034] | [75] |  |  |  |
+| `BATT-RIGHT-PTR` | Right Battery switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3037] | [61] |  |  |  |
+| `CB-FRAME-LEFT-1-PTR` | All Left CBs ON | pilot (defaulted) | default_button | [3070] | [601] |  |  |  |
+| `CB-FRAME-RIGHT-1-PTR` | All Right CBs ON | pilot (defaulted) | default_button | [3072] | [632] |  |  |  |
+| `CB-LEFT-AIRSPEED-SENSOR-PTR` | CB Air Speed Sensor, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3126] | [594] |  |  |  |
+| `CB-LEFT-AUTOPILOT-ALARM-PTR` | CB AFCS Warn, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3127] | [595] |  |  |  |
+| `CB-LEFT-BEACON-PTR` | CB Beacon Light, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3130] | [598] |  |  |  |
+| `CB-LEFT-BOMB-EMERGENCY-DETACH-PTR` | CB Emergency Jettison, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3105] | [573] |  |  |  |
+| `CB-LEFT-BOMB-EXPLOSION-PTR` | CB Bombs, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3106] | [574] |  |  |  |
+| `CB-LEFT-EXT-CARGO-EMERGENCY-DROP-PTR` | CB External Cargo Emergency Jettison, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3122] | [590] |  |  |  |
+| `CB-LEFT-FIRE-1-AUTO-PTR` | CB Fire Protection System - Auto, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3119] | [587] |  |  |  |
+| `CB-LEFT-FIRE-1-MANUAL-PTR` | CB Fire Protection System - Manual, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3120] | [588] |  |  |  |
+| `CB-LEFT-FIRE-ALARM-PTR` | CB Fire Protection System Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3121] | [589] |  |  |  |
+| `CB-LEFT-GEAR-ALARM-PTR` | CB Landing Gear Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3124] | [592] |  |  |  |
+| `CB-LEFT-GEAR-EXTENT-HANDLE-PTR` | CB Landing Gear Extend / Retract, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3123] | [591] |  |  |  |
+| `CB-LEFT-GLASS-SPRINKLER-PTR` | CB Windshield Spray, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3114] | [582] |  |  |  |
+| `CB-LEFT-GLASS-WIPER-OP-PTR` | CB Windshield Wiper Gunner, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3115] | [583] |  |  |  |
+| `CB-LEFT-GLASS-WIPER-PILOT-PTR` | CB Windshield Wiper Pilot, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3116] | [584] |  |  |  |
+| `CB-LEFT-HEADLIGHT-CONTROL-PTR` | CB Landing Light Control, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3131] | [599] |  |  |  |
+| `CB-LEFT-MISSILE-POWER-PTR` | CB Missile Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3104] | [572] |  |  |  |
+| `CB-LEFT-PILOTING-DEVICE-PTR` | CB Main Attitude Indicator, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3132] | [600] |  |  |  |
+| `CB-LEFT-PT125TS-PTR` | CB Inverter, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3125] | [593] |  |  |  |
+| `CB-LEFT-PUMP-TANK-1-PTR` | CB Fuel Shutoff Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3109] | [577] |  |  |  |
+| `CB-LEFT-PUMP-TANK-5-PTR` | CB Cross Feed Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3110] | [578] |  |  |  |
+| `CB-LEFT-RADIOCOMPASS-HF-PTR` | CB ADF, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3108] | [576] |  |  |  |
+| `CB-LEFT-RECORDER-PARAMS-PTR` | CB Flight Recorder, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3118] | [586] |  |  |  |
+| `CB-LEFT-ROCKETS-PTR` | CB Rockets, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3107] | [575] |  |  |  |
+| `CB-LEFT-SPEECH-INFORMER-PTR` | CB Audio Warning System, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3117] | [585] |  |  |  |
+| `CB-LEFT-STARTUP-BLOCK-PTR` | CB Auto Start System, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3128] | [596] |  |  |  |
+| `CB-LEFT-STARTUP-IGNITION-PTR` | CB Igniter, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3129] | [597] |  |  |  |
+| `CB-LEFT-VALVE-FIRE-LEFT-PTR` | CB Left Tank Fire Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3112] | [580] |  |  |  |
+| `CB-LEFT-VALVE-SEPARATION-PTR` | CB Left Valve Separation, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3113] | [581] |  |  |  |
+| `CB-LEFT-VALVE-TANK-1-PTR` | CB Tank 1 Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3111] | [579] |  |  |  |
+| `CB-RIGHT-ANTIICE-ALARM-PTR` | CB Anti-Ice System - Warning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3102] | [630] |  |  |  |
+| `CB-RIGHT-ANTIICE-CONTROL-PTR` | CB Anti-Ice System - Control, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3103] | [631] |  |  |  |
+| `CB-RIGHT-ARMAMENT-CAMERA-SHUTTER-PTR` | CB Camera, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3080] | [608] |  |  |  |
+| `CB-RIGHT-ARMAMENT-CANNON-PTR` | CB Cannon, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3082] | [610] |  |  |  |
+| `CB-RIGHT-ARMAMENT-CONTROL-PTR` | CB Armament Control, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3081] | [609] |  |  |  |
+| `CB-RIGHT-ARMAMENT-SIGNAL-PTR` | CB Signal, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3079] | [607] |  |  |  |
+| `CB-RIGHT-BOMB-COMBAT-DROP-PTR` | CB Bombs Release, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3089] | [617] |  |  |  |
+| `CB-RIGHT-CONDITIONER-CONTROL-PTR` | CB Air Conditioning, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3095] | [623] |  |  |  |
+| `CB-RIGHT-CONNECTION-DISTRIBUTION-DEVICE-PTR` | CB Connection Distribution Device, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3090] | [618] |  |  |  |
+| `CB-RIGHT-CONTROL-CLUTCH-PTR` | CB Collective Lever Lock, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3075] | [603] |  |  |  |
+| `CB-RIGHT-CONTROL-FORCE-MECHANISM-PTR` | CB Control Force Grad, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3074] | [602] |  |  |  |
+| `CB-RIGHT-DUAS-V-HEATING-PTR` | CB Air Data Computer Heating, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3092] | [620] |  |  |  |
+| `CB-RIGHT-EMERGENCY-DOOR-DETACH-OP-PTR` | CB Jettision Gunners Door, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3094] | [622] |  |  |  |
+| `CB-RIGHT-EMERGENCY-DOOR-DETACH-PILOT-PTR` | CB Jettison Pilot´s Door, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3093] | [621] |  |  |  |
+| `CB-RIGHT-ENGINE-TEMP-ADJUST-LEFT-PTR` | CB Temperature Control Left Governor RPM, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3076] | [604] |  |  |  |
+| `CB-RIGHT-ENGINE-TEMP-ADJUST-RIGHT-PTR` | CB Temperature Control Right Governor RPM, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3077] | [605] |  |  |  |
+| `CB-RIGHT-EXT-STORES-LOCK-RELEASE-PTR` | CB External Stores Release Lock, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3086] | [614] |  |  |  |
+| `CB-RIGHT-EXT-STORES-TACTICAL-DROP-PTR` | CB External Stores Tactical Release, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3085] | [613] |  |  |  |
+| `CB-RIGHT-FIRE-2-AUTO-PTR` | CB Squib-2 Auto Fire Protection, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3083] | [611] |  |  |  |
+| `CB-RIGHT-FIRE-2-MANUAL-PTR` | CB Squib-2 Manual Fire Protection, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3084] | [612] |  |  |  |
+| `CB-RIGHT-FUEL-METER-PTR` | CB Fuel Quantity Indication, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3096] | [624] |  |  |  |
+| `CB-RIGHT-GEAR-EXTENT-HANDLE-BACKUP-PTR` | CB Landing Gear Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3087] | [615] |  |  |  |
+| `CB-RIGHT-LAUNCHER-DETACH-PTR` | CB Jettison Missile Rails, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3088] | [616] |  |  |  |
+| `CB-RIGHT-PILOT-AIM-PTR` | PILOT SIGHT CB, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3091] | [619] |  |  |  |
+| `CB-RIGHT-PILOT-SEAT-MECHANISM-PTR` | CB Pilot Seat Adjustment, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3101] | [629] |  |  |  |
+| `CB-RIGHT-PUMP-TANK-2-PTR` | CB Fuel Pump 2, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3099] | [627] |  |  |  |
+| `CB-RIGHT-PUMP-TANK-4-PTR` | CB Fuel Pump 4, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3100] | [628] |  |  |  |
+| `CB-RIGHT-ROTOR-RPM-ADJUST-PTR` | CB Rotor RPM Adjust, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3078] | [606] |  |  |  |
+| `CB-RIGHT-VALVE-FIRE-RIGHT-PTR` | CB Fuel Tank 2 Shutoff Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3098] | [626] |  |  |  |
+| `CB-RIGHT-VALVE-TANK-2-PTR` | CB Fuel Tank 2 Valve, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3097] | [625] |  |  |  |
+| `GEN-LEFT-PTR` | Left Generator switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [101] |  |  |  |
+| `GEN-RIGHT-PTR` | Right Generator switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [80] |  |  |  |
+| `GROUND-AC-PTR` | AC Ground Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [87] |  |  |  |
+| `GROUND-DC-PTR` | DC Ground Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3031] | [73] |  |  |  |
+| `GROUND-RECT-COVER-PTR` | AC Ground Check Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3058] | [88] |  |  |  |
+| `GROUND-RECT-PTR` | AC Ground Check, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3016] | [89] |  |  |  |
+| `INV115-COVER-PTR` | Inverter PO-750A Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3061] | [97] |  |  |  |
+| `INV115-PTR` | Inverter PO-750A, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3019] | [98] |  |  |  |
+| `INV36-COVER-PTR` | Inverter PT-125Ts Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3064] | [99] |  |  |  |
+| `INV36-PTR` | Inverter PT-125Ts, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3022] | [100] |  |  |  |
+| `NET-TO-BATT-COVER-PTR` | Network to Batteries cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3067] | [70] |  |  |  |
+| `NET-TO-BATT-PTR` | Network to Batteries, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3052] | [71] |  |  |  |
+| `RECT-LEFT-PTR` | Left Rectifier switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3040] | [62] |  |  |  |
+| `RECT-RIGHT-PTR` | Right Rectifier switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3043] | [65] |  |  |  |
+| `STARTER-GEN-PTR` | APU Generator switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3046] | [66] |  |  |  |
+| `TRANS-DIM-PTR` | DIM Transformer switch, MAIN/BACKUP | pilot (defaulted) | default_2_position_tumb | [3028] | [196] |  |  |  |
+| `TRANS115-PTR` | AC Transformer 115v, MAIN/AUTO/BACKUP | pilot (defaulted) | default_3_position_tumb | [3010] | [83] |  |  |  |
+| `TRANS36-PTR` | AC Transformer 36v, MAIN/AUTO/BACKUP | pilot (defaulted) | default_3_position_tumb | [3013] | [85] |  |  |  |
+| `VOLT-AC-KNOB-PTR` | AC Voltmeter knob | pilot (defaulted) | multiposition_switch | [3025] | [91] |  |  |  |
+| `VOLT-DC-KNOB-PTR` | DC Voltmeter knob | pilot (defaulted) | multiposition_switch | [3055] | [69] |  |  |  |
 
 ## Device 2 -- FUELSYS_INTERFACE
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `EXT-TANKS-PTR` | External Tanks, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3013] | [411] |  |  |
-| `FEED-TANK-1-PTR` | Feed Tank 1 Valve Switch, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3031] | [392] |  |  |
-| `FEED-TANK-2-PTR` | Feed Tank 2 Valve Switch, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3034] | [394] |  |  |
-| `FIRE-VALVE-LEFT-COVER-PTR` | Left Engine Fire Valve Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3019] | [396] |  |  |
-| `FIRE-VALVE-LEFT-PTR` | Left Engine Fire Valve, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3016] | [397] |  |  |
-| `FIRE-VALVE-RIGHT-COVER-PTR` | Right Engine Fire Valve Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3025] | [399] |  |  |
-| `FIRE-VALVE-RIGHT-PTR` | Right Engine Fire Valve, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3022] | [400] |  |  |
-| `FUEL-DELIM-PTR` | Fuel Delimiter Valve, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3028] | [402] |  |  |
-| `FUEL-METER-H-BUTTON-PTR` | Fuel meter test low | pilot (defaulted) | default_button | [3040] | [524] |  |  |
-| `FUEL-METER-KNOB-PTR` | Select tank for fuel meter | pilot (defaulted) | multiposition_switch | [3037] | [191] |  |  |
-| `FUEL-METER-P-BUTTON-PTR` | Fuel meter test high | pilot (defaulted) | default_button | [3042] | [526] |  |  |
-| `TANK-1-PTR` | Tank 1 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [408] |  |  |
-| `TANK-2-PTR` | Tank 2 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [410] |  |  |
-| `TANK-4-PTR` | Tank 4 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [404] |  |  |
-| `TANK-5-PTR` | Tank 5 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3010] | [406] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `EXT-TANKS-PTR` | External Tanks, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3013] | [411] |  |  |  |
+| `FEED-TANK-1-PTR` | Feed Tank 1 Valve Switch, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3031] | [392] |  |  |  |
+| `FEED-TANK-2-PTR` | Feed Tank 2 Valve Switch, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3034] | [394] |  |  |  |
+| `FIRE-VALVE-LEFT-COVER-PTR` | Left Engine Fire Valve Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3019] | [396] |  |  |  |
+| `FIRE-VALVE-LEFT-PTR` | Left Engine Fire Valve, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3016] | [397] |  |  |  |
+| `FIRE-VALVE-RIGHT-COVER-PTR` | Right Engine Fire Valve Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3025] | [399] |  |  |  |
+| `FIRE-VALVE-RIGHT-PTR` | Right Engine Fire Valve, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3022] | [400] |  |  |  |
+| `FUEL-DELIM-PTR` | Fuel Delimiter Valve, OPEN/CLOSE | pilot (defaulted) | default_2_position_tumb | [3028] | [402] |  |  |  |
+| `FUEL-METER-H-BUTTON-PTR` | Fuel meter test low | pilot (defaulted) | default_button | [3040] | [524] |  |  |  |
+| `FUEL-METER-KNOB-PTR` | Select tank for fuel meter | pilot (defaulted) | multiposition_switch | [3037] | [191] |  |  |  |
+| `FUEL-METER-P-BUTTON-PTR` | Fuel meter test high | pilot (defaulted) | default_button | [3042] | [526] |  |  |  |
+| `TANK-1-PTR` | Tank 1 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [408] |  |  |  |
+| `TANK-2-PTR` | Tank 2 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [410] |  |  |  |
+| `TANK-4-PTR` | Tank 4 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [404] |  |  |  |
+| `TANK-5-PTR` | Tank 5 Pump, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3010] | [406] |  |  |  |
 
 ## Device 3 -- ENGINE_INTERFACE
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `OP-COLL-THROTTLE-PTR` | Collective (LMB press, hold and move) / Throttle (RMB press, hold and move) | operator (explicit) | raw_table_literal | [3091, 3090] | [0, 0] | [0.0, 0.0] |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `OP-COLL-THROTTLE-PTR` | Collective (LMB press, hold and move) / Throttle (RMB press, hold and move) | operator (explicit) | raw_table_literal | [3091, 3090] | [0, 0] | [0.0, 0.0] |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `APU-FALSE-CRANK-START-PTR` | APU Launch Method START/CRANK/FALSE | pilot (defaulted) | default_3_position_tumb | [3014] | [313] |  |  |
-| `APU-START-PTR` | APU Start | pilot (defaulted) | default_button | [3012] | [307] |  |  |
-| `APU-STOP-PTR` | APU Stop | pilot (defaulted) | default_button | [3013] | [311] |  |  |
-| `COLLECTIVE-CORR-PTR` | Collective (LMB press, hold and move) / Throttle (RMB press, hold and move) | pilot (explicit) | raw_table_literal | [3004, 3003] | [0, 0] | [0.0, 0.0] |  |
-| `COLLECTIVE-GOV-PTR` | Readjust Free Turbine RPM, RIGHT/NEUTRAL/LEFT | pilot (defaulted) | springloaded_3_pos_tumb | [3020, 3019] | [747] |  |  |
-| `DEDUST-OFF-COVER-PTR` | Antidust ON Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3022] | [514] |  |  |
-| `DEDUST-OFF-PTR` | Antidust ON/OFF | pilot (defaulted) | default_2_position_tumb | [3021] | [796] |  |  |
-| `ENG-ABORT-PTR` | Engine Interrupt Start | pilot (defaulted) | default_button | [3017] | [318] |  |  |
-| `ENG-BRAKE-LEFT-PTR` | Left Engine Stop | pilot (defaulted) | default_animated_lever | [3009] | [6] |  |  |
-| `ENG-BRAKE-RIGHT-PTR` | Right Engine Stop | pilot (defaulted) | default_animated_lever | [3010] | [7] |  |  |
-| `ENG-CRANK-START-PTR` | Engine Launch Method START/CRANK | pilot (defaulted) | default_2_position_tumb | [3018] | [321] |  |  |
-| `ENG-LEFT-RIGHT-PTR` | Engine Select RIGHT/LEFT | pilot (defaulted) | default_2_position_tumb | [3016] | [320] |  |  |
-| `ENG-START-PTR` | Engine Start | pilot (defaulted) | default_button | [3015] | [314] |  |  |
-| `ENG-TEMP-SENSOR-CONTROL-COLD-PTR` | Engine Termometer control COLD | pilot (defaulted) | default_button | [3023] | [194] |  |  |
-| `ENG-TEMP-SENSOR-CONTROL-HOT-PTR` | Engine Termometer control HOT | pilot (defaulted) | default_button | [3024] | [195] |  |  |
-| `ROTOR-BRAKE-PTR` | Rotor Brake | pilot (defaulted) | default_animated_lever | [3011] | [745] |  |  |
-| `RRUD-LEFT-PTR` | Left Engine Throttle | pilot (defaulted) | default_axis | [3006] | [5] |  |  |
-| `RRUD-RIGHT-PTR` | Right Engine Throttle | pilot (defaulted) | default_axis | [3008] | [4] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `APU-FALSE-CRANK-START-PTR` | APU Launch Method START/CRANK/FALSE | pilot (defaulted) | default_3_position_tumb | [3014] | [313] |  |  |  |
+| `APU-START-PTR` | APU Start | pilot (defaulted) | default_button | [3012] | [307] |  |  |  |
+| `APU-STOP-PTR` | APU Stop | pilot (defaulted) | default_button | [3013] | [311] |  |  |  |
+| `COLLECTIVE-CORR-PTR` | Collective (LMB press, hold and move) / Throttle (RMB press, hold and move) | pilot (explicit) | raw_table_literal | [3004, 3003] | [0, 0] | [0.0, 0.0] |  |  |
+| `COLLECTIVE-GOV-PTR` | Readjust Free Turbine RPM, RIGHT/NEUTRAL/LEFT | pilot (defaulted) | springloaded_3_pos_tumb | [3020, 3019] | [747] |  |  |  |
+| `DEDUST-OFF-COVER-PTR` | Antidust ON Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3022] | [514] |  |  |  |
+| `DEDUST-OFF-PTR` | Antidust ON/OFF | pilot (defaulted) | default_2_position_tumb | [3021] | [796] |  |  |  |
+| `ENG-ABORT-PTR` | Engine Interrupt Start | pilot (defaulted) | default_button | [3017] | [318] |  |  |  |
+| `ENG-BRAKE-LEFT-PTR` | Left Engine Stop | pilot (defaulted) | default_animated_lever | [3009] | [6] |  |  |  |
+| `ENG-BRAKE-RIGHT-PTR` | Right Engine Stop | pilot (defaulted) | default_animated_lever | [3010] | [7] |  |  |  |
+| `ENG-CRANK-START-PTR` | Engine Launch Method START/CRANK | pilot (defaulted) | default_2_position_tumb | [3018] | [321] |  |  |  |
+| `ENG-LEFT-RIGHT-PTR` | Engine Select RIGHT/LEFT | pilot (defaulted) | default_2_position_tumb | [3016] | [320] |  |  |  |
+| `ENG-START-PTR` | Engine Start | pilot (defaulted) | default_button | [3015] | [314] |  |  |  |
+| `ENG-TEMP-SENSOR-CONTROL-COLD-PTR` | Engine Termometer control COLD | pilot (defaulted) | default_button | [3023] | [194] |  |  |  |
+| `ENG-TEMP-SENSOR-CONTROL-HOT-PTR` | Engine Termometer control HOT | pilot (defaulted) | default_button | [3024] | [195] |  |  |  |
+| `ROTOR-BRAKE-PTR` | Rotor Brake | pilot (defaulted) | default_animated_lever | [3011] | [745] |  |  |  |
+| `RRUD-LEFT-PTR` | Left Engine Throttle | pilot (defaulted) | default_axis | [3006] | [5] |  |  |  |
+| `RRUD-RIGHT-PTR` | Right Engine Throttle | pilot (defaulted) | default_axis | [3008] | [4] |  |  |  |
 
 ## Device 4 -- HYDRO_SYS_INTERFACE
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `PEDAL-DAMPER-OP-COVER-PTR` | Pedal Damper Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3010] | [666] |  |  |
-| `PEDAL-DAMPER-OP-PTR` | Pedal Damper, ON/OFF | operator (explicit) | default_2_position_tumb | [3009] | [667] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `PEDAL-DAMPER-OP-COVER-PTR` | Pedal Damper Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3010] | [666] |  |  |  |
+| `PEDAL-DAMPER-OP-PTR` | Pedal Damper, ON/OFF | operator (explicit) | default_2_position_tumb | [3009] | [667] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| ` CONTROL-COVER-PRIORITY-PTR`  _(leading space)_ | Control Assumed Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3012] | [47] |  |  |
-| `CONTROL-PRIORITY-PTR` | Control Assumed Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3011] | [48] |  |  |
-| `HYDRO-BACKUP-OFF-COVER-PTR` | Auxiliary Disable Button Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3006] | [215] |  |  |
-| `HYDRO-BACKUP-OFF-PTR` | Auxiliary Disable Button | pilot (defaulted) | default_button | [3005] | [213] |  |  |
-| `HYDRO-MAIN-SECOND-COVER-PTR` | Main/Auxiliary Hydraulic Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3002] | [216] |  |  |
-| `HYDRO-MAIN-SECOND-PTR` | Main/Auxiliary Hydraulic Switch, MAIN/AUXILIARY | pilot (defaulted) | default_2_position_tumb | [3001] | [217] |  |  |
-| `LANDING-GEAR-MAIN-BACKUP-COVER-PTR` | Main/Reserve Gear Hydraulic Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [218] |  |  |
-| `LANDING-GEAR-MAIN-BACKUP-PTR` | Main/Reserve Gear Hydraulic Switch, MAIN/RESERVE | pilot (defaulted) | default_2_position_tumb | [3003] | [219] |  |  |
-| `PEDAL-DAMPER-COVER-PTR` | Pedal Damper, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [290] |  |  |
-| `PEDAL-DAMPER-COVER-PTR-PTR` | Pedal Damper Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3008] | [289] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ` CONTROL-COVER-PRIORITY-PTR`  _(leading space)_ | Control Assumed Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3012] | [47] |  |  |  |
+| `CONTROL-PRIORITY-PTR` | Control Assumed Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3011] | [48] |  |  |  |
+| `HYDRO-BACKUP-OFF-COVER-PTR` | Auxiliary Disable Button Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3006] | [215] |  |  |  |
+| `HYDRO-BACKUP-OFF-PTR` | Auxiliary Disable Button | pilot (defaulted) | default_button | [3005] | [213] |  |  |  |
+| `HYDRO-MAIN-SECOND-COVER-PTR` | Main/Auxiliary Hydraulic Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3002] | [216] |  |  |  |
+| `HYDRO-MAIN-SECOND-PTR` | Main/Auxiliary Hydraulic Switch, MAIN/AUXILIARY | pilot (defaulted) | default_2_position_tumb | [3001] | [217] |  |  |  |
+| `LANDING-GEAR-MAIN-BACKUP-COVER-PTR` | Main/Reserve Gear Hydraulic Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [218] |  |  |  |
+| `LANDING-GEAR-MAIN-BACKUP-PTR` | Main/Reserve Gear Hydraulic Switch, MAIN/RESERVE | pilot (defaulted) | default_2_position_tumb | [3003] | [219] |  |  |  |
+| `PEDAL-DAMPER-COVER-PTR` | Pedal Damper, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [290] |  |  |  |
+| `PEDAL-DAMPER-COVER-PTR-PTR` | Pedal Damper Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3008] | [289] |  |  |  |
 
 ## Device 6 -- WEAP_SYS
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ARMAMENT-POWER-OP-PTR` | Main Weapon Safe Switch | operator (explicit) | default_2_position_tumb | [3020] | [673] |  | `weapon_safety` |
-| `OP-STICK-RS-COVER-PTR` | Fire Weapons Cover | operator (explicit) | default_blue_cover | [3022] | [853] |  |  |
-| `OP-STICK-RS-PTR` | Fire Weapons | operator (explicit) | default_button | [3021] | [187] |  |  |
-| `SHSCHO-CHECK-PTR` | SCHO Lamps Check | operator (explicit) | default_button | [3035] | [956] |  |  |
-| `SHSCHO-KNOB-PTR` | Select Station | operator (explicit) | multiposition_switch | [3038] | [963] |  |  |
-| `SHSCHO-POWER-PTR` | SCHO Power | operator (explicit) | default_2_position_tumb | [3030] | [955] |  | `scho_pwr_b1` |
-| `WEAP-BOMBS-BLOCKS-OP-COVER-PTR` | Bombs/Blocks Mode Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3043] | [699] |  |  |
-| `WEAP-BOMBS-BLOCKS-OP-PTR` | Bombs/Blocks Mode | operator (explicit) | default_3_position_tumb | [3033] | [700] |  |  |
-| `WEAP-BURST-LENGTH-OP-PTR` | Burst Length SHORT/MED/LONG | operator (explicit) | default_3_position_tumb | [3026] | [770] |  |  |
-| `WEAP-CANNON-PACE-OP-PTR` | Cannon Fire Rate SLOW/FAST | operator (explicit) | default_2_position_tumb | [3037] | [772] |  |  |
-| `WEAP-JETTISON-EXPLOSION-OP-COVER-PTR` | Explosion on Jettison Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3041] | [714] |  |  |
-| `WEAP-JETTISON-EXPLOSION-OP-PTR` | Explosion on Jettison | operator (explicit) | default_2_position_tumb | [3024] | [715] |  |  |
-| `WEAP-JETTISON-OP-COVER-PTR` | Emergency Jettison Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3042] | [141] |  |  |
-| `WEAP-JETTISON-OP-PTR` | Emergency Jettison | operator (explicit) | default_button | [3025] | [142] |  |  |
-| `WEAP-JETTISON-SPECIAL-OP-COVER-PTR` | Jettison Launcher Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3044] | [764] |  |  |
-| `WEAP-JETTISON-SPECIAL-OP-PTR` | Jettison Launcher ON/OFF | operator (explicit) | default_2_position_tumb | [3032] | [765] |  |  |
-| `WEAP-JETTISON-TEST-OP-PTR` | Release Check PU | operator (explicit) | default_button | [3031] | [768] |  |  |
-| `WEAP-KMG-COMMENCE-OP-PTR` | Start container | operator (explicit) | default_button | [3045] | [711] |  |  |
-| `WEAP-KMG-INTERRUPT-OP-PTR` | Stop container | operator (explicit) | default_button | [3046] | [710] |  |  |
-| `WEAP-MISSILES-POWER-OP-PTR` | Missiles Power | operator (explicit) | default_2_position_tumb | [3028] | [773] |  | `missile_power` |
-| `WEAP-NPU-RELOAD-OP-PTR` | Reload Cannon | operator (explicit) | default_button | [3039] | [769] |  |  |
-| `WEAP-PRIORITY-OP-COVER-PTR` | Weapon Control Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3040] | [712] |  |  |
-| `WEAP-PRIORITY-OP-PTR` | Weapon Control | operator (explicit) | default_2_position_tumb | [3023] | [713] |  |  |
-| `WEAP-SELECT-KNOB-OP-PTR` | Select Weapon | operator (explicit) | multiposition_switch | [3027] | [709] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ARMAMENT-POWER-OP-PTR` | Main Weapon Safe Switch | operator (explicit) | default_2_position_tumb | [3020] | [673] |  |  | `weapon_safety` |
+| `OP-STICK-RS-COVER-PTR` | Fire Weapons Cover | operator (explicit) | default_blue_cover | [3022] | [853] |  |  |  |
+| `OP-STICK-RS-PTR` | Fire Weapons | operator (explicit) | default_button | [3021] | [187] |  |  |  |
+| `SHSCHO-CHECK-PTR` | SCHO Lamps Check | operator (explicit) | default_button | [3035] | [956] |  |  |  |
+| `SHSCHO-KNOB-PTR` | Select Station | operator (explicit) | multiposition_switch | [3038] | [963] |  |  |  |
+| `SHSCHO-POWER-PTR` | SCHO Power | operator (explicit) | default_2_position_tumb | [3030] | [955] |  |  | `scho_pwr_b1` |
+| `WEAP-BOMBS-BLOCKS-OP-COVER-PTR` | Bombs/Blocks Mode Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3043] | [699] |  |  |  |
+| `WEAP-BOMBS-BLOCKS-OP-PTR` | Bombs/Blocks Mode | operator (explicit) | default_3_position_tumb | [3033] | [700] |  |  |  |
+| `WEAP-BURST-LENGTH-OP-PTR` | Burst Length SHORT/MED/LONG | operator (explicit) | default_3_position_tumb | [3026] | [770] |  |  |  |
+| `WEAP-CANNON-PACE-OP-PTR` | Cannon Fire Rate SLOW/FAST | operator (explicit) | default_2_position_tumb | [3037] | [772] |  |  |  |
+| `WEAP-JETTISON-EXPLOSION-OP-COVER-PTR` | Explosion on Jettison Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3041] | [714] |  |  |  |
+| `WEAP-JETTISON-EXPLOSION-OP-PTR` | Explosion on Jettison | operator (explicit) | default_2_position_tumb | [3024] | [715] |  |  |  |
+| `WEAP-JETTISON-OP-COVER-PTR` | Emergency Jettison Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3042] | [141] |  |  |  |
+| `WEAP-JETTISON-OP-PTR` | Emergency Jettison | operator (explicit) | default_button | [3025] | [142] |  |  |  |
+| `WEAP-JETTISON-SPECIAL-OP-COVER-PTR` | Jettison Launcher Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3044] | [764] |  |  |  |
+| `WEAP-JETTISON-SPECIAL-OP-PTR` | Jettison Launcher ON/OFF | operator (explicit) | default_2_position_tumb | [3032] | [765] |  |  |  |
+| `WEAP-JETTISON-TEST-OP-PTR` | Release Check PU | operator (explicit) | default_button | [3031] | [768] |  |  |  |
+| `WEAP-KMG-COMMENCE-OP-PTR` | Start container | operator (explicit) | default_button | [3045] | [711] |  |  |  |
+| `WEAP-KMG-INTERRUPT-OP-PTR` | Stop container | operator (explicit) | default_button | [3046] | [710] |  |  |  |
+| `WEAP-MISSILES-POWER-OP-PTR` | Missiles Power | operator (explicit) | default_2_position_tumb | [3028] | [773] |  |  | `missile_power` |
+| `WEAP-NPU-RELOAD-OP-PTR` | Reload Cannon | operator (explicit) | default_button | [3039] | [769] |  |  |  |
+| `WEAP-PRIORITY-OP-COVER-PTR` | Weapon Control Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3040] | [712] |  |  |  |
+| `WEAP-PRIORITY-OP-PTR` | Weapon Control | operator (explicit) | default_2_position_tumb | [3023] | [713] |  |  |  |
+| `WEAP-SELECT-KNOB-OP-PTR` | Select Weapon | operator (explicit) | multiposition_switch | [3027] | [709] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ROUNDS-KNOB-1` | Counter Adjustment 1 | pilot (defaulted) | default_axis | [3092] | [719] |  |  |
-| `ROUNDS-KNOB-2` | Counter Adjustment 2 | pilot (defaulted) | default_axis | [3093] | [723] |  |  |
-| `ROUNDS-KNOB-3` | Counter Adjustment 3 | pilot (defaulted) | default_axis | [3094] | [727] |  |  |
-| `ROUNDS-KNOB-4` | Counter Adjustment 4 | pilot (defaulted) | default_axis | [3095] | [731] |  |  |
-| `ROUNDS-KNOB-5` | Counter Adjustment 5 | pilot (defaulted) | default_axis | [3096] | [735] |  |  |
-| `STICK-RS-COVER-PTR` | Fire Weapons Cover | pilot (defaulted) | default_blue_cover | [3002] | [740] |  |  |
-| `STICK-RS-PTR` | Fire Weapons | pilot (defaulted) | default_button | [3001] | [741] |  |  |
-| `WEAP-127-LEFT-RELOAD-PTR` | Reload Left Gondola | pilot (defaulted) | triple_switch | [3004] | [522] |  |  |
-| `WEAP-127-RIGHT-RELOAD-PTR` | Reload Right Gondola | pilot (defaulted) | triple_switch | [3005] | [527] |  |  |
-| `WEAP-BURST-LENGTH-PTR` | Burst Length SHORT/MED/LONG | pilot (defaulted) | default_3_position_tumb | [3003] | [521] |  |  |
-| `WEAP-CANNON-PACE-PTR` | Cannon Fire Rate SLOW/FAST | pilot (defaulted) | default_2_position_tumb | [3010] | [550] |  |  |
-| `WEAP-JETTISON-EXPLOSION-COVER-PTR` | Explosion on Jettison Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3014] | [545] |  |  |
-| `WEAP-JETTISON-EXPLOSION-PTR` | Explosion on Jettison ON/OFF | pilot (defaulted) | default_2_position_tumb | [3013] | [546] |  |  |
-| `WEAP-JETTISON-LAUNCHER-COVER-PTR` | Jettison Launcher Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3018] | [537] |  |  |
-| `WEAP-JETTISON-LAUNCHER-PTR` | Jettison Launcher ON/OFF | pilot (defaulted) | default_tumb_button | [3017] | [538] |  |  |
-| `WEAP-JETTISON-SPECIAL-COVER-PTR` | Jettison Pylons Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3016] | [541] |  |  |
-| `WEAP-JETTISON-SPECIAL-PTR` | Jettison Pylons ON/OFF | pilot (defaulted) | default_tumb_button | [3015] | [542] |  |  |
-| `WEAP-KMG-INTERRUPT-PTR` | Stop container | pilot (defaulted) | default_button | [3012] | [547] |  |  |
-| `WEAP-NPU-RELOAD-PTR` | Reload Cannon | pilot (defaulted) | default_button | [3011] | [549] |  |  |
-| `WEAP-ON-OFF-PTR` | Weapon Control ON/OFF | pilot (defaulted) | default_2_position_tumb | [3009] | [551] |  |  |
-| `WEAP-PUS-ENGAGEMENT-PTR` | Arm Rockets | pilot (defaulted) | default_button | [3019] | [536] |  |  |
-| `WEAP-ROCKET-SELECT-PTR` | Select Rockets LEFT/BOTH/RIGHT | pilot (defaulted) | default_3_position_tumb | [3008] | [531] |  |  |
-| `WEAP-SELECT-KNOB-PTR` | Select Weapon | pilot (defaulted) | multiposition_switch | [3007] | [523] |  |  |
-| `WEAP-SIGHT-CONTROL-ON-OFF-PTR` | Weapon Camera ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [530] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ROUNDS-KNOB-1` | Counter Adjustment 1 | pilot (defaulted) | default_axis | [3092] | [719] |  |  |  |
+| `ROUNDS-KNOB-2` | Counter Adjustment 2 | pilot (defaulted) | default_axis | [3093] | [723] |  |  |  |
+| `ROUNDS-KNOB-3` | Counter Adjustment 3 | pilot (defaulted) | default_axis | [3094] | [727] |  |  |  |
+| `ROUNDS-KNOB-4` | Counter Adjustment 4 | pilot (defaulted) | default_axis | [3095] | [731] |  |  |  |
+| `ROUNDS-KNOB-5` | Counter Adjustment 5 | pilot (defaulted) | default_axis | [3096] | [735] |  |  |  |
+| `STICK-RS-COVER-PTR` | Fire Weapons Cover | pilot (defaulted) | default_blue_cover | [3002] | [740] |  |  |  |
+| `STICK-RS-PTR` | Fire Weapons | pilot (defaulted) | default_button | [3001] | [741] |  |  |  |
+| `WEAP-127-LEFT-RELOAD-PTR` | Reload Left Gondola | pilot (defaulted) | triple_switch | [3004] | [522] |  |  |  |
+| `WEAP-127-RIGHT-RELOAD-PTR` | Reload Right Gondola | pilot (defaulted) | triple_switch | [3005] | [527] |  |  |  |
+| `WEAP-BURST-LENGTH-PTR` | Burst Length SHORT/MED/LONG | pilot (defaulted) | default_3_position_tumb | [3003] | [521] |  |  |  |
+| `WEAP-CANNON-PACE-PTR` | Cannon Fire Rate SLOW/FAST | pilot (defaulted) | default_2_position_tumb | [3010] | [550] |  |  |  |
+| `WEAP-JETTISON-EXPLOSION-COVER-PTR` | Explosion on Jettison Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3014] | [545] |  |  |  |
+| `WEAP-JETTISON-EXPLOSION-PTR` | Explosion on Jettison ON/OFF | pilot (defaulted) | default_2_position_tumb | [3013] | [546] |  |  |  |
+| `WEAP-JETTISON-LAUNCHER-COVER-PTR` | Jettison Launcher Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3018] | [537] |  |  |  |
+| `WEAP-JETTISON-LAUNCHER-PTR` | Jettison Launcher ON/OFF | pilot (defaulted) | default_tumb_button | [3017] | [538] |  |  |  |
+| `WEAP-JETTISON-SPECIAL-COVER-PTR` | Jettison Pylons Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3016] | [541] |  |  |  |
+| `WEAP-JETTISON-SPECIAL-PTR` | Jettison Pylons ON/OFF | pilot (defaulted) | default_tumb_button | [3015] | [542] |  |  |  |
+| `WEAP-KMG-INTERRUPT-PTR` | Stop container | pilot (defaulted) | default_button | [3012] | [547] |  |  |  |
+| `WEAP-NPU-RELOAD-PTR` | Reload Cannon | pilot (defaulted) | default_button | [3011] | [549] |  |  |  |
+| `WEAP-ON-OFF-PTR` | Weapon Control ON/OFF | pilot (defaulted) | default_2_position_tumb | [3009] | [551] |  |  |  |
+| `WEAP-PUS-ENGAGEMENT-PTR` | Arm Rockets | pilot (defaulted) | default_button | [3019] | [536] |  |  |  |
+| `WEAP-ROCKET-SELECT-PTR` | Select Rockets LEFT/BOTH/RIGHT | pilot (defaulted) | default_3_position_tumb | [3008] | [531] |  |  |  |
+| `WEAP-SELECT-KNOB-PTR` | Select Weapon | pilot (defaulted) | multiposition_switch | [3007] | [523] |  |  |  |
+| `WEAP-SIGHT-CONTROL-ON-OFF-PTR` | Weapon Camera ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [530] |  |  |  |
 
 ## Device 7 -- I9K113
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `L166V-SWITCH-PTR` | Lamps Check | operator (explicit) | default_3_position_tumb | [3011] | [870] |  |  |
-| `OP-AIM-RESET-RAD-PTR` | Radiation Reset | operator (explicit) | default_button | [3029] | [882] |  |  |
-| `OP-SIGHT-ANTILASER-PTR` | Laser Filter | operator (explicit) | default_2_position_tumb | [3023] | [873] |  |  |
-| `OP-SIGHT-ORANGE-PTR` | Orange Filter | operator (explicit) | default_2_position_tumb | [3022] | [872] |  |  |
-| `OP-SIGHT-SCOPE-PTR` | Zoom In-Out | operator (explicit) | default_2_position_tumb | [3021] | [871] |  |  |
-| `PK-CHECK-PTR` | CHECK2-NEUTR-CHECK1 | operator (explicit) | default_3_position_tumb | [3007] | [905] |  |  |
-| `PK-DIAPH-PTR` | DIAFR Open | operator (explicit) | default_2_position_tumb | [3003] | [887] |  |  |
-| `PK-HEATING-PTR` | Sight Heating | operator (explicit) | default_2_position_tumb | [3064] | [890] |  |  |
-| `PK-IMIT-GENER-PTR` | GENERATOR-IMIT | operator (explicit) | default_2_position_tumb | [3006] | [910] |  |  |
-| `PK-LAUNCH-PTR` | Start PM | operator (explicit) | default_button | [3010] | [911] |  |  |
-| `PK-LIGHT-PTR` | Backlight | operator (explicit) | default_2_position_tumb | [3062] | [884] |  |  |
-| `PK-LOCK-PTR` | LOCK ARU | operator (explicit) | default_2_position_tumb | [3004] | [912] |  |  |
-| `PK-OBSERVE-PTR` | OBSERVE | operator (explicit) | default_2_position_tumb | [3002] | [886] |  | `observ` |
-| `PK-PN-POWER-PTR` | Sight Power Switch | operator (explicit) | default_2_position_tumb | [3001] | [885] |  | `sight_power` |
-| `PK-SSP-PTR` | SSP On | operator (explicit) | default_2_position_tumb | [3005] | [913] |  |  |
-| `PK-WORK-CHECK-PTR` | BVK Set | operator (explicit) | multiposition_switch | [3009] | [899] |  |  |
-| `SHTV-CHECK-PTR` | Checking | operator (explicit) | default_button | [3015] | [931] |  |  |
-| `SHTV-CHECK-VALUE-PTR` | Switcher 0 - 0.4 | operator (explicit) | default_2_position_tumb | [3014] | [933] |  |  |
-| `SHTV-CODE-PTR` | Switcher CODE1-CODE2 | operator (explicit) | default_2_position_tumb | [3013] | [935] |  |  |
-| `SHTV-HIGH-K-PTR` | High K | operator (explicit) | default_button | [3016] | [875] |  |  |
-| `SHTV-IN-OUT-PTR` | Switcher IN-OUT | operator (explicit) | default_2_position_tumb | [3012] | [934] |  |  |
-| `SHTV-LAMP-CHECK-PTR` | Display Lamps Check | operator (explicit) | default_button | [3017] | [932] |  |  |
-| `WEAP-JETTISON-SPECIAL-OP-COVER-PTR002` | WORK-CHECK | operator (explicit) | default_2_position_tumb | [3008] | [903] |  |  |
-| `WEAP-MISSILES-SIGHT-HEATING-OP-PTR` | Sight Doors | operator (explicit) | default_2_position_tumb | [3018] | [775] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `L166V-SWITCH-PTR` | Lamps Check | operator (explicit) | default_3_position_tumb | [3011] | [870] |  |  |  |
+| `OP-AIM-RESET-RAD-PTR` | Radiation Reset | operator (explicit) | default_button | [3029] | [882] |  |  |  |
+| `OP-SIGHT-ANTILASER-PTR` | Laser Filter | operator (explicit) | default_2_position_tumb | [3023] | [873] |  |  |  |
+| `OP-SIGHT-ORANGE-PTR` | Orange Filter | operator (explicit) | default_2_position_tumb | [3022] | [872] |  |  |  |
+| `OP-SIGHT-SCOPE-PTR` | Zoom In-Out | operator (explicit) | default_2_position_tumb | [3021] | [871] |  |  |  |
+| `PK-CHECK-PTR` | CHECK2-NEUTR-CHECK1 | operator (explicit) | default_3_position_tumb | [3007] | [905] |  |  |  |
+| `PK-DIAPH-PTR` | DIAFR Open | operator (explicit) | default_2_position_tumb | [3003] | [887] |  |  |  |
+| `PK-HEATING-PTR` | Sight Heating | operator (explicit) | default_2_position_tumb | [3064] | [890] |  |  |  |
+| `PK-IMIT-GENER-PTR` | GENERATOR-IMIT | operator (explicit) | default_2_position_tumb | [3006] | [910] |  |  |  |
+| `PK-LAUNCH-PTR` | Start PM | operator (explicit) | default_button | [3010] | [911] |  |  |  |
+| `PK-LIGHT-PTR` | Backlight | operator (explicit) | default_2_position_tumb | [3062] | [884] |  |  |  |
+| `PK-LOCK-PTR` | LOCK ARU | operator (explicit) | default_2_position_tumb | [3004] | [912] |  |  |  |
+| `PK-OBSERVE-PTR` | OBSERVE | operator (explicit) | default_2_position_tumb | [3002] | [886] |  |  | `observ` |
+| `PK-PN-POWER-PTR` | Sight Power Switch | operator (explicit) | default_2_position_tumb | [3001] | [885] |  |  | `sight_power` |
+| `PK-SSP-PTR` | SSP On | operator (explicit) | default_2_position_tumb | [3005] | [913] |  |  |  |
+| `PK-WORK-CHECK-PTR` | BVK Set | operator (explicit) | multiposition_switch | [3009] | [899] |  |  |  |
+| `SHTV-CHECK-PTR` | Checking | operator (explicit) | default_button | [3015] | [931] |  |  |  |
+| `SHTV-CHECK-VALUE-PTR` | Switcher 0 - 0.4 | operator (explicit) | default_2_position_tumb | [3014] | [933] |  |  |  |
+| `SHTV-CODE-PTR` | Switcher CODE1-CODE2 | operator (explicit) | default_2_position_tumb | [3013] | [935] |  |  |  |
+| `SHTV-HIGH-K-PTR` | High K | operator (explicit) | default_button | [3016] | [875] |  |  |  |
+| `SHTV-IN-OUT-PTR` | Switcher IN-OUT | operator (explicit) | default_2_position_tumb | [3012] | [934] |  |  |  |
+| `SHTV-LAMP-CHECK-PTR` | Display Lamps Check | operator (explicit) | default_button | [3017] | [932] |  |  |  |
+| `WEAP-JETTISON-SPECIAL-OP-COVER-PTR002` | WORK-CHECK | operator (explicit) | default_2_position_tumb | [3008] | [903] |  |  |  |
+| `WEAP-MISSILES-SIGHT-HEATING-OP-PTR` | Sight Doors | operator (explicit) | default_2_position_tumb | [3018] | [775] |  |  |  |
 
 ## Device 8 -- DISS_15
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `DISS-ON-OFF-PTR` | DISS-15D ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [371] |  |  |
-| `DISS-SELECTOR-KNOB-PTR` | DISS select mode IDK/IDK/IDK/MEM/OPER | pilot (defaulted) | multiposition_switch | [3013] | [826] |  |  |
-| `DRIFT-R-K-PTR` | DISS Mode WORK/CHECK | pilot (defaulted) | default_2_position_tumb | [3011] | [797] |  |  |
-| `DRIFT-S-M-PTR` | DISS Mode LAND/SEA | pilot (defaulted) | default_2_position_tumb | [3012] | [798] |  |  |
-| `DVS-DISS-PTR` | Airspeed to DISS ON/OFF | pilot (defaulted) | default_2_position_tumb | [3002] | [370] |  |  |
-| `PTR-DISS-BTN-MINUS` | DISS decrease map angle | pilot (defaulted) | default_square_button | [3005] | [815] |  |  |
-| `PTR-DISS-BTN-N` | DISS decrease path | pilot (defaulted) | default_square_button | [3007] | [809] |  |  |
-| `PTR-DISS-BTN-OFF` | DISS coordinates OFF | pilot (defaulted) | default_square_button | [3003] | [818] |  |  |
-| `PTR-DISS-BTN-ON` | DISS coordinates ON | pilot (defaulted) | default_square_button | [3004] | [819] |  |  |
-| `PTR-DISS-BTN-PLUS` | DISS increase map angle | pilot (defaulted) | default_square_button | [3006] | [816] |  |  |
-| `PTR-DISS-BTN-TOLE` | DISS decrease deviation | pilot (defaulted) | default_square_button | [3009] | [803] |  |  |
-| `PTR-DISS-BTN-TORI` | DISS increase deviation | pilot (defaulted) | default_square_button | [3010] | [804] |  |  |
-| `PTR-DISS-BTN-V` | DISS increase path | pilot (defaulted) | default_square_button | [3008] | [810] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `DISS-ON-OFF-PTR` | DISS-15D ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [371] |  |  |  |
+| `DISS-SELECTOR-KNOB-PTR` | DISS select mode IDK/IDK/IDK/MEM/OPER | pilot (defaulted) | multiposition_switch | [3013] | [826] |  |  |  |
+| `DRIFT-R-K-PTR` | DISS Mode WORK/CHECK | pilot (defaulted) | default_2_position_tumb | [3011] | [797] |  |  |  |
+| `DRIFT-S-M-PTR` | DISS Mode LAND/SEA | pilot (defaulted) | default_2_position_tumb | [3012] | [798] |  |  |  |
+| `DVS-DISS-PTR` | Airspeed to DISS ON/OFF | pilot (defaulted) | default_2_position_tumb | [3002] | [370] |  |  |  |
+| `PTR-DISS-BTN-MINUS` | DISS decrease map angle | pilot (defaulted) | default_square_button | [3005] | [815] |  |  |  |
+| `PTR-DISS-BTN-N` | DISS decrease path | pilot (defaulted) | default_square_button | [3007] | [809] |  |  |  |
+| `PTR-DISS-BTN-OFF` | DISS coordinates OFF | pilot (defaulted) | default_square_button | [3003] | [818] |  |  |  |
+| `PTR-DISS-BTN-ON` | DISS coordinates ON | pilot (defaulted) | default_square_button | [3004] | [819] |  |  |  |
+| `PTR-DISS-BTN-PLUS` | DISS increase map angle | pilot (defaulted) | default_square_button | [3006] | [816] |  |  |  |
+| `PTR-DISS-BTN-TOLE` | DISS decrease deviation | pilot (defaulted) | default_square_button | [3009] | [803] |  |  |  |
+| `PTR-DISS-BTN-TORI` | DISS increase deviation | pilot (defaulted) | default_square_button | [3010] | [804] |  |  |  |
+| `PTR-DISS-BTN-V` | DISS increase path | pilot (defaulted) | default_square_button | [3008] | [810] |  |  |  |
 
 ## Device 9 -- ASO_2V
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ASO2V-INTERV-PTR` | Interval | operator (explicit) | default_2_position_tumb | [3001] | [1008] |  |  |
-| `ASO2V-LEFT-PTR` | Left Side | operator (explicit) | default_2_position_tumb | [3004] | [969] |  |  |
-| `ASO2V-RESET-PTR` | Launch Countermeasures | operator (explicit) | default_button | [3003] | [968] |  |  |
-| `ASO2V-RIGHT-PTR` | Right Side | operator (explicit) | default_2_position_tumb | [3005] | [970] |  |  |
-| `ASO2V-SERIES-PTR` | Serie | operator (explicit) | default_2_position_tumb | [3002] | [965] |  |  |
-| `ASO2V-SETS-PTR` | Set I/II/III | operator (explicit) | triple_switch | [3006] | [971] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ASO2V-INTERV-PTR` | Interval | operator (explicit) | default_2_position_tumb | [3001] | [1008] |  |  |  |
+| `ASO2V-LEFT-PTR` | Left Side | operator (explicit) | default_2_position_tumb | [3004] | [969] |  |  |  |
+| `ASO2V-RESET-PTR` | Launch Countermeasures | operator (explicit) | default_button | [3003] | [968] |  |  |  |
+| `ASO2V-RIGHT-PTR` | Right Side | operator (explicit) | default_2_position_tumb | [3005] | [970] |  |  |  |
+| `ASO2V-SERIES-PTR` | Serie | operator (explicit) | default_2_position_tumb | [3002] | [965] |  |  |  |
+| `ASO2V-SETS-PTR` | Set I/II/III | operator (explicit) | triple_switch | [3006] | [971] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ASO-ON-PTR` | Pilot Launch Snars | pilot (defaulted) | default_button | [3007] | [847] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ASO-ON-PTR` | Pilot Launch Snars | pilot (defaulted) | default_button | [3007] | [847] |  |  |  |
 
 ## Device 10 -- AUTOPILOT
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `OP-STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3028] | [855] |  |  |
-| `SAU-AZ-PTR` | Autopilot Route Azimuth | pilot (defaulted) | default_axis | [3030] | [262] |  |  |
-| `SAU-B-OFF-PTR` | Autopilot B Channel OFF | pilot (defaulted) | default_button | [3015] | [254] |  |  |
-| `SAU-B-ON-PTR` | Autopilot B Channel ON | pilot (defaulted) | default_button | [3013] | [255] |  |  |
-| `SAU-B-SWITCH-PTR` | Autopilot Altitude Control | pilot (defaulted) | springloaded_3_pos_tumb | [3019, 3017] | [253] |  |  |
-| `SAU-BRIGHT-DIM-PTR` | Buttons Lighting BRIGHT/DIM | pilot (defaulted) | default_2_position_tumb | [3070] | [267] |  |  |
-| `SAU-H-KNOB-PTR` | Autopilot H Channel Delta Correction | pilot (defaulted) | default_axis | [3023] | [234] |  |  |
-| `SAU-H-OFF-PTR` | Autopilot H Channel OFF | pilot (defaulted) | default_square_button | [3007] | [236] |  |  |
-| `SAU-H-ON-PTR` | Autopilot H Channel ON | pilot (defaulted) | default_square_button | [3005] | [237] |  |  |
-| `SAU-HEIGHT-OFF-PTR` | Autopilot Altitude Mode OFF | pilot (defaulted) | default_square_button | [3034] | [257] |  |  |
-| `SAU-HEIGHT-ON-PTR` | Autopilot Altitude Mode ON | pilot (defaulted) | default_square_button | [3032] | [258] |  |  |
-| `SAU-HOVER-ON-PTR` | Autopilot Hover Mode ON | pilot (defaulted) | default_square_button | [3036] | [259] |  |  |
-| `SAU-HOVER-ROUTE-OFF-PTR` | Autopilot Route and Hover Modes OFF | pilot (defaulted) | default_square_button | [3040] | [260] |  |  |
-| `SAU-K-KNOB-PTR` | Autopilot K Channel Delta Correction | pilot (defaulted) | default_axis | [3021] | [240] |  |  |
-| `SAU-K-OFF-PTR` | Autopilot K Channel OFF | pilot (defaulted) | default_button | [3003] | [242] |  |  |
-| `SAU-K-ON-PTR` | Autopilot K Channel ON | pilot (defaulted) | default_button | [3001] | [243] |  |  |
-| `SAU-ROUTE-ON-PTR` | Autopilot Route Mode ON | pilot (defaulted) | default_square_button | [3038] | [261] |  |  |
-| `SAU-SPEED-OFF-PTR` | Autopilot Speed Stabilization OFF | pilot (defaulted) | default_button | [3044] | [269] |  |  |
-| `SAU-SPEED-ON-PTR` | Autopilot Speed Stabilization ON | pilot (defaulted) | default_button | [3042] | [268] |  |  |
-| `SAU-T-KNOB-PTR` | Autopilot T Channel Delta Correction | pilot (defaulted) | default_axis | [3025] | [246] |  |  |
-| `SAU-T-OFF-PTR` | Autopilot T Channel OFF | pilot (defaulted) | default_square_button | [3011] | [248] |  |  |
-| `SAU-T-ON-PTR` | Autopilot T Channel ON | pilot (defaulted) | default_square_button | [3009] | [249] |  |  |
-| `STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3027] | [742] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `OP-STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3028] | [855] |  |  |  |
+| `SAU-AZ-PTR` | Autopilot Route Azimuth | pilot (defaulted) | default_axis | [3030] | [262] |  |  |  |
+| `SAU-B-OFF-PTR` | Autopilot B Channel OFF | pilot (defaulted) | default_button | [3015] | [254] |  |  |  |
+| `SAU-B-ON-PTR` | Autopilot B Channel ON | pilot (defaulted) | default_button | [3013] | [255] |  |  |  |
+| `SAU-B-SWITCH-PTR` | Autopilot Altitude Control | pilot (defaulted) | springloaded_3_pos_tumb | [3019, 3017] | [253] |  |  |  |
+| `SAU-BRIGHT-DIM-PTR` | Buttons Lighting BRIGHT/DIM | pilot (defaulted) | default_2_position_tumb | [3070] | [267] |  |  |  |
+| `SAU-H-KNOB-PTR` | Autopilot H Channel Delta Correction | pilot (defaulted) | default_axis | [3023] | [234] |  |  |  |
+| `SAU-H-OFF-PTR` | Autopilot H Channel OFF | pilot (defaulted) | default_square_button | [3007] | [236] |  |  |  |
+| `SAU-H-ON-PTR` | Autopilot H Channel ON | pilot (defaulted) | default_square_button | [3005] | [237] |  |  |  |
+| `SAU-HEIGHT-OFF-PTR` | Autopilot Altitude Mode OFF | pilot (defaulted) | default_square_button | [3034] | [257] |  |  |  |
+| `SAU-HEIGHT-ON-PTR` | Autopilot Altitude Mode ON | pilot (defaulted) | default_square_button | [3032] | [258] |  |  |  |
+| `SAU-HOVER-ON-PTR` | Autopilot Hover Mode ON | pilot (defaulted) | default_square_button | [3036] | [259] |  |  |  |
+| `SAU-HOVER-ROUTE-OFF-PTR` | Autopilot Route and Hover Modes OFF | pilot (defaulted) | default_square_button | [3040] | [260] |  |  |  |
+| `SAU-K-KNOB-PTR` | Autopilot K Channel Delta Correction | pilot (defaulted) | default_axis | [3021] | [240] |  |  |  |
+| `SAU-K-OFF-PTR` | Autopilot K Channel OFF | pilot (defaulted) | default_button | [3003] | [242] |  |  |  |
+| `SAU-K-ON-PTR` | Autopilot K Channel ON | pilot (defaulted) | default_button | [3001] | [243] |  |  |  |
+| `SAU-ROUTE-ON-PTR` | Autopilot Route Mode ON | pilot (defaulted) | default_square_button | [3038] | [261] |  |  |  |
+| `SAU-SPEED-OFF-PTR` | Autopilot Speed Stabilization OFF | pilot (defaulted) | default_button | [3044] | [269] |  |  |  |
+| `SAU-SPEED-ON-PTR` | Autopilot Speed Stabilization ON | pilot (defaulted) | default_button | [3042] | [268] |  |  |  |
+| `SAU-T-KNOB-PTR` | Autopilot T Channel Delta Correction | pilot (defaulted) | default_axis | [3025] | [246] |  |  |  |
+| `SAU-T-OFF-PTR` | Autopilot T Channel OFF | pilot (defaulted) | default_square_button | [3011] | [248] |  |  |  |
+| `SAU-T-ON-PTR` | Autopilot T Channel ON | pilot (defaulted) | default_square_button | [3009] | [249] |  |  |  |
+| `STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3027] | [742] |  |  |  |
 
 ## Device 11 -- CPT_MECH
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `CANOPY-HANDLE-OP-PTR` | Operator Lock Canopy, OPEN/CLOSE | operator (explicit) | default_animated_lever | [3019] | [848] |  |  |
-| `CLOCK-HEATING-OP-PTR` | Clock Heating Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3048] | [672] |  |  |
-| `CONTROL-TRIMMER-OP-COVER-PTR` | Autopilot Trimmer for yourself Switch Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3041] | [670] |  |  |
-| `CONTROL-TRIMMER-OP-PTR` | Autopilot Trimmer for yourself  | operator (explicit) | default_2_position_tumb | [3040] | [671] |  |  |
-| `DUAS-V-HEATING-OP-PTR` | Heating DUAS, ON/OFF | operator (explicit) | default_2_position_tumb | [3012] | [763] |  |  |
-| `EASTER_OP` | Cockpit Fan - Touch | operator (explicit) | default_button | [3030] | [0] |  |  |
-| `FAN-OP-PTR` | Operator Fan, ON/OFF | operator (explicit) | default_2_position_tumb | [3025] | [665] |  |  |
-| `LANDING-GEAR-OP-COVER-PTR` | Operator Gear Switch Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3006] | [676] |  |  |
-| `LANDING-GEAR-OP-PTR` | Operator Gear Switch, UP/DOWN | operator (explicit) | default_2_position_tumb | [3005] | [677] |  |  |
-| `WIPER-MODE-OP-PTR-HISPEED` | Windscreen Wiper Control Switch, SPEED 2 | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |
-| `WIPER-MODE-OP-PTR-LOWSPEED` | Windscreen Wiper Control Switch, SPEED 1 | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |
-| `WIPER-MODE-OP-PTR-OFF` | Windscreen Wiper Control Switch, OFF | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |
-| `WIPER-MODE-OP-PTR-RESET` | Windscreen Wiper Control Switch, RESET | operator (explicit) | default_spring_button | [3021] | [674] |  |  |
-| `WIPER-MODE-OP-PTR-START` | Windscreen Wiper Control Switch, START | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |
-| `WIPER-SPRINKLER-OP-PTR` | Operator Window Sprayer Button | operator (explicit) | default_button | [3016] | [680] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CANOPY-HANDLE-OP-PTR` | Operator Lock Canopy, OPEN/CLOSE | operator (explicit) | default_animated_lever | [3019] | [848] |  |  |  |
+| `CLOCK-HEATING-OP-PTR` | Clock Heating Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3048] | [672] |  |  |  |
+| `CONTROL-TRIMMER-OP-COVER-PTR` | Autopilot Trimmer for yourself Switch Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3041] | [670] |  |  |  |
+| `CONTROL-TRIMMER-OP-PTR` | Autopilot Trimmer for yourself  | operator (explicit) | default_2_position_tumb | [3040] | [671] |  |  |  |
+| `DUAS-V-HEATING-OP-PTR` | Heating DUAS, ON/OFF | operator (explicit) | default_2_position_tumb | [3012] | [763] |  |  |  |
+| `EASTER_OP` | Cockpit Fan - Touch | operator (explicit) | default_button | [3030] | [0] |  |  |  |
+| `FAN-OP-PTR` | Operator Fan, ON/OFF | operator (explicit) | default_2_position_tumb | [3025] | [665] |  |  |  |
+| `LANDING-GEAR-OP-COVER-PTR` | Operator Gear Switch Cover, UP/DOWN | operator (explicit) | default_blue_cover | [3006] | [676] |  |  |  |
+| `LANDING-GEAR-OP-PTR` | Operator Gear Switch, UP/DOWN | operator (explicit) | default_2_position_tumb | [3005] | [677] |  |  |  |
+| `WIPER-MODE-OP-PTR-HISPEED` | Windscreen Wiper Control Switch, SPEED 2 | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |  |
+| `WIPER-MODE-OP-PTR-LOWSPEED` | Windscreen Wiper Control Switch, SPEED 1 | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |  |
+| `WIPER-MODE-OP-PTR-OFF` | Windscreen Wiper Control Switch, OFF | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |  |
+| `WIPER-MODE-OP-PTR-RESET` | Windscreen Wiper Control Switch, RESET | operator (explicit) | default_spring_button | [3021] | [674] |  |  |  |
+| `WIPER-MODE-OP-PTR-START` | Windscreen Wiper Control Switch, START | operator (explicit) | default_position_tumb | [3021] | [674] |  |  |  |
+| `WIPER-SPRINKLER-OP-PTR` | Operator Window Sprayer Button | operator (explicit) | default_button | [3016] | [680] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `CANOPY-HANDLE-PTR` | Pilot Door Safety Lock, OPEN/CLOSE | pilot (defaulted) | default_animated_lever | [3017] | [8] |  |  |
-| `CANOPY-HANDLE-SAFETY-PTR` | Pilot Door Safety Lock Button | pilot (defaulted) | default_button | [3018] | [189] |  |  |
-| `COLLECTIVE-FRICT-PTR` | friction clutch of the collective | pilot (defaulted) | default_button | [3028] | [753] |  |  |
-| `EASTER_PILOT` | Cockpit Fan - Touch | pilot (defaulted) | default_button | [3029] | [0] |  |  |
-| `FAN-PTR` | Pilot Fan, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3024] | [420] |  |  |
-| `HEATER-CLOCK-PTR` | Clock Heating Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3047] | [386] |  |  |
-| `HEATER-PPD-LEFT-PTR` | Heating PPD Left, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3043] | [387] |  |  |
-| `HEATER-PPD-RIGHT-PTR` | Heating PPD Right, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3045] | [389] |  |  |
-| `LANDING-GEAR-EMER-PTR` | Emergency Gear Lever | pilot (defaulted) | default_animated_lever | [3007] | [827] |  |  |
-| `LANDING-GEAR-LIGHTS-COVER-PTR` | Gear Indication Lights Cover UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [223] |  |  |
-| `LANDING-GEAR-LIGHTS-PTR` | Gear Indication Lights ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [224] |  |  |
-| `LANDING-GEAR-LOCK-PTR` | Gear Lever Lock, UP/DOWN | pilot (defaulted) | default_animated_lever | [3002] | [228] |  |  |
-| `LANDING-GEAR-PTR` | Gear Lever, UP/DOWN | pilot (defaulted) | default_animated_lever | [3001] | [232] |  |  |
-| `PTR-STICK-HIDE-974` | Hide Stick toggle | pilot (defaulted) | default_2_position_tumb | [3031] | [974] |  |  |
-| `STICK-BRAKE-FIX-PTR` | Parking Brake Handle | pilot (defaulted) | default_2_position_tumb | [3027] | [736] |  |  |
-| `STICK-BRAKE-PTR` | Wheel Brakes Handle | pilot (explicit) | stick_button | [3026] | [737] |  |  |
-| `WIPER-MODE-PTR-HISPEED` | Windscreen Wiper Control Switch, SPEED 2 | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |
-| `WIPER-MODE-PTR-LOWSPEED` | Windscreen Wiper Control Switch, SPEED 1 | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |
-| `WIPER-MODE-PTR-OFF` | Windscreen Wiper Control Switch, OFF | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |
-| `WIPER-MODE-PTR-RESET` | Windscreen Wiper Control Switch, RESET | pilot (defaulted) | default_spring_button | [3020] | [418] |  |  |
-| `WIPER-MODE-PTR-START` | Windscreen Wiper Control Switch, START | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |
-| `WIPER-SPRINKLER-PTR` | Window Sprayer Button | pilot (defaulted) | default_button | [3015] | [384] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CANOPY-HANDLE-PTR` | Pilot Door Safety Lock, OPEN/CLOSE | pilot (defaulted) | default_animated_lever | [3017] | [8] |  |  |  |
+| `CANOPY-HANDLE-SAFETY-PTR` | Pilot Door Safety Lock Button | pilot (defaulted) | default_button | [3018] | [189] |  |  |  |
+| `COLLECTIVE-FRICT-PTR` | friction clutch of the collective | pilot (defaulted) | default_button | [3028] | [753] |  |  |  |
+| `EASTER_PILOT` | Cockpit Fan - Touch | pilot (defaulted) | default_button | [3029] | [0] |  |  |  |
+| `FAN-PTR` | Pilot Fan, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3024] | [420] |  |  |  |
+| `HEATER-CLOCK-PTR` | Clock Heating Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3047] | [386] |  |  |  |
+| `HEATER-PPD-LEFT-PTR` | Heating PPD Left, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3043] | [387] |  |  |  |
+| `HEATER-PPD-RIGHT-PTR` | Heating PPD Right, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3045] | [389] |  |  |  |
+| `LANDING-GEAR-EMER-PTR` | Emergency Gear Lever | pilot (defaulted) | default_animated_lever | [3007] | [827] |  |  |  |
+| `LANDING-GEAR-LIGHTS-COVER-PTR` | Gear Indication Lights Cover UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [223] |  |  |  |
+| `LANDING-GEAR-LIGHTS-PTR` | Gear Indication Lights ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [224] |  |  |  |
+| `LANDING-GEAR-LOCK-PTR` | Gear Lever Lock, UP/DOWN | pilot (defaulted) | default_animated_lever | [3002] | [228] |  |  |  |
+| `LANDING-GEAR-PTR` | Gear Lever, UP/DOWN | pilot (defaulted) | default_animated_lever | [3001] | [232] |  |  |  |
+| `PTR-STICK-HIDE-974` | Hide Stick toggle | pilot (defaulted) | default_2_position_tumb | [3031] | [974] |  |  |  |
+| `STICK-BRAKE-FIX-PTR` | Parking Brake Handle | pilot (defaulted) | default_2_position_tumb | [3027] | [736] |  |  |  |
+| `STICK-BRAKE-PTR` | Wheel Brakes Handle | pilot (explicit) | stick_button | [3026] | [737] |  |  |  |
+| `WIPER-MODE-PTR-HISPEED` | Windscreen Wiper Control Switch, SPEED 2 | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |  |
+| `WIPER-MODE-PTR-LOWSPEED` | Windscreen Wiper Control Switch, SPEED 1 | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |  |
+| `WIPER-MODE-PTR-OFF` | Windscreen Wiper Control Switch, OFF | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |  |
+| `WIPER-MODE-PTR-RESET` | Windscreen Wiper Control Switch, RESET | pilot (defaulted) | default_spring_button | [3020] | [418] |  |  |  |
+| `WIPER-MODE-PTR-START` | Windscreen Wiper Control Switch, START | pilot (defaulted) | default_position_tumb | [3020] | [418] |  |  |  |
+| `WIPER-SPRINKLER-PTR` | Window Sprayer Button | pilot (defaulted) | default_button | [3015] | [384] |  |  |  |
 
 ## Device 12 -- RADAR_ALTIMETER
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `RAD-ALT-ON-OFF-PTR` | RV-5 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [372] |  |  |
-| `RADAR-ALTIMETER-KNOB-PTR` | Radar altimeter adjust and test | pilot (explicit) | raw_table_literal | [3002, 3001] | [31, 30] | [1.0, 0.05] |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `RAD-ALT-ON-OFF-PTR` | RV-5 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [372] |  |  |  |
+| `RADAR-ALTIMETER-KNOB-PTR` | Radar altimeter adjust and test | pilot (explicit) | raw_table_literal | [3002, 3001] | [31, 30] | [1.0, 0.05] |  |  |
 
 ## Device 13 -- FIRE_EXTING_INTERFACE
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `EXTINGUISH-CONTROL-PTR` | Extinguisher Control Switch EXING/CNTRL | pilot (defaulted) | default_2_position_tumb | [3010] | [482] |  |  |
-| `FIRE-1-APU-PTR` | Extinguish APU 1 | pilot (defaulted) | default_button | [3005] | [494] |  |  |
-| `FIRE-1-L-ENG-PTR` | Extinguish Left Engine 1 | pilot (defaulted) | default_button | [3001] | [502] |  |  |
-| `FIRE-1-R-ENG-PTR` | Extinguish Right Engine 1 | pilot (defaulted) | default_button | [3003] | [498] |  |  |
-| `FIRE-1-REDUCER-PTR` | Extinguish Gearbox 1 | pilot (defaulted) | default_button | [3007] | [490] |  |  |
-| `FIRE-2-APU-PTR` | Extinguish APU 2 | pilot (defaulted) | default_button | [3006] | [496] |  |  |
-| `FIRE-2-L-ENG-PTR` | Extinguish Left Engine 2 | pilot (defaulted) | default_button | [3002] | [504] |  |  |
-| `FIRE-2-R-ENG-PTR` | Extinguish Right Engine 2 | pilot (defaulted) | default_button | [3004] | [500] |  |  |
-| `FIRE-2-REDUCER-PTR` | Extinguish Gearbox 2 | pilot (defaulted) | default_button | [3008] | [492] |  |  |
-| `FIRE-ALARM-OFF-PTR` | Turn Off Fire Signal Button | pilot (defaulted) | default_button | [3009] | [488] |  |  |
-| `FIRE-POWER-PTR` | Fire Extinguisher Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3014] | [487] |  |  |
-| `FIRE-PYRO-CHANNEL-PTR` | Fire Extinguisher Squib Control | pilot (defaulted) | springloaded_3_pos_tumb | [3011, 3012] | [486] |  |  |
-| `FIRE-SENSOR-CHANNEL-PTR1` | Fire Extinguisher Sensor Cnannel OFF/1/2/3 | pilot (explicit) | triple_switch | [3013] | [484] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `EXTINGUISH-CONTROL-PTR` | Extinguisher Control Switch EXING/CNTRL | pilot (defaulted) | default_2_position_tumb | [3010] | [482] |  |  |  |
+| `FIRE-1-APU-PTR` | Extinguish APU 1 | pilot (defaulted) | default_button | [3005] | [494] |  |  |  |
+| `FIRE-1-L-ENG-PTR` | Extinguish Left Engine 1 | pilot (defaulted) | default_button | [3001] | [502] |  |  |  |
+| `FIRE-1-R-ENG-PTR` | Extinguish Right Engine 1 | pilot (defaulted) | default_button | [3003] | [498] |  |  |  |
+| `FIRE-1-REDUCER-PTR` | Extinguish Gearbox 1 | pilot (defaulted) | default_button | [3007] | [490] |  |  |  |
+| `FIRE-2-APU-PTR` | Extinguish APU 2 | pilot (defaulted) | default_button | [3006] | [496] |  |  |  |
+| `FIRE-2-L-ENG-PTR` | Extinguish Left Engine 2 | pilot (defaulted) | default_button | [3002] | [504] |  |  |  |
+| `FIRE-2-R-ENG-PTR` | Extinguish Right Engine 2 | pilot (defaulted) | default_button | [3004] | [500] |  |  |  |
+| `FIRE-2-REDUCER-PTR` | Extinguish Gearbox 2 | pilot (defaulted) | default_button | [3008] | [492] |  |  |  |
+| `FIRE-ALARM-OFF-PTR` | Turn Off Fire Signal Button | pilot (defaulted) | default_button | [3009] | [488] |  |  |  |
+| `FIRE-POWER-PTR` | Fire Extinguisher Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3014] | [487] |  |  |  |
+| `FIRE-PYRO-CHANNEL-PTR` | Fire Extinguisher Squib Control | pilot (defaulted) | springloaded_3_pos_tumb | [3011, 3012] | [486] |  |  |  |
+| `FIRE-SENSOR-CHANNEL-PTR1` | Fire Extinguisher Sensor Cnannel OFF/1/2/3 | pilot (explicit) | triple_switch | [3013] | [484] |  |  |  |
 
 ## Device 15 -- EXT_LIGHTS_SYSTEM
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `CONTROL-HEADLIGHT-OP-COVER-PTR` | LND Light Assumed Switch Cover, OPEN/CLOSE | operator (explicit) | default_blue_cover | [3012] | [668] |  |  |
-| `CONTROL-HEADLIGHT-OP-PTR` | LND Light Assumed Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3011] | [669] |  |  |
-| `TAXILIGHT-OP-PTR` | Operator Taxi LT Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3002] | [686] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CONTROL-HEADLIGHT-OP-COVER-PTR` | LND Light Assumed Switch Cover, OPEN/CLOSE | operator (explicit) | default_blue_cover | [3012] | [668] |  |  |  |
+| `CONTROL-HEADLIGHT-OP-PTR` | LND Light Assumed Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3011] | [669] |  |  |  |
+| `TAXILIGHT-OP-PTR` | Operator Taxi LT Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3002] | [686] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `CODE-NAVLIGHT-PTR` | Navigation Lights Code Button | pilot (defaulted) | default_button | [3004] | [35] |  |  |
-| `FORMATION-LIGHTS-PTR` | Formation Lights Switch, BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3005] | [414] |  |  |
-| `NAVLIGHT-BRIGHT-DIM-OFF-PTR` | Navigation Lights Switch, BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3003] | [207] |  |  |
-| `ROTOR-LIGHTS-PTR` | Tip Lights Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [415] |  |  |
-| `STROBE-TAIL-PTR` | Strobe Light Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [417] |  |  |
-| `TAXILIGHT-PTR` | Taxi LT Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [34] |  |  |
-| `TAXILIGHT-RETR-PTR` | LND LT Control-Off-Retract switch | pilot (defaulted) | default_3_position_tumb | [3008] | [208] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CODE-NAVLIGHT-PTR` | Navigation Lights Code Button | pilot (defaulted) | default_button | [3004] | [35] |  |  |  |
+| `FORMATION-LIGHTS-PTR` | Formation Lights Switch, BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3005] | [414] |  |  |  |
+| `NAVLIGHT-BRIGHT-DIM-OFF-PTR` | Navigation Lights Switch, BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3003] | [207] |  |  |  |
+| `ROTOR-LIGHTS-PTR` | Tip Lights Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [415] |  |  |  |
+| `STROBE-TAIL-PTR` | Strobe Light Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [417] |  |  |  |
+| `TAXILIGHT-PTR` | Taxi LT Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [34] |  |  |  |
+| `TAXILIGHT-RETR-PTR` | LND LT Control-Off-Retract switch | pilot (defaulted) | default_3_position_tumb | [3008] | [208] |  |  |  |
 
 ## Device 16 -- ASP_17V
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `WEAP-DISTR-CONTROL-OP-PTR` | USR check | operator (explicit) | default_3_position_tumb | [3016] | [762] |  |  |
-| `WEAP-DISTR-POWER-OP-PTR` | USR power | operator (explicit) | default_2_position_tumb | [3015] | [761] |  | `cplr_distr` |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `WEAP-DISTR-CONTROL-OP-PTR` | USR check | operator (explicit) | default_3_position_tumb | [3016] | [762] |  |  |  |
+| `WEAP-DISTR-POWER-OP-PTR` | USR power | operator (explicit) | default_2_position_tumb | [3015] | [761] |  |  | `cplr_distr` |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ILS-ADJUST-HANDLE-PTR` | Sight reflector control | pilot (explicit) | raw_table_literal | [3045, 3046, 3045, 3046] | [1005, 1006, 1005, 1006] | [-1.0, -0.1, 1.0, 0.1] |  |
-| `SIGHT-BASE-KNOB-PTR` | Sight Base and Range Adjustment | pilot (defaulted) | default_axis | [3008] | [557] |  |  |
-| `SIGHT-CONTROL-PTR` | Sight Check | pilot (defaulted) | default_button | [3009] | [570] |  |  |
-| `SIGHT-CROSSHAIR-BACKUP-PTR` | Sight Crosshair Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3013] | [568] |  |  |
-| `SIGHT-CROSSHAIR-BRIGHNTNESS-KNOB-PTR` | Sight Crosshair Brightness Adjustment | pilot (defaulted) | default_axis | [3011] | [564] |  |  |
-| `SIGHT-GRID-BACKUP-PTR` | Sight Grid Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3012] | [569] |  |  |
-| `SIGHT-GRID-BRIGHNTNESS-KNOB-PTR` | Sight Grid Brightness Adjustment | pilot (defaulted) | default_axis | [3010] | [567] |  |  |
-| `SIGHT-HOR-KNOB-PTR` | Sight Crosshair Horizontal Adjustment | pilot (defaulted) | default_axis | [3006] | [566] |  |  |
-| `SIGHT-MAN-AUTO-PTR` | Sight mode MANUAL/AUTO | pilot (defaulted) | default_2_position_tumb | [3001] | [553] |  |  |
-| `SIGHT-SYNC-UNSYNC-PTR` | Sight mode SYNC/ASYNC | pilot (defaulted) | default_2_position_tumb | [3002] | [554] |  |  |
-| `SIGHT-VERT-KNOB-PTR` | Sight Crosshair Vertical Adjustment | pilot (defaulted) | default_axis | [3005] | [556] |  |  |
-| `WEAP-DIST-MAN-AUTO-PTR` | Sight distance MANUAL/AUTO | pilot (defaulted) | default_2_position_tumb | [3003] | [515] |  |  |
-| `WEAP-SIGHT-DIST-PTR` | Sight Range Adjustment | pilot (defaulted) | default_axis | [3004] | [552] |  |  |
-| `WEAP-SIGHT-ON-PFF-PTR` | Sight Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3014] | [529] |  |  |
-| `WEAP-SIGHT-RESET-PTR` | Sight Reset Crosshair | pilot (defaulted) | default_button | [3007] | [528] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ILS-ADJUST-HANDLE-PTR` | Sight reflector control | pilot (explicit) | raw_table_literal | [3045, 3046, 3045, 3046] | [1005, 1006, 1005, 1006] | [-1.0, -0.1, 1.0, 0.1] |  |  |
+| `SIGHT-BASE-KNOB-PTR` | Sight Base and Range Adjustment | pilot (defaulted) | default_axis | [3008] | [557] |  |  |  |
+| `SIGHT-CONTROL-PTR` | Sight Check | pilot (defaulted) | default_button | [3009] | [570] |  |  |  |
+| `SIGHT-CROSSHAIR-BACKUP-PTR` | Sight Crosshair Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3013] | [568] |  |  |  |
+| `SIGHT-CROSSHAIR-BRIGHNTNESS-KNOB-PTR` | Sight Crosshair Brightness Adjustment | pilot (defaulted) | default_axis | [3011] | [564] |  |  |  |
+| `SIGHT-GRID-BACKUP-PTR` | Sight Grid Lamp MAIN/BACKUP | pilot (defaulted) | default_2_position_small_tumb | [3012] | [569] |  |  |  |
+| `SIGHT-GRID-BRIGHNTNESS-KNOB-PTR` | Sight Grid Brightness Adjustment | pilot (defaulted) | default_axis | [3010] | [567] |  |  |  |
+| `SIGHT-HOR-KNOB-PTR` | Sight Crosshair Horizontal Adjustment | pilot (defaulted) | default_axis | [3006] | [566] |  |  |  |
+| `SIGHT-MAN-AUTO-PTR` | Sight mode MANUAL/AUTO | pilot (defaulted) | default_2_position_tumb | [3001] | [553] |  |  |  |
+| `SIGHT-SYNC-UNSYNC-PTR` | Sight mode SYNC/ASYNC | pilot (defaulted) | default_2_position_tumb | [3002] | [554] |  |  |  |
+| `SIGHT-VERT-KNOB-PTR` | Sight Crosshair Vertical Adjustment | pilot (defaulted) | default_axis | [3005] | [556] |  |  |  |
+| `WEAP-DIST-MAN-AUTO-PTR` | Sight distance MANUAL/AUTO | pilot (defaulted) | default_2_position_tumb | [3003] | [515] |  |  |  |
+| `WEAP-SIGHT-DIST-PTR` | Sight Range Adjustment | pilot (defaulted) | default_axis | [3004] | [552] |  |  |  |
+| `WEAP-SIGHT-ON-PFF-PTR` | Sight Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3014] | [529] |  |  |  |
+| `WEAP-SIGHT-RESET-PTR` | Sight Reset Crosshair | pilot (defaulted) | default_button | [3007] | [528] |  |  |  |
 
 ## Device 17 -- PKV
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `BRAKE-LEVEL-OP-PTR` | PKI control | operator (explicit) | raw_table_literal | [3006, 3001, 3001] | [15, 846, 846] | [0.0, 0.0, 0.0] |  |
-| `SIGHT-OP-BRIGHTNESS-PTR` | PKI Brightness Adjustment | operator (explicit) | default_axis | [3004] | [136] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `BRAKE-LEVEL-OP-PTR` | PKI control | operator (explicit) | raw_table_literal | [3006, 3001, 3001] | [15, 846, 846] | [0.0, 0.0, 0.0] |  |  |
+| `SIGHT-OP-BRIGHTNESS-PTR` | PKI Brightness Adjustment | operator (explicit) | default_axis | [3004] | [136] |  |  |  |
 
 ## Device 18 -- UKT_2
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `UKT-KNOB-PTR` | Pitch Trim Knob | pilot (defaulted) | default_axis_limited | [3001] | [951] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `UKT-KNOB-PTR` | Pitch Trim Knob | pilot (defaulted) | default_axis_limited | [3001] | [951] |  |  |  |
 
 ## Device 19 -- SPUU_52
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `SPUU-CONTROL-PTR` | SPUU Control Switch P/NONE/T | pilot (defaulted) | springloaded_3_pos_tumb | [3007, 3006] | [277] |  |  |
-| `SPUU-KNOB-PTR` | SPUU Adjustment Knob | pilot (defaulted) | default_axis | [3003] | [276] |  |  |
-| `SPUU-OFF-PTR` | SPUU OFF (that's a button but acts like a switch) | pilot (defaulted) | default_position_tumb | [3001] | [275] |  |  |
-| `SPUU-ON-OFF-PTR` | SPUU Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3010] | [270] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `SPUU-CONTROL-PTR` | SPUU Control Switch P/NONE/T | pilot (defaulted) | springloaded_3_pos_tumb | [3007, 3006] | [277] |  |  |  |
+| `SPUU-KNOB-PTR` | SPUU Adjustment Knob | pilot (defaulted) | default_axis | [3003] | [276] |  |  |  |
+| `SPUU-OFF-PTR` | SPUU OFF (that's a button but acts like a switch) | pilot (defaulted) | default_position_tumb | [3001] | [275] |  |  |  |
+| `SPUU-ON-OFF-PTR` | SPUU Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3010] | [270] |  |  |  |
 
 ## Device 23 -- INT_LIGHTS_SYSTEM
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `LAMP-CONTROL-OP-PTR` | Test Warning Lights Button | operator (explicit) | default_button | [3009] | [681] |  |  |
-| `LTG-COCKPIT-OP-PTR` | Operator Cabin Lighting Switch, WHITE/OFF/RED | operator (explicit) | default_3_position_tumb | [3001] | [682] |  |  |
-| `RED-LTG1-OP-PTR` | Transformer 1 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | operator (explicit) | multiposition_switch | [3017] | [1013] |  |  |
-| `RED-LTG2-OP-PTR` | Transformer 2 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | operator (explicit) | multiposition_switch | [3018] | [1014] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `LAMP-CONTROL-OP-PTR` | Test Warning Lights Button | operator (explicit) | default_button | [3009] | [681] |  |  |  |
+| `LTG-COCKPIT-OP-PTR` | Operator Cabin Lighting Switch, WHITE/OFF/RED | operator (explicit) | default_3_position_tumb | [3001] | [682] |  |  |  |
+| `RED-LTG1-OP-PTR` | Transformer 1 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | operator (explicit) | multiposition_switch | [3017] | [1013] |  |  |  |
+| `RED-LTG2-OP-PTR` | Transformer 2 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | operator (explicit) | multiposition_switch | [3018] | [1014] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `AUX-LTG-PTR` | Armament Panel Red Lights Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3014] | [822] |  |  |
-| `DAY-NIGHT-PTR` | Day-Night Switch, DAY/NIGHT | pilot (defaulted) | default_2_position_tumb | [3010] | [362] |  |  |
-| `FLASHER-PTR` | Blinker Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3011] | [364] |  |  |
-| `LAMP-CONTROL-PTR` | Test Warning Lights Button | pilot (defaulted) | default_button | [3008] | [363] |  |  |
-| `LTG-CARGO-PTR` | Cargo Lighting Switch, WHITE/OFF/BLUE | pilot (defaulted) | default_3_position_tumb | [3005] | [355] |  |  |
-| `LTG-COCKPIT-PTR` | Pilot Cabin Lighting Switch, WHITE/OFF/RED | pilot (defaulted) | default_3_position_tumb | [3002] | [356] |  |  |
-| `LTG-WHITE-COVER-PTR` | Cargo Lighting Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [353] |  |  |
-| `LTG-WHITE-PTR` | Cargo Lighting Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [354] |  |  |
-| `RED-LTG1-PTR` | Transformer 1 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3012] | [148] |  |  |
-| `RED-LTG2-PTR` | Transformer 2 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3013] | [147] |  |  |
-| `RED-LTG3-PTR` | Builtin Red Lights Transformer, OFF/0.6V/1.2V/1.8V/2.4V/3V/3.6V/4.2V/4.8V/5.4V/6V | pilot (defaulted) | multiposition_switch | [3020] | [149] |  |  |
-| `RED-LTG4-PTR` | Transformer 1 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3015] | [820] |  |  |
-| `RED-LTG5-PTR` | Transformer 2 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3016] | [503] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `AUX-LTG-PTR` | Armament Panel Red Lights Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3014] | [822] |  |  |  |
+| `DAY-NIGHT-PTR` | Day-Night Switch, DAY/NIGHT | pilot (defaulted) | default_2_position_tumb | [3010] | [362] |  |  |  |
+| `FLASHER-PTR` | Blinker Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3011] | [364] |  |  |  |
+| `LAMP-CONTROL-PTR` | Test Warning Lights Button | pilot (defaulted) | default_button | [3008] | [363] |  |  |  |
+| `LTG-CARGO-PTR` | Cargo Lighting Switch, WHITE/OFF/BLUE | pilot (defaulted) | default_3_position_tumb | [3005] | [355] |  |  |  |
+| `LTG-COCKPIT-PTR` | Pilot Cabin Lighting Switch, WHITE/OFF/RED | pilot (defaulted) | default_3_position_tumb | [3002] | [356] |  |  |  |
+| `LTG-WHITE-COVER-PTR` | Cargo Lighting Switch Cover, UP/DOWN | pilot (defaulted) | default_blue_cover | [3004] | [353] |  |  |  |
+| `LTG-WHITE-PTR` | Cargo Lighting Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [354] |  |  |  |
+| `RED-LTG1-PTR` | Transformer 1 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3012] | [148] |  |  |  |
+| `RED-LTG2-PTR` | Transformer 2 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3013] | [147] |  |  |  |
+| `RED-LTG3-PTR` | Builtin Red Lights Transformer, OFF/0.6V/1.2V/1.8V/2.4V/3V/3.6V/4.2V/4.8V/5.4V/6V | pilot (defaulted) | multiposition_switch | [3020] | [149] |  |  |  |
+| `RED-LTG4-PTR` | Transformer 1 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3015] | [820] |  |  |  |
+| `RED-LTG5-PTR` | Transformer 2 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V | pilot (defaulted) | multiposition_switch | [3016] | [503] |  |  |  |
 
 ## Device 25 -- MGV1SU_1
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GYRO1-CAGE-PTR` | Cage Gyro 1 | pilot (defaulted) | default_button | [3001] | [10] |  |  |
-| `MGV1-POWER-PTR` | Gyro 1 Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [369] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GYRO1-CAGE-PTR` | Cage Gyro 1 | pilot (defaulted) | default_button | [3001] | [10] |  |  |  |
+| `MGV1-POWER-PTR` | Gyro 1 Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [369] |  |  |  |
 
 ## Device 26 -- MGV1SU_2
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GYRO-CAGE-OP-PTR` | Cage Gyro 2 | operator (explicit) | default_button | [3003] | [701] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GYRO-CAGE-OP-PTR` | Cage Gyro 2 | operator (explicit) | default_button | [3003] | [701] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GYRO2-CAGE-PTR` | Cage Gyro 2 | pilot (defaulted) | default_button | [3001] | [14] |  |  |
-| `MGV2-POWER-PTR` | Gyro 2 Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [368] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GYRO2-CAGE-PTR` | Cage Gyro 2 | pilot (defaulted) | default_button | [3001] | [14] |  |  |  |
+| `MGV2-POWER-PTR` | Gyro 2 Power, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [368] |  |  |  |
 
 ## Device 27 -- GREBEN
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GREBEN-LATITUDE-PTR` | Greben Set Latitude | pilot (defaulted) | default_axis | [3004] | [448] |  |  |
-| `GREBEN-MATCH-PTR` | Greben Match | pilot (defaulted) | default_button | [3007] | [450] |  |  |
-| `GREBEN-MODE-PTR` | Greben' mode ZK/GPK/MK | pilot (defaulted) | default_3_position_tumb | [3009] | [449] |  |  |
-| `GREBEN-ON-PFF-PTR` | Greben' ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [367] |  |  |
-| `GREBEN-SETUP-PTR` | Greben' mode SETUP/OPER | pilot (defaulted) | default_2_position_tumb | [3012] | [451] |  |  |
-| `RMI-COURSE-KNOB-PTR` | Course setter | pilot (defaulted) | default_axis | [3015] | [858] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GREBEN-LATITUDE-PTR` | Greben Set Latitude | pilot (defaulted) | default_axis | [3004] | [448] |  |  |  |
+| `GREBEN-MATCH-PTR` | Greben Match | pilot (defaulted) | default_button | [3007] | [450] |  |  |  |
+| `GREBEN-MODE-PTR` | Greben' mode ZK/GPK/MK | pilot (defaulted) | default_3_position_tumb | [3009] | [449] |  |  |  |
+| `GREBEN-ON-PFF-PTR` | Greben' ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [367] |  |  |  |
+| `GREBEN-SETUP-PTR` | Greben' mode SETUP/OPER | pilot (defaulted) | default_2_position_tumb | [3012] | [451] |  |  |  |
+| `RMI-COURSE-KNOB-PTR` | Course setter | pilot (defaulted) | default_axis | [3015] | [858] |  |  |  |
 
 ## Device 29 -- ECS_INTERFACE
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `WEAP-MISSILES-SIGHT-FAN-OP-PTR` | Sight Fan, ON/OFF | operator (explicit) | default_2_position_tumb | [3007] | [774] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `WEAP-MISSILES-SIGHT-FAN-OP-PTR` | Sight Fan, ON/OFF | operator (explicit) | default_2_position_tumb | [3007] | [774] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `AC-FILTER-PTR` | Filter Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [143] |  |  |
-| `AC-HEATER1-MODE-PTR` | Heating Switch, HOT/NORMAL | pilot (defaulted) | default_2_position_tumb | [3004] | [144] |  |  |
-| `AC-HEATER2-MODE-PTR` | Automatic Hot Cold Switch, OFF/COLD/HOT/AUTO | pilot (defaulted) | multiposition_switch | [3005] | [145] |  |  |
-| `AC-MODE-PTR` | Blowdown Conditioning Switch, CONDITIONING/OFF/BLOWDOWN | pilot (defaulted) | default_3_position_tumb | [3002] | [134] |  |  |
-| `AC-TEMP-KNOB-PTR` | Temperature Selector, 5/10/15/18/20/22/24/30/35/40/50 | pilot (defaulted) | multiposition_switch | [3006] | [146] |  |  |
-| `CABIN-DEPRESS-PTR` | Cabin Unseal Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [133] |  |  |
-| `CABIN-PRESS-VALVE-PTR` | Sealing, OPEN/CLOSE | pilot (defaulted) | default_axis_limited | [3008] | [516] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `AC-FILTER-PTR` | Filter Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [143] |  |  |  |
+| `AC-HEATER1-MODE-PTR` | Heating Switch, HOT/NORMAL | pilot (defaulted) | default_2_position_tumb | [3004] | [144] |  |  |  |
+| `AC-HEATER2-MODE-PTR` | Automatic Hot Cold Switch, OFF/COLD/HOT/AUTO | pilot (defaulted) | multiposition_switch | [3005] | [145] |  |  |  |
+| `AC-MODE-PTR` | Blowdown Conditioning Switch, CONDITIONING/OFF/BLOWDOWN | pilot (defaulted) | default_3_position_tumb | [3002] | [134] |  |  |  |
+| `AC-TEMP-KNOB-PTR` | Temperature Selector, 5/10/15/18/20/22/24/30/35/40/50 | pilot (defaulted) | multiposition_switch | [3006] | [146] |  |  |  |
+| `CABIN-DEPRESS-PTR` | Cabin Unseal Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [133] |  |  |  |
+| `CABIN-PRESS-VALVE-PTR` | Sealing, OPEN/CLOSE | pilot (defaulted) | default_axis_limited | [3008] | [516] |  |  |  |
 
 ## Device 30 -- HELPER_AI
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `OP-COLL-ENGAGE-PTR` | Engage Stick | operator (explicit) | default_button | [3011] | [865] |  |  |
-| `OP-STICK-DISENGAGE-COVER-PTR` | Disengage Stick Cover | operator (explicit) | default_blue_cover | [3013] | [857] |  |  |
-| `OP-STICK-DISENGAGE-PTR` | Disengage Stick | operator (explicit) | default_button | [3012] | [859] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `OP-COLL-ENGAGE-PTR` | Engage Stick | operator (explicit) | default_button | [3011] | [865] |  |  |  |
+| `OP-STICK-DISENGAGE-COVER-PTR` | Disengage Stick Cover | operator (explicit) | default_blue_cover | [3013] | [857] |  |  |  |
+| `OP-STICK-DISENGAGE-PTR` | Disengage Stick | operator (explicit) | default_button | [3012] | [859] |  |  |  |
 
 ## Device 32 -- PKP72M_P
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `PKP-INIT-PITCH-KNOB-PTR` | Pitch Trim Knob | pilot (defaulted) | default_axis_limited | [3001] | [941] |  |  |
-| `PKP-TEST-PTR` | Test ADI Button | pilot (defaulted) | default_button | [3002] | [946] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `PKP-INIT-PITCH-KNOB-PTR` | Pitch Trim Knob | pilot (defaulted) | default_axis_limited | [3001] | [941] |  |  |  |
+| `PKP-TEST-PTR` | Test ADI Button | pilot (defaulted) | default_button | [3002] | [946] |  |  |  |
 
 ## Device 33 -- PKP72M_O
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `PKP-INIT-PITCH-KNOB-OP-PTR` | Pitch Trim Knob | operator (explicit) | default_axis_limited | [3001] | [782] |  |  |
-| `PKP-TEST-OP-PTR` | Test ADI Button | operator (explicit) | default_button | [3002] | [787] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `PKP-INIT-PITCH-KNOB-OP-PTR` | Pitch Trim Knob | operator (explicit) | default_axis_limited | [3001] | [782] |  |  |  |
+| `PKP-TEST-OP-PTR` | Test ADI Button | operator (explicit) | default_button | [3002] | [787] |  |  |  |
 
 ## Device 34 -- PKP72M_INTERFACE
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `PKP-POWER-OP-PTR` | ADI Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3002] | [759] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `PKP-POWER-OP-PTR` | ADI Switch, ON/OFF | operator (explicit) | default_2_position_tumb | [3002] | [759] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GYRO-SEL-PTR` | Gyrovertical Switch, 1/2 | pilot (defaulted) | default_2_position_tumb | [3001] | [12] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GYRO-SEL-PTR` | Gyrovertical Switch, 1/2 | pilot (defaulted) | default_2_position_tumb | [3001] | [12] |  |  |  |
 
 ## Device 35 -- CLOCK_P
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `CLOCK-LEFT-PTR` | Mech clock left lever | pilot (explicit) | raw_table_literal | [3001, 3002, 3003] | [57, 57, 58] | [1.0, -1.0, 1.0] |  |
-| `CLOCK-RIGHT-PTR` | Mech clock right lever | pilot (explicit) | raw_table_literal | [3004, 3005] | [59, 60] | [1.0, 0.05] |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CLOCK-LEFT-PTR` | Mech clock left lever | pilot (explicit) | raw_table_literal | [3001, 3002, 3003] | [57, 57, 58] | [1.0, -1.0, 1.0] |  |  |
+| `CLOCK-RIGHT-PTR` | Mech clock right lever | pilot (explicit) | raw_table_literal | [3004, 3005] | [59, 60] | [1.0, 0.05] |  |  |
 
 ## Device 36 -- CLOCK_O
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `CLOCK-LEFT-OP-PTR` | Mech clock left lever | operator (explicit) | raw_table_literal | [3001, 3002, 3003] | [687, 687, 688] | [1.0, -1.0, 1.0] |  |
-| `CLOCK-RIGHT-OP-PTR` | Mech clock right lever | operator (explicit) | raw_table_literal | [3004, 3005] | [693, 694] | [1.0, 0.05] |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CLOCK-LEFT-OP-PTR` | Mech clock left lever | operator (explicit) | raw_table_literal | [3001, 3002, 3003] | [687, 687, 688] | [1.0, -1.0, 1.0] |  |  |
+| `CLOCK-RIGHT-OP-PTR` | Mech clock right lever | operator (explicit) | raw_table_literal | [3004, 3005] | [693, 694] | [1.0, 0.05] |  |  |
 
 ## Device 37 -- FM_PROXY
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `STATIC-VALVE-PTR` | Static valve sensor select LEFT/BOTH/RIGHT | pilot (defaulted) | default_3_position_tumb | [3001] | [520] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `STATIC-VALVE-PTR` | Static valve sensor select LEFT/BOTH/RIGHT | pilot (defaulted) | default_3_position_tumb | [3001] | [520] |  |  |  |
 
 ## Device 41 -- BAROALT_P
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ALTIMETER-KNOB-PTR` | Baro Pressure Knob | pilot (defaulted) | default_axis | [3001] | [18] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ALTIMETER-KNOB-PTR` | Baro Pressure Knob | pilot (defaulted) | default_axis | [3001] | [18] |  |  |  |
 
 ## Device 42 -- BAROALT_O
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ALTIMETER-KNOB-OP-PTR` | Operator Baro Pressure Knob | operator (explicit) | default_axis | [3001] | [788] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ALTIMETER-KNOB-OP-PTR` | Operator Baro Pressure Knob | operator (explicit) | default_axis | [3001] | [788] |  |  |  |
 
 ## Device 43 -- RMI2_P
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `RMI-KUR-2-PTR` | Mode Switch, ZK/ARKU2 | pilot (defaulted) | default_2_position_tumb | [3002] | [26] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `RMI-KUR-2-PTR` | Mode Switch, ZK/ARKU2 | pilot (defaulted) | default_2_position_tumb | [3002] | [26] |  |  |  |
 
 ## Device 44 -- RMI2_O
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ZK_ARK_U005` | Mode Switch, ZK/ARKU2 | operator (explicit) | default_2_position_tumb | [3002] | [843] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ZK_ARK_U005` | Mode Switch, ZK/ARKU2 | operator (explicit) | default_2_position_tumb | [3002] | [843] |  |  |  |
 
 ## Device 45 -- MAP_DISPLAY
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `MAP-LIGHT-PTR` | Map Highlight  BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3011] | [192] |  |  |
-| `MAPDISPLAY-HOR-PTR` | Set the horizontall position of the helicopter on the Map  | pilot (defaulted) | default_axis | [3006] | [983] |  |  |
-| `MAPDISPLAY-POWER-PTR` | Map Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [984] |  |  |
-| `MAPDISPLAY-SCALE-PTR` | Map Scale Selector | pilot (defaulted) | default_2_position_tumb | [3001] | [985] |  |  |
-| `MAPDISPLAY-VERT-PTR` | Set the vertical position of the helicopter on the Map  | pilot (defaulted) | default_axis | [3004] | [291] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `MAP-LIGHT-PTR` | Map Highlight  BRIGHT/OFF/DIM | pilot (defaulted) | default_3_position_tumb | [3011] | [192] |  |  |  |
+| `MAPDISPLAY-HOR-PTR` | Set the horizontall position of the helicopter on the Map  | pilot (defaulted) | default_axis | [3006] | [983] |  |  |  |
+| `MAPDISPLAY-POWER-PTR` | Map Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [984] |  |  |  |
+| `MAPDISPLAY-SCALE-PTR` | Map Scale Selector | pilot (defaulted) | default_2_position_tumb | [3001] | [985] |  |  |  |
+| `MAPDISPLAY-VERT-PTR` | Set the vertical position of the helicopter on the Map  | pilot (defaulted) | default_axis | [3004] | [291] |  |  |  |
 
 ## Device 47 -- ARC_15_PANEL_P
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ARC-AUTH-PTR` | ARC-15 Control Button | pilot (defaulted) | default_button | [3012] | [461] |  |  |
-| `ARC-CH1-CENTER-PTR` | ARC-15 Left Frequency | pilot (defaulted) | multiposition_switch | [3005] | [468] |  |  |
-| `ARC-CH1-IN-PTR` | ARC-15 Left Frequency | pilot (defaulted) | multiposition_switch | [3006] | [469] |  |  |
-| `ARC-CH1-OUT-KNOB` | ARC-15 Left Frequency | pilot (defaulted) | multiposition_switch | [3004] | [467] |  |  |
-| `ARC-CH2-CENTER-PTR` | ARC-15 Right Frequency | pilot (defaulted) | multiposition_switch | [3008] | [465] |  |  |
-| `ARC-CH2-IN-PTR` | ARC-15 Right Frequency | pilot (defaulted) | multiposition_switch | [3009] | [466] |  |  |
-| `ARC-CH2-OUT-KNOB` | ARC-15 Right Frequency | pilot (defaulted) | multiposition_switch | [3007] | [464] |  |  |
-| `ARC-CHANNEL-PTR` | ARC-15 1/2 | pilot (defaulted) | default_2_position_small_tumb | [3011] | [462] |  |  |
-| `ARC-FRAME-PTR` | ARC-15 Loop Button | pilot (defaulted) | default_button | [3010] | [458] |  |  |
-| `ARC-MODE-PTR` | ARC-15 mode OFF/COMPASS/ANT/FRAME | pilot (defaulted) | multiposition_switch | [3003] | [463] |  |  |
-| `ARC-MODULATED-PTR` | ARC-15 TLF/TLG | pilot (defaulted) | default_2_position_small_tumb | [3002] | [460] |  |  |
-| `ARC-VOLUME-PTR` | ARC-15 Volume | pilot (defaulted) | default_axis | [3001] | [459] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ARC-AUTH-PTR` | ARC-15 Control Button | pilot (defaulted) | default_button | [3012] | [461] |  |  |  |
+| `ARC-CH1-CENTER-PTR` | ARC-15 Left Frequency | pilot (defaulted) | multiposition_switch | [3005] | [468] |  |  |  |
+| `ARC-CH1-IN-PTR` | ARC-15 Left Frequency | pilot (defaulted) | multiposition_switch | [3006] | [469] |  |  |  |
+| `ARC-CH1-OUT-KNOB` | ARC-15 Left Frequency | pilot (defaulted) | multiposition_switch | [3004] | [467] |  |  |  |
+| `ARC-CH2-CENTER-PTR` | ARC-15 Right Frequency | pilot (defaulted) | multiposition_switch | [3008] | [465] |  |  |  |
+| `ARC-CH2-IN-PTR` | ARC-15 Right Frequency | pilot (defaulted) | multiposition_switch | [3009] | [466] |  |  |  |
+| `ARC-CH2-OUT-KNOB` | ARC-15 Right Frequency | pilot (defaulted) | multiposition_switch | [3007] | [464] |  |  |  |
+| `ARC-CHANNEL-PTR` | ARC-15 1/2 | pilot (defaulted) | default_2_position_small_tumb | [3011] | [462] |  |  |  |
+| `ARC-FRAME-PTR` | ARC-15 Loop Button | pilot (defaulted) | default_button | [3010] | [458] |  |  |  |
+| `ARC-MODE-PTR` | ARC-15 mode OFF/COMPASS/ANT/FRAME | pilot (defaulted) | multiposition_switch | [3003] | [463] |  |  |  |
+| `ARC-MODULATED-PTR` | ARC-15 TLF/TLG | pilot (defaulted) | default_2_position_small_tumb | [3002] | [460] |  |  |  |
+| `ARC-VOLUME-PTR` | ARC-15 Volume | pilot (defaulted) | default_axis | [3001] | [459] |  |  |  |
 
 ## Device 48 -- ARC_15_PANEL_O
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ARC-OP-AUTH-PTR` | ARC-15 Control Button | operator (explicit) | default_button | [3012] | [636] |  |  |
-| `ARC-OP-CH1-CENTER-PTR` | ARC-15 Right Frequency | operator (explicit) | multiposition_switch | [3008] | [643] |  |  |
-| `ARC-OP-CH1-IN-PTR` | ARC-15 Right Frequency | operator (explicit) | multiposition_switch | [3009] | [644] |  |  |
-| `ARC-OP-CH1-OUT-KNOB` | ARC-15 Right Frequency | operator (explicit) | multiposition_switch | [3007] | [642] |  |  |
-| `ARC-OP-CH2-CENTER-PTR` | ARC-15 Left Frequency | operator (explicit) | multiposition_switch | [3005] | [640] |  |  |
-| `ARC-OP-CH2-IN-PTR` | ARC-15 Left Frequency | operator (explicit) | multiposition_switch | [3006] | [641] |  |  |
-| `ARC-OP-CH2-OUT-KNOB` | ARC-15 Left Frequency | operator (explicit) | multiposition_switch | [3004] | [639] |  |  |
-| `ARC-OP-CHANNEL-PTR` | ARC-15 1/2 | operator (explicit) | default_2_position_small_tumb | [3011] | [637] |  |  |
-| `ARC-OP-FRAME-PTR` | ARC-15 Loop Button | operator (explicit) | default_button | [3010] | [633] |  |  |
-| `ARC-OP-MODE-PTR` | ARC-15 mode OFF/COMPASS/ANT/FRAME | operator (explicit) | multiposition_switch | [3003] | [638] |  |  |
-| `ARC-OP-MODULATED-PTR` | ARC-15 TLF/TLG | operator (explicit) | default_2_position_small_tumb | [3002] | [635] |  |  |
-| `ARC-OP-VOLUME-PTR` | ARC-15 Volume | operator (explicit) | default_axis | [3001] | [634] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ARC-OP-AUTH-PTR` | ARC-15 Control Button | operator (explicit) | default_button | [3012] | [636] |  |  |  |
+| `ARC-OP-CH1-CENTER-PTR` | ARC-15 Right Frequency | operator (explicit) | multiposition_switch | [3008] | [643] |  |  |  |
+| `ARC-OP-CH1-IN-PTR` | ARC-15 Right Frequency | operator (explicit) | multiposition_switch | [3009] | [644] |  |  |  |
+| `ARC-OP-CH1-OUT-KNOB` | ARC-15 Right Frequency | operator (explicit) | multiposition_switch | [3007] | [642] |  |  |  |
+| `ARC-OP-CH2-CENTER-PTR` | ARC-15 Left Frequency | operator (explicit) | multiposition_switch | [3005] | [640] |  |  |  |
+| `ARC-OP-CH2-IN-PTR` | ARC-15 Left Frequency | operator (explicit) | multiposition_switch | [3006] | [641] |  |  |  |
+| `ARC-OP-CH2-OUT-KNOB` | ARC-15 Left Frequency | operator (explicit) | multiposition_switch | [3004] | [639] |  |  |  |
+| `ARC-OP-CHANNEL-PTR` | ARC-15 1/2 | operator (explicit) | default_2_position_small_tumb | [3011] | [637] |  |  |  |
+| `ARC-OP-FRAME-PTR` | ARC-15 Loop Button | operator (explicit) | default_button | [3010] | [633] |  |  |  |
+| `ARC-OP-MODE-PTR` | ARC-15 mode OFF/COMPASS/ANT/FRAME | operator (explicit) | multiposition_switch | [3003] | [638] |  |  |  |
+| `ARC-OP-MODULATED-PTR` | ARC-15 TLF/TLG | operator (explicit) | default_2_position_small_tumb | [3002] | [635] |  |  |  |
+| `ARC-OP-VOLUME-PTR` | ARC-15 Volume | operator (explicit) | default_axis | [3001] | [634] |  |  |  |
 
 ## Device 49 -- R_863
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `R863-AP-PTR` | R-863 Emergency Receiver ON/OFF | pilot (defaulted) | default_2_position_tumb | [3015] | [507] |  |  |
-| `R863-CHANNEL-PTR` | R-863 Channel Select | pilot (defaulted) | multiposition_switch | [3007] | [513] |  |  |
-| `R863-MODULATION-PTR` | R-863 FM/AM | pilot (defaulted) | default_2_position_tumb | [3004] | [506] |  |  |
-| `R863-ON-OFF-PTR` | R-863 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [375] |  |  |
-| `R863-PSH-PTR` | R-863 Squelch ON/OFF | pilot (defaulted) | default_2_position_tumb | [3009] | [510] |  |  |
-| `R863-RK-PTR` | R-863 ARC-UD ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [509] |  |  |
-| `R863-VOLUME-KNOB-PTR` | R-863 Volume | pilot (defaulted) | default_axis | [3012] | [511] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `R863-AP-PTR` | R-863 Emergency Receiver ON/OFF | pilot (defaulted) | default_2_position_tumb | [3015] | [507] |  |  |  |
+| `R863-CHANNEL-PTR` | R-863 Channel Select | pilot (defaulted) | multiposition_switch | [3007] | [513] |  |  |  |
+| `R863-MODULATION-PTR` | R-863 FM/AM | pilot (defaulted) | default_2_position_tumb | [3004] | [506] |  |  |  |
+| `R863-ON-OFF-PTR` | R-863 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [375] |  |  |  |
+| `R863-PSH-PTR` | R-863 Squelch ON/OFF | pilot (defaulted) | default_2_position_tumb | [3009] | [510] |  |  |  |
+| `R863-RK-PTR` | R-863 ARC-UD ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [509] |  |  |  |
+| `R863-VOLUME-KNOB-PTR` | R-863 Volume | pilot (defaulted) | default_axis | [3012] | [511] |  |  |  |
 
 ## Device 50 -- JADRO_1I
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `JADRO-001-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3004] | [437] |  |  |
-| `JADRO-01-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3007] | [436] |  |  |
-| `JADRO-1-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3010] | [429] |  |  |
-| `JADRO-10-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3013] | [428] |  |  |
-| `JADRO-100-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3016] | [427] |  |  |
-| `JADRO-CONTROL-PTR` | Jadro-1I Test | pilot (defaulted) | default_button | [3025] | [423] |  |  |
-| `JADRO-MODULATION-PTR` | Jadro-1I Mode OFF/AM/OM | pilot (defaulted) | multiposition_switch | [3001] | [438] |  |  |
-| `JADRO-ON-OFF-PTR` | Jadro-1I ON/OFF | pilot (defaulted) | default_2_position_tumb | [3027] | [374] |  |  |
-| `JADRO-PSH-PTR` | Jadro-1I Squelch | pilot (defaulted) | default_axis | [3022] | [421] |  |  |
-| `JADRO-VOLUME-PTR` | Jadro-1I Volume | pilot (defaulted) | default_axis | [3019] | [426] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `JADRO-001-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3004] | [437] |  |  |  |
+| `JADRO-01-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3007] | [436] |  |  |  |
+| `JADRO-1-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3010] | [429] |  |  |  |
+| `JADRO-10-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3013] | [428] |  |  |  |
+| `JADRO-100-PTR` | Jadro-1I Frequency | pilot (defaulted) | radio_wheel_1 | [3016] | [427] |  |  |  |
+| `JADRO-CONTROL-PTR` | Jadro-1I Test | pilot (defaulted) | default_button | [3025] | [423] |  |  |  |
+| `JADRO-MODULATION-PTR` | Jadro-1I Mode OFF/AM/OM | pilot (defaulted) | multiposition_switch | [3001] | [438] |  |  |  |
+| `JADRO-ON-OFF-PTR` | Jadro-1I ON/OFF | pilot (defaulted) | default_2_position_tumb | [3027] | [374] |  |  |  |
+| `JADRO-PSH-PTR` | Jadro-1I Squelch | pilot (defaulted) | default_axis | [3022] | [421] |  |  |  |
+| `JADRO-VOLUME-PTR` | Jadro-1I Volume | pilot (defaulted) | default_axis | [3019] | [426] |  |  |  |
 
 ## Device 51 -- EUCALYPT_M24
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `EUCAL-ASY-PTR` | R-828 ASU | pilot (defaulted) | default_button | [3003] | [340] |  |  |
-| `EUCAL-CHANNEL-PTR` | R-828 Channel Select | pilot (defaulted) | multiposition_switch | [3001] | [337] |  |  |
-| `EUCAL-PSH-PTR` | R-828 Squelch ON/OFF | pilot (defaulted) | default_2_position_small_tumb | [3004] | [341] |  |  |
-| `EUCAL-VOLUME-PTR` | R-828 Volume | pilot (defaulted) | default_axis | [3002] | [339] |  |  |
-| `R828-ON-OFF-PTR` | R-828 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3005] | [373] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `EUCAL-ASY-PTR` | R-828 ASU | pilot (defaulted) | default_button | [3003] | [340] |  |  |  |
+| `EUCAL-CHANNEL-PTR` | R-828 Channel Select | pilot (defaulted) | multiposition_switch | [3001] | [337] |  |  |  |
+| `EUCAL-PSH-PTR` | R-828 Squelch ON/OFF | pilot (defaulted) | default_2_position_small_tumb | [3004] | [341] |  |  |  |
+| `EUCAL-VOLUME-PTR` | R-828 Volume | pilot (defaulted) | default_axis | [3002] | [339] |  |  |  |
+| `R828-ON-OFF-PTR` | R-828 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3005] | [373] |  |  |  |
 
 ## Device 52 -- R_852
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `R852-CHANNEL-PTR` | R-852 Channel Select | pilot (defaulted) | multiposition_switch | [3001] | [518] |  |  |
-| `R852-VOLUME-KNOB-PTR` | R-852 Volume | pilot (defaulted) | default_axis | [3004] | [517] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `R852-CHANNEL-PTR` | R-852 Channel Select | pilot (defaulted) | multiposition_switch | [3001] | [518] |  |  |  |
+| `R852-VOLUME-KNOB-PTR` | R-852 Volume | pilot (defaulted) | default_axis | [3004] | [517] |  |  |  |
 
 ## Device 53 -- G_Meter
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GFORCE-RESET-PTR` | Accelerometer Reset Button - Push to reset | pilot (defaulted) | default_button | [3001] | [947] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GFORCE-RESET-PTR` | Accelerometer Reset Button - Push to reset | pilot (defaulted) | default_button | [3001] | [947] |  |  |  |
 
 ## Device 54 -- ARC_U2
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `ARC-U2-COMPASS-CONNECT-PTR` | ARC-U2 switcher COMPASS R-852–RADIOLINK–COMPASS R-828 | pilot (defaulted) | default_3_position_tumb | [3005] | [327] |  |  |
-| `ARC-U2-FRAME-PTR` | ARC-U2 switcher L–RAMKA-P | pilot (defaulted) | springloaded_3_pos_tumb | [3002, 3003] | [325] |  |  |
-| `ARC-U2-ON-OFF-PTR` | ARC-U2 switcher On/Off | pilot (defaulted) | default_2_position_tumb | [3001] | [324] |  |  |
-| `ARC-U2-SENS-PTR` | ARC-U2 switcher sensitivity B-M | pilot (defaulted) | default_2_position_tumb | [3004] | [326] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ARC-U2-COMPASS-CONNECT-PTR` | ARC-U2 switcher COMPASS R-852–RADIOLINK–COMPASS R-828 | pilot (defaulted) | default_3_position_tumb | [3005] | [327] |  |  |  |
+| `ARC-U2-FRAME-PTR` | ARC-U2 switcher L–RAMKA-P | pilot (defaulted) | springloaded_3_pos_tumb | [3002, 3003] | [325] |  |  |  |
+| `ARC-U2-ON-OFF-PTR` | ARC-U2 switcher On/Off | pilot (defaulted) | default_2_position_tumb | [3001] | [324] |  |  |  |
+| `ARC-U2-SENS-PTR` | ARC-U2 switcher sensitivity B-M | pilot (defaulted) | default_2_position_tumb | [3004] | [326] |  |  |  |
 
 ## Device 55 -- SPU_8
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `OP-STICK-PTT-PTR` | Trigger Button, RADIO(LMB)/ICS(RMB) | operator (explicit) | raw_table_literal | [3025, 3025] | [856, 856] | [1.0, 0.5] |  |
-| `SPU8-OP-CV-PTR` | Circular Call Button (N/F) | operator (explicit) | default_button | [3014] | [658] |  |  |
-| `SPU8-OP-EXT-PTR` | Radio/ICS Switch | operator (explicit) | default_2_position_tumb | [3012] | [660] |  |  |
-| `SPU8-OP-MODE-PTR` | Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2 | operator (explicit) | multiposition_switch | [3011] | [659] |  |  |
-| `SPU8-OP-NET-PTR` | Network 1/2 Switch (N/F) | operator (explicit) | default_2_position_tumb | [3013] | [656] |  |  |
-| `SPU8-OP-PTR` | SPU-8 Intercom Power ON/OFF | operator (explicit) | default_2_position_tumb | [3015] | [664] |  |  |
-| `SPU8-OP-RADIO-VOL-KNOB-PTR` | SPU-8 Radio Volume Knob | operator (explicit) | default_axis_limited | [3010] | [657] |  |  |
-| `SPU8-OP-VOLUME-PTR` | SPU-8 Volume Knob | operator (explicit) | default_axis_limited | [3009] | [661] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `OP-STICK-PTT-PTR` | Trigger Button, RADIO(LMB)/ICS(RMB) | operator (explicit) | raw_table_literal | [3025, 3025] | [856, 856] | [1.0, 0.5] |  |  |
+| `SPU8-OP-CV-PTR` | Circular Call Button (N/F) | operator (explicit) | default_button | [3014] | [658] |  |  |  |
+| `SPU8-OP-EXT-PTR` | Radio/ICS Switch | operator (explicit) | default_2_position_tumb | [3012] | [660] |  |  |  |
+| `SPU8-OP-MODE-PTR` | Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2 | operator (explicit) | multiposition_switch | [3011] | [659] |  |  |  |
+| `SPU8-OP-NET-PTR` | Network 1/2 Switch (N/F) | operator (explicit) | default_2_position_tumb | [3013] | [656] |  |  |  |
+| `SPU8-OP-PTR` | SPU-8 Intercom Power ON/OFF | operator (explicit) | default_2_position_tumb | [3015] | [664] |  |  |  |
+| `SPU8-OP-RADIO-VOL-KNOB-PTR` | SPU-8 Radio Volume Knob | operator (explicit) | default_axis_limited | [3010] | [657] |  |  |  |
+| `SPU8-OP-VOLUME-PTR` | SPU-8 Volume Knob | operator (explicit) | default_axis_limited | [3009] | [661] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `SPU8-1-ON-OFF-PTR` | Switch SPU-8 NET-2 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [376] |  |  |
-| `SPU8-2-ON-OFF-PTR` | Switch SPU-8 NET-1 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3017] | [377] |  |  |
-| `SPU8-CV-PTR` | Circular Call Button (N/F) | pilot (defaulted) | default_button | [3008] | [454] |  |  |
-| `SPU8-EXT-PTR` | Radio/ICS Switch | pilot (defaulted) | default_2_position_tumb | [3004] | [456] |  |  |
-| `SPU8-MODE-PTR` | Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2 | pilot (defaulted) | multiposition_switch | [3003] | [455] |  |  |
-| `SPU8-NET-PTR` | Network 1/2 Switch (N/F) | pilot (defaulted) | default_2_position_tumb | [3007] | [452] |  |  |
-| `SPU8-RADIO-VOL-KNOB-PTR` | SPU-8 Radio Volume Knob | pilot (defaulted) | default_axis_limited | [3002] | [453] |  |  |
-| `SPU8-VOLUME-PTR` | SPU-8 Volume Knob | pilot (defaulted) | default_axis_limited | [3001] | [457] |  |  |
-| `STICK-PTT-PTR` | Trigger Button, RADIO(LMB)/ICS(RMB) | pilot (explicit) | raw_table_literal | [3024, 3024] | [738, 738] | [1.0, 0.5] |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `SPU8-1-ON-OFF-PTR` | Switch SPU-8 NET-2 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3018] | [376] |  |  |  |
+| `SPU8-2-ON-OFF-PTR` | Switch SPU-8 NET-1 ON/OFF | pilot (defaulted) | default_2_position_tumb | [3017] | [377] |  |  |  |
+| `SPU8-CV-PTR` | Circular Call Button (N/F) | pilot (defaulted) | default_button | [3008] | [454] |  |  |  |
+| `SPU8-EXT-PTR` | Radio/ICS Switch | pilot (defaulted) | default_2_position_tumb | [3004] | [456] |  |  |  |
+| `SPU8-MODE-PTR` | Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2 | pilot (defaulted) | multiposition_switch | [3003] | [455] |  |  |  |
+| `SPU8-NET-PTR` | Network 1/2 Switch (N/F) | pilot (defaulted) | default_2_position_tumb | [3007] | [452] |  |  |  |
+| `SPU8-RADIO-VOL-KNOB-PTR` | SPU-8 Radio Volume Knob | pilot (defaulted) | default_axis_limited | [3002] | [453] |  |  |  |
+| `SPU8-VOLUME-PTR` | SPU-8 Volume Knob | pilot (defaulted) | default_axis_limited | [3001] | [457] |  |  |  |
+| `STICK-PTT-PTR` | Trigger Button, RADIO(LMB)/ICS(RMB) | pilot (explicit) | raw_table_literal | [3024, 3024] | [738, 738] | [1.0, 0.5] |  |  |
 
 ## Device 57 -- IFF
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `DEV6201-CODE-PTR` | IFF Transponder Mode Selector Switch, AUTO/KD/+-15/KP | pilot (defaulted) | multiposition_switch | [3001] | [334] |  |  |
-| `DEV6201-ERASE-COVER-PTR` | IFF Transponder Erase Button Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3004] | [328] |  |  |
-| `DEV6201-ERASE-PTR` | IFF Transponder Erase Button - Push to erase | pilot (defaulted) | default_button | [3005] | [329] |  |  |
-| `DEV6201-MAIN-BACKUP-PTR` | IFF Transponder Device Selector Switch, WORK/RESERVE | pilot (defaulted) | default_2_position_small_tumb | [3002] | [336] |  |  |
-| `DEV6201-NOT-USED-PTR` | IFF Transponder Device Mode Switch, 1/2 | pilot (defaulted) | default_2_position_small_tumb | [3003] | [332] |  |  |
-| `DEV6201-POWER-PTR` | IFF Transponder Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [383] |  |  |
-| `DEV6201-SOS-COVER-PTR` | IFF Transponder Disaster Switch Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3006] | [330] |  |  |
-| `DEV6201-SOS-PTR` | IFF Transponder Disaster Switch, ON/OFF | pilot (defaulted) | default_2_position_small_tumb | [3007] | [331] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `DEV6201-CODE-PTR` | IFF Transponder Mode Selector Switch, AUTO/KD/+-15/KP | pilot (defaulted) | multiposition_switch | [3001] | [334] |  |  |  |
+| `DEV6201-ERASE-COVER-PTR` | IFF Transponder Erase Button Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3004] | [328] |  |  |  |
+| `DEV6201-ERASE-PTR` | IFF Transponder Erase Button - Push to erase | pilot (defaulted) | default_button | [3005] | [329] |  |  |  |
+| `DEV6201-MAIN-BACKUP-PTR` | IFF Transponder Device Selector Switch, WORK/RESERVE | pilot (defaulted) | default_2_position_small_tumb | [3002] | [336] |  |  |  |
+| `DEV6201-NOT-USED-PTR` | IFF Transponder Device Mode Switch, 1/2 | pilot (defaulted) | default_2_position_small_tumb | [3003] | [332] |  |  |  |
+| `DEV6201-POWER-PTR` | IFF Transponder Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [383] |  |  |  |
+| `DEV6201-SOS-COVER-PTR` | IFF Transponder Disaster Switch Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3006] | [330] |  |  |  |
+| `DEV6201-SOS-PTR` | IFF Transponder Disaster Switch, ON/OFF | pilot (defaulted) | default_2_position_small_tumb | [3007] | [331] |  |  |  |
 
 ## Device 58 -- Recorder_MC61
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `RECORDER-LTG-KNOB-PTR` | Recorder MC 61 Brightness Knob | pilot (defaulted) | default_axis_limited | [3003] | [381] |  |  |
-| `RECORDER-MODE-PTR` | Recorder MC 61 AUTO/WORK | pilot (defaulted) | default_2_position_tumb | [3002] | [1007] |  |  |
-| `RECORDER-POWER-PTR` | Recorder MC 61 Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [378] |  |  |
-| `RECORDER-SOURCE-PTR` | Laryngophone Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [1012] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `RECORDER-LTG-KNOB-PTR` | Recorder MC 61 Brightness Knob | pilot (defaulted) | default_axis_limited | [3003] | [381] |  |  |  |
+| `RECORDER-MODE-PTR` | Recorder MC 61 AUTO/WORK | pilot (defaulted) | default_2_position_tumb | [3002] | [1007] |  |  |  |
+| `RECORDER-POWER-PTR` | Recorder MC 61 Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [378] |  |  |  |
+| `RECORDER-SOURCE-PTR` | Laryngophone Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [1012] |  |  |  |
 
 ## Device 59 -- VMS
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `SPEECH-CHECK-PTR` | RI-65 Check Button | pilot (defaulted) | default_button | [3002] | [360] |  |  |
-| `SPEECH-OFF-PTR` | RI-65 OFF Button | pilot (defaulted) | default_button | [3001] | [359] |  |  |
-| `SPEECH-REPEAT-PTR` | RI-65 Repeat Button | pilot (defaulted) | default_button | [3003] | [361] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `SPEECH-CHECK-PTR` | RI-65 Check Button | pilot (defaulted) | default_button | [3002] | [360] |  |  |  |
+| `SPEECH-OFF-PTR` | RI-65 OFF Button | pilot (defaulted) | default_button | [3001] | [359] |  |  |  |
+| `SPEECH-REPEAT-PTR` | RI-65 Repeat Button | pilot (defaulted) | default_button | [3003] | [361] |  |  |  |
 
 ## Device 60 -- ANTI_ICE_INTERFACE
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `WINDSHIELD-DEICER-OP-PTR` | Windshield Antiice LOW/OFF/HIGH | operator (explicit) | default_3_position_tumb | [3006] | [675] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `WINDSHIELD-DEICER-OP-PTR` | Windshield Antiice LOW/OFF/HIGH | operator (explicit) | default_3_position_tumb | [3006] | [675] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `DEICER-KNOB-PTR` | AC Voltmeter knob | pilot (defaulted) | multiposition_switch | [3007] | [114] |  |  |
-| `LEFT-ENG-HEATING-PTR` | Left Engine AntiIce ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [113] |  |  |
-| `RIGHT-ENG-HEATING-PTR` | Right Engine AntiIce ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [112] |  |  |
-| `ROTOR-DEICER-AUTO-MAN-PTR` | AntiIce AUTO/MANUAL | pilot (defaulted) | default_2_position_tumb | [3001] | [109] |  |  |
-| `ROTOR-DEICER-OFF-PTR` | AntiIce OFF | pilot (defaulted) | default_button | [3002] | [110] |  |  |
-| `WINDSHIELD-DEICER-PTR` | Windshield Antiice LOW/OFF/HIGH | pilot (defaulted) | default_3_position_tumb | [3005] | [111] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `DEICER-KNOB-PTR` | AC Voltmeter knob | pilot (defaulted) | multiposition_switch | [3007] | [114] |  |  |  |
+| `LEFT-ENG-HEATING-PTR` | Left Engine AntiIce ON/OFF | pilot (defaulted) | default_2_position_tumb | [3003] | [113] |  |  |  |
+| `RIGHT-ENG-HEATING-PTR` | Right Engine AntiIce ON/OFF | pilot (defaulted) | default_2_position_tumb | [3004] | [112] |  |  |  |
+| `ROTOR-DEICER-AUTO-MAN-PTR` | AntiIce AUTO/MANUAL | pilot (defaulted) | default_2_position_tumb | [3001] | [109] |  |  |  |
+| `ROTOR-DEICER-OFF-PTR` | AntiIce OFF | pilot (defaulted) | default_button | [3002] | [110] |  |  |  |
+| `WINDSHIELD-DEICER-PTR` | Windshield Antiice LOW/OFF/HIGH | pilot (defaulted) | default_3_position_tumb | [3005] | [111] |  |  |  |
 
 ## Device 61 -- EXT_CARGO_EQUIPMENT
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `OP-COLL-CARGO-DROP-COVER-PTR` | Emergency Cargo Release Button Cover, OPEN/CLOSE | operator (explicit) | default_blue_cover | [3006] | [862] |  |  |
-| `OP-COLL-CARGO-DROP-PTR` | Emergency Cargo Release Button - Push to release | operator (explicit) | default_button | [3005] | [863] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `OP-COLL-CARGO-DROP-COVER-PTR` | Emergency Cargo Release Button Cover, OPEN/CLOSE | operator (explicit) | default_blue_cover | [3006] | [862] |  |  |  |
+| `OP-COLL-CARGO-DROP-PTR` | Emergency Cargo Release Button - Push to release | operator (explicit) | default_button | [3005] | [863] |  |  |  |
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `COLLECTIVE-CARGO-EMER-COVER-PTR` | Emergency Cargo Release Button Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3004] | [748] |  |  |
-| `COLLECTIVE-CARGO-EMER-PTR` | Emergency Cargo Release Button - Push to release | pilot (defaulted) | default_button | [3003] | [749] |  |  |
-| `COLLECTIVE-CARGO-TACT-COVER-PTR` | Tactical Cargo Release Button Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3002] | [751] |  |  |
-| `COLLECTIVE-CARGO-TACT-PTR` | Tactical Cargo Release Button - Push to release | pilot (defaulted) | default_button | [3001] | [752] |  |  |
-| `EXTCARGO-AUTOLOCK-PTR` | External Cargo Automatic Dropping, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [199] |  |  |
-| `EXTCARGO-EXT-RETR-PTR` | External Cargo Remove Release, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [198] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `COLLECTIVE-CARGO-EMER-COVER-PTR` | Emergency Cargo Release Button Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3004] | [748] |  |  |  |
+| `COLLECTIVE-CARGO-EMER-PTR` | Emergency Cargo Release Button - Push to release | pilot (defaulted) | default_button | [3003] | [749] |  |  |  |
+| `COLLECTIVE-CARGO-TACT-COVER-PTR` | Tactical Cargo Release Button Cover, OPEN/CLOSE | pilot (defaulted) | default_blue_cover | [3002] | [751] |  |  |  |
+| `COLLECTIVE-CARGO-TACT-PTR` | Tactical Cargo Release Button - Push to release | pilot (defaulted) | default_button | [3001] | [752] |  |  |  |
+| `EXTCARGO-AUTOLOCK-PTR` | External Cargo Automatic Dropping, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3007] | [199] |  |  |  |
+| `EXTCARGO-EXT-RETR-PTR` | External Cargo Remove Release, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3008] | [198] |  |  |  |
 
 ## Device 62 -- SARPP12I1
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `SARPP-MAN-AUTO-OFF-PTR` | SARPP-12 Mode Switch, MANUAL/AUTO | pilot (defaulted) | default_3_position_tumb | [3001] | [357] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `SARPP-MAN-AUTO-OFF-PTR` | SARPP-12 Mode Switch, MANUAL/AUTO | pilot (defaulted) | default_3_position_tumb | [3001] | [357] |  |  |  |
 
 ## Device 64 -- SIGNAL_FLARES
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `FLARE-BOTTOM-GREEN-PTR` | Signal Flares Cassette 2 Launch Yellow Button | pilot (defaulted) | default_2_position_flares_tumb | [3010] | [349] |  |  |
-| `FLARE-BOTTOM-POWER-PTR` | Signal Flares Cassette 2 Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [352] |  |  |
-| `FLARE-BOTTOM-RED-PTR` | Signal Flares Cassette 2 Launch White Button | pilot (defaulted) | default_2_position_flares_tumb | [3009] | [348] |  |  |
-| `FLARE-BOTTOM-WHITE-PTR` | Signal Flares Cassette 2 Launch Red Button | pilot (defaulted) | default_2_position_flares_tumb | [3008] | [351] |  |  |
-| `FLARE-BOTTOM-YELLOW-PTR` | Signal Flares Cassette 2 Launch Green Button | pilot (defaulted) | default_2_position_flares_tumb | [3007] | [350] |  |  |
-| `FLARE-TOP-GREEN-PTR` | Signal Flares Cassette 1 Launch Green Button | pilot (defaulted) | default_2_position_flares_tumb | [3002] | [345] |  |  |
-| `FLARE-TOP-POWER-PTR` | Signal Flares Cassette 1 Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [343] |  |  |
-| `FLARE-TOP-RED-PTR` | Signal Flares Cassette 1 Launch Red Button | pilot (defaulted) | default_2_position_flares_tumb | [3003] | [344] |  |  |
-| `FLARE-TOP-WHITE-PTR` | Signal Flares Cassette 1 Launch White Button | pilot (defaulted) | default_2_position_flares_tumb | [3004] | [347] |  |  |
-| `FLARE-TOP-YELLOW-PTR` | Signal Flares Cassette 1 Launch Yellow Button | pilot (defaulted) | default_2_position_flares_tumb | [3005] | [346] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `FLARE-BOTTOM-GREEN-PTR` | Signal Flares Cassette 2 Launch Yellow Button | pilot (defaulted) | default_2_position_flares_tumb | [3010] | [349] |  |  |  |
+| `FLARE-BOTTOM-POWER-PTR` | Signal Flares Cassette 2 Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3006] | [352] |  |  |  |
+| `FLARE-BOTTOM-RED-PTR` | Signal Flares Cassette 2 Launch White Button | pilot (defaulted) | default_2_position_flares_tumb | [3009] | [348] |  |  |  |
+| `FLARE-BOTTOM-WHITE-PTR` | Signal Flares Cassette 2 Launch Red Button | pilot (defaulted) | default_2_position_flares_tumb | [3008] | [351] |  |  |  |
+| `FLARE-BOTTOM-YELLOW-PTR` | Signal Flares Cassette 2 Launch Green Button | pilot (defaulted) | default_2_position_flares_tumb | [3007] | [350] |  |  |  |
+| `FLARE-TOP-GREEN-PTR` | Signal Flares Cassette 1 Launch Green Button | pilot (defaulted) | default_2_position_flares_tumb | [3002] | [345] |  |  |  |
+| `FLARE-TOP-POWER-PTR` | Signal Flares Cassette 1 Power Switch, ON/OFF | pilot (defaulted) | default_2_position_tumb | [3001] | [343] |  |  |  |
+| `FLARE-TOP-RED-PTR` | Signal Flares Cassette 1 Launch Red Button | pilot (defaulted) | default_2_position_flares_tumb | [3003] | [344] |  |  |  |
+| `FLARE-TOP-WHITE-PTR` | Signal Flares Cassette 1 Launch White Button | pilot (defaulted) | default_2_position_flares_tumb | [3004] | [347] |  |  |  |
+| `FLARE-TOP-YELLOW-PTR` | Signal Flares Cassette 1 Launch Yellow Button | pilot (defaulted) | default_2_position_flares_tumb | [3005] | [346] |  |  |  |
 
 ## Device 67 -- SPO_10
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `GFORCE-RESET-PTR001` | Check RWR | pilot (defaulted) | default_button | [3004] | [990] |  |  |
-| `MAPDISPLAY-VERT-PTR001` | RWR DAY/NIGHT | pilot (defaulted) | default_2_position_tumb | [3003] | [989] |  |  |
-| `SIRENA-POWER-PTR` | RWR Power | pilot (defaulted) | default_2_position_tumb | [3001] | [366] |  |  |
-| `SIRENA-SIGNAL-PTR` | RWR Signal | pilot (defaulted) | default_2_position_tumb | [3002] | [365] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GFORCE-RESET-PTR001` | Check RWR | pilot (defaulted) | default_button | [3004] | [990] |  |  |  |
+| `MAPDISPLAY-VERT-PTR001` | RWR DAY/NIGHT | pilot (defaulted) | default_2_position_tumb | [3003] | [989] |  |  |  |
+| `SIRENA-POWER-PTR` | RWR Power | pilot (defaulted) | default_2_position_tumb | [3001] | [366] |  |  |  |
+| `SIRENA-SIGNAL-PTR` | RWR Signal | pilot (defaulted) | default_2_position_tumb | [3002] | [365] |  |  |  |
 
 ## Device 68 -- KM_2
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `KM2-CONTR-BUTTON-PTR` | KM-2 Test button | operator (explicit) | default_button | [3002] | [645] |  |  |
-| `KM2-KNOB-PTR` | KM-2 set magnetic declination  | operator (explicit) | default_axis | [3001] | [647] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `KM2-CONTR-BUTTON-PTR` | KM-2 Test button | operator (explicit) | default_button | [3002] | [645] |  |  |  |
+| `KM2-KNOB-PTR` | KM-2 set magnetic declination  | operator (explicit) | default_axis | [3001] | [647] |  |  |  |
 
 ## Device 70 -- TIMER
 
 ### Operator seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `TIMIR-COUNTING-OP-PTR` | Active timer start/stop | operator (explicit) | default_2_position_tumb | [3001] | [1018] |  |  |
-| `TIMIR-LEFT-OP-PTR_2-9_5` | Left timer control | operator (explicit) | raw_table_literal | [3003, 3004] | [1015, 1016] | [0.0, 0.0] |  |
-| `TIMIR-LEFT-OP-PTR_8-38` | Right timer control | operator (explicit) | raw_table_literal | [3005, 3006] | [1019, 1020] | [0.0, 0.0] |  |
-| `TIMIR-SECONDS-OP-PTR` | Active timer select | operator (explicit) | default_3_position_tumb | [3002] | [1017] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `TIMIR-COUNTING-OP-PTR` | Active timer start/stop | operator (explicit) | default_2_position_tumb | [3001] | [1018] |  |  |  |
+| `TIMIR-LEFT-OP-PTR_2-9_5` | Left timer control | operator (explicit) | raw_table_literal | [3003, 3004] | [1015, 1016] | [0.0, 0.0] |  |  |
+| `TIMIR-LEFT-OP-PTR_8-38` | Right timer control | operator (explicit) | raw_table_literal | [3005, 3006] | [1019, 1020] | [0.0, 0.0] |  |  |
+| `TIMIR-SECONDS-OP-PTR` | Active timer select | operator (explicit) | default_3_position_tumb | [3002] | [1017] |  |  |  |
 
 ## Device 73 -- R60_INTERFACE
 
 ### Pilot seat
 
-| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `PU-SELECT-PTR` | Active missile selector | pilot (defaulted) | multiposition_switch | [3003] | [1032] |  |  |
-| `R60-AIR-PTR` | Fuse selector | pilot (defaulted) | default_2_position_tumb | [3002] | [1034] |  |  |
-| `R60-POWER-PTR` | R60 Power | pilot (defaulted) | default_2_position_tumb | [3001] | [1033] |  |  |
+| Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `PU-SELECT-PTR` | Active missile selector | pilot (defaulted) | multiposition_switch | [3003] | [1032] |  |  |  |
+| `R60-AIR-PTR` | Fuse selector | pilot (defaulted) | default_2_position_tumb | [3002] | [1034] |  |  |  |
+| `R60-POWER-PTR` | R60 Power | pilot (defaulted) | default_2_position_tumb | [3001] | [1033] |  |  |  |

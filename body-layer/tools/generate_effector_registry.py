@@ -5,9 +5,11 @@ Reads `devices.lua`, `command_defs.lua` and `clickabledata.lua` from the
 installed Mi-24P module's `Cockpit/Scripts` directory, resolves every
 `elements[...]` entry's symbolic device/command references to integers,
 and emits one TOML entry per clickable element (`device`/`device_name`,
-`cmds`/`cmd_names`, `args`, optional `arg_values`, `label`, `shape`,
-`seat`/`seat_explicit` -- lists everywhere, so a consumer never branches
-on a helper-call vs. raw-table-literal element). **Stdlib only. Parses
+`cmds`/`cmd_names`, `args`, optional `arg_values`, optional `helper_args`,
+`values` (settable-value ranges, 2026-10-23 follow-up -- see the "value
+ranges" section below), `label`, `shape`, `seat`/`seat_explicit` -- lists
+everywhere, so a consumer never branches on a helper-call vs.
+raw-table-literal element). **Stdlib only. Parses
 the Lua as text; never executes it.**
 
 **The exact forms below are confirmed against a live install, build
@@ -72,6 +74,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Final
 
 _BODY_LAYER_ROOT = Path(__file__).resolve().parent.parent
 #: R13 (Stage 2, 2026-10-23): one raw dump per aircraft directory name
@@ -167,6 +170,436 @@ _SEAT_BY_NUMBERS: dict[frozenset[int], str] = {
     frozenset({0, 1}): "both",
 }
 
+# --- value ranges (2026-10-23 follow-up) -------------------------------
+#
+# What each control can be *set to* -- `aircraft-layer/research/
+# 2026-10-23-mi24p-clickable-value-ranges.md` is the source of truth this
+# section is built against. A `ValueRange` is computed once per entry of
+# `RawElement.args` (helper-call elements always have exactly one; a
+# raw-table-literal element has one per action, parallel to its own
+# `args`/`cmds`) -- never collapsed across actions, since the 13
+# raw-literal elements genuinely have a different kind per action (the
+# recon's Catch 3).
+#
+# **Deliberate simplification, stated so it is not mistaken for an
+# oversight**: for the handful of helpers whose Lua signature *can* carry
+# a custom `arg_lim_`/`arg_value_`/`val1_..val3_` (`default_spring_button`,
+# `default_position_tumb`, `default_1_position_tumb`,
+# `springloaded_3_pos_tumb`, `radio_wheel_1`), this generator still reads
+# that parameter positionally off the real call (never hard-codes the
+# default) -- the recon's own "Real calls" section is what tells us *no
+# shipped call actually overrides it*, not a reason to stop checking a
+# future one. `default_3_position_tumb`'s `arg_limit_`/`inversed_` and
+# `multiposition_switch`'s `count_`/`delta_`/`min_`/`inversed_` are parsed
+# the same way, and `multiposition_switch`'s `count_` has no default at
+# all -- every real call passes a different one (11/4/5/9 steps), so it
+# is never optional. `default_animated_lever` is the one deliberate
+# exception: its `arg_lim_` parameter is parsed off the call but never
+# applied to the output, because DCS's own `arg_lim__` typo (confirmed
+# live) makes it dead code in the real helper too -- applying it here
+# would disagree with what the switch actually does.
+
+
+class ValueKind:
+    DISCRETE = "discrete"
+    CONTINUOUS = "continuous"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class ValueRange:
+    """One `args[i]`'s settable-value description. `kind` decides which
+    other fields are meaningful: `"discrete"` uses `values` (sorted,
+    never empty) and `momentary` (BTN/spring-back vs. a latching TUMB);
+    `"continuous"` uses `min`/`max`/optional `gain`; `"unknown"` uses only
+    `reason` -- fail-closed, per the module docstring's "Fails closed, at
+    two levels," rather than a guessed default."""
+
+    kind: str
+    values: tuple[float, ...] | None = None
+    min: float | None = None
+    max: float | None = None
+    gain: float | None = None
+    momentary: bool = False
+    reason: str | None = None
+
+
+def _discrete(values: list[float], *, momentary: bool) -> ValueRange:
+    return ValueRange(
+        kind=ValueKind.DISCRETE, values=tuple(sorted(set(values))), momentary=momentary
+    )
+
+
+def _continuous(lo: float, hi: float, *, gain: float | None = None) -> ValueRange:
+    return ValueRange(kind=ValueKind.CONTINUOUS, min=lo, max=hi, gain=gain)
+
+
+def _unknown_value(reason: str) -> ValueRange:
+    return ValueRange(kind=ValueKind.UNKNOWN, reason=reason)
+
+
+#: A scalar Lua literal, parsed off a trailing helper parameter that
+#: affects a *value* (never the ones that only affect animation/sound/
+#: seat, which this section never looks at). Three outcomes, each
+#: distinct: a number (use it), `None` for `nil`/an absent trailing
+#: argument (use the helper's own documented default), or the
+#: `_UNRESOLVED` sentinel for any other expression (`anim_speed_default
+#: / 5`, a bare identifier, a table this parser does not expect here) --
+#: the caller must treat that sentinel as "unknown," never substitute the
+#: default silently, which is exactly what "never guessed" means here.
+class _Unresolved:
+    """Marker type for `_lua_scalar`/`_lua_bool`/`_lua_pair`: the text is
+    a Lua expression this generator does not evaluate (a bare
+    identifier, an arithmetic expression, a table shape it does not
+    expect), distinct from both a parsed value and `nil`/absent. A
+    dedicated class, not a bare `object()` sentinel, so `isinstance`
+    narrows the return type at every call site -- a plain identity
+    sentinel left `mypy --strict` unable to narrow `float | None |
+    object` at all, since `object` already contains every other arm of
+    that union."""
+
+
+_UNRESOLVED: Final = _Unresolved()
+_SCALAR_LITERAL_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+_BOOL_LITERAL_RE = re.compile(r"^(true|false)$")
+_PAIR_LITERAL_RE = re.compile(r"^\{\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\}$")
+
+
+def _lua_scalar(text: str) -> float | None | _Unresolved:
+    text = text.strip()
+    if text in ("", "nil"):
+        return None
+    if _SCALAR_LITERAL_RE.match(text):
+        return float(text)
+    return _UNRESOLVED
+
+
+def _lua_bool(text: str) -> bool | None | _Unresolved:
+    text = text.strip()
+    if text in ("", "nil"):
+        return None
+    if _BOOL_LITERAL_RE.match(text):
+        return text == "true"
+    return _UNRESOLVED
+
+
+def _lua_pair(text: str) -> tuple[float, float] | None | _Unresolved:
+    text = text.strip()
+    if text in ("", "nil"):
+        return None
+    m = _PAIR_LITERAL_RE.match(text)
+    if m is not None:
+        return float(m.group(1)), float(m.group(2))
+    return _UNRESOLVED
+
+
+def _trailing_param(args: list[str], index: int) -> str:
+    """`args[index]` if present, else `"nil"` -- a trailing optional
+    parameter the Lua call simply omits is indistinguishable from an
+    explicit `nil` (both mean "use the default"), so callers never need
+    to special-case a short argument list."""
+    return args[index] if index < len(args) else "nil"
+
+
+def _value_range_for_helper(helper: str, args: list[str], arg_idx: int) -> ValueRange:
+    """One `ValueRange` for a helper-call element's single `args[0]`
+    (every helper-call element has exactly one draw argument, however
+    many commands it maps to -- see the module docstring). `args` is the
+    full call argument list (`args[0]` is the hint); `arg_idx` is the
+    draw-argument's own index in it, same convention as `_parse_helper_call`."""
+
+    def p(offset: int) -> str:
+        return _trailing_param(args, arg_idx + offset)
+
+    if helper in (
+        "default_button",
+        "default_square_button",
+        "default_tumb_button",
+        "stick_button",
+    ):
+        return _discrete([0.0, 1.0], momentary=True)
+
+    if helper in (
+        "default_2_position_tumb",
+        "default_2_position_small_tumb",
+        "default_2_position_flares_tumb",
+        "default_CB_button",
+        "default_blue_cover",
+        "default_animated_lever",
+    ):
+        # `default_animated_lever`'s own `arg_lim_` is deliberately never
+        # read here -- see the section docstring above.
+        return _discrete([0.0, 1.0], momentary=False)
+
+    if helper in (
+        "default_spring_button",
+        "default_position_tumb",
+        "default_1_position_tumb",
+    ):
+        lim_offset = {
+            "default_spring_button": 2,
+            "default_position_tumb": 2,
+            "default_1_position_tumb": 3,
+        }[helper]
+        lim = _lua_pair(p(lim_offset))
+        if isinstance(lim, _Unresolved):
+            return _unknown_value(f"{helper}'s arg_lim_ is not a literal pair")
+        lo, hi = lim if lim is not None else (0.0, 1.0)
+        return _discrete([lo, hi], momentary=(helper == "default_spring_button"))
+
+    if helper == "default_3_position_tumb":
+        lim = _lua_pair(p(5))
+        if isinstance(lim, _Unresolved):
+            return _unknown_value(
+                "default_3_position_tumb's arg_limit_ is not a literal pair"
+            )
+        lo, hi = lim if lim is not None else (-1.0, 1.0)
+        return _discrete([lo, 0.0, hi], momentary=False)
+
+    if helper == "triple_switch":
+        # No parameter affects this one -- the whole element's values
+        # are fixed by the helper body itself (confirmed Q-table: every
+        # real call is `(hint, dev, cmd, arg[, crew])`).
+        return _discrete([0.0, 0.1, 0.2, 0.3], momentary=False)
+
+    if helper == "multiposition_switch":
+        count = _lua_scalar(p(1))
+        if isinstance(count, _Unresolved) or count is None:
+            return _unknown_value(
+                "multiposition_switch's count_ is required and must be a literal number"
+            )
+        delta = _lua_scalar(p(2))
+        if isinstance(delta, _Unresolved):
+            return _unknown_value(
+                "multiposition_switch's delta_ is not a literal number"
+            )
+        inversed = _lua_bool(p(3))
+        if isinstance(inversed, _Unresolved):
+            return _unknown_value(
+                "multiposition_switch's inversed_ is not a literal boolean"
+            )
+        min_ = _lua_scalar(p(4))
+        if isinstance(min_, _Unresolved):
+            return _unknown_value("multiposition_switch's min_ is not a literal number")
+        d = delta if delta is not None else 0.5
+        if inversed:
+            d = -d
+        m = min_ if min_ is not None else 0.0
+        n = int(count)
+        if n < 1:
+            return _unknown_value(
+                f"multiposition_switch's count_ must be >= 1, got {n}"
+            )
+        return _discrete([m + k * d for k in range(n)], momentary=False)
+
+    if helper == "springloaded_3_pos_tumb":
+        v1 = _lua_scalar(p(2))
+        v2 = _lua_scalar(p(3))
+        v3 = _lua_scalar(p(4))
+        if (
+            isinstance(v1, _Unresolved)
+            or isinstance(v2, _Unresolved)
+            or isinstance(v3, _Unresolved)
+        ):
+            return _unknown_value(
+                "springloaded_3_pos_tumb's val1_/val2_/val3_ is not a literal number"
+            )
+        values = [
+            v1 if v1 is not None else -1.0,
+            v2 if v2 is not None else 0.0,
+            v3 if v3 is not None else 1.0,
+        ]
+        return _discrete(values, momentary=True)
+
+    if helper == "default_axis":
+        gain = _lua_scalar(p(2))
+        if isinstance(gain, _Unresolved):
+            return _unknown_value("default_axis's gain_ is not a literal number")
+        return _continuous(0.0, 1.0, gain=(gain if gain is not None else 0.1))
+
+    if helper == "default_axis_limited":
+        gain = _lua_scalar(p(2))
+        if isinstance(gain, _Unresolved):
+            return _unknown_value(
+                "default_axis_limited's gain_ is not a literal number"
+            )
+        lim = _lua_pair(p(5))
+        if isinstance(lim, _Unresolved):
+            return _unknown_value(
+                "default_axis_limited's arg_lim_ is not a literal pair"
+            )
+        lo, hi = lim if lim is not None else (0.0, 1.0)
+        return _continuous(lo, hi, gain=(gain if gain is not None else 0.1))
+
+    if helper == "radio_wheel_1":
+        step = _lua_pair(p(1))
+        if isinstance(step, _Unresolved):
+            return _unknown_value("radio_wheel_1's arg_value_ is not a literal pair")
+        lim = _lua_pair(p(2))
+        if isinstance(lim, _Unresolved):
+            return _unknown_value("radio_wheel_1's arg_lim_ is not a literal pair")
+        lo, hi = lim if lim is not None else (0.0, 1.0)
+        gain = abs(step[1]) if step is not None else 0.1
+        return _continuous(lo, hi, gain=gain)
+
+    if helper in ("default_button_tumb", "springloaded_2_pos_tumb"):
+        # Neither is ever called in the real module (confirmed live) and
+        # each combines two genuinely different per-action kinds (a
+        # momentary push and a latching position) into one shared `arg`
+        # -- there is no single-element answer to give without a real
+        # call to check it against, so this is left unknown rather than
+        # guessed.
+        return _unknown_value(
+            f"{helper} combines heterogeneous action kinds; never called"
+        )
+
+    return _unknown_value(f"no value-range rule for helper {helper!r}")
+
+
+#: `class_type`'s own enum (`clickable_defs.lua:14`, confirmed live
+#: 2026-10-23) -- used only to resolve a bare-integer `class` entry
+#: (`BRAKE-LEVEL-OP-PTR`'s third action, `class = {TUMB, LEV, 0}`); every
+#: other entry seen live is the dotted `class_type.X` form.
+_CLASS_TYPE_BY_NUMBER: dict[int, str] = {
+    0: "NULL",
+    1: "BTN",
+    2: "TUMB",
+    3: "SNGBTN",
+    4: "LEV",
+    5: "MOVABLE_LEV",
+    6: "MULTY_TUMB",
+    7: "BTN_FIX",
+    8: "TUMB_4SIDE",
+}
+
+_RAW_CLASS_RE = re.compile(r"\bclass\s*=\s*(\{[^{}]*\}|class_type\.\w+|-?\d+)")
+_RAW_GAIN_RE = re.compile(r"\bgain\s*=\s*(\{[^{}]*\}|-?\d+(?:\.\d+)?)")
+#: `arg_lim`'s braces can nest one level (`{{0.0,1.0},{0.0,0.5}}`, one
+#: pair per action) -- unlike `class`/`gain`/`action`/`arg`, a flat
+#: `\{[^{}]*\}` regex cannot capture that, so only the field's *start* is
+#: matched here and the value itself is read with `_extract_balanced`
+#: (`_find_arg_lim_field`).
+_RAW_ARG_LIM_START_RE = re.compile(r"\barg_lim\s*=\s*\{")
+
+
+def _find_arg_lim_field(body: str) -> str | None:
+    """The raw literal's own `arg_lim = {...}` field, braces included, or
+    `None` if the field is absent -- `_parse_pair_list` expects the outer
+    braces to still be there, the same contract `_RAW_CLASS_RE`/
+    `_RAW_GAIN_RE`'s matches already have."""
+    m = _RAW_ARG_LIM_START_RE.search(body)
+    if m is None:
+        return None
+    open_pos = m.end() - 1
+    inner = _extract_balanced(body, open_pos, "{", "}")
+    return "{" + inner + "}"
+
+
+def _parse_class_list(text: str) -> list[str] | None:
+    """Every entry of a raw literal's `class` field, in order -- a scalar
+    (`class_type.BTN`) is one-element. `None` if any entry is neither a
+    `class_type.<NAME>` reference nor a bare integer this table knows."""
+    text = text.strip()
+    if text.startswith("{"):
+        parts = [p.strip() for p in text[1:-1].split(",")]
+    else:
+        parts = [text]
+    result: list[str] = []
+    for part in parts:
+        m = re.match(r"^class_type\.(\w+)$", part)
+        if m is not None:
+            result.append(m.group(1))
+            continue
+        if _INT_RE.match(part):
+            name = _CLASS_TYPE_BY_NUMBER.get(int(part))
+            if name is None:
+                return None
+            result.append(name)
+            continue
+        return None
+    return result
+
+
+def _parse_pair_list(text: str) -> list[tuple[float, float]] | None:
+    """A raw literal's `arg_lim`/`gain`-shaped field: either one flat pair
+    (`{0.0, 1.0}`, a single action) or a list of pairs
+    (`{{0.0,1.0},{0.0,0.5}}`, one per action). `None` on any other shape."""
+    text = text.strip()
+    if not text.startswith("{") or not text.endswith("}"):
+        return None
+    inner = text[1:-1]
+    parts = _split_top_level(inner)
+    if not parts:
+        return None
+    if all(p.startswith("{") for p in parts):
+        pairs: list[tuple[float, float]] = []
+        for p in parts:
+            m = _PAIR_LITERAL_RE.match(p)
+            if m is None:
+                return None
+            pairs.append((float(m.group(1)), float(m.group(2))))
+        return pairs
+    if len(parts) == 2 and all(_SCALAR_LITERAL_RE.match(p) for p in parts):
+        return [(float(parts[0]), float(parts[1]))]
+    return None
+
+
+def _parse_gain_list(text: str) -> list[float] | None:
+    text = text.strip()
+    if text.startswith("{"):
+        parts = _split_top_level(text[1:-1])
+    else:
+        parts = [text]
+    values: list[float] = []
+    for p in parts:
+        if not _SCALAR_LITERAL_RE.match(p.strip()):
+            return None
+        values.append(float(p.strip()))
+    return values
+
+
+def _value_ranges_for_raw_literal(body: str, n_actions: int) -> list[ValueRange]:
+    """One `ValueRange` per action of a raw-table-literal element,
+    parallel to its own `args`/`cmds` -- the 13 raw-literal elements
+    genuinely mix kinds within one element (the recon's Catch 3), so
+    these are never collapsed to one shared answer the way a helper-call
+    element's single `args[0]` is."""
+    class_match = _RAW_CLASS_RE.search(body)
+    classes = _parse_class_list(class_match.group(1)) if class_match else None
+    if classes is None or len(classes) != n_actions:
+        reason = (
+            "raw table literal has no parseable `class` field"
+            if class_match is None or classes is None
+            else f"`class` has {len(classes)} entries, expected {n_actions}"
+        )
+        return [_unknown_value(reason) for _ in range(n_actions)]
+
+    lim_field = _find_arg_lim_field(body)
+    lims = _parse_pair_list(lim_field) if lim_field is not None else None
+    if lims is None or len(lims) != n_actions:
+        reason = (
+            "raw table literal has no parseable `arg_lim` field"
+            if lim_field is None or lims is None
+            else f"`arg_lim` has {len(lims)} entries, expected {n_actions}"
+        )
+        return [_unknown_value(reason) for _ in range(n_actions)]
+
+    gain_match = _RAW_GAIN_RE.search(body)
+    gains = _parse_gain_list(gain_match.group(1)) if gain_match else None
+
+    result: list[ValueRange] = []
+    for i, (kind, (lo, hi)) in enumerate(zip(classes, lims)):
+        if kind == "BTN":
+            result.append(_discrete([lo, hi], momentary=True))
+        elif kind == "TUMB":
+            result.append(_discrete([lo, hi], momentary=False))
+        elif kind in ("LEV", "MOVABLE_LEV"):
+            gain = gains[i] if gains is not None and i < len(gains) else None
+            result.append(_continuous(lo, hi, gain=gain))
+        else:
+            result.append(_unknown_value(f"unhandled raw-literal class {kind!r}"))
+    return result
+
 
 class CommandDefsParseError(Exception):
     """A `command_defs.lua` structure this generator does not recognise
@@ -207,6 +640,17 @@ class RawElement:
     seat: str
     seat_explicit: bool
     arg_values: list[float] | None = None
+    #: Verbatim source text of every positional call argument after the
+    #: draw argument (`helper_args` in `plan.md`'s Output section) --
+    #: `animation_speed_`/`arg_val_`/`turn_box_`/crew-class trailing
+    #: parameters this generator does not otherwise resolve. `None` for
+    #: a raw-table-literal element (it has no positional call at all) or
+    #: a helper call with nothing after the draw argument.
+    helper_args: tuple[str, ...] | None = None
+    #: One `ValueRange` per entry of `args` -- see the "value ranges"
+    #: section above for what "per entry" means for a helper call (always
+    #: one) vs. a raw-table-literal element (one per action).
+    value_ranges: tuple[ValueRange, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -574,6 +1018,9 @@ def _parse_helper_call(
                 name, f"could not parse crew_member_access expression: {crew_text}"
             )
 
+    helper_args = tuple(args[arg_idx + 1 :]) or None
+    value_range = _value_range_for_helper(helper, args, arg_idx)
+
     return RawElement(
         name=name,
         device_id=device_id,
@@ -585,6 +1032,8 @@ def _parse_helper_call(
         shape=helper,
         seat=seat,
         seat_explicit=seat_explicit,
+        helper_args=helper_args,
+        value_ranges=(value_range,),
     )
 
 
@@ -668,6 +1117,8 @@ def _parse_raw_literal(
     hint_match = _RAW_HINT_RE.search(body)
     label = hint_match.group(2) if hint_match is not None else ""
 
+    value_ranges = tuple(_value_ranges_for_raw_literal(body, len(args)))
+
     return RawElement(
         name=name,
         device_id=device_id,
@@ -680,6 +1131,7 @@ def _parse_raw_literal(
         shape="raw_table_literal",
         seat=seat,
         seat_explicit=seat_explicit,
+        value_ranges=value_ranges,
     )
 
 
@@ -865,25 +1317,55 @@ def scan_clickabledata(
             unhandled.append(result)
 
     for element_name, field, rhs_text in post_assigns:
-        if field != "crew_member_access" or element_name not in handled:
+        if element_name not in handled:
             continue
-        numbers = [int(n) for n in _NUMBER_RE.findall(rhs_text)]
-        if not numbers:
-            continue
-        resolved_seat = _seat_for(numbers)
-        if resolved_seat is None:
-            unhandled.append(
-                UnhandledElement(
-                    element_name,
-                    f"unrecognised crew_member_access value(s) in a post-assignment "
-                    f"patch: {numbers}",
+        if field == "crew_member_access":
+            numbers = [int(n) for n in _NUMBER_RE.findall(rhs_text)]
+            if not numbers:
+                continue
+            resolved_seat = _seat_for(numbers)
+            if resolved_seat is None:
+                unhandled.append(
+                    UnhandledElement(
+                        element_name,
+                        f"unrecognised crew_member_access value(s) in a post-assignment "
+                        f"patch: {numbers}",
+                    )
                 )
+                del handled[element_name]
+                continue
+            handled[element_name] = replace(
+                handled[element_name], seat=resolved_seat, seat_explicit=True
             )
-            del handled[element_name]
-            continue
-        handled[element_name] = replace(
-            handled[element_name], seat=resolved_seat, seat_explicit=True
-        )
+        elif field == "arg_lim":
+            # The two ASP-17 sight-mode switches (`SIGHT-MAN-AUTO-PTR`/
+            # `SIGHT-SYNC-UNSYNC-PTR`) are patched to 0.0/0.5 after their
+            # `default_2_position_tumb` call already set 0/1 (recon's
+            # "Post-assignment patches that change values") -- applied
+            # here, after the helper-based value range, so the patch
+            # always wins. `None`/empty means the patch's own RHS is not
+            # a shape this generator parses; the helper's own range is
+            # then left standing rather than silently discarded.
+            current = handled[element_name]
+            if len(current.value_ranges) != 1:
+                continue
+            old = current.value_ranges[0]
+            if old.kind != ValueKind.DISCRETE:
+                continue
+            pairs = _parse_pair_list(rhs_text)
+            if not pairs:
+                continue
+            lo, hi = pairs[0]
+            handled[element_name] = replace(
+                current,
+                value_ranges=(
+                    ValueRange(
+                        kind=ValueKind.DISCRETE,
+                        values=tuple(sorted({lo, hi})),
+                        momentary=old.momentary,
+                    ),
+                ),
+            )
 
     ignored = _find_ignored_statements(stripped, consumed_spans)
     return heads, handled, unhandled, len(post_assigns), ignored
@@ -947,6 +1429,31 @@ def _toml_str_array(values: list[str]) -> str:
     return "[" + ", ".join(_toml_string(v) for v in values) + "]"
 
 
+def _toml_value_range(vr: ValueRange) -> str:
+    """One `ValueRange` as a TOML inline table -- `kind` decides which
+    other keys are present, mirroring the dataclass's own "which fields
+    are meaningful" rule (its own docstring)."""
+    parts = [f"kind = {_toml_string(vr.kind)}"]
+    if vr.kind == ValueKind.DISCRETE:
+        assert vr.values is not None
+        parts.append(f"values = {_toml_float_array(list(vr.values))}")
+        parts.append(f"momentary = {'true' if vr.momentary else 'false'}")
+    elif vr.kind == ValueKind.CONTINUOUS:
+        assert vr.min is not None and vr.max is not None
+        parts.append(f"min = {vr.min}")
+        parts.append(f"max = {vr.max}")
+        if vr.gain is not None:
+            parts.append(f"gain = {vr.gain}")
+    else:
+        assert vr.reason is not None
+        parts.append(f"reason = {_toml_string(vr.reason)}")
+    return "{ " + ", ".join(parts) + " }"
+
+
+def _toml_value_ranges_array(value_ranges: tuple[ValueRange, ...]) -> str:
+    return "[" + ", ".join(_toml_value_range(vr) for vr in value_ranges) + "]"
+
+
 def sha256_hexdigest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -988,6 +1495,10 @@ def render_toml(
         lines.append(f"args = {_toml_int_array(el.args)}")
         if el.arg_values is not None:
             lines.append(f"arg_values = {_toml_float_array(el.arg_values)}")
+        if el.helper_args is not None:
+            lines.append(f"helper_args = {_toml_str_array(list(el.helper_args))}")
+        if el.value_ranges:
+            lines.append(f"values = {_toml_value_ranges_array(el.value_ranges)}")
         lines.append(f"label = {_toml_string(el.label)}")
         lines.append(f"shape = {_toml_string(el.shape)}")
         lines.append(f"seat = {_toml_string(el.seat)}")

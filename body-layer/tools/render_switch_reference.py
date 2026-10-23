@@ -67,6 +67,63 @@ class _Element:
     cmds: list[int]
     args: list[int]
     arg_values: list[float] | None
+    #: One entry per `args`, same convention as the raw dump itself
+    #: (`generate_effector_registry.py`'s "value ranges" section) --
+    #: `None` for a dump that predates the 2026-10-23 value-ranges
+    #: follow-up, in which case the rendered cell is blank rather than
+    #: "unknown" (there was never a recon attempt to report on).
+    values: list[dict[str, Any]] | None
+
+
+#: Formats a float without a trailing `.0` when it is a whole number --
+#: `0/1`, not `0.0/1.0` -- while an genuinely fractional value (`0.5`)
+#: keeps its decimal.
+def _fmt_num(value: float) -> str:
+    if value == int(value):
+        return str(int(value))
+    return str(value)
+
+
+#: Above this many discrete values, the cell shows a count
+#: (`"0.0-1.0 (11 steps)"`) instead of spelling every one out -- short
+#: lists (two or three positions, the overwhelming majority of switches)
+#: are more readable spelled out in full.
+_DISCRETE_SPELL_OUT_MAX = 6
+
+
+def _format_value_range(vr: dict[str, Any]) -> str:
+    kind = vr.get("kind")
+    if kind == "discrete":
+        values = sorted(float(v) for v in vr.get("values", []))
+        momentary = " momentary" if vr.get("momentary") else ""
+        if len(values) > _DISCRETE_SPELL_OUT_MAX:
+            return (
+                f"{_fmt_num(values[0])}-{_fmt_num(values[-1])} "
+                f"({len(values)} steps){momentary}"
+            )
+        return "/".join(_fmt_num(v) for v in values) + momentary
+    if kind == "continuous":
+        lo, hi = vr.get("min"), vr.get("max")
+        if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+            return "unknown: malformed continuous value range (no min/max)"
+        gain = vr.get("gain")
+        cell = f"{_fmt_num(float(lo))}-{_fmt_num(float(hi))} continuous"
+        if isinstance(gain, (int, float)):
+            cell += f" (gain {_fmt_num(float(gain))})"
+        return cell
+    if kind == "unknown":
+        return f"unknown: {vr.get('reason', '')}"
+    return ""
+
+
+def _format_values_cell(values: list[dict[str, Any]] | None) -> str:
+    if not values:
+        return ""
+    if len(values) == 1:
+        return _format_value_range(values[0])
+    return "; ".join(
+        f"action {i}: {_format_value_range(vr)}" for i, vr in enumerate(values)
+    )
 
 
 def _read_build(raw_dump_text: str) -> str:
@@ -93,6 +150,7 @@ def _load_elements(raw_doc: dict[str, Any]) -> list[_Element]:
                 cmds=entry["cmds"],
                 args=entry["args"],
                 arg_values=entry.get("arg_values"),
+                values=entry.get("values"),
             )
         )
     return elements
@@ -149,6 +207,21 @@ def render_markdown(
         "blank means it is not yet in the curated registry and a sequence file",
         "cannot reference it until it is.",
         "",
+        "**Values** is what the control can be set to. `0/1` or `-1/0/1` is a short",
+        "discrete list, spelled out in full; `0.0-1.0 (11 steps)` is a longer",
+        "discrete list, shown as a count instead; `0.0-1.0 continuous` (optionally",
+        "`(gain 0.1)`) is a continuous axis; `momentary` marks a spring-back/BTN",
+        "control rather than a latching one. A control with several independent",
+        "actions (a lever with a button riding on it) shows one `action N: ...`",
+        "per action. `unknown: <reason>` means this generator could not determine",
+        "the range from ED's own source and is not guessing -- a blank cell means",
+        "the raw dump predates this column entirely (regenerate it). Values are",
+        "computed by `generate_effector_registry.py`, not by this tool.",
+        "",
+        "For the triggers a sequence file's own `run-on-trigger` header cell may",
+        "name, see `config/sequences/triggers.md` (generated separately, from code",
+        "rather than from this dump).",
+        "",
     ]
 
     by_device: dict[int, list[_Element]] = {}
@@ -165,9 +238,10 @@ def render_markdown(
             lines.append(f"### {seat.capitalize()} seat")
             lines.append("")
             lines.append(
-                "| Element | Label | Seat | Shape | Cmds | Args | Arg values | Curated as |"
+                "| Element | Label | Seat | Shape | Cmds | Args | Arg values | "
+                "Values | Curated as |"
             )
-            lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+            lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
             seat_elements = sorted(
                 (e for e in device_elements if e.seat == seat), key=lambda e: e.name
             )
@@ -189,6 +263,7 @@ def render_markdown(
                             str(element.cmds),
                             str(element.args),
                             arg_values_cell,
+                            _format_values_cell(element.values),
                             curated_names,
                         ]
                     )

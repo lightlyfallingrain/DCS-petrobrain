@@ -49,16 +49,22 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from enum import Enum
 from itertools import pairwise
 from typing import Final
 
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.effector_registry import EffectorDef
-from belief.effector_sequences import SequenceFile, SwitchRow, WaitRow
+from belief.effector_sequences import EffectorTrigger, SequenceFile, SwitchRow, WaitRow
 
 logger = logging.getLogger(__name__)
+
+#: `EffectorTrigger` is declared in `effector_sequences.py` (merged
+#: 2026-10-23 -- see that module's docstring); listing it here tells
+#: `mypy --strict` this import is a deliberate re-export, not an unused
+#: one, so `from belief.effector_engine import EffectorTrigger`
+#: (`logger.py`, tests) keeps working unchanged.
+__all__ = ["EffectorTrigger"]
 
 #: The aircraft/role this runtime always runs as -- "Role mismatch ->
 #: sequence does not run. Only Mi-24P / copilot exist now" (explore-
@@ -66,19 +72,6 @@ logger = logging.getLogger(__name__)
 #: anywhere else; a second aircraft/role is a later milestone's problem.
 AIRCRAFT: Final[str] = "Mi-24P"
 PETROVICH_ROLE: Final[str] = "copilot"
-
-
-class EffectorTrigger(Enum):
-    """One member per `effector_sequences.KNOWN_TRIGGERS` entry --
-    that module's own docstring names itself as the source of truth this
-    enum must stay in sync with. `.value` is the exact `run-on-trigger`
-    header string."""
-
-    TAKEOFF = "takeoff"
-    OBSERV_ON = "observ-on"
-    OBSERV_OFF = "observ-off"
-    WEAPONS_ARM = "weapons-arm"
-    WEAPONS_SAFE = "weapons-safe"
 
 
 #: Minimum seconds between successive writes *within one trigger's own*

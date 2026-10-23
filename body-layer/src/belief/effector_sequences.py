@@ -32,10 +32,17 @@ row is one of:
   and rejected this cut (D7's seam: "say-only rows arrive with the
   guidance-unit-ready trigger").
 
-`KNOWN_TRIGGERS` is this module's own source of truth for which
-`run-on-trigger` values are recognised. Stage 2's `EffectorTrigger` enum
-must stay in sync with it -- there is deliberately only one place this
-list is spelled out."""
+`EffectorTrigger` (below) is this module's own source of truth for which
+`run-on-trigger` values are recognised, and the single place a trigger's
+pilot-facing description and cardinality are recorded --
+`body-layer/tools/render_triggers.py` renders both into `config/
+sequences/triggers.md`. **Merged 2026-10-23** (user request, the
+`triggers.md` follow-up to this plan): `effector_engine.py` previously
+declared its own `EffectorTrigger` enum with the same five members and a
+comment asking a human to keep it in sync by hand; it now imports this
+one instead, so there is exactly one declaration rather than two kept in
+sync by convention. `KNOWN_TRIGGERS` is derived from it, never spelled
+out a second time."""
 
 from __future__ import annotations
 
@@ -43,18 +50,94 @@ import re
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Final, Literal
 
 from belief.effector_registry import EffectorDef, aircraft_dir_name
 
+
+class EffectorTrigger(Enum):
+    """The trigger names a sequence file's `run-on-trigger` header cell
+    may name, this cut (plan decision 2, explore-notes decision 2: "yes,
+    BL-B66 first, expand later"). `.value` is the exact `run-on-trigger`
+    header string. See `TRIGGER_INFO` for each member's pilot-facing
+    description and cardinality."""
+
+    TAKEOFF = "takeoff"
+    OBSERV_ON = "observ-on"
+    OBSERV_OFF = "observ-off"
+    WEAPONS_ARM = "weapons-arm"
+    WEAPONS_SAFE = "weapons-safe"
+
+
+@dataclass(frozen=True, slots=True)
+class TriggerInfo:
+    """One `EffectorTrigger` member's pilot-facing documentation --
+    `render_triggers.py`'s only input besides the enum itself.
+    `description` is one line, from the pilot's point of view, naming
+    *when* the trigger fires -- on the transition into the state, never
+    "while" it holds (`logger.py` fires each of these from an edge
+    detection or a one-shot command signal, not a level check).
+    `cardinality` is `"every_time"` for a trigger with no per-mission
+    latch (every one of the five below) or `"once"` for one that may
+    only ever fire once per mission -- no shipped trigger is `"once"`
+    yet, but the field exists so a future one does not need a format
+    change to `render_triggers.py`."""
+
+    description: str
+    cardinality: Literal["every_time", "once"]
+
+
+#: Canonical, pilot-facing documentation for every `EffectorTrigger`
+#: member -- the single source `render_triggers.py` reads to produce
+#: `config/sequences/triggers.md`. Sourced from `logger.py`'s own
+#: fire-site comments and `crew_console.py`'s handler docstrings
+#: (`_handle_observ_on`/`_handle_observ_off`/`_handle_weapons_armed`/
+#: `_handle_weapons_safe`), not re-derived independently.
+TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
+    EffectorTrigger.TAKEOFF: TriggerInfo(
+        description=(
+            "Every time the aircraft leaves the ground (on-ground true -> "
+            "false). No per-mission latch: a repeat takeoff or a warm air "
+            "start re-fires it, and a sequence file's own row conditions "
+            "(the implicit self-check) make an already-satisfied repeat a "
+            "no-op."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.OBSERV_ON: TriggerInfo(
+        description=(
+            'The pilot commands "Observ on", and the guidance unit is '
+            "ready (refused outright, without firing this trigger, if it "
+            "is not)."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.OBSERV_OFF: TriggerInfo(
+        description=(
+            'The pilot commands "Observ off". A violent manoeuvre can '
+            "also force OBSERV off automatically, but that path does not "
+            "fire this trigger -- it is the pilot-commanded path only."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.WEAPONS_ARM: TriggerInfo(
+        description=(
+            'The pilot commands "weapons armed", or starts an attack run '
+            '("engage"), which arms the weapons safety bar automatically.'
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.WEAPONS_SAFE: TriggerInfo(
+        description='The pilot commands "weapons safe".',
+        cardinality="every_time",
+    ),
+}
+
 #: The trigger names a sequence file's `run-on-trigger` header cell may
-#: name, this cut (plan decision 2, explore-notes decision 2: "yes,
-#: BL-B66 first, expand later"). Stage 2's `EffectorTrigger` enum is
-#: expected to have exactly one member per name here.
-KNOWN_TRIGGERS: Final[frozenset[str]] = frozenset(
-    {"takeoff", "observ-on", "observ-off", "weapons-arm", "weapons-safe"}
-)
+#: name -- derived from `EffectorTrigger`, never spelled out separately.
+KNOWN_TRIGGERS: Final[frozenset[str]] = frozenset(t.value for t in EffectorTrigger)
 
 _REQUIRED_HEADER_KEYS: Final[tuple[str, ...]] = (
     "aircraft",
