@@ -20,7 +20,7 @@ not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
 | R4 | Takeoff one-shot per mission | **Every takeoff**; the file's row conditions skip what is already on | User: *"per takeoff, the sequence file will then deal with it not being the first takeoff"* |
 | R5 | Row conditions read **commanded** state (old D3) | **Conditions read the observed cockpit readback** | Commanded state cannot know a hot start, an air start, or a switch the pilot moved by hand — the very cases R4 makes the file handle |
 | R6 | Bad file → refuse to start (explore decision 6, old D2/D3) | **Bad file → log, ignore that file, console banner, one intercom line once the intercom is up** | User decision 3, 2026-10-23 |
-| R7 | Stage 3 = generic watched-args readback, needed for parity | **Not needed for this cut**: BL-B80's existing per-frame `cockpit_switch` feed already carries all six switch args. Stage 3 becomes the last, deferrable stage. Stage 2 adds an arg-keyed view of the existing feed (aircraft-layer Python only, no `Export.lua` change). | Measured from the code: `push_cockpit_switch_state` reads 773/761/885/955/886/673 + 898/960/962 |
+| R7 | Stage 3 = generic watched-args readback, needed for parity | **Not needed for *reading* this cut's six switches**: BL-B80's existing per-frame `cockpit_switch` feed already carries all six. Stage 2 adds an arg-keyed view of the existing feed (aircraft-layer Python only, no `Export.lua` change). **Superseded again, 2026-10-23** (explore-notes, "Readback rate and scope"): the user does not want switch positions riding BL-B80's per-frame push at all, regardless of parity — "we'll be reading a lot of args eventually... for switch positions the normal lower frequency poll is enough... query a set of switches when they are needed, not everything... at DCS export level if possible." So the generic low-rate/on-demand readback move is **BL-B90's own last stage** (renumbered Stage 4 below), in scope for this milestone, not a deferred/backlog item — it just runs after Stage 3's card, per the user's "let's say BL-B90 last step." | Measured from the code: `push_cockpit_switch_state` reads 773/761/885/955/886/673 + 898/960/962. User direction, 2026-10-23 (quoted in full in explore-notes' "Readback rate and scope"). |
 | R8 | Global vs per-trigger queue open | **Per trigger** | User decision 1 |
 | R9 | No acceptance card | **Own short re-flight card** (Stage 3, `/test-card`) | User decision 4 |
 | R10 | Stage 0 placement "Implementer's call" | **Settled**: `body-layer/tools/generate_effector_registry.py`, full spec below | User: build the generator next |
@@ -82,19 +82,16 @@ scripts, which no Mac-side role can read (the files exist only on the Windows DC
 Stage 0). Stage 0 is designed fail-closed so the first real run reports any form it does not
 handle, and Stage 0a is a read-only recon step on that machine.
 
-### Finding outside this plan's scope — raise before Flight A
+### Finding outside this plan's scope, raised before Flight A — now resolved
 
-**The merged BL-B80 code does not implement BL-B80's own decision 2** ("Guidance unit ready" only on
-an *observed* 960 off→on edge, silent on air starts). `logger.py` calls
-`drain_guidance_unit_ready(ready=sight_ready(state), announced=…)` and `drain_guidance_unit_ready`
-speaks whenever `ready and not announced`. On an air start the first `cockpit_switch` sample
-already has `ready_lamp: true`, so he says "Guidance unit ready" at spawn. Nothing tests the
-air-start case (`test_logger.py`'s ready test starts with the lamp unobserved). The latch is also
-once per mission, so a power-down/re-power never re-announces. **Flight A is an air start**, so
-this will be heard. The fix is small and independent (true edge: previous `ready_observed is False`
-and new `is True`; drop the `guidance_unit_ready_announced` latch), and could go on `main` before
-Flight A. If it has not landed by the time this plan reaches Stage 2, Stage 2 does it, because the
-edge detector is also R3's seam.
+**Resolved 2026-10-23, independently of this plan.** The merged BL-B80 code did not implement
+BL-B80's own decision 2 ("Guidance unit ready" only on an *observed* 960 off→on edge, silent on
+air starts) — `logger.py`'s `drain_guidance_unit_ready` spoke whenever `ready and not announced`,
+so an air start (lamp already lit on the first sample) said "Guidance unit ready" at spawn. Fixed
+on `fix/guidance-ready-edge` (true edge: previous `ready_observed is False` and new `is True`;
+`guidance_unit_ready_announced` latch dropped), reviewed, DoD-passed, and merged to `main`
+(`body-layer/ROADMAP/BL-B80.md`). This plan's Stage 2 does **not** need to redo this fix — the
+edge detector it lands on is exactly R3's seam, already in place.
 
 ---
 
@@ -175,7 +172,10 @@ reference for what they do, if DCS file does not provide info."* So:
     unhandled list goes into the header.
   - `--dcs-build`: if absent and `DCS_INSTALL_PATH` is set, read the version from
     `$DCS_INSTALL_PATH/autoupdate.cfg` (that exact file, no walking up); otherwise exit 1 with
-    "pass --dcs-build".
+    "pass --dcs-build". **Resolved lazily, immediately before the write step, not at startup** —
+    report mode never consumes a build string (it is only ever rendered into the TOML header), so
+    requiring it unconditionally would be a startup refusal with no corresponding need. Settled
+    as shipped, per `implementation.md`'s "Follow-up pass" item 1.
 - **Real-run command** (Windows DCS machine, from the repo checkout's `body-layer/`; both vars
   already set there):
 
@@ -185,53 +185,95 @@ reference for what they do, if DCS file does not provide info."* So:
   python tools/generate_effector_registry.py --write   # then write config/effectors-raw.toml
   ```
 
-### Forms the parser must handle (from the research notes; 0a confirms or corrects)
+### Forms the parser must handle — **confirmed live by Stage 0a**, not guessed
 
-1. **`devices.lua`**: `devices["NAME"] = counter()` (or `devices.NAME = counter()`), assigned by
-   order of appearance from 1 (`mi24p-command-surface.md` §2/§9). Control points: `WEAP_SYS = 6`,
-   `I9K113 = 7`, `ASP_17V = 16`, `HELPER_AI = 30`, `SPU_8 = 55`, 73 devices total in 2.9.29.
-2. **Command tables**: `<x>_commands = { Name = counter(), … }`, each table restarting at 3001
-   (§9/§10 "all restart at 3001 per device"). **How the restart is written** (a `start_command`
-   constant, a reset of a local, a fresh `counter` per table) is question Q1 for 0a; the tool
-   implements that exact form and fails closed on any other. If `command_defs.lua` pulls in the
-   per-system `*_commands.lua` files (`dofile(LockOn_Options.script_path.."X.lua")` or similar —
-   Q2), the tool follows includes **only to files inside `--scripts-dir`**, and an include it
-   cannot resolve is an error.
+Superseded by `aircraft-layer/research/2026-10-23-mi24p-clickabledata-forms.md` (build
+2.9.30.28738; the 749 `elements[` count is unchanged from the 2026-09-11 dump at 2.9.29.27278, so
+the two builds agree on everything below). The bullets below originally guessed at these forms
+before 0a ran; **every one of the four guesses 0a corrected is now stated as fact**, not as a
+question for 0a, since 0a has already run:
+
+1. **`devices.lua`**: `devices["NAME"] = counter()` only — **there is no dotted
+   `devices.NAME = counter()` declaration form** (the original guess above was wrong on this
+   point; dotted access is reference-only, used by `clickabledata.lua`/`clickable_defs.lua` to
+   *read* a device back). Ids assigned by order of appearance from 1. Control points: `WEAP_SYS = 6`,
+   `I9K113 = 7`, `ASP_17V = 16`, `HELPER_AI = 30`, `SPU_8 = 55`, 73 devices total — confirmed at
+   both 2.9.29.27278 and 2.9.30.28738.
+2. **Command tables**: `<x>_commands = { Name = counter(); … }`, each of 48 plain tables preceded
+   by a column-0 `count = start_command` reset; the 49th, `device_commands`, is built by a `for
+   cmd_num = 1,120 do device_commands["Button_"..cmd_num] = counter() end` loop instead of a plain
+   constructor — the tool's `device_commands`-loop form and its fail-closed rejection of any other
+   loop shape (`CommandDefsParseError`) is this, not a guess. **The include direction is the
+   reverse of the original guess**: the per-system `*_commands.lua` files (`A036_commands.lua`,
+   `Weap_syst_commands.lua`, etc.) `dofile` *into* `command_defs.lua`, not the other way around,
+   and none of them defines any command id or needs to be read — the generator correctly ignores
+   them entirely, per the research note's Q0/Q2. `Keys = {...}` (explicit numeric literals, no
+   counter, before the first reset) is never referenced by `clickabledata.lua` and is correctly
+   never touched.
 3. **Helper-call elements**: `elements["NAME"] = <helper>(_("hint"), devices.X, x_commands.Y, <arg>, …)`.
-   Known helpers (§7): `default_button`, `default_2_position_tumb`, `default_3_position_tumb`,
-   `default_2_position_small_tumb`, `default_axis`, `default_animated_lever`,
-   `default_blue_cover`, `multiposition_switch`. The tool holds a table
-   `helper name → positions of (hint, device, command, arg)`; positions beyond the fourth are kept
-   verbatim as `helper_args`. An unknown helper name → unhandled, named in the report. Q3 for 0a:
-   each helper's parameter list in `clickable_defs.lua`.
+   **22 distinct helper signatures exist (not 8), 18 of them actually called** in
+   `clickabledata.lua` — `default_button`, `default_2_position_tumb`, `default_3_position_tumb`,
+   `default_2_position_small_tumb`, `default_axis`, `default_axis_limited`,
+   `default_animated_lever`, `default_blue_cover`, `multiposition_switch`, `default_square_button`,
+   `default_position_tumb`, `default_2_position_flares_tumb`, `springloaded_3_pos_tumb`,
+   `radio_wheel_1`, `triple_switch`, `stick_button`, `default_tumb_button`,
+   `default_spring_button` — plus `default_CB_button`, `default_button_tumb`,
+   `springloaded_2_pos_tumb`, `default_1_position_tumb` defined but never called. Two
+   (`default_button_tumb`, `springloaded_3_pos_tumb`) take **two** command slots, not one; the
+   generator carries the second as `cmd2`/`cmd2_id`/`cmd2_symbol`, rendered only when present —
+   this is a departure from this plan's original one-`cmd` schema, logged in
+   `implementation.md`. The tool holds the exact 22-entry signature table (`_HELPER_SIGNATURES`,
+   baked in from the research note's Q3 rather than parsed from `clickable_defs.lua` at runtime,
+   since only parameter order — not the helper bodies — matters for id resolution). An unknown
+   helper name → unhandled, named in the report.
 4. **Raw-table-literal elements** — the 13 the 2026-09-11 dump missed
-   (`mi24p-command-surface.md` "Known gap"; `2026-09-20-dcs-install-detection-deep-read.md`
-   finding 11): `elements["STICK-PTT-PTR"] = { class = {…}, hint = _("…"), device = devices.SPU_8,
-   action = {…, …}, arg = {738, 738}, arg_value = {1.0, 0.5}, arg_lim = {{0.0, 1.0}, {0.0, 0.5}}, … }`.
-   `action`/`arg` may be scalars or lists; lists are kept as lists. Control points: `STICK-PTT-PTR`
-   args `[738, 738]`, `OP-STICK-PTT-PTR` `[856, 856]`, both `arg_value = [1.0, 0.5]`.
+   (`mi24p-command-surface.md` "Known gap"). **The field names this plan originally guessed
+   (`cockpit_device_id`, `name`) are wrong** — the real shape uses `device`, `hint`, `action`,
+   `arg` (confirmed at Q5): `elements["STICK-PTT-PTR"] = { class = {…}, hint = _("…"), device =
+   devices.SPU_8, action = {…, …}, arg = {738, 738}, arg_value = {1.0, 0.5}, arg_lim = {{0.0,
+   1.0}, {0.0, 0.5}}, … }`. `action`/`arg` may be scalars or lists; lists are kept as lists, and
+   the generator's output schema carries them as lists throughout (`cmds`/`args`/`arg_values`),
+   never deduplicating two identical-looking commands that are really two distinct LMB/RMB
+   actions. Control points: `STICK-PTT-PTR` args `[738, 738]`, `OP-STICK-PTT-PTR` `[856, 856]`,
+   both `arg_value = [1.0, 0.5]`.
 5. **Post-assignment fields**: `elements["NAME"].crew_member_access = {1}` and the same form
-   inside a literal. Absent → recorded as `seat = "default"` (DCS defaults to pilot,
-   `crew_member_access` absent = 0 per the SPU-8 recon) — never silently written as `"pilot"`.
-   `{0}` → `"pilot"`, `{1}` → `"operator"`, `{0, 1}` → `"both"`. Control point: arg 664's element
-   `crew_member_access = {1}`.
+   inside a literal (235 such patches total in the real file, confirmed by Q6/Q7, almost all for
+   fields outside this registry's schema — `turn_box`, `sound`, `updatable`, `side`, counted for
+   the completeness arithmetic but not otherwise acted on). **Corrected seat rule, overriding the
+   original "absent → `seat = \"default\"`" text**: `seat` is always rendered as one of
+   `"pilot"`/`"operator"`/`"both"` (DCS's real default is 0 = pilot when
+   `crew_member_access` is absent or `nil` — never an unresolved `"default"` placeholder), with a
+   separate `seat_explicit: bool` field recording whether the source actually said so.
+   `{0}` → `"pilot"`, `{1}` → `"operator"`, `{0, 1}` → `"both"`; any other set → **unhandled**,
+   not silently guessed. Control point: arg 664's element `crew_member_access = {1}`.
 6. **Anything else** at top level of `clickabledata.lua` (loops, locals, function definitions) is
-   **not an element**: counted and listed by line in the report as "statements ignored". Q4 for
-   0a: does any loop create or mutate elements? If so the tool must handle it before 0c.
-7. **Completeness check, fail-closed**: the number of textual `elements[` assignment heads in
-   `clickabledata.lua` must equal emitted + unhandled. 749 expected for 2.9.29.27278; a different
-   count is reported, not an error (patches add controls).
+   **not an element**: counted and listed by line in the report as "statements ignored"
+   (implemented — see the review fixes in `implementation.md`). Confirmed by 0a's Q4: the real
+   file's top level has no loop, no function definition, nothing that creates or mutates an
+   element outside the plain `elements[...]` assignment/patch forms.
+7. **Completeness check, fail-closed, three-way (not two-way as originally written)**: the number
+   of textual `elements[` assignment heads in `clickabledata.lua` must equal **emitted +
+   unhandled + post-assignment patches** — a third term the original two-way text ("heads =
+   emitted + unhandled") did not have, needed once Q6/Q7 confirmed 235 of the 749 heads are field
+   patches on an already-defined element, not new definitions. 749 confirmed at both
+   2.9.29.27278 and 2.9.30.28738 (501 helper calls + 13 raw-literal openers + 235 patches); a
+   different count on a later build is reported, not an error (patches add controls).
 
 ### Output — `body-layer/config/effectors-raw.toml`
 
 Hand-rendered TOML (stdlib cannot write TOML; same as `generate_defaults.py`), sorted by element
-name so a regeneration diffs cleanly:
+name so a regeneration diffs cleanly. **Schema below corrected to what Stage 0b actually ships**
+(`seat`/`seat_explicit` always resolved, not a `"default"` placeholder; `device_name` its own
+field, not a trailing comment; `cmds`/`args` as lists even for a single-command element, per "a
+consumer never branches on type"; `shape` is the bare helper name, including `"raw_table_literal"`
+for the 13 raw-literal elements, not a stripped/renamed form):
 
 ```toml
 # Generated by body-layer/tools/generate_effector_registry.py. DO NOT HAND-EDIT.
-# Source: Mods/aircraft/Mi-24P/Cockpit/Scripts, DCS 2.9.29.27278
-# Inputs (sha256): devices.lua <hex>, command_defs.lua <hex>, clickabledata.lua <hex>, ...
-# Elements: 749 emitted, 0 unhandled. Statements ignored: <n> (see the run report).
+# Source: Mods/aircraft/Mi-24P/Cockpit/Scripts, DCS <build, e.g. 2.9.30.28738>
+# Inputs (sha256): devices.lua <hex>, command_defs.lua <hex>, clickabledata.lua <hex>
+# Elements: 749 elements[ heads: 501 emitted (helper), 13 emitted (raw literal), 0 unhandled,
+# 235 field patches, <n> statements ignored (see the run report).
 # Regenerate after any DCS update: device and command numbers are positional.
 
 [elements."WEAP-SIGHT-ON-PFF-PTR"]
@@ -242,7 +284,8 @@ cmd_names = ["asp_commands.Power"]
 args = [529]
 label = "Sight Power ON/OFF"     # ED's own hint string, not a friendly name
 shape = "default_2_position_tumb"
-seat = "default"
+seat = "pilot"
+seat_explicit = false
 
 [elements."STICK-PTT-PTR"]
 device = 55
@@ -251,9 +294,10 @@ cmds = [<n>, <n>]
 cmd_names = ["...", "..."]
 args = [738, 738]
 arg_values = [1.0, 0.5]
-label = "..."
-shape = "raw"
-seat = "default"
+label = "Trigger Button, RADIO(LMB)/ICS(RMB)"
+shape = "raw_table_literal"
+seat = "pilot"
+seat_explicit = true
 ```
 
 Lists everywhere (one shape for helper and raw elements; a consumer never branches on type).
@@ -290,8 +334,11 @@ Against `mi24p-command-surface.md` §2/§10 and the live-confirmed BL-B66/BL-B80
 6/7/16/30/55; `asp_commands.Power` = 3014 on arg 529; the six BL-B66 writes —
 `(6, 3028)` arg 773, `(16, 3015)` arg 761 (still UNVERIFIED), `(7, 3001)` arg 885, `(6, 3030)`
 arg 955, `(7, 3002)` arg 886, `(6, 3020)` arg 673 — each present as some element; 738/856 present;
-664 `seat = "operator"`. A mismatch on a DCS build newer than 2.9.29 is a finding to write up, not
-an automatic fail; a mismatch on the same build is a parser bug.
+664 `seat = "operator"`. These control points, and the full form/count survey above, are now
+confirmed live at both 2.9.29.27278 and 2.9.30.28738 (`aircraft-layer/research/
+2026-10-23-mi24p-clickabledata-forms.md`) — Stage 0c runs against whichever build is installed on
+the Windows machine at the time. A mismatch on a build newer than 2.9.30 is a finding to write up,
+not an automatic fail; a mismatch on either confirmed build is a parser bug.
 
 **Stage 0 is its own batch** (dev tool, no runtime dependency; performance/security passes per
 root `CLAUDE.md`'s batch rule — one each, after 0b).
@@ -530,7 +577,13 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
   against an older collector: no `args` key → readback unknown → D3 waits then skips; log one
   WARNING "cockpit_switch feed has no args map — update the collector".
 
-**Stage 4 (deferred)** — the generic `watch_args` readback (2026-10-21 Stage 3, kept below).
+**Stage 4 (last stage, in scope — not deferred, R7 2026-10-23)** — the generic low-rate/on-demand
+switch readback, replacing BL-B80's per-frame push of the six switch args. Design as 2026-10-21
+(kept below, "Superseded (2026-10-21 text)"), with the 2026-10-23 scope correction: **move the six
+switch args off the per-frame feed**, not merely add a parallel low-rate one — the user's "better
+not do it every frame" / "query a set of switches when they are needed, not everything" is a
+reduction, not an addition, for switch positions specifically (axis args stay per-frame, per
+BL-B80, unaffected).
 
 ---
 
@@ -563,11 +616,18 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
    on"/"Observ off"; "weapons armed"/"weapons safe"; one air start → no "Guidance unit ready" at
    spawn; one deliberately broken sequence file (typo in an effector name) → console banner at
    start, the error line once the intercom is on, everything else still works. ~10 minutes.
-4. **Stage 4 — generic low-rate readback (deferred).** Build when the first sequence names an
-   effector outside the six args the existing feed carries; until then the loader and D3's
-   WARNING say exactly which effector needs it. Design as 2026-10-21 (below), **additive**: the
-   existing `cockpit_switch` line and its BL-B80 fields are not reduced. Needs an `Export.lua`
-   redeploy on the Windows DCS machine.
+4. **Stage 4 — generic low-rate readback, BL-B90's last stage** (R7, user direction 2026-10-23,
+   explore-notes "Readback rate and scope" — *"we'll be reading a lot of args eventually. Better
+   not do it every frame... If possible, query a set of switches when they are needed, not
+   everything. This at DCS export level if possible, for performance reasons. Ok to defer to
+   later stage, but will be needed soonish. Let's say BL-B90 last step."* **In scope for this
+   milestone, run after Stage 3's card** — not a backlog item, and not merely additive: the six
+   switch args move off BL-B80's per-frame `cockpit_switch` push onto the lower-rate
+   poll, ideally an on-demand query of just the set of switches a loaded sequence actually
+   references, done at `Export.lua`/DCS-export level for the performance win the user asked for.
+   Axis args (BL-B80's own slew-rate reads) are unaffected — this is switch positions only.
+   Design as 2026-10-21 (below, "Superseded (2026-10-21 text)"), corrected for this reduction
+   rather than addition. Needs an `Export.lua` redeploy on the Windows DCS machine.
 
 ---
 
@@ -632,16 +692,16 @@ first consumer of the say-only row and of event-driven (not pilot-driven) trigge
 
 ## Decisions Requiring User Input
 
-1. **Stage 4 (generic watched-args readback): defer until a sequence needs it?** Recommend
-   **defer** — the existing feed covers every switch this cut touches, Stage 4 is the only part
-   needing an `Export.lua` redeploy, and the loader names the first effector that would need it.
-   (Your 2026-10-21 "readback is registry-driven, low frequency" stands as the design for when it
-   is built.)
+1. ~~Stage 4 (generic watched-args readback): defer until a sequence needs it?~~ **Decided,
+   2026-10-23** (explore-notes, "Readback rate and scope"): not deferred to the backlog — it is
+   BL-B90's own last stage, built after Stage 3's card, and it moves the six switch args off
+   BL-B80's per-frame push rather than adding a parallel feed. See R7 and the Stage 4 text above.
 2. **`guidance-unit-ready` trigger in this cut?** Recommend **no** (your default) — ~half a day,
    seam is in place (D7).
-3. **The BL-B80 air-start "Guidance unit ready" divergence** (above): fix it on `main` before
-   Flight A, or let it ride to this plan's Stage 2? Recommend **fix before Flight A** — it is a
-   few lines and Flight A is an air start.
+3. ~~The BL-B80 air-start "Guidance unit ready" divergence~~ **Resolved, 2026-10-23**: fixed on
+   `fix/guidance-ready-edge`, merged to `main` (explore-notes: *"there's already a note somewhere
+   to say it on change to ready. Use that"* — BL-B80 decision 2), independently of this plan's own
+   Stage 2. Nothing further needed here.
 
 ---
 

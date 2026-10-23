@@ -24,4 +24,29 @@
   **Decided 2026-10-23** (explore-notes, "2026-10-23"): queues per trigger; takeoff sequence runs
   on every takeoff, the file's own row conditions handle the already-powered case; a bad sequence
   file is logged, ignored, and announced on the intercom — body-layer keeps running (supersedes the
-  2026-10-21 "fail loudly at startup"); its own short re-flight card.
+  2026-10-21 "fail loudly at startup"); its own short re-flight card. **Readback rate/scope,
+  2026-10-23 (explore-notes)**: switch positions move off BL-B80's per-frame push to a lower-rate,
+  ideally on-demand `Export.lua`-level query — not deferred to backlog, this is BL-B90's own
+  **last** stage (R7/Stage 4, `plan.md`).
+
+  **Stage 0b — the offline effector-registry generator — done, 2026-10-23**
+  (`body-layer/tools/generate_effector_registry.py`), DoD-passed
+  (`plans/effector-sequences/dod-check-stage0.md`). Stage 0a's live recon
+  (`aircraft-layer/research/2026-10-23-mi24p-clickabledata-forms.md`, build 2.9.30.28738) corrected
+  several of the plan's and `mi24p-command-surface.md`'s original guesses (devices.lua's
+  declaration form, the command_defs.lua include direction, the raw-literal field names, the real
+  18-of-22 helper set, the always-resolved `seat`/`seat_explicit` pair, the three-way completeness
+  invariant) — `plan.md`'s "Forms the parser must handle" section is updated to state these as
+  fact, not as open questions. One security finding filed and fixed in the same batch
+  (`[[BL-B91]]`, TOML control-character escaping in `label`/element `name`). **Next: Stage 0c** —
+  the real run against the installed Mi-24P module, Windows DCS machine only (no Mac-side role
+  produces the real dump — execution-boundary rule). Command card:
+  `plans/effector-sequences/stage0c-run.md`. Stage 0d (control-point check of the returned dump,
+  then commit) and Stage 1+ (registry/sequence loader, engine, wiring) remain untouched.
+
+  **Milestone-completion question**: Stage 0b's completion does not change what Stage 0c/1+ should
+  be — the generator was built *to* the plan's spec (corrected where the recon proved the plan's
+  original guess wrong) — but it does sharpen one downstream assumption: Stage 1's curated
+  `effectors.toml` can now be filled in directly from the real dump's `seat`/`shape`/`cmds`/`args`
+  field names once Stage 0c/0d land, with no further format negotiation, since those names are now
+  implementation-fact rather than plan-guess.
