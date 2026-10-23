@@ -128,6 +128,23 @@ is harmless if the switch was already there). Reversible; say if unknown should 
   `body-layer/config/effectors-raw/mi-24p.toml`. A sequence file's `aircraft` param must match
   the directory it sits in, and it resolves effectors only against that aircraft's registry.
 
+### Two new triggers: mission start (2026-10-23)
+
+> *"Add trigger for mission-start that fires once at every mission start and separate for
+> mission-start-in-air that fires once at mission start only if airborne (AGL > 10 m)"*
+
+- `mission-start`: once per mission start, on the ground or in the air.
+- `mission-start-in-air`: once per mission start, only if airborne at that moment. "Airborne" is
+  AGL > 10 m, which is exactly the existing tunable `ON_GROUND_AGL_THRESHOLD_M` (10.0 m), reused
+  rather than a second constant.
+- Asked and answered, same day:
+  - **An air start does NOT fire `takeoff`** (*"No, only real takeoffs"*). After a mission start,
+    `takeoff` fires only on an actual ground→air transition. Today body-layer assumes on-ground at
+    start, so an air start's first sample counted as a takeoff; that goes.
+  - **A body-layer start or restart during a running mission does NOT count as a mission start**
+    (*"No, only real mission starts"*). Only DCS's own mission (re)start event fires the two
+    triggers.
+
 Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
 tool for creating the switch list."* (Stage 0, the generator.)
 
