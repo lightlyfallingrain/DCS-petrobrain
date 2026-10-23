@@ -1024,6 +1024,35 @@ def test_multiposition_switch_missing_count_is_unknown(gen: ModuleType) -> None:
     assert "count_" in vr.reason
 
 
+def test_multiposition_switch_fractional_delta_is_evaluated(gen: ModuleType) -> None:
+    """`AC-TEMP-KNOB-PTR`'s real shape -- `delta_` is `1/9`, not a bare
+    literal (first real Windows run, 2026-10-23 follow-up). The research
+    note's earlier "every real call uses d = 0.1" was wrong."""
+    text = (
+        'elements["X"] = multiposition_switch(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 146, 11, 1/9, false, 0.0, anim_speed_default, false)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert len(vr.values) == 11
+    assert vr.values[0] == 0.0
+    assert vr.values[1] == pytest.approx(1 / 9)
+
+
+def test_multiposition_switch_unresolvable_delta_expression_is_unknown(
+    gen: ModuleType,
+) -> None:
+    """A real identifier in the expression (not pure numeric-literal
+    arithmetic) must still be `_UNRESOLVED`, never silently evaluated."""
+    text = (
+        'elements["X"] = multiposition_switch(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 148, 11, anim_speed_default / 5, false, 0.0)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "unknown"
+    assert "delta_" in vr.reason
+
+
 def test_triple_switch_is_fixed_four_discrete_values(gen: ModuleType) -> None:
     text = 'elements["X"] = triple_switch(_("Hint"), devices.ASP_17V, asp_commands.Power, 1)\n'
     (vr,) = _values_of(gen, text)
@@ -1049,6 +1078,33 @@ def test_default_axis_limited_custom_range(gen: ModuleType) -> None:
     assert (vr.kind, vr.min, vr.max, vr.gain) == ("continuous", -0.15, 0.15, 0.1)
 
 
+def test_default_axis_arithmetic_gain_is_evaluated_and_rounded(
+    gen: ModuleType,
+) -> None:
+    """`GREBEN-SET-LATITUDE-PTR`'s real shape -- `gain_` is `-2/3`, a
+    constant-arithmetic expression (first real Windows run, 2026-10-23
+    follow-up). The computed value is also rounded, so float division
+    noise (`0.2 * 5 / 6` style) is never re-emitted verbatim."""
+    text = (
+        'elements["X"] = default_axis(_("Hint"), devices.ASP_17V, asp_commands.Power, '
+        "1, 0, -2/3, true, true, true)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "continuous"
+    assert vr.gain == pytest.approx(-2 / 3)
+    assert vr.gain == round(vr.gain, 6)
+
+
+def test_default_axis_unresolvable_gain_identifier_is_unknown(gen: ModuleType) -> None:
+    text = (
+        'elements["X"] = default_axis(_("Hint"), devices.ASP_17V, asp_commands.Power, '
+        "1, 0, anim_speed_default, true, true, true)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "unknown"
+    assert "gain_" in vr.reason
+
+
 def test_default_animated_lever_ignores_its_own_arg_lim_typo(gen: ModuleType) -> None:
     """DCS's own `arg_lim__` typo makes the parameter dead code in the
     real helper -- the generator must not apply it either, even though
@@ -1072,6 +1128,208 @@ def test_springloaded_3_pos_tumb_default_and_custom(gen: ModuleType) -> None:
     assert not unhandled
     (vr,) = handled["X"].value_ranges
     assert vr.values == (-1.0, 0.0, 1.0) and vr.momentary is True
+
+
+def test_default_1_position_tumb_default_arg_lim_is_0_to_1(gen: ModuleType) -> None:
+    """With no `arg_val_` and no `arg_lim_` at all, the default stays
+    `{0,1}` -- same as `default_spring_button`/`default_position_tumb`."""
+    text = (
+        'elements["X"] = default_1_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 500, anim_speed_default, nil, nil, nil)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert vr.values == (0.0, 1.0)
+
+
+def test_default_1_position_tumb_default_arg_lim_uses_custom_arg_val(
+    gen: ModuleType,
+) -> None:
+    """Required fix (review `plans/effector-sequences/review-switch-
+    values.md`): this helper's own documented default is `arg_lim_ or
+    {0, arg_val_}`, distinct from the other two helpers in its group,
+    whose default is the fixed `{0,1}` regardless of `arg_val_`. A
+    custom `arg_val_` with no `arg_lim_` must change the upper bound."""
+    text = (
+        'elements["X"] = default_1_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 500, anim_speed_default, 2, nil, nil)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert vr.values == (0.0, 2.0)
+
+
+def test_default_1_position_tumb_unresolvable_arg_val_is_unknown(
+    gen: ModuleType,
+) -> None:
+    text = (
+        'elements["X"] = default_1_position_tumb(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 500, anim_speed_default, anim_speed_default, nil, nil)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "unknown"
+    assert "arg_val_" in vr.reason
+
+
+def test_radio_wheel_1_is_relative_discrete_not_continuous(gen: ModuleType) -> None:
+    """`JADRO-01-PTR`'s real shape: TUMB, `relative=true`, stepped 0.1
+    over `arg_lim_` -- not a continuous axis (first real Windows run,
+    2026-10-23 follow-up)."""
+    text = (
+        'elements["X"] = radio_wheel_1(_("Hint"), devices.ASP_17V, '
+        "asp_commands.Power, 436, {-0.1, 0.1}, {0,1}, nil)\n"
+    )
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert vr.momentary is False
+    assert vr.relative is True
+    assert len(vr.values) == 11
+    assert vr.values[0] == 0.0
+    assert vr.values[-1] == pytest.approx(1.0)
+
+
+def test_radio_wheel_1_default_step_and_limit(gen: ModuleType) -> None:
+    text = 'elements["X"] = radio_wheel_1(_("Hint"), devices.ASP_17V, asp_commands.Power, 436)\n'
+    (vr,) = _values_of(gen, text)
+    assert vr.kind == "discrete"
+    assert vr.relative is True
+    assert len(vr.values) == 11
+
+
+#: One expected `ValueRange` shape per `_HELPER_SIGNATURES` entry, built
+#: from a *minimal* call (only hint/device/command(s)/draw-argument --
+#: `_build_helper_call_text(..., crew_idx=None)` -- every other
+#: positional parameter therefore `nil`, i.e. "use the helper's own
+#: documented default"). Covers all 22 helpers in one test, closing the
+#: mutation-coverage gap the review found (`plans/effector-sequences/
+#: review-switch-values.md`): removing any single helper from its
+#: `if helper in (...)` group in `_value_range_for_helper` silently
+#: downgrades it to `"unknown"`, and only a dedicated expectation per
+#: helper -- not just the ones already covered by another test -- can
+#: catch that. Transcribed from the research note's Helpers table, not
+#: read off the generator's own grouping.
+_EXPECTED_DEFAULT_VALUE_RANGES: dict[str, dict[str, object]] = {
+    "default_button": {"kind": "discrete", "values": (0.0, 1.0), "momentary": True},
+    "default_square_button": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": True,
+    },
+    "default_tumb_button": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": True,
+    },
+    "stick_button": {"kind": "discrete", "values": (0.0, 1.0), "momentary": True},
+    "default_2_position_tumb": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_2_position_small_tumb": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_2_position_flares_tumb": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_CB_button": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_blue_cover": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_animated_lever": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_spring_button": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": True,
+    },
+    "default_position_tumb": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_1_position_tumb": {
+        "kind": "discrete",
+        "values": (0.0, 1.0),
+        "momentary": False,
+    },
+    "default_3_position_tumb": {
+        "kind": "discrete",
+        "values": (-1.0, 0.0, 1.0),
+        "momentary": False,
+    },
+    "triple_switch": {
+        "kind": "discrete",
+        "values": (0.0, 0.1, 0.2, 0.3),
+        "momentary": False,
+    },
+    # `count_` is required with no default -- a minimal call omitting it
+    # is unknown, not a guess.
+    "multiposition_switch": {"kind": "unknown"},
+    # Never called in the real module; always unknown regardless of
+    # params (heterogeneous per-action kinds -- see the generator's own
+    # comment at this group).
+    "default_button_tumb": {"kind": "unknown"},
+    "springloaded_2_pos_tumb": {"kind": "unknown"},
+    "springloaded_3_pos_tumb": {
+        "kind": "discrete",
+        "values": (-1.0, 0.0, 1.0),
+        "momentary": True,
+    },
+    "default_axis": {"kind": "continuous", "min": 0.0, "max": 1.0, "gain": 0.1},
+    "default_axis_limited": {
+        "kind": "continuous",
+        "min": 0.0,
+        "max": 1.0,
+        "gain": 0.1,
+    },
+    "radio_wheel_1": {
+        "kind": "discrete",
+        "momentary": False,
+        "relative": True,
+        "n_values": 11,
+    },
+}
+
+
+def test_value_range_for_every_helper_signature_minimal_call(gen: ModuleType) -> None:
+    assert set(_EXPECTED_DEFAULT_VALUE_RANGES) == set(gen._HELPER_SIGNATURES)
+    for helper, (n_commands, _crew_idx) in gen._HELPER_SIGNATURES.items():
+        expected = _EXPECTED_DEFAULT_VALUE_RANGES[helper]
+        text = _build_helper_call_text("X", helper, n_commands, None)
+        (vr,) = _values_of(gen, text)
+        assert vr.kind == expected["kind"], (
+            f"{helper}: expected kind {expected['kind']}, got {vr.kind}"
+        )
+        if "values" in expected:
+            assert vr.values == pytest.approx(expected["values"]), helper
+        if "n_values" in expected:
+            assert vr.values is not None and len(vr.values) == expected["n_values"], (
+                helper
+            )
+        if "momentary" in expected:
+            assert vr.momentary == expected["momentary"], helper
+        if "relative" in expected:
+            assert vr.relative == expected["relative"], helper
+        if "min" in expected:
+            assert vr.min == pytest.approx(expected["min"]), helper
+        if "max" in expected:
+            assert vr.max == pytest.approx(expected["max"]), helper
+        if "gain" in expected:
+            assert vr.gain == pytest.approx(expected["gain"]), helper
 
 
 def test_helper_args_captures_trailing_positional_text(gen: ModuleType) -> None:
@@ -1147,9 +1405,13 @@ def test_raw_table_literal_lev_class_is_continuous_with_gain(gen: ModuleType) ->
     assert (vr1.kind, vr1.min, vr1.max, vr1.gain) == ("continuous", -1.0, 1.0, 0.1)
 
 
-def test_raw_table_literal_null_class_action_is_unknown(gen: ModuleType) -> None:
+def test_raw_table_literal_null_class_action_is_none_not_unknown(
+    gen: ModuleType,
+) -> None:
     """`BRAKE-LEVEL-OP-PTR`'s own shape: a bare `0` (`class_type.NULL`)
-    third action -- never guessed at, reported unknown by name."""
+    third action -- a placeholder action with no settable value at all,
+    not a parser failure, so it is `"none"`, distinct from `"unknown"`
+    (2026-10-23 follow-up, after the first real Windows run)."""
     text = (
         'elements["BRAKE-LEVEL-OP-PTR"] = {\n'
         "\tclass = {class_type.TUMB, class_type.LEV, 0},\n"
@@ -1166,8 +1428,7 @@ def test_raw_table_literal_null_class_action_is_unknown(gen: ModuleType) -> None
     vr0, vr1, vr2 = handled["BRAKE-LEVEL-OP-PTR"].value_ranges
     assert vr0.kind == "discrete" and vr0.momentary is False
     assert vr1.kind == "continuous"
-    assert vr2.kind == "unknown"
-    assert "NULL" in vr2.reason
+    assert vr2.kind == "none"
 
 
 def test_raw_table_literal_missing_class_field_is_unknown_for_every_action(

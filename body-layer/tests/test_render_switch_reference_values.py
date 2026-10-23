@@ -53,22 +53,45 @@ def test_long_discrete_list_is_shown_as_a_step_count(mod: ModuleType) -> None:
         "values": [round(k * 0.1, 1) for k in range(11)],
         "momentary": False,
     }
-    assert mod._format_value_range(vr) == "0-1 (11 steps)"
+    assert mod._format_value_range(vr) == "0 to 1 (11 steps)"
+
+
+def test_relative_discrete_list_is_marked(mod: ModuleType) -> None:
+    """`radio_wheel_1`'s own shape -- a stepped range whose value is
+    added to the current position on each click, not set directly."""
+    vr = {
+        "kind": "discrete",
+        "values": [round(k * 0.1, 1) for k in range(11)],
+        "momentary": False,
+        "relative": True,
+    }
+    assert mod._format_value_range(vr) == "0 to 1 (11 steps) relative"
 
 
 def test_continuous_with_gain(mod: ModuleType) -> None:
     vr = {"kind": "continuous", "min": 0.0, "max": 1.0, "gain": 0.1}
-    assert mod._format_value_range(vr) == "0-1 continuous (gain 0.1)"
+    assert mod._format_value_range(vr) == "0 to 1 continuous (gain 0.1)"
 
 
 def test_continuous_without_gain(mod: ModuleType) -> None:
+    """A negative lower bound must still read unambiguously as a range,
+    not as what could be misread as a typo or a single number
+    (`COLLECTIVE-CORR-PTR`'s real -1..1 range, the review's own finding)."""
     vr = {"kind": "continuous", "min": -1.0, "max": 1.0, "gain": None}
-    assert mod._format_value_range(vr) == "-1-1 continuous"
+    assert mod._format_value_range(vr) == "-1 to 1 continuous"
 
 
 def test_unknown_shows_its_reason(mod: ModuleType) -> None:
     vr = {"kind": "unknown", "reason": "no parseable arg_lim field"}
     assert mod._format_value_range(vr) == "unknown: no parseable arg_lim field"
+
+
+def test_none_kind_renders_as_an_em_dash(mod: ModuleType) -> None:
+    """A NULL-class placeholder action (`ILS-ADJUST-HANDLE-PTR`'s third/
+    fourth actions, `BRAKE-LEVEL-OP-PTR`'s third) -- not "unknown": there
+    is nothing unrecognised, the action simply has no settable value."""
+    vr = {"kind": "none"}
+    assert mod._format_value_range(vr) == "—"
 
 
 def test_values_cell_is_blank_for_none_or_empty(mod: ModuleType) -> None:
@@ -88,5 +111,5 @@ def test_values_cell_multi_action_is_labelled_per_action(mod: ModuleType) -> Non
     ]
     assert (
         mod._format_values_cell(values)
-        == "action 0: 0/1 momentary; action 1: 0-1 continuous"
+        == "action 0: 0/1 momentary; action 1: 0 to 1 continuous"
     )

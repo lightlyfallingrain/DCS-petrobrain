@@ -68,6 +68,7 @@ count toward or against that completeness check.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import os
 import re
@@ -198,22 +199,47 @@ _SEAT_BY_NUMBERS: dict[frozenset[int], str] = {
 # applied to the output, because DCS's own `arg_lim__` typo (confirmed
 # live) makes it dead code in the real helper too -- applying it here
 # would disagree with what the switch actually does.
+#
+# **Amended after the first real Windows run (DCS 2.9.30.28738,
+# 2026-10-23 follow-up)**: a positional parameter read this way is often
+# a constant-arithmetic expression, not a bare literal -- `1/9`, `1/20`,
+# `-2/3`, `0.2 * 5 / 6` all appear on real calls (`_lua_scalar` evaluates
+# these via `_lua_arithmetic`/`_eval_constant_arithmetic` rather than
+# leaving them `_UNRESOLVED`; the research note's earlier "every real
+# call uses d = 0.1" for `multiposition_switch` was wrong and has been
+# corrected there). `radio_wheel_1` is TUMB/relative, not LEV/continuous
+# -- it is emitted as a stepped discrete range with `relative=True`, not
+# a continuous axis. Every computed numeric field is rounded
+# (`_round_value`) before being stored, since float division on a
+# fraction like the ones above produces noise
+# (`0.30000000000000004`) that would otherwise be re-emitted verbatim.
 
 
 class ValueKind:
     DISCRETE = "discrete"
     CONTINUOUS = "continuous"
     UNKNOWN = "unknown"
+    #: A raw-table-literal action whose `class` entry is the bare `0`
+    #: (`class_type.NULL`) -- a placeholder action ED's own source
+    #: assigns no behaviour to, confirmed live on `ILS-ADJUST-HANDLE-PTR`/
+    #: `BRAKE-LEVEL-OP-PTR` (2026-10-23 follow-up). Distinct from
+    #: `"unknown"`: there is nothing unrecognised here, the control
+    #: simply has no settable value for this action.
+    NONE = "none"
 
 
 @dataclass(frozen=True)
 class ValueRange:
     """One `args[i]`'s settable-value description. `kind` decides which
     other fields are meaningful: `"discrete"` uses `values` (sorted,
-    never empty) and `momentary` (BTN/spring-back vs. a latching TUMB);
-    `"continuous"` uses `min`/`max`/optional `gain`; `"unknown"` uses only
-    `reason` -- fail-closed, per the module docstring's "Fails closed, at
-    two levels," rather than a guessed default."""
+    never empty), `momentary` (BTN/spring-back vs. a latching TUMB), and
+    `relative` (a wheel/knob whose step is added to the *current*
+    position on each click, e.g. `radio_wheel_1`, rather than a position
+    the control is set to directly); `"continuous"` uses `min`/`max`/
+    optional `gain`; `"none"` uses no other field (a NULL-class
+    placeholder action); `"unknown"` uses only `reason` -- fail-closed,
+    per the module docstring's "Fails closed, at two levels," rather
+    than a guessed default."""
 
     kind: str
     values: tuple[float, ...] | None = None
@@ -221,32 +247,65 @@ class ValueRange:
     max: float | None = None
     gain: float | None = None
     momentary: bool = False
+    relative: bool = False
     reason: str | None = None
 
 
-def _discrete(values: list[float], *, momentary: bool) -> ValueRange:
+#: Every `ValueRange` numeric field is rounded to this many decimal
+#: places before it is stored -- Lua/Python float arithmetic on a
+#: fraction like `1/3` or `0.2 * 5 / 6` produces noise
+#: (`0.30000000000000004`) that is otherwise computed once here and then
+#: re-emitted verbatim by every downstream reader (the TOML dump, the
+#: rendered switch reference) forever.
+_VALUE_ROUND_NDIGITS: Final = 6
+
+
+def _round_value(x: float) -> float:
+    return round(x, _VALUE_ROUND_NDIGITS)
+
+
+def _discrete(
+    values: list[float], *, momentary: bool, relative: bool = False
+) -> ValueRange:
     return ValueRange(
-        kind=ValueKind.DISCRETE, values=tuple(sorted(set(values))), momentary=momentary
+        kind=ValueKind.DISCRETE,
+        values=tuple(sorted({_round_value(v) for v in values})),
+        momentary=momentary,
+        relative=relative,
     )
 
 
 def _continuous(lo: float, hi: float, *, gain: float | None = None) -> ValueRange:
-    return ValueRange(kind=ValueKind.CONTINUOUS, min=lo, max=hi, gain=gain)
+    return ValueRange(
+        kind=ValueKind.CONTINUOUS,
+        min=_round_value(lo),
+        max=_round_value(hi),
+        gain=(_round_value(gain) if gain is not None else None),
+    )
 
 
 def _unknown_value(reason: str) -> ValueRange:
     return ValueRange(kind=ValueKind.UNKNOWN, reason=reason)
 
 
+def _none_value() -> ValueRange:
+    return ValueRange(kind=ValueKind.NONE)
+
+
 #: A scalar Lua literal, parsed off a trailing helper parameter that
 #: affects a *value* (never the ones that only affect animation/sound/
 #: seat, which this section never looks at). Three outcomes, each
-#: distinct: a number (use it), `None` for `nil`/an absent trailing
-#: argument (use the helper's own documented default), or the
-#: `_UNRESOLVED` sentinel for any other expression (`anim_speed_default
-#: / 5`, a bare identifier, a table this parser does not expect here) --
-#: the caller must treat that sentinel as "unknown," never substitute the
-#: default silently, which is exactly what "never guessed" means here.
+#: distinct: a number (use it; a constant-arithmetic expression like
+#: `1/9` or `0.2 * 5 / 6` is evaluated via `_lua_arithmetic`, confirmed
+#: live 2026-10-23 -- the real module's own `delta_`/`gain_` arguments
+#: use these, not bare literals, on roughly half the helper calls that
+#: pass one at all), `None` for `nil`/an absent trailing argument (use
+#: the helper's own documented default), or the `_UNRESOLVED` sentinel
+#: for anything that is not pure numeric-literal arithmetic (a bare
+#: identifier such as `anim_speed_default`, a call, a table this parser
+#: does not expect here) -- the caller must treat that sentinel as
+#: "unknown," never substitute the default silently, which is exactly
+#: what "never guessed" means here.
 class _Unresolved:
     """Marker type for `_lua_scalar`/`_lua_bool`/`_lua_pair`: the text is
     a Lua expression this generator does not evaluate (a bare
@@ -265,12 +324,70 @@ _BOOL_LITERAL_RE = re.compile(r"^(true|false)$")
 _PAIR_LITERAL_RE = re.compile(r"^\{\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\}$")
 
 
+#: `ast.BinOp.op` node types this generator evaluates -- `+`/`-`/`*`/`/`
+#: only, matching Lua's own arithmetic operators on numbers (division is
+#: always float, in both languages, so `/` needs no special-casing).
+_ARITHMETIC_BINOPS: Final = (ast.Add, ast.Sub, ast.Mult, ast.Div)
+
+
+def _eval_constant_arithmetic(node: ast.expr) -> float | None:
+    """Evaluate `node` if -- recursively -- it is built only from numeric
+    literals, unary minus, and `+ - * /` (parentheses are not a node at
+    all; `ast.parse` already resolves them into nesting) -- `None` for
+    anything else (a `Name`, a `Call`, a string, a comparison, ...), so a
+    real identifier such as `anim_speed_default` in `anim_speed_default
+    / 5` stays unresolved rather than silently evaluating to some wrong
+    substitute. Never uses `eval` -- this is a small hand-written
+    whitelist walk over the parsed tree, nothing else is interpreted."""
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+    ):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        operand = _eval_constant_arithmetic(node.operand)
+        return None if operand is None else -operand
+    if isinstance(node, ast.BinOp) and isinstance(node.op, _ARITHMETIC_BINOPS):
+        left = _eval_constant_arithmetic(node.left)
+        right = _eval_constant_arithmetic(node.right)
+        if left is None or right is None:
+            return None
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        return left / right  # the only remaining member of _ARITHMETIC_BINOPS: Div
+    return None
+
+
+def _lua_arithmetic(text: str) -> float | None:
+    """`text` evaluated as constant-literal arithmetic, or `None` if it
+    is not parseable Python expression syntax, not whitelisted by
+    `_eval_constant_arithmetic`, or divides by zero -- every failure
+    mode collapses to the same `None`, which `_lua_scalar` turns into
+    `_UNRESOLVED` rather than a guess."""
+    try:
+        tree = ast.parse(text, mode="eval")
+    except SyntaxError:
+        return None
+    try:
+        return _eval_constant_arithmetic(tree.body)
+    except ZeroDivisionError:
+        return None
+
+
 def _lua_scalar(text: str) -> float | None | _Unresolved:
     text = text.strip()
     if text in ("", "nil"):
         return None
     if _SCALAR_LITERAL_RE.match(text):
         return float(text)
+    value = _lua_arithmetic(text)
+    if value is not None:
+        return value
     return _UNRESOLVED
 
 
@@ -344,7 +461,21 @@ def _value_range_for_helper(helper: str, args: list[str], arg_idx: int) -> Value
         lim = _lua_pair(p(lim_offset))
         if isinstance(lim, _Unresolved):
             return _unknown_value(f"{helper}'s arg_lim_ is not a literal pair")
-        lo, hi = lim if lim is not None else (0.0, 1.0)
+        if lim is not None:
+            lo, hi = lim
+        elif helper == "default_1_position_tumb":
+            # This helper's own documented default is `arg_lim_ or {0,
+            # arg_val_}` -- distinct from the other two in this group,
+            # whose default is the fixed `{0,1}` (research note row 36).
+            # `arg_val_` sits one offset before `arg_lim_` (`p(2)`).
+            arg_val = _lua_scalar(p(2))
+            if isinstance(arg_val, _Unresolved):
+                return _unknown_value(
+                    "default_1_position_tumb's arg_val_ is not a literal number"
+                )
+            lo, hi = 0.0, (arg_val if arg_val is not None else 1.0)
+        else:
+            lo, hi = 0.0, 1.0
         return _discrete([lo, hi], momentary=(helper == "default_spring_button"))
 
     if helper == "default_3_position_tumb":
@@ -432,6 +563,11 @@ def _value_range_for_helper(helper: str, args: list[str], arg_idx: int) -> Value
         return _continuous(lo, hi, gain=(gain if gain is not None else 0.1))
 
     if helper == "radio_wheel_1":
+        # TUMB, relative=true, not LEV/continuous (research note row for
+        # `radio_wheel_1`) -- each click adds `arg_value_`'s magnitude to
+        # the *current* position rather than setting an absolute one, so
+        # this is emitted as a stepped discrete range with `relative`
+        # set, not a continuous axis.
         step = _lua_pair(p(1))
         if isinstance(step, _Unresolved):
             return _unknown_value("radio_wheel_1's arg_value_ is not a literal pair")
@@ -439,8 +575,16 @@ def _value_range_for_helper(helper: str, args: list[str], arg_idx: int) -> Value
         if isinstance(lim, _Unresolved):
             return _unknown_value("radio_wheel_1's arg_lim_ is not a literal pair")
         lo, hi = lim if lim is not None else (0.0, 1.0)
-        gain = abs(step[1]) if step is not None else 0.1
-        return _continuous(lo, hi, gain=gain)
+        step_size = abs(step[1]) if step is not None else 0.1
+        if step_size <= 0:
+            return _unknown_value("radio_wheel_1's arg_value_ step must be nonzero")
+        n_steps = round((hi - lo) / step_size)
+        if n_steps < 0:
+            return _unknown_value(
+                "radio_wheel_1's arg_lim_ span is inconsistent with its step"
+            )
+        values = [lo + k * step_size for k in range(int(n_steps) + 1)]
+        return _discrete(values, momentary=False, relative=True)
 
     if helper in ("default_button_tumb", "springloaded_2_pos_tumb"):
         # Neither is ever called in the real module (confirmed live) and
@@ -596,6 +740,13 @@ def _value_ranges_for_raw_literal(body: str, n_actions: int) -> list[ValueRange]
         elif kind in ("LEV", "MOVABLE_LEV"):
             gain = gains[i] if gains is not None and i < len(gains) else None
             result.append(_continuous(lo, hi, gain=gain))
+        elif kind == "NULL":
+            # A placeholder action (`ILS-ADJUST-HANDLE-PTR`'s third/
+            # fourth actions, `BRAKE-LEVEL-OP-PTR`'s third) -- its own
+            # `arg_lim` pair is present but unused, since the action has
+            # no behaviour at all. Not "unknown": there is nothing here
+            # this generator failed to recognise.
+            result.append(_none_value())
         else:
             result.append(_unknown_value(f"unhandled raw-literal class {kind!r}"))
     return result
@@ -1438,12 +1589,16 @@ def _toml_value_range(vr: ValueRange) -> str:
         assert vr.values is not None
         parts.append(f"values = {_toml_float_array(list(vr.values))}")
         parts.append(f"momentary = {'true' if vr.momentary else 'false'}")
+        if vr.relative:
+            parts.append("relative = true")
     elif vr.kind == ValueKind.CONTINUOUS:
         assert vr.min is not None and vr.max is not None
         parts.append(f"min = {vr.min}")
         parts.append(f"max = {vr.max}")
         if vr.gain is not None:
             parts.append(f"gain = {vr.gain}")
+    elif vr.kind == ValueKind.NONE:
+        pass  # no other field is meaningful for a NULL-class placeholder
     else:
         assert vr.reason is not None
         parts.append(f"reason = {_toml_string(vr.reason)}")
@@ -1469,6 +1624,7 @@ def render_toml(
 ) -> str:
     source_subpath = "/".join(_SCRIPTS_SUBPATH.parts)
     inputs = ", ".join(f"{name} {digest}" for name, digest in sha256_by_file.items())
+    n_unknown_value_ranges = len(_unknown_value_ranges(handled))
     lines = [
         "# GENERATED by body-layer/tools/generate_effector_registry.py. DO NOT HAND-EDIT.",
         "# Regenerate against the installed Mi-24P module (a Windows box with the",
@@ -1480,7 +1636,8 @@ def render_toml(
         (
             f"# Elements: {len(handled)} emitted, {n_unhandled} unhandled, "
             f"{n_post_assigns} field patches, {heads} elements[ heads total. "
-            f"Statements ignored: {n_ignored} (see the run report)."
+            f"Statements ignored: {n_ignored} (see the run report). "
+            f"Value ranges unknown: {n_unknown_value_ranges} (see the run report)."
         ),
         "# Regenerate after any DCS update: device and command numbers are positional.",
         "",
@@ -1531,6 +1688,29 @@ def _read_dcs_build_from_autoupdate_cfg(install_path: Path) -> str | None:
         return None
     m = _VERSION_RE.search(text)
     return m.group(1) if m else None
+
+
+def _unknown_value_ranges(
+    handled: dict[str, RawElement],
+) -> list[tuple[str, int, str]]:
+    """Every `(element name, action index, reason)` whose `ValueRange`
+    is `"unknown"` across every handled element -- parse-level success
+    (the element itself is `handled`, not `unhandled`) says nothing about
+    whether its *value range* was determined, and that gap was
+    previously silent: a reader had to grep the rendered TOML by hand to
+    find out how many controls this run could not place a settable value
+    on. Deliberately not fatal (see the module docstring's "Fails
+    closed, at two levels" -- a value-range unknown already fails closed
+    at the `ValueRange` level, so refusing to write the whole registry
+    over it would be a second, redundant refusal) -- loud instead:
+    `main` prints every one and a count in the summary line."""
+    found: list[tuple[str, int, str]] = []
+    for name in sorted(handled):
+        for i, vr in enumerate(handled[name].value_ranges):
+            if vr.kind == ValueKind.UNKNOWN:
+                assert vr.reason is not None
+                found.append((name, i, vr.reason))
+    return found
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1609,14 +1789,20 @@ def main(argv: list[str] | None = None) -> int:
         n_post_assigns,
     )
 
+    unknown_value_ranges = _unknown_value_ranges(handled)
     print(
         f"{heads} elements[ heads: {len(handled)} emitted, {len(unhandled)} unhandled, "
-        f"{n_post_assigns} field patches, {len(ignored)} statements ignored"
+        f"{n_post_assigns} field patches, {len(ignored)} statements ignored, "
+        f"{len(unknown_value_ranges)} value range(s) unknown"
     )
     if unhandled:
         print("unhandled:")
         for u in unhandled:
             print(f"  {u.name}: {u.reason}")
+    if unknown_value_ranges:
+        print("value range unknown (element emitted, but with no settable-value data):")
+        for name, action_idx, reason in unknown_value_ranges:
+            print(f"  {name} (action {action_idx}): {reason}")
     if ignored:
         print("statements ignored (neither an elements[...] definition nor a patch):")
         for line_no, snippet in ignored:

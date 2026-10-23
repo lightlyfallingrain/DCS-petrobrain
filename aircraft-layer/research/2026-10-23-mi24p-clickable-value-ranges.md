@@ -39,7 +39,7 @@ TUMB_4SIDE=8.
 | `default_2_position_flares_tumb` | wraps `default_2_position_tumb` (sound, BTN_FIX, side) | | | 0/1 |
 | `default_3_position_tumb(..,arg,cycled_,anim,inversed_,arg_value_,arg_limit_,crew)` | {TUMB,TUMB} | `{-v,v}`, `v = arg_value_ or 1`, negated if `inversed_` | `arg_limit_ or {-1,1}`, cycle=`cycled_ or false` | default -1/0/1 |
 | `triple_switch(hint,dev,cmd,arg,crew)` | {TUMB,TUMB}, 4 actions, class_vr TUMB_4SIDE | `{-0.1,0.1,0.2,0.3}` | `{{0,0.3},{0,0.3},{0,0.2},{0,0.3}}` | 0.0/0.1/0.2/0.3 |
-| `multiposition_switch(..,arg,count_,delta_,inversed_,min_,anim,cycled_,crew)` | TUMB | `{-d,d}`, `d = delta_ or 0.5` (×−1 if `inversed_`) | `{min_, min_+d*(count_-1)}`, `min_ or 0`; `count_` required | `min_ + k*d`, k = 0..count_-1 (every real call uses d = 0.1) |
+| `multiposition_switch(..,arg,count_,delta_,inversed_,min_,anim,cycled_,crew)` | TUMB | `{-d,d}`, `d = delta_ or 0.5` (×−1 if `inversed_`) | `{min_, min_+d*(count_-1)}`, `min_ or 0`; `count_` required | `min_ + k*d`, k = 0..count_-1 |
 | `default_button_tumb(..,cmd1,cmd2,arg,anim,crew)` | {BTN,TUMB} | `{-1,1}` | `{{-1,0},{0,1}}` | -1 momentary, 0/1 latching (not called) |
 | `springloaded_2_pos_tumb` | wraps `default_2_position_tumb`, class {BTN,BTN}, arg_value {1,1} | | | momentary (not called) |
 | `springloaded_3_pos_tumb(..,cmd1,cmd2,arg,anim,val1_,val2_,val3_,crew)` | {BTN,BTN} | `{val1,val3}` | `{{val1,val2},{val2,val3}}`; defaults -1.0/0.0/1.0 | -1/0/1, springs back to 0 |
@@ -123,3 +123,24 @@ BTN_FIX and TUMB_4SIDE.
    patched to 0/0.5.
 3. Several raw literals have multiple actions with different classes (a button and a lever on one
    element). Their values are per action, not one range for the element.
+
+## Amendment, first real Windows run (DCS 2.9.30.28738, 2026-10-23)
+
+Regenerating `config/effectors-raw/mi-24p.toml` against the real install surfaced three things
+this note's own first pass did not anticipate:
+
+1. **`multiposition_switch`'s `delta_` (and `default_axis`/`default_axis_limited`'s `gain_`) is
+   routinely an arithmetic expression, not a bare literal** -- `1/9`, `1/17`, `1/3`, `1/6`,
+   `1/20`, `1/5`, `1/10`, `-2/3`, `1.0 / 6.0`, `0.2 * 5 / 6` all appear on real calls (`AC-TEMP-
+   KNOB-PTR`, `R863`/`ARC`/`SPU8`/`VOLT`/`FUEL-METER`/`DEV6201` knobs, `GREBEN`/`SAU-B`/`SPUU`
+   axes). The row above's "every real call uses d = 0.1" was wrong -- several do, but far from
+   all -- and has been corrected. `generate_effector_registry.py` now evaluates
+   constant-literal-only arithmetic (numeric literals, unary minus, `+ - * /`) via a small
+   whitelisted AST walk, never `eval`, rather than leaving every such expression `_UNRESOLVED`.
+2. **`radio_wheel_1` is TUMB with `relative=true`** (consistent with the Helpers table row above,
+   `arg_value_ or {-0.1,0.1}`), not a continuous axis -- it is now emitted as a discrete,
+   0.1-stepped range over `arg_lim_` with a `relative` marker, not `_continuous`.
+3. **A NULL-class (`class_type.NULL`, bare `0`) raw-literal action is a placeholder with no
+   settable value at all**, not a parser failure -- `ILS-ADJUST-HANDLE-PTR`'s third/fourth
+   actions and `BRAKE-LEVEL-OP-PTR`'s third are real examples. Emitted as its own `"none"` kind,
+   distinct from `"unknown"`.
