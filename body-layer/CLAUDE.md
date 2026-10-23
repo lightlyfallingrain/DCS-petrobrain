@@ -419,6 +419,34 @@ Belief — observation *consumption*:
 - `src/belief/tasks.py` — `PendingIntent`/`TaskStore`. `TaskKind` is `"scan_area"`/`"watch_contact"`/`"attack_target"` (BL-14) — the last two share `watch_contact`'s shape exactly (no area, no success/timeout lifecycle).
 - `src/belief/attack_run.py` — BL-14's alignment derivation (`plans/attack-run/plan.md`). The one other file, beside `percept.py`, allowed to mention `Percept.relative_direction` — grep-fenced, `test_attack_run.py`. Tier 1 only as of Stage 3; tier 2 is Stage 6. And `seen_world_direction`, whose one caller is `sight_head.py` (BL-B80).
 - `src/belief/sight_head.py` — `SightHead` (BL-B80, `plans/9k113-sight-pointing/plan.md`): Petrovich's simulated 9K113 sight — gyro world-stabilised, gimbal-limited, slew-rate-limited — and the "Aim source" selection rule (`seen`/`held`/`belief`). Advanced once per poll by `logger.py`; the real DCS sight is a best-effort slave of it, outside this process entirely.
+- `src/belief/sight_effector.py` — `GuidanceUnitState` (the 9K113 lamps/switches *readback*
+  only: `sight_ready`, `refresh_readback`) and `write_sight_target` (BL-B80, untouched by
+  BL-B90). Switch *sequencing* moved out of this module to the effector engine below.
+- `src/belief/effector_registry.py` / `effector_sequences.py` / `effector_engine.py` (`BL-B90`,
+  `plans/effector-sequences/plan.md`) — cockpit switch sequences, data-driven instead of
+  hand-written write blocks. `effector_registry.load_registries_by_aircraft` loads one curated
+  `config/sequences/<aircraft-dir>/effectors.toml` (joined against the raw dump
+  `config/effectors-raw/<aircraft-dir>.toml`) per aircraft directory; `effector_sequences.
+  load_sequences` parses that aircraft's `config/sequences/<aircraft-dir>/*.md` files into rows.
+  `effector_engine.advance` runs the per-trigger queues each poll: `fire_trigger` starts/queues a
+  run, a row writes unless its own effector is already observed at the target value (the implicit
+  self-check — no explicit `!= on` condition needed in a sequence file for that), and a failed
+  write blocks later writes to the *same* switch this poll without blocking other triggers.
+  **A bad raw dump/curated file disables every sequence for that aircraft; a bad sequence file
+  disables only itself** — neither is fatal (`logger.error` per finding, one stderr banner at
+  startup, one spoken line — "System error, bad sequence file, see the logs..." — held until the
+  SPU-8 intercom gate opens, see `drain_config_error`). **To add a new effector**: find it in the
+  generated `config/sequences/<aircraft-dir>/switch-reference.md` (device/seat/element/shape/
+  cmd/args), add a curated entry to that aircraft's `effectors.toml`, then reference it from a
+  `*.md` sequence file's row — `switch-reference.md`'s own header has the exact TOML shape to
+  copy. `tools/generate_effector_registry.py` (offline, run on the Windows DCS machine, Stage 0)
+  and `tools/render_switch_reference.py` (regenerates `switch-reference.md`, staleness-checked
+  against both TOML files by `test_switch_reference_matches_the_generator`) are dev tools, not run
+  at body-layer startup. Two tunables, `[belief.effector_engine]` in `config/defaults.toml`:
+  `EFFECTOR_CONDITION_READBACK_WAIT_S` (how long an unknown readback is waited on before the
+  engine gives up — explicit conditions then skip the row, the implicit self-check instead writes)
+  and `EFFECTOR_SEQUENCE_STEP_DELAY_S` (gap between rows within one trigger's own run, renamed from
+  the old `GUIDANCE_UNIT_SWITCH_DELAY_S`).
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

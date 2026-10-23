@@ -462,8 +462,11 @@ existing `>= 0.5` threshold; works for 3-position). Absent readback is **unknown
   - each sequence file is validated alone; a bad one is ignored and every error is collected
     (file, line, reason);
   - **registry, recommended posture — same, at the finest grain that is honest**: a bad curated
-    *entry* (unresolved `source_element`, two entries resolving to the same `(device, cmd, arg)`,
-    bad `values`) drops that entry, and any sequence file using it becomes a bad file in turn;
+    *entry* (unresolved `source_element`, bad `values`) drops that entry, and any sequence file
+    using it becomes a bad file in turn. **Two entries resolving to the same `(device, cmd, arg)`
+    is R13's collision rule, not this one**: the first (TOML file order) wins and every later one
+    is the dropped entry — not "drop both", which is what this paragraph originally said before
+    R13 superseded it;
     a curated or raw file that cannot be read or parsed as TOML at all disables **every** sequence
     (all depend on it). Same banner, same one audio line. *Why not fatal for the registry*: the
     user's principle — "Petrobrain will continue, but some functionality may not work" — applies
@@ -484,7 +487,12 @@ existing `>= 0.5` threshold; works for 3-position). Absent readback is **unknown
   self.silenced`, then clears the flag. `intercom_open` is `gate_open is True`; `None` (no SPU-8
   sample, or an old `Export.lua`) never opens it — the banner already went to the console. Not
   cleared by a mission restart (it describes the process, not the mission): `_reset_mission_state`
-  must not touch it.
+  must not touch it. **Performance guard, added in the Stage 1-2 performance review's change
+  request (`performance-stage1-2.md`)**: the `GET /spu8/state` fetch itself is gated behind
+  `config_error_pending` — `logger.py` only calls `get_spu8_state_latest()` when the flag is still
+  `True`, so once it clears (one-shot, per D6 above) the GET never fires again for that process's
+  lifetime, instead of running unconditionally every poll of every sortie to serve a flag that
+  stays `False` after the first mission (re)start with no bad file.
 - **D7 — `guidance-unit-ready` trigger: seam now, trigger later** (user default). Seam: the
   hard-coded announce sits on the single line that detects the 960 edge, and the trigger enum is a
   code enum. Moving it later costs: one `EffectorTrigger` member, replacing that `_print` with

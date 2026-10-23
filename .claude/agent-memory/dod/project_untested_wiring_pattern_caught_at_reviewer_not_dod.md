@@ -1,6 +1,6 @@
 ---
 name: project_untested_wiring_pattern_caught_at_reviewer_not_dod
-description: 4th occurrence (2026-10-22, BL-B80 v2/9k113-sight-pointing) of "leaf module unit-tested, its wiring into the poll loop/consuming site is not" — caught at Reviewer each time, never reaching DoD as a live defect, but recurring even when the plan names it explicitly up front
+description: 5th occurrence (2026-10-23, BL-B90 Stages 1-2/effector-sequences) of "a branch/condition that reads as tested but isn't" — caught at Reviewer each time, never reaching DoD as a live defect; the two most recent occurrences are a distinct sub-shape (sibling-gate masking, not leaf/wiring-gap) but share the same root cause and the same place in the sequence where it gets caught
 metadata:
   type: project
 ---
@@ -38,3 +38,27 @@ the right place to close this, or does it need a mechanical check (e.g. a Review
 marked done without one) rather than relying on the plan's own words being read and acted on.
 Still caught at Reviewer, not DoD — the sequence held — but four occurrences of the same shape,
 one of them immune to an explicit in-plan warning, is itself the signal.
+
+**Occurrence 5, BL-B90 Stages 1-2 (effector-sequences), 2026-10-23 — a distinct sub-shape within
+the same family.** Not a leaf-module/wiring-site gap this time: both halves (`drain_config_error`'s
+`silenced` check and its `intercom_open` check) were coded and wired together from the start. The
+gap was that the one test written to cover the intercom gate
+(`test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once`) never reached a
+state where `intercom_open is False` and `silenced is False` at the same time — every phase with
+the intercom closed also had `silenced = True`, so the `silenced` check alone already explained
+every assertion, and the intercom gate's own contribution was never observed. Reviewer confirmed by
+mutation (deleting the intercom-gate `if` left the full suite green) and saved the specific lesson
+as its own reviewer-memory file
+(`.claude/agent-memory/reviewer/feedback_sibling_gate_masked_by_adjacent_flag_in_same_test.md`:
+"two independent gates, one test, one gate's window always shadowed by the other"). **Why this
+still belongs in this file**: the root cause — a test whose own narrative claims to cover a
+specific condition but never actually isolates it — is the same "looks tested, is not" shape as
+occurrences 1-4, and it was caught at the same stage (Reviewer, before DoD). It is a *sibling-gate*
+variant rather than a *leaf/wiring* variant, so treat this file as now tracking two related
+sub-patterns rather than one: (a) a pure module's own wiring into its consuming site has no test
+at all, and (b) two gates share one test and one gate's window is always shadowed by the other's.
+Both are "untested branch, caught at Reviewer, never DoD" — five occurrences of that outer shape
+is a stronger signal than four that this may want a mechanical check (e.g. a Reviewer-stage
+requirement to show, for any newly-added gate/condition, the specific test phase where every
+*other* gate is held open/satisfied so this one's own contribution is isolated) rather than relying
+on each reviewer's own mutation-testing diligence to catch it project-wide.

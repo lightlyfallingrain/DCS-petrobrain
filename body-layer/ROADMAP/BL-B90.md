@@ -54,3 +54,32 @@
   `effectors.toml` can now be filled in directly from the real dump's `seat`/`shape`/`cmds`/`args`
   field names once Stage 0c/0d land, with no further format negotiation, since those names are now
   implementation-fact rather than plan-guess.
+
+  **Stages 1-2 — done, DoD-passed, 2026-10-23** (`plans/effector-sequences/dod-check-stage1-2.md`).
+  Curated registry + sequence loader (`belief/effector_registry.py`/`effector_sequences.py`) and
+  the engine/wiring (`belief/effector_engine.py`, `logger.py`, `crew_console.py`) replace
+  `sight_effector.py`'s hand-written takeoff/OBSERV/weapons-safety write blocks. Built to plan with
+  three revisions made live during implementation: **R12** — the engine itself skips a row whose
+  effector is already observed at the target value (an implicit self-check on every row, not just
+  takeoff's), so the shipped takeoff file carries no explicit `!= on` condition at all; **R13** —
+  per-aircraft layout (`config/sequences/<aircraft-dir>/`, `config/effectors-raw/<aircraft-dir>.toml`)
+  with a device/cmd/arg collision resolved "first TOML-file-order entry wins, reject the rest" (not
+  "drop both," which is what the plan said before this revision); and the performance review's
+  change request gating `GET /spu8/state` behind `config_error_pending` so the fetch only runs
+  until the one-shot config-error line has fired, not every poll of every sortie. Reviewer
+  APPROVED (one required fix on the SPU-8 intercom-gate test coverage, closed and mutation-
+  verified in the same batch), security deep analysis APPROVED (no findings), performance review
+  APPROVED with the one change request above, closed and mutation-verified. `plan.md`'s R12/R13
+  rows and D6 now state the built behaviour directly rather than only in the review reports.
+  `body-layer/CLAUDE.md`'s module map and this entry are the user-facing pointers to the new
+  modules, the "add a new effector" how-to, the bad-file posture, and the two tunables.
+
+  **Re-flight card published**: `docs/acceptance/2026-10-23-bl-b90-sequences-reflight.md`, branch
+  `feature/effector-sequences`, not yet merged. #needs-flight — six items (cold-start takeoff
+  order/timing, second-takeoff no-op, Observ/weapons readback parity, warm air-start silence,
+  hand-switched-off recovery, one deliberately broken sequence file) all clearable in one sortie on
+  the branch above; nothing here has been flown yet, only built and reviewed.
+
+  **Next: Stage 3 is this card** (already published, awaiting a flight) **and then Stage 4** —
+  the generic low-rate/on-demand switch readback (R7), BL-B90's own last stage, not deferred. No
+  merge yet: the user decides when, after (at least) this card's flight.
