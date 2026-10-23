@@ -86,6 +86,20 @@ On "Guidance unit ready" at spawn on an air start: *"there's already a note some
 *change* to ready. Use that."* (BL-B80 decision 2, *"only on change"*.) Fixed separately on
 `fix/guidance-ready-edge` before Flight A, not in BL-B90.
 
+### File locations and the switch reference (2026-10-23, before Stages 1–2)
+
+> *"1 and 2 — and do build a full list of switches that are available. Save to file so I can
+> reference it when building/modifying sequence files. — sequence files (and the available
+> effectors list) go to body-layer/sequences/"*
+
+So: the sequence files and the curated effector registry (the names a sequence file may use) live
+in `body-layer/sequences/`, not `config/effector-sequences/`. Alongside them goes a
+human-readable reference of **every** available Mi-24P switch, generated from the Stage 0 dump, so
+the user can find an ED control while writing a sequence. Main-loop reading of "the available
+effectors list": the curated registry plus the full reference both sit in `sequences/`. The
+generated raw dump (`config/effectors-raw.toml`) stays where Stage 0 put it, as machine data. That
+placement is reversible, so it is the main loop's choice; say so if it should move too.
+
 Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
 tool for creating the switch list."* (Stage 0, the generator.)
 
