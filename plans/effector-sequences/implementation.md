@@ -385,3 +385,36 @@ byte-identical to before stashing) and reran -- all pass.
 None -- the new `_toml_escape()` docstring-comment is new content (explaining why `label`/`name`
 are the one place this matters, referencing `BL-B91`), not a prune of anything pre-existing; the
 two-line `.replace()` bodies it replaced carried no comment of their own to prune.
+
+## Stage 0c/0d — real dump, 2026-10-23
+
+**0c** ran on the Windows DCS machine (relayed by the main loop), from a worktree of
+`feature/effector-sequences` at `7464bfa0`, Python 3.12.3, DCS **2.9.30.28738**. Report run exit 0:
+`749 elements[ heads: 514 emitted, 0 unhandled, 235 field patches, 17 statements ignored`. The 17
+ignored lines are exactly the preamble the recon described (Q4): four `dofile`s, `gettext`/`_`,
+the `cursor_mode` table, `clickable_mode_initial_status`, `use_pointer_name`, `direction`,
+`cyclic_by_default`, `elements = {}`. `--write` produced `body-layer/config/effectors-raw.toml`
+(514 elements, 5676 lines), committed as `872aa905`. Nothing written under `$DCS_INSTALL_PATH`.
+The Windows side also checked the five device ids against the ordinal positions in the installed
+`devices.lua`.
+
+**0d** (main loop, loading the committed dump with `tomllib`): every control point matches.
+
+| control point | element | seat |
+|---|---|---|
+| devices 6/7/16/30/55 | WEAP_SYS / I9K113 / ASP_17V / HELPER_AI / SPU_8 | — |
+| `(16, 3014)` arg 529 | `WEAP-SIGHT-ON-PFF-PTR` (`asp_commands.Power`) | pilot |
+| `(6, 3028)` arg 773 | `WEAP-MISSILES-POWER-OP-PTR` | operator |
+| `(16, 3015)` arg 761 | `WEAP-DISTR-POWER-OP-PTR` (`asp_commands.USR`) | operator |
+| `(7, 3001)` arg 885 | `PK-PN-POWER-PTR` | operator |
+| `(6, 3030)` arg 955 | `SHSCHO-POWER-PTR` | operator |
+| `(7, 3002)` arg 886 | `PK-OBSERVE-PTR` | operator |
+| `(6, 3020)` arg 673 | `ARMAMENT-POWER-OP-PTR` | operator |
+| arg 738 / 856 | `STICK-PTT-PTR` / `OP-STICK-PTT-PTR`, cmds `[3024,3024]` / `[3025,3025]` | pilot / operator |
+| arg 664 | `SPU8-OP-PTR` | operator (positional crew arg) |
+
+`(16, 3015)` arg 761, marked "still UNVERIFIED" in BL-B66, now exists as ED's own element
+`WEAP-DISTR-POWER-OP-PTR` on the operator seat. That confirms the mapping. Whether a write to it
+takes effect in flight remains a flight question. The leading-space element is emitted verbatim
+as the quoted key `" CONTROL-COVER-PRIORITY-PTR"`. Stage 1's `source_element` join must match
+names exactly and never strip them.

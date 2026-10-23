@@ -38,11 +38,15 @@
   18-of-22 helper set, the always-resolved `seat`/`seat_explicit` pair, the three-way completeness
   invariant) — `plan.md`'s "Forms the parser must handle" section is updated to state these as
   fact, not as open questions. One security finding filed and fixed in the same batch
-  (`[[BL-B91]]`, TOML control-character escaping in `label`/element `name`). **Next: Stage 0c** —
-  the real run against the installed Mi-24P module, Windows DCS machine only (no Mac-side role
-  produces the real dump — execution-boundary rule). Command card:
-  `plans/effector-sequences/stage0c-run.md`. Stage 0d (control-point check of the returned dump,
-  then commit) and Stage 1+ (registry/sequence loader, engine, wiring) remain untouched.
+  (`[[BL-B91]]`, TOML control-character escaping in `label`/element `name`).
+
+  **Stage 0c/0d — done, 2026-10-23.** Real run on the Windows DCS machine against
+  2.9.30.28738: 749 heads = 514 elements + 235 field patches, **0 unhandled**; dump committed as
+  `body-layer/config/effectors-raw.toml` (`872aa905`). Every 0d control point matches — the five
+  device ids, `asp_commands.Power`, all six BL-B66 switch writes (761 now confirmed as ED's
+  `WEAP-DISTR-POWER-OP-PTR`), 738/856, and 664 on the operator seat
+  (`plans/effector-sequences/implementation.md`, "Stage 0c/0d"). **Next: Stage 1** — curated
+  registry + sequence loader.
 
   **Milestone-completion question**: Stage 0b's completion does not change what Stage 0c/1+ should
   be — the generator was built *to* the plan's spec (corrected where the recon proved the plan's
