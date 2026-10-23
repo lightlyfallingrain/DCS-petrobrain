@@ -103,6 +103,12 @@ placement is reversible, so it is the main loop's choice; say so if it should mo
 Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
 tool for creating the switch list."* (Stage 0, the generator.)
 
+**Correction, 2026-10-23, mid-Stage-1**: *"actually, body-layer/config/sequences is better."*
+Overrides the placement two paragraphs up — the curated registry (`effectors.toml`), the sequence
+`*.md` files, and the generated `switch-reference.md` all live under
+`body-layer/config/sequences/`, not `body-layer/sequences/`. The raw dump stays at
+`body-layer/config/effectors-raw.toml`, unaffected by either placement.
+
 ## Carried from the concept, unchanged
 
 - 1 s between effectors (existing tunable `GUIDANCE_UNIT_SWITCH_DELAY_S`); axes excluded.

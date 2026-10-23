@@ -418,3 +418,120 @@ The Windows side also checked the five device ids against the ordinal positions 
 takes effect in flight remains a flight question. The leading-space element is emitted verbatim
 as the quoted key `" CONTROL-COVER-PRIORITY-PTR"`. Stage 1's `source_element` join must match
 names exactly and never strip them.
+
+## Stage 1 — curated registry + sequence loader, 2026-10-23
+
+**Location correction mid-stage**: the task that opened this stage said `body-layer/sequences/`
+(explore-notes' "File locations and the switch reference" section). Before any file was
+committed, the user corrected this to **`body-layer/config/sequences/`** ("actually,
+body-layer/config/sequences is better"). Everything below — the curated registry, the five
+shipped sequence files, and the generated switch reference — lives there. The raw dump stays at
+`body-layer/config/effectors-raw.toml`, unaffected by either placement. `plan.md`'s R-table gained
+R11 recording the correction; `explore-notes.md`'s "File locations" section carries the verbatim
+quote. Nothing was ever written under `body-layer/sequences/`, so there was nothing to `git mv`.
+
+**Files added:**
+
+- `body-layer/src/belief/effector_registry.py` — `load_registry(raw_dump_path, curated_path) ->
+  (dict[str, EffectorDef], list[RegistryError])`. Pure; never raises on bad content.
+- `body-layer/src/belief/effector_sequences.py` — `load_sequences(sequences_dir, registry) ->
+  (dict[(aircraft, role, trigger), SequenceFile], list[SequenceError])`. Pure; never raises on
+  bad content. Also exports `KNOWN_TRIGGERS` (`takeoff`/`observ-on`/`observ-off`/`weapons-arm`/
+  `weapons-safe`) — Stage 2's own source of truth for `EffectorTrigger` must stay in sync with
+  this set; there is deliberately only one place the trigger-name list is spelled out, and this
+  module owns it since the validation ("unknown trigger") needs it independent of the engine.
+- `body-layer/config/sequences/effectors.toml` — the curated registry for the six BL-B66
+  switches (`missile_power`, `cplr_distr`, `sight_power`, `scho_pwr_b1`, `observ`,
+  `weapon_safety`), each `source_element` taken from the committed raw dump by exact name
+  (Stage 0d's control-point table). `cplr_distr` keeps `unverified = true`, matching the plan's
+  own example — Stage 0d confirmed the *element* exists under that name but not that a write to
+  it takes effect in flight.
+- `body-layer/config/sequences/mi-24p-copilot-{takeoff,observ-on,observ-off,weapons-arm,
+  weapons-safe}.md` — the five shipped sequence files. Takeoff reproduces today's
+  `_POWER_UP_SWITCHES` order (missile_power → cplr_distr → sight_power → scho_pwr_b1) with a
+  `<effector> != on` condition on every row (R4/R5: runs on every takeoff, a second run or a warm
+  start is a no-op via the row conditions, read against observed state). OBSERV on/off and
+  weapons arm/safe are each one unconditional row, parity with today's single writes. No
+  `petrovich-says` anywhere in this cut — "Guidance unit ready" stays hard-coded on the 960 edge
+  (R3/D7), which this stage does not touch (no engine, no `logger.py` wiring).
+- `body-layer/tools/render_switch_reference.py` + `body-layer/config/sequences/switch-reference.md`
+  (generated) — the full Mi-24P switch reference the user asked for, grouped by device then
+  seat, one row per control: element name (leading space rendered visibly, e.g.
+  `` ` CONTROL-COVER-PRIORITY-PTR` ``), label, seat (explicit/defaulted), shape, cmds, args, arg
+  values when present, and a "Curated as" column naming the friendly name(s) already in
+  `effectors.toml`. Same generator convention as `generate_defaults.py` (static TOML read, check
+  mode by default, `--write` to regenerate, GENERATED header with the source DCS build — parsed
+  from the raw dump's own header comment, not hard-coded — and the raw dump's own sha256).
+  `tests/test_render_switch_reference.py` is the staleness guard, same pattern as
+  `test_tuning_defaults_toml.py`.
+- Tests: `tests/test_effector_registry.py` (11 cases — good load, `unverified` carried through,
+  unresolved `source_element`, missing `values`, index out of range, device/cmd/arg collision
+  drops both entries, raw-dump unreadable/unparsable, curated-file unreadable/unparsable, plus a
+  round-trip against the real committed files), `tests/test_effector_sequences.py` (17 cases —
+  one per Stage 1 validation rule the plan lists: unknown effector, unknown value, unknown
+  effector/value in a condition, unknown trigger, malformed row, wait row plus its malformed
+  variant, say-only row rejection, duplicate trigger rejecting both files, an unreadable file
+  collected rather than raised, `switch-reference.md` skipped by name, plus a round-trip of every
+  shipped sequence file and a dedicated check that the takeoff file's row order/conditions match
+  today's hard-coded sequence exactly).
+
+**Design choices not spelled out verbatim in the plan:**
+
+- **D5's "disables every sequence" for a catastrophically bad raw/curated file is implemented as
+  a cascade, not a separate fatal flag.** `load_registry` returns `({}, [one file-level error])`
+  on an unreadable/unparsable file; every sequence file then fails its own "unknown effector"
+  check against the empty registry and is dropped by `load_sequences` in turn. This reaches D5's
+  stated behaviour (every sequence off) with one mechanism instead of two, at the cost of the
+  per-file error messages all reading "unknown effector X" rather than naming the real root cause
+  directly — acceptable since the one `RegistryError` from `load_registry` itself still names the
+  real cause, and both error lists reach the same console banner in Stage 2.
+- **A device/cmd/arg collision between two curated entries drops both, matching the "neither
+  silently wins" posture `load_sequences` already uses for a duplicate (aircraft, role, trigger).**
+  The plan's D5 text ("drops that entry") is singular; I read it as applying per-colliding-entry
+  rather than picking a winner, since there is no principled way to choose one over the other
+  from inside the loader.
+- **No tunables added in Stage 1.** `EFFECTOR_CONDITION_READBACK_WAIT_S` (D3) and the
+  `GUIDANCE_UNIT_SWITCH_DELAY_S` → `EFFECTOR_SEQUENCE_STEP_DELAY_S` rename (D10) both belong to
+  `belief.effector_engine`, which does not exist yet — Stage 2's job, per the task that opened
+  this stage ("If the rename only matters in Stage 2, leave it to Stage 2 and say so"). `tuning.py`
+  and `config/defaults.toml` are therefore untouched by this stage.
+- **`EffectorDef.values` stores floats under named keys (`on`/`off`/`armed`/`safe`), the raw
+  value a write/compare uses** — not wrapped in a further `EffectorValue` type, since nothing in
+  Stage 1 needs more than a `dict[str, float]` and Stage 2's condition-matching epsilon rule
+  (plan: "half the smallest gap between named values") operates directly on it.
+- **Markdown table parsing (`effector_sequences._parse_tables`) is a small hand-rolled splitter**,
+  not a dependency — pipe-delimited rows only, a separator row recognised by
+  `^:?-+:?$` per cell, anything else (prose, an HTML comment, a blank line) ends the current
+  table. No library was considered; this project's `tools/generate_defaults.py` already
+  hand-renders TOML for the same "stdlib only" reason, and the shape here is simpler than a TOML
+  writer.
+
+**Coverage check against the plan's Stage 1 validation list** ("unknown effector, unknown value,
+unknown trigger, malformed row, say-only row (reserved), duplicate (aircraft, role, trigger) ...,
+unresolved `source_element`, duplicate triple collision, unreadable TOML ..., plus a round-trip
+of each shipped file"): every item has a dedicated test named above; none was skipped.
+
+**Checks** (`body-layer/`, this stage's own files plus the full existing suite):
+
+- `ruff format --check src tests tools` — pass (178 files).
+- `ruff check src tests tools` — pass.
+- `cd body-layer && .venv/bin/mypy src` — pass (73 source files).
+- `cd body-layer && .venv/bin/mypy tools` — pass (9 source files).
+- `pytest -q` (`-p no:randomly`, see below) — 2532 passed, 4 xfailed.
+
+**Pre-existing flakiness found, not introduced by this stage**: `pytest`'s random test-order
+plugin (`pytest-randomly`) occasionally fails `test_logger.py::
+test_main_print_tuning_works_without_aircraft_layer_url` or
+`test_brain_client.py::test_unreachable_brain_logs_one_line_without_traceback` depending on
+order, in both directions — confirmed by stashing every file this stage added and re-running the
+full suite three times with no `-p no:randomly`, which reproduced the same two failures on
+unmodified `8f2dc3f3`. Not this stage's to fix; noted here so Stage 2 does not waste time
+re-diagnosing it as a regression. Run with `-p no:randomly` for a deterministic check.
+
+**Notable discovery**: the real committed `config/effectors-raw.toml` (514 elements) has zero
+`cmd2`/`helper_args` occurrences — none of this cut's or the wider dump's elements use the two
+two-command-slot helpers (`default_button_tumb`, `springloaded_3_pos_tumb`) the Stage 0 spec
+reserved a schema extension for. `effector_registry.py` therefore only ever reads `cmds`/`args`
+by `index` (default 0) and never needed to special-case a second command slot — worth knowing if
+a later registry entry (e.g. a Mi-8 or a pilot-role control) ever does hit one of those two
+shapes.

@@ -24,6 +24,7 @@ not final truth") > `body-layer/ROADMAP/BL-B90.md` > this plan's own text.
 | R8 | Global vs per-trigger queue open | **Per trigger** | User decision 1 |
 | R9 | No acceptance card | **Own short re-flight card** (Stage 3, `/test-card`) | User decision 4 |
 | R10 | Stage 0 placement "Implementer's call" | **Settled**: `body-layer/tools/generate_effector_registry.py`, full spec below | User: build the generator next |
+| R11 | Curated registry + sequence files at `body-layer/config/effectors.toml` / `body-layer/config/effector-sequences/*.md` | **`body-layer/config/sequences/`** — `effectors.toml`, `*.md` sequence files, and the generated `switch-reference.md` all live there; the raw dump stays at `body-layer/config/effectors-raw.toml` | User, 2026-10-23: first "sequence files ... go to body-layer/sequences/", then corrected mid-Stage-1 to "body-layer/config/sequences is better" |
 
 Superseded text that a later reader needs is kept in "Superseded (2026-10-21 text)" at the end,
 not deleted.
@@ -347,7 +348,7 @@ root `CLAUDE.md`'s batch rule — one each, after 0b).
 
 ## File formats (Stages 1–2)
 
-**Curated registry — `body-layer/config/effectors.toml`.** Hand-written, small. Each entry: a
+**Curated registry — `body-layer/config/sequences/effectors.toml`.** Hand-written, small. Each entry: a
 friendly name, `source_element` (join key into the raw dump), optional `index` (which entry of a
 multi-action element's lists, default 0), named `values`. **Never repeats device/cmd/arg.**
 
@@ -378,7 +379,7 @@ source_element = "<ED name for arg 673>"
 values = { armed = 1.0, safe = 0.0 }
 ```
 
-**Sequence files — `body-layer/config/effector-sequences/*.md`.** Two tables per file:
+**Sequence files — `body-layer/config/sequences/*.md`.** Two tables per file:
 
 1. Header (`file-param | for`) with exactly `aircraft`, `petrovich-role`, `run-on-trigger` — the
    key for duplicate detection (not the filename).
@@ -494,7 +495,7 @@ existing `>= 0.5` threshold; works for 3-position). Absent readback is **unknown
 
 | Concern | Today | After |
 |---|---|---|
-| Which switches, order, values | `_POWER_UP_SWITCHES` + two single writes in `sight_effector.py` | `effectors-raw.toml` + `effectors.toml` + `effector-sequences/*.md` |
+| Which switches, order, values | `_POWER_UP_SWITCHES` + two single writes in `sight_effector.py` | `config/effectors-raw.toml` + `config/sequences/effectors.toml` + `config/sequences/*.md` |
 | Sequencing state: `takeoff_seen`, `power_up_stage`, `next_switch_due_sim` | `GuidanceUnitState` | **deleted** / `EffectorRunState` |
 | `observ_commanded`, `weapon_safety_commanded` | `GuidanceUnitState` | `EffectorRunState.commanded_values` (written on a successful write). `sight_trace_writer`'s `observ_commanded` column keeps its name and meaning, sourced from there (`None` → `False`, today's default) — Flight A's triage reads it |
 | `observ_observed`, `weapon_safety_observed`, `align_observed`, `ready_observed`, `launch_perm_observed` | `GuidanceUnitState` | **stay** on `GuidanceUnitState` (renaming it is churn with no gain; it is the guidance unit's observed state). `refresh_readback` unchanged |
@@ -552,7 +553,7 @@ state for trigger X" is the `BL-B71` failure shape and is not allowed.
   `source_element`, returns `(registry, errors)`; never raises on bad content (D5).
 - `body-layer/src/belief/effector_sequences.py` (new) — parses `*.md`, returns
   `(sequences_by_key, errors)`.
-- `body-layer/config/effectors.toml`, `body-layer/config/effector-sequences/mi-24p-copilot-{takeoff,observ-on,observ-off,weapons-arm,weapons-safe}.md` (new).
+- `body-layer/config/sequences/effectors.toml`, `body-layer/config/sequences/mi-24p-copilot-{takeoff,observ-on,observ-off,weapons-arm,weapons-safe}.md` (new).
 
 **Stage 2 (engine + wiring)**
 - `body-layer/src/belief/effector_engine.py` (new) — `EffectorTrigger` (TAKEOFF, OBSERV_ON,
