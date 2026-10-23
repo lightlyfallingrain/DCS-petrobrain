@@ -57,4 +57,12 @@ __pycache__/
 # asset in this directory and it is ignored by the same rule.
 docs/concept/mi-24_info/*.pdf
 
+# Raw flight/probe logs -- kept on disk where they land (body-layer/logs/,
+# aircraft-layer/research/logs/<date>/), never committed: they bloat the repo
+# and can carry machine paths. The findings go into the acceptance doc or
+# research note as a written summary with the numbers. Logs committed before
+# 2026-10-23 stay tracked (an ignore rule does not untrack them) and stay in
+# history; no rewrite.
+*.log
+
 
