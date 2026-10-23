@@ -74,6 +74,28 @@ conversation as it happens.
 10. **The pilot's abort is spoken or inferred.** On whether "unless pilot aborts" was a command or
     inferred from manoeuvre: *"both"*.
 
+## Round 4 (after a mock ATGM attack-run tree and a table of candidate uses)
+
+11. **Missile at us during ATGM guidance: needs rules.** *"not so black and white, it'd need
+    rules"*. "Abort everything" is not absolute; the tree has to weigh it.
+12. **BL-B89's scan procedure is a good tree candidate.** *"yes, that would make it easy to modify,
+    test and iterate to get correct without needing code changes"*.
+13. **Context changes the drill.** *"it would, based on friendly/enemy territory, waypoint, phase of
+    mission, target area, time of day, … Like player set a mark at village then could command scan
+    south of village. The tree could specify how the scan would behave."*
+14. **The user's own example, first imagined for effector sequences:**
+    - *"at start, if twilight or night, set dome light to white"*
+    - *"takeoff, if twilight or night, set dome light to red"*
+    - *"guidance unit ready, set dome light off."*
+
+    (Operator dome light = `LTG-COCKPIT-OP-PTR`, arg 682, WHITE/OFF/RED, `-1/0/1` in
+    `switch-reference.md`. Which value is which colour is unverified.) Today's sequence-file
+    condition grammar is only `<effector> = <value>`, so it cannot say "if night".
+15. **The vocabulary is the real cost, and the real value.** *"Tree would certainly need to use
+    params or variables that the engine would check for the rules. Possibly quite many. This would
+    be a very powerful way to build Petrobrain behaviour. But it would need a comprehensive set of
+    state params and actions, otherwise it's very limited."*
+
 ## Status: concept only, not a plan
 
 *"Do not architect anything yet. The whole behaviour tree thing is a concept that I want to explore,
