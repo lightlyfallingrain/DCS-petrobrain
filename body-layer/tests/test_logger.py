@@ -916,6 +916,11 @@ class FakeConsoleAircraftClient:
         #: A test exercising `drain_config_error`'s intercom gate drives
         #: this directly, the same way `cockpit_switch_state` is driven.
         self.spu8_state: dict[str, Any] | None = None
+        #: Performance review (`plans/effector-sequences/
+        #: performance-stage1-2.md`) -- counts every `get_spu8_state_
+        #: latest` call, so a test can assert the per-poll GET only fires
+        #: while `config_error_pending` is actually set.
+        self.spu8_state_requests = 0
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -997,6 +1002,7 @@ class FakeConsoleAircraftClient:
         return self.sight_servo_state
 
     def get_spu8_state_latest(self) -> dict[str, Any] | None:
+        self.spu8_state_requests += 1
         return self.spu8_state
 
 
@@ -5838,6 +5844,61 @@ def test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once(
     assert not poll_thread.is_alive()
     spoken = crew_console.output.getvalue()
     assert spoken.count(CONFIG_ERROR_LINE) == 1, spoken
+
+
+def test_no_spu8_poll_when_config_error_not_pending(tmp_path: Path) -> None:
+    """Performance review (`plans/effector-sequences/
+    performance-stage1-2.md`): `GET /spu8/state` must not be requested on
+    every poll -- only while `config_error_pending` is actually set. The
+    ordinary sortie (no bad sequence/registry file) never sets the flag,
+    so the fix is that this fake never sees the call at all."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0
+    telemetry["dcs_model_time_s"] = 100.0
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.output = io.StringIO()
+    assert crew_console.config_error_pending is False
+    effector_sequences, effector_registry = _real_effector_config()
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # Let several polls run.
+        time.sleep(0.3)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert aircraft_client.spu8_state_requests == 0
 
 
 def test_config_error_pending_survives_a_mission_restart() -> None:

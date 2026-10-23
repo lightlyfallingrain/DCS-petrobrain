@@ -796,6 +796,51 @@ once unsilenced, with the intercom still closed), confirming the gate is now loa
 test. Restored the two deleted lines by hand and re-checked the file's `shasum` — identical to the
 pre-mutation value, confirming an exact restore rather than a by-eye one. Re-ran the test: passes.
 
+### Performance change request (Stages 1-2 batch, `performance-stage1-2.md`)
+
+Mitigation applied for the one finding with an `Action: NOW`: the unconditional per-poll
+`GET /spu8/state` in `_run_crew_text_poll_loop`.
+
+- `body-layer/src/logger.py` (~line 3574) — the `aircraft_client.get_spu8_state_latest()` call
+  and the `intercom_open` computation that follows it are now gated behind
+  `crew_console.config_error_pending`, exactly as the review's own mitigation snippet specifies:
+  `intercom_open` defaults to `False`, and the GET only fires while the flag it serves is still
+  pending. `drain_config_error` clears the flag after one successful speak (pre-existing
+  behaviour, untouched), so in the ordinary sortie (no bad sequence/registry file) this GET now
+  never fires at all, and in the rare bad-file case it fires on every poll only until the line is
+  spoken once. No other behaviour changed — `drain_config_error`'s own signature and body are
+  untouched; a failed fetch is still tolerated the same way (next poll retries).
+
+### Tests Added (performance change request)
+
+- `body-layer/tests/test_logger.py::test_no_spu8_poll_when_config_error_not_pending` — drives
+  `_run_crew_text_poll_loop` for several polls with a fresh `CrewConsole` (`config_error_pending`
+  defaults `False`) and asserts `FakeConsoleAircraftClient.spu8_state_requests == 0` afterwards.
+  `FakeConsoleAircraftClient` gained that counter field, incremented in
+  `get_spu8_state_latest`, for this and any future test needing to assert on request volume
+  rather than just content.
+- Existing `test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once` and
+  `test_config_error_pending_survives_a_mission_restart` re-run unchanged and still pass — the
+  gate change does not alter `drain_config_error`'s own observable behaviour, only when the GET
+  feeding it fires.
+
+Mutation-confirmed: recorded `shasum` of `body-layer/src/logger.py` after the fix
+(`a71e170c3a4c161a16e673c4ce3e3d1ddd920be3`), reverted to the unconditional pre-fix call (removed
+the `if crew_console.config_error_pending:` guard), ran
+`test_no_spu8_poll_when_config_error_not_pending` in isolation — failed as expected
+(`assert 33 == 0`, 33 unconditional GETs over the ~0.3s poll window). Restored the guarded version
+by hand and re-checked `shasum` — identical to the post-fix value, confirming an exact restore.
+Re-ran the test: passes.
+
+### Checks (performance change request)
+
+- `body-layer/`:
+  - `ruff format --check src tests` — pass (171 files already formatted)
+  - `ruff check src tests` — pass
+  - `cd body-layer && .venv/bin/mypy src` — pass (74 files)
+  - `pytest tests -q` — 2550 passed, 4 xfailed (one more than the Stage 2 review-fix run's 2549,
+    the added test)
+
 ### Checks (Stage 2 review fix)
 
 - `body-layer/`:

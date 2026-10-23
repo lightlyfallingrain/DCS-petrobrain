@@ -3570,12 +3570,21 @@ def _run_crew_text_poll_loop(
                         )
                         # D5/D6 (`plans/effector-sequences/plan.md`): the
                         # one-shot "bad sequence file" line, held until
-                        # the SPU-8 intercom gate reads open.
-                        spu8_latest = aircraft_client.get_spu8_state_latest()
-                        intercom_open = (
-                            spu8_latest is not None
-                            and spu8_latest.get("gate_open") is True
-                        )
+                        # the SPU-8 intercom gate reads open. Only fetch
+                        # `/spu8/state` while the flag it serves is still
+                        # pending -- `drain_config_error` clears it after
+                        # one successful speak, so this GET fires at most
+                        # once per process lifetime in the common case
+                        # (no bad file), not on every poll of every sortie
+                        # (performance review, `plans/effector-sequences/
+                        # performance-stage1-2.md`).
+                        intercom_open = False
+                        if crew_console.config_error_pending:
+                            spu8_latest = aircraft_client.get_spu8_state_latest()
+                            intercom_open = (
+                                spu8_latest is not None
+                                and spu8_latest.get("gate_open") is True
+                            )
                         crew_console.drain_config_error(
                             runner.last_t_sim, intercom_open=intercom_open
                         )
