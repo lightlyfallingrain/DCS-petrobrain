@@ -111,12 +111,14 @@ class TriggerInfo:
 TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
     EffectorTrigger.TAKEOFF: TriggerInfo(
         description=(
-            "Every time the aircraft leaves the ground (on-ground true -> "
-            "false). No per-mission latch: a repeat takeoff or a warm air "
-            "start re-fires it, and the engine's own implicit self-check --"
-            "a row does not write if its switch is already observed at the "
-            "target value -- makes an already-satisfied repeat a no-op, "
-            "with no explicit condition needed in the sequence file itself."
+            "Every time the aircraft leaves the ground on a real observed "
+            "ground -> air transition (on-ground true -> false). Never on "
+            "an air start -- that fires MISSION_START/MISSION_START_IN_AIR "
+            "instead. No per-mission latch: a repeat takeoff re-fires it, "
+            "and the engine's own implicit self-check -- a row does not "
+            "write if its switch is already observed at the target value "
+            "-- makes an already-satisfied repeat a no-op, with no "
+            "explicit condition needed in the sequence file itself."
         ),
         cardinality="every_time",
     ),

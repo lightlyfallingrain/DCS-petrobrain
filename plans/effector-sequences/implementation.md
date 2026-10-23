@@ -259,3 +259,131 @@ confirmed via a full mypy/ruff/pytest re-run afterward rather than by eye.
   cache serving a bit-identical `t_sim` float across polls until a genuinely new sample lands —
   true by construction (`TelemetryCache` serves the same cached object), but worth restating if
   a future change ever makes the aircraft-layer synthesize or round `t_sim` on each read.
+
+---
+
+## Review fixes (2026-10-23, follow-on): stale air-start docs + baseline-collision fallback
+
+Applies `plans/effector-sequences/review-mission-start.md`'s required fix (three stale "warm air
+start re-fires takeoff" claims, plus two more found by the review's own instruction to grep
+further) and its optional baseline-collision refinement, on top of the reviewed tip `b61bf3e6`.
+
+### Files Changed
+
+- `body-layer/src/belief/effector_sequences.py` — `TRIGGER_INFO[EffectorTrigger.TAKEOFF]
+  .description` no longer claims a warm air start re-fires `takeoff`; states instead that
+  `takeoff` fires only on a real observed ground->air transition and that an air start fires
+  `MISSION_START`/`MISSION_START_IN_AIR` instead.
+- `body-layer/config/sequences/triggers.md` — regenerated (`tools/render_triggers.py --write`)
+  from the corrected description above. Checked the **rendered** text, not just the source
+  comment, per the review's own instruction.
+- `body-layer/config/sequences/mi-24p/copilot-takeoff.md` — header comment no longer says a
+  "hot/air start" finishes the power-up on its own; splits the claim (hot start still reaches
+  this file via the implicit self-check; an air start never reaches this file at all) and adds a
+  one-line pointer to the mission-start triggers that fire instead.
+- `body-layer/src/logger.py` — three changes:
+  1. The `elif was_on_ground and not crew_console.on_ground:` TAKEOFF comment (the review's
+     grep-for-more instruction caught this one, not in the three-item list) no longer claims a
+     warm air start reaches this branch and is made a no-op there — it never reaches this `elif`
+     at all, suppressed for the whole `mission_start_resolving` window.
+  2. New tunable `MISSION_START_RESOLVE_FALLBACK_S` (`tuning.real`, default 30.0, bounds
+     5.0–120.0, status `judgement`) — the baseline-collision fix, below.
+  3. New `ConsolePerceptionRunner` field `mission_start_resolving_since_wall: float | None`,
+     set by `_check_for_new_mission` to `time.monotonic()` the same poll the pending flags are
+     armed, cleared back to `None` once the resolving window actually resolves. Reset to its
+     default via the same `reset_for_new_mission` re-`__init__` pattern every other per-mission
+     field uses — no special-casing needed.
+- `plans/effector-sequences/plan.md` — two more stale "air start" mentions found by the grep
+  instruction, both pre-dating R14 and left behind when it was added: the Stage 1–2 "Takeoff, as
+  it ships" example (said a warm air start skips every takeoff row; an air start never reaches
+  that file at all now) and a "Risks & Unknowns" bullet claiming an airborne first sample is a
+  takeoff edge that powers a cold unit (superseded in place, with the "Was"/"Now" framing the
+  rest of the plan's revision table already uses, rather than deleted — the new gap it names,
+  that neither new trigger ships a sequence file yet, is worth a future reader having).
+- `body-layer/tests/test_logger.py` — one new test (below) plus the matching import.
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`) for the
+  new tunable.
+
+**Not touched, deliberately:** the acceptance card the review mentions (`block 4`) is a published
+Artifact, not a repository file — nothing to grep or fix here. `belief/effector_engine.py` has no
+"air start" mention at all (checked). `test_effector_engine.py`'s own "warm air start" docstring
+(`test_air_start_with_switches_already_on_writes_nothing`) is about the engine's own mechanics —
+it fires `EffectorTrigger.TAKEOFF` directly and asserts the implicit self-check, which is still
+true at that layer regardless of whether `logger.py` would ever reach it on a real air start —
+left alone. Several `plans/effector-sequences/*.md` "warm air start" mentions outside `plan.md`
+(review-stage0/1/2, dod-check-stage0, the revision-history table's own R5 row, the "Superseded"
+section's D3/R5 rationale) are dated historical records of an earlier design point, not assertions
+about current behaviour presented as fact — left as the record `docs/PROCESS.md`'s "supersede,
+don't delete" convention asks for.
+
+### The baseline-collision fix: why wall-clock, not a poll count
+
+The coordinator relayed a DCS fact from the user mid-task: *"Mission restart always resets the
+mission elapsed timer in DCS."* That is the reason the `!=` check (already shipped, unchanged by
+this fix) is sound in the first place — a real restart's fresh samples almost always differ from
+the pre-reset baseline immediately, since DCS's own model clock restarts near zero. The collision
+this fix guards against needs two things at once: the restart happens near `t_sim = 0`, **and**
+the very first fresh sample lands on the exact same float as the baseline. Both together is rare
+enough to self-heal on the next restart, which is why the review marked this optional.
+
+The original plan (stated in the review and the task) was a plain poll-count fallback. Building it
+surfaced a real conflict with an existing, already-passing test:
+`test_stale_telemetry_at_mission_restart_does_not_decide_airborne` deliberately holds the
+resolving window open across roughly twenty polls at its fast (0.01s) test poll interval, to prove
+the code does *not* resolve prematurely from a stale cached sample. A poll-count threshold small
+enough to self-heal promptly at the real 1.0s default poll interval (e.g. 5) would misfire inside
+that test; a threshold large enough to survive that test's poll count would be too large to
+self-heal promptly in real flight. Wall-clock elapsed time has neither problem: it is independent
+of `--poll-interval-s`, so the fast test stays fast and safe while production self-heals promptly.
+Declared as `MISSION_START_RESOLVE_FALLBACK_S` (seconds), default 30.0 — comfortably above any
+plausible `Export.lua` resume latency and the fast tests' sub-second windows, comfortably below
+"wait for the whole sortie."
+
+### Tests Added
+
+- `test_baseline_collision_resolves_via_bounded_fallback` — reproduces the collision by never
+  changing the telemetry dict's `dcs_model_time_s` across a mission restart (the baseline and
+  every "fresh" sample thereafter carry the identical `t_sim`), confirms the pending flags stay
+  armed and no write lands across ten polls (proving the `!=` check alone cannot resolve this),
+  then jumps `mission_start_resolving_since_wall` back past `MISSION_START_RESOLVE_FALLBACK_S`
+  (so the test does not sleep 30 real seconds) and confirms `MISSION_START` fires and both pending
+  flags clear. **Verified failing on the pre-fix code**: stashed `src/logger.py` back to the
+  reviewed tip, re-ran the test — `ImportError: cannot import name
+  'MISSION_START_RESOLVE_FALLBACK_S' from 'logger'` (the mechanism does not exist there), i.e. red
+  for the stated reason. Restored the fix via `git stash apply`/`drop`, confirmed by `shasum`
+  before and after rather than by eye.
+
+### Checks
+
+(body-layer only — the only subproject touched)
+
+- `ruff format --check src tests tools`: pass (one auto-fix needed first — an import-order
+  violation from the new `import tuning`, fixed with `ruff check --fix`, then both checks pass
+  clean)
+- `ruff check src tests tools`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass, no issues, 74 source files
+- `cd body-layer && .venv/bin/mypy tools`: pass, no issues, 10 source files
+- `pytest -q`: pass — 2603 passed, 4 xfailed (one more passed than the review's reported 2602,
+  the new collision test)
+
+### Out of scope, per the task
+
+The pre-existing look-command gating note (the review's second optional refinement: `crew_console.
+on_ground` is reassigned unconditionally from the current sample every poll, stale or fresh,
+regardless of `mission_start_resolving`, so a look command during the stale-cache window is gated
+on the previous mission's last known altitude rather than the safe `True` default `reset_for_new_
+mission` just set) is left alone, per the task's explicit instruction — not a regression, not
+touched by this diff, flagged by the review as pre-existing and out of scope for this cut.
+
+### Notable Discoveries
+
+- The review's "grep for other 'air start' mentions" instruction found two real stale spots the
+  three-item required-fix list missed: the `TAKEOFF` `elif`'s own comment in `logger.py`, and two
+  spots in `plan.md` (an example block and a Risks & Unknowns bullet) both predating R14. Neither
+  would have been caught by the staleness tests the review already named
+  (`test_switch_reference_matches_the_generator`/`test_render_triggers.py` only check that a
+  render matches its generator's current input, not that the input itself is current) — same gap
+  the review called out for the three it did find.
+- The acceptance card the review's "block 4" reference points at is not a repository file (a
+  published Artifact from an earlier `/test-card` run) — nothing here to check against it; noted
+  rather than silently skipped.

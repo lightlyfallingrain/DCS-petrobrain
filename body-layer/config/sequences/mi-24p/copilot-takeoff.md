@@ -1,8 +1,11 @@
-<!-- Four-switch guidance-unit power-up (BL-B66), run on every takeoff
-     (D2/D4). No row carries an explicit `condition` cell any more
-     (R12, 2026-10-23 user correction) -- the engine's own implicit
-     self-check (every switch row, every trigger) is what makes a
-     re-run after the first a no-op and what lets a hot/air start
+<!-- Four-switch guidance-unit power-up (BL-B66), run on every real
+     ground->air takeoff (D2/D4) -- an air start fires `mission-start`/
+     `mission-start-in-air` instead and never reaches this file
+     (`plans/effector-sequences/explore-notes.md`, "Two new triggers:
+     mission start"). No row carries an explicit `condition` cell any
+     more (R12, 2026-10-23 user correction) -- the engine's own
+     implicit self-check (every switch row, every trigger) is what
+     makes a re-run after the first a no-op and what lets a hot start
      finish the power-up on its own, by comparing each row's own
      effector against its already-observed readback before writing.
      "Guidance unit ready" is not spoken from this file: it stays

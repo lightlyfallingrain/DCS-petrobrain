@@ -403,8 +403,10 @@ values = { armed = 1.0, safe = 0.0 }
    - **say-only row** (effector blank, `petrovich-says` set) is **reserved, rejected this cut**
      with the message "say-only rows arrive with the guidance-unit-ready trigger" (seam, D7).
 
-Takeoff, as it ships (R4/R12 — a second takeoff, or a warm air start, skips every row via the
-engine's own implicit self-check, not an explicit `condition` cell):
+Takeoff, as it ships (R4/R12/R14 — a second takeoff skips every row via the engine's own implicit
+self-check, not an explicit `condition` cell; an air start never reaches this file at all, since
+`takeoff` now fires only on a real observed ground→air transition — an air start fires
+`mission-start`/`mission-start-in-air` instead):
 
 ```markdown
 | file-param | for |
@@ -693,8 +695,13 @@ BL-B80, unaffected).
 - **`on_ground` jitter near 10 m AGL** (hover-taxi) now fires TAKEOFF repeatedly. Harmless —
   D1 coalesces and conditions skip — but it means the takeoff file must stay idempotent. A
   hysteresis on `on_ground` is out of scope (it is shared with the look-refusal gate).
-- **An airborne first sample is a takeoff edge** (`on_ground` defaults `True`). Intended here: it
-  is what powers a cold unit on an air start; on a warm air start every row skips.
+- **Superseded by R14**: this bullet originally read "an airborne first sample is a takeoff edge
+  (`on_ground` defaults `True`) — intended here: it is what powers a cold unit on an air start; on
+  a warm air start every row skips." R14 removed that path entirely — `mission_start_resolving`
+  now suppresses the `TAKEOFF` edge check for the whole window around a mission (re)start, so an
+  air start never reaches this file at all; it fires `mission-start`/`mission-start-in-air`
+  instead, and *neither* trigger has a shipped sequence file this cut, so a cold unit on an air
+  start is not powered up by anything yet (tracked as a gap, not fixed by this entry).
 - **Silenced or intercom never on**: the error line may never be voiced. The console banner is the
   primary channel; the line is a reminder.
 - **761 (`cplr_distr`) stays UNVERIFIED**, carried as `unverified = true`. The user: *"If we get the

@@ -57,6 +57,7 @@ from logger import (
     _SIGHT_WIDE_SEARCH_FAR_M,
     DEFAULT_SPEECH_LOG_PATH,
     LOOK_DIRECTION_FOV_HALF_DEG,
+    MISSION_START_RESOLVE_FALLBACK_S,
     ConsolePerceptionRunner,
     PerceptionLogger,
     _active_gaze,
@@ -6312,6 +6313,109 @@ def test_stale_telemetry_at_mission_restart_does_not_decide_airborne(
     ]
     assert runner.pending_mission_start_fire is False
     assert runner.pending_mission_start_in_air_check is False
+
+
+def test_baseline_collision_resolves_via_bounded_fallback(tmp_path: Path) -> None:
+    """The optional-refinement case `review-mission-start.md` names: the
+    first genuinely fresh post-restart sample happens to carry the exact
+    same `t_sim` as the pre-reset baseline, so the `!=` freshness check
+    can never trip on its own -- here reproduced by simply never changing
+    the telemetry dict's `dcs_model_time_s` across the restart at all, the
+    simplest case of "the new sample's own `t_sim` coincides with the old
+    one's". Without `MISSION_START_RESOLVE_FALLBACK_S`'s bounded fallback,
+    this hangs forever: `pending_mission_start_fire`/`pending_mission_
+    start_in_air_check` would stay `True`, and `TAKEOFF` would stay
+    suppressed, for the rest of the mission. The test proves the fallback
+    by jumping `mission_start_resolving_since_wall` back past the
+    threshold instead of sleeping for real -- `MISSION_START_RESOLVE_
+    FALLBACK_S` defaults to 30 s, and this test must stay fast."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 5.0  # settle grounded
+    sim_t = 50.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = _MISSION_START_COCKPIT_SWITCH_STATE
+    runner = _settled_mission_start_runner(aircraft_client)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    effector_sequences, effector_registry = (
+        _effector_config_with_mission_start_sequences()
+    )
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+        kwargs={
+            "effector_sequences": effector_sequences,
+            "effector_registry": effector_registry,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+        assert runner.last_t_sim == sim_t
+
+        # The restart: `dcs_model_time_s` is left completely unchanged --
+        # the baseline (the settled `sim_t` above) and every "fresh"
+        # sample from here on carry the exact same `t_sim`, the collision
+        # this fallback exists for.
+        aircraft_client.mission_start_sequence = 2
+        deadline = time.monotonic() + 5.0
+        while (
+            runner.pending_mission_start_in_air_check is not True
+            or runner.mission_start_fresh_sample_baseline_t_sim != sim_t
+        ) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.pending_mission_start_in_air_check is True
+        assert runner.mission_start_fresh_sample_baseline_t_sim == sim_t
+
+        # Several polls of the exact same (colliding) `t_sim` -- the `!=`
+        # check alone can never resolve this; confirm it stays pending.
+        for _ in range(10):
+            time.sleep(0.02)
+        assert runner.pending_mission_start_fire is True
+        assert runner.pending_mission_start_in_air_check is True
+        assert aircraft_client.cockpit_switch_writes == []
+
+        # Fast-forward the fallback clock past its threshold rather than
+        # sleeping `MISSION_START_RESOLVE_FALLBACK_S` for real.
+        runner.mission_start_resolving_since_wall = time.monotonic() - (
+            MISSION_START_RESOLVE_FALLBACK_S + 1.0
+        )
+        deadline = time.monotonic() + 5.0
+        while (
+            _MISSION_START_WRITE not in aircraft_client.cockpit_switch_writes
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert _MISSION_START_WRITE in aircraft_client.cockpit_switch_writes
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # The fallback resolved both pending triggers together, same poll --
+    # grounded throughout, so `MISSION_START_IN_AIR` never fires.
+    assert aircraft_client.cockpit_switch_writes == [_MISSION_START_WRITE]
+    assert runner.pending_mission_start_fire is False
+    assert runner.pending_mission_start_in_air_check is False
+    assert runner.mission_start_resolving_since_wall is None
 
 
 # --- _load_effector_config (D5/D6) ------------------------------------------

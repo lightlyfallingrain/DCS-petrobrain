@@ -201,8 +201,9 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal, TextIO
+from typing import Final, Literal, TextIO
 
+import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attack_run import AttackRunState
 from belief.attention import (
@@ -313,6 +314,34 @@ from store.reader import load_only_region
 from tuning import render_print_tuning, render_startup_block, validate_against_defaults
 
 logger = logging.getLogger(__name__)
+
+#: Bounded fallback for the mission-start resolving window (`plans/
+#: effector-sequences/review-mission-start.md`'s optional-refinement item):
+#: how many seconds of **wall clock** (not sim time, not a poll count --
+#: see `ConsolePerceptionRunner.mission_start_resolving_since_wall`'s own
+#: docstring for why) `_run_crew_text_poll_loop` may wait for a fresh
+#: ownship sample before firing `MISSION_START`/`MISSION_START_IN_AIR`
+#: regardless of whether `t_sim` has yet differed from the pre-reset
+#: baseline. The `!=` check this backs up is sound for the reason stated at
+#: its own call site -- the user, confirming the underlying DCS fact:
+#: "Mission restart always resets the mission elapsed timer in DCS" -- so a
+#: real fresh sample's `t_sim` and the stale cached sample's `t_sim`
+#: coincide only if the restart happens near `t_sim = 0` **and** the first
+#: fresh sample lands on the exact same float as the baseline, which
+#: self-heals on the next restart and is not reachable by any shipped
+#: sequence file this cut (none ships for either new trigger yet). This
+#: fallback exists only so that pathological coincidence cannot suppress
+#: `TAKEOFF` for an entire mission -- 30 s is long enough that it is never
+#: reached by an ordinary restart (which resolves on the very next poll,
+#: typically well under a second) and short enough to self-heal within the
+#: same sortie without a second restart.
+MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
+    "logger.MISSION_START_RESOLVE_FALLBACK_S",
+    30.0,
+    lo=5.0,
+    hi=120.0,
+    status="judgement",
+)
 
 
 def format_observation_line(ownship: OwnshipState, observation: Observation) -> str:
@@ -608,6 +637,24 @@ class ConsolePerceptionRunner:
     #: own comment for why `!=` rather than `<` against this baseline.
     mission_start_fresh_sample_baseline_t_sim: float | None = None
 
+    #: `time.monotonic()` at the poll `_check_for_new_mission` armed the
+    #: two pending flags above -- `MISSION_START_RESOLVE_FALLBACK_S`'s own
+    #: bounded-fallback clock (`plans/effector-sequences/
+    #: review-mission-start.md`'s optional refinement). `None` whenever
+    #: neither pending flag is set (the normal state outside a mission-
+    #: start resolving window). Deliberately **wall-clock, not a poll
+    #: count**: a poll-count bound would be relative to whatever
+    #: `--poll-interval-s` happens to be (1.0 s default, but tests run it
+    #: far faster to stay quick), so a count large enough to never
+    #: mis-fire during this codebase's own fast-interval stale-cache
+    #: tests (`test_stale_telemetry_at_mission_restart_does_not_decide_
+    #: airborne` deliberately holds the resolving window open across
+    #: several dozen such polls) would be too large to self-heal promptly
+    #: at the real 1.0 s interval, and a count small enough to self-heal
+    #: promptly there would misfire during those tests' fast polling.
+    #: Wall-clock time has neither problem.
+    mission_start_resolving_since_wall: float | None = None
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1). Re-invokes `__init__` on this same object, passing
@@ -624,7 +671,8 @@ class ConsolePerceptionRunner:
         `last_sight_look_sim`, `attitude_history`, `optic`,
         `_last_look_direction`, `last_mission_start_sequence`,
         `pending_mission_start_fire`, `pending_mission_start_in_air_check`,
-        `mission_start_fresh_sample_baseline_t_sim`) resets to its
+        `mission_start_fresh_sample_baseline_t_sim`,
+        `mission_start_resolving_since_wall`) resets to its
         declared default (D11: a mission (re)start drops every
         running/pending effector-sequence run with nothing carried over;
         the three mission-start-trigger fields reset to `False`/`False`/
@@ -2516,6 +2564,10 @@ def _check_for_new_mission(
     runner.pending_mission_start_fire = True
     runner.pending_mission_start_in_air_check = True
     runner.mission_start_fresh_sample_baseline_t_sim = pre_reset_t_sim
+    # Starts the bounded-fallback clock the resolving block below checks
+    # against `MISSION_START_RESOLVE_FALLBACK_S` -- see that field's own
+    # docstring for why this is wall-clock time, not a poll count.
+    runner.mission_start_resolving_since_wall = time.monotonic()
     runner.last_mission_start_sequence = sequence
     return True
 
@@ -3520,16 +3572,51 @@ def _run_crew_text_poll_loop(
                         # same object every poll until a real one lands,
                         # so its `t_sim` is bit-identical and any
                         # genuinely new sample's `t_sim` differs from it.
+                        # User, confirming the DCS fact this check leans on:
+                        # "Mission restart always resets the mission
+                        # elapsed timer in DCS" -- so a real restart's
+                        # fresh samples almost always differ from the
+                        # pre-reset baseline on the first poll; the
+                        # coincidence this leaves open (a restart landing
+                        # near `t_sim = 0` whose first fresh sample happens
+                        # to match the baseline exactly) is covered by the
+                        # bounded fallback below
+                        # (`MISSION_START_RESOLVE_FALLBACK_S`).
                         mission_start_resolving = (
                             runner.pending_mission_start_fire
                             or runner.pending_mission_start_in_air_check
                         )
                         if mission_start_resolving:
                             baseline = runner.mission_start_fresh_sample_baseline_t_sim
-                            if (
+                            fresh_sample_confirmed = (
                                 baseline is None
                                 or runner.last_ownship_state.t_sim != baseline
-                            ):
+                            )
+                            # Bounded fallback (`MISSION_START_RESOLVE_
+                            # FALLBACK_S`'s own declaration comment and
+                            # `mission_start_resolving_since_wall`'s own
+                            # docstring for why this is wall-clock, not a
+                            # poll count): only reachable if a real restart
+                            # happens near `t_sim = 0` *and* the first fresh
+                            # sample's `t_sim` happens to land on the exact
+                            # same float as the baseline -- the `!=` check
+                            # above is sound against every other case.
+                            resolving_since = runner.mission_start_resolving_since_wall
+                            fallback_due = not fresh_sample_confirmed and (
+                                resolving_since is not None
+                                and time.monotonic() - resolving_since
+                                >= MISSION_START_RESOLVE_FALLBACK_S
+                            )
+                            if fallback_due:
+                                logger.warning(
+                                    "mission-start resolving window hit its "
+                                    "%.0fs fallback without a t_sim mismatch "
+                                    "(baseline=%r) -- firing MISSION_START/"
+                                    "MISSION_START_IN_AIR anyway",
+                                    MISSION_START_RESOLVE_FALLBACK_S,
+                                    baseline,
+                                )
+                            if fresh_sample_confirmed or fallback_due:
                                 if runner.pending_mission_start_fire:
                                     runner.effector_state = fire_effector_trigger(
                                         runner.effector_state,
@@ -3550,6 +3637,7 @@ def _run_crew_text_poll_loop(
                                             runner.last_t_sim,
                                         )
                                     runner.pending_mission_start_in_air_check = False
+                                runner.mission_start_resolving_since_wall = None
                             # `TAKEOFF` is suppressed for every poll this
                             # mission (re)start is still resolving,
                             # including the one that just resolved it --
@@ -3558,10 +3646,14 @@ def _run_crew_text_poll_loop(
                             # without treating it as a transition (an air
                             # start must never also read as a takeoff).
                         # D2/D4 (`plans/effector-sequences/plan.md`):
-                        # fires on **every** takeoff, no `takeoff_seen`
-                        # latch -- the takeoff sequence file's own row
-                        # conditions (R12's implicit self-check) make a
-                        # repeat takeoff or a warm air start a no-op.
+                        # fires on **every** real ground->air transition,
+                        # no `takeoff_seen` latch -- the takeoff sequence
+                        # file's own row conditions (R12's implicit
+                        # self-check) make a repeat takeoff a no-op. Never
+                        # reached on an air start: that case is handled
+                        # entirely by the `mission_start_resolving` branch
+                        # above, which suppresses this `elif` for the
+                        # whole resolving window.
                         elif was_on_ground and not crew_console.on_ground:
                             runner.effector_state = fire_effector_trigger(
                                 runner.effector_state,
