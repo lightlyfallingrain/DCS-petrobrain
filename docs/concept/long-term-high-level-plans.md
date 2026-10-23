@@ -13,6 +13,7 @@
 - Pilot's primary responsibility is flying the aircraft and navigation, per players request
   - Player sets desired state, Petrovich as pilot flies the aircraft
       - controlling aircraft pitch, bank, yaw, collective
+      - NOTE!: controlling aircraft requires pitch, bank, yaw, collective and throttle axis value writes that must override player/AI axis values. See BL-B80 and BL-B81 for solution on overriding axis values with tiny wobble.
   - heading, speed, altitude
   - pitch, bank angle
   - turn X deg left/right
