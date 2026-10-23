@@ -404,6 +404,13 @@ consume.
   phrasings per token), and helpers (`spoken_phrases`, `token_for_phrase`, `to_gbnf` for
   whisper.cpp's `--grammar`). Keep in sync with those two sources by hand; there is no automated
   check tying the three together.
+  **The whisper prompt is in sync with this file by construction, and that is a rule** (user
+  direction, 2026-10-23): `to_prompt()` carries every word of `recognised_words()` — every
+  `PHRASES` word plus every slot table — and `test_vocabulary.py` fails if any word is missing or
+  the prompt outgrows whisper's 224-token cap. So a new command or slot word goes into these tables,
+  never only into `command_matcher.py` or body-layer, or whisper is never biased toward it. Before
+  2026-10-23 the prompt sampled 24 of 66 tokens' phrasings and missed silence, engage, set target,
+  describe and every slot word — the cause of "violence"/"same ahead" in the speech logs.
 - `src/command_matcher.py` (Slice 3 Stage 2, `plans/inbound-speech/plan.md` Decision 4 REVISED) —
   the transcript -> candidate-token matcher: normalise (`vocabulary.normalize_for_match`) -> verb
   anchor (`VERB_ANCHOR_WORDS`, derived from `vocabulary.PHRASES`, not hand-copied) -> bearing slot
