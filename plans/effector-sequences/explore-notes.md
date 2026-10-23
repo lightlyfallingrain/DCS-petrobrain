@@ -38,6 +38,38 @@
    unknown effector/value names, unknown trigger, duplicate (aircraft, role, trigger), malformed
    rows. No hot reload.
 
+## 2026-10-23 — after BL-B80 v2 merged (`a2ea382c`); answers to the plan's four decisions
+
+Context: BL-B80 v2 rewrote `sight_effector.py`/`logger.py` after the plan was written —
+readiness now comes from the real READY lamp (arg 960), and `GuidanceUnitState` carries the
+898/960/962 lamp readbacks that pointing depends on. The user's direction on that:
+
+- *"guidance unit power switch flip can go to sequence file"*
+- On "Guidance unit ready" being spoken on the 960 lamp's edge: *"this is correct. For now it can
+  be hard coded, but it should really be it's own trigger for a sequence file."* — so the
+  `guidance-unit-ready` trigger (deferred in decision 2) is the intended home; hard-coded is
+  acceptable in this cut.
+- On risk of wrong arg values: *"It's easy to change the arg values in the sequence files. If we
+  get the wrong one, the change is trivial. That's a benefit of the sequence files."* — so building
+  this before Flight A settles the lamp args is not a blocker.
+
+The plan's "Decisions Requiring User Input":
+
+1. **Queues: per trigger** — *"queues: per trigger"*. (Refines decision 4: queueing is within one
+   trigger, not across triggers.)
+2. **Takeoff: every takeoff** — *"takeoff: per takeoff, the sequence file will then deal with it
+   not being the first takeoff"*. Overturns the plan's one-shot-per-mission recommendation; the
+   file's own row conditions handle the already-powered case.
+3. **Bad file: log, ignore that file, keep running** — **supersedes decision 6's "fail loudly /
+   refuse to start"**. User's words: *"bad file: log error and ignore file. Write a clear and
+   obvious error message to console and queue audio error message to play once the intercom is up:
+   'System error, bad sequence file, see the logs. Petrobrain will continue, but some functionality
+   may not work.'"*
+4. **Re-flight: own short card** — *"re-flight: own short card."*
+
+Order of work: *"Start by updating the plan as BL-B80 has made changes. After that first build the
+tool for creating the switch list."* (Stage 0, the generator.)
+
 ## Carried from the concept, unchanged
 
 - 1 s between effectors (existing tunable `GUIDANCE_UNIT_SWITCH_DELAY_S`); axes excluded.
