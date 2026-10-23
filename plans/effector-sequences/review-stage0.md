@@ -254,3 +254,111 @@ counts outside of `pytest`; hand-built and ran a synthetic fixture combining thr
 directly to check the broadened head-matching/ignored-statement logic does not misclassify any of
 them. Not independently re-verified against the live DCS install (no Mac-side access to it) — that
 remains Stage 0c's own job, same limitation the first pass noted.
+
+---
+
+## 2026-10-23 — BL-B91 fix review (security change request)
+
+Reviewed commit `9032bec5fd27ba9002499bed2dd0030f7edfef50` on `feature/effector-sequences`
+("BL-B91: escape TOML control characters in effector-registry label/name fields"). Verified in a
+detached checkout at that exact sha (this worktree's HEAD, `f4e552c1`, was not an ancestor of the
+tip — main gained a merge today — so used `git checkout --detach 9032bec5` against a clean tree
+rather than fast-forwarding; tree was clean before and after).
+
+This is the fix for `BL-B91` (`body-layer/ROADMAP/BL-B91.md`), filed by the security deep analysis
+on this branch (`plans/effector-sequences/security-stage0.md`): `_toml_string`/`_toml_key` escaped
+only `\` and `"`, so a raw control character (newline, other C0, DEL) in the two ED-sourced
+free-text fields (`label`, element `name`) produced a TOML value `tomllib` could not parse. User
+direction picked option (C), fix now.
+
+### Scope fit
+
+The fix departs from the security report's own recommended action — "escape or ... mark the
+element unhandled" — by choosing full TOML-spec escaping over the unhandled-element fallback.
+`implementation.md`'s "BL-B91 fix pass" section states why: escaping loses no information and
+needs no new fail-closed branch, and the unhandled-element path was named in the finding as a
+fallback for exactly the case where escaping is not possible, which does not apply here (every
+codepoint has either a short escape or a `\uXXXX` form in TOML basic strings). That is the more
+complete fix, not a narrower one, and it is the one the security report's own wording leaves room
+for ("escape **or**..."). No scope drift: new code is one helper (`_toml_escape`) plus its lookup
+table, called from the two existing render sites, nothing else touched.
+
+### Spec correctness — verified directly, not just read
+
+- **Short escapes**: `_TOML_SHORT_ESCAPES` covers exactly the TOML 1.0 basic-string set
+  (`\b \t \n \f \r \" \\`), matching spec.
+- **`\uXXXX` for the rest**: every other codepoint `< U+0020` plus `U+007F` (DEL) goes through
+  `\\u{ord(ch):04x}`. TOML's grammar accepts either case for the hex digits; lowercase (what
+  `:04x` produces) is valid.
+- **Non-ASCII passes through unescaped and round-trips** — not covered by the new test suite
+  (which only exercises ASCII control classes, the quote, the backslash, and plain text), so I ran
+  it myself: café, Привет мир, and plain ASCII all round-tripped byte-identical through
+  `_toml_string` → `tomllib.loads`, and the raw UTF-8 bytes were present unescaped in the rendered
+  string (not re-encoded as `\u` escapes). This is the one check in the brief the tests don't
+  cover, and it holds.
+- **Both keys and values go through it**: `_toml_key` and `_toml_string` both call `_toml_escape`
+  (lines 926, 930); confirmed by reading, and by the dedicated
+  `test_toml_key_escapes_control_characters_in_a_quoted_key` test.
+
+### Tests fail on the old code — re-ran the counterfactual myself, not trusted from the report
+
+Copied the pre-fix `_toml_string`/`_toml_key` (`git show 0c9ff074:...`) into the tree and ran the
+14 new/relevant tests against it: **10 fail** (`test_toml_string_round_trips_every_control_class`'s
+7 non-plain/quote/backslash cases, the injection-payload test, the quoted-key test, and the
+end-to-end `render_toml` test), **4 pass** (plain text, quote, backslash, tab — already handled
+pre-fix). This matches `implementation.md`'s own counterfactual claim exactly. Also independently
+reran the security report's own demonstration payload
+(`'evil\nlabel = "INJECTED"\n[elements.pwn]\nx=1'`) against the unmodified pre-fix module in an
+isolated interpreter (`-I`, separate scratch dir) and confirmed `tomllib.TOMLDecodeError: Illegal
+character '\n'` — the exact failure the finding describes. Restored the fixed file afterward;
+`git status --porcelain` on `generate_effector_registry.py` was empty, confirming a byte-identical
+restore.
+
+### Nothing else bypasses the helper
+
+`grep`'d the renderer for every string emission site: `_toml_key`, `_toml_string`,
+`_toml_str_array` (which itself calls `_toml_string` per element) are the only three, and
+`render_toml` routes every free-text field (`name` via `_toml_key`; `device_symbol`,
+`cmd_symbols`, `label`, `shape`, `seat` via `_toml_string`/`_toml_str_array`) through one of them.
+No inline `f"\"{...}\""` or `.replace()` string construction remains anywhere in the file.
+
+### Reuse check, confirmed
+
+`generate_defaults.py`'s `_toml_value()` has the identical two-character-only gap (read directly:
+`body-layer/tools/generate_defaults.py:214-221`, unchanged by this commit). Correctly left out of
+scope and flagged rather than silently ignored — it renders this repo's own `tuning.*` source-tree
+literals, not ED-sourced free text, so BL-B91's threat does not apply to it. A graph query
+(`gq.sh`) surfaced the same node cluster and did not contradict this.
+
+### Checks run (this pass, independently)
+
+- `ruff format --check src tests tools`: 172 files already formatted.
+- `ruff check src tests tools`: all checks passed.
+- `cd body-layer && mypy src`: success, 71 source files. `mypy tools`: success, 8 source files.
+- `pytest tests -q`: 2505 passed, 4 xfailed — matches `implementation.md`'s reported count
+  exactly.
+- No leftover debug code or TODOs in the diff.
+- `git status --porcelain`: clean throughout, including after the counterfactual swap-and-restore.
+
+### Memory / graph queries run
+
+`python3 .claude/scripts/memory-search.py toml escaping effector registry` — not indexed yet, no
+hit (expected: a one-occurrence finding, not yet promoted to a memory per the security report's
+own note). `.claude/scripts/gq.sh` on the `generate_defaults.py` reuse question — surfaced the
+expected node cluster, nothing contradicting direct code reading.
+
+### Verdict
+
+**APPROVED.** The escape helper is TOML-1.0-spec-correct (short escapes plus `\uXXXX`, verified
+against non-ASCII pass-through which the tests themselves don't cover), both keys and values route
+through it, nothing else in the renderer bypasses it, the new tests demonstrably fail on the
+pre-fix code (verified by mutation, not by reading), and the `generate_defaults.py` sibling gap is
+correctly identified as out of scope with a reason, not silently left unmentioned. Format/lint/
+type/test all pass clean. No regressions, no scope drift, no missing coverage.
+
+### Review Confidence
+
+Full read of the fix diff and its three input documents. Every checklist item in the dispatch
+prompt verified directly (spec correctness including the one gap the tests don't cover, the
+counterfactual re-run on genuinely swapped-out pre-fix code, the bypass grep, the full
+format/lint/type/test suite) rather than taken from `implementation.md`'s report.
