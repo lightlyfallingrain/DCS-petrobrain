@@ -158,3 +158,99 @@ full `ruff`/`mypy`/`pytest` suite myself, manually cross-checked all 22 `_HELPER
 entries against the research note's Q3 parameter lists by hand, and mutated the running code twice
 (an untested helper's `crew_idx`, and the completeness assert) to confirm what the test suite would
 and would not catch, restoring the file cleanly after each. Not spot-checked.
+
+---
+
+### Re-review — 2026-10-23 (fix commit `05ed91d7..197f6577`)
+
+Reviewed `197f65773a78f2669ced8a8a44aabd84ec366875` (worktree fast-forwarded cleanly from
+`6dfece18`, a strict ancestor; tree clean before and after).
+
+**All four Required Fixes close the gap, demonstrated by re-running the exact mutations from the
+first pass against the fixed code, not just by reading the diff:**
+
+- **Duplicate-name guard.** Mutated the new `table_name in tables` check back out
+  (`parse_command_defs`) and reran `test_parse_command_defs_duplicate_table_name_raises_not_silently_restarts`:
+  fails (`DID NOT RAISE DuplicateNameError`). Restored, confirmed clean. `parse_devices` has the
+  mirrored guard and its own direct test (not separately mutated — same mechanism, already proven
+  by the command-defs case).
+- **Helper-signature table coverage.** Re-ran the reviewer's own mutation
+  (`multiposition_switch`'s `crew_idx` 10→9 in the shipped `_HELPER_SIGNATURES`) against
+  `test_helper_signatures_positional_crew_and_command_count`: fails with
+  `AssertionError: multiposition_switch: crew_idx positioned wrong`. Restored, confirmed clean via
+  `git status --porcelain`.
+- **"Statements ignored."** Implemented as `_find_ignored_statements` (blank every matched head's
+  consumed span, report remaining non-blank lines) plus a `scan_clickabledata` return value and a
+  `render_toml`/CLI report line. Verified directly (not only via the test suite) against a
+  hand-built fixture combining the real file's **leading-space element name**, a **nested-table
+  raw literal** (`arg_lim = {{0.0, 1.0}, {0.0, 0.5}}`, i.e. Q5's actual `STICK-PTT-PTR` shape) and
+  a **post-assignment patch** in one text: `scan_clickabledata` on that text returns `heads=2,
+  handled=['STICK-PTT-PTR', 'X'], unhandled=[], patches=0, ignored=[]` — none of the three
+  real-file forms is misclassified as ignored or dropped. Ran the actual `clean`/`dirty` fixture
+  directories through the CLI directly (not just `pytest`): clean reports
+  `10 elements[ heads: 9 emitted, 0 unhandled, 1 field patches, 1 statements ignored` (the
+  `elements = {}` line, correctly the only ignored line); dirty reports
+  `14 elements[ heads: 9 emitted, 4 unhandled, 1 field patches, 2 statements ignored` — the emitted/
+  unhandled counts match the pre-fix numbers exactly (9/4, 9 elements written), confirming no
+  regression from broadening `_ELEMENTS_HEAD_RE`.
+- **CLI flag rename.** `--output` is now the defined flag; incidentally, `--out` *still* works
+  (argparse's default long-option prefix matching resolves the unambiguous abbreviation) — not a
+  bug, just worth knowing it wasn't a hard rename in the sense of breaking the old spelling.
+
+**Dynamic-key handling** (new, beyond the four fixes, since fix 2 and fix "2b" are coupled):
+`elements[key..i] = ...` is now surfaced as `unhandled` with a reason naming the actual key
+expression, verified directly against the `for`-loop synthetic text from `implementation.md`'s
+own description — correctly 1 head, 0 handled, 1 unhandled, and the loop's `for`/`end` lines
+correctly land in `ignored` rather than being swallowed into the dynamic-key head's span.
+
+**Completeness invariant**: unaffected by this pass's changes — `heads == handled + unhandled +
+patches` is still asserted in `main()` and is orthogonal to the newly-added `ignored` count, which
+the code and docstrings are explicit never feeds that arithmetic. Not independently re-derived
+against the real file's 749/501/13/235 decomposition this pass (no live DCS access from this
+worktree), but nothing in this diff touches how heads/handled/unhandled/patches are computed or
+counted — only *which* heads are found (`_ELEMENTS_HEAD_RE` broadened to match any key form, not
+just quoted-string keys) and what happens to the ones that fall outside the completeness
+arithmetic. The clean/dirty fixture runs above are the closest available proxy and show no
+regression.
+
+**`_EXPECTED_HELPER_SIGNATURES` independence claim.** Diffed it character-for-character against the
+shipped `_HELPER_SIGNATURES` in the module: identical, including key order. On its own this would
+read as "copied from the module and labelled independent" — but the recon note's own Q3 code block
+lists all 22 signatures in that exact order, so two honest transcriptions of the same ordered
+source naturally produce an identical literal. Verified the claim the right way instead: hand-
+derived `(n_commands, crew_idx)` for all 22 entries directly from the recon's own positional-
+parameter lists (counting argument positions in each `helper(hint_, device_, command_[, command2_],
+arg_, ..., crew)` signature myself) and checked both tables against that independent arithmetic —
+all 22 match. Combined with the mutation result above (a wrong entry in the shipped table is
+caught by the test literal, which is a separate object and does not move with it), this is real
+independence, not a diff artifact. Saved as a general lesson:
+`.claude/agent-memory/reviewer/feedback_independent_transcription_claim_needs_source_math_not_diff.md`.
+
+**Other checks, this pass:**
+
+- `ruff format --check src tests tools`, `ruff check src tests tools`, `cd body-layer && mypy src`,
+  `mypy tools`: all pass clean (71 + 8 source files).
+- `pytest -q`: 2491 passed, 4 xfailed — matches `implementation.md`'s reported count exactly
+  (2481 + 10 new tests), no regressions.
+- No leftover debug code/TODOs in the diff.
+- `git status --porcelain` clean before and after every mutation check; no stray files.
+
+### Re-review Verdict
+
+**APPROVED.** All four Required Fixes are genuinely closed, each verified by re-running the exact
+mutation that originally demonstrated the gap and confirming it now fails a test (not merely that
+new tests exist). All three Optional Refinements were also done. No regressions in the mechanical
+checks or the fixture-level behavior. Stage 0 is ready for Stage 0c (the real run against the
+Windows DCS install).
+
+### Re-review Confidence
+
+Full read of the fix diff (`generate_effector_registry.py`, the test file, `implementation.md`'s
+"Review fixes" section) and the recon note's Q3/Q4/Q5 sections. Verified by mutation, not just by
+reading: reran both of the first pass's demonstrated mutations against the fixed code and watched
+each fail a test; ran the CLI directly against the `clean`/`dirty` fixtures to cross-check reported
+counts outside of `pytest`; hand-built and ran a synthetic fixture combining three real-file forms
+(leading-space name, nested-table raw literal, post-assignment patch) through `scan_clickabledata`
+directly to check the broadened head-matching/ignored-statement logic does not misclassify any of
+them. Not independently re-verified against the live DCS install (no Mac-side access to it) — that
+remains Stage 0c's own job, same limitation the first pass noted.
