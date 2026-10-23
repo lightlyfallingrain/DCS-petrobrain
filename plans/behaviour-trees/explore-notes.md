@@ -96,6 +96,25 @@ conversation as it happens.
     be a very powerful way to build Petrobrain behaviour. But it would need a comprehensive set of
     state params and actions, otherwise it's very limited."*
 
+## Round 5
+
+16. **The missile-during-guidance rule is a time race.** *"time to ATGM impact vs time to SAM/AAM
+    impact."*
+17. **Light level: approximate from sun position.** *"light level outside, but we probably cannot
+    get that from DCS, but we might get sun position that would allow us to approximate light
+    level"*. Whether DCS exposes sun position (or mission date/time to compute it) is unverified.
+18. **Scan-area geometry is a tree decision.** Asked how far and how wide "south of the village" is:
+    *"exactly the questions that a tree could decide"*.
+19. **The big payoff is aircraft control.** *"The more useful behaviour trees would come with
+    aircraft control."* The user's examples:
+    - *"fly heading, alt, speed,…"*
+    - *"move x km to left"*
+    - *"hide behind ridge"*
+    - *"attack run from southeast, pop up 3 km from target."*
+    - *"evasive action behaviour automatically"*
+    - *"lots of "sane" wingman behaviour to replace the "idiotic" wingman behaviour of standard DCS
+      wingmen"*
+
 ## Status: concept only, not a plan
 
 *"Do not architect anything yet. The whole behaviour tree thing is a concept that I want to explore,
