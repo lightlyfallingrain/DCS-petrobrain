@@ -134,8 +134,16 @@ class GuidanceUnitState:
     longer *declares* readiness on its own last write (v1's zero-real-
     warm-up `sight_ready` field, removed) -- `sight_ready()` reads the
     real 960 lamp (`ready_observed`) instead. `guidance_unit_ready_
-    announced` is the one-shot latch so "Guidance unit ready" is spoken
-    exactly once, on the lamp's own off->on edge.
+    prev_observed` carries `ready_observed`'s own value as of the end of
+    the *previous* poll, so `CrewConsole.drain_guidance_unit_ready` can
+    tell an observed off->on edge (speak) from an already-lit lamp
+    (stay silent) or a first-ever sample that already reads lit, as a
+    warm air start's does (also stay silent -- there is no prior `False`
+    reading to rise from). Bug fix, `plans/9k113-sight-pointing/plan.md`
+    decision 2 ("only on change"): the one-shot `bool` latch this field
+    replaced spoke on the very first poll that ever read the lamp lit,
+    including a warm air start's first sample, and then never spoke
+    again for the rest of the mission even across a power cycle.
 
     `observ_commanded`/`observ_observed` and `weapon_safety_commanded`/
     `weapon_safety_observed` are the co-moving pairs the plan names:
@@ -162,7 +170,7 @@ class GuidanceUnitState:
     takeoff_seen: bool = False
     power_up_stage: int = 0
     next_switch_due_sim: float | None = None
-    guidance_unit_ready_announced: bool = False
+    guidance_unit_ready_prev_observed: bool | None = None
     observ_commanded: bool = False
     observ_observed: bool | None = None
     weapon_safety_commanded: Literal["armed", "safe"] | None = None

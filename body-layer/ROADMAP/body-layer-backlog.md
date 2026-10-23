@@ -129,6 +129,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B88]] — `join_voice_latency.py` crashes whole on one malformed JSONL line
 - [[BL-B89]] — 9K113 scanning procedure: points of interest, not band sweeps (next after 9k113-narrow-search)
 - [[BL-B90]] — configurable cockpit effector sequences: named registry + per-trigger sequence files (after [[BL-B80]])
+- [[BL-B92]] — `test_connection_reporter_*` tests order-dependent under pytest-randomly
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

@@ -5081,7 +5081,15 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
     until the real 960 lamp (`ready_lamp`) is observed lit, simulated
     here via the fake's `cockpit_switch_state`; "Guidance unit ready."
     then speaks exactly once across several subsequent polls, not once
-    per poll."""
+    per poll.
+
+    A genuine cold start: the lamp is observed explicitly *unlit*
+    (`ready_lamp: False`) for at least one poll before it lights, so the
+    rise is a real observed off->on edge (`plans/9k113-sight-pointing/
+    plan.md` decision 2, "only on change") -- not merely the lamp's
+    first-ever sample, which `test_guidance_unit_ready_is_silent_on_a_
+    warm_air_start_through_the_real_poll_loop` below covers and which
+    must *not* speak."""
     db_path = tmp_path / "region.sqlite"
     conn = open_for_build(db_path)
     conn.close()
@@ -5156,6 +5164,20 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
         # observed yet -- `[[BL-B80]]` v2's own readiness source.
         assert crew_console.sight_ready is False
 
+        # The lamp is observed explicitly unlit first -- a real cold
+        # start, not merely an unobserved reading -- so the later rise is
+        # a genuine off->on edge.
+        aircraft_client.cockpit_switch_state = {"ready_lamp": False}
+        deadline = time.monotonic() + 5.0
+        while (
+            runner.guidance_unit_state.ready_observed is not False
+            and time.monotonic() < deadline
+        ):
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert runner.guidance_unit_state.ready_observed is False
+
         # The lamp lights.
         aircraft_client.cockpit_switch_state = {"ready_lamp": True}
 
@@ -5173,10 +5195,174 @@ def test_takeoff_runs_the_guidance_unit_power_up_sequence_through_the_real_poll_
     assert not poll_thread.is_alive()
     assert crew_console.sight_ready is True
     assert runner.guidance_unit_state.ready_observed is True
-    assert runner.guidance_unit_state.guidance_unit_ready_announced is True
+    assert runner.guidance_unit_state.guidance_unit_ready_prev_observed is True
     assert isinstance(crew_console.output, io.StringIO)
     spoken = crew_console.output.getvalue()
     assert spoken.count("Guidance unit ready.") == 1, spoken
+
+
+def test_guidance_unit_ready_is_silent_on_a_warm_air_start_through_the_real_poll_loop(
+    tmp_path: Path,
+) -> None:
+    """Bug fix, `plans/9k113-sight-pointing/plan.md` decision 2 ("only on
+    change"): a warm air start (Flight A's own shape -- already airborne,
+    guidance unit already powered up before the first poll) has the 960
+    lamp reading lit on the very first cockpit-switch sample, with no
+    prior `False` observation to rise from. That must stay silent --
+    before this fix, the one-shot `announced` latch spoke on any
+    first-ever lit reading, including this one."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # already airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    # The lamp already reads lit on the very first poll -- no prior
+    # `False` sample exists anywhere, matching a real warm air start.
+    aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    # Already powered up -- a warm start skips the takeoff-edge sequence
+    # (already covered above); only the lamp-edge behaviour is under test.
+    runner.guidance_unit_state = GuidanceUnitState(takeoff_seen=True, power_up_stage=4)
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.output = io.StringIO()
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while crew_console.sight_ready is not True and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert crew_console.sight_ready is True
+
+        # A few more polls -- still never spoken.
+        for _ in range(6):
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert runner.guidance_unit_state.ready_observed is True
+    assert isinstance(crew_console.output, io.StringIO)
+    spoken = crew_console.output.getvalue()
+    assert "Guidance unit ready." not in spoken, spoken
+
+
+def test_guidance_unit_ready_speaks_again_after_a_power_cycle_through_the_real_poll_loop(
+    tmp_path: Path,
+) -> None:
+    """Bug fix, same decision: a power cycle (lamp lit, then observed
+    unlit, then lit again) must announce a second time -- the old
+    one-shot `announced` latch never reset, so a real power-down/
+    power-up during a sortie went silent forever after the first
+    announcement. Starts from a state that has already observed the lamp
+    unlit once (`ready_observed=False`, matching `guidance_unit_ready_
+    prev_observed=False`) so the first rise in this test is itself a
+    genuine edge, then drives the lamp off and on again to prove the
+    second rise speaks too -- and that it does not speak a third time
+    while staying lit afterwards."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    telemetry = _console_telemetry_dict()
+    telemetry["altitude_agl_m"] = 500.0  # already airborne
+    sim_t = 100.0
+    telemetry["dcs_model_time_s"] = sim_t
+
+    aircraft_client = FakeConsoleAircraftClient(telemetry, {"objects": []})
+    aircraft_client.cockpit_switch_state = {"ready_lamp": False}
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    runner.guidance_unit_state = GuidanceUnitState(
+        takeoff_seen=True,
+        power_up_stage=4,
+        ready_observed=False,
+        guidance_unit_ready_prev_observed=False,
+    )
+    crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
+    crew_console.output = io.StringIO()
+
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_crew_text_poll_loop,
+        args=(
+            runner,
+            crew_console,
+            aircraft_client,
+            "Syria",
+            db_path,
+            0.01,
+            stop_event,
+        ),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runner.last_t_sim is not None
+
+        # First rise.
+        aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+        deadline = time.monotonic() + 5.0
+        while crew_console.sight_ready is not True and time.monotonic() < deadline:
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert crew_console.sight_ready is True
+        assert isinstance(crew_console.output, io.StringIO)
+        assert crew_console.output.getvalue().count("Guidance unit ready.") == 1
+
+        # Power down: the lamp is observed unlit again.
+        aircraft_client.cockpit_switch_state = {"ready_lamp": False}
+        deadline = time.monotonic() + 5.0
+        while crew_console.sight_ready is not False and time.monotonic() < deadline:
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert crew_console.sight_ready is False
+
+        # Power up again: the second rise.
+        aircraft_client.cockpit_switch_state = {"ready_lamp": True}
+        deadline = time.monotonic() + 5.0
+        while crew_console.sight_ready is not True and time.monotonic() < deadline:
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+        assert crew_console.sight_ready is True
+
+        # Staying lit afterwards must not speak a third time.
+        for _ in range(6):
+            sim_t += 0.5
+            telemetry["dcs_model_time_s"] = sim_t
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert isinstance(crew_console.output, io.StringIO)
+    spoken = crew_console.output.getvalue()
+    assert spoken.count("Guidance unit ready.") == 2, spoken
 
 
 def test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up(
@@ -5202,7 +5388,7 @@ def test_second_takeoff_in_the_same_mission_does_not_rerun_the_power_up(
         takeoff_seen=True,
         power_up_stage=4,
         ready_observed=True,
-        guidance_unit_ready_announced=True,
+        guidance_unit_ready_prev_observed=True,
     )
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
 
@@ -5322,7 +5508,7 @@ def test_observ_and_weapons_safety_write_through_the_real_poll_loop(
             takeoff_seen=True,
             power_up_stage=4,
             ready_observed=True,
-            guidance_unit_ready_announced=True,
+            guidance_unit_ready_prev_observed=True,
         )
         deadline = time.monotonic() + 5.0
         while not crew_console.sight_ready and time.monotonic() < deadline:
@@ -5395,7 +5581,7 @@ def test_slew_trace_is_written_from_the_real_poll_loop(tmp_path: Path) -> None:
         takeoff_seen=True,
         power_up_stage=4,
         ready_observed=True,
-        guidance_unit_ready_announced=True,
+        guidance_unit_ready_prev_observed=True,
     )
     crew_console = CrewConsole(store=runner.store, tasks=runner.tasks)
     slew_trace_path = tmp_path / "slew.jsonl"
