@@ -5809,6 +5809,16 @@ def test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once(
         assert crew_console.config_error_pending is True
         assert CONFIG_ERROR_LINE not in crew_console.output.getvalue()
 
+        # Unsilenced, but intercom still closed: must still not speak. This
+        # isolates the intercom gate itself -- the phase above also has
+        # `silenced=True`, so it cannot tell the intercom gate's own
+        # contribution apart from the silenced gate's.
+        crew_console.silenced = False
+        time.sleep(0.1)
+        assert crew_console.config_error_pending is True
+        assert CONFIG_ERROR_LINE not in crew_console.output.getvalue()
+        crew_console.silenced = True
+
         # Intercom opens, but still silenced: must still not speak.
         aircraft_client.spu8_state = {"gate_open": True}
         time.sleep(0.1)

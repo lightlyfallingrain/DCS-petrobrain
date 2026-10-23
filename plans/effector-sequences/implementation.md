@@ -770,3 +770,37 @@ R12 (the implicit self-check replacing the takeoff file's `!= on` conditions), R
   job) was kept. The takeoff-edge block's comment describing `advance_guidance_unit_power_up`'s
   own readback-consumer list was replaced with D2/D4/R12's current reasoning rather than kept
   alongside dead code.
+
+### Stage 2 review fix
+
+Per `plans/effector-sequences/review-stage2.md`'s one required fix: `CrewConsole.
+drain_config_error`'s `if not intercom_open: return` gate had no test exercising it in isolation.
+`test_config_error_held_while_silenced_and_intercom_closed_then_speaks_once`'s existing
+intercom-closed phase also had `silenced=True`, so the `silenced` check alone already returned
+early there and the intercom gate's own contribution was never observed.
+
+- `body-layer/tests/test_logger.py` — added a phase to that same test, between the existing
+  silenced+closed phase and the silenced+open phase: `crew_console.silenced = False` with the
+  intercom still closed (no `spu8_state` sample set yet), asserting no speech and
+  `config_error_pending` still `True`, then `silenced` is set back to `True` before the original
+  flow (intercom opens while still silenced, then unsilenced) continues unchanged. Test-only
+  change; no production code touched. Same shape the test already used for the silenced gate
+  (review's own suggestion), just with the roles swapped.
+
+Mutation-confirmed per the review's own instruction: recorded `shasum` of
+`body-layer/src/belief/crew_console.py` before mutating
+(`242b70ced238108c27174c382ef69c852f5eef7d`), deleted the `if not intercom_open: return` lines,
+ran the one test in isolation — it failed at the new phase's
+`assert crew_console.config_error_pending is True` (actual `False`: the line spoke immediately
+once unsilenced, with the intercom still closed), confirming the gate is now load-bearing for this
+test. Restored the two deleted lines by hand and re-checked the file's `shasum` — identical to the
+pre-mutation value, confirming an exact restore rather than a by-eye one. Re-ran the test: passes.
+
+### Checks (Stage 2 review fix)
+
+- `body-layer/`:
+  - `ruff format --check src tests tools` — pass (180 files)
+  - `ruff check src tests tools` — pass
+  - `cd body-layer && .venv/bin/mypy src` — pass (74 files)
+  - `pytest tests -q` — 2549 passed, 4 xfailed (same totals as `review-stage2.md`'s own run; one
+    existing test extended, no test added or removed)
