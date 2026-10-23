@@ -14,6 +14,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3012]
 cmd_names = ["hydraulic_commands.Hydro_Damper_Switch_PCover"]
 args = [47]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Control Assumed Switch Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -25,6 +26,7 @@ device_name = "ECS_INTERFACE"
 cmds = [3003]
 cmd_names = ["ecs_commands.Filter"]
 args = [143]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Filter Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -36,6 +38,7 @@ device_name = "ECS_INTERFACE"
 cmds = [3004]
 cmd_names = ["ecs_commands.Heating"]
 args = [144]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Heating Switch, HOT/NORMAL"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -47,6 +50,8 @@ device_name = "ECS_INTERFACE"
 cmds = [3005]
 cmd_names = ["ecs_commands.AutomaticHotCold"]
 args = [145]
+helper_args = ["4", "0.1", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004], momentary = false }]
 label = "Automatic Hot Cold Switch, OFF/COLD/HOT/AUTO"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -58,6 +63,7 @@ device_name = "ECS_INTERFACE"
 cmds = [3002]
 cmd_names = ["ecs_commands.BlowdownConditioning"]
 args = [134]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Blowdown Conditioning Switch, CONDITIONING/OFF/BLOWDOWN"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -69,6 +75,8 @@ device_name = "ECS_INTERFACE"
 cmds = [3006]
 cmd_names = ["ecs_commands.Temperature"]
 args = [146]
+helper_args = ["11", "1/9", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "Temperature Selector, 5/10/15/18/20/22/24/30/35/40/50"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -80,6 +88,8 @@ device_name = "BAROALT_O"
 cmds = [3001]
 cmd_names = ["baroaltimeter_commands.CMD_ADJUST_PRESSURE"]
 args = [788]
+helper_args = ["1", "0.6", "false", "true", "nil", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.6 }]
 label = "Operator Baro Pressure Knob"
 shape = "default_axis"
 seat = "operator"
@@ -91,6 +101,8 @@ device_name = "BAROALT_P"
 cmds = [3001]
 cmd_names = ["baroaltimeter_commands.CMD_ADJUST_PRESSURE"]
 args = [18]
+helper_args = ["1", "0.6", "false", "true", "nil", "nil"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.6 }]
 label = "Baro Pressure Knob"
 shape = "default_axis"
 seat = "pilot"
@@ -102,6 +114,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3014]
 cmd_names = ["engine_commands.STARTUP_APU_Launch_Method"]
 args = [313]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "APU Launch Method START/CRANK/FALSE"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -113,6 +126,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3012]
 cmd_names = ["engine_commands.STARTUP_APU_StartUp"]
 args = [307]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "APU Start"
 shape = "default_button"
 seat = "pilot"
@@ -124,6 +138,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3013]
 cmd_names = ["engine_commands.STARTUP_APU_Stop"]
 args = [311]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "APU Stop"
 shape = "default_button"
 seat = "pilot"
@@ -135,6 +150,7 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3012]
 cmd_names = ["arc15_commands.CONTROL"]
 args = [461]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "ARC-15 Control Button"
 shape = "default_button"
 seat = "pilot"
@@ -146,6 +162,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3005]
 cmd_names = ["arc15_commands.BACKUP_10KHz"]
 args = [468]
+helper_args = ["10", "1/9"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -157,6 +175,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3006]
 cmd_names = ["arc15_commands.BACKUP_1KHz"]
 args = [469]
+helper_args = ["20", "1/20"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -168,6 +188,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3004]
 cmd_names = ["arc15_commands.BACKUP_100KHz"]
 args = [467]
+helper_args = ["18", "1/17"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -179,6 +201,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3008]
 cmd_names = ["arc15_commands.PRIMARY_10KHz"]
 args = [465]
+helper_args = ["10", "1/9"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -190,6 +214,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3009]
 cmd_names = ["arc15_commands.PRIMARY_1KHz"]
 args = [466]
+helper_args = ["20", "1/20"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -201,6 +227,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3007]
 cmd_names = ["arc15_commands.PRIMARY_100KHz"]
 args = [464]
+helper_args = ["18", "1/17"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -212,6 +240,7 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3011]
 cmd_names = ["arc15_commands.DIAL_SELECT"]
 args = [462]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ARC-15 1/2"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -223,6 +252,7 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3010]
 cmd_names = ["arc15_commands.LOOP"]
 args = [458]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "ARC-15 Loop Button"
 shape = "default_button"
 seat = "pilot"
@@ -234,6 +264,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3003]
 cmd_names = ["arc15_commands.MODE"]
 args = [463]
+helper_args = ["4", "0.115"]
+values = [{ kind = "discrete", values = [0.0, 0.115, 0.23, 0.34500000000000003], momentary = false }]
 label = "ARC-15 mode OFF/COMPASS/ANT/FRAME"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -245,6 +277,7 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3002]
 cmd_names = ["arc15_commands.TLF_TLG"]
 args = [460]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ARC-15 TLF/TLG"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -256,6 +289,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3012]
 cmd_names = ["arc15_commands.CONTROL"]
 args = [636]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "ARC-15 Control Button"
 shape = "default_button"
 seat = "operator"
@@ -267,6 +302,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3008]
 cmd_names = ["arc15_commands.PRIMARY_10KHz"]
 args = [643]
+helper_args = ["10", "1/9", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -278,6 +315,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3009]
 cmd_names = ["arc15_commands.PRIMARY_1KHz"]
 args = [644]
+helper_args = ["20", "1/20", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -289,6 +328,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3007]
 cmd_names = ["arc15_commands.PRIMARY_100KHz"]
 args = [642]
+helper_args = ["18", "1/17", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Right Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -300,6 +341,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3005]
 cmd_names = ["arc15_commands.BACKUP_10KHz"]
 args = [640]
+helper_args = ["10", "1/9", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -311,6 +354,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3006]
 cmd_names = ["arc15_commands.BACKUP_1KHz"]
 args = [641]
+helper_args = ["20", "1/20", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -322,6 +367,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3004]
 cmd_names = ["arc15_commands.BACKUP_100KHz"]
 args = [639]
+helper_args = ["18", "1/17", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "ARC-15 Left Frequency"
 shape = "multiposition_switch"
 seat = "operator"
@@ -333,6 +380,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3011]
 cmd_names = ["arc15_commands.DIAL_SELECT"]
 args = [637]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ARC-15 1/2"
 shape = "default_2_position_small_tumb"
 seat = "operator"
@@ -344,6 +393,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3010]
 cmd_names = ["arc15_commands.LOOP"]
 args = [633]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "ARC-15 Loop Button"
 shape = "default_button"
 seat = "operator"
@@ -355,6 +406,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3003]
 cmd_names = ["arc15_commands.MODE"]
 args = [638]
+helper_args = ["4", "0.115", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.115, 0.23, 0.34500000000000003], momentary = false }]
 label = "ARC-15 mode OFF/COMPASS/ANT/FRAME"
 shape = "multiposition_switch"
 seat = "operator"
@@ -366,6 +419,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3002]
 cmd_names = ["arc15_commands.TLF_TLG"]
 args = [635]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ARC-15 TLF/TLG"
 shape = "default_2_position_small_tumb"
 seat = "operator"
@@ -377,6 +432,8 @@ device_name = "ARC_15_PANEL_O"
 cmds = [3001]
 cmd_names = ["arc15_commands.VOLUME"]
 args = [634]
+helper_args = ["0", "0.05", "false", "false", "false", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "ARC-15 Volume"
 shape = "default_axis"
 seat = "operator"
@@ -388,6 +445,7 @@ device_name = "ARC_U2"
 cmds = [3005]
 cmd_names = ["ARC_U2_commands.CMD_ARC_U2_COMPASS_CONNECT"]
 args = [327]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "ARC-U2 switcher COMPASS R-852–RADIOLINK–COMPASS R-828"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -399,6 +457,8 @@ device_name = "ARC_U2"
 cmds = [3002, 3003]
 cmd_names = ["ARC_U2_commands.CMD_ARC_U2_FRAME_LEFT", "ARC_U2_commands.CMD_ARC_U2_FRAME_RIGHT"]
 args = [325]
+helper_args = ["anim_speed_default * 1.5"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = true }]
 label = "ARC-U2 switcher L–RAMKA-P"
 shape = "springloaded_3_pos_tumb"
 seat = "pilot"
@@ -410,6 +470,7 @@ device_name = "ARC_U2"
 cmds = [3001]
 cmd_names = ["ARC_U2_commands.CMD_ARC_U2_ON_OFF"]
 args = [324]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ARC-U2 switcher On/Off"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -421,6 +482,7 @@ device_name = "ARC_U2"
 cmds = [3004]
 cmd_names = ["ARC_U2_commands.CMD_ARC_U2_SENS"]
 args = [326]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ARC-U2 switcher sensitivity B-M"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -432,6 +494,8 @@ device_name = "ARC_15_PANEL_P"
 cmds = [3001]
 cmd_names = ["arc15_commands.VOLUME"]
 args = [459]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "ARC-15 Volume"
 shape = "default_axis"
 seat = "pilot"
@@ -443,6 +507,8 @@ device_name = "WEAP_SYS"
 cmds = [3020]
 cmd_names = ["weapon_commands.Operator_SWITCHER_SAFE_WEAP"]
 args = [673]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Main Weapon Safe Switch"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -454,6 +520,7 @@ device_name = "ASO_2V"
 cmds = [3007]
 cmd_names = ["avASO_2V_commands.ASO_2V_Release_Pilot"]
 args = [847]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Pilot Launch Snars"
 shape = "default_button"
 seat = "pilot"
@@ -465,6 +532,8 @@ device_name = "ASO_2V"
 cmds = [3001]
 cmd_names = ["avASO_2V_commands.ASO_2V_Interval_2_4"]
 args = [1008]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Interval"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -476,6 +545,8 @@ device_name = "ASO_2V"
 cmds = [3004]
 cmd_names = ["avASO_2V_commands.ASO_2V_Left"]
 args = [969]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Side"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -487,6 +558,8 @@ device_name = "ASO_2V"
 cmds = [3003]
 cmd_names = ["avASO_2V_commands.ASO_2V_Release"]
 args = [968]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Launch Countermeasures"
 shape = "default_button"
 seat = "operator"
@@ -498,6 +571,8 @@ device_name = "ASO_2V"
 cmds = [3005]
 cmd_names = ["avASO_2V_commands.ASO_2V_Right"]
 args = [970]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Side"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -509,6 +584,8 @@ device_name = "ASO_2V"
 cmds = [3002]
 cmd_names = ["avASO_2V_commands.ASO_2V_Series_4_16"]
 args = [965]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Serie"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -520,6 +597,8 @@ device_name = "ASO_2V"
 cmds = [3006]
 cmd_names = ["avASO_2V_commands.ASO_2V_Set_I_II_III"]
 args = [971]
+helper_args = ["1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3], momentary = false }]
 label = "Set I/II/III"
 shape = "triple_switch"
 seat = "operator"
@@ -531,6 +610,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3014]
 cmd_names = ["int_lights_commands.SpecialEquipmentPanelRedLights"]
 args = [822]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Armament Panel Red Lights Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -542,6 +622,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3049]
 cmd_names = ["elec_commands.BatteryHeating"]
 args = [74]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Battery Heating, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -553,6 +634,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3034]
 cmd_names = ["elec_commands.BatteryLeft"]
 args = [75]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Battery switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -564,6 +646,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3037]
 cmd_names = ["elec_commands.BatteryRight"]
 args = [61]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Battery switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -576,6 +659,7 @@ cmds = [3006, 3001, 3001]
 cmd_names = ["pki_commands.Lock_Unlock", "pki_commands.Reflector_Move", "pki_commands.Reflector_Move"]
 args = [15, 846, 846]
 arg_values = [0.0, 0.0, 0.0]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = -0.01 }, { kind = "unknown", reason = "unhandled raw-literal class 'NULL'" }]
 label = "PKI control"
 shape = "raw_table_literal"
 seat = "operator"
@@ -587,6 +671,7 @@ device_name = "ECS_INTERFACE"
 cmds = [3001]
 cmd_names = ["ecs_commands.CabinUnseal"]
 args = [133]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Cabin Unseal Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -598,6 +683,8 @@ device_name = "ECS_INTERFACE"
 cmds = [3008]
 cmd_names = ["ecs_commands.Sealing_valve"]
 args = [516]
+helper_args = ["0", "0.1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Sealing, OPEN/CLOSE"
 shape = "default_axis_limited"
 seat = "pilot"
@@ -609,6 +696,8 @@ device_name = "CPT_MECH"
 cmds = [3019]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Canopy"]
 args = [848]
+helper_args = ["2", "nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Operator Lock Canopy, OPEN/CLOSE"
 shape = "default_animated_lever"
 seat = "operator"
@@ -620,6 +709,8 @@ device_name = "CPT_MECH"
 cmds = [3017]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PilotDoor_Lock"]
 args = [8]
+helper_args = ["2"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Pilot Door Safety Lock, OPEN/CLOSE"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -631,6 +722,7 @@ device_name = "CPT_MECH"
 cmds = [3018]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PilotDoor_Safety_Lock_Button"]
 args = [189]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Pilot Door Safety Lock Button"
 shape = "default_button"
 seat = "pilot"
@@ -642,6 +734,8 @@ device_name = "ELEC_INTERFACE"
 cmds = [3070]
 cmd_names = ["elec_commands.CB_FRAME_LEFT"]
 args = [601]
+helper_args = ["anim_speed_default / 5"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "All Left CBs ON"
 shape = "default_button"
 seat = "pilot"
@@ -653,6 +747,8 @@ device_name = "ELEC_INTERFACE"
 cmds = [3072]
 cmd_names = ["elec_commands.CB_FRAME_RIGHT"]
 args = [632]
+helper_args = ["anim_speed_default / 5"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "All Right CBs ON"
 shape = "default_button"
 seat = "pilot"
@@ -664,6 +760,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3126]
 cmd_names = ["elec_commands.CB_LEFT_AIRSPEED_SENSOR"]
 args = [594]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Air Speed Sensor, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -675,6 +772,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3127]
 cmd_names = ["elec_commands.CB_LEFT_AUTOPILOT_ALARM"]
 args = [595]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB AFCS Warn, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -686,6 +784,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3130]
 cmd_names = ["elec_commands.CB_LEFT_BEACON"]
 args = [598]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Beacon Light, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -697,6 +796,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3105]
 cmd_names = ["elec_commands.CB_LEFT_BOMB_EMERGENCY_DETACH"]
 args = [573]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Emergency Jettison, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -708,6 +808,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3106]
 cmd_names = ["elec_commands.CB_LEFT_BOMB_EXPLOSION"]
 args = [574]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Bombs, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -719,6 +820,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3122]
 cmd_names = ["elec_commands.CB_LEFT_EXT_CARGO_EMERGENCY_DROP"]
 args = [590]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB External Cargo Emergency Jettison, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -730,6 +832,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3119]
 cmd_names = ["elec_commands.CB_LEFT_FIRE_1_AUTO"]
 args = [587]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fire Protection System - Auto, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -741,6 +844,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3120]
 cmd_names = ["elec_commands.CB_LEFT_FIRE_1_MANUAL"]
 args = [588]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fire Protection System - Manual, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -752,6 +856,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3121]
 cmd_names = ["elec_commands.CB_LEFT_FIRE_ALARM"]
 args = [589]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fire Protection System Warning, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -763,6 +868,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3124]
 cmd_names = ["elec_commands.CB_LEFT_GEAR_ALARM"]
 args = [592]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Landing Gear Warning, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -774,6 +880,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3123]
 cmd_names = ["elec_commands.CB_LEFT_GEAR_EXTENT_HANDLE"]
 args = [591]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Landing Gear Extend / Retract, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -785,6 +892,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3114]
 cmd_names = ["elec_commands.CB_LEFT_GLASS_SPRINKLER"]
 args = [582]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Windshield Spray, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -796,6 +904,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3115]
 cmd_names = ["elec_commands.CB_LEFT_GLASS_WIPER_OP"]
 args = [583]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Windshield Wiper Gunner, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -807,6 +916,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3116]
 cmd_names = ["elec_commands.CB_LEFT_GLASS_WIPER_PILOT"]
 args = [584]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Windshield Wiper Pilot, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -818,6 +928,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3131]
 cmd_names = ["elec_commands.CB_LEFT_HEADLIGHT_CONTROL"]
 args = [599]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Landing Light Control, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -829,6 +940,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3104]
 cmd_names = ["elec_commands.CB_LEFT_HOMING_MISSILE_POWER"]
 args = [572]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Missile Power, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -840,6 +952,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3132]
 cmd_names = ["elec_commands.CB_LEFT_PILOTING_DEVICE"]
 args = [600]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Main Attitude Indicator, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -851,6 +964,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3125]
 cmd_names = ["elec_commands.CB_LEFT_PT125Ts"]
 args = [593]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Inverter, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -862,6 +976,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3109]
 cmd_names = ["elec_commands.CB_LEFT_PUMP_TANK_1"]
 args = [577]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fuel Shutoff Valve, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -873,6 +988,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3110]
 cmd_names = ["elec_commands.CB_LEFT_PUMP_TANK_5"]
 args = [578]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Cross Feed Valve, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -884,6 +1000,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3108]
 cmd_names = ["elec_commands.CB_LEFT_RADIOCOMPASS_HF"]
 args = [576]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB ADF, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -895,6 +1012,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3118]
 cmd_names = ["elec_commands.CB_LEFT_RECORDER_PARAMS"]
 args = [586]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Flight Recorder, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -906,6 +1024,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3107]
 cmd_names = ["elec_commands.CB_LEFT_UNGUIDED_ROCKETS"]
 args = [575]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Rockets, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -917,6 +1036,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3117]
 cmd_names = ["elec_commands.CB_LEFT_SPEECH_INFORMER"]
 args = [585]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Audio Warning System, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -928,6 +1048,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3128]
 cmd_names = ["elec_commands.CB_LEFT_STARTUP_BLOCK"]
 args = [596]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Auto Start System, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -939,6 +1060,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3129]
 cmd_names = ["elec_commands.CB_LEFT_STARTUP_IGNITION"]
 args = [597]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Igniter, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -950,6 +1072,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3112]
 cmd_names = ["elec_commands.CB_LEFT_VALVE_FIRE_LEFT"]
 args = [580]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Left Tank Fire Warning, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -961,6 +1084,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3113]
 cmd_names = ["elec_commands.CB_LEFT_VALVE_SEPARATION"]
 args = [581]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Left Valve Separation, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -972,6 +1096,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3111]
 cmd_names = ["elec_commands.CB_LEFT_VALVE_TANK_1"]
 args = [579]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Tank 1 Valve, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -983,6 +1108,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3102]
 cmd_names = ["elec_commands.CB_RIGHT_ANTIICE_ALARM"]
 args = [630]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Anti-Ice System - Warning, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -994,6 +1120,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3103]
 cmd_names = ["elec_commands.CB_RIGHT_ANTIICE_CONTROL"]
 args = [631]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Anti-Ice System - Control, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1005,6 +1132,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3080]
 cmd_names = ["elec_commands.CB_RIGHT_ARMAMENT_CAMERA_SHUTTER"]
 args = [608]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Camera, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1016,6 +1144,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3082]
 cmd_names = ["elec_commands.CB_RIGHT_ARMAMENT_CANNON"]
 args = [610]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Cannon, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1027,6 +1156,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3081]
 cmd_names = ["elec_commands.CB_RIGHT_ARMAMENT_CONTROL"]
 args = [609]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Armament Control, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1038,6 +1168,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3079]
 cmd_names = ["elec_commands.CB_RIGHT_ARMAMENT_SIGNAL"]
 args = [607]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Signal, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1049,6 +1180,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3089]
 cmd_names = ["elec_commands.CB_RIGHT_BOMB_COMBAT_DROP"]
 args = [617]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Bombs Release, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1060,6 +1192,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3095]
 cmd_names = ["elec_commands.CB_RIGHT_CONDITIONER_CONTROL"]
 args = [623]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Air Conditioning, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1071,6 +1204,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3090]
 cmd_names = ["elec_commands.CB_RIGHT_CONNECTION_DISTRIBUTION_DEVICE"]
 args = [618]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Connection Distribution Device, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1082,6 +1216,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3075]
 cmd_names = ["elec_commands.CB_RIGHT_CONTROL_CLUTCH"]
 args = [603]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Collective Lever Lock, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1093,6 +1228,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3074]
 cmd_names = ["elec_commands.CB_RIGHT_CONTROL_FORCE_MECHANISM"]
 args = [602]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Control Force Grad, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1104,6 +1240,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3092]
 cmd_names = ["elec_commands.CB_RIGHT_DUAS_V_HEATING"]
 args = [620]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Air Data Computer Heating, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1115,6 +1252,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3094]
 cmd_names = ["elec_commands.CB_RIGHT_EMERGENCY_DOOR_DETACH_OP"]
 args = [622]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Jettision Gunners Door, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1126,6 +1264,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3093]
 cmd_names = ["elec_commands.CB_RIGHT_EMERGENCY_DOOR_DETACH_PILOT"]
 args = [621]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Jettison Pilot´s Door, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1137,6 +1276,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3076]
 cmd_names = ["elec_commands.CB_RIGHT_ENGINE_TEMP_ADJUST_LEFT"]
 args = [604]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Temperature Control Left Governor RPM, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1148,6 +1288,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3077]
 cmd_names = ["elec_commands.CB_RIGHT_ENGINE_TEMP_ADJUST_RIGHT"]
 args = [605]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Temperature Control Right Governor RPM, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1159,6 +1300,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3086]
 cmd_names = ["elec_commands.CB_RIGHT_EXT_STORES_LOCK_RELEASE"]
 args = [614]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB External Stores Release Lock, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1170,6 +1312,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3085]
 cmd_names = ["elec_commands.CB_RIGHT_EXT_STORES_TACTICAL_DROP"]
 args = [613]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB External Stores Tactical Release, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1181,6 +1324,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3083]
 cmd_names = ["elec_commands.CB_RIGHT_FIRE_2_AUTO"]
 args = [611]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Squib-2 Auto Fire Protection, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1192,6 +1336,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3084]
 cmd_names = ["elec_commands.CB_RIGHT_FIRE_2_MANUAL"]
 args = [612]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Squib-2 Manual Fire Protection, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1203,6 +1348,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3096]
 cmd_names = ["elec_commands.CB_RIGHT_FUEL_METER"]
 args = [624]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fuel Quantity Indication, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1214,6 +1360,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3087]
 cmd_names = ["elec_commands.CB_RIGHT_GEAR_EXTENT_HANDLE_BACKUP"]
 args = [615]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Landing Gear Valve, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1225,6 +1372,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3088]
 cmd_names = ["elec_commands.CB_RIGHT_LAUNCHER_DETACH"]
 args = [616]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Jettison Missile Rails, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1236,6 +1384,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3091]
 cmd_names = ["elec_commands.CB_RIGHT_PILOT_AIM"]
 args = [619]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "PILOT SIGHT CB, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1247,6 +1396,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3101]
 cmd_names = ["elec_commands.CB_RIGHT_PILOT_SEAT_MECHANISM"]
 args = [629]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Pilot Seat Adjustment, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1258,6 +1408,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3099]
 cmd_names = ["elec_commands.CB_RIGHT_PUMP_TANK_2"]
 args = [627]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fuel Pump 2, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1269,6 +1420,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3100]
 cmd_names = ["elec_commands.CB_RIGHT_PUMP_TANK_4"]
 args = [628]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fuel Pump 4, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1280,6 +1432,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3078]
 cmd_names = ["elec_commands.CB_RIGHT_ROTOR_RPM_ADJUST"]
 args = [606]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Rotor RPM Adjust, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1291,6 +1444,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3098]
 cmd_names = ["elec_commands.CB_RIGHT_VALVE_FIRE_RIGHT"]
 args = [626]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fuel Tank 2 Shutoff Valve, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1302,6 +1456,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3097]
 cmd_names = ["elec_commands.CB_RIGHT_VALVE_TANK_2"]
 args = [625]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "CB Fuel Tank 2 Valve, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1313,6 +1468,8 @@ device_name = "CPT_MECH"
 cmds = [3048]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_ClockHeatCPG"]
 args = [672]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Clock Heating Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -1325,6 +1482,7 @@ cmds = [3001, 3002, 3003]
 cmd_names = ["device_commands.Button_1", "device_commands.Button_2", "device_commands.Button_3"]
 args = [687, 687, 688]
 arg_values = [1.0, -1.0, 1.0]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "discrete", values = [-1.0, 0.0], momentary = true }, { kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Mech clock left lever"
 shape = "raw_table_literal"
 seat = "operator"
@@ -1337,6 +1495,7 @@ cmds = [3001, 3002, 3003]
 cmd_names = ["device_commands.Button_1", "device_commands.Button_2", "device_commands.Button_3"]
 args = [57, 57, 58]
 arg_values = [1.0, -1.0, 1.0]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "discrete", values = [-1.0, 0.0], momentary = true }, { kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Mech clock left lever"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -1349,6 +1508,7 @@ cmds = [3004, 3005]
 cmd_names = ["device_commands.Button_4", "device_commands.Button_5"]
 args = [693, 694]
 arg_values = [1.0, 0.05]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "continuous", min = -0.15, max = 0.15, gain = 1.2 }]
 label = "Mech clock right lever"
 shape = "raw_table_literal"
 seat = "operator"
@@ -1361,6 +1521,7 @@ cmds = [3004, 3005]
 cmd_names = ["device_commands.Button_4", "device_commands.Button_5"]
 args = [59, 60]
 arg_values = [1.0, 0.05]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "continuous", min = -0.15, max = 0.15, gain = 1.2 }]
 label = "Mech clock right lever"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -1372,6 +1533,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3004]
 cmd_names = ["ext_lights_commands.NavCodeButton"]
 args = [35]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Navigation Lights Code Button"
 shape = "default_button"
 seat = "pilot"
@@ -1383,6 +1545,7 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3004]
 cmd_names = ["ext_cargo_equipment_commands.CMD_EmergencyReleaseBtn_Cover"]
 args = [748]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Emergency Cargo Release Button Cover, OPEN/CLOSE"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -1394,6 +1557,7 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3003]
 cmd_names = ["ext_cargo_equipment_commands.CMD_EmergencyReleaseBtn"]
 args = [749]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Emergency Cargo Release Button - Push to release"
 shape = "default_button"
 seat = "pilot"
@@ -1405,6 +1569,7 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3002]
 cmd_names = ["ext_cargo_equipment_commands.CMD_TacticalReleaseBtn_Cover"]
 args = [751]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Tactical Cargo Release Button Cover, OPEN/CLOSE"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -1416,6 +1581,7 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3001]
 cmd_names = ["ext_cargo_equipment_commands.CMD_TacticalReleaseBtn"]
 args = [752]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Tactical Cargo Release Button - Push to release"
 shape = "default_button"
 seat = "pilot"
@@ -1428,6 +1594,7 @@ cmds = [3004, 3003]
 cmd_names = ["engine_commands.COLLECTIVE", "engine_commands.CONTROL_CORRECTION"]
 args = [0, 0]
 arg_values = [0.0, 0.0]
+values = [{ kind = "continuous", min = -1.0, max = 1.0, gain = 0.1 }, { kind = "continuous", min = -1.0, max = 1.0, gain = 0.1 }]
 label = "Collective (LMB press, hold and move) / Throttle (RMB press, hold and move)"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -1439,6 +1606,7 @@ device_name = "CPT_MECH"
 cmds = [3028]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_CollectiveStopper"]
 args = [753]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "friction clutch of the collective"
 shape = "default_button"
 seat = "pilot"
@@ -1450,6 +1618,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3020, 3019]
 cmd_names = ["engine_commands.READJUST_DOWN", "engine_commands.READJUST_UP"]
 args = [747]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = true }]
 label = "Readjust Free Turbine RPM, RIGHT/NEUTRAL/LEFT"
 shape = "springloaded_3_pos_tumb"
 seat = "pilot"
@@ -1461,6 +1630,8 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3012]
 cmd_names = ["ext_lights_commands.Headlight_Operator_Switch_PCover"]
 args = [668]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "LND Light Assumed Switch Cover, OPEN/CLOSE"
 shape = "default_blue_cover"
 seat = "operator"
@@ -1472,6 +1643,8 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3011]
 cmd_names = ["ext_lights_commands.Headlight_Operator_Switch"]
 args = [669]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "LND Light Assumed Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -1483,6 +1656,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3011]
 cmd_names = ["hydraulic_commands.Hydro_Damper_Switch_P"]
 args = [48]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Control Assumed Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1494,6 +1668,8 @@ device_name = "CPT_MECH"
 cmds = [3041]
 cmd_names = ["cockpit_mechanics_commands.Trimmer_myself_cover"]
 args = [670]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Autopilot Trimmer for yourself Switch Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -1505,6 +1681,8 @@ device_name = "CPT_MECH"
 cmds = [3040]
 cmd_names = ["cockpit_mechanics_commands.Trimmer_myself"]
 args = [671]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Autopilot Trimmer for yourself "
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -1516,6 +1694,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3010]
 cmd_names = ["int_lights_commands.DayNight"]
 args = [362]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Day-Night Switch, DAY/NIGHT"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1527,6 +1706,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3022]
 cmd_names = ["engine_commands.ANTIDUST_On_COVER"]
 args = [514]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Antidust ON Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -1538,6 +1718,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3021]
 cmd_names = ["engine_commands.ANTIDUST_On"]
 args = [796]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Antidust ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1549,6 +1730,8 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3007]
 cmd_names = ["AntiIceSys_commands.ANTIICE_Ammeter"]
 args = [114]
+helper_args = ["11", "0.1", "false", "0", "nil", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "AC Voltmeter knob"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -1560,6 +1743,8 @@ device_name = "IFF"
 cmds = [3001]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Mode_Sw"]
 args = [334]
+helper_args = ["4", "1/3"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "IFF Transponder Mode Selector Switch, AUTO/KD/+-15/KP"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -1571,6 +1756,7 @@ device_name = "IFF"
 cmds = [3004]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Erase_BtnCover"]
 args = [328]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "IFF Transponder Erase Button Cover, OPEN/CLOSE"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -1582,6 +1768,7 @@ device_name = "IFF"
 cmds = [3005]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Erase_Btn"]
 args = [329]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "IFF Transponder Erase Button - Push to erase"
 shape = "default_button"
 seat = "pilot"
@@ -1593,6 +1780,7 @@ device_name = "IFF"
 cmds = [3002]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Device_Sw"]
 args = [336]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "IFF Transponder Device Selector Switch, WORK/RESERVE"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -1604,6 +1792,7 @@ device_name = "IFF"
 cmds = [3003]
 cmd_names = ["IFF_6201_commands.CMD_IFF_1_2"]
 args = [332]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "IFF Transponder Device Mode Switch, 1/2"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -1615,6 +1804,7 @@ device_name = "IFF"
 cmds = [3008]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Power_Sw"]
 args = [383]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "IFF Transponder Power Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1626,6 +1816,7 @@ device_name = "IFF"
 cmds = [3006]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Disaster_SwCover"]
 args = [330]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "IFF Transponder Disaster Switch Cover, OPEN/CLOSE"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -1637,6 +1828,7 @@ device_name = "IFF"
 cmds = [3007]
 cmd_names = ["IFF_6201_commands.CMD_IFF_Disaster_Sw"]
 args = [331]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "IFF Transponder Disaster Switch, ON/OFF"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -1648,6 +1840,7 @@ device_name = "DISS_15"
 cmds = [3001]
 cmd_names = ["diss_commands.POWER"]
 args = [371]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "DISS-15D ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1659,6 +1852,8 @@ device_name = "DISS_15"
 cmds = [3013]
 cmd_names = ["diss_commands.CHECK_SWITCH"]
 args = [826]
+helper_args = ["5", "0.1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
 label = "DISS select mode IDK/IDK/IDK/MEM/OPER"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -1670,6 +1865,7 @@ device_name = "DISS_15"
 cmds = [3011]
 cmd_names = ["diss_commands.W_CHECK_WORK"]
 args = [797]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "DISS Mode WORK/CHECK"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1681,6 +1877,7 @@ device_name = "DISS_15"
 cmds = [3012]
 cmd_names = ["diss_commands.W_LAND_SEA"]
 args = [798]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "DISS Mode LAND/SEA"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1692,6 +1889,8 @@ device_name = "CPT_MECH"
 cmds = [3012]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PitotTotalAndAoASideslip"]
 args = [763]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Heating DUAS, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -1703,6 +1902,7 @@ device_name = "DISS_15"
 cmds = [3002]
 cmd_names = ["diss_commands.DVS"]
 args = [370]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Airspeed to DISS ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1714,6 +1914,8 @@ device_name = "CPT_MECH"
 cmds = [3030]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_TouchFanCPG"]
 args = [0]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Cockpit Fan - Touch"
 shape = "default_button"
 seat = "operator"
@@ -1725,6 +1927,7 @@ device_name = "CPT_MECH"
 cmds = [3029]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_TouchFanPLT"]
 args = [0]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Cockpit Fan - Touch"
 shape = "default_button"
 seat = "pilot"
@@ -1736,6 +1939,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3017]
 cmd_names = ["engine_commands.STARTUP_Engine_InterruptStartUp"]
 args = [318]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Engine Interrupt Start"
 shape = "default_button"
 seat = "pilot"
@@ -1747,6 +1951,8 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3009]
 cmd_names = ["engine_commands.LEVER_Left_Engine_Lock"]
 args = [6]
+helper_args = ["2"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Engine Stop"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -1758,6 +1964,8 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3010]
 cmd_names = ["engine_commands.LEVER_Right_Engine_Lock"]
 args = [7]
+helper_args = ["2"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Engine Stop"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -1769,6 +1977,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3018]
 cmd_names = ["engine_commands.STARTUP_Engine_Launch_Method"]
 args = [321]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Engine Launch Method START/CRANK"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1780,6 +1989,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3016]
 cmd_names = ["engine_commands.STARTUP_Engine_Select"]
 args = [320]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Engine Select RIGHT/LEFT"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1791,6 +2001,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3015]
 cmd_names = ["engine_commands.STARTUP_Engine_StartUp"]
 args = [314]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Engine Start"
 shape = "default_button"
 seat = "pilot"
@@ -1802,6 +2013,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3023]
 cmd_names = ["engine_commands.IA6_COLD"]
 args = [194]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Engine Termometer control COLD"
 shape = "default_button"
 seat = "pilot"
@@ -1813,6 +2025,7 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3024]
 cmd_names = ["engine_commands.IA6_HOT"]
 args = [195]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Engine Termometer control HOT"
 shape = "default_button"
 seat = "pilot"
@@ -1824,6 +2037,7 @@ device_name = "EUCALYPT_M24"
 cmds = [3003]
 cmd_names = ["eucalypt_commands.ASU"]
 args = [340]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "R-828 ASU"
 shape = "default_button"
 seat = "pilot"
@@ -1835,6 +2049,8 @@ device_name = "EUCALYPT_M24"
 cmds = [3001]
 cmd_names = ["eucalypt_commands.CHANNEL_CHANGE"]
 args = [337]
+helper_args = ["10", "0.1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9], momentary = false }]
 label = "R-828 Channel Select"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -1846,6 +2062,7 @@ device_name = "EUCALYPT_M24"
 cmds = [3004]
 cmd_names = ["eucalypt_commands.NOISE_REDUCTOR_ON_OFF2"]
 args = [341]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-828 Squelch ON/OFF"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -1857,6 +2074,8 @@ device_name = "EUCALYPT_M24"
 cmds = [3002]
 cmd_names = ["eucalypt_commands.VOLUME_CHANGE"]
 args = [339]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "R-828 Volume"
 shape = "default_axis"
 seat = "pilot"
@@ -1868,6 +2087,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3013]
 cmd_names = ["fuel_commands.ExtTank"]
 args = [411]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "External Tanks, OPEN/CLOSE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1879,6 +2099,7 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3007]
 cmd_names = ["ext_cargo_equipment_commands.CMD_AutoReleaseSw"]
 args = [199]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "External Cargo Automatic Dropping, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1890,6 +2111,7 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3008]
 cmd_names = ["ext_cargo_equipment_commands.CMD_RemoveRelease"]
 args = [198]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "External Cargo Remove Release, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1901,6 +2123,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3010]
 cmd_names = ["fire_commands.SensorControl"]
 args = [482]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Extinguisher Control Switch EXING/CNTRL"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1912,6 +2135,8 @@ device_name = "CPT_MECH"
 cmds = [3025]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_FAN_OPERATOR"]
 args = [665]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Operator Fan, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -1923,6 +2148,7 @@ device_name = "CPT_MECH"
 cmds = [3024]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_FAN_PILOT"]
 args = [420]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Pilot Fan, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1934,6 +2160,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3031]
 cmd_names = ["fuel_commands.ValveTank1"]
 args = [392]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Feed Tank 1 Valve Switch, OPEN/CLOSE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1945,6 +2172,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3034]
 cmd_names = ["fuel_commands.ValveTank2"]
 args = [394]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Feed Tank 2 Valve Switch, OPEN/CLOSE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -1956,6 +2184,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3005]
 cmd_names = ["fire_commands.ExtingiushAPU1"]
 args = [494]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish APU 1"
 shape = "default_button"
 seat = "pilot"
@@ -1967,6 +2196,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3001]
 cmd_names = ["fire_commands.ExtingiushLE1"]
 args = [502]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish Left Engine 1"
 shape = "default_button"
 seat = "pilot"
@@ -1978,6 +2208,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3003]
 cmd_names = ["fire_commands.ExtingiushRE1"]
 args = [498]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish Right Engine 1"
 shape = "default_button"
 seat = "pilot"
@@ -1989,6 +2220,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3007]
 cmd_names = ["fire_commands.ExtingiushMRED1"]
 args = [490]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish Gearbox 1"
 shape = "default_button"
 seat = "pilot"
@@ -2000,6 +2232,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3006]
 cmd_names = ["fire_commands.ExtingiushAPU2"]
 args = [496]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish APU 2"
 shape = "default_button"
 seat = "pilot"
@@ -2011,6 +2244,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3002]
 cmd_names = ["fire_commands.ExtingiushLE2"]
 args = [504]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish Left Engine 2"
 shape = "default_button"
 seat = "pilot"
@@ -2022,6 +2256,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3004]
 cmd_names = ["fire_commands.ExtingiushRE2"]
 args = [500]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish Right Engine 2"
 shape = "default_button"
 seat = "pilot"
@@ -2033,6 +2268,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3008]
 cmd_names = ["fire_commands.ExtingiushMRED2"]
 args = [492]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Extinguish Gearbox 2"
 shape = "default_button"
 seat = "pilot"
@@ -2044,6 +2280,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3009]
 cmd_names = ["fire_commands.DisableAlarm"]
 args = [488]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Turn Off Fire Signal Button"
 shape = "default_button"
 seat = "pilot"
@@ -2055,6 +2292,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3014]
 cmd_names = ["fire_commands.Power"]
 args = [487]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Fire Extinguisher Power ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2066,6 +2304,8 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3011, 3012]
 cmd_names = ["fire_commands.Pyro1", "fire_commands.Pyro2"]
 args = [486]
+helper_args = ["nil", "nil", "nil", "nil"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = true }]
 label = "Fire Extinguisher Squib Control"
 shape = "springloaded_3_pos_tumb"
 seat = "pilot"
@@ -2077,6 +2317,7 @@ device_name = "FIRE_EXTING_INTERFACE"
 cmds = [3013]
 cmd_names = ["fire_commands.SensorGroup"]
 args = [484]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3], momentary = false }]
 label = "Fire Extinguisher Sensor Cnannel OFF/1/2/3"
 shape = "triple_switch"
 seat = "pilot"
@@ -2088,6 +2329,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3019]
 cmd_names = ["fuel_commands.ValveLeftEngineCover"]
 args = [396]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Engine Fire Valve Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2099,6 +2341,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3016]
 cmd_names = ["fuel_commands.ValveLeftEngine"]
 args = [397]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Engine Fire Valve, OPEN/CLOSE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2110,6 +2353,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3025]
 cmd_names = ["fuel_commands.ValveRightEngineCover"]
 args = [399]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Engine Fire Valve Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2121,6 +2365,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3022]
 cmd_names = ["fuel_commands.ValveRightEngine"]
 args = [400]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Engine Fire Valve, OPEN/CLOSE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2132,6 +2377,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3010]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette2_YELLOW"]
 args = [349]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 2 Launch Yellow Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2143,6 +2389,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3006]
 cmd_names = ["signal_flares_commands.CMD_Cassette2_Power"]
 args = [352]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 2 Power Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2154,6 +2401,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3009]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette2_WHITE"]
 args = [348]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 2 Launch White Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2165,6 +2413,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3008]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette2_RED"]
 args = [351]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 2 Launch Red Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2176,6 +2425,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3007]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette2_GREEN"]
 args = [350]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 2 Launch Green Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2187,6 +2437,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3002]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette1_GREEN"]
 args = [345]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 1 Launch Green Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2198,6 +2449,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3001]
 cmd_names = ["signal_flares_commands.CMD_Cassette1_Power"]
 args = [343]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 1 Power Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2209,6 +2461,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3003]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette1_RED"]
 args = [344]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 1 Launch Red Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2220,6 +2473,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3004]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette1_WHITE"]
 args = [347]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 1 Launch White Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2231,6 +2485,7 @@ device_name = "SIGNAL_FLARES"
 cmds = [3005]
 cmd_names = ["signal_flares_commands.CMD_drop_Cassette1_YELLOW"]
 args = [346]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Signal Flares Cassette 1 Launch Yellow Button"
 shape = "default_2_position_flares_tumb"
 seat = "pilot"
@@ -2242,6 +2497,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3011]
 cmd_names = ["int_lights_commands.BlinkerSystem"]
 args = [364]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Blinker Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2253,6 +2509,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3005]
 cmd_names = ["ext_lights_commands.FormationLights"]
 args = [414]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Formation Lights Switch, BRIGHT/OFF/DIM"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -2264,6 +2521,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3028]
 cmd_names = ["fuel_commands.ValveDelimiter"]
 args = [402]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Fuel Delimiter Valve, OPEN/CLOSE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2275,6 +2533,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3040]
 cmd_names = ["fuel_commands.FuelMeterButtonH"]
 args = [524]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Fuel meter test low"
 shape = "default_button"
 seat = "pilot"
@@ -2286,6 +2545,8 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3037]
 cmd_names = ["fuel_commands.FuelMeter"]
 args = [191]
+helper_args = ["7", "1/6", "false", "0", "nil", "false"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "Select tank for fuel meter"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -2297,6 +2558,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3042]
 cmd_names = ["fuel_commands.FuelMeterButtonP"]
 args = [526]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Fuel meter test high"
 shape = "default_button"
 seat = "pilot"
@@ -2308,6 +2570,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3004]
 cmd_names = ["elec_commands.ACGeneratorLeft"]
 args = [101]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Generator switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2319,6 +2582,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3007]
 cmd_names = ["elec_commands.ACGeneratorRight"]
 args = [80]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Generator switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2330,6 +2594,7 @@ device_name = "G_Meter"
 cmds = [3001]
 cmd_names = ["G_Meter_commands.Command_AccelReset"]
 args = [947]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Accelerometer Reset Button - Push to reset"
 shape = "default_button"
 seat = "pilot"
@@ -2341,6 +2606,7 @@ device_name = "SPO_10"
 cmds = [3004]
 cmd_names = ["SPO_commands.Command_SPO_CHECK"]
 args = [990]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Check RWR"
 shape = "default_button"
 seat = "pilot"
@@ -2352,6 +2618,8 @@ device_name = "GREBEN"
 cmds = [3004]
 cmd_names = ["greben_commands.LATITUDE"]
 args = [448]
+helper_args = ["0", "-2/3", "true", "true", "true"]
+values = [{ kind = "unknown", reason = "default_axis's gain_ is not a literal number" }]
 label = "Greben Set Latitude"
 shape = "default_axis"
 seat = "pilot"
@@ -2363,6 +2631,7 @@ device_name = "GREBEN"
 cmds = [3007]
 cmd_names = ["greben_commands.MATCH"]
 args = [450]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Greben Match"
 shape = "default_button"
 seat = "pilot"
@@ -2374,6 +2643,7 @@ device_name = "GREBEN"
 cmds = [3009]
 cmd_names = ["greben_commands.MODE"]
 args = [449]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Greben' mode ZK/GPK/MK"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -2385,6 +2655,7 @@ device_name = "GREBEN"
 cmds = [3001]
 cmd_names = ["greben_commands.POWER"]
 args = [367]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Greben' ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2396,6 +2667,7 @@ device_name = "GREBEN"
 cmds = [3012]
 cmd_names = ["greben_commands.SETUP_OPER"]
 args = [451]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Greben' mode SETUP/OPER"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2407,6 +2679,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3001]
 cmd_names = ["elec_commands.ACGroundPower"]
 args = [87]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "AC Ground Power, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2418,6 +2691,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3031]
 cmd_names = ["elec_commands.DCGroundPower"]
 args = [73]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "DC Ground Power, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2429,6 +2703,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3058]
 cmd_names = ["elec_commands.GroundCheckCover"]
 args = [88]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "AC Ground Check Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2440,6 +2715,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3016]
 cmd_names = ["elec_commands.GroundCheck"]
 args = [89]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "AC Ground Check, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2451,6 +2727,8 @@ device_name = "MGV1SU_2"
 cmds = [3003]
 cmd_names = ["mgv1su_commands.CAGE_OP"]
 args = [701]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Cage Gyro 2"
 shape = "default_button"
 seat = "operator"
@@ -2462,6 +2740,7 @@ device_name = "PKP72M_INTERFACE"
 cmds = [3001]
 cmd_names = ["pkp72m_interface_commands.GyroverticalSwitch"]
 args = [12]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gyrovertical Switch, 1/2"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2473,6 +2752,7 @@ device_name = "MGV1SU_1"
 cmds = [3001]
 cmd_names = ["mgv1su_commands.CAGE"]
 args = [10]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Cage Gyro 1"
 shape = "default_button"
 seat = "pilot"
@@ -2484,6 +2764,7 @@ device_name = "MGV1SU_2"
 cmds = [3001]
 cmd_names = ["mgv1su_commands.CAGE"]
 args = [14]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Cage Gyro 2"
 shape = "default_button"
 seat = "pilot"
@@ -2495,6 +2776,7 @@ device_name = "CPT_MECH"
 cmds = [3047]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_ClockHeatPLT"]
 args = [386]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Clock Heating Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2506,6 +2788,7 @@ device_name = "CPT_MECH"
 cmds = [3043]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PitotTotalLeft"]
 args = [387]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Heating PPD Left, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2517,6 +2800,7 @@ device_name = "CPT_MECH"
 cmds = [3045]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PitotTotalRight"]
 args = [389]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Heating PPD Right, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2528,6 +2812,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3006]
 cmd_names = ["hydraulic_commands.DisableAuxiliaryHydroCover"]
 args = [215]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Auxiliary Disable Button Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2539,6 +2824,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3005]
 cmd_names = ["hydraulic_commands.DisableAuxiliaryHydro"]
 args = [213]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Auxiliary Disable Button"
 shape = "default_button"
 seat = "pilot"
@@ -2550,6 +2836,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3002]
 cmd_names = ["hydraulic_commands.MainHydroCover"]
 args = [216]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Main/Auxiliary Hydraulic Switch Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2561,6 +2848,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3001]
 cmd_names = ["hydraulic_commands.MainHydro"]
 args = [217]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Main/Auxiliary Hydraulic Switch, MAIN/AUXILIARY"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2573,6 +2861,7 @@ cmds = [3045, 3046, 3045, 3046]
 cmd_names = ["asp_commands.Reflector_Fix", "asp_commands.Reflector_Move", "asp_commands.Reflector_Fix", "asp_commands.Reflector_Move"]
 args = [1005, 1006, 1005, 1006]
 arg_values = [-1.0, -0.1, 1.0, 0.1]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = -0.01 }, { kind = "unknown", reason = "unhandled raw-literal class 'NULL'" }, { kind = "unknown", reason = "unhandled raw-literal class 'NULL'" }]
 label = "Sight reflector control"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -2584,6 +2873,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3061]
 cmd_names = ["elec_commands.Rotary115vConverterCover"]
 args = [97]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Inverter PO-750A Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2595,6 +2885,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3019]
 cmd_names = ["elec_commands.Rotary115vConverter"]
 args = [98]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Inverter PO-750A, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2606,6 +2897,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3064]
 cmd_names = ["elec_commands.Rotary36vConverterCover"]
 args = [99]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Inverter PT-125Ts Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2617,6 +2909,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3022]
 cmd_names = ["elec_commands.Rotary36vConverter"]
 args = [100]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Inverter PT-125Ts, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2628,6 +2921,8 @@ device_name = "JADRO_1I"
 cmds = [3004]
 cmd_names = ["jadro_commands.FREQ_1MHZ"]
 args = [437]
+helper_args = ["{-0.1, 0.1}", "{0,1}", "{434,{0.0,1.0}, 1.0,slave = {435,{0.0,1.0},1.0,master_lim = {0.9,1.0}}}"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2639,6 +2934,8 @@ device_name = "JADRO_1I"
 cmds = [3007]
 cmd_names = ["jadro_commands.FREQ_100KHZ"]
 args = [436]
+helper_args = ["{-0.1, 0.1}", "{0,1}", "{433,{0.0,1.0}}"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2650,6 +2947,8 @@ device_name = "JADRO_1I"
 cmds = [3010]
 cmd_names = ["jadro_commands.FREQ_10KHZ"]
 args = [429]
+helper_args = ["{-0.1, 0.1}", "{0,1}", "{432,{0.0,1.0}}"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2661,6 +2960,8 @@ device_name = "JADRO_1I"
 cmds = [3013]
 cmd_names = ["jadro_commands.FREQ_1KHZ"]
 args = [428]
+helper_args = ["{-0.1, 0.1}", "{0,1}", "{431,{0.0,1.0}}"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2672,6 +2973,8 @@ device_name = "JADRO_1I"
 cmds = [3016]
 cmd_names = ["jadro_commands.FREQ_100HZ"]
 args = [427]
+helper_args = ["{-0.1, 0.1}", "{0,1}", "{430,{0.0,1.0}}"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Jadro-1I Frequency"
 shape = "radio_wheel_1"
 seat = "pilot"
@@ -2683,6 +2986,7 @@ device_name = "JADRO_1I"
 cmds = [3025]
 cmd_names = ["jadro_commands.CTL"]
 args = [423]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Jadro-1I Test"
 shape = "default_button"
 seat = "pilot"
@@ -2694,6 +2998,8 @@ device_name = "JADRO_1I"
 cmds = [3001]
 cmd_names = ["jadro_commands.MODE"]
 args = [438]
+helper_args = ["3", "0.1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2], momentary = false }]
 label = "Jadro-1I Mode OFF/AM/OM"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -2705,6 +3011,7 @@ device_name = "JADRO_1I"
 cmds = [3027]
 cmd_names = ["jadro_commands.POWER"]
 args = [374]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Jadro-1I ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2716,6 +3023,8 @@ device_name = "JADRO_1I"
 cmds = [3022]
 cmd_names = ["jadro_commands.SQUELCH"]
 args = [421]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Jadro-1I Squelch"
 shape = "default_axis"
 seat = "pilot"
@@ -2727,6 +3036,8 @@ device_name = "JADRO_1I"
 cmds = [3019]
 cmd_names = ["jadro_commands.VOLUME"]
 args = [426]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Jadro-1I Volume"
 shape = "default_axis"
 seat = "pilot"
@@ -2738,6 +3049,8 @@ device_name = "KM_2"
 cmds = [3002]
 cmd_names = ["avKM_2_commands.TEST"]
 args = [645]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "KM-2 Test button"
 shape = "default_button"
 seat = "operator"
@@ -2749,6 +3062,8 @@ device_name = "KM_2"
 cmds = [3001]
 cmd_names = ["avKM_2_commands.MagneticDeclRotary"]
 args = [647]
+helper_args = ["0", "0.1", "true", "true", "true", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "KM-2 set magnetic declination "
 shape = "default_axis"
 seat = "operator"
@@ -2760,6 +3075,8 @@ device_name = "I9K113"
 cmds = [3011]
 cmd_names = ["i9K113_commands.Command_CHECK_LAMPS"]
 args = [870]
+helper_args = ["false", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Lamps Check"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -2771,6 +3088,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3009]
 cmd_names = ["int_lights_commands.TestLightsOperator"]
 args = [681]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Test Warning Lights Button"
 shape = "default_button"
 seat = "operator"
@@ -2782,6 +3101,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3008]
 cmd_names = ["int_lights_commands.TestLightsPilot"]
 args = [363]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Test Warning Lights Button"
 shape = "default_button"
 seat = "pilot"
@@ -2793,6 +3113,7 @@ device_name = "CPT_MECH"
 cmds = [3007]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_EmeregencyGear"]
 args = [827]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Emergency Gear Lever"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -2804,6 +3125,7 @@ device_name = "CPT_MECH"
 cmds = [3004]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Gear_Pilot_LightsOff_Cover"]
 args = [223]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gear Indication Lights Cover UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2815,6 +3137,7 @@ device_name = "CPT_MECH"
 cmds = [3003]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Gear_Pilot_LightsOff"]
 args = [224]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gear Indication Lights ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2826,6 +3149,8 @@ device_name = "CPT_MECH"
 cmds = [3002]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Gear_Pilot_Lock"]
 args = [228]
+helper_args = ["6"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gear Lever Lock, UP/DOWN"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -2837,6 +3162,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3004]
 cmd_names = ["hydraulic_commands.GearHydroCover"]
 args = [218]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Main/Reserve Gear Hydraulic Switch Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2848,6 +3174,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3003]
 cmd_names = ["hydraulic_commands.GearHydro"]
 args = [219]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Main/Reserve Gear Hydraulic Switch, MAIN/RESERVE"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2859,6 +3186,8 @@ device_name = "CPT_MECH"
 cmds = [3006]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Gear_Operator_Cover"]
 args = [676]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Operator Gear Switch Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -2870,6 +3199,8 @@ device_name = "CPT_MECH"
 cmds = [3005]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Gear_Operator"]
 args = [677]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Operator Gear Switch, UP/DOWN"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -2881,6 +3212,8 @@ device_name = "CPT_MECH"
 cmds = [3001]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Gear_Pilot"]
 args = [232]
+helper_args = ["4"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gear Lever, UP/DOWN"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -2892,6 +3225,7 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3003]
 cmd_names = ["AntiIceSys_commands.ANTIICE_LeftEng"]
 args = [113]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Engine AntiIce ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2903,6 +3237,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3005]
 cmd_names = ["int_lights_commands.CargoLightingWhiteBlue"]
 args = [355]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Cargo Lighting Switch, WHITE/OFF/BLUE"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -2914,6 +3249,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3001]
 cmd_names = ["int_lights_commands.OperatorCabinLightingWhiteRed"]
 args = [682]
+helper_args = ["nil", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Operator Cabin Lighting Switch, WHITE/OFF/RED"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -2925,6 +3262,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3002]
 cmd_names = ["int_lights_commands.PilotCabinLightingWhiteRed"]
 args = [356]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Pilot Cabin Lighting Switch, WHITE/OFF/RED"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -2936,6 +3274,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3004]
 cmd_names = ["int_lights_commands.CargoWhiteLightingOn_COVER"]
 args = [353]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Cargo Lighting Switch Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -2947,6 +3286,7 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3003]
 cmd_names = ["int_lights_commands.CargoWhiteLightingOn"]
 args = [354]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Cargo Lighting Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2958,6 +3298,7 @@ device_name = "MAP_DISPLAY"
 cmds = [3011]
 cmd_names = ["map_display_commands.Lights"]
 args = [192]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Map Highlight  BRIGHT/OFF/DIM"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -2969,6 +3310,8 @@ device_name = "MAP_DISPLAY"
 cmds = [3006]
 cmd_names = ["map_display_commands.HorAdj"]
 args = [983]
+helper_args = ["0", "0.05", "false", "true", "nil", "nil"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Set the horizontall position of the helicopter on the Map "
 shape = "default_axis"
 seat = "pilot"
@@ -2980,6 +3323,7 @@ device_name = "MAP_DISPLAY"
 cmds = [3008]
 cmd_names = ["map_display_commands.Power"]
 args = [984]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Map Power ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -2991,6 +3335,7 @@ device_name = "MAP_DISPLAY"
 cmds = [3001]
 cmd_names = ["map_display_commands.Scale"]
 args = [985]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Map Scale Selector"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3002,6 +3347,8 @@ device_name = "MAP_DISPLAY"
 cmds = [3004]
 cmd_names = ["map_display_commands.VertAdj"]
 args = [291]
+helper_args = ["0", "0.05", "false", "true", "nil", "nil"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Set the vertical position of the helicopter on the Map "
 shape = "default_axis"
 seat = "pilot"
@@ -3013,6 +3360,7 @@ device_name = "SPO_10"
 cmds = [3003]
 cmd_names = ["SPO_commands.Command_DAY_NIGHT"]
 args = [989]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "RWR DAY/NIGHT"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3024,6 +3372,7 @@ device_name = "MGV1SU_1"
 cmds = [3004]
 cmd_names = ["mgv1su_commands.POWER"]
 args = [369]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gyro 1 Power, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3035,6 +3384,7 @@ device_name = "MGV1SU_2"
 cmds = [3004]
 cmd_names = ["mgv1su_commands.POWER"]
 args = [368]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Gyro 2 Power, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3046,6 +3396,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3003]
 cmd_names = ["ext_lights_commands.NavLtSwitch"]
 args = [207]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Navigation Lights Switch, BRIGHT/OFF/DIM"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -3057,6 +3408,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3067]
 cmd_names = ["elec_commands.NetworkToBatteriesCover"]
 args = [70]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Network to Batteries cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -3068,6 +3420,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3052]
 cmd_names = ["elec_commands.NetworkToBatteries"]
 args = [71]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Network to Batteries, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3079,6 +3432,8 @@ device_name = "I9K113"
 cmds = [3029]
 cmd_names = ["i9K113_commands.Command_RadiationReset"]
 args = [882]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Radiation Reset"
 shape = "default_button"
 seat = "operator"
@@ -3090,6 +3445,8 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3006]
 cmd_names = ["ext_cargo_equipment_commands.CMD_OperatorEmergencyReleaseBtn_Cover"]
 args = [862]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Emergency Cargo Release Button Cover, OPEN/CLOSE"
 shape = "default_blue_cover"
 seat = "operator"
@@ -3101,6 +3458,8 @@ device_name = "EXT_CARGO_EQUIPMENT"
 cmds = [3005]
 cmd_names = ["ext_cargo_equipment_commands.CMD_OperatorEmergencyReleaseBtn"]
 args = [863]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Emergency Cargo Release Button - Push to release"
 shape = "default_button"
 seat = "operator"
@@ -3112,6 +3471,8 @@ device_name = "HELPER_AI"
 cmds = [3011]
 cmd_names = ["helperai_commands.EngageOperatorStickLever"]
 args = [865]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Engage Stick"
 shape = "default_button"
 seat = "operator"
@@ -3124,6 +3485,7 @@ cmds = [3091, 3090]
 cmd_names = ["engine_commands.OP_COLLECTIVE", "engine_commands.OP_CONTROL_CORRECTION"]
 args = [0, 0]
 arg_values = [0.0, 0.0]
+values = [{ kind = "continuous", min = -1.0, max = 1.0, gain = 0.1 }, { kind = "continuous", min = -1.0, max = 1.0, gain = 0.1 }]
 label = "Collective (LMB press, hold and move) / Throttle (RMB press, hold and move)"
 shape = "raw_table_literal"
 seat = "operator"
@@ -3135,6 +3497,8 @@ device_name = "I9K113"
 cmds = [3023]
 cmd_names = ["i9K113_commands.Command_SES"]
 args = [873]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Laser Filter"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3146,6 +3510,8 @@ device_name = "I9K113"
 cmds = [3022]
 cmd_names = ["i9K113_commands.Command_OS"]
 args = [872]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Orange Filter"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3157,6 +3523,8 @@ device_name = "I9K113"
 cmds = [3021]
 cmd_names = ["i9K113_commands.Command_ZOOM"]
 args = [871]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Zoom In-Out"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3168,6 +3536,8 @@ device_name = "HELPER_AI"
 cmds = [3013]
 cmd_names = ["helperai_commands.DisengageOperatorStickButtonCover"]
 args = [857]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Disengage Stick Cover"
 shape = "default_blue_cover"
 seat = "operator"
@@ -3179,6 +3549,8 @@ device_name = "HELPER_AI"
 cmds = [3012]
 cmd_names = ["helperai_commands.DisengageOperatorStickButton"]
 args = [859]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Disengage Stick"
 shape = "default_button"
 seat = "operator"
@@ -3191,6 +3563,7 @@ cmds = [3025, 3025]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_TRIGGER_O", "SPU_8_Mi24_commands.CMD_SPU8_TRIGGER_O"]
 args = [856, 856]
 arg_values = [1.0, 0.5]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "discrete", values = [0.0, 0.5], momentary = true }]
 label = "Trigger Button, RADIO(LMB)/ICS(RMB)"
 shape = "raw_table_literal"
 seat = "operator"
@@ -3202,6 +3575,8 @@ device_name = "WEAP_SYS"
 cmds = [3022]
 cmd_names = ["weapon_commands.Operator_RUV_FIRE_Cvr"]
 args = [853]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Fire Weapons Cover"
 shape = "default_blue_cover"
 seat = "operator"
@@ -3213,6 +3588,8 @@ device_name = "WEAP_SYS"
 cmds = [3021]
 cmd_names = ["weapon_commands.Operator_RUV_FIRE_OPERATOR"]
 args = [187]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Fire Weapons"
 shape = "default_button"
 seat = "operator"
@@ -3224,6 +3601,7 @@ device_name = "AUTOPILOT"
 cmds = [3028]
 cmd_names = ["autopilot_commands.TrimmerMULT"]
 args = [855]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Trimmer Button"
 shape = "stick_button"
 seat = "pilot"
@@ -3235,6 +3613,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3007]
 cmd_names = ["hydraulic_commands.Hydro_Damper_P"]
 args = [290]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Pedal Damper, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3246,6 +3625,7 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3008]
 cmd_names = ["hydraulic_commands.Hydro_Damper_PCover"]
 args = [289]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Pedal Damper Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -3257,6 +3637,8 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3010]
 cmd_names = ["hydraulic_commands.Hydro_Damper_OCover"]
 args = [666]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Pedal Damper Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -3268,6 +3650,8 @@ device_name = "HYDRO_SYS_INTERFACE"
 cmds = [3009]
 cmd_names = ["hydraulic_commands.Hydro_Damper_O"]
 args = [667]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Pedal Damper, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3279,6 +3663,8 @@ device_name = "I9K113"
 cmds = [3007]
 cmd_names = ["i9K113_commands.Command_KONTR_T1_B9_KONTR_T2"]
 args = [905]
+helper_args = ["false", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "CHECK2-NEUTR-CHECK1"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -3290,6 +3676,8 @@ device_name = "I9K113"
 cmds = [3003]
 cmd_names = ["i9K113_commands.Command_DIAFR_OTKR"]
 args = [887]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "DIAFR Open"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3301,6 +3689,8 @@ device_name = "I9K113"
 cmds = [3064]
 cmd_names = ["i9K113_commands.Command_Heat_O"]
 args = [890]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Heating"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3312,6 +3702,8 @@ device_name = "I9K113"
 cmds = [3006]
 cmd_names = ["i9K113_commands.Command_GENER_EMIT"]
 args = [910]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "GENERATOR-IMIT"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3323,6 +3715,8 @@ device_name = "I9K113"
 cmds = [3010]
 cmd_names = ["i9K113_commands.Command_START_PM"]
 args = [911]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Start PM"
 shape = "default_button"
 seat = "operator"
@@ -3334,6 +3728,8 @@ device_name = "I9K113"
 cmds = [3062]
 cmd_names = ["i9K113_commands.Command_9k113_Backlight"]
 args = [884]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Backlight"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3345,6 +3741,8 @@ device_name = "I9K113"
 cmds = [3004]
 cmd_names = ["i9K113_commands.Command_OTKL_BLOCK_ARU"]
 args = [912]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "LOCK ARU"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3356,6 +3754,8 @@ device_name = "I9K113"
 cmds = [3002]
 cmd_names = ["i9K113_commands.Command_NABL"]
 args = [886]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "OBSERVE"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3367,6 +3767,8 @@ device_name = "I9K113"
 cmds = [3001]
 cmd_names = ["i9K113_commands.Command_POWER_PN"]
 args = [885]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Power Switch"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3378,6 +3780,8 @@ device_name = "I9K113"
 cmds = [3005]
 cmd_names = ["i9K113_commands.Command_SSP_VKL"]
 args = [913]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "SSP On"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3389,6 +3793,8 @@ device_name = "I9K113"
 cmds = [3009]
 cmd_names = ["i9K113_commands.Command_VHOD_BVK_KV"]
 args = [899]
+helper_args = ["5", "0.1", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
 label = "BVK Set"
 shape = "multiposition_switch"
 seat = "operator"
@@ -3400,6 +3806,8 @@ device_name = "PKP72M_O"
 cmds = [3001]
 cmd_names = ["pkp72m_commands.PitchTrimKnob"]
 args = [782]
+helper_args = ["0", "0.02", "nil", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.02 }]
 label = "Pitch Trim Knob"
 shape = "default_axis_limited"
 seat = "operator"
@@ -3411,6 +3819,8 @@ device_name = "PKP72M_P"
 cmds = [3001]
 cmd_names = ["pkp72m_commands.PitchTrimKnob"]
 args = [941]
+helper_args = ["0", "0.02"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.02 }]
 label = "Pitch Trim Knob"
 shape = "default_axis_limited"
 seat = "pilot"
@@ -3422,6 +3832,8 @@ device_name = "PKP72M_INTERFACE"
 cmds = [3002]
 cmd_names = ["pkp72m_interface_commands.PKP72MoperatorSwitch"]
 args = [759]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "ADI Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -3433,6 +3845,8 @@ device_name = "PKP72M_O"
 cmds = [3002]
 cmd_names = ["pkp72m_commands.TestControl"]
 args = [787]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Test ADI Button"
 shape = "default_button"
 seat = "operator"
@@ -3444,6 +3858,7 @@ device_name = "PKP72M_P"
 cmds = [3002]
 cmd_names = ["pkp72m_commands.TestControl"]
 args = [946]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Test ADI Button"
 shape = "default_button"
 seat = "pilot"
@@ -3455,6 +3870,7 @@ device_name = "DISS_15"
 cmds = [3005]
 cmd_names = ["diss_commands.COORD_DEC_MAP_ANGLE"]
 args = [815]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS decrease map angle"
 shape = "default_square_button"
 seat = "pilot"
@@ -3466,6 +3882,7 @@ device_name = "DISS_15"
 cmds = [3007]
 cmd_names = ["diss_commands.COORD_DEC_PATH_KM"]
 args = [809]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS decrease path"
 shape = "default_square_button"
 seat = "pilot"
@@ -3477,6 +3894,7 @@ device_name = "DISS_15"
 cmds = [3003]
 cmd_names = ["diss_commands.COORD_OFF"]
 args = [818]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS coordinates OFF"
 shape = "default_square_button"
 seat = "pilot"
@@ -3488,6 +3906,7 @@ device_name = "DISS_15"
 cmds = [3004]
 cmd_names = ["diss_commands.COORD_ON"]
 args = [819]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS coordinates ON"
 shape = "default_square_button"
 seat = "pilot"
@@ -3499,6 +3918,7 @@ device_name = "DISS_15"
 cmds = [3006]
 cmd_names = ["diss_commands.COORD_INC_MAP_ANGLE"]
 args = [816]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS increase map angle"
 shape = "default_square_button"
 seat = "pilot"
@@ -3510,6 +3930,7 @@ device_name = "DISS_15"
 cmds = [3009]
 cmd_names = ["diss_commands.COORD_DEC_DEVIATION_KM"]
 args = [803]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS decrease deviation"
 shape = "default_square_button"
 seat = "pilot"
@@ -3521,6 +3942,7 @@ device_name = "DISS_15"
 cmds = [3010]
 cmd_names = ["diss_commands.COORD_INC_DEVIATION_KM"]
 args = [804]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS increase deviation"
 shape = "default_square_button"
 seat = "pilot"
@@ -3532,6 +3954,7 @@ device_name = "DISS_15"
 cmds = [3008]
 cmd_names = ["diss_commands.COORD_INC_PATH_KM"]
 args = [810]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "DISS increase path"
 shape = "default_square_button"
 seat = "pilot"
@@ -3543,6 +3966,7 @@ device_name = "CPT_MECH"
 cmds = [3031]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_Elements_Hide"]
 args = [974]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Hide Stick toggle"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3554,6 +3978,8 @@ device_name = "R60_INTERFACE"
 cmds = [3003]
 cmd_names = ["R60_commands.StationSelector"]
 args = [1032]
+helper_args = ["5", "0.1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
 label = "Active missile selector"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3565,6 +3991,7 @@ device_name = "R60_INTERFACE"
 cmds = [3002]
 cmd_names = ["R60_commands.NC_VC"]
 args = [1034]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Fuse selector"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3576,6 +4003,7 @@ device_name = "R60_INTERFACE"
 cmds = [3001]
 cmd_names = ["R60_commands.Power_OnOff"]
 args = [1033]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R60 Power"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3587,6 +4015,7 @@ device_name = "EUCALYPT_M24"
 cmds = [3005]
 cmd_names = ["eucalypt_commands.POWER_ON_OFF2"]
 args = [373]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-828 ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3598,6 +4027,8 @@ device_name = "R_852"
 cmds = [3001]
 cmd_names = ["r852_commands.CHANNEL"]
 args = [518]
+helper_args = ["4", "0.1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004], momentary = false }]
 label = "R-852 Channel Select"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3609,6 +4040,8 @@ device_name = "R_852"
 cmds = [3004]
 cmd_names = ["r852_commands.VOLUME"]
 args = [517]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "R-852 Volume"
 shape = "default_axis"
 seat = "pilot"
@@ -3620,6 +4053,7 @@ device_name = "R_863"
 cmds = [3015]
 cmd_names = ["r863_commands.EMERG_RCV"]
 args = [507]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-863 Emergency Receiver ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3631,6 +4065,8 @@ device_name = "R_863"
 cmds = [3007]
 cmd_names = ["r863_commands.CHANNEL_SEL"]
 args = [513]
+helper_args = ["20", "1/20"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "R-863 Channel Select"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3642,6 +4078,7 @@ device_name = "R_863"
 cmds = [3004]
 cmd_names = ["r863_commands.AM_FM"]
 args = [506]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-863 FM/AM"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3653,6 +4090,7 @@ device_name = "R_863"
 cmds = [3001]
 cmd_names = ["r863_commands.POWER"]
 args = [375]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-863 ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3664,6 +4102,7 @@ device_name = "R_863"
 cmds = [3009]
 cmd_names = ["r863_commands.SQUELCH"]
 args = [510]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-863 Squelch ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3675,6 +4114,7 @@ device_name = "R_863"
 cmds = [3018]
 cmd_names = ["r863_commands.ARC"]
 args = [509]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "R-863 ARC-UD ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3686,6 +4126,8 @@ device_name = "R_863"
 cmds = [3012]
 cmd_names = ["r863_commands.VOLUME"]
 args = [511]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "R-863 Volume"
 shape = "default_axis"
 seat = "pilot"
@@ -3697,6 +4139,7 @@ device_name = "RADAR_ALTIMETER"
 cmds = [3003]
 cmd_names = ["ralt_commands.POWER"]
 args = [372]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "RV-5 ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3709,6 +4152,7 @@ cmds = [3002, 3001]
 cmd_names = ["ralt_commands.TEST", "ralt_commands.ROTARY"]
 args = [31, 30]
 arg_values = [1.0, 0.05]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Radar altimeter adjust and test"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -3720,6 +4164,8 @@ device_name = "Recorder_MC61"
 cmds = [3003]
 cmd_names = ["RecorderMC61_commands.CMD_LightRst"]
 args = [381]
+helper_args = ["0.0", "0.1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Recorder MC 61 Brightness Knob"
 shape = "default_axis_limited"
 seat = "pilot"
@@ -3731,6 +4177,7 @@ device_name = "Recorder_MC61"
 cmds = [3002]
 cmd_names = ["RecorderMC61_commands.CMD_Auto_Work"]
 args = [1007]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Recorder MC 61 AUTO/WORK"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3742,6 +4189,7 @@ device_name = "Recorder_MC61"
 cmds = [3001]
 cmd_names = ["RecorderMC61_commands.CMD_Power"]
 args = [378]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Recorder MC 61 Power Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3753,6 +4201,7 @@ device_name = "Recorder_MC61"
 cmds = [3004]
 cmd_names = ["RecorderMC61_commands.CMD_Laryngophone"]
 args = [1012]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Laryngophone Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3764,6 +4213,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3040]
 cmd_names = ["elec_commands.RectifierLeft"]
 args = [62]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Left Rectifier switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3775,6 +4225,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3043]
 cmd_names = ["elec_commands.RectifierRight"]
 args = [65]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Rectifier switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3786,6 +4237,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3017]
 cmd_names = ["int_lights_commands.RedLightsOperatorPanel_1"]
 args = [1013]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 1 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "operator"
@@ -3797,6 +4250,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3012]
 cmd_names = ["int_lights_commands.RedLightsPilotInstrumentPanelRightPanel_1"]
 args = [148]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 1 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3808,6 +4263,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3018]
 cmd_names = ["int_lights_commands.RedLightsOperatorPanel_2"]
 args = [1014]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 2 Group Of Red Lights Left And Operator Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "operator"
@@ -3819,6 +4276,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3013]
 cmd_names = ["int_lights_commands.RedLightsPilotInstrumentPanelRightPanel_2"]
 args = [147]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 2 Group Of Red Lights Right And Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3830,6 +4289,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3020]
 cmd_names = ["int_lights_commands.RedLightsPilotBuiltInRedLights"]
 args = [149]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Builtin Red Lights Transformer, OFF/0.6V/1.2V/1.8V/2.4V/3V/3.6V/4.2V/4.8V/5.4V/6V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3841,6 +4302,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3015]
 cmd_names = ["int_lights_commands.RedLightsPilotLeftPanel_1"]
 args = [820]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 1 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3852,6 +4315,8 @@ device_name = "INT_LIGHTS_SYSTEM"
 cmds = [3016]
 cmd_names = ["int_lights_commands.RedLightsPilotLeftPanel_2"]
 args = [503]
+helper_args = ["11", "0.1", "false", "0.0", "anim_speed_default", "false"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0], momentary = false }]
 label = "Transformer 2 Group Of Red Lights Left Pilot Panel, OFF/8V/9V/10V/11V/12V/13V/14V/16V/18V/20V"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -3863,6 +4328,7 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3004]
 cmd_names = ["AntiIceSys_commands.ANTIICE_RightEng"]
 args = [112]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Right Engine AntiIce ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3874,6 +4340,8 @@ device_name = "GREBEN"
 cmds = [3015]
 cmd_names = ["greben_commands.ZK"]
 args = [858]
+helper_args = ["0", "0.5", "true", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.5 }]
 label = "Course setter"
 shape = "default_axis"
 seat = "pilot"
@@ -3885,6 +4353,7 @@ device_name = "RMI2_P"
 cmds = [3002]
 cmd_names = ["rmi2_commands.MODE_RIGHTSW"]
 args = [26]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Mode Switch, ZK/ARKU2"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3896,6 +4365,8 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3011]
 cmd_names = ["engine_commands.LEVER_Rotor_Lock"]
 args = [745]
+helper_args = ["2"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Rotor Brake"
 shape = "default_animated_lever"
 seat = "pilot"
@@ -3907,6 +4378,7 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3001]
 cmd_names = ["AntiIceSys_commands.ANTIICE_ManAuto"]
 args = [109]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "AntiIce AUTO/MANUAL"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3918,6 +4390,7 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3002]
 cmd_names = ["AntiIceSys_commands.ANTIICE_Off"]
 args = [110]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "AntiIce OFF"
 shape = "default_button"
 seat = "pilot"
@@ -3929,6 +4402,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3006]
 cmd_names = ["ext_lights_commands.TipLights"]
 args = [415]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Tip Lights Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -3940,6 +4414,8 @@ device_name = "WEAP_SYS"
 cmds = [3092]
 cmd_names = ["weapon_commands.Pilot_Counter1"]
 args = [719]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Counter Adjustment 1"
 shape = "default_axis"
 seat = "pilot"
@@ -3951,6 +4427,8 @@ device_name = "WEAP_SYS"
 cmds = [3093]
 cmd_names = ["weapon_commands.Pilot_Counter2"]
 args = [723]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Counter Adjustment 2"
 shape = "default_axis"
 seat = "pilot"
@@ -3962,6 +4440,8 @@ device_name = "WEAP_SYS"
 cmds = [3094]
 cmd_names = ["weapon_commands.Pilot_Counter3"]
 args = [727]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Counter Adjustment 3"
 shape = "default_axis"
 seat = "pilot"
@@ -3973,6 +4453,8 @@ device_name = "WEAP_SYS"
 cmds = [3095]
 cmd_names = ["weapon_commands.Pilot_Counter4"]
 args = [731]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Counter Adjustment 4"
 shape = "default_axis"
 seat = "pilot"
@@ -3984,6 +4466,8 @@ device_name = "WEAP_SYS"
 cmds = [3096]
 cmd_names = ["weapon_commands.Pilot_Counter5"]
 args = [735]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Counter Adjustment 5"
 shape = "default_axis"
 seat = "pilot"
@@ -3995,6 +4479,8 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3006]
 cmd_names = ["engine_commands.CONTROL_LEFT_THROTTLE_CLICK"]
 args = [5]
+helper_args = ["0", "0.05", "true", "true", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Left Engine Throttle"
 shape = "default_axis"
 seat = "pilot"
@@ -4006,6 +4492,8 @@ device_name = "ENGINE_INTERFACE"
 cmds = [3008]
 cmd_names = ["engine_commands.CONTROL_RIGHT_THROTTLE_CLICK"]
 args = [4]
+helper_args = ["0", "0.05", "true", "true", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Right Engine Throttle"
 shape = "default_axis"
 seat = "pilot"
@@ -4017,6 +4505,7 @@ device_name = "SARPP12I1"
 cmds = [3001]
 cmd_names = ["SARPP_commands.CMD_Mode"]
 args = [357]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "SARPP-12 Mode Switch, MANUAL/AUTO"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -4028,6 +4517,8 @@ device_name = "AUTOPILOT"
 cmds = [3030]
 cmd_names = ["autopilot_commands.RouteAngle"]
 args = [262]
+helper_args = ["0", "1.0 / 6.0", "false", "true", "true"]
+values = [{ kind = "unknown", reason = "default_axis's gain_ is not a literal number" }]
 label = "Autopilot Route Azimuth"
 shape = "default_axis"
 seat = "pilot"
@@ -4039,6 +4530,7 @@ device_name = "AUTOPILOT"
 cmds = [3015]
 cmd_names = ["autopilot_commands.ButtonBoff"]
 args = [254]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot B Channel OFF"
 shape = "default_button"
 seat = "pilot"
@@ -4050,6 +4542,7 @@ device_name = "AUTOPILOT"
 cmds = [3013]
 cmd_names = ["autopilot_commands.ButtonBon"]
 args = [255]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot B Channel ON"
 shape = "default_button"
 seat = "pilot"
@@ -4061,6 +4554,8 @@ device_name = "AUTOPILOT"
 cmds = [3019, 3017]
 cmd_names = ["autopilot_commands.ControlDown", "autopilot_commands.ControlUp"]
 args = [253]
+helper_args = ["nil", "nil", "nil", "nil"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = true }]
 label = "Autopilot Altitude Control"
 shape = "springloaded_3_pos_tumb"
 seat = "pilot"
@@ -4072,6 +4567,7 @@ device_name = "AUTOPILOT"
 cmds = [3070]
 cmd_names = ["autopilot_commands.Lighting"]
 args = [267]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Buttons Lighting BRIGHT/DIM"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4083,6 +4579,8 @@ device_name = "AUTOPILOT"
 cmds = [3023]
 cmd_names = ["autopilot_commands.DeltaH"]
 args = [234]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Autopilot H Channel Delta Correction"
 shape = "default_axis"
 seat = "pilot"
@@ -4094,6 +4592,7 @@ device_name = "AUTOPILOT"
 cmds = [3007]
 cmd_names = ["autopilot_commands.ButtonHoff"]
 args = [236]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot H Channel OFF"
 shape = "default_square_button"
 seat = "pilot"
@@ -4105,6 +4604,7 @@ device_name = "AUTOPILOT"
 cmds = [3005]
 cmd_names = ["autopilot_commands.ButtonHon"]
 args = [237]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot H Channel ON"
 shape = "default_square_button"
 seat = "pilot"
@@ -4116,6 +4616,7 @@ device_name = "AUTOPILOT"
 cmds = [3034]
 cmd_names = ["autopilot_commands.HeightOff"]
 args = [257]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Altitude Mode OFF"
 shape = "default_square_button"
 seat = "pilot"
@@ -4127,6 +4628,7 @@ device_name = "AUTOPILOT"
 cmds = [3032]
 cmd_names = ["autopilot_commands.HeightOn"]
 args = [258]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Altitude Mode ON"
 shape = "default_square_button"
 seat = "pilot"
@@ -4138,6 +4640,7 @@ device_name = "AUTOPILOT"
 cmds = [3036]
 cmd_names = ["autopilot_commands.HoverOn"]
 args = [259]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Hover Mode ON"
 shape = "default_square_button"
 seat = "pilot"
@@ -4149,6 +4652,7 @@ device_name = "AUTOPILOT"
 cmds = [3040]
 cmd_names = ["autopilot_commands.RouteHoverOff"]
 args = [260]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Route and Hover Modes OFF"
 shape = "default_square_button"
 seat = "pilot"
@@ -4160,6 +4664,8 @@ device_name = "AUTOPILOT"
 cmds = [3021]
 cmd_names = ["autopilot_commands.DeltaK"]
 args = [240]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Autopilot K Channel Delta Correction"
 shape = "default_axis"
 seat = "pilot"
@@ -4171,6 +4677,7 @@ device_name = "AUTOPILOT"
 cmds = [3003]
 cmd_names = ["autopilot_commands.ButtonKoff"]
 args = [242]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot K Channel OFF"
 shape = "default_button"
 seat = "pilot"
@@ -4182,6 +4689,7 @@ device_name = "AUTOPILOT"
 cmds = [3001]
 cmd_names = ["autopilot_commands.ButtonKon"]
 args = [243]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot K Channel ON"
 shape = "default_button"
 seat = "pilot"
@@ -4193,6 +4701,7 @@ device_name = "AUTOPILOT"
 cmds = [3038]
 cmd_names = ["autopilot_commands.RouteOn"]
 args = [261]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Route Mode ON"
 shape = "default_square_button"
 seat = "pilot"
@@ -4204,6 +4713,7 @@ device_name = "AUTOPILOT"
 cmds = [3044]
 cmd_names = ["autopilot_commands.SpeedOff"]
 args = [269]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Speed Stabilization OFF"
 shape = "default_button"
 seat = "pilot"
@@ -4215,6 +4725,7 @@ device_name = "AUTOPILOT"
 cmds = [3042]
 cmd_names = ["autopilot_commands.SpeedOn"]
 args = [268]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Speed Stabilization ON"
 shape = "default_button"
 seat = "pilot"
@@ -4226,6 +4737,8 @@ device_name = "AUTOPILOT"
 cmds = [3025]
 cmd_names = ["autopilot_commands.DeltaT"]
 args = [246]
+helper_args = ["0", "0.1", "false", "true", "true"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.1 }]
 label = "Autopilot T Channel Delta Correction"
 shape = "default_axis"
 seat = "pilot"
@@ -4237,6 +4750,7 @@ device_name = "AUTOPILOT"
 cmds = [3011]
 cmd_names = ["autopilot_commands.ButtonToff"]
 args = [248]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot T Channel OFF"
 shape = "default_square_button"
 seat = "pilot"
@@ -4248,6 +4762,7 @@ device_name = "AUTOPILOT"
 cmds = [3009]
 cmd_names = ["autopilot_commands.ButtonTon"]
 args = [249]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot T Channel ON"
 shape = "default_square_button"
 seat = "pilot"
@@ -4259,6 +4774,8 @@ device_name = "WEAP_SYS"
 cmds = [3035]
 cmd_names = ["weapon_commands.Operator_CHECK_LAMPS_9C475"]
 args = [956]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "SCHO Lamps Check"
 shape = "default_button"
 seat = "operator"
@@ -4270,6 +4787,8 @@ device_name = "WEAP_SYS"
 cmds = [3038]
 cmd_names = ["weapon_commands.Operator_SWITCHER_LAUNCH_STATION"]
 args = [963]
+helper_args = ["9", "0.1", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8], momentary = false }]
 label = "Select Station"
 shape = "multiposition_switch"
 seat = "operator"
@@ -4281,6 +4800,8 @@ device_name = "WEAP_SYS"
 cmds = [3030]
 cmd_names = ["weapon_commands.Operator_POWER_SHO_SWITCHER"]
 args = [955]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "SCHO Power"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4292,6 +4813,8 @@ device_name = "I9K113"
 cmds = [3015]
 cmd_names = ["i9K113_commands.Command_CHECKING"]
 args = [931]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Checking"
 shape = "default_button"
 seat = "operator"
@@ -4303,6 +4826,8 @@ device_name = "I9K113"
 cmds = [3014]
 cmd_names = ["i9K113_commands.Command_0_04"]
 args = [933]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Switcher 0 - 0.4"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4314,6 +4839,8 @@ device_name = "I9K113"
 cmds = [3013]
 cmd_names = ["i9K113_commands.Command_COD1_COD2"]
 args = [935]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Switcher CODE1-CODE2"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4325,6 +4852,8 @@ device_name = "I9K113"
 cmds = [3016]
 cmd_names = ["i9K113_commands.Command_HIGH_K"]
 args = [875]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "High K"
 shape = "default_button"
 seat = "operator"
@@ -4336,6 +4865,8 @@ device_name = "I9K113"
 cmds = [3012]
 cmd_names = ["i9K113_commands.Command_SWITCHER_IN_OUT"]
 args = [934]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Switcher IN-OUT"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4347,6 +4878,8 @@ device_name = "I9K113"
 cmds = [3017]
 cmd_names = ["i9K113_commands.Command_TABLO"]
 args = [932]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Display Lamps Check"
 shape = "default_button"
 seat = "operator"
@@ -4358,6 +4891,8 @@ device_name = "ASP_17V"
 cmds = [3008]
 cmd_names = ["asp_commands.Base_Range"]
 args = [557]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Sight Base and Range Adjustment"
 shape = "default_axis"
 seat = "pilot"
@@ -4369,6 +4904,7 @@ device_name = "ASP_17V"
 cmds = [3009]
 cmd_names = ["asp_commands.Control"]
 args = [570]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Sight Check"
 shape = "default_button"
 seat = "pilot"
@@ -4380,6 +4916,7 @@ device_name = "ASP_17V"
 cmds = [3013]
 cmd_names = ["asp_commands.Backup_Light_PM"]
 args = [568]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Crosshair Lamp MAIN/BACKUP"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -4391,6 +4928,8 @@ device_name = "ASP_17V"
 cmds = [3011]
 cmd_names = ["asp_commands.Brightness_PM"]
 args = [564]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Sight Crosshair Brightness Adjustment"
 shape = "default_axis"
 seat = "pilot"
@@ -4402,6 +4941,7 @@ device_name = "ASP_17V"
 cmds = [3012]
 cmd_names = ["asp_commands.Backup_Light_NS"]
 args = [569]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Grid Lamp MAIN/BACKUP"
 shape = "default_2_position_small_tumb"
 seat = "pilot"
@@ -4413,6 +4953,8 @@ device_name = "ASP_17V"
 cmds = [3010]
 cmd_names = ["asp_commands.Brightness_NS"]
 args = [567]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Sight Grid Brightness Adjustment"
 shape = "default_axis"
 seat = "pilot"
@@ -4424,6 +4966,8 @@ device_name = "ASP_17V"
 cmds = [3006]
 cmd_names = ["asp_commands.Azimuth_Delta"]
 args = [566]
+helper_args = ["0", "0.0125", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.0125 }]
 label = "Sight Crosshair Horizontal Adjustment"
 shape = "default_axis"
 seat = "pilot"
@@ -4435,6 +4979,7 @@ device_name = "ASP_17V"
 cmds = [3001]
 cmd_names = ["asp_commands.Manual_Auto"]
 args = [553]
+values = [{ kind = "discrete", values = [0.0, 0.5], momentary = false }]
 label = "Sight mode MANUAL/AUTO"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4446,6 +4991,8 @@ device_name = "PKV"
 cmds = [3004]
 cmd_names = ["pki_commands.Brightness"]
 args = [136]
+helper_args = ["0", "0.05", "false", "false", "false", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "PKI Brightness Adjustment"
 shape = "default_axis"
 seat = "operator"
@@ -4457,6 +5004,7 @@ device_name = "ASP_17V"
 cmds = [3002]
 cmd_names = ["asp_commands.Sync_Async"]
 args = [554]
+values = [{ kind = "discrete", values = [0.0, 0.5], momentary = false }]
 label = "Sight mode SYNC/ASYNC"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4468,6 +5016,8 @@ device_name = "ASP_17V"
 cmds = [3005]
 cmd_names = ["asp_commands.Elevation_Delta"]
 args = [556]
+helper_args = ["0", "0.0125", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.0125 }]
 label = "Sight Crosshair Vertical Adjustment"
 shape = "default_axis"
 seat = "pilot"
@@ -4479,6 +5029,7 @@ device_name = "SPO_10"
 cmds = [3001]
 cmd_names = ["SPO_commands.Command_SPO_POWER"]
 args = [366]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "RWR Power"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4490,6 +5041,7 @@ device_name = "SPO_10"
 cmds = [3002]
 cmd_names = ["SPO_commands.Command_SPO_SIGNAL"]
 args = [365]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "RWR Signal"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4501,6 +5053,7 @@ device_name = "VMS"
 cmds = [3002]
 cmd_names = ["RI65_commands.CMD_RI_Mi24_Check"]
 args = [360]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "RI-65 Check Button"
 shape = "default_button"
 seat = "pilot"
@@ -4512,6 +5065,7 @@ device_name = "VMS"
 cmds = [3001]
 cmd_names = ["RI65_commands.CMD_RI_Mi24_Off"]
 args = [359]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "RI-65 OFF Button"
 shape = "default_button"
 seat = "pilot"
@@ -4523,6 +5077,7 @@ device_name = "VMS"
 cmds = [3003]
 cmd_names = ["RI65_commands.CMD_RI_Mi24_Repeat"]
 args = [361]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "RI-65 Repeat Button"
 shape = "default_button"
 seat = "pilot"
@@ -4534,6 +5089,7 @@ device_name = "SPU_8"
 cmds = [3018]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_NETWORK_2"]
 args = [376]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Switch SPU-8 NET-2 ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4545,6 +5101,7 @@ device_name = "SPU_8"
 cmds = [3017]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_NETWORK_1"]
 args = [377]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Switch SPU-8 NET-1 ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4556,6 +5113,7 @@ device_name = "SPU_8"
 cmds = [3008]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_CIRC_FLOW"]
 args = [454]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Circular Call Button (N/F)"
 shape = "default_button"
 seat = "pilot"
@@ -4567,6 +5125,7 @@ device_name = "SPU_8"
 cmds = [3004]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_ICS_RADIO"]
 args = [456]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Radio/ICS Switch"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4578,6 +5137,8 @@ device_name = "SPU_8"
 cmds = [3003]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_MODE"]
 args = [455]
+helper_args = ["6", "1/5"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -4589,6 +5150,7 @@ device_name = "SPU_8"
 cmds = [3007]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_NETWORK"]
 args = [452]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Network 1/2 Switch (N/F)"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4600,6 +5162,8 @@ device_name = "SPU_8"
 cmds = [3014]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_CIRC_FLOW"]
 args = [658]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Circular Call Button (N/F)"
 shape = "default_button"
 seat = "operator"
@@ -4611,6 +5175,8 @@ device_name = "SPU_8"
 cmds = [3012]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_ICS_RADIO"]
 args = [660]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Radio/ICS Switch"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4622,6 +5188,8 @@ device_name = "SPU_8"
 cmds = [3011]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_MODE"]
 args = [659]
+helper_args = ["6", "1/5", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "Radio Source Selector Switch, R-863/NF/R-828(Eucalypt)/JADRO-1A/ARC-15/ARC-U2"
 shape = "multiposition_switch"
 seat = "operator"
@@ -4633,6 +5201,8 @@ device_name = "SPU_8"
 cmds = [3013]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_NETWORK"]
 args = [656]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Network 1/2 Switch (N/F)"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4644,6 +5214,8 @@ device_name = "SPU_8"
 cmds = [3015]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_ICS"]
 args = [664]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "SPU-8 Intercom Power ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4655,6 +5227,8 @@ device_name = "SPU_8"
 cmds = [3010]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_RADIO_VOLUME"]
 args = [657]
+helper_args = ["0.0", "0.05", "nil", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "SPU-8 Radio Volume Knob"
 shape = "default_axis_limited"
 seat = "operator"
@@ -4666,6 +5240,8 @@ device_name = "SPU_8"
 cmds = [3009]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_O_MAIN_VOLUME"]
 args = [661]
+helper_args = ["0.0", "0.05", "nil", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "SPU-8 Volume Knob"
 shape = "default_axis_limited"
 seat = "operator"
@@ -4677,6 +5253,8 @@ device_name = "SPU_8"
 cmds = [3002]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_RADIO_VOLUME"]
 args = [453]
+helper_args = ["0.0", "0.05"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "SPU-8 Radio Volume Knob"
 shape = "default_axis_limited"
 seat = "pilot"
@@ -4688,6 +5266,8 @@ device_name = "SPU_8"
 cmds = [3001]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_P_MAIN_VOLUME"]
 args = [457]
+helper_args = ["0.0", "0.05"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "SPU-8 Volume Knob"
 shape = "default_axis_limited"
 seat = "pilot"
@@ -4699,6 +5279,8 @@ device_name = "SPUU_52"
 cmds = [3007, 3006]
 cmd_names = ["spuu_commands.switchDown", "spuu_commands.switchUp"]
 args = [277]
+helper_args = ["nil", "nil", "nil", "nil"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = true }]
 label = "SPUU Control Switch P/NONE/T"
 shape = "springloaded_3_pos_tumb"
 seat = "pilot"
@@ -4710,6 +5292,8 @@ device_name = "SPUU_52"
 cmds = [3003]
 cmd_names = ["spuu_commands.control"]
 args = [276]
+helper_args = ["1", "0.2 * 5 / 6", "true", "false", "false"]
+values = [{ kind = "unknown", reason = "default_axis's gain_ is not a literal number" }]
 label = "SPUU Adjustment Knob"
 shape = "default_axis"
 seat = "pilot"
@@ -4721,6 +5305,7 @@ device_name = "SPUU_52"
 cmds = [3001]
 cmd_names = ["spuu_commands.button_off"]
 args = [275]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "SPUU OFF (that's a button but acts like a switch)"
 shape = "default_position_tumb"
 seat = "pilot"
@@ -4732,6 +5317,7 @@ device_name = "SPUU_52"
 cmds = [3010]
 cmd_names = ["spuu_commands.On_Off"]
 args = [270]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "SPUU Power ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4743,6 +5329,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3046]
 cmd_names = ["elec_commands.DCGenerator"]
 args = [66]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "APU Generator switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4754,6 +5341,7 @@ device_name = "FM_PROXY"
 cmds = [3001]
 cmd_names = ["fmproxy_commands.STATIC_SYS_MODE"]
 args = [520]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Static valve sensor select LEFT/BOTH/RIGHT"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -4765,6 +5353,7 @@ device_name = "CPT_MECH"
 cmds = [3027]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_ParkingBrake"]
 args = [736]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Parking Brake Handle"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4776,6 +5365,7 @@ device_name = "CPT_MECH"
 cmds = [3026]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_WheelBrake"]
 args = [737]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Wheel Brakes Handle"
 shape = "stick_button"
 seat = "pilot"
@@ -4788,6 +5378,7 @@ cmds = [3024, 3024]
 cmd_names = ["SPU_8_Mi24_commands.CMD_SPU8_TRIGGER_P", "SPU_8_Mi24_commands.CMD_SPU8_TRIGGER_P"]
 args = [738, 738]
 arg_values = [1.0, 0.5]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }, { kind = "discrete", values = [0.0, 0.5], momentary = true }]
 label = "Trigger Button, RADIO(LMB)/ICS(RMB)"
 shape = "raw_table_literal"
 seat = "pilot"
@@ -4799,6 +5390,7 @@ device_name = "WEAP_SYS"
 cmds = [3002]
 cmd_names = ["weapon_commands.Pilot_RUV_FIRE_Cvr"]
 args = [740]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Fire Weapons Cover"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -4810,6 +5402,7 @@ device_name = "WEAP_SYS"
 cmds = [3001]
 cmd_names = ["weapon_commands.Pilot_RUV_FIRE"]
 args = [741]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Fire Weapons"
 shape = "default_button"
 seat = "pilot"
@@ -4821,6 +5414,7 @@ device_name = "AUTOPILOT"
 cmds = [3027]
 cmd_names = ["autopilot_commands.Trimmer"]
 args = [742]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Autopilot Trimmer Button"
 shape = "stick_button"
 seat = "pilot"
@@ -4832,6 +5426,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3007]
 cmd_names = ["ext_lights_commands.StrobeLight"]
 args = [417]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Strobe Light Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4843,6 +5438,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3001]
 cmd_names = ["fuel_commands.Tank1Pump"]
 args = [408]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Tank 1 Pump, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4854,6 +5450,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3004]
 cmd_names = ["fuel_commands.Tank2Pump"]
 args = [410]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Tank 2 Pump, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4865,6 +5462,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3007]
 cmd_names = ["fuel_commands.Tank4Pump"]
 args = [404]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Tank 4 Pump, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4876,6 +5474,7 @@ device_name = "FUELSYS_INTERFACE"
 cmds = [3010]
 cmd_names = ["fuel_commands.Tank5Pump"]
 args = [406]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Tank 5 Pump, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4887,6 +5486,8 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3002]
 cmd_names = ["ext_lights_commands.OperatorTaxiLight"]
 args = [686]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Operator Taxi LT Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4898,6 +5499,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3001]
 cmd_names = ["ext_lights_commands.PilotTaxiLight"]
 args = [34]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Taxi LT Switch, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4909,6 +5511,7 @@ device_name = "EXT_LIGHTS_SYSTEM"
 cmds = [3008]
 cmd_names = ["ext_lights_commands.HeadlightControl"]
 args = [208]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "LND LT Control-Off-Retract switch"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -4920,6 +5523,8 @@ device_name = "TIMER"
 cmds = [3001]
 cmd_names = ["timers_commands.CMD_Timer_On_Off"]
 args = [1018]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Active timer start/stop"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -4932,6 +5537,7 @@ cmds = [3003, 3004]
 cmd_names = ["timers_commands.CMD_Timer_Left_Up_Down", "timers_commands.CMD_Timer_Left_Rot"]
 args = [1015, 1016]
 arg_values = [0.0, 0.0]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = 0.066 }]
 label = "Left timer control"
 shape = "raw_table_literal"
 seat = "operator"
@@ -4944,6 +5550,7 @@ cmds = [3005, 3006]
 cmd_names = ["timers_commands.CMD_Timer_Right_Up_Down", "timers_commands.CMD_Timer_Right_Rot"]
 args = [1019, 1020]
 arg_values = [0.0, 0.0]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }, { kind = "continuous", min = 0.0, max = 1.0, gain = 0.066 }]
 label = "Right timer control"
 shape = "raw_table_literal"
 seat = "operator"
@@ -4955,6 +5562,8 @@ device_name = "TIMER"
 cmds = [3002]
 cmd_names = ["timers_commands.CMD_Timer_Left_Right"]
 args = [1017]
+helper_args = ["nil", "nil", "nil", "0.5", "{0,1}", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Active timer select"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -4966,6 +5575,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3028]
 cmd_names = ["elec_commands.Transformer36vDIMMainBackup"]
 args = [196]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "DIM Transformer switch, MAIN/BACKUP"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -4977,6 +5587,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3010]
 cmd_names = ["elec_commands.Transformer115vMainBackup"]
 args = [83]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "AC Transformer 115v, MAIN/AUTO/BACKUP"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -4988,6 +5599,7 @@ device_name = "ELEC_INTERFACE"
 cmds = [3013]
 cmd_names = ["elec_commands.Transformer36vMainBackup"]
 args = [85]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "AC Transformer 36v, MAIN/AUTO/BACKUP"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -4999,6 +5611,8 @@ device_name = "UKT_2"
 cmds = [3001]
 cmd_names = ["ukt2_commands.PitchTrimKnob"]
 args = [951]
+helper_args = ["0", "0.02"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.02 }]
 label = "Pitch Trim Knob"
 shape = "default_axis_limited"
 seat = "pilot"
@@ -5010,6 +5624,8 @@ device_name = "ELEC_INTERFACE"
 cmds = [3025]
 cmd_names = ["elec_commands.ACGangSwitcher"]
 args = [91]
+helper_args = ["11", "1/10", "false", "0", "nil", "false"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "AC Voltmeter knob"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -5021,6 +5637,8 @@ device_name = "ELEC_INTERFACE"
 cmds = [3055]
 cmd_names = ["elec_commands.DCGangSwitcher"]
 args = [69]
+helper_args = ["10", "1/10", "false", "0", "nil", "false"]
+values = [{ kind = "unknown", reason = "multiposition_switch's delta_ is not a literal number" }]
 label = "DC Voltmeter knob"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -5032,6 +5650,7 @@ device_name = "WEAP_SYS"
 cmds = [3004]
 cmd_names = ["weapon_commands.Pilot_RELOAD_LEFT"]
 args = [522]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3], momentary = false }]
 label = "Reload Left Gondola"
 shape = "triple_switch"
 seat = "pilot"
@@ -5043,6 +5662,7 @@ device_name = "WEAP_SYS"
 cmds = [3005]
 cmd_names = ["weapon_commands.Pilot_RELOAD_RIGHT"]
 args = [527]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.3], momentary = false }]
 label = "Reload Right Gondola"
 shape = "triple_switch"
 seat = "pilot"
@@ -5054,6 +5674,8 @@ device_name = "WEAP_SYS"
 cmds = [3043]
 cmd_names = ["weapon_commands.Operator_SWITCHER_BOMB_BLOCK_BOMB_Cvr"]
 args = [699]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Bombs/Blocks Mode Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -5065,6 +5687,8 @@ device_name = "WEAP_SYS"
 cmds = [3033]
 cmd_names = ["weapon_commands.Operator_SWITCHER_BOMB_BLOCK_BOMB"]
 args = [700]
+helper_args = ["false", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Bombs/Blocks Mode"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -5076,6 +5700,8 @@ device_name = "WEAP_SYS"
 cmds = [3026]
 cmd_names = ["weapon_commands.Operator_CHAIN_LENGTH_SHORT_MED_LONG"]
 args = [770]
+helper_args = ["false", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Burst Length SHORT/MED/LONG"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -5087,6 +5713,7 @@ device_name = "WEAP_SYS"
 cmds = [3003]
 cmd_names = ["weapon_commands.Pilot_NPU_CHAIN"]
 args = [521]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Burst Length SHORT/MED/LONG"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -5098,6 +5725,8 @@ device_name = "WEAP_SYS"
 cmds = [3037]
 cmd_names = ["weapon_commands.Operator_OPERATOR_RATE_MORE"]
 args = [772]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Cannon Fire Rate SLOW/FAST"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5109,6 +5738,7 @@ device_name = "WEAP_SYS"
 cmds = [3010]
 cmd_names = ["weapon_commands.Pilot_TEMP_NPU30"]
 args = [550]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Cannon Fire Rate SLOW/FAST"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -5120,6 +5750,7 @@ device_name = "ASP_17V"
 cmds = [3003]
 cmd_names = ["asp_commands.Range_Auto_Manual"]
 args = [515]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight distance MANUAL/AUTO"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -5131,6 +5762,8 @@ device_name = "ASP_17V"
 cmds = [3016]
 cmd_names = ["asp_commands.USR_check"]
 args = [762]
+helper_args = ["nil", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "USR check"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -5142,6 +5775,8 @@ device_name = "ASP_17V"
 cmds = [3015]
 cmd_names = ["asp_commands.USR"]
 args = [761]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "USR power"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5153,6 +5788,7 @@ device_name = "WEAP_SYS"
 cmds = [3014]
 cmd_names = ["weapon_commands.Pilot_EMERG_EXPLODE_COVER"]
 args = [545]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Explosion on Jettison Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -5164,6 +5800,8 @@ device_name = "WEAP_SYS"
 cmds = [3041]
 cmd_names = ["weapon_commands.Operator_EMERG_EXPLODE_OPERATOR_Cvr"]
 args = [714]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Explosion on Jettison Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -5175,6 +5813,8 @@ device_name = "WEAP_SYS"
 cmds = [3024]
 cmd_names = ["weapon_commands.Operator_EMERG_EXPLODE_OPERATOR"]
 args = [715]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Explosion on Jettison"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5186,6 +5826,7 @@ device_name = "WEAP_SYS"
 cmds = [3013]
 cmd_names = ["weapon_commands.Pilot_EMERG_EXPLODE"]
 args = [546]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Explosion on Jettison ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -5197,6 +5838,7 @@ device_name = "WEAP_SYS"
 cmds = [3018]
 cmd_names = ["weapon_commands.Pilot_EMERG_RELEASE_PU_COVER"]
 args = [537]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Jettison Launcher Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -5208,6 +5850,7 @@ device_name = "WEAP_SYS"
 cmds = [3017]
 cmd_names = ["weapon_commands.Pilot_EMERG_RELEASE_PU"]
 args = [538]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Jettison Launcher ON/OFF"
 shape = "default_tumb_button"
 seat = "pilot"
@@ -5219,6 +5862,8 @@ device_name = "WEAP_SYS"
 cmds = [3042]
 cmd_names = ["weapon_commands.Operator_EMERG_RELEASE_OPERATOR_Cvr"]
 args = [141]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Emergency Jettison Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -5230,6 +5875,8 @@ device_name = "WEAP_SYS"
 cmds = [3025]
 cmd_names = ["weapon_commands.Operator_EMERG_RELEASE_OPERATOR"]
 args = [142]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Emergency Jettison"
 shape = "default_button"
 seat = "operator"
@@ -5241,6 +5888,7 @@ device_name = "WEAP_SYS"
 cmds = [3016]
 cmd_names = ["weapon_commands.Pilot_EMERG_RELEASE_COVER"]
 args = [541]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Jettison Pylons Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "pilot"
@@ -5252,6 +5900,8 @@ device_name = "WEAP_SYS"
 cmds = [3044]
 cmd_names = ["weapon_commands.Operator_EMERG_RELEASE_PU_OPERATOR_Cvr"]
 args = [764]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Jettison Launcher Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -5263,6 +5913,8 @@ device_name = "I9K113"
 cmds = [3008]
 cmd_names = ["i9K113_commands.Command_WORK_CONTROL"]
 args = [903]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "WORK-CHECK"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5274,6 +5926,8 @@ device_name = "WEAP_SYS"
 cmds = [3032]
 cmd_names = ["weapon_commands.Operator_EMERGE_RELEASE_PU_OPERATOR"]
 args = [765]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Jettison Launcher ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5285,6 +5939,7 @@ device_name = "WEAP_SYS"
 cmds = [3015]
 cmd_names = ["weapon_commands.Pilot_EMERG_RELEASE"]
 args = [542]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Jettison Pylons ON/OFF"
 shape = "default_tumb_button"
 seat = "pilot"
@@ -5296,6 +5951,8 @@ device_name = "WEAP_SYS"
 cmds = [3031]
 cmd_names = ["weapon_commands.Operator_CHECK_RELEASE_PU"]
 args = [768]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Release Check PU"
 shape = "default_button"
 seat = "operator"
@@ -5307,6 +5964,8 @@ device_name = "WEAP_SYS"
 cmds = [3045]
 cmd_names = ["weapon_commands.Operator_START_KMG"]
 args = [711]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Start container"
 shape = "default_button"
 seat = "operator"
@@ -5318,6 +5977,8 @@ device_name = "WEAP_SYS"
 cmds = [3046]
 cmd_names = ["weapon_commands.Operator_STOP_KMG"]
 args = [710]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Stop container"
 shape = "default_button"
 seat = "operator"
@@ -5329,6 +5990,7 @@ device_name = "WEAP_SYS"
 cmds = [3012]
 cmd_names = ["weapon_commands.Pilot_STOP_KMG"]
 args = [547]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Stop container"
 shape = "default_button"
 seat = "pilot"
@@ -5340,6 +6002,8 @@ device_name = "WEAP_SYS"
 cmds = [3028]
 cmd_names = ["weapon_commands.Operator_URS_POWER"]
 args = [773]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Missiles Power"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5351,6 +6015,8 @@ device_name = "ECS_INTERFACE"
 cmds = [3007]
 cmd_names = ["ecs_commands.HeatingAirFlowSight"]
 args = [774]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Fan, ON/OFF"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5362,6 +6028,8 @@ device_name = "I9K113"
 cmds = [3018]
 cmd_names = ["i9K113_commands.Command_STVORKI"]
 args = [775]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Doors"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5373,6 +6041,8 @@ device_name = "WEAP_SYS"
 cmds = [3039]
 cmd_names = ["weapon_commands.Operator_RELOAD_NPU30"]
 args = [769]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Reload Cannon"
 shape = "default_button"
 seat = "operator"
@@ -5384,6 +6054,7 @@ device_name = "WEAP_SYS"
 cmds = [3011]
 cmd_names = ["weapon_commands.Pilot_RELOAD_NPU30"]
 args = [549]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Reload Cannon"
 shape = "default_button"
 seat = "pilot"
@@ -5395,6 +6066,7 @@ device_name = "WEAP_SYS"
 cmds = [3009]
 cmd_names = ["weapon_commands.Pilot_SWITCHER_FIRE_CONTROL"]
 args = [551]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Weapon Control ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -5406,6 +6078,8 @@ device_name = "WEAP_SYS"
 cmds = [3040]
 cmd_names = ["weapon_commands.Operator_CONTROL_On_ME_OPERATOR_Cvr"]
 args = [712]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Weapon Control Cover, UP/DOWN"
 shape = "default_blue_cover"
 seat = "operator"
@@ -5417,6 +6091,8 @@ device_name = "WEAP_SYS"
 cmds = [3023]
 cmd_names = ["weapon_commands.Operator_SWITCHER_CONTROL_On_ME_OPERATOR"]
 args = [713]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Weapon Control"
 shape = "default_2_position_tumb"
 seat = "operator"
@@ -5428,6 +6104,7 @@ device_name = "WEAP_SYS"
 cmds = [3019]
 cmd_names = ["weapon_commands.Pilot_PUS_ARMING"]
 args = [536]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Arm Rockets"
 shape = "default_button"
 seat = "pilot"
@@ -5439,6 +6116,7 @@ device_name = "WEAP_SYS"
 cmds = [3008]
 cmd_names = ["weapon_commands.Pilot_BOTH_LEFT_RIGHT"]
 args = [531]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Select Rockets LEFT/BOTH/RIGHT"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -5450,6 +6128,8 @@ device_name = "WEAP_SYS"
 cmds = [3027]
 cmd_names = ["weapon_commands.Operator_SWITCHER_WEAP_TYPE_AB"]
 args = [709]
+helper_args = ["5", "0.1", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4], momentary = false }]
 label = "Select Weapon"
 shape = "multiposition_switch"
 seat = "operator"
@@ -5461,6 +6141,8 @@ device_name = "WEAP_SYS"
 cmds = [3007]
 cmd_names = ["weapon_commands.Pilot_SWITCHER_OFF_GM_URS_NPU"]
 args = [523]
+helper_args = ["9", "0.1"]
+values = [{ kind = "discrete", values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8], momentary = false }]
 label = "Select Weapon"
 shape = "multiposition_switch"
 seat = "pilot"
@@ -5472,6 +6154,7 @@ device_name = "WEAP_SYS"
 cmds = [3006]
 cmd_names = ["weapon_commands.Pilot_FKP_CAMERA"]
 args = [530]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Weapon Camera ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -5483,6 +6166,8 @@ device_name = "ASP_17V"
 cmds = [3004]
 cmd_names = ["asp_commands.Range_Value"]
 args = [552]
+helper_args = ["0", "0.05", "false", "false", "false"]
+values = [{ kind = "continuous", min = 0.0, max = 1.0, gain = 0.05 }]
 label = "Sight Range Adjustment"
 shape = "default_axis"
 seat = "pilot"
@@ -5494,6 +6179,7 @@ device_name = "ASP_17V"
 cmds = [3014]
 cmd_names = ["asp_commands.Power"]
 args = [529]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Sight Power ON/OFF"
 shape = "default_2_position_tumb"
 seat = "pilot"
@@ -5505,6 +6191,7 @@ device_name = "ASP_17V"
 cmds = [3007]
 cmd_names = ["asp_commands.Sight_Null"]
 args = [528]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Sight Reset Crosshair"
 shape = "default_button"
 seat = "pilot"
@@ -5516,6 +6203,8 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3006]
 cmd_names = ["AntiIceSys_commands.ANTIICE_GLAZING_O"]
 args = [675]
+helper_args = ["nil", "nil", "nil", "nil", "nil", "1"]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Windshield Antiice LOW/OFF/HIGH"
 shape = "default_3_position_tumb"
 seat = "operator"
@@ -5527,6 +6216,7 @@ device_name = "ANTI_ICE_INTERFACE"
 cmds = [3005]
 cmd_names = ["AntiIceSys_commands.ANTIICE_GLAZING_P"]
 args = [111]
+values = [{ kind = "discrete", values = [-1.0, 0.0, 1.0], momentary = false }]
 label = "Windshield Antiice LOW/OFF/HIGH"
 shape = "default_3_position_tumb"
 seat = "pilot"
@@ -5538,6 +6228,8 @@ device_name = "CPT_MECH"
 cmds = [3021]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_OPERATOR_MODE_WIPER"]
 args = [674]
+helper_args = ["0.25", "{0.25, 0.25}", "{0,0,0}", "1"]
+values = [{ kind = "discrete", values = [0.25], momentary = false }]
 label = "Windscreen Wiper Control Switch, SPEED 2"
 shape = "default_position_tumb"
 seat = "operator"
@@ -5549,6 +6241,8 @@ device_name = "CPT_MECH"
 cmds = [3021]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_OPERATOR_MODE_WIPER"]
 args = [674]
+helper_args = ["0.15", "{0.15, 0.15}", "{0,0,0}", "1"]
+values = [{ kind = "discrete", values = [0.15], momentary = false }]
 label = "Windscreen Wiper Control Switch, SPEED 1"
 shape = "default_position_tumb"
 seat = "operator"
@@ -5560,6 +6254,8 @@ device_name = "CPT_MECH"
 cmds = [3021]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_OPERATOR_MODE_WIPER"]
 args = [674]
+helper_args = ["0.00", "{0.00, 0.00}", "{0,0,0}", "1"]
+values = [{ kind = "discrete", values = [0.0], momentary = false }]
 label = "Windscreen Wiper Control Switch, OFF"
 shape = "default_position_tumb"
 seat = "operator"
@@ -5571,6 +6267,8 @@ device_name = "CPT_MECH"
 cmds = [3021]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_OPERATOR_MODE_WIPER"]
 args = [674]
+helper_args = ["0.35", "{0.00, 0.35}", "{0,0,0}", "1"]
+values = [{ kind = "discrete", values = [0.0, 0.35], momentary = true }]
 label = "Windscreen Wiper Control Switch, RESET"
 shape = "default_spring_button"
 seat = "operator"
@@ -5582,6 +6280,8 @@ device_name = "CPT_MECH"
 cmds = [3021]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_OPERATOR_MODE_WIPER"]
 args = [674]
+helper_args = ["0.05", "{0.05, 0.05}", "{0,0,0}", "1"]
+values = [{ kind = "discrete", values = [0.05], momentary = false }]
 label = "Windscreen Wiper Control Switch, START"
 shape = "default_position_tumb"
 seat = "operator"
@@ -5593,6 +6293,8 @@ device_name = "CPT_MECH"
 cmds = [3020]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PILOT_MODE_WIPER"]
 args = [418]
+helper_args = ["0.25", "{0.25, 0.25}", "{0,0,0}"]
+values = [{ kind = "discrete", values = [0.25], momentary = false }]
 label = "Windscreen Wiper Control Switch, SPEED 2"
 shape = "default_position_tumb"
 seat = "pilot"
@@ -5604,6 +6306,8 @@ device_name = "CPT_MECH"
 cmds = [3020]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PILOT_MODE_WIPER"]
 args = [418]
+helper_args = ["0.15", "{0.15, 0.15}", "{0,0,0}"]
+values = [{ kind = "discrete", values = [0.15], momentary = false }]
 label = "Windscreen Wiper Control Switch, SPEED 1"
 shape = "default_position_tumb"
 seat = "pilot"
@@ -5615,6 +6319,8 @@ device_name = "CPT_MECH"
 cmds = [3020]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PILOT_MODE_WIPER"]
 args = [418]
+helper_args = ["0.00", "{0.00, 0.00}", "{0,0,0}"]
+values = [{ kind = "discrete", values = [0.0], momentary = false }]
 label = "Windscreen Wiper Control Switch, OFF"
 shape = "default_position_tumb"
 seat = "pilot"
@@ -5626,6 +6332,8 @@ device_name = "CPT_MECH"
 cmds = [3020]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PILOT_MODE_WIPER"]
 args = [418]
+helper_args = ["0.35", "{0.00, 0.35}", "{0,0,0}"]
+values = [{ kind = "discrete", values = [0.0, 0.35], momentary = true }]
 label = "Windscreen Wiper Control Switch, RESET"
 shape = "default_spring_button"
 seat = "pilot"
@@ -5637,6 +6345,8 @@ device_name = "CPT_MECH"
 cmds = [3020]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_PILOT_MODE_WIPER"]
 args = [418]
+helper_args = ["0.05", "{0.05, 0.05}", "{0,0,0}"]
+values = [{ kind = "discrete", values = [0.05], momentary = false }]
 label = "Windscreen Wiper Control Switch, START"
 shape = "default_position_tumb"
 seat = "pilot"
@@ -5648,6 +6358,8 @@ device_name = "CPT_MECH"
 cmds = [3016]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_WindSprayerOperator"]
 args = [680]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Operator Window Sprayer Button"
 shape = "default_button"
 seat = "operator"
@@ -5659,6 +6371,7 @@ device_name = "CPT_MECH"
 cmds = [3015]
 cmd_names = ["cockpit_mechanics_commands.Command_CPT_MECH_WindSprayerPilot"]
 args = [384]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = true }]
 label = "Window Sprayer Button"
 shape = "default_button"
 seat = "pilot"
@@ -5670,6 +6383,8 @@ device_name = "RMI2_O"
 cmds = [3002]
 cmd_names = ["rmi2_commands.MODE_RIGHTSW"]
 args = [843]
+helper_args = ["nil", "1"]
+values = [{ kind = "discrete", values = [0.0, 1.0], momentary = false }]
 label = "Mode Switch, ZK/ARKU2"
 shape = "default_2_position_tumb"
 seat = "operator"
