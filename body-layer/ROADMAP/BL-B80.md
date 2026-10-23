@@ -16,6 +16,18 @@
   See `notes/the-9k113-sight-bl-b64.md`'s last bullet for why nothing in v1's own test suite could
   have caught this — only the live probe could.**
 
+  ## Merged 2026-10-23 (`a2ea382c`) before Flight A — still in progress, not flown
+
+  `feature/9k113-sight-pointing` merged to `main` at user direction (*"merge BL-B80, I will test
+  fly when I have a chance"*), ahead of the plan's own pre-merge condition (a cold start showing
+  arg 960 lights as the READY lamp). **So the merged build carries that risk:** if 960 never lights
+  on a cold start, OBSERV is refused for the whole sortie. Also unverified: elevation closed loop on
+  555, mark scale and boresight calibration, the frame the AI rate acts in, and the 1.2 m aim
+  offset. Flight A (`docs/acceptance/2026-10-22-bl-b80-v2-flight-a.md`, now on `main`) settles
+  them; Flight B follows. Post-merge checks: both subprojects' mypy and pytest pass (body-layer
+  2443 passed, 4 xfailed; aircraft-layer 533 passed); the only `ruff` findings are in
+  pre-existing `research/` files outside the merge.
+
   ## Status, 2026-10-22 — v2 Stages 1-4 (with 3b) built and reviewed; Stage 0/4 flights outstanding
 
   `feature/9k113-sight-pointing` (tip `e009465eba841a1a320ac02740dbbd1133221b96`) implements the
