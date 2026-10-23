@@ -131,6 +131,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B90]] — configurable cockpit effector sequences: named registry + per-trigger sequence files (after [[BL-B80]])
 - [[BL-B92]] — `test_connection_reporter_*` tests order-dependent under pytest-randomly (fixed, merged `27f9821f`)
 - [[BL-B93]] — `test_tuning.py` autouse fixture leaves the tuning registry empty for later tests
+- [[BL-B94]] — parameter comparisons in effector-sequence conditions (dome-light POC; after [[BL-B90]])
+- [[BL-B95]] — behaviour trees: the drill from a file, once the vocabulary exists `[>]` deferred
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

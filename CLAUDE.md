@@ -276,6 +276,16 @@ rather than improvising a second one.
 the first sentence, so a warning written second reaches nobody — and that survived three review
 passes by readers reading the diff.
 
+### Behaviour as actions and params — so behaviour trees can come later
+
+**User direction, 2026-10-23:** *"Future code should be structured so that refactoring to decision
+trees can be easy."* No tree engine yet (`[[BL-B95]]`, deferred). New behaviour code is shaped as
+**actions** (do one thing, explicit params, report running/succeeded/failed, never decide *when*),
+**state params** (named read-only queries with a declared type, shared with sequence-file
+conditions, `[[BL-B94]]`), and the **"when"** (priorities, interrupts, preconditions) kept in one
+place per behaviour, apart from the actions, so it can later move into a file without touching them.
+Existing hard-coded behaviour stays unless a change touches it anyway.
+
 ## Do not reinvent the wheel
 
 **User direction, 2026-10-17**, in their own words:
