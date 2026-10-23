@@ -28,6 +28,22 @@
   2443 passed, 4 xfailed; aircraft-layer 533 passed); the only `ruff` findings are in
   pre-existing `research/` files outside the merge.
 
+  **Fixed on `fix/guidance-ready-edge` (DoD pass 2026-10-23, tip `1390acfd`), not yet merged to
+  `main`.** The merged build's 960/READY callout did not match this plan's own Decision 2 ("only
+  on change"): `CrewConsole.drain_guidance_unit_ready` held a one-shot latch that spoke
+  "Guidance unit ready." on the first poll the lamp ever read lit — including a warm air start's
+  very first sample, with no prior observation at all — and then never spoke again, so a real
+  power cycle never re-announced. The fix replaces the latch with a true previous-observed
+  edge (`guidance_unit_ready_prev_observed: bool | None`; `None` is not treated as `False`, so a
+  warm air start stays silent and a power cycle re-announces). Reviewer and Security approved;
+  Performance: MONITOR, not a blocker (one more per-poll `replace()` at ~1 Hz). This is the only
+  change on that branch — no change to `sight_ready()`, OBSERV gating, or anything else BL-B80
+  touches. **Does not change what Flight A/B should observe**: Flight A's own card runs no
+  body-layer process at all (it is the aircraft-layer Lua probe plus a manual cockpit-lamp
+  observation), so the pre-fix latch bug was never reachable from that card and the card needed
+  no correction. Flight B (not yet written) should note that "Guidance unit ready." is expected
+  once, on the observed lamp's off→on transition, not at mission start if the unit is already warm.
+
   ## Status, 2026-10-22 — v2 Stages 1-4 (with 3b) built and reviewed; Stage 0/4 flights outstanding
 
   `feature/9k113-sight-pointing` (tip `e009465eba841a1a320ac02740dbbd1133221b96`) implements the
