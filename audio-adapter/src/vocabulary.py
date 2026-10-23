@@ -44,6 +44,8 @@ phrasings this user actually says and which get misheard.
 
 from __future__ import annotations
 
+import re
+
 #: The 15 tokens that also exist in the legacy F10 radio menu, in that
 #: menu's own order. Kept as a named group for traceability while the F10
 #: path still runs; it carries no obligation to match, since that path is
@@ -1317,21 +1319,49 @@ def parse_weapon(text: str) -> str | None:
 #: is exactly the register these commands are spoken in.
 _PROMPT_FRAMING = "Helicopter crew intercom, pilot to gunner."
 
-#: Words that carry the domain but are not vocabulary phrasings -- the
-#: ones the decoder is least likely to reach for unprompted. "Petrovich"
-#: is the whole reason this list exists: it is a proper noun, it is the
-#: routing discriminator, and a general-English decoder has no reason to
-#: prefer it over "Petrovitch", "petro which", or anything else.
-_PROMPT_EXTRA_TERMS: tuple[str, ...] = (
-    "Petrovich",
-    "bearing",
-    "o'clock",
-    "contacts",
-    "air defence",
-)
+#: Spellings the prompt should carry in a form other than the lowercase
+#: one `recognised_words` returns. "Petrovich" is a proper noun and the
+#: routing discriminator; a general-English decoder has no reason to
+#: prefer it over "Petrovitch" or "petro which". "SAM"/"AAA" are spoken as
+#: acronyms, and lowercase "sam" reads as a name -- the 2026-10-15 log has
+#: "set target, long range, same ahead".
+_PROMPT_DISPLAY_FORMS: dict[str, str] = {
+    "petrovich": "Petrovich",
+    "sam": "SAM",
+    "aaa": "AAA",
+}
 
 
-def to_prompt(max_phrasings: int = 24) -> str:
+def recognised_words() -> tuple[str, ...]:
+    """Every distinct word the recogniser is expected to hear: each word of
+    every `PHRASES` phrasing, then every slot table's words, lowercase, in
+    first-seen order.
+
+    This is the set `to_prompt` must carry in full (`test_vocabulary.py`
+    asserts it). **A word the matcher acts on belongs in one of these
+    tables**, never only as a literal in `command_matcher.py` -- a word
+    whisper is not biased toward comes back as a near-homophone ("silence"
+    as "violence", 2026-10-15) and the pilot gets "say again" (user
+    direction 2026-10-23: vocabulary and prompt kept in sync as a rule).
+    """
+    sources: list[str] = [p for token in TOKENS for p in PHRASES[token]]
+    sources += [
+        *DESCRIPTOR_WORDS,
+        *SECTOR_WORDS,
+        *RELATIVE_WORDS,
+        *TIME_OF_DAY_WORDS,
+        *BAND_WORDS,
+        *STEP_DIRECTION_WORDS,
+        *WEAPON_WORDS,
+    ]
+    words: dict[str, None] = {}
+    for source in sources:
+        for word in re.findall(r"[a-z']+", source.lower()):
+            words[word] = None
+    return tuple(words)
+
+
+def to_prompt() -> str:
     """An initial prompt biasing whisper toward this vocabulary.
 
     Unlike `to_gbnf`, this is a **soft** bias: it makes these words more
@@ -1345,20 +1375,19 @@ def to_prompt(max_phrasings: int = 24) -> str:
     have to actually hear it that way, and a mishearing still comes back
     looking wrong, which is what lets fuzzy matching reject it.
 
-    Truncated to `max_phrasings` because the prompt competes with the
-    audio for the decoder's attention and whisper caps it at
-    `n_text_ctx/2` tokens; the full phrase list is neither necessary nor
-    free. Phrasings are sampled across tokens rather than taken in order,
-    so the prompt covers the vocabulary's shape rather than its first
-    third.
+    **Every recognised word once, space-joined** -- not a sample of whole
+    phrasings. whisper.cpp keeps only the last `n_text_ctx/2` = 224 prompt
+    tokens and drops the front, so the prompt cannot simply list all 123
+    phrasings (~300 GPT-2 tokens); sampling 24 of them instead left most
+    commands added after the 2026-09-19 bench (silence, engage, set
+    target, describe...) and every slot word (SAM, guns, closer...) out of
+    the prompt entirely. The word list is ~135 tokens. Commas are omitted
+    because each costs a token. Benched 2026-10-23 on the 252-clip corpus,
+    `small.en`: 249/252 against the sampled prompt's 248/252, p90 0.86 s
+    against 2.10 s (the sampled prompt provoked repetition loops such as
+    "scan ahead, scan north, scan north, ..."); a phrase-fragment variant
+    scored 247/252. The corpus predates the new commands, so this shows
+    no regression on the old ones, not the gain on the new.
     """
-    sampled: list[str] = []
-    for token in TOKENS:
-        phrasings = PHRASES[token]
-        if phrasings:
-            sampled.append(phrasings[0])
-    if len(sampled) > max_phrasings:
-        step = len(sampled) / max_phrasings
-        sampled = [sampled[int(i * step)] for i in range(max_phrasings)]
-    terms = ", ".join([*sampled, *_PROMPT_EXTRA_TERMS])
-    return f"{_PROMPT_FRAMING} {terms}."
+    words = [_PROMPT_DISPLAY_FORMS.get(w, w) for w in recognised_words()]
+    return f"{_PROMPT_FRAMING} {' '.join(words)}."

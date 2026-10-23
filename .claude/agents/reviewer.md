@@ -61,6 +61,14 @@ definition, including this one.
 - No large raw/generated datasets accidentally staged for commit (`world-model/data/` must stay gitignored)?
 - **Every new behaviour-affecting constant goes through the tuning mechanism** — see below. Standard
   practice as of 2026-10-15 (user direction), and yours to verify.
+- **Spoken vocabulary and the STT prompt still agree** (user direction, 2026-10-23). Any change that
+  adds or renames a voice command, a phrasing, or a slot word must land the word in
+  `audio-adapter/src/vocabulary.py`'s tables (`PHRASES` or a slot table `recognised_words()` reads)
+  — not as a literal inside `command_matcher.py` or body-layer only — so `to_prompt()` carries it to
+  whisper. `test_vocabulary.py`'s prompt-coverage test fails on a word the tables hold but the
+  prompt drops; it **cannot** see a word that never reached the tables, so that half is yours. The
+  failure is silent in flight: a word whisper is not biased toward comes back as a near-homophone
+  ("silence" → "violence", "SAM" → "same") and the pilot gets "say again".
 - **Comments attached to changed code pruned of what is no longer load-bearing, and nothing durable
   lost with them?** See "Checking a pruned comment block" below. Standard practice as of
   2026-10-18 (user direction), and yours to verify.

@@ -11,6 +11,8 @@ behave as `stt_engine.py`/`tools/stt_bench.py` need them to.
 
 from __future__ import annotations
 
+import re
+
 from vocabulary import (
     BAND_WORDS,
     DESCRIPTOR_WORDS,
@@ -43,6 +45,7 @@ from vocabulary import (
     report_verbs,
     spoken_phrases,
     to_gbnf,
+    to_prompt,
     token_for_phrase,
 )
 
@@ -645,3 +648,56 @@ def test_parse_time_of_day_reads_each_greeting_word() -> None:
 
 def test_parse_time_of_day_returns_none_without_a_greeting_word() -> None:
     assert parse_time_of_day("good job petrovich") is None
+
+
+def _prompt_words() -> set[str]:
+    return set(re.findall(r"[a-z']+", to_prompt().lower()))
+
+
+def test_prompt_carries_every_word_of_every_phrasing() -> None:
+    """The vocabulary/prompt sync rule (user direction, 2026-10-23): a word
+    the matcher is meant to hear must be in whisper's prompt, or it comes
+    back as a near-homophone -- "silence" as "violence" was logged
+    2026-10-15 while `silence` was missing from the sampled prompt.
+    Derived from the tables here, not from `recognised_words`, so dropping
+    a source from that function fails this test rather than shrinking it."""
+    missing = {
+        (token, word)
+        for token in TOKENS
+        for phrase in PHRASES[token]
+        for word in re.findall(r"[a-z']+", phrase.lower())
+        if word not in _prompt_words()
+    }
+    assert not missing
+
+
+def test_prompt_carries_every_slot_word() -> None:
+    """Slot words are never a whole phrasing, so a phrasing sample cannot
+    cover them: "SAM" was absent and was logged as "same ahead"."""
+    slot_tables = {
+        "DESCRIPTOR_WORDS": DESCRIPTOR_WORDS,
+        "SECTOR_WORDS": SECTOR_WORDS,
+        "RELATIVE_WORDS": RELATIVE_WORDS,
+        "TIME_OF_DAY_WORDS": TIME_OF_DAY_WORDS,
+        "BAND_WORDS": tuple(BAND_WORDS),
+        "STEP_DIRECTION_WORDS": tuple(STEP_DIRECTION_WORDS),
+        "WEAPON_WORDS": WEAPON_WORDS,
+    }
+    missing = {
+        (table, word)
+        for table, words in slot_tables.items()
+        for word in words
+        if word not in _prompt_words()
+    }
+    assert not missing
+
+
+def test_prompt_fits_whisper_prompt_budget() -> None:
+    """whisper.cpp keeps only the last `n_text_ctx/2` = 224 prompt tokens
+    and silently drops the front -- the framing sentence would go first.
+    No tokenizer is a dependency here, so this bounds words instead:
+    measured 2026-10-23 with GPT-2 BPE (the `.en` models' tokenizer), the
+    prompt is 133 tokens for 122 words, ~1.1 tokens per word. 180 words
+    is ~200 tokens at that ratio, leaving margin; past it, re-measure
+    before raising the bound."""
+    assert len(to_prompt().split()) <= 180
