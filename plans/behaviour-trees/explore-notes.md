@@ -43,3 +43,23 @@ conversation as it happens.
    how he interrupts. That calls for context conditions, not one fixed priority order.
 4. **Who edits, and which tree.** *"I would edit, or maybe you. Different trees likely based on role
    and mission type."* So: one tree per (role, mission type), edited by the user or by Claude.
+
+## Round 2 (after a mock "scan ahead" tree and a context-dependent missile interrupt)
+
+5. **Editable level: parameters of the drill, not the perception.** *"I would not want to edit
+   detection logic, but possibly which sector, when and how long, scan Distance, Optic used. When
+   flight control gets implemented, flight patterns."* So the file holds sector, timing/dwell, scan
+   distance, optic choice (and later flight patterns). Detection, classification and LOS stay code.
+6. **Interrupts come in two kinds.** The user's cases:
+   - *"missile launch: observe if it aims at us. If it does, abort everything else and alert, deploy
+     counter measures. If not, resume current activity."*
+   - *"AAA fire: urgent report. But continue attack run unless pilot aborts, continue ATGM guidance
+     unless pilot aborts."*
+
+   Reading (main loop, to confirm): a **pre-empting** interrupt (missile aimed at us) aborts the
+   current activity; a **concurrent** one (AAA, a missile not aimed at us) adds an urgent report
+   while the current activity carries on. "Resume current activity" means activities must be
+   resumable, not restarted. Only the pilot aborts an attack run or ATGM guidance.
+7. **Tree structure: a common tree with mission branches, separate trees per role.** *"probably
+   more like own branches of a common tree. Escort certainly would be its own since it's different
+   from pure attack. Petrovich roles would mean different trees: copilot, pilot, wingman."*
