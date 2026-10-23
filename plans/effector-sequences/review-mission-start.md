@@ -228,3 +228,124 @@ subproject check suite run and passing. Did not re-verify the untouched parts of
 mechanism already covered by the first review pass (the mid-mission-start distinction, the
 takeoff-suppression window, the module/scope checks) — no code in that surface changed in this
 commit.
+
+---
+
+## Fix re-review 2 (2026-10-23)
+
+Re-reviewed fix commit `e39408f8535481c71f7defd413d677e265bd2cab` (tip, confirmed via
+`git rev-parse HEAD` against the dispatched sha before checkout) on `feature/switch-reference-values`,
+diffed against the previously-reviewed `4b00a955`. Addresses the "Fix re-review (2026-10-23)"
+required fix above: the fallback could not tell a `t_sim`-coincidence apart from no fresh sample
+having arrived at all, and both cases fired `MISSION_START_IN_AIR` off stale, previous-mission
+`on_ground` data.
+
+**Behaviour change, read from the code, not the commit message**: on fallback expiry,
+`MISSION_START` still fires unconditionally (`src/logger.py`'s poll block, `if runner.
+pending_mission_start_fire:` under `if fresh_sample_confirmed or fallback_due:`). `MISSION_START_
+IN_AIR` is now gated on `fresh_sample_confirmed and not crew_console.on_ground` — never on
+`fallback_due` alone — so a fallback forced by "no fresh sample at all" drops the air/ground
+classification instead of guessing, logs a warning naming why
+(`"...dropping the MISSION_START_IN_AIR check..."`), and still clears `pending_mission_start_
+in_air_check`/`mission_start_resolving_since_wall` the same poll, which ends `TAKEOFF` suppression
+the same way a normal resolution does. No code changed to make that last part true: the pre-existing
+`if mission_start_resolving: ... elif was_on_ground ...` structure already skips the takeoff-edge
+check for the resolving poll itself regardless of path, and the *next* poll's `was_on_ground` is
+taken from whatever `on_ground` value that resolving poll established — confirmed by reading the
+code, not assumed from the commit message's account of it.
+
+**2 new tests — only one is a mutation-kill test for this fix, and that is correct, not a gap.**
+Re-ran the mutation independently: swapped `src/logger.py` back to the `4b00a955` version (tests
+left at `e39408f8`) and ran both new tests.
+- `test_no_fresh_sample_fallback_fires_mission_start_only_then_real_takeoff` — **failed red** for
+  the stated reason: the old code's unconditional `if not crew_console.on_ground:` fires
+  `MISSION_START_IN_AIR`'s write off the stale airborne sample, which the new test's exact
+  write-list assertion catches (`assert aircraft_client.cockpit_switch_writes == [*writes_before_
+  restart, _MISSION_START_WRITE]` — extra tuple `(6, 3020, 1.0)` present on old code).
+- `test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback` — **passed on the
+  unfixed code too.** This is not a hidden gap: its own docstring says it is a *companion*
+  isolating two claims the first test does not assert on directly (the stale sample right after
+  resolution is not itself read as a `TAKEOFF` edge, and a later genuine ground→air transition
+  still fires `TAKEOFF` exactly once) — both of which were already true before this fix, since
+  they depend on the unchanged `if`/`elif` takeoff-suppression structure, not on the
+  `MISSION_START_IN_AIR` gating this commit changes. `implementation.md`'s own account says the
+  same thing ("isolating the two claims the test above doesn't assert on directly"). So: the
+  commit's premise that "2 new tests" verify this fix is true only of the first; the second earns
+  its place as regression coverage for an adjacent property, not as a second mutation-kill test —
+  worth stating precisely rather than letting "2 tests, 2 kills" stand unchecked.
+Restored the fixed `src/logger.py` from a saved copy; `git status --porcelain` on it came back
+empty afterward.
+
+**Rendered files and TRIGGER_INFO**: `triggers.md`'s `mission-start-in-air` row,
+`TRIGGER_INFO[MISSION_START_IN_AIR].description`, `EffectorTrigger.MISSION_START_IN_AIR`'s own
+`#:` comment, and the rendered `defaults.toml` entry for `logger.MISSION_START_RESOLVE_FALLBACK_S`
+all now state both cases (the rare `t_sim` coincidence, which self-heals, and "no fresh sample at
+all," which does not and instead drops the check) — read the **rendered** `defaults.toml`, not
+just the source `#:` block, and confirmed the generator emitted the *whole* first sentence intact,
+including the `plans/effector-sequences/review-mission-start.md` backtick path split across two
+source lines, joined with no inserted or dropped space. All four of the places this review's
+previous pass could name are now internally consistent with the code and with each other.
+
+**`implementation.md` append-only**: `git show 4b00a955:plans/effector-sequences/
+implementation.md` is byte-identical to the first 389 lines of the new 467-line file — confirmed
+by diffing those 389 lines directly, not by line count alone.
+
+**Edge case asked for by the dispatching task — a paused mission start where the first fresh
+sample arrives *after* the fallback expired, with the aircraft on the ground**: traced by hand and
+confirmed by `test_takeoff_suppression_ends_cleanly_after_no_fresh_sample_fallback`'s own
+"land, then take off for real" step. After the fallback fires (stale sample still airborne),
+`crew_console.on_ground` keeps reflecting that stale sample every poll (the unconditional
+reassignment above the mission-start block, unchanged by this diff and already flagged as a
+pre-existing, out-of-scope quirk in the first review's optional refinements) until a genuinely
+fresh sample lands. The moment it does — altitude dropped to the grounded threshold in the test —
+`crew_console.on_ground` is reassigned from *that* sample and becomes `True`, with no `TAKEOFF`
+write in between (asserted via `writes_right_after_fallback` staying unchanged across ten polls,
+then the landing transition itself producing no write, since `TAKEOFF`'s edge condition requires
+leaving the ground, not reaching it). A subsequent real takeoff from that correctly-grounded state
+then fires `TAKEOFF` exactly once, counted against the pre-restart flight's own four writes landing
+twice in total. So: yes, `on_ground` comes from the fresh sample once it arrives, and no false
+`TAKEOFF` fires on the stale→fresh transition into "on the ground" — confirmed, not merely asserted
+by the test's own pass.
+
+**Checks** (from inside this worktree's `body-layer/`, using the main checkout's `.venv` since
+none exists in this worktree): `ruff format --check src tests tools` — 183 files already
+formatted; `ruff check src tests tools` — all checks passed; `mypy src` — success, 74 source
+files; `mypy tools` — success, 10 source files; `pytest -q` — 2605 passed, 4 xfailed, matching the
+implementer's reported counts.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- **Two adjacent docstrings still describe `pending_mission_start_in_air_check`'s clearing path as
+  single-cause, and this fix did not touch either** — not introduced by this commit, and not worse
+  than before it, but now slightly more wrong given what the code does. `ConsolePerceptionRunner.
+  pending_mission_start_in_air_check`'s own field docstring (`src/logger.py:628-636`) says
+  "Cleared the poll a fresh (non-stale) ownship sample is found," and `_check_for_new_mission`'s
+  docstring (`src/logger.py:2483-2485`) says the poll block fires both new triggers "once it has
+  an ownship sample it trusts is not the previous mission's stale cached one" — both describe only
+  the fresh-sample path, not the fallback-without-a-fresh-sample path this very fix adds a second,
+  documented way to resolve through. Low cost to close (one clause each, same pattern already used
+  at the call site and in `MISSION_START_RESOLVE_FALLBACK_S`'s own comment) and not required now
+  because neither claim is relied on by a test or another comment the way the three required-fix
+  spots in the first pass were, and both predate this commit's own touched lines.
+- **`body-layer/CLAUDE.md`'s `effector_sequences.py` module-map entry** ("`mission-start-in-air`
+  fires immediately after it, same poll, only when that same sample is airborne") was not updated
+  to mention the fallback-drop case either, and wasn't in the task's named list of files to check
+  (comments, `TRIGGER_INFO`, rendered `triggers.md`/`defaults.toml`) — flagging only because a
+  reader of that file alone would still expect an unconditional in-air classification.
+
+### Verdict
+
+APPROVED
+
+### Review Confidence (fix re-review 2)
+
+Full read of the diff against `4b00a955`. Mutation-verified both new tests independently (one
+kills on old code, one correctly does not, matching its own stated scope). Full subproject check
+suite run and passing. Traced the asked-for paused-mission-start edge case by hand against the
+code and against the existing test that exercises it, rather than taking the test's green alone as
+the answer. Did not re-verify the parts of the mechanism unchanged by this commit and already
+covered by the first two passes (the mid-mission-start distinction, scope, module boundary).
