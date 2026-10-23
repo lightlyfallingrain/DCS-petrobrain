@@ -3313,19 +3313,28 @@ def _run_crew_text_poll_loop(
                         # `_handle_observ_on` reads this to gate the
                         # command (plan §3).
                         crew_console.sight_ready = is_sight_ready
-                        if is_sight_ready:
-                            runner.guidance_unit_state = replace(
-                                runner.guidance_unit_state,
-                                guidance_unit_ready_announced=(
-                                    crew_console.drain_guidance_unit_ready(
-                                        runner.last_t_sim,
-                                        ready=True,
-                                        announced=(
-                                            runner.guidance_unit_state.guidance_unit_ready_announced
-                                        ),
-                                    )
-                                ),
-                            )
+                        # Called every poll, unconditionally -- not only
+                        # while `is_sight_ready` -- so an observed unlit
+                        # poll (power-down, or no lamp reading yet) is
+                        # tracked too; otherwise a power cycle's falling
+                        # edge would never update `guidance_unit_ready_
+                        # prev_observed`, and the later rising edge would
+                        # not be recognised as one (bug fix, `plans/
+                        # 9k113-sight-pointing/plan.md` decision 2).
+                        runner.guidance_unit_state = replace(
+                            runner.guidance_unit_state,
+                            guidance_unit_ready_prev_observed=(
+                                crew_console.drain_guidance_unit_ready(
+                                    runner.last_t_sim,
+                                    ready_observed=(
+                                        runner.guidance_unit_state.ready_observed
+                                    ),
+                                    previously_observed=(
+                                        runner.guidance_unit_state.guidance_unit_ready_prev_observed
+                                    ),
+                                )
+                            ),
+                        )
                         # `plans/attack-run/plan.md` Stage 5 -- apply
                         # whatever `engage`/`disengage` the previous
                         # poll's command dispatch left as a one-shot

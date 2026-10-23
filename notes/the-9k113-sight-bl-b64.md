@@ -167,3 +167,14 @@
   probe, treat "passes review and all its own tests" as necessary, not sufficient — the probe is
   what the architecture actually depends on, and it belongs before the model is built on, not
   after.
+- **A "speak once when a lamp lights" callout written as a one-shot `bool` latch is silently wrong
+  for any lamp that can cycle, and the wrongness is invisible on a warm start.** `BL-B80`'s
+  960/READY callout (`CrewConsole.drain_guidance_unit_ready`) latched on the first poll the lamp
+  ever read lit — which on a warm air start (lamp already lit at the very first sample) fires
+  correctly by coincidence, so the bug only shows on a real cold-start power cycle, where the
+  latch never resets and a second power-up stays silent. The fix is a previous-observed edge
+  (`prev_observed: bool | None`, edge = `previously_observed is False and ready_observed is True`)
+  with `None` deliberately not treated as `False`, so a first-ever-lit sample (no prior
+  observation) is not an edge either. The general shape: any "announce on this becoming true"
+  callout needs the previous *observed* value, not a has-this-ever-fired flag, or it cannot
+  distinguish "just became true" from "was already true before we were watching."

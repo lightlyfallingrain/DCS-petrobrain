@@ -1501,26 +1501,41 @@ class CrewConsole:
         return spoken
 
     def drain_guidance_unit_ready(
-        self, now_sim: float, *, ready: bool, announced: bool
-    ) -> bool:
-        """Speaks "Guidance unit ready." exactly once, the poll
-        `belief.sight_effector.sight_ready` first turns `True` (`BL-B66`
-        Stage 2, `plans/9k113-effectors/plan.md` explore-notes point 5:
-        "One callout: 'Guidance unit ready'. No per-switch narration.").
+        self,
+        now_sim: float,
+        *,
+        ready_observed: bool | None,
+        previously_observed: bool | None,
+    ) -> bool | None:
+        """Speaks "Guidance unit ready." exactly on an observed off->on
+        edge of the real 960 (guidance-unit READY) lamp (`BL-B66` Stage 2,
+        `plans/9k113-effectors/plan.md` explore-notes point 5: "One
+        callout: 'Guidance unit ready'. No per-switch narration."; edge-
+        only behaviour per `plans/9k113-sight-pointing/plan.md` decision
+        2, "only on change").
+
+        An edge is `previously_observed is False and ready_observed is
+        True`. A first-ever sample that already reads lit --
+        `previously_observed is None`, as on a warm air start -- is
+        deliberately *not* an edge: there is no prior `False` reading to
+        rise from, so Petrovich stays silent rather than narrating a
+        state he never saw change. A power cycle (lit, then observed
+        unlit, then lit again) speaks a second time, since the unlit
+        poll in between resets `previously_observed` to `False`.
 
         `GuidanceUnitState` lives on `logger.ConsolePerceptionRunner`, not
         here -- the same division `attack_run_transition`'s own docstring
         states for `AttackRunState`, applied the other direction: the
-        caller passes this method the two booleans it needs
-        (`ready`/`announced`) rather than this class holding or reaching
-        into that state itself. Returns the (possibly updated)
-        `guidance_unit_ready_announced` value for the caller to store
-        back onto `GuidanceUnitState` -- `True` once this call has spoken,
-        `announced` unchanged (never un-announced) otherwise."""
-        if announced or not ready:
-            return announced
-        self._print(["Guidance unit ready."], now_sim)
-        return True
+        caller passes this method the two observed values it needs rather
+        than this class holding or reaching into that state itself.
+        Returns `ready_observed` unchanged, for the caller to store back
+        onto `GuidanceUnitState.guidance_unit_ready_prev_observed` as the
+        next poll's `previously_observed` -- called every poll,
+        unconditionally, so the unlit state is tracked too and not only
+        the lit one."""
+        if previously_observed is False and ready_observed is True:
+            self._print(["Guidance unit ready."], now_sim)
+        return ready_observed
 
     def _speak_or_defer(
         self,
