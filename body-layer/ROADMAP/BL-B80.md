@@ -28,8 +28,8 @@
   2443 passed, 4 xfailed; aircraft-layer 533 passed); the only `ruff` findings are in
   pre-existing `research/` files outside the merge.
 
-  **Fixed on `fix/guidance-ready-edge` (DoD pass 2026-10-23, tip `1390acfd`), not yet merged to
-  `main`.** The merged build's 960/READY callout did not match this plan's own Decision 2 ("only
+  **Fixed on `fix/guidance-ready-edge` (DoD pass 2026-10-23, tip `1390acfd`), merged to `main`
+  2026-10-23 (`1e249dfb`).** The merged build's 960/READY callout did not match this plan's own Decision 2 ("only
   on change"): `CrewConsole.drain_guidance_unit_ready` held a one-shot latch that spoke
   "Guidance unit ready." on the first poll the lamp ever read lit — including a warm air start's
   very first sample, with no prior observation at all — and then never spoke again, so a real
