@@ -87,6 +87,7 @@ than normalised.
 - [[X-B36]] — `tools/` is outside every subproject's documented format/lint gate
 - [[X-B37]] — The tuning TOML generator renders only a first sentence, and renders markdown into it
 - [[X-B38]] — Two accepted-but-untested edge cases in `tuning.py`
+- [[X-B39]] — A mechanical check for the leaf-tested / wiring-untested defect `[?]`
 
 ## One entry carries two checkbox blocks
 
