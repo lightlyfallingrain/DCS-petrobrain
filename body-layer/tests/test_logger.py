@@ -4669,6 +4669,23 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
     Asserts the actual emitted messages rather than call counts -- these
     are lines a person reads on a terminal while flying, so the test pins
     what they say.
+
+    Filters `caplog.records` down to this module's own logger
+    (`BL-B92`) -- `caplog.at_level(level, logger=name)` only scopes the
+    *level* of the named logger; it does not limit which records land in
+    `caplog.records`, since pytest's log-capture handler is attached to
+    the *root* logger for every test regardless of the `logger=` passed
+    to `at_level`. A `belief.brain_client.BrainLayerClient` pointed at an
+    unreachable URL elsewhere in this suite starts a daemon `_poll_loop`
+    thread that is never stopped (nothing stops a `daemon=True` thread --
+    see `_run_plain_logger_main_for_n_polls`'s own docstring) and retries
+    forever, logging "background brain reply poll failed (retrying)" via
+    its own `belief.brain_client` logger every ~1.0 s for the rest of the
+    pytest session. That record propagates to root like any other and
+    landed in this test's `caplog.records` whenever its brief assertion
+    window happened to coincide with one of those retries -- a timing
+    coincidence, not something `--randomly-seed` alone pins, which is why
+    reruns of the same seed did not reproduce it deterministically.
     """
     reporter = logger_module._ConnectionReporter()
     dead = AircraftLayerError("request to http://host/x failed: refused")
@@ -4680,7 +4697,11 @@ def test_connection_reporter_says_disconnected_once_then_connected_once(
         reporter.report_success()
         reporter.report_success()
 
-    messages = [record.getMessage() for record in caplog.records]
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == logger_module.__name__
+    ]
     assert messages == [
         "aircraft layer disconnected (request to http://host/x failed: refused)",
         "aircraft layer connected",
@@ -4696,20 +4717,33 @@ def test_connection_reporter_announces_the_first_connection(
     happens -- "it is working" is worth one line at startup, and without
     it the pilot cannot tell a healthy run from one that has not reached
     the collector yet.
+
+    Filters to this module's own logger -- `BL-B92`, see the sibling
+    `test_connection_reporter_says_disconnected_once_then_connected_once`'s
+    docstring for why an unfiltered `caplog.records` is order-dependent
+    (a leaked `BrainLayerClient` daemon thread elsewhere in the suite
+    logs via a different logger that also propagates to root).
     """
     reporter = logger_module._ConnectionReporter()
 
     with caplog.at_level(logging.INFO, logger=logger_module.__name__):
         reporter.report_success()
 
-    assert [r.getMessage() for r in caplog.records] == ["aircraft layer connected"]
+    messages = [
+        r.getMessage() for r in caplog.records if r.name == logger_module.__name__
+    ]
+    assert messages == ["aircraft layer connected"], messages
 
 
 def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Each real transition gets its own line -- the suppression is of
-    repeats, not of subsequent events."""
+    repeats, not of subsequent events.
+
+    Filters to this module's own logger -- `BL-B92`, see
+    `test_connection_reporter_says_disconnected_once_then_connected_once`'s
+    docstring for why an unfiltered `caplog.records` is order-dependent."""
     reporter = logger_module._ConnectionReporter()
     dead = AircraftLayerError("request to http://host/x failed: refused")
 
@@ -4720,7 +4754,10 @@ def test_connection_reporter_reannounces_after_a_recovery_and_a_second_drop(
         reporter.report_failure(dead)
         reporter.report_success()
 
-    assert [r.getMessage() for r in caplog.records] == [
+    messages = [
+        r.getMessage() for r in caplog.records if r.name == logger_module.__name__
+    ]
+    assert messages == [
         "aircraft layer disconnected (request to http://host/x failed: refused)",
         "aircraft layer connected",
         "aircraft layer disconnected (request to http://host/x failed: refused)",

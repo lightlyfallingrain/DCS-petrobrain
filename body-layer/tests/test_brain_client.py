@@ -293,7 +293,25 @@ def test_unreachable_brain_logs_one_line_without_traceback(
 ) -> None:
     """Connection refused is an expected state (brain-layer not started
     yet), so the retry warning carries no traceback -- one spewed every
-    `_POLL_RETRY_BACKOFF_S` buried everything else in the terminal."""
+    `_POLL_RETRY_BACKOFF_S` buried everything else in the terminal.
+
+    Filters `caplog.records` down to **this client's own poll-worker
+    thread** (`BL-B92`) -- `caplog.at_level(level, logger=name)` only
+    scopes the *level* of the named logger, not which records land in
+    `caplog.records`. Any other `BrainLayerClient` pointed at an
+    unreachable or malformed-reply server elsewhere in this suite leaves
+    its own `_poll_loop` daemon thread running forever (nothing stops a
+    `daemon=True` thread -- see `_run_plain_logger_main_for_n_polls`'s
+    docstring in `tests/test_logger.py`), retrying on its own clock and
+    logging via the *same* `belief.brain_client` logger name -- so an
+    unfiltered `caplog.records[0]` can be a stray record from a
+    completely different, already-leaked client instance (one whose
+    failure carries a traceback, e.g. `test_invalid_reply_still_logs_a_
+    traceback`'s), not this test's own connection-refused one. Logger
+    name alone cannot discriminate between two instances of the same
+    client class, unlike `BL-B92`'s fix on `test_logger.py`'s
+    `_ConnectionReporter` tests (one logger, one call site) -- thread
+    identity can."""
     # Bound but never listening: connect is refused at once, unlike a bare
     # port number, which some sandboxes time out on instead.
     with (
@@ -302,12 +320,17 @@ def test_unreachable_brain_logs_one_line_without_traceback(
     ):
         closed_port.bind(("127.0.0.1", 0))
         port = closed_port.getsockname()[1]
-        BrainLayerClient(base_url=f"http://127.0.0.1:{port}").poll_replies()
+        client = BrainLayerClient(base_url=f"http://127.0.0.1:{port}")
+        client.poll_replies()
+        worker = client._poll_worker
+        assert worker is not None, "poll_replies() must start the worker synchronously"
+        own_records = [r for r in caplog.records if r.thread == worker.ident]
         deadline = time.monotonic() + 2.0
-        while not caplog.records and time.monotonic() < deadline:
+        while not own_records and time.monotonic() < deadline:
             time.sleep(0.01)
-    assert caplog.records
-    record = caplog.records[0]
+            own_records = [r for r in caplog.records if r.thread == worker.ident]
+    assert own_records
+    record = own_records[0]
     assert record.getMessage() == "background brain reply poll failed (retrying)"
     assert not record.exc_info
 
